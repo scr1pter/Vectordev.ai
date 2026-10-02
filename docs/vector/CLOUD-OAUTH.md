@@ -20,7 +20,11 @@ For Vercel and Netlify, the browser callback returns an encrypted authorization
 result to the pending desktop flow: the Vercel authorization code and Netlify
 access token are protected by an ephemeral desktop relay. The private key stays
 with that flow; there is no plaintext custom-URL fallback. The relay format is
-versioned, and an unsupported older desktop is told to update before starting.
+versioned. Current desktops advertise `relay=v1` when checking hosted readiness.
+An absent or unknown relay capability keeps Vercel and Netlify unconfigured in
+that response, preserving the manual-token form in desktop 1.99.8 even after
+their server credentials are installed. A direct incompatible start still fails
+with an update instruction; it never falls back to plaintext.
 Supabase uses an authorization-code flow with S256 PKCE.
 
 The desktop checks the pending state and provider identity before saving a
@@ -63,8 +67,10 @@ Never copy a production secret into a committed `.env` file or diagnostic log.
 
 Readiness fails closed when the signing secret is missing or shorter than 32
 characters, or when required provider variables are absent. Missing names may
-be reported; their values are not. Configured means the required settings are
-present, not that registration, permissions or live consent have been verified.
+be reported; their values are not. Configured means the required settings and
+the desktop's required relay capability are present, not that registration,
+permissions or live consent have been verified. Supabase readiness is unchanged:
+desktop 1.99.8 already supports its S256 PKCE flow.
 
 Desktop **Cloud Services → Connections** offers hosted sign-in when configured.
 If hosted OAuth is unavailable and this desktop supports manual tokens, it

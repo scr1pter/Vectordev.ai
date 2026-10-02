@@ -553,3 +553,27 @@ test("OAuth broker refresh refuses a redirect without forwarding credentials or 
     await server.stop(true)
   }
 })
+
+test("desktop readiness advertises its versioned encrypted relay to the actual broker request", async () => {
+  const { listCloudProviderConnections } = await import("./cloud-connections")
+  const requests: string[] = []
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url)
+      requests.push(url.pathname + url.search)
+      return Response.json({ ok: true, providers: [] })
+    },
+  })
+  const previous = process.env.VECTOR_OAUTH_BROKER_URL
+  process.env.VECTOR_OAUTH_BROKER_URL = new URL("/api/cloud/oauth", server.url).toString()
+  try {
+    await listCloudProviderConnections()
+    expect(requests).toEqual(["/api/cloud/oauth/status?relay=v1"])
+  } finally {
+    if (previous === undefined) delete process.env.VECTOR_OAUTH_BROKER_URL
+    else process.env.VECTOR_OAUTH_BROKER_URL = previous
+    await server.stop(true)
+  }
+})

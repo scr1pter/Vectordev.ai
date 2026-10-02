@@ -71,6 +71,55 @@ async function browserCallback(provider: "vercel" | "netlify", input: URL) {
 }
 
 describe("cloud OAuth configuration", () => {
+  test("the status route preserves legacy manual tokens unless the desktop supports the secure relay", async () => {
+    // Run the actual route with only synthetic environment values, never host credentials.
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `
+const { GET } = await import(${JSON.stringify(new URL("../../../api/cloud/oauth/status.ts", import.meta.url).href)})
+const results = []
+for (const query of ["", "?relay=unknown", "?relay=v1"]) {
+  const response = GET(new Request("https://vectordev.ai/api/cloud/oauth/status" + query))
+  results.push({ status: response.status, body: await response.json() })
+}
+delete process.env.VECTOR_VERCEL_CLIENT_SECRET
+results.push({ body: await GET(new Request("https://vectordev.ai/api/cloud/oauth/status?relay=v1")).json() })
+await Bun.write(Bun.stdout, JSON.stringify(results))
+`,
+      ],
+      { env: credentials, stdout: "pipe", stderr: "pipe", signal: AbortSignal.timeout(10_000) },
+    )
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+    const results = JSON.parse(stdout)
+    for (const [index, compatible] of [false, false, true].entries()) {
+      expect(results[index]).toEqual({
+        status: 200,
+        body: {
+          ok: true,
+          providers: ["vercel", "netlify", "supabase"].map((provider) => ({
+            provider,
+            configured: provider === "supabase" || compatible,
+            callbackUrl: `https://vectordev.ai/api/cloud/oauth/callback-${provider}`,
+            missing: [],
+          })),
+        },
+      })
+    }
+    expect(results[3].body.providers[0]).toEqual({
+      provider: "vercel",
+      configured: false,
+      callbackUrl: "https://vectordev.ai/api/cloud/oauth/callback-vercel",
+      missing: ["VECTOR_VERCEL_CLIENT_SECRET"],
+    })
+  })
+
   test("reports missing provider credentials without exposing values", () => {
     expect(oauthProviderConfig("vercel", requestUrl, {}).missing).toEqual([
       "VECTOR_OAUTH_STATE_SECRET",
