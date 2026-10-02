@@ -2,7 +2,7 @@ import { test, expect, describe, afterEach, beforeEach, spyOn } from "bun:test"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
-import { Cause, Effect, Exit, Layer, Option } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { NamedError } from "@vectordevai/core/util/error"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Config } from "@/config/config"
@@ -184,6 +184,56 @@ const withGlobalConfig = <A, E, R>(
     if (input.config) yield* writeConfigEffect(dir, schemaConfig(input.config), input.name)
     return yield* withGlobalConfigDir(dir, fn({ dir }))
   })
+
+it.live("an interrupted global load publishes its successful cache before cancellation", () =>
+  withGlobalConfig({ config: { model: "test/cached-model" } }, ({ dir }) =>
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let reads = 0
+      const filesystem = Layer.succeed(FSUtil.Service, {
+        ...fs,
+        readFileStringSafe: (file: string) =>
+          file !== path.join(dir, "vector.json")
+            ? fs.readFileStringSafe(file)
+            : Effect.gen(function* () {
+                reads++
+                yield* Deferred.succeed(started, undefined)
+                yield* Deferred.await(release)
+                return yield* fs.readFileStringSafe(file)
+              }),
+      })
+      yield* Effect.gen(function* () {
+        const config = yield* Config.Service
+        const first = yield* config.getGlobal().pipe(Effect.forkChild)
+        yield* Deferred.await(started)
+        const cancellation = yield* Fiber.interrupt(first).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(cancellation)
+        expect(Exit.hasInterrupts(yield* Fiber.await(first))).toBe(true)
+
+        const loaded = yield* config.getGlobal().pipe(Effect.exit)
+        expect(Exit.isSuccess(loaded)).toBe(true)
+        if (Exit.isSuccess(loaded)) expect(loaded.value.model).toBe("test/cached-model")
+        const completedReads = reads
+        expect(yield* config.getGlobal().pipe(Effect.exit)).toEqual(loaded)
+        expect(reads).toBe(completedReads)
+      }).pipe(
+        Effect.provide(
+          Layer.fresh(
+            LayerNode.compile(Config.node, [
+              [FSUtil.node, filesystem],
+              [Auth.node, AuthTest.empty],
+              [Npm.node, NpmTest.noop],
+              [httpClient, Layer.succeed(HttpClient.HttpClient, unexpectedHttp)],
+            ]),
+          ),
+        ),
+      )
+    }),
+  ),
+)
 
 const withConfigTree = <A, E, R>(
   input: { global?: object; project?: object; local?: object },
