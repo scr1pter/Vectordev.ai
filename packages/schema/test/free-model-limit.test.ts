@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test"
-import { FreeModelsLimitError, isFreeModel, parseFreeModelLimit, type FreeModelLimit } from "../src/free-model"
+import {
+  FreeModelsLimitError,
+  isFreeModel,
+  parseFreeModelLimit,
+  retainFreeModelSelection,
+  type FreeModelLimit,
+} from "../src/free-model"
 
 const limit: FreeModelLimit = {
   type: "free_models_limit",
@@ -25,4 +31,16 @@ test("free-model auxiliary routing recognizes every accepted suffix case", () =>
       false,
     )
   }
+})
+
+test("agent switches retain free intent without catalog availability or price metadata", () => {
+  for (const providerID of ["vector", "openrouter"]) {
+    for (const suffix of ["free", "FREE", "Free"]) {
+      const selected = { providerID, modelID: `maker/unavailable:${suffix}`, variant: "careful" }
+      expect(retainFreeModelSelection(selected)).toBe(selected)
+    }
+  }
+  expect(retainFreeModelSelection({ providerID: "openrouter", modelID: "maker/paid" })).toBeUndefined()
+  expect(retainFreeModelSelection({ providerID: "custom", modelID: "maker/paid:free" })).toBeUndefined()
+  expect(retainFreeModelSelection(undefined)).toBeUndefined()
 })
