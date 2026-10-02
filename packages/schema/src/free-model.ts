@@ -154,3 +154,11 @@ export function isFreeModel(model: { providerID: string; id: string; cost?: { in
     model.cost.output === 0
   )
 }
+
+// Changing agents is not consent to change a free model into a paid one. Retain
+// the selection even if discovery no longer offers it; the transport will refuse it.
+export function retainFreeModelSelection<T extends { providerID: string; modelID: string }>(model: T | undefined) {
+  return model && ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+    ? model
+    : undefined
+}

@@ -44,7 +44,7 @@ function catalog(input: { enabled: boolean; own?: boolean }) {
 
 async function setup(
   page: Page,
-  input: { enabled: boolean; limited?: boolean; own?: boolean; resumed?: () => boolean },
+  input: { enabled: boolean; limited?: boolean; own?: boolean; resumed?: () => boolean; paidAgent?: boolean },
 ) {
   const messages = () => ({
     items: input.limited
@@ -129,8 +129,35 @@ async function setup(
         : [],
     eventRetry: 100,
   })
-  await page.addInitScript(() =>
-    localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } })),
+  if (input.paidAgent) {
+    await page.route(/\/agent(?:\?|$)/, (route) =>
+      route.fulfill({
+        json: [
+          { name: "build", mode: "primary" },
+          { name: "specialist", mode: "primary", model: { providerID: "openrouter", modelID: "maker/paid" } },
+        ],
+      }),
+    )
+    await page.route(/\/provider(?:\?|$)/, (route) => {
+      const provider = catalog(input)
+      const router = provider.all.find((item) => item.id === "openrouter")!
+      Object.assign(router.models, {
+        "maker/paid": {
+          id: "maker/paid",
+          name: "Paid Specialist",
+          providerID: "openrouter",
+          limit: { context: 128000 },
+          cost: { input: 10, output: 10 },
+          variants: {},
+        },
+      })
+      return route.fulfill({ json: provider })
+    })
+  }
+  await page.addInitScript(
+    (showCustomAgents) =>
+      localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true, showCustomAgents } })),
+    input.paidAgent ?? false,
   )
   await page.goto(`/${base64Encode(directory)}/session/${sessionID}`)
   await expect(page.locator('[data-component="session-composer"]')).toBeVisible()
@@ -157,6 +184,21 @@ test("groups free models once, prefers own account, and hides the group when OFF
     page.locator('[data-slot="model-section-name"]').filter({ hasText: "Free models inside of Vector" }),
   ).toHaveCount(0)
   await expect(page.locator('[data-option-key="openrouter:maker/coder:free"]')).toBeVisible()
+})
+
+test("switching agents preserves the selected free model until an explicit paid model choice", async ({ page }) => {
+  await setup(page, { enabled: true, paidAgent: true })
+  const picker = page.locator('[data-action="prompt-model"]').filter({ visible: true }).first()
+  await expect(picker).toContainText("Maker Coder")
+  const agent = page.locator('[data-action="prompt-agent"]').filter({ visible: true }).first()
+  await agent.click()
+  await page.getByRole("option", { name: "specialist", exact: true }).click()
+  await expect(agent).toContainText("specialist")
+  await expect(picker).toContainText("Maker Coder")
+
+  await picker.click()
+  await page.locator('[data-option-key="openrouter:maker/paid"]').click()
+  await expect(picker).toContainText("Paid Specialist")
 })
 
 test("quota recovery resumes the same failed turn without submitting a new prompt", async ({ page }, testInfo) => {
