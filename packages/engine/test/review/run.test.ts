@@ -425,12 +425,9 @@ describe("Review.run", () => {
     TIMEOUT,
   )
 
-  // Known bug, kept visible until it is fixed: interrupting the first prompt on an instance while its config and
-  // providers are still loading leaves the interruption cached (the per-instance ScopedCache in
-  // src/effect/instance-state.ts, and the Effect.cachedInvalidateWithTTL loaders in src/config/config.ts and
-  // core's model-catalog.ts), so every later prompt on that instance fails before reaching the model until the
-  // instance is reloaded. The hung-model test above warms the instance first so it does not depend on this.
-  it.instance.failing(
+  // Interrupting the first prompt on an instance while its config and providers are still loading must not leave
+  // the interruption cached (the per-instance ScopedCache, and the global config and model catalog loaders).
+  it.instance(
     "a review after an interrupted cold start still reaches the model",
     () =>
       Effect.gen(function* () {

@@ -125,21 +125,6 @@ const make = <R, E>(testLayer: Layer.Layer<R, E>, liveLayer: Layer.Layer<R, E>, 
     )
   }
 
-  // Records a known bug: bun passes the test while its body fails, and fails it once the bug is fixed.
-  instance.failing = <A, E2, E3 = never>(
-    name: string,
-    value: Body<A, E2, R | InstanceStore.Service | TestInstance | Scope.Scope>,
-    options?: InstanceOptions<E3, R | Scope.Scope> | number | TestOptions,
-    opts?: number | TestOptions,
-  ) => {
-    const args = instanceArgs(options, opts)
-    return test.failing(
-      name,
-      () => run(body(value).pipe(withTmpdirInstance(args.instanceOptions)), liveLayer),
-      args.testOptions,
-    )
-  }
-
   return { effect, live, instance }
 }
 

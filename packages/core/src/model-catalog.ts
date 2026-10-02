@@ -156,10 +156,12 @@ const layer = Layer.effect(
       yield* fs.writeWithDirs(tempfile, response).pipe(
         Effect.andThen(fs.rename(tempfile, filepath)),
         Effect.catch((error) =>
-          fs.remove(tempfile, { force: true }).pipe(
-            Effect.ignore,
-            Effect.andThen(Effect.logWarning("Could not save the Vector model catalog cache", { cause: error })),
-          ),
+          fs
+            .remove(tempfile, { force: true })
+            .pipe(
+              Effect.ignore,
+              Effect.andThen(Effect.logWarning("Could not save the Vector model catalog cache", { cause: error })),
+            ),
         ),
       )
       return catalog
@@ -181,7 +183,12 @@ const layer = Layer.effect(
       ).pipe(Effect.catch((error) => reportUnavailable(error).pipe(Effect.as({}))))
     }).pipe(Effect.withSpan("ModelCatalog.populate"), Effect.orDie)
 
-    const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(populate, Duration.infinity)
+    // Uninterruptible so a caller stopped during the first load cannot leave the interruption cached for every
+    // later caller.
+    const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(
+      Effect.uninterruptible(populate),
+      Duration.infinity,
+    )
 
     const get = (): Effect.Effect<Record<string, Provider>> => cachedGet
 

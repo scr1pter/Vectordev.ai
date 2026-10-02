@@ -294,12 +294,15 @@ const layer = Layer.effect(
       return result
     })
 
+    // Uninterruptible so a caller stopped during the first load cannot leave the interruption cached for every
+    // later caller.
     const [cachedGlobal, invalidateGlobal] = yield* Effect.cachedInvalidateWithTTL(
       loadGlobal().pipe(
         Effect.tapError((error) =>
           Effect.logError("failed to load global config, using defaults", { error: String(error) }),
         ),
         Effect.orElseSucceed((): Info => ({})),
+        Effect.uninterruptible,
       ),
       Duration.infinity,
     )
@@ -679,9 +682,7 @@ const layer = Layer.effect(
           }),
         ),
       )
-      return entries
-        .filter(isRecord)
-        .reduce<Record<string, unknown>>((merged, entry) => mergeDeep(merged, entry), {})
+      return entries.filter(isRecord).reduce<Record<string, unknown>>((merged, entry) => mergeDeep(merged, entry), {})
     })
 
     const removeMcpLocal = Effect.fn("Config.removeMcpLocal")(function* (name: string) {
