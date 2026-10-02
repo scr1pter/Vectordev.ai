@@ -7,6 +7,48 @@ reserved. The latest instruction holds further pushes to `main`; prepare and
 commit release work on the candidate branch until that restriction is lifted.
 The publication request does not authorize purchases or changes to billing.
 
+## Current checkpoint
+
+Cloud connection and project environment repairs are pushed on `cloud-completion`
+at `bd69ea0f3`; all 22 package typechecks passed before that push. Platform repairs
+are committed at `dc2fb8ce0` and await native CI. The main-branch hold remains in
+effect. Neither checkpoint establishes a published or fully verified release.
+
+The platform change fixes the notice generator's classification of physical
+dependencies inside workspace `node_modules` directories, validates installed
+package identities against the lock, and retains the committed notices unchanged.
+It also repairs Windows packaging and approval fixtures and adds native
+PowerShell/deferred-uninstall diagnostics. Local validation passed:
+
+- Notice and generated-artifact checks: 32 tests, 99 assertions, including exact
+  committed notice bytes and existing platform/bundled-license security checks.
+- OAuth approval checks: eight tests, 75 assertions.
+- Packaging checks: 16 tests, 119 assertions.
+- Core and Engine typechecks, plus one focused onboarding browser case with its
+  existing deadline and assertions unchanged.
+
+The free-selection repair is committed at `6bf619953`. Switching agents now
+preserves the active free model and variant, including automatic TUI plan
+transitions and unavailable saved free selections. An explicit paid model choice
+remains available. The actual TUI context checks passed five tests with nine
+assertions, Schema passed three tests with 23 assertions, and all four free-model
+browser cases passed in 1.3 minutes. App, TUI, Schema and browser-test typechecks
+passed. Earlier cold-start browser attempts stalled at `page.goto`; no test
+deadline was increased to obtain the final pass. These checks made no live model
+requests. The eligible catalogue remains the canonical, tool-capable, zero-price
+ZDR `:free` subset; this change does not widen that eligibility policy.
+
+The completed native results at `e83f34b2b` passed standalone Windows installation,
+typechecks, Verify, free-model integration, and Linux unit and browser validation.
+The [standalone installer job](https://github.com/scr1pter/Vectordev.ai/actions/runs/37064154072/job/111027689940)
+passed the real PowerShell installer, including the unchanged 290–325 second
+stalled-body acceptance window and executable-preservation checks. The
+[test workflow](https://github.com/scr1pter/Vectordev.ai/actions/runs/37064154111)
+still failed Windows unit and browser validation. Those failures remain the
+native baseline until the repaired source passes its own Windows jobs. New
+PowerShell and deferred-uninstall diagnostics provide evidence for that run;
+their local checks do not prove native acceptance.
+
 ## Source parity
 
 The original comparison used `12c3ffd78fdd03219310f88573a188d3b2a32b77`, which
@@ -46,7 +88,7 @@ the local Mac app during validation; it now reports 1.999.99. Its bundled build
 metadata records the version and channel without a source commit, so that local
 installation does not establish this candidate's provenance or publication.
 
-## GitHub Actions is executing
+## Earlier validation checkpoints
 
 At source `7d8cf97318bba7a7acb78bff5f75b7185ca83cba`, all four native typecheck
 jobs, the website build and the free-model integration job passed. Linux browser
