@@ -119,6 +119,7 @@ import { compressionLayer } from "./middleware/compression"
 import { corsVaryFix } from "./middleware/cors-vary"
 import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
+import { hostGuardLayer } from "./middleware/host"
 import { schemaErrorLayer } from "./middleware/schema-error"
 
 export const context = Context.makeUnsafe<unknown>(new Map())
@@ -276,7 +277,7 @@ const app = LayerNode.group([
 ])
 
 export function createRoutes(
-  corsOptions?: CorsOptions,
+  corsOptions?: CorsOptions & { readonly guardedHostname?: string },
 ): Layer.Layer<never, EffectConfig.ConfigError, RouteRequirements> {
   const locationServiceMapV2 = buildLocationServiceMap([[Teams.node, VectorTeams.node]])
 
@@ -295,6 +296,7 @@ export function createRoutes(
       corsVaryFix,
       fenceLayer,
       cors(corsOptions),
+      ...(corsOptions?.guardedHostname === undefined ? [] : [hostGuardLayer(corsOptions.guardedHostname)]),
       AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, locationServiceMapV2]]),
       HttpServer.layerServices,
     ]),

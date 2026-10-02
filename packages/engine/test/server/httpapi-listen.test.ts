@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import http from "node:http"
 import net from "node:net"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
@@ -446,6 +447,56 @@ describe("HttpApi Server.listen", () => {
     }
   })
 })
+
+describe("Server.listen Host check", () => {
+  test("a passwordless loopback listener answers only requests addressed to a loopback name", async () => {
+    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    const listener = await startNoAuthListener()
+    try {
+      const health = new URL("/global/health", listener.url)
+      for (const host of [`127.0.0.1:${listener.port}`, `localhost:${listener.port}`, `[::1]:${listener.port}`]) {
+        expect({ host, status: await statusWithHost(health, host) }).toEqual({ host, status: 200 })
+      }
+      // A page that rebinds its own name to 127.0.0.1 still sends that name as Host.
+      for (const host of [`attacker.example:${listener.port}`, `localhost.attacker.example:${listener.port}`]) {
+        expect({ host, status: await statusWithHost(health, host) }).toEqual({ host, status: 403 })
+      }
+      const config = new URL("/config", listener.url)
+      expect(
+        await statusWithHost(config, `attacker.example:${listener.port}`, { "x-vector-directory": tmp.path }),
+      ).toBe(403)
+      const connect = new URL(PtyPaths.connect.replace(":ptyID", "pty_missing"), listener.url)
+      expect(await statusWithHost(connect, `attacker.example:${listener.port}`)).toBe(403)
+      // Clients that use the listener URL, like the SDK, TUI and attach, are unaffected.
+      expect((await fetch(config, { headers: { "x-vector-directory": tmp.path } })).status).toBe(200)
+    } finally {
+      await stop(listener, "timed out cleaning up host-checked listener").catch(() => undefined)
+    }
+  })
+
+  test("a password-protected listener does not check Host", async () => {
+    const listener = await startListener()
+    try {
+      const health = new URL("/global/health", listener.url)
+      expect(await statusWithHost(health, `vector.example:${listener.port}`, { authorization: authorization() })).toBe(
+        200,
+      )
+    } finally {
+      await stop(listener, "timed out cleaning up password listener").catch(() => undefined)
+    }
+  })
+})
+
+function statusWithHost(url: URL, host: string, headers: Record<string, string> = {}) {
+  return new Promise<number>((resolve, reject) => {
+    const request = http.request(url, { headers: { ...headers, host } }, (response) => {
+      response.resume()
+      resolve(response.statusCode ?? 0)
+    })
+    request.on("error", reject)
+    request.end()
+  })
+}
 
 function isPortFree(port: number) {
   return new Promise<boolean>((resolve) => {

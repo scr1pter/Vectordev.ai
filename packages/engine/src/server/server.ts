@@ -15,7 +15,7 @@ import type { CorsOptions } from "@vectordevai/server/cors"
 import { lazy } from "@/util/lazy"
 import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
 import { ServerAuth } from "./auth"
-import { assertListenSecurity } from "./listen-policy"
+import { assertListenSecurity, guardedHostname } from "./listen-policy"
 
 // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -38,6 +38,8 @@ type ListenOptions = CorsOptions & {
   mdns?: boolean
   mdnsDomain?: string
   unsecured?: boolean
+  /** Set by listen() when requests must name a loopback host; see guardedHostname. */
+  guardedHostname?: string
 }
 type ListenerState = {
   scope: Scope.Scope
@@ -83,7 +85,7 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
     ),
   )
   assertListenSecurity(opts, auth)
-  const listener = await Effect.runPromise(listenEffect(opts))
+  const listener = await Effect.runPromise(listenEffect({ ...opts, guardedHostname: guardedHostname(opts, auth) }))
   return {
     hostname: listener.hostname,
     port: listener.port,

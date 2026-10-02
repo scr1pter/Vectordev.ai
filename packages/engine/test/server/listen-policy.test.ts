@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Option } from "effect"
-import { assertListenSecurity } from "../../src/server/listen-policy"
+import { allowedHost, assertListenSecurity, guardedHostname } from "../../src/server/listen-policy"
 import { Server } from "../../src/server/server"
 
 const unprotected = { username: "vector", password: Option.none<string>() }
@@ -49,5 +49,52 @@ describe("server bind security", () => {
         { ...unprotected, password: Option.some(""), guestPassword: Option.some("") },
       ),
     ).toThrow()
+  })
+
+  test("guards the Host header only on a passwordless loopback listener", () => {
+    expect(guardedHostname({ hostname: "127.0.0.1" }, unprotected)).toBe("127.0.0.1")
+    expect(guardedHostname({ hostname: "localhost" }, unprotected)).toBe("localhost")
+    expect(guardedHostname({ hostname: "::1" }, unprotected)).toBe("::1")
+    expect(guardedHostname({ hostname: "127.0.0.1" }, { ...unprotected, password: Option.some("secret") })).toBe(
+      undefined,
+    )
+    expect(guardedHostname({ hostname: "127.0.0.1" }, { ...unprotected, guestPassword: Option.some("secret") })).toBe(
+      undefined,
+    )
+    expect(guardedHostname({ hostname: "0.0.0.0" }, unprotected)).toBe(undefined)
+  })
+
+  test("accepts loopback names and the configured hostname as Host", () => {
+    for (const host of [
+      "localhost",
+      "localhost:4096",
+      "LOCALHOST:4096",
+      "localhost.:4096",
+      "127.0.0.1",
+      "127.0.0.1:4096",
+      "127.0.0.2:4096",
+      "[::1]:4096",
+      "[::ffff:127.0.0.1]:4096",
+      undefined,
+    ]) {
+      expect({ host, allowed: allowedHost(host, "127.0.0.1") }).toEqual({ host, allowed: true })
+    }
+    expect(allowedHost("[::1]:4096", "::1")).toBe(true)
+  })
+
+  test("rejects any other Host, which is what a DNS rebinding page sends", () => {
+    for (const host of [
+      "attacker.example:4096",
+      "attacker.example",
+      "localhost.attacker.example:4096",
+      "127.0.0.1.attacker.example",
+      "192.168.1.10:4096",
+      "[::]:4096",
+      "evil@127.0.0.1",
+      "127.0.0.1/evil",
+      "",
+    ]) {
+      expect({ host, allowed: allowedHost(host, "127.0.0.1") }).toEqual({ host, allowed: false })
+    }
   })
 })
