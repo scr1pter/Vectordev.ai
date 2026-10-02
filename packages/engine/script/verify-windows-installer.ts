@@ -44,12 +44,13 @@ const state = {
   requests: [] as string[],
 }
 
-async function run(command: string[], env?: Record<string, string>) {
+async function run(command: string[], env?: Record<string, string>, signal?: AbortSignal) {
   const child = Bun.spawn(command, {
     env: WindowsPowerShell.environment(command[0], { ...process.env, ...env }),
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
+    signal,
   })
   const [code, stdout, stderr] = await Promise.all([
     child.exited,
@@ -57,6 +58,30 @@ async function run(command: string[], env?: Record<string, string>) {
     new Response(child.stderr).text(),
   ])
   return { code, stdout, stderr }
+}
+function processCleanup(stop: () => void, completion: Promise<unknown>) {
+  const state = { disposed: false }
+  return {
+    async [Symbol.asyncDispose]() {
+      if (state.disposed) return
+      state.disposed = true
+      stop()
+      const deadline = Promise.withResolvers<void>()
+      const timer = setTimeout(() => deadline.reject(new Error("Fixture process cleanup exceeded two seconds")), 2_000)
+      try {
+        // The caller or waitStatus reports process failures; disposal only joins termination.
+        await Promise.race([
+          completion.then(
+            () => undefined,
+            () => undefined,
+          ),
+          deadline.promise,
+        ])
+      } finally {
+        clearTimeout(timer)
+      }
+    },
+  }
 }
 const ps = (command: string) => run([powershell, "-NoProfile", "-NonInteractive", "-Command", command])
 async function pack(version: string) {
@@ -77,7 +102,7 @@ async function pack(version: string) {
   state.archive = await Bun.file(zip).bytes()
   state.version = version
 }
-async function install(extra: string[] = []) {
+async function install(extra: string[] = [], signal?: AbortSignal) {
   return await run(
     [
       powershell,
@@ -95,20 +120,51 @@ async function install(extra: string[] = []) {
       // Native installer prerequisites only; the fixture server is already running independently.
       PATH: [path.dirname(powershell), path.join(process.env.SYSTEMROOT!, "System32")].join(";"),
     },
+    signal,
   )
 }
-async function waitStatus(file: string, expected: string) {
+async function waitStatus(file: string, expected: string, operation: ReturnType<typeof run>) {
+  const outcome: { result?: Awaited<ReturnType<typeof run>>; error?: string } = {}
+  void operation.then(
+    (result) => {
+      outcome.result = { ...result, stdout: result.stdout.slice(-4_000), stderr: result.stderr.slice(-4_000) }
+    },
+    (error) => {
+      outcome.error = String(error).slice(-4_000)
+    },
+  )
+  const failure = async (reason: string) => {
+    const status = await Bun.file(file)
+      .slice(0, 8_000)
+      .text()
+      .catch((error) => `Status unavailable: ${String(error).slice(-1_000)}`)
+    const detail = JSON.stringify({ expected, status, operation: outcome.result ?? outcome.error ?? "still running" })
+    evidence[path.basename(file)] = detail
+    return new Error(`${reason}: ${detail}`)
+  }
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
     const status = await Bun.file(file)
       .json()
       .catch(() => undefined)
-    if (status?.state === "failed") throw new Error(status.message)
+    if (status?.state === "failed") throw await failure(`Operation failed while waiting for ${expected}`)
     if (status?.state === expected) return
+    if (outcome.result || outcome.error) throw await failure(`Operation exited before ${expected}`)
     await Bun.sleep(100)
   }
-  throw new Error(`Timed out waiting for ${expected}`)
+  throw await failure(`Timed out waiting for ${expected}`)
 }
+
+// Exercise the actual atomic status writer before deferred installation can hide a replacement error.
+const statusWriter = (await Bun.file(installer).text()).match(
+  /^function Write-OperationStatus\([^\n]+\) \{[\s\S]*?^\}/m,
+)?.[0]
+assert.ok(statusWriter, "The installer status writer must be present")
+const statusTransitions = await ps(
+  `$ErrorActionPreference = 'Stop'; $stage = ${quote(root)}; $statusPath = ${quote(path.join(root, "status-transition.json"))}; $script:statusCreated = $false; $Version = '1.99.42'; $utf8 = New-Object System.Text.UTF8Encoding($false); ${statusWriter}; foreach ($state in @('preparing', 'prepared', 'failed')) { Write-OperationStatus $state ('fixture ' + $state); $status = [IO.File]::ReadAllText($statusPath) | ConvertFrom-Json; if ($status.state -cne $state -or $status.message -cne ('fixture ' + $state) -or $status.version -cne $Version -or $status.schemaVersion -ne 1) { throw 'The actual installer status writer did not preserve the transition.' } }`,
+)
+assert.equal(statusTransitions.code, 0, statusTransitions.stderr + statusTransitions.stdout)
+evidence.atomicStatusTransitions = true
 
 const certificate = path.join(root, "certificate.pem")
 const key = path.join(root, "key.pem")
@@ -224,46 +280,57 @@ try {
   evidence.checksumAndRedirectPreserveOld = true
   await pack("1.99.43")
   const abandoned = Bun.spawn([executable, "--hold"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
+  await using abandonedCleanup = processCleanup(() => abandoned.kill(), abandoned.exited)
   const abandonedIdentity = await ps(`(Get-Process -Id ${abandoned.pid}).StartTime.ToUniversalTime().Ticks.ToString()`)
   assert.equal(abandonedIdentity.code, 0, abandonedIdentity.stderr)
   const abandonedOperation = randomBytes(16).toString("hex")
   const abandonedStatus = path.join(installDir, `.vector-update-${abandonedOperation}.json`)
-  const unacknowledged = install([
-    "-Version",
-    state.version,
-    "-WaitForProcessId",
-    String(abandoned.pid),
-    "-WaitForStartTicks",
-    abandonedIdentity.stdout.trim(),
-    "-OperationId",
-    abandonedOperation,
-  ])
+  const unacknowledgedController = new AbortController()
+  const unacknowledged = install(
+    [
+      "-Version",
+      state.version,
+      "-WaitForProcessId",
+      String(abandoned.pid),
+      "-WaitForStartTicks",
+      abandonedIdentity.stdout.trim(),
+      "-OperationId",
+      abandonedOperation,
+    ],
+    unacknowledgedController.signal,
+  )
+  await using unacknowledgedCleanup = processCleanup(() => unacknowledgedController.abort(), unacknowledged)
   try {
-    await waitStatus(abandonedStatus, "prepared")
+    await waitStatus(abandonedStatus, "prepared", unacknowledged)
   } finally {
-    abandoned.kill()
-    await abandoned.exited
+    await abandonedCleanup[Symbol.asyncDispose]()
   }
   assert.notEqual((await unacknowledged).code, 0)
   assert.deepEqual(await Bun.file(executable).bytes(), first)
   evidence.unacknowledgedExitPreservesOld = true
   const holder = Bun.spawn([executable, "--hold"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
+  await using holderCleanup = processCleanup(() => holder.kill(), holder.exited)
   const identity = await ps(`(Get-Process -Id ${holder.pid}).StartTime.ToUniversalTime().Ticks.ToString()`)
   assert.equal(identity.code, 0, identity.stderr)
   const operation = randomBytes(16).toString("hex")
   const status = path.join(installDir, `.vector-update-${operation}.json`)
-  const pending = install([
-    "-Version",
-    state.version,
-    "-WaitForProcessId",
-    String(holder.pid),
-    "-WaitForStartTicks",
-    identity.stdout.trim(),
-    "-OperationId",
-    operation,
-  ])
+  const pendingController = new AbortController()
+  const pending = install(
+    [
+      "-Version",
+      state.version,
+      "-WaitForProcessId",
+      String(holder.pid),
+      "-WaitForStartTicks",
+      identity.stdout.trim(),
+      "-OperationId",
+      operation,
+    ],
+    pendingController.signal,
+  )
+  await using pendingCleanup = processCleanup(() => pendingController.abort(), pending)
   try {
-    await waitStatus(status, "prepared")
+    await waitStatus(status, "prepared", pending)
     await writeFile(`${status}.ready`, "ready\n", { flag: "wx" })
     assert.deepEqual(
       await Bun.file(executable).bytes(),
@@ -271,12 +338,11 @@ try {
       "A running executable must remain unchanged until it exits",
     )
   } finally {
-    holder.kill()
-    await holder.exited
+    await holderCleanup[Symbol.asyncDispose]()
   }
   const replaced = await pending
   assert.equal(replaced.code, 0, replaced.stderr)
-  await waitStatus(status, "complete")
+  await waitStatus(status, "complete", pending)
   assert.equal((await Bun.file(receipt).text()).split("\t")[2], "1.99.43")
   evidence.runningExecutableReplacement = true
   const current = await Bun.file(executable).bytes()
@@ -290,6 +356,7 @@ try {
   evidence.stalledBodyMilliseconds = Date.now() - started
   evidence.stalledBodyPreservesOld = true
   const removalHolder = Bun.spawn([executable, "--hold"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
+  await using removalHolderCleanup = processCleanup(() => removalHolder.kill(), removalHolder.exited)
   const removalIdentity = await ps(
     `(Get-Process -Id ${removalHolder.pid}).StartTime.ToUniversalTime().Ticks.ToString()`,
   )
@@ -319,26 +386,23 @@ try {
       ],
     }),
   )
-  const removing = run([
-    powershell,
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    removalScript,
-  ])
+  const removingController = new AbortController()
+  const removing = run(
+    [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", removalScript],
+    undefined,
+    removingController.signal,
+  )
+  await using removingCleanup = processCleanup(() => removingController.abort(), removing)
   try {
-    await waitStatus(removalStatus, "prepared")
+    await waitStatus(removalStatus, "prepared", removing)
     await writeFile(`${removalStatus}.ready`, "ready\n", { flag: "wx" })
     assert.equal(await Bun.file(executable).exists(), true)
   } finally {
-    removalHolder.kill()
-    await removalHolder.exited
+    await removalHolderCleanup[Symbol.asyncDispose]()
   }
   const removed = await removing
   assert.equal(removed.code, 0, removed.stderr)
-  await waitStatus(removalStatus, "complete")
+  await waitStatus(removalStatus, "complete", removing)
   assert.equal(await Bun.file(executable).exists(), false)
   assert.equal(await Bun.file(receipt).exists(), false)
   assert.equal(await Bun.file(path.join(metadata, "keep-user-file")).text(), "preserve")

@@ -52,7 +52,8 @@ function Write-OperationStatus([string]$state, [string]$message) {
   }
   $temporary = Join-Path $stage 'status.json'
   [IO.File]::WriteAllText($temporary, $json, $utf8)
-  [IO.File]::Replace($temporary, $statusPath, $null)
+  # PowerShell converts ordinary $null to an empty string for .NET string arguments.
+  [IO.File]::Replace($temporary, $statusPath, [System.Management.Automation.Language.NullString]::Value)
 }
 
 function Download-VectorFile([string]$url, [string]$output, [long]$limit) {
@@ -179,7 +180,7 @@ try {
     } catch { $rollbackFailed = $true }
     try {
       if ($replaced) {
-        if (Test-Path -LiteralPath $oldBinary) { [IO.File]::Replace($oldBinary, $destination, $null) } elseif (-not $hadOriginal) { [IO.File]::Delete($destination) }
+        if (Test-Path -LiteralPath $oldBinary) { [IO.File]::Replace($oldBinary, $destination, [System.Management.Automation.Language.NullString]::Value) } elseif (-not $hadOriginal) { [IO.File]::Delete($destination) }
       }
     } catch { $rollbackFailed = $true }
   }
