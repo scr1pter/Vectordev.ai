@@ -4,6 +4,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
+import { legacyName } from "@vectordevai/core/flag/legacy"
+import { Global } from "@vectordevai/core/global"
 import { Shell } from "@vectordevai/core/shell"
 import { which } from "@vectordevai/core/util/which"
 
@@ -67,6 +69,16 @@ const SECRETS = [
   "Library/Application Support/Microsoft Edge",
   "Library/Application Support/Arc",
 ]
+
+// Vector's own credential stores inside a data directory. A CLI user without the
+// desktop vault key keeps these as plaintext, so they are worth as much as ~/.ssh.
+const CREDENTIAL_FILES = ["auth.json", "mcp-auth.json", "cli-auth.json", "plugin-oauth-approvals.json"]
+
+// The desktop app keeps its vault key and license beside its user data. Electron puts
+// that under Application Support on macOS and ~/.config on Linux, named by app ID.
+const DESKTOP_ROOTS = ["Library/Application Support", ".config"]
+const DESKTOP_APP_IDS = ["ai.vector.app", "ai.vector.app.beta", "ai.vector.app.dev"]
+const DESKTOP_SECRETS = ["secure-runtime", "vector-license.json"]
 
 // Package managers write into a shared per-user cache rather than the workspace,
 // so a sandbox that forbids these turns every first build into a failure. This is
@@ -196,6 +208,7 @@ export function wrapCommand(input: {
   workspaceRoot: string
   platform?: NodeJS.Platform
   home?: string
+  data?: string
 }): Wrapped {
   const platform = input.platform ?? process.platform
 
@@ -260,7 +273,11 @@ export function wrapCommand(input: {
       ...CACHES.map((entry) => canonical(path.join(home, entry))),
       ...git.writable,
     ].filter((file) => file !== "/")
-    const denyRead = [...SECRETS.map((entry) => canonical(path.join(home, entry))), ...cargoCredentialPaths(home)]
+    const denyRead = [
+      ...SECRETS.map((entry) => canonical(path.join(home, entry))),
+      ...cargoCredentialPaths(home),
+      ...credentialStorePaths(home, input.data ?? Global.Path.data),
+    ]
 
     if (availability.mechanism === "seatbelt") {
       return {
@@ -379,6 +396,25 @@ function cargoCredentialPaths(home: string) {
     .readdirSync(directory)
     .filter((entry) => entry.startsWith("credentials"))
     .map((entry) => canonical(path.join(directory, entry)))
+}
+
+/**
+ * Vector's credential stores, the earlier product's equivalents (a user who upgraded
+ * still has them on disk), and the desktop vault key. The desktop runs the engine
+ * with its own XDG_DATA_HOME, so the CLI's default data root is listed as well: the
+ * two apps often share one machine.
+ */
+export function credentialStorePaths(home: string, data: string) {
+  const roots = Array.from(new Set([path.dirname(data), path.join(home, ".local", "share")]))
+  const names = [path.basename(data), ...(legacyName ? [legacyName] : [])]
+  return [
+    ...roots.flatMap((root) =>
+      names.flatMap((name) => CREDENTIAL_FILES.map((file) => canonical(path.join(root, name, file)))),
+    ),
+    ...DESKTOP_ROOTS.flatMap((root) =>
+      DESKTOP_APP_IDS.flatMap((id) => DESKTOP_SECRETS.map((entry) => canonical(path.join(home, root, id, entry)))),
+    ),
+  ]
 }
 
 /**

@@ -5,7 +5,8 @@ import net from "node:net"
 import os from "node:os"
 import path from "node:path"
 
-import { sandboxAvailability, sandboxEnabled, seatbeltProfile, wrapCommand } from "./sandbox"
+import { legacyName } from "@vectordevai/core/flag/legacy"
+import { credentialStorePaths, sandboxAvailability, sandboxEnabled, seatbeltProfile, wrapCommand } from "./sandbox"
 
 const darwin = process.platform === "darwin"
 const home = fs.realpathSync(os.homedir())
@@ -224,6 +225,71 @@ test.skipIf(!darwin)("package-manager credential files are masked inside writabl
   })
   expect(denied.status).not.toBe(0)
   expect(denied.output).not.toContain("secret")
+})
+
+test("credential stores cover the data directory, the CLI default, the earlier product and the desktop vault", () => {
+  const fakeHome = workspace("sandbox-home-")
+  // The desktop layout: the engine's data directory lives under the app's user data.
+  const data = path.join(fakeHome, "Library", "Application Support", "ai.vector.app", "xdg-data", "vector")
+  const paths = credentialStorePaths(fakeHome, data)
+  const cliData = path.join(fakeHome, ".local", "share")
+
+  ;["auth.json", "mcp-auth.json", "cli-auth.json", "plugin-oauth-approvals.json"].forEach((file) => {
+    expect(paths).toContain(path.join(data, file))
+    expect(paths).toContain(path.join(cliData, "vector", file))
+    expect(paths).toContain(path.join(cliData, legacyName!, file))
+    expect(paths).toContain(path.join(path.dirname(data), legacyName!, file))
+  })
+  // macOS keeps Electron user data under Application Support, Linux under ~/.config.
+  ;["Library/Application Support", ".config"].forEach((root) =>
+    ["ai.vector.app", "ai.vector.app.beta", "ai.vector.app.dev"].forEach((id) => {
+      expect(paths).toContain(path.join(fakeHome, root, id, "secure-runtime"))
+      expect(paths).toContain(path.join(fakeHome, root, id, "vector-license.json"))
+    }),
+  )
+  // The rest of the data directory (worktrees, logs, tool output) stays reachable.
+  expect(paths).not.toContain(data)
+})
+
+test.skipIf(!sandboxAvailability().supported)("an agent cannot read Vector's credential stores or the vault key", () => {
+  const root = workspace()
+  const fakeHome = workspace("sandbox-home-")
+  const data = path.join(fakeHome, ".local", "share", "vector")
+  const secrets = [
+    path.join(data, "auth.json"),
+    path.join(data, "mcp-auth.json"),
+    path.join(data, "cli-auth.json"),
+    path.join(fakeHome, ".local", "share", legacyName!, "auth.json"),
+    path.join(fakeHome, ".local", "share", legacyName!, "mcp-auth.json"),
+    path.join(fakeHome, darwin ? "Library/Application Support" : ".config", "ai.vector.app", "secure-runtime", "credential-key.v1"),
+  ]
+  const readable = path.join(data, "log", "engine.log")
+  ;[...secrets, readable].forEach((file) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, file === readable ? "log-line" : "secret")
+  })
+
+  const wrapped = wrapCommand({
+    shell: "/bin/sh",
+    command: [
+      ...secrets.map((file) => `cat ${JSON.stringify(file)} 2>/dev/null`),
+      `cat ${JSON.stringify(readable)}`,
+      ...secrets.map((file) => `printf tamper > ${JSON.stringify(file)} 2>/dev/null`),
+      "true",
+    ].join("; "),
+    cwd: root,
+    env: process.env,
+    workspaceRoot: root,
+    home: fakeHome,
+    data,
+  })
+  expect(wrapped.sandboxed).toBe(true)
+  const result = spawnSync(wrapped.command, wrapped.args, { cwd: root, env: process.env, encoding: "utf8" })
+  const output = (result.stdout + result.stderr).trim()
+
+  expect(output).not.toContain("secret")
+  expect(output).toContain("log-line")
+  secrets.forEach((file) => expect(fs.readFileSync(file, "utf8")).toBe("secret"))
 })
 
 test.skipIf(!darwin)("linked worktrees keep shared objects, refs, and reflogs read-only", () => {
