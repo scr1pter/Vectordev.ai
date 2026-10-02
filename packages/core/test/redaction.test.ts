@@ -75,26 +75,111 @@ describe("Redaction", () => {
     })
   })
 
-  test("unchanged drops the marker so a deep merge keeps the stored value", () => {
-    const sent = Redaction.redact(stored)
-    sent.provider.custom.options.baseURL = "https://changed.example.com"
-    expect<unknown>(Redaction.unchanged(sent)).toEqual({
-      provider: {
-        custom: {
-          options: {
-            baseURL: "https://changed.example.com",
-            headers: { "User-Agent": "vector" },
-            maxTokens: 4096,
-            setCacheKey: true,
-          },
-        },
+  test("redactConfig marks an agent's own secret-named fields and keeps its permission rules", () => {
+    const config = {
+      agent: {
+        build: { apiKey: "agent-top-secret", model: "custom/small", permission: { read: { "*.key": "deny" } } },
       },
-      mcp: { tools: { type: "local", command: ["tool"], environment: { DEBUG: "1" } } },
+      mode: { plan: { sessionToken: "mode-secret", prompt: "plan" } },
+    }
+    expect(Redaction.redactConfig(config)).toEqual({
+      agent: {
+        build: { apiKey: Redaction.MARKER, model: "custom/small", permission: { read: { "*.key": "deny" } } },
+      },
+      mode: { plan: { sessionToken: Redaction.MARKER, prompt: "plan" } },
     })
   })
 
-  test("unchanged keeps a new secret the client typed", () => {
-    expect(Redaction.unchanged({ apiKey: "sk-new" })).toEqual({ apiKey: "sk-new" })
+  test("redactConfig masks secret query parameters and command arguments", () => {
+    const config = {
+      provider: { custom: { options: { baseURL: "https://api.example.com/v1?api_key=sk-url&region=us" } } },
+      mcp: {
+        remote: { type: "remote", url: "https://mcp.example.com/sse?token=url-secret&mode=full#top" },
+        tools: {
+          type: "local",
+          command: ["npx", "server", "--api-key", "sk-arg", "--x-token=arg-secret", "--max-tokens", "100"],
+        },
+      },
+    }
+    expect(Redaction.redactConfig(config)).toEqual({
+      provider: {
+        custom: { options: { baseURL: `https://api.example.com/v1?api_key=${Redaction.MARKER}&region=us` } },
+      },
+      mcp: {
+        remote: { type: "remote", url: `https://mcp.example.com/sse?token=${Redaction.MARKER}&mode=full#top` },
+        tools: {
+          type: "local",
+          command: [
+            "npx",
+            "server",
+            "--api-key",
+            Redaction.MARKER,
+            `--x-token=${Redaction.MARKER}`,
+            "--max-tokens",
+            "100",
+          ],
+        },
+      },
+    })
+  })
+
+  test("omit masks secret query parameters in URL fields", () => {
+    expect<unknown>(Redaction.omit({ baseURL: "https://api.example.com?key=sk-url", apiKey: "sk" })).toEqual({
+      baseURL: `https://api.example.com?key=${Redaction.MARKER}`,
+    })
+  })
+
+  test("restore puts back every secret of a redacted config, inside arrays too", () => {
+    const config = {
+      ...stored,
+      plugin: ["plain", ["first", { apiKey: "first-secret" }], ["second", { apiKey: "second-secret", region: "us" }]],
+      provider: {
+        custom: { options: { ...stored.provider.custom.options, baseURL: "https://api.example.com?api_key=sk-url" } },
+      },
+      mcp: {
+        tools: { ...stored.mcp.tools, command: ["server", "--api-key", "sk-arg", "--x-token=arg-secret"] },
+        remote: { type: "remote", url: "https://mcp.example.com/sse?token=url-secret" },
+      },
+      agent: { build: { apiKey: "agent-secret", options: { apiKey: "agent-secret" } } },
+    }
+    expect(Redaction.restore(Redaction.redactConfig(config), config)).toEqual(config)
+  })
+
+  test("restore pairs a plugin tuple by name, not by position", () => {
+    const sent = { plugin: [["second", { apiKey: Redaction.MARKER }]] }
+    const file = {
+      plugin: [
+        ["first", { apiKey: "first-secret" }],
+        ["second", { apiKey: "second-secret" }],
+      ],
+    }
+    expect(Redaction.restore(sent, file)).toEqual({ plugin: [["second", { apiKey: "second-secret" }]] })
+    expect<unknown>(Redaction.restore({ plugin: [["third", { apiKey: Redaction.MARKER }]] }, file)).toEqual({
+      plugin: [["third", {}]],
+    })
+  })
+
+  test("restore keeps a changed URL but never sends the stored key to a new host", () => {
+    const url = "https://mcp.example.com/sse?token=url-secret&mode=full"
+    expect(Redaction.restore(`https://mcp.example.com/sse?token=${Redaction.MARKER}&mode=lite`, url)).toBe(
+      "https://mcp.example.com/sse?token=url-secret&mode=lite",
+    )
+    expect(Redaction.restore(`https://evil.example.com/sse?token=${Redaction.MARKER}&mode=full`, url)).toBe(
+      "https://evil.example.com/sse?mode=full",
+    )
+  })
+
+  test("restore finds a masked argument by its flag and drops one it cannot find", () => {
+    const command = ["server", "--api-key", "sk-arg", "--x-token=arg-secret"]
+    expect(Redaction.restore(["server", "--verbose", "--api-key", Redaction.MARKER], command)).toEqual([
+      "server",
+      "--verbose",
+      "--api-key",
+      "sk-arg",
+    ])
+    expect(
+      Redaction.restore(["server", "--other-key", Redaction.MARKER, `--x-token=${Redaction.MARKER}`], command),
+    ).toEqual(["server", "--other-key", "--x-token=arg-secret"])
   })
 
   test("restore puts the stored secret back where the marker was", () => {

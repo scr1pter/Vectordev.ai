@@ -65,4 +65,20 @@ describe("Provider.toClientInfo", () => {
     expect(info.models.small.options.temperature).toBe(0)
     expect(info.models.small.headers["User-Agent"]).toBe("vector")
   })
+
+  test("drops keys from model variants and masks keys in a base URL query", () => {
+    const info = Provider.toClientInfo(
+      provider({
+        options: { baseURL: "https://api.example.com/v1?api_key=secret-9&region=us" },
+        models: {
+          small: { id: "small", variants: { high: { apiKey: "secret-10", reasoningEffort: "high" } } },
+        },
+      }),
+    )
+    const text = JSON.stringify(info)
+    expect(text).not.toContain("secret-9")
+    expect(text).not.toContain("secret-10")
+    expect(info.options.baseURL).toBe("https://api.example.com/v1?api_key=[redacted]&region=us")
+    expect(info.models.small.variants).toEqual({ high: { reasoningEffort: "high" } })
+  })
 })

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
+import { pathToFileURL } from "url"
 import { Global } from "@vectordevai/core/global"
 import { Redaction } from "@vectordevai/core/redaction"
 import { Server } from "../../src/server/server"
@@ -8,7 +9,23 @@ import { disposeAllInstances, tmpdir } from "../fixture/fixture"
 import { waitGlobalBusEvent } from "./global-bus"
 import { Effect } from "effect"
 
-const secrets = ["sk-config-secret", "header-secret", "model-header-secret", "env-secret", "mcp-header-secret"]
+const secrets = [
+  "sk-config-secret",
+  "header-secret",
+  "model-header-secret",
+  "env-secret",
+  "mcp-header-secret",
+  "base-url-secret",
+  "variant-secret",
+  "mcp-url-secret",
+  "mcp-arg-secret",
+  "mcp-flag-secret",
+  "agent-top-secret",
+]
+
+// A local plugin, so the tuple below can carry options without an install.
+const PLUGIN_FILE = "secret-plugin.ts"
+const pluginSecret = "plugin-secret"
 
 const config = {
   formatter: false,
@@ -19,28 +36,74 @@ const config = {
       npm: "@ai-sdk/openai-compatible",
       options: {
         apiKey: "sk-config-secret",
-        baseURL: "https://api.example.com/v1",
+        baseURL: "https://api.example.com/v1?api_key=base-url-secret&region=us",
         headers: { Authorization: "Bearer header-secret", "User-Agent": "vector-test" },
       },
       models: {
-        small: { name: "Small", headers: { "x-api-key": "model-header-secret" } },
+        small: {
+          name: "Small",
+          headers: { "x-api-key": "model-header-secret" },
+          variants: { high: { apiKey: "variant-secret", reasoningEffort: "high" } },
+        },
       },
     },
   },
   mcp: {
     tools: {
       type: "local",
-      command: ["tools-server"],
+      command: ["tools-server", "--api-key", "mcp-arg-secret", "--x-token=mcp-flag-secret", "--verbose"],
       enabled: false,
       environment: { GITHUB_TOKEN: "env-secret", DEBUG: "1" },
     },
     remote: {
       type: "remote",
-      url: "https://mcp.example.com",
+      url: "https://mcp.example.com/sse?token=mcp-url-secret&mode=full",
       enabled: false,
       headers: { Authorization: "Bearer mcp-header-secret" },
     },
   },
+  agent: { build: { apiKey: "agent-top-secret", options: { region: "us" } } },
+}
+
+// The project config above plus a plugin tuple whose options hold a key.
+function project() {
+  return tmpdir({
+    config: { ...config, plugin: [[`./${PLUGIN_FILE}`, { apiKey: pluginSecret, region: "us" }]] },
+    init: (dir) => Bun.write(path.join(dir, PLUGIN_FILE), "export default async () => ({})\n"),
+  })
+}
+
+// Every stored secret, read back from a config file, so a round trip can prove
+// each one survived byte for byte.
+async function storedSecrets(file: string) {
+  const saved = await Bun.file(file).json()
+  return {
+    apiKey: saved.provider.custom.options.apiKey,
+    baseURL: saved.provider.custom.options.baseURL,
+    authorization: saved.provider.custom.options.headers.Authorization,
+    modelHeader: saved.provider.custom.models.small.headers["x-api-key"],
+    variant: saved.provider.custom.models.small.variants.high.apiKey,
+    environment: saved.mcp.tools.environment,
+    command: saved.mcp.tools.command,
+    url: saved.mcp.remote.url,
+    mcpHeader: saved.mcp.remote.headers.Authorization,
+    agent: saved.agent.build.apiKey,
+    plugin: saved.plugin.find((item: unknown) => Array.isArray(item))?.[1],
+  }
+}
+
+const expectedSecrets = {
+  apiKey: "sk-config-secret",
+  baseURL: "https://api.example.com/v1?api_key=base-url-secret&region=us",
+  authorization: "Bearer header-secret",
+  modelHeader: "model-header-secret",
+  variant: "variant-secret",
+  environment: { GITHUB_TOKEN: "env-secret", DEBUG: "1" },
+  command: ["tools-server", "--api-key", "mcp-arg-secret", "--x-token=mcp-flag-secret", "--verbose"],
+  url: "https://mcp.example.com/sse?token=mcp-url-secret&mode=full",
+  mcpHeader: "Bearer mcp-header-secret",
+  agent: "agent-top-secret",
+  plugin: { apiKey: pluginSecret, region: "us" },
 }
 
 function request(route: string, directory: string, init: RequestInit = {}) {
@@ -109,30 +172,58 @@ afterEach(async () => {
 
 describe("config and provider responses", () => {
   test("never carry a stored secret to the client", async () => {
-    await using tmp = await tmpdir({ config })
+    await using tmp = await project()
     for (const route of ["/config", "/provider", "/config/providers"]) {
       const body = await text(route, tmp.path)
       // The custom provider must be listed, or the check below proves nothing.
       expect({ route, listed: body.includes("api.example.com") }).toEqual({ route, listed: true })
-      for (const secret of secrets) expect({ route, leaked: body.includes(secret) }).toEqual({ route, leaked: false })
+      for (const secret of [...secrets, pluginSecret])
+        expect({ route, leaked: body.includes(secret) }).toEqual({ route, leaked: false })
     }
-  })
+    // The first request boots the instance and loads the plugin, which is slow on a busy machine.
+  }, 15_000)
+
+  test("GET /agent never carries an agent's option secrets", async () => {
+    await using tmp = await project()
+    const body = await text("/agent", tmp.path)
+    for (const secret of secrets) expect(body).not.toContain(secret)
+    const build = JSON.parse(body).find((item: { name: string }) => item.name === "build")
+    expect(build.options).toMatchObject({ apiKey: Redaction.MARKER, region: "us" })
+  }, 15_000)
 
   test("GET /config marks each secret and keeps everything else", async () => {
-    await using tmp = await tmpdir({ config })
+    await using tmp = await project()
     const body = JSON.parse(await text("/config", tmp.path))
     expect(body.provider.custom.options).toMatchObject({
       apiKey: Redaction.MARKER,
-      baseURL: "https://api.example.com/v1",
+      baseURL: `https://api.example.com/v1?api_key=${Redaction.MARKER}&region=us`,
       headers: { Authorization: Redaction.MARKER, "User-Agent": "vector-test" },
     })
     expect(body.provider.custom.models.small.headers["x-api-key"]).toBe(Redaction.MARKER)
+    expect(body.provider.custom.models.small.variants.high).toEqual({
+      apiKey: Redaction.MARKER,
+      reasoningEffort: "high",
+    })
     expect(body.mcp.tools.environment).toEqual({ GITHUB_TOKEN: Redaction.MARKER, DEBUG: "1" })
+    expect(body.mcp.tools.command).toEqual([
+      "tools-server",
+      "--api-key",
+      Redaction.MARKER,
+      `--x-token=${Redaction.MARKER}`,
+      "--verbose",
+    ])
+    expect(body.mcp.remote.url).toBe(`https://mcp.example.com/sse?token=${Redaction.MARKER}&mode=full`)
     expect(body.mcp.remote.headers.Authorization).toBe(Redaction.MARKER)
+    expect(body.agent.build.apiKey).toBe(Redaction.MARKER)
+    expect(body.agent.build.options).toMatchObject({ apiKey: Redaction.MARKER, region: "us" })
+    expect(body.plugin.find((item: unknown) => Array.isArray(item))[1]).toEqual({
+      apiKey: Redaction.MARKER,
+      region: "us",
+    })
   })
 
   test("writing the redacted config back keeps every stored secret", async () => {
-    await using tmp = await tmpdir({ config })
+    await using tmp = await project()
     const body = JSON.parse(await text("/config", tmp.path))
     const disposed = Effect.runPromise(
       waitGlobalBusEvent({
@@ -147,18 +238,14 @@ describe("config and provider responses", () => {
     })
     expect(response.status).toBe(200)
     const echoed = await response.text()
-    for (const secret of secrets) expect(echoed).not.toContain(secret)
+    for (const secret of [...secrets, pluginSecret]) expect(echoed).not.toContain(secret)
     await disposed
 
-    const saved = await Bun.file(path.join(tmp.path, "vector.json")).json()
+    const file = path.join(tmp.path, "vector.json")
+    const saved = await Bun.file(file).json()
     expect(saved.username).toBe("round-trip")
-    expect(saved.provider.custom.options).toMatchObject({
-      apiKey: "sk-config-secret",
-      headers: { Authorization: "Bearer header-secret", "User-Agent": "vector-test" },
-    })
-    expect(saved.provider.custom.models.small.headers["x-api-key"]).toBe("model-header-secret")
-    expect(saved.mcp.tools.environment).toEqual({ GITHUB_TOKEN: "env-secret", DEBUG: "1" })
-    expect(saved.mcp.remote.headers.Authorization).toBe("Bearer mcp-header-secret")
+    expect(saved.provider.custom.options.headers["User-Agent"]).toBe("vector-test")
+    expect(await storedSecrets(file)).toEqual(expectedSecrets)
     expect(JSON.stringify(saved)).not.toContain(Redaction.MARKER)
   })
 
@@ -175,6 +262,7 @@ describe("config and provider responses", () => {
 
     const saved = await Bun.file(path.join(tmp.path, ".vector", "vector.local.json")).json()
     expect(saved.mcp.tools.environment).toEqual({ GITHUB_TOKEN: "env-secret", DEBUG: "1" })
+    expect(saved.mcp.tools.command).toEqual(expectedSecrets.command)
   })
 
   test("V2 provider and model responses never carry a stored secret", async () => {
@@ -187,6 +275,15 @@ describe("config and provider responses", () => {
       expect({ route, marked: body.includes(Redaction.MARKER) }).toEqual({ route, marked: true })
       for (const secret of secrets) expect({ route, leaked: body.includes(secret) }).toEqual({ route, leaked: false })
     }
+  }, 30_000)
+
+  test("V2 agent responses never carry an agent's request secrets", async () => {
+    await using tmp = await tmpdir({ git: true, config })
+    await waitForProvider(tmp.path)
+    const body = await text("/api/agent", tmp.path)
+    for (const secret of secrets) expect(body).not.toContain(secret)
+    const build = JSON.parse(body).data.find((item: { id: string }) => item.id === "build")
+    expect(build.request.body).toMatchObject({ apiKey: Redaction.MARKER, region: "us" })
   }, 30_000)
 
   test("re-adding an MCP server keeps the {env:...} reference its config file holds", async () => {
@@ -237,10 +334,17 @@ describe("config and provider responses", () => {
 
 describe("global config responses", () => {
   test("never carry a stored secret, and writing them back keeps every secret", async () => {
-    await using tmp = await tmpdir()
-    await withGlobalConfig(tmp.path, { $schema: "https://vectordev.ai/config.json", ...config }, async (file) => {
+    await using tmp = await tmpdir({
+      init: (dir) => Bun.write(path.join(dir, PLUGIN_FILE), "export default async () => ({})\n"),
+    })
+    const content = {
+      $schema: "https://vectordev.ai/config.json",
+      ...config,
+      plugin: [[pathToFileURL(path.join(tmp.path, PLUGIN_FILE)).href, { apiKey: pluginSecret, region: "us" }]],
+    }
+    await withGlobalConfig(tmp.path, content, async (file) => {
       const body = await text("/global/config", tmp.path)
-      for (const secret of secrets) expect(body).not.toContain(secret)
+      for (const secret of [...secrets, pluginSecret]) expect(body).not.toContain(secret)
       const info = JSON.parse(body)
       expect(info.provider.custom.options.apiKey).toBe(Redaction.MARKER)
       expect(info.provider.custom.options.headers.Authorization).toBe(Redaction.MARKER)
@@ -249,19 +353,12 @@ describe("global config responses", () => {
       const response = await patch("/global/config", tmp.path, { ...info, username: "global-round-trip" })
       expect(response.status).toBe(200)
       const echoed = await response.text()
-      for (const secret of secrets) expect(echoed).not.toContain(secret)
+      for (const secret of [...secrets, pluginSecret]) expect(echoed).not.toContain(secret)
 
       const saved = await Bun.file(file).text()
       expect(saved).not.toContain(Redaction.MARKER)
-      const stored = JSON.parse(saved)
-      expect(stored.username).toBe("global-round-trip")
-      expect(stored.provider.custom.options).toMatchObject({
-        apiKey: "sk-config-secret",
-        headers: { Authorization: "Bearer header-secret", "User-Agent": "vector-test" },
-      })
-      expect(stored.provider.custom.models.small.headers["x-api-key"]).toBe("model-header-secret")
-      expect(stored.mcp.tools.environment).toEqual({ GITHUB_TOKEN: "env-secret", DEBUG: "1" })
-      expect(stored.mcp.remote.headers.Authorization).toBe("Bearer mcp-header-secret")
+      expect(JSON.parse(saved).username).toBe("global-round-trip")
+      expect(await storedSecrets(file)).toEqual(expectedSecrets)
     })
   })
 })

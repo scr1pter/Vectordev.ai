@@ -1016,7 +1016,7 @@ const CLIENT_VISIBLE_API_KEYS = new Set<string>(["", OAUTH_DUMMY_KEY])
  * endpoints used to send toPublicInfo(), which still carries `key`, the user's
  * stored API key, to every client of the server, including guests invited with
  * `vector invite`. Clients need to know how a provider is connected, never the
- * credential itself. Model options and headers can carry keys too.
+ * credential itself. Model options, headers and variants can carry keys too.
  */
 export function toClientInfo(provider: Info): Info {
   const { key: _key, ...info } = toPublicInfo(provider)
@@ -1027,6 +1027,7 @@ export function toClientInfo(provider: Info): Info {
     ...model,
     options: Redaction.omit(model.options ?? {}),
     headers: Redaction.omit(model.headers ?? {}),
+    variants: Redaction.omit(model.variants),
   }))
   return { ...info, options, models }
 }

@@ -599,16 +599,26 @@ const layer = Layer.effect(
       )
     })
 
+    // The config a file holds as written: {env:...} and {file:...} references stay
+    // unresolved, so a secret restored from it goes back as its reference. Plugin
+    // specs resolve as they do on load, so each plugin tuple a client sends back
+    // pairs with the stored one.
+    const storedFile = Effect.fnUntraced(function* (file: string) {
+      const text = yield* readConfigFile(file)
+      if (!text || !/^\s*[{/]/.test(text)) return {}
+      const stored = ConfigParse.schema(ConfigV1.Info, normalizeLoadedConfig(ConfigParse.jsonc(text, file)), file)
+      return yield* Effect.promise(() => resolveLoadedPlugins(stored, file))
+    })
+
     const update = Effect.fn("Config.update")(function* (config: Info) {
       const dir = yield* InstanceState.directory
       const file = path.join(dir, "vector.json")
       const existing = yield* loadFile(file)
-      yield* fs
-        .writeFileString(
-          file,
-          JSON.stringify(mergeDeep(writable(existing), Redaction.unchanged(writable(config))), null, 2),
-        )
-        .pipe(Effect.orDie)
+      // A client sends secrets back as Redaction.MARKER. Restoring them before the
+      // merge keeps the ones inside arrays, such as plugin options, which a deep
+      // merge replaces wholesale.
+      const patch = Redaction.restore(writable(config), yield* storedFile(file))
+      yield* fs.writeFileString(file, JSON.stringify(mergeDeep(writable(existing), patch), null, 2)).pipe(Effect.orDie)
     })
 
     const invalidate = Effect.fn("Config.invalidate")(function* () {
@@ -707,7 +717,7 @@ const layer = Layer.effect(
       const file = globalConfigFile()
       const original = (yield* readConfigFile(file)) ?? "{}"
       const before = ConfigSchema.rewrite(original)
-      const patch = Redaction.unchanged(writableGlobal(config))
+      const patch = Redaction.restore(writableGlobal(config), yield* storedFile(file))
 
       let next: Info
       let changed: boolean

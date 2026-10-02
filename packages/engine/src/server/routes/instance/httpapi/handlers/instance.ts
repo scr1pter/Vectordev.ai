@@ -3,6 +3,7 @@ import { Command } from "@/command"
 import * as InstanceState from "@/effect/instance-state"
 import { Format } from "@/format"
 import { Global } from "@vectordevai/core/global"
+import { Redaction } from "@vectordevai/core/redaction"
 import { LSP } from "@/lsp/lsp"
 import { Vcs } from "@/project/vcs"
 import { Skill } from "@/skill"
@@ -94,8 +95,11 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       return yield* command.list()
     })
 
+    // Agent options come from config and can carry keys. Every client of the
+    // server reads this list, including guests invited with `vector invite`.
     const getAgent = Effect.fn("InstanceHttpApi.agent")(function* () {
-      return yield* agent.list()
+      const agents = yield* agent.list()
+      return agents.map((item) => ({ ...item, options: Redaction.redact(item.options) }))
     })
 
     const getSkill = Effect.fn("InstanceHttpApi.skill")(function* () {
