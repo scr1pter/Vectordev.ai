@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises"
 import path from "node:path"
+import { assertCleanArtifacts } from "../../../script/artifact-audit"
 
 export async function verifyNotices(directory: string, platform: "darwin" | "win32" | "linux") {
   const resources =
@@ -26,5 +27,7 @@ if (import.meta.main) {
   for (const directory of process.argv.slice(3)) {
     await verifyNotices(directory, platform)
     console.log(`Verified bundled license notices: ${directory}`)
+    // The release workflow verifies every unpacked app here before uploading its installers.
+    await assertCleanArtifacts([directory])
   }
 }

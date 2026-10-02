@@ -18,3 +18,15 @@ The same 16 attributed matches existed in the prior reviewed native build. They 
 Since the environment migration fix, `packages/core/src/flag/legacy.ts` imports `THIRD_PARTY_NOTICES.md` as text to derive the earlier product's environment prefix and default server username. The engine and TUI bundles therefore embed the notices text one more time, so the next audit will show extra "Embedded third-party notices" hits. They are expected legal-attribution hits, not new product identifiers.
 
 The development artifact is not a published release or an installed replacement. Its final audit is recorded at `/Users/Krishna/.cache/vector-rebuild-evidence/part1-binary-audit.json`, with exact occurrence attribution in `part1-final-native-attribution.json` beside it. Repeat the audit for each later release artifact. Until the owner decides, report the strict binary check as unresolved rather than claiming complete removal.
+
+## Automated release audit
+
+`script/artifact-audit.ts` now enforces this rule on every release path before anything is uploaded or published:
+
+- npm CLI: `packages/engine/script/publish-vector.ts` audits every `dist/vector-<target>` package and the `@vectordevai/cli` umbrella.
+- Standalone CLI: `packages/cloud/src/upload-cli-release.ts` audits the prepared `.tar.gz` and `.zip` archives (decompressed while streaming) after `prepare` and again before a separate `stage`.
+- Desktop: `packages/desktop/scripts/verify-package.ts` (macOS `.app`) and `packages/desktop/scripts/verify-notices.ts` (Windows and Linux unpacked apps) audit each app, including `app.asar` and the bundled engine, before the release workflow uploads installers.
+
+It fails on the former name in any case in UTF-8 and both UTF-16 byte orders, retired upstream hosts (the former product domain and the public model catalog service URL), and borrowed OAuth registrations or shared-key literals. The Codex CLI client used for ChatGPT sign-in is allowed. Only three classes are allowed and each is counted in the output: exact notice lines from `THIRD_PARTY_NOTICES.md` and `LICENSE`, Monaco's open-code-editor method names, and Bun's built-in package table entry between its pinned neighbours. Run it by hand with `bun script/artifact-audit.ts <file-or-directory>...`.
+
+A trial run on the installed 1.99.91 macOS app (Electron 42.11.4, the same Electron version `main` pins) found 5 more matches inside `Electron Framework`. They come from Node.js's `util.styleText`, whose local variable for the opening ANSI codes contains the name. They are not in the allowlist, so the desktop audit will fail on Electron's own bytes until the owner either approves this Node.js identifier class or chooses a different Electron build. No exception was added.

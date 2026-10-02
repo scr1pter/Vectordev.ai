@@ -23,6 +23,7 @@ import path from "path"
 import os from "os"
 import fs from "fs/promises"
 import { catalogDigest, ensurePublishedCatalog, prepareReleaseCatalog } from "./release-catalog"
+import { assertCleanArtifacts } from "../../../script/artifact-audit"
 import { fileURLToPath } from "url"
 import desktop from "../../desktop/package.json"
 import plugin from "../../plugin/package.json"
@@ -84,25 +85,16 @@ for (const suffix of targets) {
     if (!manifest.files?.includes(file)) throw new Error(`Missing ${file} from ${suffix} package file list`)
   }
   const binary = path.join("dist", `vector-${suffix}`, "bin", suffix.startsWith("windows") ? "vector.exe" : "vector")
+  if (!(await Bun.file(binary).exists())) throw new Error(`Missing ${binary}`)
   for (const notice of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]) {
     if (!(await Bun.file(path.join("dist", `vector-${suffix}`, notice)).exists())) {
       throw new Error(`Missing ${notice} in ${suffix}`)
     }
   }
-  const bytes = Buffer.from(await Bun.file(binary).arrayBuffer())
-  // The Codex CLI client is allowed again: the owner restored ChatGPT sign-in
-  // on 26 September 2026.
-  for (const credential of [
-    'apiKey:"public"',
-    "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
-    "Ov23li8tweQw6odWQebz",
-  ]) {
-    if (bytes.includes(credential))
-      throw new Error(
-        `Refusing to publish ${suffix}: the binary embeds a retired credential or borrowed OAuth registration`,
-      )
-  }
 }
+// Byte-level audit of every platform package: the former product name outside its
+// documented allowlist, retired upstream hosts and borrowed credentials all stop the release.
+await assertCleanArtifacts(targets.map((suffix) => path.join("dist", `vector-${suffix}`)))
 
 // 1. Rename platform packages: vector-<suffix> -> @vectordevai/cli-<suffix>
 const platformPackages: Record<string, string> = {}
@@ -199,6 +191,8 @@ await Bun.file(`${out}/package.json`).write(
     2,
   ),
 )
+
+await assertCleanArtifacts([out])
 
 // The runtime uses this public plugin SDK. It must exist before any CLI publication.
 if (plugin.name !== "@vectordevai/plugin") throw new Error("Unexpected plugin package name")

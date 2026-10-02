@@ -8,6 +8,13 @@ const root = path.resolve(import.meta.dir, "../../../..")
 const notices = ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]
 const targets = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "windows-x64", "windows-arm64"]
 const version = "1.2.3"
+// The publisher's byte audit derives the former product name from this real notice.
+const realNotices = await Bun.file(path.join(root, "THIRD_PARTY_NOTICES.md")).text()
+const formerName = realNotices
+  .split("<!-- vector-upstream-attribution -->")[1]
+  ?.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
+  ?.trim()
+  .toLowerCase()
 
 async function fixture() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "vector-cli-packaging-"))
@@ -34,6 +41,7 @@ async function fixture() {
     path.join(dir, "packages/engine/script/publish-vector.ts"),
     Bun.file(path.join(root, "packages/engine/script/publish-vector.ts")),
   )
+  await Bun.write(path.join(dir, "script/artifact-audit.ts"), Bun.file(path.join(root, "script/artifact-audit.ts")))
   await Bun.write(path.join(dir, "packages/desktop/package.json"), JSON.stringify({ version }))
   await Bun.write(
     path.join(dir, "packages/plugin/package.json"),
@@ -45,7 +53,11 @@ async function fixture() {
   )
   await Bun.write(path.join(dir, "user.npmrc"), "")
   await Bun.write(path.join(dir, "global.npmrc"), "")
-  for (const notice of notices) await Bun.write(path.join(dir, notice), `Fixture ${notice}\n`)
+  for (const notice of notices)
+    await Bun.write(
+      path.join(dir, notice),
+      notice === "THIRD_PARTY_NOTICES.md" ? `Fixture ${notice}\n${realNotices}` : `Fixture ${notice}\n`,
+    )
   for (const target of targets) {
     const folder = path.join(dir, "packages/engine/dist", `vector-${target}`)
     const [platform, arch] = target.split("-")
@@ -174,7 +186,9 @@ test("dry-run packages every target with notices and a working Vector launcher w
       )
       expect(unpacked.code, unpacked.stderr).toBe(0)
       for (const notice of notices)
-        expect(await Bun.file(path.join(destination, notice)).text()).toBe(`Fixture ${notice}\n`)
+        expect(await Bun.file(path.join(destination, notice)).text()).toBe(
+          await Bun.file(path.join(tmp.dir, notice)).text(),
+        )
     }
     // The fixture is a script; Windows requires a compiled PE executable for this final smoke check.
     if (process.platform === "win32") return
@@ -197,7 +211,10 @@ test("dry-run packages every target with notices and a working Vector launcher w
 
 // The Codex CLI client was restored for ChatGPT sign-in on 26 September 2026;
 // every other borrowed registration still stops a publish.
-const borrowedRegistrations = ["1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e", "Ov23li8tweQw6odWQebz"]
+const borrowedRegistrations = [
+  "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
+  "Ov23li8tweQw6odWQebz",
+]
 for (const problem of [
   "stale version",
   "missing binary",
@@ -205,6 +222,8 @@ for (const problem of [
   "excluded notice",
   "shared credential",
   "wrong catalog digest",
+  "former product name",
+  "retired host",
   ...borrowedRegistrations,
 ]) {
   test(`refuses every package before publishing when the final target has ${problem}`, async () => {
@@ -223,10 +242,16 @@ for (const problem of [
     if (problem === "missing notice") await rm(path.join(folder, "THIRD_PARTY_NOTICES.md"))
     if (problem === "shared credential")
       await Bun.write(path.join(folder, "bin/vector.exe"), 'compiled fixture apiKey:"public"')
+    if (problem === "former product name")
+      await Bun.write(path.join(folder, "bin/vector.exe"), `compiled fixture ${formerName?.toUpperCase()} agent`)
+    if (problem === "retired host")
+      await Bun.write(path.join(folder, "bin/vector.exe"), 'compiled fixture fetch("https://models.dev/api.json")')
     if (borrowedRegistrations.includes(problem))
       await Bun.write(path.join(folder, "bin/vector.exe"), `compiled fixture ${problem}`)
     const result = await run([process.execPath, "script/publish-vector.ts", "--skip-build", "--dry-run"], cwd, tmp.env)
     expect(result.code).not.toBe(0)
+    if (["former product name", "retired host", "shared credential", ...borrowedRegistrations].includes(problem))
+      expect(result.stdout + result.stderr).toContain("artifact audit violation")
     expect((await Bun.file(path.join(cwd, "dist/vector-darwin-arm64/package.json")).json()).name).toBe(
       "vector-darwin-arm64",
     )

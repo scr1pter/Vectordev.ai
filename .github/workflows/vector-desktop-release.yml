@@ -621,7 +621,8 @@ jobs:
       # 1.19.96 shipped without app-update.yml and every update check failed
       # with ENOENT. Nothing in the pipeline noticed, because the app packaged,
       # signed and launched fine — only the updater was dead.
-      - name: Verify packaged apps can reach the update feed
+      # verify:package also runs script/artifact-audit.ts over each .app before upload.
+      - name: Verify packaged apps can reach the update feed and pass the byte audit
         run: bun run --cwd packages/desktop verify:package
 
       - name: Verify app notarization and artifact signatures
@@ -775,7 +776,8 @@ jobs:
             Start-Sleep -Seconds ($attempt * 15)
           }
 
-      - name: Verify installer signatures and updater metadata
+      # verify-notices.ts also runs script/artifact-audit.ts over each unpacked app.
+      - name: Verify installer signatures, updater metadata and byte audit
         shell: pwsh
         run: |
           bun packages/desktop/scripts/verify-notices.ts win32 packages/desktop/dist/win-unpacked packages/desktop/dist/win-arm64-unpacked
@@ -863,6 +865,7 @@ jobs:
             if [ "$attempt" = "3" ]; then exit 1; fi
             sleep $((attempt * 15))
           done
+      # verify-notices.ts also runs script/artifact-audit.ts over each unpacked app.
       - name: Verify Linux artifacts
         run: |
           set -euo pipefail

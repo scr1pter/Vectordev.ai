@@ -2,6 +2,7 @@ import path from "node:path"
 import { list, put } from "@vercel/blob"
 import { CliRelease } from "@vectordevai/schema/cli-release"
 import { cliBlobUrl, hashCliFile, packageCliRelease } from "./cli-release-package"
+import { assertCleanArtifacts } from "../../../script/artifact-audit"
 
 export type CliReleaseStore = {
   origin: string
@@ -200,6 +201,8 @@ if (import.meta.main) {
       output: directory,
       publishedAt: required("VECTOR_RELEASE_PUBLISHED_AT"),
     })
+    // Container jobs consume these archives directly, so the byte audit runs before any upload.
+    await assertCleanArtifacts([directory])
     console.log(`Prepared all twelve CLI archives in ${directory}`)
   }
   if (phase !== "prepare") {
@@ -224,6 +227,7 @@ if (import.meta.main) {
         }),
     }
     if (phase === "stage" || phase === "all") {
+      if (phase === "stage") await assertCleanArtifacts([directory])
       const file = Bun.file(path.join(directory, "manifest.json"))
       if (file.size > CliRelease.MAX_MANIFEST_BYTES)
         throw new Error("The prepared CLI manifest exceeds the size limit.")
