@@ -408,7 +408,8 @@ const layer = Layer.effect(
                     status: "error",
                     error: "Cancelled",
                     time: { start: part.state.time.start, end: Date.now() },
-                    metadata: part.state.metadata,
+                    // The flag processor cleanup sets too: clients show a stopped subtask as cancelled, not failed.
+                    metadata: { ...part.state.metadata, interrupted: true },
                     input: part.state.input,
                   },
                 } satisfies SessionV1.ToolPart)

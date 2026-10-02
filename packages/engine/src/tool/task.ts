@@ -629,8 +629,8 @@ export const TaskTool = Tool.define(
         )
       })
 
-      if (yield* background.extend({ id: nextSession.id, run: runTask() })) {
-        // This call adds to a run that is still working; its card settles when that run does.
+      // This call adds to a run that is still working; its card settles when that run does.
+      const joined = Effect.fn("TaskTool.joined")(function* () {
         yield* background.wait({ id: nextSession.id }).pipe(
           Effect.flatMap((waited) =>
             waited.info && waited.info.status !== "running"
@@ -662,7 +662,9 @@ export const TaskTool = Tool.define(
             text: BACKGROUND_UPDATED,
           }),
         }
-      }
+      })
+      const extendRun = () => background.extend({ id: nextSession.id, run: runTask() })
+      if (yield* extendRun()) return yield* joined()
 
       // A resumed child starts a new run: point its record at this call.
       if (session) {
@@ -692,6 +694,14 @@ export const TaskTool = Tool.define(
         ]),
         run: runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id))),
       })
+      // start hands back the running job when a concurrent call resuming the same task_id got there first. Join that
+      // run instead of dropping this call's prompt, so only the call that started it reports its result.
+      if (info.metadata?.startedAt !== startedAt || info.metadata?.callID !== ctx.callID) {
+        if (yield* extendRun()) return yield* joined()
+        return yield* Effect.fail(
+          new Error(`Task ${nextSession.id} was resumed by another call that has already finished; resume it again.`),
+        )
+      }
 
       function backgroundResult() {
         return {

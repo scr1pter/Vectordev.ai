@@ -26,10 +26,14 @@ export type FinalStatus = Extract<SubagentStatus, "completed" | "error" | "cance
 export type Outcome = Partial<Pick<SubagentRecord, "status" | "completedAt" | "usage" | "error">>
 
 // A background launch's part is completed right after the launch returns, and
-// a foreground part turns to error as soon as the call fails, so a short wait
-// covers both.
-const PART_ATTEMPTS = 50
-const PART_RETRY = "200 millis"
+// a foreground part turns to error as soon as the call fails, so the first
+// polls are quick. The part can stay pending far longer, though: a sibling tool
+// in the same step still running, an unanswered permission prompt, a provider
+// retry backoff. So polling slows down and keeps going for ten minutes.
+const PART_QUICK_ATTEMPTS = 50
+const PART_QUICK_RETRY = "200 millis"
+const PART_SLOW_ATTEMPTS = 120
+const PART_SLOW_RETRY = "5 seconds"
 
 export function read(info: Pick<Session.Info, "metadata">): SubagentRecord | undefined {
   const value = info.metadata?.[METADATA_KEY]
@@ -172,10 +176,14 @@ export function patchPart(input: {
     return "done" as const
   })
   return Effect.gen(function* () {
-    for (let index = 0; index < PART_ATTEMPTS; index++) {
+    for (let index = 0; index < PART_QUICK_ATTEMPTS + PART_SLOW_ATTEMPTS; index++) {
       if ((yield* attempt) !== "pending") return
-      yield* Effect.sleep(PART_RETRY)
+      yield* Effect.sleep(index < PART_QUICK_ATTEMPTS ? PART_QUICK_RETRY : PART_SLOW_RETRY)
     }
+    yield* Effect.logWarning("subagent tool part never settled; its card keeps its last status", {
+      messageID: input.messageID,
+      callID: input.callID,
+    })
   }).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning("subagent tool part patch failed", { messageID: input.messageID, callID: input.callID, cause }),
