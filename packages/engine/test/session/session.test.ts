@@ -205,6 +205,51 @@ describe("step-finish token propagation via event", () => {
   )
 })
 
+describe("session cost totals", () => {
+  it.instance("a session update read before a step settled does not erase that step's cost", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const events = yield* EventV2Bridge.Service
+      const info = yield* session.create({ title: "cost totals" })
+      // What setTitle or setMetadata read just before a step-finish landed: the totals as they were.
+      const stale = yield* session.get(info.id)
+      const messageID = MessageID.ascending()
+      yield* session.updateMessage({
+        id: messageID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        sessionID: info.id,
+        mode: "build",
+        agent: "build",
+        cost: 0.5,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: "test",
+        providerID: "lmstudio",
+        time: { created: Date.now() },
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: PartID.ascending(),
+        messageID,
+        sessionID: info.id,
+        type: "step-finish",
+        reason: "stop",
+        cost: 0.5,
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+      expect((yield* session.get(info.id)).cost).toBe(0.5)
+
+      yield* events.publish(SessionV1.Event.Updated, { sessionID: info.id, info: { ...stale, title: "renamed" } })
+
+      const after = yield* session.get(info.id)
+      expect(after.title).toBe("renamed")
+      expect(after.cost).toBe(0.5)
+      expect(after.tokens?.input).toBe(100)
+      yield* session.remove(info.id)
+    }),
+  )
+})
+
 describe("Session", () => {
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {

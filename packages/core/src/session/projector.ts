@@ -250,14 +250,26 @@ const layer = Layer.effectDiscard(
         }
       }),
     )
-    yield* events.project(SessionV1.Event.Updated, (event) =>
-      db
+    yield* events.project(SessionV1.Event.Updated, (event) => {
+      // The usage columns belong to the step accounting below. A patch carries the totals it read before publishing,
+      // so writing them back would erase every step that settled in between, such as one landing while a title is
+      // generated or a subagent's record is updated.
+      const {
+        cost: _,
+        tokens_input: __,
+        tokens_output: ___,
+        tokens_reasoning: ____,
+        tokens_cache_read: _____,
+        tokens_cache_write: ______,
+        ...settings
+      } = sessionRow(event.data.info)
+      return db
         .update(SessionTable)
-        .set(sessionRow(event.data.info))
+        .set(settings)
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
-        .pipe(Effect.orDie),
-    )
+        .pipe(Effect.orDie)
+    })
     yield* events.project(SessionEvent.Moved, (event) =>
       Effect.gen(function* () {
         yield* db
