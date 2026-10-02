@@ -16,6 +16,11 @@ export const prerender = true
             <li><strong>While you are away</strong><span>Vector stays in the tray after you close the window, so runs fire without you there.</span></li>
           </ul>
           <p class="note">
+            Scheduling lives in the Vector desktop app, so tasks fire while that app is running — including with every
+            window closed, but not while the machine is off or Vector has been quit from the tray. A scheduled run uses
+            Vector's own agent rather than an external CLI runtime.
+          </p>
+          <p class="note">
             Runs that fall due while Vector is fully closed are not replayed one by one. The next start catches up with
             a single run and says how many it skipped.
           </p>

@@ -457,7 +457,7 @@ export const SettingsGeneral: Component = () => {
           description={
             <>
               {language.t("settings.general.row.theme.description")}{" "}
-              <Link href="https://vectordev.ai/docs/settings-appearance">{language.t("common.learnMore")}</Link>
+              <Link href="https://vectordev.ai/docs/desktop-app#settings-appearance">{language.t("common.learnMore")}</Link>
             </>
           }
         >

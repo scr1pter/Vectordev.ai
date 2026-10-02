@@ -1,330 +1,81 @@
 // The documentation's shape: groups in order, each leaf a page under /docs.
-// Generated from the single-page docs; edit here and the sidebar, the pager and
-// the search index all follow.
+// Edit here and the sidebar, the pager and the search index all follow.
 export type DocLink = { id: string; title: string; blurb: string }
 export type DocGroup = { label: string; links: DocLink[] }
 
 export const docsNav: DocGroup[] = [
   {
-    label: "Start here",
+    label: "Get started",
     links: [
       {
         id: "install",
         title: "Install Vector",
-        blurb:
-          "Download the installer that matches your computer, open it, and move through the operating system's installation flow.",
-      },
-      {
-        id: "open-repository",
-        title: "Open a repository",
-        blurb: "From Home, choose Open repository and select a local project folder.",
+        blurb: "Download the installer for your computer and run it.",
       },
       {
         id: "first-task",
-        title: "Run your first task",
-        blurb: "Describe the result, the constraints, and how Vector should verify the work.",
+        title: "Your first task",
+        blurb: "Open a repository, then describe the result, the constraints and how Vector should verify the work.",
       },
     ],
   },
   {
-    label: "Build",
+    label: "Agents",
     links: [
       {
         id: "vector-agent",
         title: "Vector Agent",
-        blurb:
-          "The main session can inspect the repository, edit files, run commands, use project tools, and report a reviewable result.",
+        blurb: "The main session inspects the repository, edits files, runs commands and reports a reviewable result.",
       },
       {
-        id: "agent-workspaces",
-        title: "Agent workspaces",
-        blurb:
-          "Use another workspace when work can happen independently: one agent can handle the interface while another investigates tests or infrastructure.",
+        id: "subagents",
+        title: "Subagents and subagent specialists",
+        blurb: "Vector's agent hands self-contained pieces of a task to other agents that run at the same time.",
       },
       {
-        id: "project-rules",
-        title: "Project rules",
-        blurb:
-          'A rule is a standard written the way you would say it to a new teammate — "we don\'t put database query logic in the controller".',
-      },
-      {
-        id: "agent-dashboard",
-        title: "Agent Dashboard",
-        blurb: "Every agent in the project on one board: Running, Needs you and Done.",
+        id: "parallel-agents",
+        title: "Parallel agents",
+        blurb: "Run several agents at once, each in its own checkout, and watch them from one dashboard.",
       },
       {
         id: "external-agents",
-        title: "Claude Code, Codex and Cursor",
-        blurb: "A workspace can run someone else's CLI instead of Vector's own agent.",
+        title: "Orchestrate Claude Code, Codex and Cursor",
+        blurb: "Run Claude Code, Codex and Cursor in Vector workspaces, on the CLIs and subscriptions you already have.",
       },
       {
         id: "automations",
         title: "Automations",
         blurb: "An automation is one task Vector runs again and again on a schedule.",
       },
-      {
-        id: "agent-editor",
-        title: "Agent and Editor",
-        blurb: "Agent and Editor are two modes over one Vector session.",
-      },
-      {
-        id: "browser",
-        title: "Using the browser",
-        blurb: "The Browser is attached to the current repository and session.",
-      },
-      {
-        id: "terminal-review",
-        title: "Terminal and review",
-        blurb: "The Terminal runs commands inside the active repository or isolated workspace.",
-      },
     ],
   },
   {
-    label: "Ship and connect",
+    label: "Features",
     links: [
       {
-        id: "cloud-services",
-        title: "Cloud Services",
-        blurb: "Cloud work is part of the task, not a panel you operate afterwards.",
+        id: "browser-agent",
+        title: "Browser agent",
+        blurb: "A real Chromium view inside Vector that the agent drives against your running product.",
       },
       {
-        id: "models",
-        title: "Models and BYOK",
-        blurb: "You do not need an API key.",
-      },
-      {
-        id: "connections",
-        title: "MCP and connections",
-        blurb: "MCP servers and project connections give an agent structured access to approved tools.",
-      },
-      {
-        id: "review",
-        title: "Review and recovery",
-        blurb: "Review changed files before merging or publishing.",
-      },
-      {
-        id: "multiplayer",
-        title: "Multiplayer",
-        blurb: "One workspace, several people.",
-      },
-      {
-        id: "github",
-        title: "GitHub automation",
-        blurb: "Task in, pull request out.",
-      },
-      {
-        id: "code-review",
-        title: "Vectorscope, the code review bot",
-        blurb: "Vector's code review bot: on every pull request, on your branch before you push, and in the workspace.",
-      },
-      {
-        id: "review-pipeline",
-        title: "How a review runs",
-        blurb:
-          "The path from a trigger to a comment: the skip ladder, what the reviewer reads, the verify pass, noise control and the limits.",
-      },
-      {
-        id: "follow",
-        title: "Follow mode",
-        blurb: "Watch the agent type.",
-      },
-    ],
-  },
-  {
-    label: "The workspace",
-    links: [
-      {
-        id: "composer",
-        title: "The composer",
-        blurb:
-          "The box at the bottom of a session is where you type the task, and it carries every per-message control: which agent answers, which model, how hard that model thinks, how fast to run, dictat",
-      },
-      {
-        id: "transcript",
-        title: "The session transcript",
-        blurb:
-          "The conversation is a timeline of turns: your messages, the agent's text, collapsible thinking blocks, tool calls with their status and error cards, and a per-turn summary of how many tools ",
-      },
-      {
-        id: "checkpoints",
-        title: "Checkpoints, archaeology and the timeline",
-        blurb: "Vector snapshots the files an agent changed as named checkpoints.",
-      },
-      {
-        id: "workspace-rail",
-        title: "The rail, the palette and search",
-        blurb:
-          "The slim rail down the left edge is the app's top-level navigation: Home, Projects, Search, Agent Dashboard, Browser, Pull Requests, Plugins, Connections and Settings, with a help cluster fo",
-      },
-      {
-        id: "settings-appearance",
-        title: "Appearance and workspace settings",
-        blurb:
-          "Appearance sets the colour scheme, theme, language and Vector's own palette — accent, workspace, sidebar and chat colours — with no external service involved.",
-      },
-      {
-        id: "help-assistant",
-        title: "Help inside the app",
-        blurb: "The help panel answers questions without leaving Vector.",
-      },
-    ],
-  },
-  {
-    label: "How the agent works",
-    links: [
-      {
-        id: "tools",
-        title: "The agent's tools",
-        blurb:
-          "The agent changes your project through a fixed set of first-class tools rather than free-form shell commands, so its behaviour is the same in the desktop app, in the terminal and in GitHub A",
-      },
-      {
-        id: "permissions",
-        title: "Permissions",
-        blurb: "Every tool action is checked against a ruleset whose effect is allow, ask or deny.",
-      },
-      {
-        id: "context",
-        title: "Context and compaction",
-        blurb: "A long session does not fail when it reaches the model's context limit.",
-      },
-      {
-        id: "skills",
-        title: "Skills",
-        blurb:
-          "A skill is a packaged set of instructions for a recurring kind of work — a house style, a review checklist, a deployment runbook.",
-      },
-      {
-        id: "commands",
-        title: "Custom commands",
-        blurb:
-          "Your own commands are Markdown files in a command/ or commands/ folder, in the project or in your global config.",
-      },
-      {
-        id: "custom-agents",
-        title: "Custom agents and subagents",
-        blurb:
-          "Vector ships nine subagents an agent can delegate to: a general one, and the specialists explore, review, judge, debug, test, security, performance and migration.",
-      },
-    ],
-  },
-  {
-    label: "Terminal",
-    links: [
-      {
-        id: "cli-terminal",
-        title: "The terminal agent",
-        blurb:
-          "Running vector with no subcommand starts the interactive agent in the current directory, or in the path you pass.",
-      },
-      {
-        id: "cli-run",
-        title: "One-shot and scripted runs",
-        blurb: "vector run sends one prompt and prints the result.",
-      },
-      {
-        id: "cli-account",
-        title: "Account and CLI tokens",
-        blurb: "The published vector binary is free but needs a Vector account.",
-      },
-      {
-        id: "cli-models",
-        title: "Models and variants in the terminal",
-        blurb:
-          "vector models lists every model available to you — the ones included with Vector and the providers you have connected.",
-      },
-      {
-        id: "cli-sessions",
-        title: "Sessions: list, export, share",
-        blurb:
-          "vector session list prints recent sessions, with --max-count to cap them and --format for scripting; vector session delete &lt;id&gt; removes one permanently.",
-      },
-      {
-        id: "cli-mcp",
-        title: "MCP from the terminal",
-        blurb:
-          "vector mcp add registers a server: --url for a remote one with --header KEY=VALUE, or a command with --env KEY=VALUE for a local one.",
-      },
-      {
-        id: "cli-plugins",
-        title: "Plugins",
-        blurb:
-          "vector plugin &lt;module&gt; installs an npm module as a plugin and writes it into your config; --global installs into the global config rather than the project's, and --force replaces a ver",
-      },
-      {
-        id: "cli-server",
-        title: "Server, web and editors",
-        blurb:
-          "vector serve runs the agent as a headless server with --port and --hostname; vector web starts the same server and opens the browser interface.",
-      },
-      {
-        id: "sdk",
-        title: "JavaScript SDK",
-        blurb: "Connect typed JavaScript integrations to a local Vector server.",
-      },
-      {
-        id: "cli-github",
-        title: "GitHub from the terminal",
-        blurb:
-          "vector pr &lt;number&gt; fetches a pull request's branch, checks it out and starts Vector in that working tree — the shortcut for picking a review conversation up on your own machine.",
-      },
-      {
-        id: "cli-maintenance",
-        title: "Upkeep, flags and your data",
-        blurb:
-          "vector upgrade moves the CLI to the newest version, or one you name, with --method when several installation methods are possible.",
-      },
-    ],
-  },
-  {
-    label: "Help",
-    links: [
-      {
-        id: "delete-account",
-        title: "Delete your account",
-        blurb: "Delete your Vector account, what that removes, and what stays on your own machine.",
-      },
-      {
-        id: "troubleshooting",
-        title: "Troubleshooting",
-        blurb:
-          "Confirm a provider and model are connected, then check whether the provider reports a quota or authentication error.",
-      },
-      {
-        id: "faq",
-        title: "Frequently asked questions",
-        blurb: "{item.answer}",
-      },
-    ],
-  },
-  {
-    label: "Why Vector",
-    links: [
-      {
-        id: "why-vector",
-        title: "Why Vector",
-        blurb: "Most tools write the code.",
-      },
-      {
-        id: "operating-loop",
-        title: "One operating loop",
-        blurb: "From a brief to verified, shipped work.",
-      },
-      {
-        id: "local-memory",
-        title: "Local memory",
-        blurb:
-          "Vector lets you save durable facts about how you work — your stack, your conventions, the corrections you would otherwise repeat — in one MEMORY.md file inside Vector's local app config dire",
+        id: "vectorscope",
+        title: "Vectorscope code review",
+        blurb: "Vector's code review bot: on every pull request, on your branch before you push, and in the app.",
       },
       {
         id: "tokenomics",
-        title: "Tokenomics engine",
-        blurb: "Priced from the tokens your provider reported.",
+        title: "Vector Tokenomics Engine",
+        blurb: "Measures what each run spends from the tokens your provider reports, and stops starting automations once your daily cap is spent.",
       },
       {
-        id: "hulk",
-        title: "HULK — hidden unique licence keys",
-        blurb: "Every copy has its own key.",
+        id: "mcp-and-plugins",
+        title: "MCP, custom MCP servers and plugins",
+        blurb: "MCP servers and plugins give an agent structured access to approved tools.",
+      },
+      {
+        id: "skills-and-commands",
+        title: "Skills and custom commands",
+        blurb: "Packaged instructions for recurring work, and your own prompt templates as Markdown files.",
       },
       {
         id: "verified-completion",
@@ -332,53 +83,125 @@ export const docsNav: DocGroup[] = [
         blurb: "Completion you can check, instead of a confident summary.",
       },
       {
-        id: "controlled-browser",
-        title: "Controlled browser",
-        blurb: "The browser is a real Chromium view embedded in the Vector window, not a screenshot service.",
+        id: "checkpoints",
+        title: "Checkpoints and recovery",
+        blurb: "Vector snapshots the files an agent changed as named checkpoints you can restore.",
       },
       {
-        id: "only-in-vector",
-        title: "Only in Vector",
-        blurb: "Things that are rarely true in one place.",
+        id: "local-memory",
+        title: "Local memory",
+        blurb: "Durable facts about how you work, kept in one MEMORY.md file on your machine.",
       },
       {
-        id: "conditions",
-        title: "The conditions, stated",
-        blurb: "Where a capability has a catch, here it is.",
+        id: "models",
+        title: "Models, free models and your own keys",
+        blurb: "Connect a provider account or API key, or use Free models inside of Vector where eligible.",
       },
       {
-        id: "subagents",
-        title: "Subagents and subagent specialists",
-        blurb: "Vector's agent does not have to do every part of a task itself.",
+        id: "cloud-services",
+        title: "Cloud services",
+        blurb: "Deployments, domains, databases and logs through your own Vercel, Netlify, Supabase and AWS accounts.",
       },
       {
-        id: "comparison",
-        title: "How Vector compares",
-        blurb:
-          "Vector combines capabilities commonly split across an agent, an editor, a browser, a Git client, and a deployment dashboard.",
+        id: "multiplayer",
+        title: "Multiplayer and Follow mode",
+        blurb: "One workspace, several people, and an editor that follows the agent as it types.",
       },
       {
-        id: "velocity",
-        title: "Vector Velocity model Coming soon",
-        blurb:
-          "Vector Velocity is Vector's own model — over 300 billion parameters — tuned for the loop Vector actually runs — planning, tool calls, edits, checks, and verification — rather than for open-e",
+        id: "desktop-app",
+        title: "The desktop app",
+        blurb: "Agent and Editor are two modes over the same local repository and session.",
+      },
+    ],
+  },
+  {
+    label: "Terminal",
+    links: [
+      {
+        id: "terminal-agent",
+        title: "The terminal agent",
+        blurb: "Run vector in any directory for the interactive agent, scripted runs and a headless server.",
       },
       {
-        id: "api-platform",
-        title: "API platform Coming soon",
-        blurb:
-          "Programmatic access to the same workspace: start sessions, run tasks, read transcripts and measured spend, manage connections, and trigger automations from your own systems and CI.",
+        id: "sdk",
+        title: "JavaScript SDK",
+        blurb: "Connect typed JavaScript integrations to a local Vector server.",
+      },
+    ],
+  },
+  {
+    label: "Reference",
+    links: [
+      {
+        id: "permissions",
+        title: "Permissions",
+        blurb: "Every tool action is checked against a ruleset whose effect is allow, ask or deny.",
+      },
+      {
+        id: "troubleshooting",
+        title: "Troubleshooting and FAQ",
+        blurb: "Fixes for common problems, frequent questions, and deleting your account.",
       },
       {
         id: "changelog",
         title: "Changelog",
-        blurb: "Keep the whole build in view.",
+        blurb: "Every Vector release, newest first.",
       },
     ],
   },
 ]
 
 export const docsOrder: DocLink[] = docsNav.flatMap((group) => group.links)
+
+// Pages that were merged into another one, and where each now lives. The /docs
+// hash shim reads this, and vercel.json carries the same map as redirects, so an
+// old /docs/<id> or /docs#<id> link still lands on its subject.
+export const docsMoved: Record<string, string> = {
+  "open-repository": "first-task#open-repository",
+  "project-rules": "vector-agent#project-rules",
+  tools: "vector-agent#tools",
+  context: "vector-agent#context",
+  "why-vector": "vector-agent",
+  "operating-loop": "vector-agent",
+  "only-in-vector": "vector-agent",
+  conditions: "vector-agent",
+  comparison: "vector-agent",
+  "custom-agents": "subagents#custom-agents",
+  "agent-workspaces": "parallel-agents",
+  "agent-dashboard": "parallel-agents#agent-dashboard",
+  browser: "browser-agent",
+  "controlled-browser": "browser-agent#controlled-browser",
+  "code-review": "vectorscope",
+  "review-pipeline": "vectorscope#review-pipeline",
+  github: "vectorscope#github",
+  "cli-github": "vectorscope#cli-github",
+  connections: "mcp-and-plugins",
+  "cli-mcp": "mcp-and-plugins#cli-mcp",
+  "cli-plugins": "mcp-and-plugins#cli-plugins",
+  skills: "skills-and-commands",
+  commands: "skills-and-commands#commands",
+  review: "checkpoints#review",
+  "cli-models": "models#cli-models",
+  velocity: "models",
+  "api-platform": "sdk",
+  follow: "multiplayer#follow",
+  "agent-editor": "desktop-app#agent-editor",
+  composer: "desktop-app#composer",
+  transcript: "desktop-app#transcript",
+  "workspace-rail": "desktop-app#workspace-rail",
+  "settings-appearance": "desktop-app#settings-appearance",
+  "help-assistant": "desktop-app#help-assistant",
+  "terminal-review": "desktop-app#terminal-review",
+  "cli-terminal": "terminal-agent",
+  "cli-run": "terminal-agent#cli-run",
+  "cli-account": "terminal-agent#cli-account",
+  "cli-sessions": "terminal-agent#cli-sessions",
+  "cli-server": "terminal-agent#cli-server",
+  "cli-maintenance": "terminal-agent#cli-maintenance",
+  faq: "troubleshooting#faq",
+  "delete-account": "troubleshooting#delete-account",
+  hulk: "troubleshooting#faq",
+}
 
 export const groupOf = (id: string) => docsNav.find((group) => group.links.some((link) => link.id === id))?.label ?? ""
 

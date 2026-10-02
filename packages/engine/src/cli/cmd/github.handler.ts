@@ -256,7 +256,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
               ? "    Then open a pull request: Vectorscope reviews it, and again on every push. Comment `/vectorscope review` to ask again."
               : "    Then comment `/vectorscope review` on a pull request to have Vectorscope review it.",
             "    Comment `/vector <task>` on an issue to get a pull request back.",
-            `    Tune reviews with .vector/review.md (rules) and .vector/review.json (limits): ${VECTOR_SITE}/docs#code-review`,
+            `    Tune reviews with .vector/review.md (rules) and .vector/review.json (limits): ${VECTOR_SITE}/docs/vectorscope#pull-requests`,
           ].join("\n"),
         )
       }

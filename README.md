@@ -82,7 +82,7 @@ Vectorscope only ever comments — it never approves or blocks a pull request un
 
 Run `vector` inside any repository to start the agent. `vector auth login` adds your own provider keys, `vector invite` shares the workspace, and `vector github install` sets up GitHub: pull requests from issues, and reviews of pull requests. `vector review` reviews your branch locally.
 
-In the candidate, GitHub workflows authenticate with `VECTOR_CLI_TOKEN` and can use the eligible shared free default when that service is enabled. Otherwise set `MODEL` to `provider/model` and pass its provider credential as a repository secret. A Vector account token does not authorize arbitrary paid providers. `GITHUB_TOKEN` remains the default GitHub credential; the prepared Vector App mode requires owner setup and explicit opt-in. See [GitHub setup](https://vectordev.ai/docs/github) and [Vectorscope](https://vectordev.ai/docs/code-review).
+In the candidate, GitHub workflows authenticate with `VECTOR_CLI_TOKEN` and can use the eligible shared free default when that service is enabled. Otherwise set `MODEL` to `provider/model` and pass its provider credential as a repository secret. A Vector account token does not authorize arbitrary paid providers. `GITHUB_TOKEN` remains the default GitHub credential; the prepared Vector App mode requires owner setup and explicit opt-in. See [GitHub setup](https://vectordev.ai/docs/vectorscope#github) and [Vectorscope](https://vectordev.ai/docs/vectorscope).
 
 Unsigned desktop releases require a manual download. They do not replace signed automatic-update feeds, and macOS or Windows may show an unidentified-developer or unknown-publisher warning.
 

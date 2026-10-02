@@ -10,6 +10,226 @@
   "outputDirectory": "packages/web/dist",
   "redirects": [
     {
+      "source": "/docs/open-repository",
+      "destination": "/docs/first-task#open-repository",
+      "permanent": true
+    },
+    {
+      "source": "/docs/project-rules",
+      "destination": "/docs/vector-agent#project-rules",
+      "permanent": true
+    },
+    {
+      "source": "/docs/tools",
+      "destination": "/docs/vector-agent#tools",
+      "permanent": true
+    },
+    {
+      "source": "/docs/context",
+      "destination": "/docs/vector-agent#context",
+      "permanent": true
+    },
+    {
+      "source": "/docs/why-vector",
+      "destination": "/docs/vector-agent",
+      "permanent": true
+    },
+    {
+      "source": "/docs/operating-loop",
+      "destination": "/docs/vector-agent",
+      "permanent": true
+    },
+    {
+      "source": "/docs/only-in-vector",
+      "destination": "/docs/vector-agent",
+      "permanent": true
+    },
+    {
+      "source": "/docs/conditions",
+      "destination": "/docs/vector-agent",
+      "permanent": true
+    },
+    {
+      "source": "/docs/comparison",
+      "destination": "/docs/vector-agent",
+      "permanent": true
+    },
+    {
+      "source": "/docs/custom-agents",
+      "destination": "/docs/subagents#custom-agents",
+      "permanent": true
+    },
+    {
+      "source": "/docs/agent-workspaces",
+      "destination": "/docs/parallel-agents",
+      "permanent": true
+    },
+    {
+      "source": "/docs/agent-dashboard",
+      "destination": "/docs/parallel-agents#agent-dashboard",
+      "permanent": true
+    },
+    {
+      "source": "/docs/browser",
+      "destination": "/docs/browser-agent",
+      "permanent": true
+    },
+    {
+      "source": "/docs/controlled-browser",
+      "destination": "/docs/browser-agent#controlled-browser",
+      "permanent": true
+    },
+    {
+      "source": "/docs/code-review",
+      "destination": "/docs/vectorscope",
+      "permanent": true
+    },
+    {
+      "source": "/docs/review-pipeline",
+      "destination": "/docs/vectorscope#review-pipeline",
+      "permanent": true
+    },
+    {
+      "source": "/docs/github",
+      "destination": "/docs/vectorscope#github",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-github",
+      "destination": "/docs/vectorscope#cli-github",
+      "permanent": true
+    },
+    {
+      "source": "/docs/connections",
+      "destination": "/docs/mcp-and-plugins",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-mcp",
+      "destination": "/docs/mcp-and-plugins#cli-mcp",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-plugins",
+      "destination": "/docs/mcp-and-plugins#cli-plugins",
+      "permanent": true
+    },
+    {
+      "source": "/docs/skills",
+      "destination": "/docs/skills-and-commands",
+      "permanent": true
+    },
+    {
+      "source": "/docs/commands",
+      "destination": "/docs/skills-and-commands#commands",
+      "permanent": true
+    },
+    {
+      "source": "/docs/review",
+      "destination": "/docs/checkpoints#review",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-models",
+      "destination": "/docs/models#cli-models",
+      "permanent": true
+    },
+    {
+      "source": "/docs/velocity",
+      "destination": "/docs/models",
+      "permanent": true
+    },
+    {
+      "source": "/docs/api-platform",
+      "destination": "/docs/sdk",
+      "permanent": true
+    },
+    {
+      "source": "/docs/follow",
+      "destination": "/docs/multiplayer#follow",
+      "permanent": true
+    },
+    {
+      "source": "/docs/agent-editor",
+      "destination": "/docs/desktop-app#agent-editor",
+      "permanent": true
+    },
+    {
+      "source": "/docs/composer",
+      "destination": "/docs/desktop-app#composer",
+      "permanent": true
+    },
+    {
+      "source": "/docs/transcript",
+      "destination": "/docs/desktop-app#transcript",
+      "permanent": true
+    },
+    {
+      "source": "/docs/workspace-rail",
+      "destination": "/docs/desktop-app#workspace-rail",
+      "permanent": true
+    },
+    {
+      "source": "/docs/settings-appearance",
+      "destination": "/docs/desktop-app#settings-appearance",
+      "permanent": true
+    },
+    {
+      "source": "/docs/help-assistant",
+      "destination": "/docs/desktop-app#help-assistant",
+      "permanent": true
+    },
+    {
+      "source": "/docs/terminal-review",
+      "destination": "/docs/desktop-app#terminal-review",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-terminal",
+      "destination": "/docs/terminal-agent",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-run",
+      "destination": "/docs/terminal-agent#cli-run",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-account",
+      "destination": "/docs/terminal-agent#cli-account",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-sessions",
+      "destination": "/docs/terminal-agent#cli-sessions",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-server",
+      "destination": "/docs/terminal-agent#cli-server",
+      "permanent": true
+    },
+    {
+      "source": "/docs/cli-maintenance",
+      "destination": "/docs/terminal-agent#cli-maintenance",
+      "permanent": true
+    },
+    {
+      "source": "/docs/faq",
+      "destination": "/docs/troubleshooting#faq",
+      "permanent": true
+    },
+    {
+      "source": "/docs/delete-account",
+      "destination": "/docs/troubleshooting#delete-account",
+      "permanent": true
+    },
+    {
+      "source": "/docs/hulk",
+      "destination": "/docs/troubleshooting#faq",
+      "permanent": true
+    },
+    {
       "source": "/docs/product",
       "destination": "/",
       "permanent": true

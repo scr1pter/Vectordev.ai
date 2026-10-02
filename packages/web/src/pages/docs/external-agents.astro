@@ -7,18 +7,28 @@ export const prerender = true
 <DocsPage id="external-agents">
 
           <p>
-            A workspace can run someone else's CLI instead of Vector's own agent. Vector finds the CLI through your
-            login shell, so a tool installed by nvm, Homebrew or an app bundle is detected even though a desktop app
-            inherits none of that.
+            A workspace can run someone else's CLI instead of Vector's own agent: Claude Code, Codex or Cursor, on the
+            CLIs and subscriptions you already have. Vector finds the CLI through your login shell, so a tool installed
+            by nvm, Homebrew or an app bundle is detected even though a desktop app inherits none of that.
           </p>
+
+          <h2 id="run-one">Run one in a workspace</h2>
           <ol class="steps">
             <li><span>1</span><div><strong>Pick the runtime</strong><p>Choose Claude Code, Codex or Cursor when you create the workspace. The tile shows the version it found, or that it is signed out.</p></div></li>
             <li><span>2</span><div><strong>Let it work</strong><p>The run happens in an isolated worktree or copy. Vector streams its output and runs the project's own checks afterwards.</p></div></li>
             <li><span>3</span><div><strong>Keep talking</strong><p>The workspace has a message box. A follow-up resumes the CLI's own conversation, so it still remembers the file it just changed.</p></div></li>
           </ol>
+
+          <h2 id="how-they-behave">How they behave</h2>
           <ul class="feature-list">
+            <li><strong>Your installs, your sign-in</strong><span>They run only where Vector detects that CLI installed on this computer, and the run is signed in by the subscription already in it. Vector never asks for a second key.</span></li>
             <li><strong>Signed out is visible</strong><span>Vector asks each CLI whether it is authenticated and shows "Signed out" with the one command that fixes it.</span></li>
             <li><strong>Resume, or an honest restart</strong><span>If a CLI refuses to resume, Vector re-briefs it with a written summary and labels that turn as restarted rather than pretending it remembers.</span></li>
-            <li><strong>They can receive, not send</strong><span>External CLIs have no teammate-message tool, so they can be told what teammates did but cannot reply.</span></li>
+            <li><strong>They can receive, not send</strong><span>External CLIs have no teammate-message tool, so they can be told what teammates did but cannot reply. They share the checkout but not the message channel.</span></li>
+            <li><strong>Your project rules</strong><span>They read their own instruction files, so Vector copies the matching <a href="/docs/vector-agent#project-rules">project rules</a> into the prompt it hands them.</span></li>
           </ul>
+          <p class="note">
+            Run them side by side with Vector's own agent and watch them all in the
+            <a href="/docs/parallel-agents#agent-dashboard">Agent Dashboard</a>.
+          </p>
 </DocsPage>

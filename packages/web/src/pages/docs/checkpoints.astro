@@ -12,15 +12,30 @@ export const prerender = true
           <p class="note">
             Checkpoint storage is bounded. Once a session passes its size or count budget the oldest checkpoints are dropped.
           </p>
-          <h3>The engineering timeline</h3>
+
+          <h2 id="review">Review and recovery</h2>
+          <p>
+            Review changed files before merging or publishing. Checkpoints preserve recoverable
+            project states, while isolated workspace diffs show exactly what an agent wants to bring
+            into the main branch.
+          </p>
+          <p>
+            Review an agent's diff and merge selected hunks or files rather than accepting the whole change, with secret
+            scanning and a restorable checkpoint before anything lands on main.
+          </p>
+          <p>To review a whole branch before you push, see <a href="/docs/vectorscope#before-you-push">Vectorscope</a>.</p>
+
+          <h2 id="timeline">The engineering timeline</h2>
           <p>
             The side panel builds one chronological timeline from the session's events: each changed file with its risk estimate, each checkpoint, and each problem found while scanning the project. Filter it by kind, search it, and expand any event for its files and details — it is how you reconstruct a long run without rereading the transcript.
           </p>
-          <h3>Project report and risk scan</h3>
+
+          <h2 id="risk-scan">Project report and risk scan</h2>
           <p>
             Vector scans the open project and writes a local report: the language breakdown by files and lines, a judgement on model fit, and a list of problems with severities that feed the timeline as risk events. The scan runs on your machine against your own repository, and refreshes on demand.
           </p>
-          <h3>Skill mode</h3>
+
+          <h2 id="skill-mode">Skill mode</h2>
           <p>
             The side panel remembers whether you want beginner, intermediate or advanced explanations, and the engineering surfaces say more or less accordingly. The setting is stored on the machine you set it on rather than synced.
           </p>

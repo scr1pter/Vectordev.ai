@@ -4,14 +4,109 @@ import DocsPage from "../../layouts/DocsPage.astro"
 export const prerender = true
 ---
 
-<DocsPage id="review-pipeline">
+<DocsPage id="vectorscope">
+
           <p class="dx-lede">
-            Vectorscope is one engine behind three doors: the GitHub Action, <code>vector vectorscope</code> in your
-            terminal, and the Pull Requests panel in the desktop app. They share the same prompts, the same output
-            schema, the same filters and the same summary. This page is what happens between a trigger and a comment.
+            Vectorscope is Vector's code review bot. It reads the repository around a change, not just the diff, and says
+            what is wrong with it — on a pull request, on your branch before you push, or on the work sitting in your
+            editor right now.
           </p>
 
-          <h2>The path a review takes</h2>
+          <h2 id="where-it-runs">Where Vectorscope runs</h2>
+          <dl class="doc-rows">
+            <div><dt>On every pull request</dt><dd>Say yes to automatic review during <code>vector github install</code>. Vectorscope reviews each pull request when it opens and again on every push, and answers <code>/vectorscope</code> in a comment.</dd></div>
+            <div><dt>Before you push</dt><dd><code>vector vectorscope</code> in your terminal runs the same review on your branch against its merge base, or on your uncommitted work with <code>--uncommitted</code>. Nothing is posted anywhere.</dd></div>
+            <div><dt>In the workspace</dt><dd>The desktop app's Pull Requests panel reviews a pull request in place and lets you post the result, or keep it to yourself.</dd></div>
+          </dl>
+
+          <h2 id="pull-requests">On a pull request</h2>
+          <p>
+            Vectorscope leaves one summary comment with the risk, what changed and the files that matter, and comments
+            on the exact lines, each with a severity and, where it is safe, a fix you can commit from GitHub. It reads
+            the repository, not just the diff: it opens the changed files, follows their callers and checks the tests.
+            On the next push it reviews only what changed and says what got fixed instead of repeating itself.
+          </p>
+          <dl class="doc-rows">
+            <div><dt>What you get</dt><dd>A summary that is edited in place, and one review per push that contains only new comments. Severities are Blocking, Concern and Nit; nits and anything outside the changed lines stay in the summary. Vectorscope only ever comments. It never approves or blocks a pull request, unless you set <code>failOn</code> to make its check fail on blocking issues.</dd></div>
+            <div><dt>Commands</dt><dd><code>/vectorscope review</code> reviews again, <code>/vectorscope review full</code> starts over, and <code>/vectorscope pause</code> or <code>/vectorscope resume</code> turns automatic reviews off or on for one pull request (or add the <code>vector:paused</code> label). Reply <code>/vectorscope fix</code> on a comment and Vectorscope applies that fix. <code>/vs</code> is the short form; <code>/vector</code> and <code>/vx</code> still work, so workflows installed before the name existed keep running. General coding tasks on issues continue to use <code>/vector</code> or <code>/vx</code>. A person with write access, or the pull request's author, can resolve a comment or react to it with a thumbs-down, and Vectorscope won't raise it again. Commands need write access.</dd></div>
+            <div><dt>Your rules</dt><dd>Write plain-English rules in <code>.vector/review.md</code>. A <code>## path: src/billing/**</code> heading scopes the rules under it. Tune limits in <code>.vector/review.json</code>: <code>maxComments</code> (10), <code>minSeverity</code> (concern), <code>minConfidence</code> (0.7), <code>ignore</code>, <code>security</code>, <code>maxCostUsd</code>. Both are read from the base branch, so a pull request can't change the rules it is reviewed under, except by editing the workflow file, which needs write access.</dd></div>
+            <div><dt>Low noise</dt><dd>Lockfiles, build output, generated and vendored files, snapshots and binaries are skipped and listed. Drafts, dependency bots and pull requests labelled <code>vector:skip</code> are skipped. To review drafts too, delete the <code>draft == false</code> line from <code>.github/workflows/vector.yml</code>. Very large pull requests get a note with a cost estimate instead of a review.</dd></div>
+            <div><dt>Cost</dt><dd>Your model provider bills usage under your own credentials. Every review ends with the model, the tokens, what it cost and the total for that pull request. Each review stops at <code>maxCostUsd</code> ($2.00), automatic reviews of one pull request stop at <code>maxCostUsdPerPr</code> ($10.00), and <code>REVIEW_MAX_COST_USD_PER_MONTH</code> in the workflow caps a month. Set <code>REVIEW_AUTO_MODEL</code> to use a cheaper model for automatic reviews.</dd></div>
+          </dl>
+
+          <h2 id="choose-a-model">Choose a model</h2>
+          <p class="note">For 1.99.91, the next release, repositories using Vector's GitHub workflow should run <code>vector github install</code> again. The regenerated workflow uses <code>VECTOR_*</code> configuration variables.</p>
+          <p>
+            In 1.99.91, reviews and GitHub runs need your own provider credentials. The <code>VECTOR_CLI_TOKEN</code>
+            secret authenticates your Vector account; it does not provide model access. Add the provider key as a
+            repository secret and pass it into each job that calls Vector, using the provider's environment variable,
+            such as <code>ANTHROPIC_API_KEY</code> or <code>OPENAI_API_KEY</code>. Set <code>MODEL</code> in the job's
+            environment to a model that provider offers, in <code>provider/model</code> format.
+          </p>
+          <p>
+            New workflows connect the selected provider's secret automatically. Check older workflows too: provider-key
+            lines that are commented out do not pass the secret into the run. If no model is configured or available,
+            Vector stops with setup instructions instead of selecting an unavailable model. Set
+            <code>REVIEW_AUTO_MODEL</code> to choose a different model for automatic reviews, or set <code>model</code>
+            in <code>.vector/review.json</code>.
+          </p>
+          <p>
+            For a local review, connect a provider with <code>vector auth login</code> and choose a model with
+            <code>--model provider/model</code>, your review configuration, or Vector's configured default.
+          </p>
+          <p class="note">
+            Upcoming release: the former third-party hosted model providers will no longer be available, even with
+            your own API key for them. Connect another provider for reviews and GitHub runs. This service change is
+            implemented in source; the release version and installer publication are pending.
+          </p>
+
+          <h2 id="github">Task in, pull request out</h2>
+          <p>
+            Run <code>vector github install</code> once inside a repository: it writes a workflow that installs the CLI
+            from npm on every <code>/vector</code> comment, then add the <code>VECTOR_CLI_TOKEN</code> secret from your
+            account page. From then on, commenting <code>/vector fix the flaky auth test</code> on an issue opens a
+            branch and a pull request; commenting on an existing pull request replies on that branch.
+          </p>
+          <p>
+            Every pull request carries its evidence, not just a diff: a Changes table with line counts per file, the
+            output of any test, typecheck, lint, or build command the agent ran with its exit code, the measured token
+            cost of the run, the judge's PASS or FAIL verdict when a judge pass ran, and a link back to the workflow run.
+            Reviewers see what was checked before they read a line.
+          </p>
+          <p class="note">
+            One repository setting is required: under Settings → Actions → General →
+            Workflow permissions, tick "Allow GitHub Actions to create and approve pull requests" (GitHub leaves it off
+            by default; without it the branch is pushed and Vector comments a compare link instead). Pull requests opened
+            with the built-in GitHub token do not trigger the repository's other workflows; use a personal access token
+            if you need CI to run on them.
+          </p>
+
+          <h2 id="before-you-push">Before you push</h2>
+          <p>
+            <code>vector vectorscope</code> (or <code>vector review</code>) runs the same review on your branch against
+            its merge-base with the default branch. Use <code>--uncommitted</code> for work in progress,
+            <code>--json</code> for scripts, and <code>--fail-on blocking</code> in a pre-push hook.
+          </p>
+          <p class="doc-cmd"><code>vector vectorscope
+vector vectorscope --uncommitted
+vector vectorscope --pr 482 --json</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+
+          <h2 id="cli-github">GitHub from the terminal</h2>
+          <p>
+            <code>vector pr &lt;number&gt;</code> fetches a pull request's branch, checks it out and starts Vector in that working tree — the shortcut for picking a review conversation up on your own machine.
+          </p>
+          <p class="doc-cmd"><code>vector pr 482
+vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            The generated workflow calls two commands you can also run yourself. <code>vector github run</code> executes the agent for a GitHub event, with <code>--event</code> for a payload and <code>--token</code> for a personal access token. <code>vector github review</code> reviews a pull request and posts the result; <code>--dry-run</code> prints every write it would make as JSON instead of posting, which is how you test a configuration change without commenting on a real pull request.
+          </p>
+
+          <h2 id="review-pipeline">How a review runs</h2>
+          <p>
+            Vectorscope is one engine behind three doors: the GitHub Action, <code>vector vectorscope</code> in your
+            terminal, and the Pull Requests panel in the desktop app. They share the same prompts, the same output
+            schema, the same filters and the same summary. This is what happens between a trigger and a comment.
+          </p>
           <ol class="steps">
             <li>
               <span />
@@ -73,18 +168,14 @@ export const prerender = true
             </li>
           </ol>
 
-          <h2>Reading the command</h2>
+          <h3 id="reading-the-command">Reading the command</h3>
           <p>
             The parser strips HTML comments, code fences and quoted lines before it looks for anything, so showing or
             quoting a command never runs it. Only the first line that starts with a mention is read. A known verb runs
             that verb; anything else is treated as a task for the agent rather than ignored.
           </p>
-          <p class="note">
-            <code>/vecbot</code> was the name for one evening. <code>/vector</code> and <code>/vx</code> keep working
-            because they are written into workflow files installed before the name existed.
-          </p>
 
-          <h2>The skip ladder</h2>
+          <h3 id="skip-ladder">The skip ladder</h3>
           <p>Rules apply in this order and the first match wins:</p>
           <ul class="feature-list">
             <li><strong>month-budget</strong><span>The monthly cap is spent. This one has no command exception.</span></li>
@@ -99,7 +190,7 @@ export const prerender = true
             <li><strong>too-large</strong><span>More than 300 files or 5,000 changed lines. Automatic runs only; the summary carries a cost estimate instead.</span></li>
           </ul>
 
-          <h2>Planning the run</h2>
+          <h3 id="planning">Planning the run</h3>
           <dl class="doc-rows">
             <div>
               <dt>Which specialists</dt>
@@ -127,7 +218,7 @@ export const prerender = true
             </div>
           </dl>
 
-          <h2>What the reviewer sees</h2>
+          <h3 id="what-the-reviewer-sees">What the reviewer sees</h3>
           <p>
             A review is not a diff in a prompt. Each specialist gets a read-only session and, with it:
           </p>
@@ -145,7 +236,7 @@ export const prerender = true
             result.
           </p>
 
-          <h2>The verify pass</h2>
+          <h3 id="verify-pass">The verify pass</h3>
           <p>
             Candidate findings go to a second pass that re-reads the code at each cited location and answers
             <strong>confirmed</strong> only when the defect is real and triggers as described, otherwise
@@ -155,7 +246,7 @@ export const prerender = true
             pass confirms the finding.
           </p>
 
-          <h2>Noise control</h2>
+          <h3 id="noise-control">Noise control</h3>
           <p>
             Selection is where a review stops being a wall of text. A finding below <code>minConfidence</code> (0.7) or
             below <code>minSeverity</code> (concern) does not go on a line; nits and anything outside the changed lines
@@ -171,7 +262,7 @@ export const prerender = true
             the finding a maintainer most needs to see, so it is always posted.
           </p>
 
-          <h2>What carries between runs</h2>
+          <h3 id="between-runs">What carries between runs</h3>
           <dl class="doc-rows">
             <div>
               <dt>Finding identity</dt>
@@ -199,7 +290,7 @@ export const prerender = true
             </div>
           </dl>
 
-          <h2>Posting</h2>
+          <h3 id="posting">Posting</h3>
           <p>
             Vectorscope posts one review per run with the event <strong>comment</strong>. It never approves a pull
             request and never requests changes; the only way it can block a merge is the check you opt into with
@@ -211,7 +302,7 @@ export const prerender = true
             comment GitHub will not take moves to the summary with its file and line, so no finding is silently lost.
           </p>
 
-          <h2>Limits</h2>
+          <h3 id="limits">Limits</h3>
           <p>Every run is bounded. Before each step Vectorscope prices the next one and stops if it would cross a line.</p>
           <dl class="doc-rows">
             <div><dt>maxSteps</dt><dd>30 model steps per specialist.</dd></div>
@@ -223,11 +314,11 @@ export const prerender = true
           </dl>
           <p>
             A run that stops early is asked to finalize — return what it has confirmed rather than nothing — so a
-            budget or a timeout still produces a review. Every review ends with the model it ran on, the tokens and what
-            it cost.
+            budget or a timeout still produces a review. A review can go past its budget by at most one model step, and
+            it says so when it stops early. The monthly cap is best-effort on very busy repositories.
           </p>
 
-          <h2>Security</h2>
+          <h3 id="security">Security</h3>
           <ul class="feature-list">
             <li><strong>Read-only by construction</strong><span>Permission rules, not a prompt: no edit, no write, no patch, no shell. The local <code>--checks</code> option allows a short list of bare test and typecheck commands, never with flags, because flags on those commands can run any program.</span></li>
             <li><strong>Untrusted text is fenced</strong><span>Everything the pull request controls — code, titles, comments — is wrapped in untrusted tags, and any tag-like text inside it is escaped, so it cannot close its own block or open a trusted one.</span></li>
@@ -237,13 +328,4 @@ export const prerender = true
             <li><strong>Least privilege</strong><span>Reviews post as <code>github-actions[bot]</code> and need only <code>contents: read</code> and <code>pull-requests: write</code>.</span></li>
           </ul>
 
-          <h2>Running it yourself</h2>
-          <p class="doc-cmd"><code>vector vectorscope
-vector vectorscope --uncommitted
-vector vectorscope --pr 482 --json
-vector github review --pr 482 --dry-run</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
-          <p>
-            <code>--dry-run</code> prints every write it would make as JSON instead of posting it, which is how to test
-            a configuration change without commenting on a real pull request.
-          </p>
 </DocsPage>

@@ -1,0 +1,137 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="terminal-agent">
+
+          <p>
+            Running <code>vector</code> with no subcommand starts the interactive agent in the current directory, or in the path you pass. The published <code>vector</code> binary is free but needs a Vector account.
+          </p>
+          <p class="doc-cmd"><code>vector
+vector ~/code/myapp --model anthropic/claude-sonnet-5</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            It takes the same session flags as <code>run</code>: <code>--model</code>, <code>--agent</code>, <code>--prompt</code>, <code>--continue</code>, <code>--session</code> and <code>--fork</code>. <code>--mini</code> starts a minimal interface, and <code>--replay</code>, <code>--no-replay</code> and <code>--replay-limit</code> control how much history is redrawn when you resume or resize.
+          </p>
+
+          <h2 id="install-the-cli">Install the CLI</h2>
+          <p>Install the CLI from npm as <code>@vectordevai/cli</code>:</p>
+          <p class="doc-cmd"><code>npm install -g @vectordevai/cli</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            vectordev.ai serves a shell installer at <code>https://vectordev.ai/install</code> and a PowerShell installer at
+            <code>https://vectordev.ai/install.ps1</code>. They download a standalone Vector CLI archive, check its size and
+            SHA-256 checksum before installing, and do not require Node.js or npm. They install only standalone CLI releases
+            that Vector has published for them, which are separate from the npm package; when the requested release is not
+            published, the installer stops with an error and leaves any existing installation unchanged. No standalone CLI
+            release is published for the installers yet, so today they stop with that error; install the CLI from npm
+            or use the desktop download until then.
+            <code>vector upgrade</code> and <code>vector uninstall</code> respect the verified installer or package manager
+            that owns the running executable. On Windows, replacement of a running executable is scheduled after it exits;
+            scheduled does not mean completed. Windows acceptance is still pending. Use the
+            <a href="/releases">published release instructions</a> for available downloads.
+          </p>
+
+          <h2 id="cli-account">Account and CLI tokens</h2>
+          <p>
+            <code>vector login</code> opens the page that mints a token, or takes one directly with <code>--token</code>; <code>vector whoami</code> prints who is signed in and <code>vector logout</code> removes it. The same token is the <code>VECTOR_CLI_TOKEN</code> secret used by GitHub Actions.
+          </p>
+          <p class="doc-cmd"><code>vector login
+vector whoami</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            The token is verified about once a day and cached with a seven-day offline grace window, so a flaky network never locks you out of your own terminal. Only a definitive invalid or expired answer signs you out. <code>login</code>, <code>logout</code>, <code>whoami</code>, <code>completion</code>, <code>upgrade</code> and <code>uninstall</code> work signed out.
+          </p>
+
+          <h2 id="cli-run">One-shot and scripted runs</h2>
+          <p>
+            <code>vector run</code> sends one prompt and prints the result. It is the surface you script against: <code>--format json</code> emits raw events for a pipeline, <code>--file</code> attaches files, <code>--model</code> and <code>--agent</code> choose who answers, <code>--variant</code> sets reasoning effort and <code>--title</code> names the session. <code>--continue</code> resumes the last session, <code>--session</code> a specific one, and <code>--fork</code> branches instead of appending.
+          </p>
+          <p class="doc-cmd"><code>vector run "why is the checkout test flaky?" --format json
+vector run -c "now fix it" --variant high</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+
+          <h2 id="cli-sessions">Sessions: list, export, import</h2>
+          <p>
+            <code>vector session list</code> prints recent sessions, with <code>--max-count</code> to cap them and <code>--format</code> for scripting; <code>vector session delete &lt;id&gt;</code> removes one permanently. Those ids are what <code>--session</code> takes elsewhere.
+          </p>
+          <p class="doc-cmd"><code>vector session list -n 20
+vector export &lt;id&gt; --sanitize &gt; session.json
+vector import session.json</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            <code>vector export</code> writes a session's transcript and metadata as JSON, and <code>--sanitize</code> redacts the sensitive parts — transcript text, file contents, subtask commands — so it can be attached to a bug report. <code>vector import</code> reads a local JSON file back. Public session sharing and import from share URLs are no longer supported. <code>vector invite</code> remains available for live workspace access; see <a href="/docs/multiplayer">Multiplayer</a>.
+          </p>
+
+          <h2 id="cli-server">Server, web and editors</h2>
+          <p>
+            <code>vector serve</code> runs the agent as a headless server with <code>--port</code> and <code>--hostname</code>;
+            <code>vector web</code> starts the same server and opens the browser interface. <code>vector attach &lt;url&gt;</code>
+            connects a terminal session to a running server, with <code>--dir</code> to choose its directory and
+            <code>--username</code> and <code>--password</code> for Basic authentication.
+          </p>
+          <p class="doc-cmd"><code>vector serve --port 4096
+vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            From 1.99.91, the next release, configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally,
+            <code>VECTOR_SERVER_USERNAME</code>; the default username is <code>vector</code>, and non-loopback binding requires
+            a password unless you explicitly choose <code>--unsecured</code>. Releases before 1.99.91, such as desktop 1.99.8 and npm CLI 1.99.7, do not read these names or
+            enforce that rule, so keep <code>vector serve</code> on loopback until you upgrade. Use a protected secret source
+            for server passwords. From 1.99.91, the settings and database overrides are <code>VECTOR_AGENT_CONFIG</code>,
+            <code>VECTOR_AGENT_CONFIG_DIR</code> and <code>VECTOR_AGENT_DB</code>.
+            Keep the existing database file when migrating an ambiguous historical override.
+          </p>
+          <p>
+            <code>vector acp</code> starts an Agent Client Protocol server for compatible editors. For programmatic HTTP
+            use, see the <a href="/docs/sdk">SDK guide</a>; first public SDK publication remains pending.
+          </p>
+          <h3 id="wsl">Windows Subsystem for Linux</h3>
+          <p>
+            From 1.99.91, the next desktop release, Install Vector in server settings runs the shell installer with the exact
+            CLI version that desktop requires, and that desktop release is published only after its required CLI version is
+            available to the installer. It installs <code>~/.vector/bin/vector-native</code> using Linux download, archive and
+            SHA-256 tools. Node.js and npm are not required. A matching installed engine can start without the download
+            tools; a version mismatch requires an update.
+          </p>
+          <p>
+            Sign in to the desktop before starting its managed WSL server. The desktop passes its Vector account token
+            through the managed process's stdin and stops stale processes when the account changes or signs out. It does
+            not put the token in command arguments, an installer receipt or a new credential file. Provider credentials
+            remain separate; connect your chosen provider inside that environment when needed. Startup binds to Linux
+            loopback, checks health and requires an unauthenticated request to be rejected before connecting. Actual
+            Windows/WSL and published-installer validation remain release requirements.
+          </p>
+          <h3 id="public-transcripts-and-teams">Public transcripts and teams</h3>
+          <p>
+            Vector's source includes public transcript sharing on Vector's own service; it stays off until Vector
+            completes its setup. Preview the content, explicitly choose
+            publication and future updates, and set an expiry before sharing. Public links can expose visible prompts,
+            code and tool output; importing creates passive local history. Removing a new Vector share does not remove a
+            historical copy on another service. <code>vector invite</code> remains the separate live-workspace feature.
+          </p>
+          <p>
+            Vector Teams offers <code>vector org list</code>, <code>vector org switch &lt;orgID&gt;</code> and
+            <code>vector org personal</code>. A selected team supplies signed provider, permission and integration defaults;
+            Personal clears selection even while offline. Refresh running apps after changing the selection from a separate
+            CLI. Sharing and Teams require their production service setup before availability can be announced.
+          </p>
+
+          <h2 id="cli-maintenance">Upkeep, flags and your data</h2>
+          <p>
+            <code>vector upgrade</code> updates <code>@vectordevai/cli</code> to the newest npm version, or one you name. Supported <code>--method</code> values are <code>npm</code>, <code>pnpm</code> and <code>bun</code>. <code>vector uninstall</code> removes it, keeping configuration with <code>--keep-config</code> or sessions with <code>--keep-data</code>, and <code>--dry-run</code> lists what would go.
+          </p>
+          <p class="doc-cmd"><code>vector db path
+vector db "select count(*) from session"</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            Vector keeps sessions, messages and permissions in a local SQLite database. <code>vector db</code> opens a sqlite3 shell against it, <code>vector db "&lt;query&gt;"</code> runs one query with <code>--format</code> for the output shape, and <code>vector db path</code> prints where the file is. It is the plain answer to where your data lives: on your disk, in a file you can open yourself.
+          </p>
+          <ul class="feature-list">
+            <li><strong>--print-logs</strong><span>Send logs to stderr.</span></li>
+            <li><strong>--log-level</strong><span>DEBUG, INFO, WARN or ERROR.</span></li>
+            <li><strong>--pure</strong><span>Run without external plugins.</span></li>
+            <li><strong>vector completion</strong><span>Print a shell completion script.</span></li>
+          </ul>
+          <p class="note">
+            Models, MCP servers, plugins and GitHub have terminal commands too: see
+            <a href="/docs/models#cli-models">Models in the terminal</a>,
+            <a href="/docs/mcp-and-plugins#cli-mcp">Custom MCP servers</a> and
+            <a href="/docs/vectorscope#cli-github">GitHub from the terminal</a>.
+          </p>
+</DocsPage>

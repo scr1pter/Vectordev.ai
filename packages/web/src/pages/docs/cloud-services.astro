@@ -7,16 +7,22 @@ export const prerender = true
 <DocsPage id="cloud-services">
 
           <p>
-            Cloud work is part of the task, not a panel you operate afterwards. The agent drives it through one
-            permission-gated tool: it checks which providers are connected, detects the project's build settings,
-            prepares a Supabase-backed database or authentication, syncs environment values to the linked host,
-            publishes, and lists recent deployments. Every action that creates, changes, or spends asks you first.
+            Deployments, domains with real DNS checks, environment variables, databases and logs, run through the
+            Vercel, Netlify, Supabase and AWS accounts that already belong to you. Cloud work is part of the task, not a
+            panel you operate afterwards.
+          </p>
+          <p>
+            The agent drives it through one permission-gated tool: it checks which providers are connected, detects the
+            project's build settings, prepares a Supabase-backed database or authentication, syncs environment values to
+            the linked host, publishes, and lists recent deployments. Every action that creates, changes, or spends asks
+            you first.
           </p>
           <ul class="feature-list">
             <li><strong>A publish that is checked</strong><span>Publishing ends with a real browser load of the deployed URL, and the agent reports the page it found and the console errors it saw rather than assuming the deploy worked.</span></li>
             <li><strong>Failures come with logs</strong><span>The agent reads recent deployment logs from the host, so a broken deploy is diagnosed from the actual build or runtime error.</span></li>
+            <li><strong>A database it can create</strong><span>The agent creates a real Supabase project on your own account, asks which organization when there are several, and writes the keys and client into your repository.</span></li>
             <li><strong>Migrations it can apply</strong><span>The <code>.sql</code> migrations in your repository can be applied to the linked database, with a record of which ones already ran, so running again is safe.</span></li>
-            <li><strong>Your own accounts</strong><span>Vercel, Netlify, Supabase, and AWS connect with your credentials, and the resources stay in them. Vector does not host your app.</span></li>
+            <li><strong>Your own accounts</strong><span>Vercel, Netlify, and Supabase work once you authorize them, and AWS reads a profile you already configured for the AWS CLI. The resources stay in your accounts; Vector does not host your app and does not proxy your code.</span></li>
           </ul>
           <p class="note">
             These cloud actions run in the Vector desktop app, where the provider connections live. The terminal CLI

@@ -1,0 +1,85 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="desktop-app">
+
+          <p>
+            Agent and Editor are two modes over the same local repository and session, with project-wide file search,
+            diagnostics, a terminal, browser, review, and the same agent beside the file you opened.
+          </p>
+
+          <h2 id="agent-editor">Agent and Editor</h2>
+          <p>
+            Switch to Editor when you want to work directly: search the project, open files in tabs, edit with language
+            support, or keep the same agent beside the file and ask it to make the change.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Find a file</strong><span>Use project search to open a file full-screen in a persistent tab.</span></li>
+            <li><strong>Edit normally</strong><span>Your changes are written to the active repository or isolated workspace.</span></li>
+            <li><strong>Ask beside the code</strong><span>The session does not restart when you switch views, so the agent keeps the task and its history.</span></li>
+          </ul>
+          <p class="note">
+            The session header can hand the project to the editor or terminal you already use — Visual Studio Code,
+            Sublime Text, TextMate, Android Studio, Antigravity, Ghostty or the system terminal — or copy the project
+            path. It also carries the toggles for the file tree, Changes and Terminal.
+          </p>
+
+          <h2 id="composer">The composer</h2>
+          <p>
+            The box at the bottom of a session is where you type the task, and it carries every per-message control: which agent answers, which model, how hard that model thinks, how fast to run (see <a href="/docs/vector-agent#modes">modes</a>), dictation, and attachments. It takes pasted images and dragged files, keeps a history of your prompts you can walk back through, and offers a popover of slash commands. Shell mode sends a command instead of a prompt, and it is refused while Plan Mode is on.
+          </p>
+          <p>
+            For models that expose reasoning effort, the model popover shows a slider across that model's variants: <strong>Default</strong> follows the provider's recommendation, <strong>Light</strong> favours speed and cost on small tasks, <strong>Balanced</strong> trades speed against careful reasoning, and <strong>Max</strong> sits at the top of the range. The choice shows on the control, with its description in the tooltip.
+          </p>
+          <p class="note">
+            Dictation is transcribed by a Whisper model that runs on your machine. The model file is fetched and cached
+            the first time, after which nothing is sent to a cloud speech service.
+          </p>
+
+          <h2 id="transcript">The session transcript</h2>
+          <p>
+            The conversation is a timeline of turns: your messages, the agent's text, collapsible thinking blocks, tool calls with their status and error cards, and a per-turn summary of how many tools ran.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Comment on a line</strong><span>Click a line inside a code block or a diff in the conversation and attach a comment to it. The comment is carried into your next prompt as context, so "this branch is wrong" is tied to the exact line instead of described in prose. Annotations stay on the block until you send.</span></li>
+            <li><strong>The todo dock</strong><span>While the agent works through a multi-step task, its plan sits as a live checklist above the composer, so the step in progress and the ones still outstanding are visible without scrolling the transcript.</span></li>
+          </ul>
+
+          <h2 id="workspace-rail">The rail, the palette and search</h2>
+          <p>
+            The slim rail down the left edge is the app's top-level navigation: Home, Projects, Search, Agent Dashboard, Browser, Pull Requests, Plugins, Connections and Settings, with a help cluster for Docs, Best practices, Changelog, Diagnostics, Support and Send feedback.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Command palette</strong><span>Searches every action by category and runs it without the mouse. Shortcuts are editable and can be reset to their defaults, and some actions live only here, such as adding the current file selection to the prompt context.</span></li>
+            <li><strong>Chat search</strong><span>A search overlay finds sessions and messages across the workspace, so you can return to a conversation without scrolling the sidebar. It closes on Escape.</span></li>
+          </ul>
+
+          <h2 id="terminal-review">Terminal and review</h2>
+          <p>
+            The Terminal runs commands inside the active repository or isolated workspace. Review keeps the files an
+            agent changed, validation results, risk signals and merge controls together, so you can inspect what will
+            land before it touches the primary checkout. See <a href="/docs/checkpoints#review">Review and recovery</a>.
+          </p>
+
+          <h2 id="settings-appearance">Appearance and workspace settings</h2>
+          <p>
+            <strong>Appearance</strong> sets the colour scheme, theme, language and Vector's own palette — accent, workspace, sidebar and chat colours — with no external service involved. A layout card tunes sizing, motion and corner rounding, and interface font size lives here too. Changes apply at once and are remembered on that computer.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Editor</strong><span>Code font size, family and line height; word wrap, line numbers, active-line highlight, whitespace rendering, AI autocomplete, and whether the editor follows the agent.</span></li>
+            <li><strong>Chat</strong><span>Conversation width and the spacing between messages.</span></li>
+            <li><strong>Notifications</strong><span>Desktop alerts, error alerts and sound effects.</span></li>
+            <li><strong>Accessibility</strong><span>Interface scaling, high contrast, reduced motion, visible focus indicators and larger click targets.</span></li>
+          </ul>
+
+          <h2 id="help-assistant">Help inside the app</h2>
+          <p>
+            The help panel answers questions without leaving Vector. Its <strong>Assistant</strong> tab replies only from Vector's own documentation, and says plainly when it cannot reach the service or has nothing to offer rather than inventing an answer; the <strong>Documentation</strong> tab browses the same material.
+          </p>
+          <p>
+            <strong>Send feedback</strong> in the same cluster files a bug report from inside the app, with an optional email address so the team can reply, and tells you when a report could not be delivered.
+          </p>
+</DocsPage>

@@ -15,20 +15,20 @@ export const prerender = true
           <div class="doc-grid doc-grid-4">
             <article class="doc-card">
               <small>General purpose · for big tasks</small>
-              <h3>Subagents</h3>
+              <h4>Subagents</h4>
               <p>A subagent takes whatever piece of the task the main agent hands it: answer a question about the code, change a group of files, find out why a check fails. Vector uses them for big tasks, one per independent part, launched together so they run at the same time, and does small tasks itself. You can turn them off in Settings → Agents.</p>
             </article>
             <article class="doc-card">
               <small>Named · one focus each</small>
-              <h3>Subagent specialists</h3>
+              <h4>Subagent specialists</h4>
               <p>A subagent specialist is a named agent with a fixed focus and its own permissions. Vector calls one when part of the task fits that focus, such as reviewing a diff or finding the cause of a failure. Agents you define yourself count as custom specialists.</p>
             </article>
           </div>
-          <h3>How they differ</h3>
+          <h2 id="how-they-differ">How they differ</h2>
           <dl class="doc-rows">
             {subagentKinds.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}
           </dl>
-          <h3>The eight subagent specialists</h3>
+          <h2 id="specialists">The eight subagent specialists</h2>
           <p>
             Explore, Review, Judge and Security can read your project and run checks, but they cannot edit it. Debug,
             Test, Performance and Migration can edit. To ask for one yourself, type <code>@</code> and its name in the
@@ -43,13 +43,13 @@ export const prerender = true
               </article>
             ))}
           </div>
-          <h3>Where you see them</h3>
+          <h2 id="where-you-see-them">Where you see them</h2>
           <ul class="feature-list">
             <li><strong>In the chat</strong><span>Each batch of delegated work appears as a card in the conversation, with its title, kind, how many agents are working, their status and the time so far, and one square per agent. Click it to open that work in Background tasks.</span></li>
             <li><strong>In Background tasks</strong><span>Open the panel with the Tasks button in the session header, or with Cmd+Shift+B (Ctrl+Shift+B on Windows and Linux). Each card shows the kind, the elapsed time, how many agents and their tokens, and one row per agent with its model, tokens and time. A running card has a Stop button, running work is shown in purple, and finished tasks collect under Finished.</span></li>
             <li><strong>In Settings</strong><span>Settings → Agents explains both kinds and has the General subagents switch, which turns subagents off. Subagent specialists keep working when it is off.</span></li>
           </ul>
-          <h3>Turning subagents off</h3>
+          <h2 id="turning-them-off">Turning subagents off</h2>
           <p>
             Subagents are on by default. With them off, Vector's agent does the work itself, except parts that fit a
             subagent specialist, which it can still hand to one. You can also still ask for a specialist yourself with
@@ -60,9 +60,24 @@ export const prerender = true
             <li><strong>In the terminal</strong><span>The terminal reads its own config file, so the desktop switch does not change it. From 1.99.91, the next release, add <code>{'"agent": { "general": { "disable": true } }'}</code> to <code>~/.config/vector/vector.json</code> (<code>%USERPROFILE%\.config\vector\vector.json</code> on Windows). It takes effect the next time you start Vector in the terminal.</span></li>
             <li><strong>For one project</strong><span>From 1.99.91, put the same setting in the project's <code>vector.json</code>. It turns subagents off for that project in the terminal and the desktop app alike, whatever the switch says. Releases before 1.99.91, such as desktop 1.99.8 and npm CLI 1.99.7, do not read <code>vector.json</code>.</span></li>
           </ul>
+          <h2 id="custom-agents">Custom agents</h2>
+          <p>
+            Explore, review, judge and security carry a read-only boundary that is re-applied after your repository's config is merged, so a checked-in file cannot turn a read-only reviewer into one that writes; they can still run verification commands from an allowlist such as <code>git diff</code>, <code>git log</code> and the project's test and build scripts.
+          </p>
+          <p>
+            A parent can declare which paths each subagent owns, and Vector refuses two siblings that claim overlapping paths; tasks can depend on each other, run in the background and be resumed later by id.
+          </p>
+          <p>
+            You can add your own:
+          </p>
+          <p class="doc-cmd"><code>vector agent create --description "reviews SQL migrations" --mode subagent
+vector agent list</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p class="note">
+            Past six running siblings Vector tells the model to mention the spend, because each subagent spends on your keys.
+          </p>
           <p class="note">
             Subagents are not agent workspaces. A subagent works inside your session and your checkout and reports to the
             main agent. An agent workspace is a separate session in its own worktree or copy that you start, watch in the
-            Agent Dashboard, and merge yourself. See <a href="#agent-workspaces">Agent workspaces</a>.
+            Agent Dashboard, and merge yourself. See <a href="/docs/parallel-agents">Parallel agents</a>.
           </p>
 </DocsPage>

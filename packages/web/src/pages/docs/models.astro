@@ -6,7 +6,28 @@ export const prerender = true
 
 <DocsPage id="models">
 
-          <h3>Free models inside of Vector</h3>
+          <p>
+            Connect a provider account or API key to start. Eligible accounts may also see Free models inside of
+            Vector, with availability and usage limits shown in the app.
+          </p>
+
+          <h2 id="byok">Bring your own key</h2>
+          <p>
+            Connect a provider in Settings, or run <code>vector providers login</code> in the terminal, then
+            select a model in the session composer. Model availability, context limits, pricing, and
+            rate limits come from the provider. Vector's usage view tracks the information returned by
+            those sessions.
+          </p>
+          <p class="note">
+            The upcoming release no longer loads the former third-party hosted providers, even with an API key.
+            Choose another provider before starting a task. Sign in with ChatGPT stays available for OpenAI models. Native
+            Copilot, xAI, GitLab OAuth, Poe and DigitalOcean sign-in flows are paused pending Vector's own registrations;
+            API-key methods remain where supported.
+            External Claude Code, Codex,
+            and Cursor runtimes still use your own installed CLIs and their authentication.
+          </p>
+
+          <h2 id="free-models">Free models inside of Vector</h2>
           <p>
             The upcoming release adds a section for approved OpenRouter free models when the service is enabled.
             Sign in to Vector for a shared allowance, or choose Connect OpenRouter to use your own account directly.
@@ -24,19 +45,21 @@ export const prerender = true
             by provider; review those policies before sending confidential code. This describes upcoming functionality,
             not an announcement that the shared service is enabled in production.
           </p>
-          <p class="note">
-            The upcoming release no longer loads the former third-party hosted providers, even with an API key.
-            Choose another provider before starting a task. Sign in with ChatGPT stays available for OpenAI models. Native
-            Copilot, xAI, GitLab OAuth, Poe and DigitalOcean sign-in flows are paused pending Vector's own registrations;
-            API-key methods remain where supported.
-            External Claude Code, Codex,
-            and Cursor runtimes still use your own installed CLIs and their authentication.
-          </p>
-          <h3>Bring your own key</h3>
+
+          <h2 id="cli-models">Models in the terminal</h2>
           <p>
-            Connect a provider in Settings, or run <code>vector providers login</code> in the terminal, then
-            select a model in the session composer. Model availability, context limits, pricing, and
-            rate limits come from the provider. Vector's usage view tracks the information returned by
-            those sessions.
+            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release. From 1.99.91, the next release, <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>, <code>VECTOR_MODELS_PATH</code> selects a local catalog, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
+          </p>
+          <p class="doc-cmd"><code>vector models
+vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
+          <p>
+            In the upcoming release, an enabled service adds the heading <strong>Free models inside of Vector</strong>,
+            with shared allowance or own OpenRouter account captions. Display names omit <code>:free</code>;
+            selectors retain it. Your account takes precedence over a duplicate shared model. Human guidance goes
+            to stderr, while stdout keeps plain model selectors. Connect your own account with
+            <code>vector providers login --provider openrouter --method "Connect OpenRouter"</code>.
+          </p>
+          <p>
+            Models that expose reasoning effort take <code>--variant</code>. The level resolves from the flag, then your saved preference, then what the session last used, and your choice is kept per provider and model.
           </p>
 </DocsPage>

@@ -1,0 +1,74 @@
+---
+import DocsPage from "../../layouts/DocsPage.astro"
+
+export const prerender = true
+---
+
+<DocsPage id="parallel-agents">
+
+          <p>
+            Run separate lines of work as separate agents, each in its own Git worktree or managed project copy, so
+            unfinished work does not alter the main files. Watch them from a single dashboard and merge only what you
+            trust.
+          </p>
+
+          <h2 id="agent-workspaces">Agent workspaces</h2>
+          <p>
+            Use another workspace when work can happen independently: one agent can handle the
+            interface while another investigates tests or infrastructure. Vector sets no cap on how many run at once.
+          </p>
+          <ol class="steps">
+            <li><span>1</span><div><strong>Create a workspace</strong><p>Name the responsibility and send its first request.</p></div></li>
+            <li><span>2</span><div><strong>Keep working</strong><p>Switch between workspaces while they stream activity independently.</p></div></li>
+            <li><span>3</span><div><strong>Review and merge</strong><p>Inspect the diff and checks before bringing selected work into main.</p></div></li>
+          </ol>
+          <p class="note">
+            An isolated agent gets a Git worktree on its own branch only when the project is a Git repository and the
+            working tree is clean. Without one — no repository, uncommitted changes, or a worktree that cannot be
+            created — Vector provisions an isolated copy instead and records which it used in the workspace log.
+          </p>
+          <p class="note is-caution">
+            Two agents should not intentionally edit the same lines at the same time. Split work by
+            responsibility to reduce conflicts and make review easier.
+          </p>
+
+          <h2 id="coordinated-runs">Coordinated runs: one objective, a team of agents</h2>
+          <p>
+            Instead of naming each workspace yourself, choose <strong>Coordinate agents</strong> in the launcher and
+            give Vector the objective. A planner model reads the repository and writes a plan: tasks with roles —
+            explore, implement, debug, test, review, security, docs — and the dependencies between them. Each task
+            becomes its own agent in its own workspace, routed to a model by tier, and tasks run as soon as the ones
+            they depend on finish. Explore, debug, test, review and security tasks go to the matching subagent
+            specialist; implement and docs tasks run on the general agent.
+          </p>
+          <p>
+            You set the strategy (economy, balanced or quality), the most agents that may run at once, and how many
+            run in parallel. The run reports as one board — planning, running, needs review — and nothing reaches your
+            main checkout until you look at the combined diff and merge it.
+          </p>
+          <p class="note">
+            Teams can be wired everyone-to-everyone, coordinator-to-workers, or any pairing you set. A message to a
+            teammate you have not linked is refused and told so, rather than dropped where the sender never finds out.
+          </p>
+
+          <h2 id="agent-dashboard">The Agent Dashboard</h2>
+          <p>
+            Every agent in the project on one board: <strong>Running</strong>, <strong>Needs you</strong> and
+            <strong>Done</strong>. Open it from the workspace rail. Switch to a list for a denser view of the same
+            three groups.
+          </p>
+          <ul class="feature-list">
+            <li><strong>Needs you</strong><span>Merges failed with needs-review, including a finished run that reported an error. Both are stopped and waiting on a person.</span></li>
+            <li><strong>Filters that compose</strong><span>Status, Team, Pull request and Agent. Two values in one menu means either; values in two menus means both.</span></li>
+            <li><strong>Pull request state</strong><span>Open, merged, or never opened — merge state wins, so a merged run does not sit under "open" forever.</span></li>
+            <li><strong>Teams as a unit</strong><span>Agents sharing a team or swarm filter together, and the board shows the messages they sent each other mid-run.</span></li>
+          </ul>
+          <p class="note is-caution">
+            Two agents holding uncommitted work on the same file are reported as a clash. Merging both will conflict —
+            review one before merging the other.
+          </p>
+          <p class="note">
+            Agent workspaces are not subagents. Subagents work inside one session's checkout and report to its main
+            agent; see <a href="/docs/subagents">Subagents and subagent specialists</a>.
+          </p>
+</DocsPage>
