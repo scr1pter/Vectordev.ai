@@ -91,6 +91,20 @@ describe("release artifact audit", () => {
     expect(report.violations.some((item) => item.context.toLowerCase().includes(name))).toBe(false)
   })
 
+  test("only Monaco's exact casing followed by Editor is allowed", async () => {
+    // Every single-capital spelling of the name except Monaco's own, plus the all-lowercase one.
+    const variants = [
+      name,
+      ...Array.from(name, (_, index) => name.slice(0, index) + name[index].toUpperCase() + name.slice(index + 1)),
+    ].filter((item) => `${item}Editor` !== monaco)
+    expect(variants).toHaveLength(name.length)
+    const report = await audit({
+      "app.asar": Buffer.from(variants.map((item) => `editorService.${item}Editor({resource:e});`).join("")),
+    })
+    expect(report.allowed.monaco).toBe(0)
+    expect(report.violations.map((item) => item.kind)).toEqual(variants.map(() => "former-name"))
+  })
+
   test("a notice line is allowed only verbatim", async () => {
     const report = await audit({ "notice.txt": Buffer.from(`Copyright (c) 2026 ${name}\n`) })
     expect(report.violations.map((item) => item.kind)).toEqual(["former-name"])

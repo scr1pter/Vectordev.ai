@@ -21,8 +21,8 @@
  * Allowlist (docs/vector/owner-actions/binary-identifiers.md), each class counted:
  * - license: the match sits inside an exact line of THIRD_PARTY_NOTICES.md or LICENSE that
  *   carries the name, either as a packaged notice file or as notice text a bundle embeds;
- * - monaco: Monaco's camel-case method that opens a code editor, an identifier formed by the
- *   name followed by `Editor`;
+ * - monaco: Monaco's camel-case method that opens a code editor, exactly the name in the
+ *   casing the notices display (first letter lowered) followed by `Editor`;
  * - bun: Bun's built-in trusted-package table entry (the name plus `-ai`), recognised only
  *   between its pinned alphabetical neighbours.
  */
@@ -127,6 +127,12 @@ async function loadRules() {
     .toLowerCase()
   if (!name) throw new Error("The upstream MIT copyright notice is missing from THIRD_PARTY_NOTICES.md")
   const license = await Bun.file(path.join(root, "LICENSE")).text()
+  // Monaco's method uses the display casing the notices print, with its first letter lowered.
+  const display = [notices, license]
+    .flatMap((text) => text.match(new RegExp(name, "gi")) ?? [])
+    .find((item) => item !== name && item !== item.toUpperCase())
+  if (!display) throw new Error("The notices no longer show the former name's display casing")
+  const monaco = display[0].toLowerCase() + display.slice(1)
   // Every position of the name inside each notice line that carries it.
   const legal = [
     ...new Set(
@@ -161,7 +167,7 @@ async function loadRules() {
   })
   // Hides every audited value in printed context, not just the reported match.
   const mask = new RegExp(values.map((item) => item.value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|"), "gi")
-  return { name, legal, needles, mask, reach: CONTEXT + Math.max(...needles.map((needle) => needle.length)) }
+  return { name, monaco, legal, needles, mask, reach: CONTEXT + Math.max(...needles.map((needle) => needle.length)) }
 }
 
 async function listFiles(item: string): Promise<string[]> {
@@ -280,7 +286,7 @@ function allowedClass(context: Context, rules: Rules): AllowedClass | undefined 
   )
   if (legal) return "license"
   if (
-    /^[a-z]+[A-Z][a-z]*$/.test(context.match) &&
+    context.match === rules.monaco &&
     !/[\w$]$/.test(context.before.replace(/_$/, "")) &&
     /^Editor(?![\w$])/.test(context.after)
   )
