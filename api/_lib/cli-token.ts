@@ -14,7 +14,7 @@ const CLI_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
 function secret() {
   // Prefer a dedicated secret; otherwise derive a purpose-bound key so this
-  // system never shares raw key material with license/download signing.
+  // system never shares raw key material with other signing uses.
   const dedicated = process.env.VECTOR_CLI_TOKEN_SECRET ?? ""
   if (dedicated.length >= 32) return dedicated
   const base = process.env.VECTOR_LICENSE_SECRET ?? ""

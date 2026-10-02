@@ -2955,6 +2955,140 @@
         ]
       }
     },
+    "/vcs/branches": {
+      "get": {
+        "tags": ["instance"],
+        "operationId": "vcs.branches",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Local branches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsBranchList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "List local git branches, marking the current branch and branches checked out in another worktree.",
+        "summary": "List branches",
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.vcs.branches({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/vcs/switch": {
+      "post": {
+        "tags": ["instance"],
+        "operationId": "vcs.switch",
+        "parameters": [
+          {
+            "name": "directory",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "VCS info after the switch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsInfo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VcsSwitchError | InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/VcsSwitchError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestError"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "description": "Switch the working tree to another local branch, or create a branch from HEAD and switch to it. Never forces, stashes or discards changes, including ignored files and commits on a detached HEAD. Refused while a session in this directory is running, and in Vector-managed agent workspaces only creating a branch is allowed.",
+        "summary": "Switch branch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "create": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["branch"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createVectorClient } from \"@vectordevai/sdk\"\n\nconst client = createVectorClient()\nawait client.vcs.switch({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/command": {
       "get": {
         "tags": ["instance"],
@@ -24712,6 +24846,74 @@
               "reason": {
                 "type": "string",
                 "enum": ["non-git", "commit-failed"]
+              }
+            },
+            "required": ["message", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "VcsBranch": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "checkedOutElsewhere": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "current"],
+        "additionalProperties": false
+      },
+      "VcsBranchList": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "branches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VcsBranch"
+            }
+          }
+        },
+        "required": ["branches"],
+        "additionalProperties": false
+      },
+      "VcsSwitchError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["VcsSwitchError"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "non-git",
+                  "invalid-name",
+                  "not-found",
+                  "exists",
+                  "checked-out-elsewhere",
+                  "dirty",
+                  "busy",
+                  "detached",
+                  "managed",
+                  "switch-failed"
+                ]
               }
             },
             "required": ["message", "reason"],

@@ -103,7 +103,6 @@
     "@vercel/blob": "2.7.0",
     "jose": "6.2.3",
     "resend": "6.18.1",
-    "stripe": "22.4.0",
     "typescript": "catalog:",
     "effect": "catalog:",
     "@vercel/og": "1.0.1",

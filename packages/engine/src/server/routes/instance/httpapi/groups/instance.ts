@@ -51,6 +51,17 @@ export class ApiVcsCommitError extends Schema.ErrorClass<ApiVcsCommitError>("Vcs
   { httpApiStatus: 400 },
 ) {}
 
+export class ApiVcsSwitchError extends Schema.ErrorClass<ApiVcsSwitchError>("VcsSwitchError")(
+  {
+    name: Schema.Literal("VcsSwitchError"),
+    data: Schema.Struct({
+      message: Schema.String,
+      reason: Vcs.SwitchReason,
+    }),
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export const InstancePaths = {
   dispose: "/instance/dispose",
   path: "/path",
@@ -60,6 +71,8 @@ export const InstancePaths = {
   vcsDiffRaw: "/vcs/diff/raw",
   vcsApply: "/vcs/apply",
   vcsCommit: "/vcs/commit",
+  vcsBranches: "/vcs/branches",
+  vcsSwitch: "/vcs/switch",
   command: "/command",
   agent: "/agent",
   skill: "/skill",
@@ -164,6 +177,30 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "vcs.commit",
             summary: "Commit working tree",
             description: "Capture a restore point, then stage all changes and commit them to the current branch.",
+          }),
+        ),
+        HttpApiEndpoint.get("vcsBranches", InstancePaths.vcsBranches, {
+          query: WorkspaceRoutingQuery,
+          success: described(Vcs.BranchList, "Local branches"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.branches",
+            summary: "List branches",
+            description:
+              "List local git branches, marking the current branch and branches checked out in another worktree.",
+          }),
+        ),
+        HttpApiEndpoint.post("vcsSwitch", InstancePaths.vcsSwitch, {
+          query: WorkspaceRoutingQuery,
+          payload: Vcs.SwitchInput,
+          success: described(Vcs.Info, "VCS info after the switch"),
+          error: ApiVcsSwitchError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.switch",
+            summary: "Switch branch",
+            description:
+              "Switch the working tree to another local branch, or create a branch from HEAD and switch to it. Never forces, stashes or discards changes, including ignored files and commits on a detached HEAD. Refused while a session in this directory is running, and in Vector-managed agent workspaces only creating a branch is allowed.",
           }),
         ),
         HttpApiEndpoint.get("command", InstancePaths.command, {

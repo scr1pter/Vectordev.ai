@@ -1,0 +1,71 @@
+/* Session header branch chip as a picker trigger, and its popover. The chip keeps the
+   [data-vector-session-branch] look from vector-premium.css; the popover reuses the composer
+   model popover's frame and rows (.vector-model-popover), so only branch details live here. */
+
+button[data-vector-branch-picker] {
+  max-width: 180px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+button[data-vector-branch-picker]:hover,
+button[data-vector-branch-picker][data-expanded] {
+  border-color: var(--vx-line-strong);
+  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
+  color: var(--vx-text);
+}
+
+button[data-vector-branch-picker][aria-busy="true"] {
+  cursor: progress;
+  color: var(--vx-text-muted);
+}
+
+[data-vector-branch-picker] [data-slot="branch-picker-name"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-vector-branch-picker] [data-slot="branch-picker-caret"] {
+  display: inline-flex;
+  flex: none;
+  opacity: 0.7;
+}
+
+[data-vector-branch-picker] [data-slot="branch-picker-caret"] > svg {
+  width: 12px;
+  height: 12px;
+}
+
+.vector-branch-picker {
+  width: 300px;
+}
+
+.vector-branch-picker [data-slot="branch-picker-name"] {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--vx-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vector-branch-picker [data-slot="branch-picker-note"] {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--vx-text-muted);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+.vector-branch-picker [data-component="menu-v2-item"][data-disabled] {
+  cursor: default;
+}
+
+.vector-branch-picker [data-component="menu-v2-item"][data-disabled]:not([data-checked]) [data-slot="menu-v2-item-content"] {
+  color: var(--vx-text-muted);
+}

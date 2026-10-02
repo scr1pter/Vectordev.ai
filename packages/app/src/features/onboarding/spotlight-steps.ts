@@ -420,17 +420,6 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       onFound: (element) => element.click(),
     },
     {
-      id: "settings-billing",
-      section: "Settings",
-      title: "Billing & license.",
-      body: "Your Vector license and device activation live here — activate, move to another machine, or manage the subscription.",
-      target: settingsTab("billing"),
-      placement: "right",
-      group: "settings",
-      prepare: host.openSettingsDialog,
-      onFound: (element) => element.click(),
-    },
-    {
       id: "settings-workspace",
       section: "Settings",
       title: "Workspace: Editor and Chat.",

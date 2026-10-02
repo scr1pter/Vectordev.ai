@@ -1,5 +1,5 @@
 ---
-import MarketingFooter from "../components/marketing/MarketingFooter.astro"
+import SiteFooter from "../components/marketing/SiteFooter.astro"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
 import MarketingNav from "../components/marketing/MarketingNav.astro"
 
@@ -19,7 +19,7 @@ const layers = [
   {
     name: "The models",
     body:
-      "Models included with Vector, so it works with no API key. Your own keys for Claude, GPT, Gemini and the rest, with the bill between you and that provider. And soon, a model of our own.",
+      "Your own keys for Claude, GPT, Gemini and the rest, with the bill between you and that provider. And soon, a model of our own.",
   },
 ]
 
@@ -66,9 +66,8 @@ const principles = [
           calls, edits, checks, and verification — rather than for chat.
         </p>
         <p>
-          Velocity will join the models included with Vector, selectable like any other provider in the desktop app
-          and the CLI, and measured by the same Tokenomics engine as everything else. Your own provider keys work alongside
-          the models included with Vector.
+          Velocity will be selectable like any other provider in the desktop app and the CLI, and measured by the same
+          Tokenomics engine as everything else. Your own provider keys work alongside it.
         </p>
       </section>
 
@@ -83,12 +82,12 @@ const principles = [
 
       <section class="about-cta">
         <h2>Start building.</h2>
-        <p>Vector desktop is $10 a month or $99 a year for macOS, Windows, and Linux, with models included and no API key needed. Create an account, then choose a plan. The terminal agent is free with a Vector account: <code>npm install -g @vectordevai/cli</code>.</p>
+        <p>Vector is free for macOS, Windows, and Linux. Create a free Vector account to download it, then connect your own model provider. The terminal agent uses the same account: <code>npm install -g @vectordevai/cli</code>.</p>
         <a class="about-button" href="/login">Get Vector</a>
-        <a class="about-link" href="/why-vector">Why Vector, in detail</a>
+        <a class="about-link" href="/docs">See everything Vector does</a>
       </section>
     </main>
-    <MarketingFooter />
+    <SiteFooter />
   </div>
 </MarketingLayout>
 

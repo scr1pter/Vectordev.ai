@@ -178,25 +178,20 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Review changes",
         where: "Project group in the sidebar, inside an active task.",
-        body: "Everything the task changed, as diffs — read it like a pull request before you accept it. Each file shows its additions and deletions with a Low / Medium / High risk read based on the size and nature of the change, so you know where to slow down. Vector's own guidance applies here too: review carefully, run the app, and keep a checkpoint before accepting broad edits.",
+        body: "Everything the task changed, as diffs — read it like a pull request before you accept it. Each file shows its additions and deletions with a Low / Medium / High risk read based on the size and nature of the change, so you know where to slow down. Vector's own guidance applies here too: review carefully and run the app before accepting broad edits, and if a request went the wrong way, Rewind code + chat undoes it.",
         tip: "Make Review the last step of every task — two minutes of reading beats an hour of debugging a change you never saw.",
+      },
+      {
+        title: "Rewind code + chat",
+        where: "Command palette (⌘⇧P, or Ctrl+Shift+P on Windows/Linux) inside a session, or type /undo or /redo in the message box.",
+        body: "Undo an agent's work one request at a time. Rewind code + chat restores the files and the conversation to before your last request. If the agent is still working, Vector stops it first, and that request's text goes back into the message box so you can edit it and send it again. Run it again to go back further. Move rewind forward (or /redo) restores the next request; at the latest one, everything is back.",
+        tip: "When a request took the project the wrong way, rewind and re-prompt instead of asking the agent to repair its own change.",
       },
       {
         title: "Terminal",
         where: "Project group in the sidebar, inside an active task.",
         body: "A real shell in your project's directory, opened as a panel inside the task. Run the dev server, git commands, package installs — anything you'd type into any terminal — without leaving Vector. It needs an active task; the sidebar item toggles it open and closed.",
         tip: "One-off commands are often faster typed here yourself than asked of the agent.",
-      },
-    ],
-  },
-  {
-    kicker: "Your safety net",
-    entries: [
-      {
-        title: "Code Archaeology",
-        where: "Inside a task — open it from the session's side panel.",
-        body: "Vector captures a checkpoint automatically every time an agent edits your files — no setup, nothing to remember. The panel lists the task's whole history in order as Checkpoint 1, 2, 3… from the first to the latest; click a checkpoint's name to rename it, and use its notes field to write your own documentation of what changed and why. Every touched file gets a chip that opens straight into its diff. Restore writes a checkpoint's stored file snapshots back into your workspace — a one-click undo for an agent run that went the wrong way.",
-        tip: "If a later prompt regresses behavior, don't argue with the agent — restore the last good checkpoint and re-prompt from there.",
       },
     ],
   },

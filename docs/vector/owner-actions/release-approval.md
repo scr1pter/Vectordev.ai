@@ -1,13 +1,42 @@
 # Release approval and external prerequisites
 
-Status checked October 2, 2026. The owner selected **1.999.99** for desktop and CLI,
-approved unsigned builds, and requested publication across supported operating
+Status checked October 2, 2026. The owner reserved version 2 and allowed an
+interim 1.x version. The candidate now follows main's **1.99.99** desktop and CLI
+version; earlier **1.999.99** preparation records remain historical. The owner
+approved unsigned builds and requested publication across supported operating
 systems plus replacement of the local Mac app after verification. Version 2 is
 reserved. The latest instruction holds further pushes to `main`; prepare and
 commit release work on the candidate branch until that restriction is lifted.
 The publication request does not authorize purchases or changes to billing.
 
 ## Current checkpoint
+
+The candidate incorporates main through `9b6f2a45d`, including free Vector access,
+session branch switching and removal of Code Archaeology. Another session pushed
+those four commits and deployed them at 22:13 UTC. This task has not pushed main.
+Main's release number is retained to avoid competing unpublished release lines.
+The Cloud, free-selection and Windows repairs remain on `cloud-completion`.
+
+At the preceding candidate `a113da23e`, Linux unit tests, generated-client checks,
+HTTP API exercises, both Linux and Windows browser jobs, standalone installers,
+Verify, free-model integration and public-sharing integration passed. Windows
+unit validation exposed one nested PowerShell fixture failure and two deferred
+uninstall failures. The worker never wrote its first status record, although the
+parent identity command succeeded. Commit `81d6e89d8` encodes the nested fixture
+command; `6b5a70ec3` starts the worker in an independent minimized console and
+encodes path data, including Unicode and PowerShell quote characters. Local
+ownership checks passed five cases with two native-only skips; Engine types and
+independent review passed. Native Windows acceptance of these repairs and checks
+of the combined source are still required. No test deadlines were increased.
+
+Vector Cloud registration is limited to Vercel and Supabase. Netlify registration
+was canceled at the owner's request. The prepared Vercel agreement requires owner
+submission; the prepared Supabase OAuth registration awaits action-time approval.
+No new OAuth credential has been retrieved or saved, and no live customer consent
+flow has been verified. Personal OpenRouter access still needs the documented
+unfunded-account acceptance; no real inference request or purchase was made.
+
+## Earlier candidate checkpoint
 
 Cloud connection and project environment repairs are pushed on `cloud-completion`
 at `bd69ea0f3`; all 22 package typechecks passed before that push. Platform repairs
@@ -58,10 +87,10 @@ histories. Another session subsequently advanced `main` to
 included in `free-only-safety`, preserving both histories; this task
 has pushed only the candidate branch since the owner imposed the main hold.
 The subsequent documentation-only changes through
-`7372c5b1c19add723be6b7ffa23e7a3abaed08ac` are included as well. The candidate
-therefore contains that complete main history, not just selected patches.
-No runtime or test files were lost in the comparison; removed website pages were
-consolidated into the current feature documentation. Recheck the final release
+`7372c5b1c19add723be6b7ffa23e7a3abaed08ac` and main through `9b6f2a45d` are included
+as well. The candidate retains the complete main history, not just selected
+patches. Main's intentional licensing and Code Archaeology removals are preserved,
+including its revised historical release copy. Recheck the final release
 commit after further changes. The separate shared working checkout contains
 other work and is not the release workspace.
 
@@ -81,7 +110,7 @@ other work and is not the release workspace.
 - Verify the exact release source in CI before publication. Local passing suites
   do not replace the macOS, Windows, and Linux release jobs.
 
-The catalog and npm inputs remain incomplete. No 1.999.99 installers, npm packages,
+The catalog and npm inputs remain incomplete. No 1.99.99 installers, npm packages,
 or standalone archives are claimed as published. Public desktop downloads remain
 at 1.99.8 and npm CLI at 1.99.7, rechecked at 20:35 UTC. Another task replaced
 the local Mac app during validation; it now reports 1.999.99. Its bundled build
@@ -320,7 +349,7 @@ not reached. Its load timeouts followed the ONNX optimizer errors repaired in
    standalone CLI archives required by desktop and WSL. See the
    [plugin](npm-plugin.md) and [standalone CLI](standalone-cli-release.md) procedures.
 3. Dispatch the desktop workflow from the exact candidate ref with tag
-   `v1.999.99`, `allow_unsigned=true`, and the stable channel. A plain tag push uses
+   `v1.99.99`, `allow_unsigned=true`, and the stable channel. A plain tag push uses
    the signed path and does not select the approved unsigned policy.
 4. Verify all six installers, checksums, sizes, CLI provenance, and the public
    download manifest before advancing `publishedDesktopVersion` or describing the

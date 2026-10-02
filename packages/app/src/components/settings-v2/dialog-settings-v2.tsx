@@ -9,7 +9,6 @@ import { SettingsProvidersV2 } from "./providers"
 import { SettingsModelsV2 } from "./models"
 import { SettingsServersV2 } from "./servers"
 import { SettingsUsageV2 } from "./usage"
-import { SettingsBillingV2 } from "./billing"
 import { SettingsAboutV2 } from "./about"
 import { SettingsVoiceV2 } from "./voice"
 import { SettingsPersonalizationV2 } from "./personalization"
@@ -49,7 +48,6 @@ export const SettingsWorkspace: Component<SettingsWorkspaceProps> = (props) => {
 
   const panel = (item: SettingsTab) => {
     if (item === "usage") return <SettingsUsageV2 />
-    if (item === "billing") return <SettingsBillingV2 />
     if (item === "about") return <SettingsAboutV2 />
     if (item === "voice") return <SettingsVoiceV2 />
     if (item === "personalization") return <SettingsPersonalizationV2 />

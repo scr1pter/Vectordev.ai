@@ -2485,6 +2485,35 @@ export type VcsCommitError = {
   }
 }
 
+export type VcsBranch = {
+  name: string
+  current: boolean
+  checkedOutElsewhere?: string
+}
+
+export type VcsBranchList = {
+  current?: string
+  branches: Array<VcsBranch>
+}
+
+export type VcsSwitchError = {
+  name: "VcsSwitchError"
+  data: {
+    message: string
+    reason:
+      | "non-git"
+      | "invalid-name"
+      | "not-found"
+      | "exists"
+      | "checked-out-elsewhere"
+      | "dirty"
+      | "busy"
+      | "detached"
+      | "managed"
+      | "switch-failed"
+  }
+}
+
 export type Command = {
   name: string
   description?: string
@@ -9300,6 +9329,65 @@ export type VcsCommitResponses = {
 }
 
 export type VcsCommitResponse = VcsCommitResponses[keyof VcsCommitResponses]
+
+export type VcsBranchesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/branches"
+}
+
+export type VcsBranchesErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type VcsBranchesError = VcsBranchesErrors[keyof VcsBranchesErrors]
+
+export type VcsBranchesResponses = {
+  /**
+   * Local branches
+   */
+  200: VcsBranchList
+}
+
+export type VcsBranchesResponse = VcsBranchesResponses[keyof VcsBranchesResponses]
+
+export type VcsSwitchData = {
+  body?: {
+    branch: string
+    create?: boolean
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/switch"
+}
+
+export type VcsSwitchErrors = {
+  /**
+   * VcsSwitchError | InvalidRequestError
+   */
+  400: VcsSwitchError | InvalidRequestError
+}
+
+export type VcsSwitchError2 = VcsSwitchErrors[keyof VcsSwitchErrors]
+
+export type VcsSwitchResponses = {
+  /**
+   * VCS info after the switch
+   */
+  200: VcsInfo
+}
+
+export type VcsSwitchResponse = VcsSwitchResponses[keyof VcsSwitchResponses]
 
 export type CommandListData = {
   body?: never

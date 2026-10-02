@@ -1,6 +1,6 @@
 # OpenRouter free access — owner actions
 
-Decision: use each user's own free OpenRouter account for the upcoming **1.999.99** release. Personal free-model discovery and setup work independently of `FREE_MODELS_ENABLED=false`. Leave the shared service off; do not add a shared key, activate KV for this feature, or purchase credits. The currently downloadable desktop **1.99.8** does not include this guarded setup.
+Decision: use each user's own free OpenRouter account for the upcoming **1.99.99** release. Personal free-model discovery and setup work independently of `FREE_MODELS_ENABLED=false`. Leave the shared service off; do not add a shared key, activate KV for this feature, or purchase credits. The currently downloadable desktop **1.99.8** does not include this guarded setup.
 
 No account was created, terms accepted, purchase made, key read, privacy setting changed or message sent by the implementation agent. Account-specific endpoint viability has **not** been verified. The candidate snapshot below was checked on 25 September 2026; it is not a promise of current availability.
 
@@ -13,7 +13,7 @@ On 2 October 2026, OpenRouter's [pricing page](https://openrouter.ai/pricing) li
 3. Select an eligible model under **Free models inside of Vector → Your OpenRouter account**. The initial scope is explicit `:free` models with online, tool-capable, zero-price endpoints listed by OpenRouter's `/api/v1/endpoints/zdr`. Discovery matches model ID and endpoint tag. This is OpenRouter's ZDR classification, not an independent manual policy audit or a list of every free model.
 4. Keep zero-price routing, `provider.zdr: true`, `data_collection: "deny"`, and the protections against paid plugins and paid model/provider fallbacks. Missing eligibility, an unavailable endpoint, and exhausted limits must stop the request. Do not relax the constraints to make a request succeed.
 5. OpenRouter currently lists up to 50 requests/day and 20 requests/minute without buying credits. A coding task can require many requests. Wait for a reset when limits are reached; do not purchase a higher allowance or create accounts to evade limits. See the [current upstream policy](https://openrouter.ai/docs/api_reference/limits).
-6. Review the user's OpenRouter privacy settings and downstream policies. The ZDR routing restriction does not cover Vector's local history, OpenRouter account logging, or every external tool/service. Keep Vector's subscription and other independently configured providers/tools distinct from free model access.
+6. Review the user's OpenRouter privacy settings and downstream policies. The ZDR routing restriction does not cover Vector's local history, OpenRouter account logging, or every external tool/service. Keep other independently configured providers/tools distinct from free model access.
 
 Before describing personal access as verified, the owner must exercise the reviewed candidate with their own unfunded account and an eligible model. Confirm that a harmless prompt succeeds under the unchanged privacy and zero-price constraints, and that the account balance is unchanged. Report only the model ID, success or rejection, and the balance result; keep credentials and request headers private. A rejection keeps live availability unverified and must not trigger paid routing, a credit purchase, or relaxed privacy settings.
 

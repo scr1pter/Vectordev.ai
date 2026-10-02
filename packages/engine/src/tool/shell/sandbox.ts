@@ -74,12 +74,12 @@ const SECRETS = [
 // desktop vault key keeps these as plaintext, so they are worth as much as ~/.ssh.
 const CREDENTIAL_FILES = ["auth.json", "mcp-auth.json", "cli-auth.json", "plugin-oauth-approvals.json"]
 
-// The desktop app keeps its vault key and license beside its user data. Electron puts
+// The desktop app keeps its vault key beside its user data. Electron puts
 // that under Application Support on macOS and $XDG_CONFIG_HOME (default ~/.config) on
 // Linux, named by app ID.
 const DESKTOP_ROOTS = ["Library/Application Support", ".config"]
 const DESKTOP_APP_IDS = ["ai.vector.app", "ai.vector.app.beta", "ai.vector.app.dev"]
-const DESKTOP_SECRETS = ["secure-runtime", "vector-license.json"]
+const DESKTOP_SECRETS = ["secure-runtime"]
 
 // Package managers write into a shared per-user cache rather than the workspace,
 // so a sandbox that forbids these turns every first build into a failure. This is

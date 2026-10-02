@@ -1,6 +1,6 @@
 # Standalone CLI releases and package-manager channels
 
-This implementation prepares Vector's native CLI archives and publication tooling. It has not published a release, created a Homebrew tap or Scoop bucket, registered accounts, or changed Vector's licensing/subscriptions. The owner must create the actual tap and bucket repositories and supply their coordinates before those channels can be published.
+This implementation prepares Vector's native CLI archives and publication tooling. It has not published a release, created a Homebrew tap or Scoop bucket, registered accounts, or changed Vector's licensing. The owner must create the actual tap and bucket repositories and supply their coordinates before those channels can be published.
 
 ## Release identity and files
 

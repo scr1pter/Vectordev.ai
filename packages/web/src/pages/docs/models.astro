@@ -7,7 +7,7 @@ export const prerender = true
 <DocsPage id="models">
 
           <p>
-            Connect a provider account or API key to start. The upcoming 1.999.99 release adds guarded free-model
+            Connect a provider account or API key to start. The upcoming 1.99.99 release adds guarded free-model
             access through your own free OpenRouter account, with setup and limits described below.
           </p>
 
@@ -29,7 +29,7 @@ export const prerender = true
 
           <h2 id="free-models">Free models inside of Vector</h2>
           <p>
-            The upcoming 1.999.99 release adds guarded access through your own free OpenRouter account.
+            The upcoming 1.99.99 release adds guarded access through your own free OpenRouter account.
             In Settings → Providers, choose Connect OpenRouter, then choose an eligible model under
             Free models inside of Vector, marked Your OpenRouter account. This personal section works while
             Vector's shared allowance is off. Its initial selection is limited to explicit free variants with
@@ -50,7 +50,7 @@ export const prerender = true
             <a href="https://openrouter.ai/docs/api/api-reference/endpoints/preview-the-impact-of-zdr-on-the-available-endpoints">OpenRouter's endpoint classification</a>,
             not an independent policy audit. It does not promise zero retention for Vector's local history,
             OpenRouter account logging or other connected services. Review those settings before sending confidential code.
-            Vector's subscription terms and other provider connections are separate. This describes upcoming functionality,
+            Other provider connections have their own terms. This describes upcoming functionality,
             not functionality in the currently downloadable desktop 1.99.8. The shared service remains off.
           </p>
           <p>
@@ -64,12 +64,12 @@ export const prerender = true
 
           <h2 id="cli-models">Models in the terminal</h2>
           <p>
-            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release. From 1.999.99, the next release, <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>, <code>VECTOR_MODELS_PATH</code> selects a local catalog, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
+            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release. From 1.99.99, the next release, <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>, <code>VECTOR_MODELS_PATH</code> selects a local catalog, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
           </p>
           <p class="doc-cmd"><code>vector models
 vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
-            In the upcoming 1.999.99 release, your personal account adds eligible models under
+            In the upcoming 1.99.99 release, your personal account adds eligible models under
             <strong>Free models inside of Vector</strong>, marked Your OpenRouter account, independently of the
             disabled shared allowance. Display names omit <code>:free</code>; selectors retain it. Human guidance
             goes to stderr, while stdout keeps plain model selectors. Connect your own account with

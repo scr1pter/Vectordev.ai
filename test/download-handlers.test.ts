@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { handleBillingDownload } from "../api/billing/download"
 import { handleDownloadChecksums } from "../api/download-checksums"
 import { installerFromManifest, parseDownloadManifest, PUBLIC_DOWNLOAD_TARGETS } from "../api/_lib/downloads"
 import { ApiError, type ApiRequest, type ApiResponse } from "../api/_lib/http"
-import { handleDownload, requireDownloadAccess } from "../api/download"
+import { handleDownload } from "../api/download"
 
 const version = "1.19.98"
 const manifest = parseDownloadManifest({
@@ -125,35 +124,6 @@ describe("public installer handler", () => {
   })
 })
 
-describe("installer account entitlement", () => {
-  test("keeps every confirmed account eligible during free beta", async () => {
-    let checkedBilling = false
-    const account = await requireDownloadAccess(
-      { headers: {} },
-      () => Promise.resolve({ id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb", email: "user@example.com" }),
-      () => {
-        checkedBilling = true
-        return Promise.resolve(undefined)
-      },
-      () => ({ available: false, licenseRequired: false }),
-    )
-
-    expect(account.email).toBe("user@example.com")
-    expect(checkedBilling).toBe(false)
-  })
-
-  test("fails closed when paid access is selected without production billing", async () => {
-    await expect(
-      requireDownloadAccess(
-        { headers: {} },
-        () => Promise.resolve({ id: "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb", email: "user@example.com" }),
-        () => Promise.resolve(undefined),
-        () => ({ available: false, licenseRequired: true }),
-      ),
-    ).rejects.toMatchObject({ statusCode: 503, code: "PAID_ACCESS_NOT_CONFIGURED" })
-  })
-})
-
 describe("download checksum handler", () => {
   test("redirects to checksums from the same immutable release", async () => {
     const result = await invoke(
@@ -167,27 +137,5 @@ describe("download checksum handler", () => {
       "cache-control": "no-store",
       "x-vector-release": version,
     })
-  })
-})
-
-describe("licensed installer handler", () => {
-  test("validates entitlement and uses the same public release", async () => {
-    let entitlementChecked = false
-    const result = await invoke(
-      (request, response) =>
-        handleBillingDownload(request, response, {
-          consumeDownload: async (token, target) => {
-            entitlementChecked = token === "license-download" && target === "windows-x64"
-            return { file: PUBLIC_DOWNLOAD_TARGETS[target] }
-          },
-          currentInstaller,
-        }),
-      { method: "GET", query: { token: "license-download", target: "windows-x64" }, headers: {} },
-    )
-
-    expect(entitlementChecked).toBe(true)
-    expect(result.status).toBe(307)
-    expect(result.headers.location).toEndWith("/releases/vector-v1.19.98/vector-desktop-win-x64.exe")
-    expect(result.headers["x-vector-release"]).toBe(version)
   })
 })

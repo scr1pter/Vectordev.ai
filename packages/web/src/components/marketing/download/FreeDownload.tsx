@@ -17,15 +17,7 @@ function Glyph({ os }: { os: string }) {
   return <Terminal size={17} />
 }
 
-export function FreeDownload({
-  version,
-  accessToken,
-  accessAllowed = true,
-}: {
-  version?: string
-  accessToken?: string
-  accessAllowed?: boolean
-}) {
+export function FreeDownload({ accessToken }: { accessToken?: string }) {
   const [target, setTarget] = useState(DOWNLOAD_TARGETS[0])
   const [ready, setReady] = useState(false)
   const [downloading, setDownloading] = useState("")
@@ -39,10 +31,6 @@ export function FreeDownload({
   const download = (id: string) => {
     if (!accessToken) {
       location.assign(`/login?returnTo=${encodeURIComponent(`/account?target=${id}`)}`)
-      return
-    }
-    if (!accessAllowed) {
-      setError("An active Vector license is required to download this build.")
       return
     }
     setDownloading(id)
@@ -75,18 +63,12 @@ export function FreeDownload({
         className="free-download-cta"
         type="button"
         onClick={() => download(target.id)}
-        disabled={Boolean(downloading) || !accessAllowed}
+        disabled={Boolean(downloading)}
         data-action="download-primary"
       >
         <Download size={18} />
         <span>
-          <strong>
-            {!accessAllowed
-              ? "License required"
-              : downloading === target.id
-                ? "Preparing installer…"
-                : "Download Vector"}
-          </strong>
+          <strong>{downloading === target.id ? "Preparing installer…" : "Download Vector"}</strong>
           {/* Rendered only after detection so the label never claims the wrong
               platform on the server-rendered first paint. */}
           <small>{ready ? `${target.os} · ${target.note}` : "Detecting your platform…"}</small>
@@ -94,10 +76,9 @@ export function FreeDownload({
       </button>
 
       <p className="free-download-note">
-        Sign in to your Vector account to access available installers.{" "}
-        {version ? `Checksum-verified release v${version}.` : "macOS, Windows and Linux."}
+        Free with your Vector account. macOS, Windows and Linux.
       </p>
-      {error && <p className="purchase-error">{error}</p>}
+      {error && <p className="download-error">{error}</p>}
 
       {/* Preview builds are unsigned, so the operating system blocks the first
           launch. Without this, a working download reads as a broken one. */}
@@ -134,7 +115,7 @@ export function FreeDownload({
               type="button"
               className={`free-download-alt ${entry.id === target.id ? "is-current" : ""}`}
               onClick={() => download(entry.id)}
-              disabled={Boolean(downloading) || !accessAllowed}
+              disabled={Boolean(downloading)}
             >
               <Glyph os={entry.os} />
               <span>

@@ -135,7 +135,6 @@ import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/brow
 import { boundInlineCompletionContext, sanitizeInlineCompletion } from "@/utils/codespace-ai"
 import { notifyWorkspaceFileSaved } from "@/utils/workspace-file-saved"
 import { announceWorkspaceMode } from "@/utils/workspace-mode"
-import { saveCheckpoints } from "./ai-change-checkpoints"
 
 const DialogSelectFile = lazy(() =>
   import("@/components/dialog-select-file").then((module) => ({ default: module.DialogSelectFile })),
@@ -218,26 +217,6 @@ type CodespaceProblem = {
   message: string
 }
 
-type AiChangeCheckpointSnapshot = {
-  path: string
-  content: string
-}
-
-type AiChangeCheckpoint = {
-  id: string
-  session: string
-  title: string
-  files: string[]
-  createdAt: number
-  /** Auto-generated capture summary; never user-edited. */
-  documentation?: string
-  /** User-chosen display name; falls back to sequential "Checkpoint N". */
-  name?: string
-  /** User-written documentation/notes for this checkpoint. */
-  note?: string
-  snapshots?: AiChangeCheckpointSnapshot[]
-}
-
 type TimelineFilter = "all" | "ai" | "files" | "terminal" | "browser" | "checkpoints" | "errors"
 type SkillMode = "beginner" | "intermediate" | "advanced"
 
@@ -306,7 +285,6 @@ type VectorLocalReport = {
   promptReplayBench: Array<{ model: string; quality: string; cost: string; recommendation: string }>
 }
 
-const AI_CHANGE_CHECKPOINTS_KEY = "vector.ai-change-checkpoints.v1"
 const SKILL_MODE_KEY = "vector.skill-mode.v1"
 
 function textFromFileReadResponse(result: unknown) {
@@ -677,7 +655,7 @@ function buildVectorLocalReport(
       ? "Dependency edges were inferred from imports, requires, HTML assets, and CSS imports."
       : "No internal dependency edges were detected in the scanned files.",
     impactRisk === "High"
-      ? "Review carefully, run the app, and create or keep a checkpoint before accepting."
+      ? "Review carefully and run the app before accepting. Rewind code + chat undoes the last request if it goes wrong."
       : impactRisk === "Medium"
         ? "A targeted review and preview run should be enough before accepting."
         : "This appears low risk based on local file and diff analysis.",
@@ -691,7 +669,7 @@ function buildVectorLocalReport(
       file: path,
       owner: changedFiles.includes(path) ? "AI edited" : "Workspace",
       reason: changedFiles.includes(path)
-        ? "The current AI task modified this file, so Vector will track it in review/checkpoints."
+        ? "The current AI task modified this file, so it appears in Review changes."
         : importantFiles.includes(path)
           ? "This file looks central to running or understanding the project."
           : "This file is part of the detected architecture map.",
@@ -707,7 +685,7 @@ function buildVectorLocalReport(
     problems.some((problem) => problem.severity === "error")
       ? "Fix blocking local problems before demoing or asking for another broad AI edit."
       : "Use the controlled Browser or terminal checks after each meaningful AI edit.",
-    "If something breaks, inspect the review diff and restore a checkpoint only if the change moved in the wrong direction.",
+    "If something breaks, inspect the review diff and use Rewind code + chat only if the change moved in the wrong direction.",
   ]
 
   const changedSummary = diffs.map(
@@ -818,7 +796,7 @@ function buildVectorLocalReport(
         problems.some((problem) => problem.severity === "error")
           ? "Fix blocking syntax/missing-asset errors first."
           : "Keep changes small and inspect them through Review Changes.",
-        "Create a checkpoint before accepting broad AI edits.",
+        "Use Rewind code + chat if a broad AI edit goes the wrong way.",
       ],
     },
     promptGuard: {
@@ -837,7 +815,7 @@ function buildVectorLocalReport(
       "Run one focused edit and wait for reviewable changes.",
       "Open Review changes to inspect changed files before accepting them.",
       preview.status === "ready" ? "Open Browser and show the rendered app." : "Fix preview blockers before demoing.",
-      "Restore a checkpoint if the edit is not trustworthy.",
+      "Use Rewind code + chat if the edit is not trustworthy.",
     ],
     architecture,
     dependencies,
@@ -1049,27 +1027,23 @@ function detectSecrets(text: string) {
   return SECRET_PATTERNS.filter((item) => item.pattern.test(text)).map((item) => item.label)
 }
 
-function formatCheckpointTime(value: number) {
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  })
-}
-
-function createAiCheckpointDocumentation(files: string[]) {
-  const fileList = files.length ? files.join(", ") : "the current workspace"
-  const scope =
-    files.length === 1
-      ? "a focused one-file edit"
-      : files.length <= 4
-        ? "a contained multi-file edit"
-        : "a broad workspace edit that deserves careful review"
-  return [
-    `Vector captured this checkpoint immediately after the AI produced ${scope} across ${fileList}.`,
-    "Review the changed files before applying more work. Restore this checkpoint if a later prompt regresses behavior, deletes important code, or moves the project away from the intended direction.",
-  ].join(" ")
+// Earlier builds stored whole-file snapshots of every AI change (up to ~2M
+// characters of the shared localStorage quota) for the removed Code Archaeology
+// panel, plus a per-session "seen" key that the secret scan now keeps under
+// vector.secret-scan.<session>. Nothing reads the old keys any more, so free
+// that space once per app load. Best effort: storage may be blocked.
+let legacyCheckpointsCleared = false
+function clearLegacyCheckpoints() {
+  if (legacyCheckpointsCleared) return
+  legacyCheckpointsCleared = true
+  try {
+    const stale = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index) ?? "").filter(
+      (key) => key === "vector.ai-change-checkpoints.v1" || key.startsWith("vector.ai-change-checkpoint."),
+    )
+    for (const key of stale) localStorage.removeItem(key)
+  } catch {
+    // Leaving stale data behind is harmless.
+  }
 }
 
 function estimateDiffRisk(diff: RenderDiff): "Low" | "Medium" | "High" {
@@ -1126,38 +1100,6 @@ function timelineStatusLabel(status: EngineeringEventStatus) {
     failed: "Failed",
   }
   return labels[status]
-}
-
-function loadAiChangeCheckpoints(session: string): AiChangeCheckpoint[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(AI_CHANGE_CHECKPOINTS_KEY) ?? "[]") as AiChangeCheckpoint[]
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((item) => item && item.session === session).sort((a, b) => b.createdAt - a.createdAt)
-  } catch {
-    return []
-  }
-}
-
-/**
- * Patches a stored checkpoint's user-editable fields (name/note) in place.
- * Old checkpoints without these fields keep working: empty or whitespace-only
- * values delete the field so the UI falls back to the sequential default.
- */
-function updateAiChangeCheckpoint(id: string, patch: Partial<Pick<AiChangeCheckpoint, "name" | "note">>) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(AI_CHANGE_CHECKPOINTS_KEY) ?? "[]") as AiChangeCheckpoint[]
-    if (!Array.isArray(parsed)) return
-    const next = parsed.map((item) => {
-      if (!item || item.id !== id) return item
-      const merged: AiChangeCheckpoint = { ...item, ...patch }
-      if (!merged.name?.trim()) delete merged.name
-      if (!merged.note?.trim()) delete merged.note
-      return merged
-    })
-    localStorage.setItem(AI_CHANGE_CHECKPOINTS_KEY, JSON.stringify(next))
-  } catch {
-    // Checkpoint metadata is a local convenience; storage failures are non-fatal.
-  }
 }
 
 function fileLanguage(path: string | undefined) {
@@ -4412,209 +4354,6 @@ export function PreviewPanel(props: {
   )
 }
 
-// Code Archaeology — the checkpoints this task has made, from the first to the
-// latest. Read-only history; restoring a checkpoint is the one mutating action,
-// and it writes real file content back via the SDK.
-function CodeArchaeologyPanel(props: {
-  open: boolean
-  onClose: () => void
-  checkpoints: AiChangeCheckpoint[]
-  restoringCheckpoint: string | undefined
-  onRestoreCheckpoint: (checkpoint: AiChangeCheckpoint) => void
-  onUpdateCheckpoint: (id: string, patch: { name?: string; note?: string }) => void
-  onOpenDiff: (path: string) => void
-}) {
-  // Oldest first — the literal ask: the task's checkpoint history from the
-  // very first one made to the latest. Sequential "Checkpoint N" names follow
-  // this order, so the numbering is stable as new checkpoints append.
-  const chronological = createMemo(() => [...props.checkpoints].sort((a, b) => a.createdAt - b.createdAt))
-
-  return (
-    <Show when={props.open}>
-      <div
-        class="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-        onClick={(e) => e.target === e.currentTarget && props.onClose()}
-      >
-        <div class="vx-arch">
-          <div class="vx-arch__head">
-            <div class="vx-arch__glyph">
-              <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
-                <path
-                  d="M2.75 8A5.25 5.25 0 1 1 8 13.25M2.75 8V4.5M2.75 8H6.25"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.25"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-                <path
-                  d="M8 5.25V8l2 1.25"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.25"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </div>
-            <div class="min-w-0 flex-1">
-              <div class="text-[14px] font-semibold text-[color:var(--vx-text)]">Code Archaeology</div>
-              <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
-                Every checkpoint this task has made, from the first to the latest.
-              </div>
-            </div>
-            <button
-              type="button"
-              class="grid size-7 place-items-center rounded-md text-[color:var(--vx-text-muted)] transition hover:bg-[color:var(--vx-control-hover)] hover:text-[color:var(--vx-text)]"
-              aria-label="Close"
-              onClick={() => props.onClose()}
-            >
-              <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                <path d="m4 4 8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
-            </button>
-          </div>
-
-          <div class="flex-1 overflow-y-auto p-3">
-            <Show
-              when={chronological().length}
-              fallback={
-                <p class="px-2 py-10 text-center text-[13px] text-[color:var(--vx-text-muted)]">
-                  No checkpoints yet. Vector captures one automatically whenever an agent edits your files.
-                </p>
-              }
-            >
-              <div class="vx-arch__list">
-                <For each={chronological()}>
-                  {(checkpoint, index) => {
-                    const [renaming, setRenaming] = createSignal(false)
-                    const [nameDraft, setNameDraft] = createSignal("")
-                    let nameInput: HTMLInputElement | undefined
-                    const displayName = () => checkpoint.name?.trim() || `Checkpoint ${index() + 1}`
-                    const startRename = () => {
-                      setNameDraft(displayName())
-                      setRenaming(true)
-                      requestAnimationFrame(() => {
-                        nameInput?.focus()
-                        nameInput?.select()
-                      })
-                    }
-                    const commitRename = () => {
-                      if (!renaming()) return
-                      setRenaming(false)
-                      const next = nameDraft().trim()
-                      if (next === displayName()) return
-                      props.onUpdateCheckpoint(checkpoint.id, { name: next })
-                    }
-                    const commitNote = (value: string) => {
-                      if (value === (checkpoint.note ?? "")) return
-                      props.onUpdateCheckpoint(checkpoint.id, { note: value })
-                    }
-
-                    return (
-                      <div class="vx-arch__item">
-                        <div class="flex items-center gap-2">
-                          <span class="vx-arch__seq">{index() + 1}</span>
-                          <Show
-                            when={renaming()}
-                            fallback={
-                              <button
-                                type="button"
-                                class="group/name flex min-w-0 flex-1 items-center gap-1.5 text-left"
-                                title="Rename checkpoint"
-                                onClick={startRename}
-                              >
-                                <span class="vx-arch__name truncate group-hover/name:text-[color:var(--vx-text)]">
-                                  {displayName()}
-                                </span>
-                                <svg
-                                  viewBox="0 0 16 16"
-                                  class="size-3 shrink-0 text-[color:var(--vx-text-muted)] transition group-hover/name:text-[color:var(--vx-purple-bright)]"
-                                  aria-hidden="true"
-                                >
-                                  <path
-                                    d="m9.9 3.3 2.8 2.8L5.6 13.2l-3.1.3.3-3.1 7.1-7.1Zm1.4-1.4 1.1-1.1 2.8 2.8-1.1 1.1-2.8-2.8Z"
-                                    fill="currentColor"
-                                  />
-                                </svg>
-                              </button>
-                            }
-                          >
-                            <input
-                              ref={nameInput}
-                              value={nameDraft()}
-                              class="h-6 min-w-0 flex-1 rounded-md border border-[color:var(--vx-purple)]/50 bg-[color:var(--vx-canvas)] px-1.5 text-[13px] font-medium text-[color:var(--vx-text)] outline-none focus:border-[color:var(--vx-purple-bright)]"
-                              aria-label="Checkpoint name"
-                              onInput={(event) => setNameDraft(event.currentTarget.value)}
-                              onKeyDown={(event) => {
-                                event.stopPropagation()
-                                if (event.key === "Enter") {
-                                  event.preventDefault()
-                                  commitRename()
-                                }
-                                if (event.key === "Escape") {
-                                  event.preventDefault()
-                                  setRenaming(false)
-                                }
-                              }}
-                              onBlur={commitRename}
-                            />
-                          </Show>
-                          <div class="shrink-0 text-[10.5px] text-[color:var(--vx-text-muted)]">
-                            {formatCheckpointTime(checkpoint.createdAt)}
-                          </div>
-                        </div>
-                        <div class="pl-7 text-[10.5px] text-[color:var(--vx-text-muted)]">
-                          {checkpoint.files.length} {checkpoint.files.length === 1 ? "file" : "files"} captured
-                          automatically after AI edits
-                        </div>
-                        <div class="pl-7">
-                          <textarea
-                            value={checkpoint.note ?? ""}
-                            rows={2}
-                            placeholder="Write documentation for this checkpoint…"
-                            class="w-full resize-y rounded-md border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-2 py-1.5 text-[12px] leading-5 text-[color:var(--vx-text-subtle)] outline-none transition placeholder:text-[color:var(--vx-text-muted)] focus:border-[color:var(--vx-purple)]/60 focus:text-[color:var(--vx-text)]"
-                            aria-label="Checkpoint documentation"
-                            onKeyDown={(event) => event.stopPropagation()}
-                            onChange={(event) => commitNote(event.currentTarget.value)}
-                          />
-                        </div>
-                        <div class="flex items-center justify-between gap-2 pl-7">
-                          <div class="flex flex-wrap gap-1">
-                            <For each={checkpoint.files}>
-                              {(path) => (
-                                <button
-                                  type="button"
-                                  class="rounded border border-[color:var(--vx-line)] bg-[color:var(--vx-control)] px-1.5 py-0.5 text-[10.5px] text-[color:var(--vx-text-subtle)] hover:text-[color:var(--vx-text)]"
-                                  onClick={() => props.onOpenDiff(path)}
-                                >
-                                  {path.split("/").at(-1)}
-                                </button>
-                              )}
-                            </For>
-                          </div>
-                          <button
-                            type="button"
-                            class="shrink-0 rounded-md border border-[color:var(--vx-line)] px-2 py-1 text-[11px] text-[color:var(--vx-text-subtle)] transition hover:bg-[color:var(--vx-control-hover)] hover:text-white disabled:opacity-40"
-                            disabled={props.restoringCheckpoint === checkpoint.id}
-                            onClick={() => props.onRestoreCheckpoint(checkpoint)}
-                          >
-                            {props.restoringCheckpoint === checkpoint.id ? "Restoring…" : "Restore"}
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  }}
-                </For>
-              </div>
-            </Show>
-          </div>
-        </div>
-      </div>
-    </Show>
-  )
-}
-
 export function SessionSidePanel(props: {
   canReview: () => boolean
   diffs: () => (SnapshotFileDiff | VcsFileDiff)[]
@@ -4683,18 +4422,15 @@ export function SessionSidePanel(props: {
     }
     return (hash >>> 0).toString(36)
   })
-  const checkpointSessionStatus = createMemo(() => {
+  const activeSessionStatus = createMemo(() => {
     const id = params.id
     if (!id) return undefined
     return sync().data.session_status[id]?.type
   })
-  const [archaeologyOpen, setArchaeologyOpen] = createSignal(false)
-  const [checkpointRefresh, setCheckpointRefresh] = createSignal(0)
   const [timelineRefresh, setTimelineRefresh] = createSignal(0)
   const [timelineFilter, setTimelineFilter] = createSignal<TimelineFilter>("all")
   const [timelineSearch, setTimelineSearch] = createSignal("")
   const [expandedTimelineEvents, setExpandedTimelineEvents] = createSignal<Record<string, boolean>>({})
-  const [restoringCheckpoint, setRestoringCheckpoint] = createSignal<string | undefined>()
   const [projectReport, setProjectReport] = createSignal<VectorLocalReport | undefined>()
   const [projectReportLoading, setProjectReportLoading] = createSignal(false)
   const [skillMode, setSkillMode] = createSignal<SkillMode>(readSkillModePreference())
@@ -4704,10 +4440,6 @@ export function SessionSidePanel(props: {
     } catch {
       // Local preference only.
     }
-  })
-  const aiCheckpoints = createMemo(() => {
-    checkpointRefresh()
-    return loadAiChangeCheckpoints(sessionKey())
   })
   const storedEngineeringTimeline = createMemo(() => {
     timelineRefresh()
@@ -4732,25 +4464,6 @@ export function SessionSidePanel(props: {
       } satisfies EngineeringTimelineEvent
     }),
   )
-  const checkpointTimelineEvents = createMemo<EngineeringTimelineEvent[]>(() =>
-    aiCheckpoints().map(
-      (checkpoint) =>
-        ({
-          id: `checkpoint:${checkpoint.id}`,
-          timestamp: checkpoint.createdAt,
-          type: "checkpoint",
-          status: "success",
-          title: checkpoint.name?.trim() || checkpoint.title,
-          summary: checkpoint.documentation || createAiCheckpointDocumentation(checkpoint.files),
-          details: checkpoint.files.length
-            ? [`Captured ${checkpoint.files.length} file${checkpoint.files.length === 1 ? "" : "s"}.`]
-            : undefined,
-          files: checkpoint.files,
-          checkpointId: checkpoint.id,
-          source: "Checkpoint",
-        }) satisfies EngineeringTimelineEvent,
-    ),
-  )
   const riskTimelineEvents = createMemo<EngineeringTimelineEvent[]>(() => {
     const report = projectReport()
     if (!report) return []
@@ -4769,7 +4482,6 @@ export function SessionSidePanel(props: {
     const byId = new Map<string, EngineeringTimelineEvent>()
     for (const event of storedEngineeringTimeline()) byId.set(event.id, event)
     for (const event of diffTimelineEvents()) byId.set(event.id, event)
-    for (const event of checkpointTimelineEvents()) byId.set(event.id, event)
     for (const event of riskTimelineEvents()) byId.set(event.id, event)
     return [...byId.values()].sort((a, b) => b.timestamp - a.timestamp)
   })
@@ -4913,37 +4625,41 @@ export function SessionSidePanel(props: {
     return out
   })
 
+  onMount(clearLegacyCheckpoints)
+
+  // Once an AI change settles, read the changed files once to scan them for
+  // credentials. The contents are only scanned, never stored.
   createEffect(
     on(
-      () => [aiChangeSignature(), checkpointSessionStatus()] as const,
+      () => [aiChangeSignature(), activeSessionStatus()] as const,
       ([signature, sessionStatus]) => {
         if (!signature) return
         if (sessionStatus && sessionStatus !== "idle") return
         const session = sessionKey()
-        const seenKey = `vector.ai-change-checkpoint.${session}`
+        const seenKey = `vector.secret-scan.${session}`
         if (localStorage.getItem(seenKey) === signature) return
         localStorage.setItem(seenKey, signature)
 
         const createdAt = Date.now()
         const files = [...diffFiles()]
         void (async () => {
-          const snapshots = (
+          const contents = (
             await Promise.all(
               files.map(async (path) => {
                 try {
                   const result = await sdk().client.file.read({ path })
                   const content = textFromFileReadResponse(result)
                   if (!content) return undefined
-                  return { path, content } satisfies AiChangeCheckpointSnapshot
+                  return { path, content }
                 } catch {
                   return undefined
                 }
               }),
             )
-          ).filter((item): item is AiChangeCheckpointSnapshot => Boolean(item))
+          ).filter((item) => item !== undefined)
 
-          const flagged = snapshots.flatMap((snapshot) =>
-            detectSecrets(snapshot.content).map((label) => `${fileBasename(snapshot.path)} (${label})`),
+          const flagged = contents.flatMap((file) =>
+            detectSecrets(file.content).map((label) => `${fileBasename(file.path)} (${label})`),
           )
           if (flagged.length > 0) {
             showToast({
@@ -4953,55 +4669,24 @@ export function SessionSidePanel(props: {
             })
           }
 
-          const existing = (() => {
-            try {
-              return JSON.parse(localStorage.getItem(AI_CHANGE_CHECKPOINTS_KEY) ?? "[]") as AiChangeCheckpoint[]
-            } catch {
-              return []
-            }
-          })()
-          const checkpoint = {
-            id: `${session}-${createdAt}`,
-            session,
-            title: `${files.length} AI-edited ${files.length === 1 ? "file" : "files"}`,
-            files,
-            createdAt,
-            documentation: createAiCheckpointDocumentation(files),
-            snapshots,
-          } satisfies AiChangeCheckpoint
-          saveCheckpoints(localStorage, AI_CHANGE_CHECKPOINTS_KEY, [checkpoint, ...existing])
           logEngineeringEvent(session, {
-            id: `checkpoint:${checkpoint.id}`,
-            timestamp: checkpoint.createdAt,
-            type: "checkpoint",
-            status: "success",
-            title: checkpoint.title,
-            summary: checkpoint.documentation,
-            details: ["Vector captured a restorable snapshot after AI-generated edits."],
-            files: checkpoint.files,
-            checkpointId: checkpoint.id,
-            source: "AI Agent",
-          })
-          logEngineeringEvent(session, {
-            id: `file-edit:${checkpoint.id}`,
-            timestamp: checkpoint.createdAt,
+            id: `file-edit:${session}-${createdAt}`,
+            timestamp: createdAt,
             type: "file",
             status: flagged.length > 0 ? "warning" : "success",
             title: `Edited ${files.length} ${files.length === 1 ? "file" : "files"}`,
             summary:
               flagged.length > 0
-                ? "AI changes were captured, but the secret scanner flagged possible credentials."
-                : "AI changes were captured and queued for review.",
+                ? "AI changes are waiting for review, and the secret scanner flagged possible credentials."
+                : "AI changes are waiting for review.",
             details:
               flagged.length > 0
                 ? [`Potential secrets: ${[...new Set(flagged)].slice(0, 5).join("; ")}`]
                 : ["Review these files before continuing."],
             files,
-            checkpointId: checkpoint.id,
             source: "AI Agent",
           })
           setTimelineRefresh((value) => value + 1)
-          setCheckpointRefresh((value) => value + 1)
         })()
       },
       { defer: true },
@@ -5102,89 +4787,6 @@ export function SessionSidePanel(props: {
     } finally {
       setProjectReportLoading(false)
     }
-  }
-
-  const vectorArchaeologyPanel = (_event?: Event) => {
-    setArchaeologyOpen(true)
-    view().reviewPanel.close()
-    layout.fileTree.close()
-  }
-
-  const patchAiCheckpoint = (id: string, patch: { name?: string; note?: string }) => {
-    updateAiChangeCheckpoint(id, patch)
-    setCheckpointRefresh((value) => value + 1)
-  }
-
-  const closeCodeArchaeologyPanel = () => {
-    setArchaeologyOpen(false)
-  }
-
-  const restoreAiCheckpoint = async (checkpoint: AiChangeCheckpoint) => {
-    const snapshots = checkpoint.snapshots ?? []
-    if (!snapshots.length) {
-      showToast({
-        variant: "error",
-        title: "Checkpoint cannot be restored",
-        description: "Vector has no saved file contents for this checkpoint, so there is nothing to restore.",
-      })
-      return
-    }
-
-    setRestoringCheckpoint(checkpoint.id)
-    try {
-      for (const snapshot of snapshots) {
-        await sdk().client.file.write({ directory: sdk().directory, path: snapshot.path, content: snapshot.content })
-        await file.load(snapshot.path, { force: true })
-      }
-      await file.tree.refresh("")
-      logEngineeringEvent(sessionKey(), {
-        id: `checkpoint-restore:${checkpoint.id}:${Date.now()}`,
-        timestamp: Date.now(),
-        type: "checkpoint",
-        status: "success",
-        title: "Restored checkpoint",
-        summary: `Restored ${snapshots.length} file${snapshots.length === 1 ? "" : "s"} from ${formatCheckpointTime(checkpoint.createdAt)}.`,
-        details: ["Vector wrote the stored checkpoint snapshots back into the workspace."],
-        files: checkpoint.files,
-        checkpointId: checkpoint.id,
-        source: "Checkpoint",
-      })
-      setTimelineRefresh((value) => value + 1)
-      showToast({
-        title: "Checkpoint restored",
-        description: `Restored ${snapshots.length} file${snapshots.length === 1 ? "" : "s"} from ${formatCheckpointTime(checkpoint.createdAt)}.`,
-      })
-    } catch (error) {
-      logEngineeringEvent(sessionKey(), {
-        type: "error",
-        status: "failed",
-        title: "Checkpoint restore failed",
-        summary:
-          error instanceof Error && error.message
-            ? error.message
-            : "Vector could not write one or more checkpoint files.",
-        files: checkpoint.files,
-        checkpointId: checkpoint.id,
-        source: "Checkpoint",
-      })
-      setTimelineRefresh((value) => value + 1)
-      showToast({
-        variant: "error",
-        title: "Could not restore checkpoint",
-        description:
-          error instanceof Error && error.message
-            ? error.message
-            : "Vector could not write one or more checkpoint files.",
-      })
-    } finally {
-      setRestoringCheckpoint(undefined)
-    }
-  }
-
-  const openReviewDiffFromArchaeology = (path: string) => {
-    closeCodeArchaeologyPanel()
-    view().reviewPanel.open("other")
-    props.focusReviewDiff(path)
   }
 
   const toggleTimelineEvent = (id: string) => {
@@ -5410,399 +5012,359 @@ export function SessionSidePanel(props: {
   })
 
   return (
-    <>
-      <Show when={isDesktop() && !(settings.general.newLayoutDesigns() && !params.id)}>
-        <aside
-          id="review-panel"
-          data-vector-review-panel
-          aria-label={language.t("session.panel.reviewAndFiles")}
-          aria-hidden={!open()}
-          inert={!open()}
-          class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
-          classList={{
-            "pointer-events-none": !open(),
-            "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-              !props.size.active() && !props.reviewSnap,
-            "rounded-[10px] shadow-[var(--v2-elevation-raised)] overflow-hidden":
-              settings.general.newLayoutDesigns() && !codespaceOpen(),
-            "flex-1": reviewOpen(),
-          }}
-          style={{ width: panelWidth() }}
-        >
-          <Show when={open()}>
+    <Show when={isDesktop() && !(settings.general.newLayoutDesigns() && !params.id)}>
+      <aside
+        id="review-panel"
+        data-vector-review-panel
+        aria-label={language.t("session.panel.reviewAndFiles")}
+        aria-hidden={!open()}
+        inert={!open()}
+        class="relative min-w-0 h-full flex shrink-0 overflow-hidden bg-background-base"
+        classList={{
+          "pointer-events-none": !open(),
+          "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
+            !props.size.active() && !props.reviewSnap,
+          "rounded-[10px] shadow-[var(--v2-elevation-raised)] overflow-hidden":
+            settings.general.newLayoutDesigns() && !codespaceOpen(),
+          "flex-1": reviewOpen(),
+        }}
+        style={{ width: panelWidth() }}
+      >
+        <Show when={open()}>
+          <div
+            class="size-full flex"
+            classList={{
+              "border-l border-border-weaker-base": !settings.general.newLayoutDesigns() && !codespaceOpen(),
+            }}
+          >
             <div
-              class="size-full flex"
+              aria-hidden={!reviewOpen()}
+              inert={!reviewOpen()}
+              class="relative min-w-0 h-full flex-1 overflow-hidden bg-background-base"
               classList={{
-                "border-l border-border-weaker-base": !settings.general.newLayoutDesigns() && !codespaceOpen(),
+                "pointer-events-none": !reviewOpen(),
               }}
             >
-              <div
-                aria-hidden={!reviewOpen()}
-                inert={!reviewOpen()}
-                class="relative min-w-0 h-full flex-1 overflow-hidden bg-background-base"
-                classList={{
-                  "pointer-events-none": !reviewOpen(),
-                }}
-              >
-                <div class="size-full min-w-0 h-full bg-background-base">
-                  <DragDropProvider
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                    onDragOver={handleDragOver}
-                    collisionDetector={closestCenter}
-                  >
-                    <DragDropSensors />
-                    <ConstrainDragYAxis />
-                    <Tabs value={activeTab()} onChange={handleTabChange}>
-                      <Show when={activeTab() !== "codespace"}>
-                        <Show
-                          when={contextActive()}
-                          fallback={
-                            <div class="sticky top-0 shrink-0 flex">
-                              <Tabs.List
-                                ref={(el: HTMLDivElement) => {
-                                  const stop = createFileTabListSync({ el, contextOpen })
-                                  onCleanup(stop)
-                                }}
-                              >
-                                <Show when={contextOpen()}>
-                                  <Tabs.Trigger
-                                    value="context"
-                                    closeButton={
-                                      <TooltipKeybind
-                                        title={language.t("common.closeTab")}
-                                        keybind={command.keybind("tab.close")}
-                                        placement="bottom"
-                                        gutter={10}
-                                      >
-                                        <IconButton
-                                          icon="close-small"
-                                          variant="ghost"
-                                          class="h-5 w-5"
-                                          onClick={() => tabs().close("context")}
-                                          aria-label={language.t("common.closeTab")}
-                                        />
-                                      </TooltipKeybind>
-                                    }
-                                    hideCloseButton
-                                    onMiddleClick={() => tabs().close("context")}
-                                  >
-                                    <div class="flex items-center gap-2">
-                                      <SessionContextUsage variant="indicator" />
-                                      <div>{language.t("session.tab.context")}</div>
-                                    </div>
-                                  </Tabs.Trigger>
-                                </Show>
-                                <Show when={activeTab() !== "preview"}>
-                                  <button
-                                    type="button"
-                                    class="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-white/60 transition hover:bg-white/[0.06] hover:text-white"
-                                    aria-label="Code Archaeology"
-                                    title="Code Archaeology — every checkpoint, from first to latest"
-                                    onClick={() => vectorArchaeologyPanel()}
-                                  >
-                                    <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
+              <div class="size-full min-w-0 h-full bg-background-base">
+                <DragDropProvider
+                  onDragStart={handleDragStart}
+                  onDragEnd={handleDragEnd}
+                  onDragOver={handleDragOver}
+                  collisionDetector={closestCenter}
+                >
+                  <DragDropSensors />
+                  <ConstrainDragYAxis />
+                  <Tabs value={activeTab()} onChange={handleTabChange}>
+                    <Show when={activeTab() !== "codespace"}>
+                      <Show
+                        when={contextActive()}
+                        fallback={
+                          <div class="sticky top-0 shrink-0 flex">
+                            <Tabs.List
+                              ref={(el: HTMLDivElement) => {
+                                const stop = createFileTabListSync({ el, contextOpen })
+                                onCleanup(stop)
+                              }}
+                            >
+                              <Show when={contextOpen()}>
+                                <Tabs.Trigger
+                                  value="context"
+                                  closeButton={
+                                    <TooltipKeybind
+                                      title={language.t("common.closeTab")}
+                                      keybind={command.keybind("tab.close")}
+                                      placement="bottom"
+                                      gutter={10}
+                                    >
+                                      <IconButton
+                                        icon="close-small"
+                                        variant="ghost"
+                                        class="h-5 w-5"
+                                        onClick={() => tabs().close("context")}
+                                        aria-label={language.t("common.closeTab")}
+                                      />
+                                    </TooltipKeybind>
+                                  }
+                                  hideCloseButton
+                                  onMiddleClick={() => tabs().close("context")}
+                                >
+                                  <div class="flex items-center gap-2">
+                                    <SessionContextUsage variant="indicator" />
+                                    <div>{language.t("session.tab.context")}</div>
+                                  </div>
+                                </Tabs.Trigger>
+                              </Show>
+                              <Show when={previewOpen()}>
+                                <Tabs.Trigger
+                                  value="preview"
+                                  closeButton={
+                                    <TooltipKeybind
+                                      title="Close browser"
+                                      keybind={command.keybind("tab.close")}
+                                      placement="bottom"
+                                      gutter={10}
+                                    >
+                                      <IconButton
+                                        icon="close-small"
+                                        variant="ghost"
+                                        class="h-5 w-5"
+                                        onClick={() => tabs().close("preview")}
+                                        aria-label="Close browser"
+                                      />
+                                    </TooltipKeybind>
+                                  }
+                                  hideCloseButton
+                                  onMiddleClick={() => tabs().close("preview")}
+                                >
+                                  <div class="flex items-center gap-2">
+                                    <svg viewBox="0 0 16 16" class="size-4 text-[#c4a6ff]" aria-hidden="true">
                                       <path
-                                        d="M2.75 8A5.25 5.25 0 1 1 8 13.25M2.75 8V4.5M2.75 8H6.25"
+                                        d="M2.25 4.25A1.25 1.25 0 0 1 3.5 3h9A1.25 1.25 0 0 1 13.75 4.25v6.5A1.25 1.25 0 0 1 12.5 12h-9a1.25 1.25 0 0 1-1.25-1.25v-6.5Z"
                                         fill="none"
                                         stroke="currentColor"
                                         stroke-width="1.25"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
                                       />
                                       <path
-                                        d="M8 5.25V8l2 1.25"
+                                        d="M2.75 5.5h10.5"
                                         fill="none"
                                         stroke="currentColor"
-                                        stroke-width="1.25"
+                                        stroke-width="1.2"
                                         stroke-linecap="round"
-                                        stroke-linejoin="round"
                                       />
                                     </svg>
-                                    <div>Archaeology</div>
-                                  </button>
-                                </Show>
-                                <Show when={previewOpen()}>
-                                  <Tabs.Trigger
-                                    value="preview"
-                                    closeButton={
-                                      <TooltipKeybind
-                                        title="Close browser"
-                                        keybind={command.keybind("tab.close")}
-                                        placement="bottom"
-                                        gutter={10}
-                                      >
-                                        <IconButton
-                                          icon="close-small"
-                                          variant="ghost"
-                                          class="h-5 w-5"
-                                          onClick={() => tabs().close("preview")}
-                                          aria-label="Close browser"
-                                        />
-                                      </TooltipKeybind>
-                                    }
-                                    hideCloseButton
-                                    onMiddleClick={() => tabs().close("preview")}
-                                  >
-                                    <div class="flex items-center gap-2">
-                                      <svg viewBox="0 0 16 16" class="size-4 text-[#c4a6ff]" aria-hidden="true">
-                                        <path
-                                          d="M2.25 4.25A1.25 1.25 0 0 1 3.5 3h9A1.25 1.25 0 0 1 13.75 4.25v6.5A1.25 1.25 0 0 1 12.5 12h-9a1.25 1.25 0 0 1-1.25-1.25v-6.5Z"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          stroke-width="1.25"
-                                        />
-                                        <path
-                                          d="M2.75 5.5h10.5"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          stroke-width="1.2"
-                                          stroke-linecap="round"
-                                        />
-                                      </svg>
-                                      <div>Browser</div>
-                                    </div>
-                                  </Tabs.Trigger>
-                                </Show>
-                                <Show when={activeTab() !== "preview" && reviewTab() && props.canReview()}>
-                                  <Tabs.Trigger value="review">
-                                    <div class="flex items-center gap-1.5">
-                                      <div>Changes</div>
-                                      <Show when={props.hasReview()}>
-                                        <div>{props.reviewCount()}</div>
-                                      </Show>
-                                    </div>
-                                  </Tabs.Trigger>
-                                </Show>
-                                <Show when={activeTab() !== "preview"}>
-                                  <SortableProvider ids={openedTabs()}>
-                                    <For each={openedTabs()}>
-                                      {(tab) => <SortableTab tab={tab} onTabClose={tabs().close} />}
-                                    </For>
-                                  </SortableProvider>
-                                </Show>
-                                <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
-                                  <TooltipKeybind title="Close panel" keybind="Esc" placement="bottom" gutter={10}>
-                                    <IconButton
-                                      icon="close-small"
-                                      variant="ghost"
-                                      iconSize="large"
-                                      class="!rounded-md"
-                                      onClick={closePanel}
-                                      aria-label="Close review panel"
-                                    />
-                                  </TooltipKeybind>
-                                </div>
-                              </Tabs.List>
-                            </div>
-                          }
-                        >
-                          <div class="sticky top-0 z-20 h-10 shrink-0 flex items-center justify-between border-b border-border-weaker-base bg-background-stronger px-3">
-                            <div class="flex min-w-0 items-center gap-2 text-12-medium text-text-base">
-                              <SessionContextUsage variant="indicator" />
-                              <span>Context</span>
-                            </div>
-                            <TooltipKeybind title="Close context" keybind="Esc" placement="bottom" gutter={10}>
-                              <IconButton
-                                icon="close-small"
-                                variant="ghost"
-                                iconSize="large"
-                                class="!rounded-md"
-                                onClick={() => {
-                                  tabs().close("context")
-                                  view().reviewPanel.close()
-                                }}
-                                aria-label="Close context"
-                              />
-                            </TooltipKeybind>
-                          </div>
-                        </Show>
-                      </Show>
-
-                      <Show when={reviewTab() && props.canReview()}>
-                        <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">
-                          <Show when={reviewOpen() && activeTab() === "review"}>{props.reviewPanel()}</Show>
-                        </Tabs.Content>
-                      </Show>
-
-                      <Tabs.Content value="codespace" class="flex flex-col h-full overflow-hidden contain-strict">
-                        <Show when={reviewOpen() && activeTab() === "codespace"}>
-                          <CodespaceWorkbench
-                            modified={diffFiles}
-                            kinds={kinds}
-                            empty={() => empty(language.t("session.files.empty"))}
-                            diffs={diffs}
-                            focusReviewDiff={props.focusReviewDiff}
-                            sessionId={() => params.id}
-                            onClose={closePanel}
-                            follow={agentFollow}
-                          />
-                        </Show>
-                      </Tabs.Content>
-
-                      <Tabs.Content value="preview" class="flex flex-col h-full overflow-hidden contain-strict">
-                        <Show when={reviewOpen() && activeTab() === "preview"}>
-                          <PreviewPanel
-                            sessionKey={sessionKey()}
-                            contextId={params.id ?? sessionKey()}
-                            directory={sdk().directory}
-                            onClose={() => {
-                              tabs().close("preview")
-                              view().reviewPanel.close()
-                            }}
-                          />
-                        </Show>
-                      </Tabs.Content>
-
-                      <Tabs.Content value="empty" class="flex flex-col h-full overflow-hidden contain-strict">
-                        <Show when={activeTab() === "empty"}>
-                          <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-                            <div class="h-full px-6 pb-42 -mt-4 flex flex-col items-center justify-center text-center gap-6">
-                              <Mark class="w-14 opacity-10" />
-                              <div class="text-14-regular text-text-weak max-w-56">
-                                {language.t("session.files.selectToOpen")}
+                                    <div>Browser</div>
+                                  </div>
+                                </Tabs.Trigger>
+                              </Show>
+                              <Show when={activeTab() !== "preview" && reviewTab() && props.canReview()}>
+                                <Tabs.Trigger value="review">
+                                  <div class="flex items-center gap-1.5">
+                                    <div>Changes</div>
+                                    <Show when={props.hasReview()}>
+                                      <div>{props.reviewCount()}</div>
+                                    </Show>
+                                  </div>
+                                </Tabs.Trigger>
+                              </Show>
+                              <Show when={activeTab() !== "preview"}>
+                                <SortableProvider ids={openedTabs()}>
+                                  <For each={openedTabs()}>
+                                    {(tab) => <SortableTab tab={tab} onTabClose={tabs().close} />}
+                                  </For>
+                                </SortableProvider>
+                              </Show>
+                              <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
+                                <TooltipKeybind title="Close panel" keybind="Esc" placement="bottom" gutter={10}>
+                                  <IconButton
+                                    icon="close-small"
+                                    variant="ghost"
+                                    iconSize="large"
+                                    class="!rounded-md"
+                                    onClick={closePanel}
+                                    aria-label="Close review panel"
+                                  />
+                                </TooltipKeybind>
                               </div>
+                            </Tabs.List>
+                          </div>
+                        }
+                      >
+                        <div class="sticky top-0 z-20 h-10 shrink-0 flex items-center justify-between border-b border-border-weaker-base bg-background-stronger px-3">
+                          <div class="flex min-w-0 items-center gap-2 text-12-medium text-text-base">
+                            <SessionContextUsage variant="indicator" />
+                            <span>Context</span>
+                          </div>
+                          <TooltipKeybind title="Close context" keybind="Esc" placement="bottom" gutter={10}>
+                            <IconButton
+                              icon="close-small"
+                              variant="ghost"
+                              iconSize="large"
+                              class="!rounded-md"
+                              onClick={() => {
+                                tabs().close("context")
+                                view().reviewPanel.close()
+                              }}
+                              aria-label="Close context"
+                            />
+                          </TooltipKeybind>
+                        </div>
+                      </Show>
+                    </Show>
+
+                    <Show when={reviewTab() && props.canReview()}>
+                      <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={reviewOpen() && activeTab() === "review"}>{props.reviewPanel()}</Show>
+                      </Tabs.Content>
+                    </Show>
+
+                    <Tabs.Content value="codespace" class="flex flex-col h-full overflow-hidden contain-strict">
+                      <Show when={reviewOpen() && activeTab() === "codespace"}>
+                        <CodespaceWorkbench
+                          modified={diffFiles}
+                          kinds={kinds}
+                          empty={() => empty(language.t("session.files.empty"))}
+                          diffs={diffs}
+                          focusReviewDiff={props.focusReviewDiff}
+                          sessionId={() => params.id}
+                          onClose={closePanel}
+                          follow={agentFollow}
+                        />
+                      </Show>
+                    </Tabs.Content>
+
+                    <Tabs.Content value="preview" class="flex flex-col h-full overflow-hidden contain-strict">
+                      <Show when={reviewOpen() && activeTab() === "preview"}>
+                        <PreviewPanel
+                          sessionKey={sessionKey()}
+                          contextId={params.id ?? sessionKey()}
+                          directory={sdk().directory}
+                          onClose={() => {
+                            tabs().close("preview")
+                            view().reviewPanel.close()
+                          }}
+                        />
+                      </Show>
+                    </Tabs.Content>
+
+                    <Tabs.Content value="empty" class="flex flex-col h-full overflow-hidden contain-strict">
+                      <Show when={activeTab() === "empty"}>
+                        <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                          <div class="h-full px-6 pb-42 -mt-4 flex flex-col items-center justify-center text-center gap-6">
+                            <Mark class="w-14 opacity-10" />
+                            <div class="text-14-regular text-text-weak max-w-56">
+                              {language.t("session.files.selectToOpen")}
                             </div>
+                          </div>
+                        </div>
+                      </Show>
+                    </Tabs.Content>
+
+                    <Show when={contextOpen()}>
+                      <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={activeTab() === "context"}>
+                          <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
+                            <SessionContextTab />
                           </div>
                         </Show>
                       </Tabs.Content>
+                    </Show>
 
-                      <Show when={contextOpen()}>
-                        <Tabs.Content value="context" class="flex flex-col h-full overflow-hidden contain-strict">
-                          <Show when={activeTab() === "context"}>
-                            <div class="relative pt-2 flex-1 min-h-0 overflow-hidden">
-                              <SessionContextTab />
-                            </div>
-                          </Show>
-                        </Tabs.Content>
-                      </Show>
-
-                      <Show when={activeFileTab()} keyed>
-                        {(tab) => <FileTabContent tab={tab} />}
-                      </Show>
-                    </Tabs>
-                    <DragOverlay>
-                      <Show when={store.activeDraggable} keyed>
-                        {(tab) => {
-                          const path = file.pathFromTab(tab)
-                          return (
-                            <div data-component="tabs-drag-preview">
-                              <Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>
-                            </div>
-                          )
-                        }}
-                      </Show>
-                    </DragOverlay>
-                  </DragDropProvider>
-                </div>
+                    <Show when={activeFileTab()} keyed>
+                      {(tab) => <FileTabContent tab={tab} />}
+                    </Show>
+                  </Tabs>
+                  <DragOverlay>
+                    <Show when={store.activeDraggable} keyed>
+                      {(tab) => {
+                        const path = file.pathFromTab(tab)
+                        return (
+                          <div data-component="tabs-drag-preview">
+                            <Show when={path}>{(p) => <FileVisual active path={p()} />}</Show>
+                          </div>
+                        )
+                      }}
+                    </Show>
+                  </DragOverlay>
+                </DragDropProvider>
               </div>
+            </div>
 
-              <Show when={shown()}>
+            <Show when={shown()}>
+              <div
+                id="file-tree-panel"
+                aria-hidden={!fileOpen()}
+                inert={!fileOpen()}
+                class="relative min-w-0 h-full shrink-0 overflow-hidden"
+                classList={{
+                  "pointer-events-none": !fileOpen(),
+                  "transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
+                    !props.size.active(),
+                }}
+                style={{ width: treeWidth() }}
+              >
                 <div
-                  id="file-tree-panel"
-                  aria-hidden={!fileOpen()}
-                  inert={!fileOpen()}
-                  class="relative min-w-0 h-full shrink-0 overflow-hidden"
-                  classList={{
-                    "pointer-events-none": !fileOpen(),
-                    "transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] motion-reduce:transition-none":
-                      !props.size.active(),
-                  }}
-                  style={{ width: treeWidth() }}
+                  class="h-full flex flex-col overflow-hidden group/filetree"
+                  classList={{ "border-l border-border-weaker-base": reviewOpen() }}
                 >
-                  <div
-                    class="h-full flex flex-col overflow-hidden group/filetree"
-                    classList={{ "border-l border-border-weaker-base": reviewOpen() }}
+                  <Tabs
+                    variant="pill"
+                    value={fileTreeTab()}
+                    onChange={setFileTreeTabValue}
+                    class="h-full"
+                    data-scope="filetree"
                   >
-                    <Tabs
-                      variant="pill"
-                      value={fileTreeTab()}
-                      onChange={setFileTreeTabValue}
-                      class="h-full"
-                      data-scope="filetree"
-                    >
-                      <Tabs.List>
-                        <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
-                          {props.reviewCount()}{" "}
-                          {language.t(
-                            props.reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other",
-                          )}
-                        </Tabs.Trigger>
-                        <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
-                          {language.t("session.files.all")}
-                        </Tabs.Trigger>
-                      </Tabs.List>
-                      <Tabs.Content value="changes" class="bg-background-stronger px-3 py-0">
-                        <Switch>
-                          <Match when={props.hasReview() || !props.diffsReady()}>
-                            <Show
-                              when={props.diffsReady()}
-                              fallback={
-                                <div class="px-2 py-2 text-12-regular text-text-weak">
-                                  {language.t("common.loading")}
-                                  {language.t("common.loading.ellipsis")}
-                                </div>
-                              }
-                            >
-                              <FileTree
-                                path=""
-                                class="pt-3"
-                                allowed={diffFiles()}
-                                kinds={kinds()}
-                                draggable={false}
-                                active={props.activeDiff}
-                                onFileClick={(node) => props.focusReviewDiff(node.path)}
-                              />
-                            </Show>
-                          </Match>
-                        </Switch>
-                      </Tabs.Content>
-                      <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
-                        <Switch>
-                          <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
-                          <Match when={true}>
+                    <Tabs.List>
+                      <Tabs.Trigger value="changes" class="flex-1" classes={{ button: "w-full" }}>
+                        {props.reviewCount()}{" "}
+                        {language.t(
+                          props.reviewCount() === 1 ? "session.review.change.one" : "session.review.change.other",
+                        )}
+                      </Tabs.Trigger>
+                      <Tabs.Trigger value="all" class="flex-1" classes={{ button: "w-full" }}>
+                        {language.t("session.files.all")}
+                      </Tabs.Trigger>
+                    </Tabs.List>
+                    <Tabs.Content value="changes" class="bg-background-stronger px-3 py-0">
+                      <Switch>
+                        <Match when={props.hasReview() || !props.diffsReady()}>
+                          <Show
+                            when={props.diffsReady()}
+                            fallback={
+                              <div class="px-2 py-2 text-12-regular text-text-weak">
+                                {language.t("common.loading")}
+                                {language.t("common.loading.ellipsis")}
+                              </div>
+                            }
+                          >
                             <FileTree
                               path=""
                               class="pt-3"
-                              modified={diffFiles()}
+                              allowed={diffFiles()}
                               kinds={kinds()}
-                              onFileClick={(node) => openTab(file.tab(node.path))}
+                              draggable={false}
+                              active={props.activeDiff}
+                              onFileClick={(node) => props.focusReviewDiff(node.path)}
                             />
-                          </Match>
-                        </Switch>
-                      </Tabs.Content>
-                    </Tabs>
-                  </div>
-                  <Show when={fileOpen()}>
-                    <div onPointerDown={() => props.size.start()}>
-                      <ResizeHandle
-                        direction="horizontal"
-                        edge="start"
-                        size={layout.fileTree.width()}
-                        min={200}
-                        max={typeof window === "undefined" ? 1200 : Math.max(720, window.innerWidth * 0.72)}
-                        onResize={(width) => {
-                          props.size.touch()
-                          layout.fileTree.resize(width)
-                        }}
-                      />
-                    </div>
-                  </Show>
+                          </Show>
+                        </Match>
+                      </Switch>
+                    </Tabs.Content>
+                    <Tabs.Content value="all" class="bg-background-stronger px-3 py-0">
+                      <Switch>
+                        <Match when={nofiles()}>{empty(language.t("session.files.empty"))}</Match>
+                        <Match when={true}>
+                          <FileTree
+                            path=""
+                            class="pt-3"
+                            modified={diffFiles()}
+                            kinds={kinds()}
+                            onFileClick={(node) => openTab(file.tab(node.path))}
+                          />
+                        </Match>
+                      </Switch>
+                    </Tabs.Content>
+                  </Tabs>
                 </div>
-              </Show>
-            </div>
-          </Show>
-        </aside>
-      </Show>
-      <CodeArchaeologyPanel
-        open={archaeologyOpen()}
-        onClose={closeCodeArchaeologyPanel}
-        checkpoints={aiCheckpoints()}
-        restoringCheckpoint={restoringCheckpoint()}
-        onRestoreCheckpoint={restoreAiCheckpoint}
-        onUpdateCheckpoint={patchAiCheckpoint}
-        onOpenDiff={openReviewDiffFromArchaeology}
-      />
-    </>
+                <Show when={fileOpen()}>
+                  <div onPointerDown={() => props.size.start()}>
+                    <ResizeHandle
+                      direction="horizontal"
+                      edge="start"
+                      size={layout.fileTree.width()}
+                      min={200}
+                      max={typeof window === "undefined" ? 1200 : Math.max(720, window.innerWidth * 0.72)}
+                      onResize={(width) => {
+                        props.size.touch()
+                        layout.fileTree.resize(width)
+                      }}
+                    />
+                  </div>
+                </Show>
+              </div>
+            </Show>
+          </div>
+        </Show>
+      </aside>
+    </Show>
   )
 }

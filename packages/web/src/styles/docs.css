@@ -1149,42 +1149,7 @@
     line-height: 1.7;
   }
 
-  /* ---- Why Vector -------------------------------------------------------------------------------------------- */
-
-  .doc-tally {
-    margin-top: 28px;
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    border-top: 1px solid var(--d-line);
-    border-bottom: 1px solid var(--d-line);
-  }
-
-  .doc-tally div {
-    padding: 22px 20px 22px 0;
-  }
-
-  .doc-tally div + div {
-    padding-left: 22px;
-    border-left: 1px solid var(--d-line);
-  }
-
-  .doc-tally strong {
-    display: block;
-    color: var(--d-heading);
-    font-size: 30px;
-    font-weight: 600;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .doc-tally span {
-    margin-top: 6px;
-    display: block;
-    color: var(--d-muted);
-    font-size: 13.5px;
-    line-height: 1.45;
-  }
+  /* ---- Cards and grids --------------------------------------------------------------------------------------- */
 
   .doc-grid {
     margin-top: 18px;
@@ -1471,19 +1436,6 @@
     .doc-rows > div,
     .troubleshooting article {
       grid-template-columns: minmax(0, 1fr);
-    }
-
-    .doc-tally {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .doc-tally div:nth-child(odd) {
-      padding-left: 0;
-      border-left: 0;
-    }
-
-    .doc-tally div:nth-child(n + 3) {
-      border-top: 1px solid var(--d-line);
     }
 
     .doc-table thead th:first-child,

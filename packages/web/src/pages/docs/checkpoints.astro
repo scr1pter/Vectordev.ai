@@ -7,36 +7,23 @@ export const prerender = true
 <DocsPage id="checkpoints">
 
           <p>
-            Vector snapshots the files an agent changed as named checkpoints. You can rename one, write documentation against it, and restore it. <strong>Code Archaeology</strong> opens the whole history — every checkpoint from the first to the latest — with the files each one captured.
-          </p>
-          <p class="note">
-            Checkpoint storage is bounded. Once a session passes its size or count budget the oldest checkpoints are dropped.
+            Vector can wind a session back one request at a time. <strong>Rewind code + chat</strong> restores the files and the conversation to before the last request, and <strong>Move rewind forward</strong> restores the next one.
           </p>
 
-          <h2 id="review">Review and recovery</h2>
+          <h2 id="rewind">Rewind code and chat</h2>
           <p>
-            Review changed files before merging or publishing. Checkpoints preserve recoverable
-            project states, while isolated workspace diffs show exactly what an agent wants to bring
-            into the main branch.
+            Run <strong>Rewind code + chat</strong> from the command palette, or type <code>/undo</code>. If the agent is still working, Vector stops it first. It then undoes the file changes made since your last request, rolls that request and its replies back, and puts the request's text back in the composer so you can edit it and send it again. Run it again to go back further.
           </p>
           <p>
-            Review an agent's diff and merge selected hunks or files rather than accepting the whole change, with secret
-            scanning and a restorable checkpoint before anything lands on main.
+            <strong>Move rewind forward</strong>, or <code>/redo</code>, brings back the next request and its changes. Rolled-back messages are listed above the composer, and <strong>Restore message</strong> on any of them brings the session forward to that point.
+          </p>
+
+          <h2 id="review">Review and merge</h2>
+          <p>
+            An agent in an isolated workspace works on its own copy of your project. Review its diff, then approve individual hunks or files for a partial merge or merge everything. Vector scans the changed files for credentials first and stops the merge until you review anything it finds.
+          </p>
+          <p>
+            Every merge checkpoints your main project before it writes anything: Vector saves main's uncommitted changes as a patch and keeps a copy of each file the merge replaces. <strong>Commit all changes to main</strong> also records a git commit, which you can undo with <code>git reset --soft HEAD~1</code>.
           </p>
           <p>To review a whole branch before you push, see <a href="/docs/vectorscope#before-you-push">Vectorscope</a>.</p>
-
-          <h2 id="timeline">The engineering timeline</h2>
-          <p>
-            The side panel builds one chronological timeline from the session's events: each changed file with its risk estimate, each checkpoint, and each problem found while scanning the project. Filter it by kind, search it, and expand any event for its files and details — it is how you reconstruct a long run without rereading the transcript.
-          </p>
-
-          <h2 id="risk-scan">Project report and risk scan</h2>
-          <p>
-            Vector scans the open project and writes a local report: the language breakdown by files and lines, a judgement on model fit, and a list of problems with severities that feed the timeline as risk events. The scan runs on your machine against your own repository, and refreshes on demand.
-          </p>
-
-          <h2 id="skill-mode">Skill mode</h2>
-          <p>
-            The side panel remembers whether you want beginner, intermediate or advanced explanations, and the engineering surfaces say more or less accordingly. The setting is stored on the machine you set it on rather than synced.
-          </p>
 </DocsPage>

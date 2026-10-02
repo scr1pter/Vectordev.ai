@@ -10,7 +10,6 @@ import {
   PUBLIC_DOWNLOAD_TARGETS,
   suggestedTarget,
 } from "../api/_lib/downloads"
-import { downloadTargets } from "../api/_lib/billing"
 import { currentInstaller } from "../api/_lib/release-downloads"
 
 describe("public installer downloads", () => {
@@ -18,12 +17,6 @@ describe("public installer downloads", () => {
     for (const entry of DOWNLOAD_MENU) {
       expect(() => installerFor(entry.target)).not.toThrow()
     }
-  })
-
-  test("the public list matches what the licensed endpoint serves", () => {
-    // The same files. If these drift, a customer and a visitor get different
-    // builds from the same release, which is the worst kind of bug to debug.
-    expect(PUBLIC_DOWNLOAD_TARGETS).toEqual(downloadTargets)
   })
 
   test("an unknown or missing target is refused, not guessed", () => {

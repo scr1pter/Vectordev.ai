@@ -434,6 +434,8 @@ import type {
   V2SkillListResponses,
   VcsApplyErrors,
   VcsApplyResponses,
+  VcsBranchesErrors,
+  VcsBranchesResponses,
   VcsCommitErrors,
   VcsCommitResponses,
   VcsDiffErrors,
@@ -444,6 +446,8 @@ import type {
   VcsGetResponses,
   VcsStatusErrors,
   VcsStatusResponses,
+  VcsSwitchErrors,
+  VcsSwitchResponses,
   WorktreeCreateErrors,
   WorktreeCreateInput,
   WorktreeCreateResponses,
@@ -2324,6 +2328,75 @@ export class Vcs extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<VcsCommitResponses, VcsCommitErrors, ThrowOnError>({
       url: "/vcs/commit",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * List branches
+   *
+   * List local git branches, marking the current branch and branches checked out in another worktree.
+   */
+  public branches<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<VcsBranchesResponses, VcsBranchesErrors, ThrowOnError>({
+      url: "/vcs/branches",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Switch branch
+   *
+   * Switch the working tree to another local branch, or create a branch from HEAD and switch to it. Never forces, stashes or discards changes, including ignored files and commits on a detached HEAD. Refused while a session in this directory is running, and in Vector-managed agent workspaces only creating a branch is allowed.
+   */
+  public switch<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      branch?: string
+      create?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "branch" },
+            { in: "body", key: "create" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsSwitchResponses, VcsSwitchErrors, ThrowOnError>({
+      url: "/vcs/switch",
       ...options,
       ...params,
       headers: {

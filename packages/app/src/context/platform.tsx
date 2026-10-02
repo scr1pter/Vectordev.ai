@@ -5,7 +5,6 @@ import type { DesktopMenuAction } from "../desktop-menu"
 import { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
 import type { UpdaterPlatform } from "../updater"
-import type { VectorLicensePlatform } from "../license"
 import type { VectorAccountPlatform } from "../vector-account"
 
 type PickerPaths = string | string[] | null
@@ -71,9 +70,6 @@ type PlatformBase = {
 
   /** Application-global desktop updater */
   updater?: UpdaterPlatform
-
-  /** Vector desktop entitlement and billing controls */
-  license?: VectorLicensePlatform
 
   /** Desktop account status and sign-in; credentials stay in the main process. */
   vectorAccount?: VectorAccountPlatform

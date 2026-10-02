@@ -217,10 +217,8 @@ export function AuthPage() {
         </button>
       </p>
       {mode === "register" && (
-        <p className="auth-plan-note">
-          Desktop plans are $10/month or $99/year.
-          <br />
-          Creating an account does not start a subscription.
+        <p className="auth-account-note">
+          Vector is free. One account covers the desktop app and the terminal agent.
         </p>
       )}
       <p className="auth-legal">

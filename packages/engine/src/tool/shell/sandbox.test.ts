@@ -266,7 +266,6 @@ test("credential stores cover the data directory, the CLI default, the earlier p
   ;[path.join(fakeHome, "Library", "Application Support"), path.join(fakeHome, ".config"), configHome].forEach((root) =>
     ["ai.vector.app", "ai.vector.app.beta", "ai.vector.app.dev"].forEach((id) => {
       expect(paths).toContain(path.join(root, id, "secure-runtime"))
-      expect(paths).toContain(path.join(root, id, "vector-license.json"))
       expect(paths).toContain(path.join(root, id, "xdg-data", "vector", "auth.json"))
       expect(paths).toContain(path.join(root, id, "xdg-data", "vector", "mcp-auth.json"))
       expect(paths).toContain(path.join(root, id, "xdg-data", "vector", "vector.db"))

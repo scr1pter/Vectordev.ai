@@ -197,7 +197,7 @@ describe("launch host", () => {
   test("a blocking screen takes over at once, before the minimum and even after failure", () => {
     win.api = {}
     const api = start()
-    api.yield("license")
+    api.yield("unreachable")
     expect(api.phase()).toBe("revealing")
 
     host?.dispose()
