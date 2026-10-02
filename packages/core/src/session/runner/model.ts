@@ -99,6 +99,7 @@ export const withPricing = (model: Model, cost: ModelV2.Info["cost"]) => {
 export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
   const totalNanoAiu = metadata?.copilot?.totalNanoAiu
   if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
+    // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
     return totalNanoAiu / 100_000_000_000
 
   const costs = pricing.get(model)

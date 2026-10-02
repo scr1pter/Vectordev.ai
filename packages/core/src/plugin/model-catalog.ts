@@ -31,7 +31,9 @@ function cost(input: ModelCatalog.Model["cost"]): ModelV2Info["cost"] {
         write: item.cache_write ?? 0,
       },
     })) ?? []),
-    ...(input?.context_over_200k
+    // models.dev generates context_over_200k from the exact tiers for older readers, at a fixed 200K threshold,
+    // so it only stands in for tiers a catalog entry does not have. GPT-5.4's long-context price starts at 272K.
+    ...(input?.context_over_200k && !input.tiers?.length
       ? [
           {
             tier: {
@@ -166,7 +168,8 @@ export const ModelCatalogPlugin = define({
             const baseCost = cost(model.cost)
             catalog.model.update(providerID, model.id, (draft) => applyModel(draft, model, { cost: baseCost }))
             for (const [mode, options] of Object.entries(model.experimental?.modes ?? {})) {
-              if (!ModelCatalog.modeSupported(model.provider?.npm ?? item.npm, model.id, options.provider?.body)) continue
+              if (!ModelCatalog.modeSupported(model.provider?.npm ?? item.npm, model.id, options.provider?.body))
+                continue
               catalog.model.update(providerID, `${model.id}-${mode}`, (draft) =>
                 applyModel(draft, model, {
                   name: modeName(model, mode),

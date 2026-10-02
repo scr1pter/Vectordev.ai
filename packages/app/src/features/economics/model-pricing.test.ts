@@ -41,6 +41,18 @@ describe("ratesFor", () => {
     expect(ratesFor(catalog, "nope", "claude-sonnet-5")).toBeUndefined()
     expect(ratesFor(undefined, "anthropic", "claude-sonnet-5")).toBeUndefined()
   })
+
+  test("treats a negative or non-finite rate as no price rather than estimating a negative cost", () => {
+    // vector.json accepts any finite number, so a typo like `input: -3` reaches the renderer.
+    const broken: ReadonlyMap<string, ModelCostSource> = new Map([
+      ["custom", { models: { negative: { cost: { ...sonnet, input: -3 } } } }],
+      ["mirror", { models: { nan: { cost: { ...sonnet, cache: { read: Number.NaN, write: 3.75 } } } } }],
+      ["google", { models: { tier: { cost: { ...tiered, tiers: [{ ...tiered.tiers![0], output: -15 }] } } } }],
+    ])
+    expect(ratesFor(broken, "custom", "negative")).toBeUndefined()
+    expect(ratesFor(broken, "mirror", "nan")).toBeUndefined()
+    expect(ratesFor(broken, "google", "tier")).toBeUndefined()
+  })
 })
 
 describe("ratesAtContext", () => {

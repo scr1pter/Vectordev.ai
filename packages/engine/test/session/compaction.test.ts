@@ -1717,7 +1717,39 @@ describe("SessionNs.getUsage", () => {
     expect(result.cost).toBe(2.75 + 0.6 + 0.05)
   })
 
-  test("falls back to over-200k pricing when no cost tier matches", () => {
+  test("keeps the base price below the exact tier even past 200k", () => {
+    // GPT-5.4's long-context price starts at 272k; models.dev's over-200k copy of it must not move that to 200k.
+    const model = createModel({
+      context: 1_050_000,
+      output: 128_000,
+      cost: {
+        input: 2.5,
+        output: 15,
+        cache: { read: 0.25, write: 0 },
+        tiers: [
+          {
+            input: 5,
+            output: 22.5,
+            cache: { read: 0.5, write: 0 },
+            tier: { type: "context", size: 272_000 },
+          },
+        ],
+        experimentalOver200K: {
+          input: 5,
+          output: 22.5,
+          cache: { read: 0.5, write: 0 },
+        },
+      },
+    })
+    const result = SessionNs.getUsage({
+      model,
+      usage: usage({ inputTokens: 250_000, outputTokens: 1_000, totalTokens: 251_000 }),
+    })
+
+    expect(result.cost).toBe(0.625 + 0.015)
+  })
+
+  test("uses over-200k pricing when the catalog lists no exact tiers", () => {
     const model = createModel({
       context: 1_000_000,
       output: 32_000,
@@ -1725,14 +1757,6 @@ describe("SessionNs.getUsage", () => {
         input: 1,
         output: 2,
         cache: { read: 0.1, write: 0.5 },
-        tiers: [
-          {
-            input: 5,
-            output: 6,
-            cache: { read: 0.5, write: 2.5 },
-            tier: { type: "context", size: 500_000 },
-          },
-        ],
         experimentalOver200K: {
           input: 3,
           output: 4,

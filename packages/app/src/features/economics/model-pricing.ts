@@ -42,11 +42,15 @@ export type ModelCostSource = {
   models?: Record<string, { cost?: ModelRates } | undefined>
 }
 
-// All-zero catalog rates do not establish what the provider bills.
-// Return undefined so callers render "cost unknown" rather than an unsupported $0.00 claim.
+// All-zero catalog rates do not establish what the provider bills, and a negative or non-finite rate (a typo in
+// vector.json, a bad mirror) is no price at all. Return undefined so callers render "cost unknown" rather than an
+// unsupported $0.00 claim or a negative estimate.
 function priced(rates: ModelRates | undefined): ModelRates | undefined {
   if (!rates) return undefined
   if (rates.input === 0 && rates.output === 0 && rates.cache.read === 0 && rates.cache.write === 0) return undefined
+  const invalid = (band: Pick<ModelRates, "input" | "output" | "cache">) =>
+    [band.input, band.output, band.cache.read, band.cache.write].some((rate) => !Number.isFinite(rate) || rate < 0)
+  if (invalid(rates) || (rates.tiers ?? []).some(invalid)) return undefined
   return rates
 }
 
