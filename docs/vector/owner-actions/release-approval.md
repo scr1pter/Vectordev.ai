@@ -43,6 +43,36 @@ older local build and must not be relabelled as this candidate.
 
 ## GitHub Actions is executing
 
+The [candidate PR](https://github.com/scr1pter/Vectordev.ai/pull/5) is a draft.
+At source `948649315e75e060c2e47a3aefecd141fc10c640`, the
+[native test run](https://github.com/scr1pter/Vectordev.ai/actions/runs/37054778865)
+completed Linux successfully: Engine 3,752 passes, 35 skips, one todo and no
+failures; Core 1,556 passes, six skips and no failures; app 1,265 unit cases plus
+32 browser-condition cases passed. All nine Turbo tasks passed. Generated-client
+verification passed, and HTTP coverage, authentication and actual request modes
+each completed with 230 passes and no failures, skips, missing or extra scenarios.
+Linux browser checks passed with 98 initial passes, five passing retries, one
+existing skip, and all four public-viewer cases passing. All four native typecheck
+jobs and the website build passed at this source.
+
+Windows was still incomplete when these results were recorded. Its unit log
+showed 25 failures: 13 packaging cases assumed a package-local dependency path
+despite Windows using the hoisted linker, nine POSIX installer fixtures required
+`shasum` although Git Bash supplies `sha256sum`, one generated-notice byte mismatch,
+and two deferred-uninstall cases stopped before scheduling. The Core log stopped
+at the bounded free-catalog wait, and browser navigation still timed out without
+the earlier ONNX optimizer error. These partial logs are not final suite totals.
+
+Subsequent repairs preserve Windows PowerShell's native module discovery when
+launched through Bun and use the available Git Bash checksum command. The
+free-catalog deadline stays referenced until settlement and clears immediately
+after an early result. Fresh-process regressions and the full local Core suite
+passed after this change: 1,563 passes, no failures and 5,933 assertions. Native
+confirmation is still required. Deferred-uninstall fixtures now use the same
+PowerShell environment boundary and report their disposable status files when
+the child exits early. Certificate trust, hash checks, ownership checks, exact
+notice bytes and existing test deadlines remain enforced.
+
 The repository is public at this checkpoint. The previous account-level Actions
 block is no longer the observed state: source `12c3ffd78` passed
 [Verify](https://github.com/scr1pter/Vectordev.ai/actions/runs/37042607157),
