@@ -219,7 +219,7 @@ async function brokerRequest<T>(path: string, init?: RequestInit, request: Cloud
 }
 
 async function brokerStatuses(): Promise<BrokerProviderStatus[]> {
-  const response = await brokerRequest<{ providers: BrokerProviderStatus[] }>("/status")
+  const response = await brokerRequest<{ providers: BrokerProviderStatus[] }>("/status?relay=v1")
   return Array.isArray(response.providers) ? response.providers : []
 }
 

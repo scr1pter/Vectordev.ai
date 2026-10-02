@@ -185,10 +185,10 @@ export function createOAuthAuthorizeUrl(
 
 function requireOAuthRelayState(state: string): void {
   const parts = state.split(".")
-  if (parts.length !== 3 || parts[1] !== "v1" || !/^[A-Za-z0-9_-]{43}$/.test(parts[0]) || state.length > 3200) {
+  if (parts.length !== 3 || parts[1] !== "v1" || !/^[A-Za-z0-9_-]{43}$/.test(parts[0] ?? "") || state.length > 3200) {
     throw new Error("A secure desktop OAuth relay key is required. Update Vector and start again.")
   }
-  const encoded = parts[2]
+  const encoded = parts[2] ?? ""
   if (!/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error("The OAuth relay key is invalid.")
   const jwk: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"))
   if (!jwk || typeof jwk !== "object" || Reflect.get(jwk, "kty") !== "RSA" || Reflect.has(jwk, "d")) {

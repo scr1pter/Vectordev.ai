@@ -1,13 +1,12 @@
-import {
-  jsonResponse,
-  oauthProviderConfig,
-  type CloudOAuthProvider,
-} from "./_oauth.js"
+import { jsonResponse, oauthProviderConfig, type CloudOAuthProvider } from "./_oauth.js"
 
 export function GET(request: Request): Response {
   if (request.method !== "GET") {
     return jsonResponse(405, { ok: false, error: "Method not allowed. Use GET." })
   }
+  // Older desktops hide their manual-token form when configured is true, but
+  // cannot create or decrypt the versioned Vercel/Netlify relay.
+  const relay = new URL(request.url).searchParams.get("relay") === "v1"
   const providers: CloudOAuthProvider[] = ["vercel", "netlify", "supabase"]
   return jsonResponse(200, {
     ok: true,
@@ -15,7 +14,7 @@ export function GET(request: Request): Response {
       const config = oauthProviderConfig(provider, request.url, process.env)
       return {
         provider,
-        configured: config.configured,
+        configured: config.configured && (provider === "supabase" || relay),
         callbackUrl: config.callbackUrl,
         missing: config.missing,
       }
