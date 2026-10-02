@@ -1,5 +1,5 @@
 import path from "path"
-import { Context, Duration, Effect, Layer, Option, Ref, Schedule } from "effect"
+import { Context, Duration, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
 import { Global } from "./global"
@@ -11,6 +11,8 @@ import { InstallationChannel, InstallationVersion } from "./installation/version
 import { EventV2 } from "./event"
 import { makeGlobalNode } from "./effect/app-node"
 import { httpClient } from "./effect/app-node-platform"
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)
 
 const USER_AGENT = `vector/${InstallationVersion} (${InstallationChannel}; ${Flag.VECTOR_CLIENT})`
 
@@ -142,24 +144,24 @@ const layer = Layer.effect(
 
     const fetchAndWrite = Effect.fn("ModelCatalog.fetchAndWrite")(function* () {
       const response = yield* fetchApi()
-      const catalog = yield* Effect.try({ try: () => JSON.parse(response), catch: (cause) => cause }).pipe(
-        Effect.flatMap(decode),
-      )
+      const catalog = yield* decodeJson(response).pipe(Effect.flatMap(decode))
       // Never replace a usable cache with a mirror whose every provider was skipped or refused.
       if (!Object.keys(catalog).length)
         return yield* Effect.fail(new Error("The model catalog mirror has no usable providers"))
-      const text = JSON.stringify(catalog)
+      yield* Ref.set(unavailable, false)
+      // Every installed build shares this cache file and filters it again on read, so save the validated mirror
+      // text rather than this build's filtered view: a newer build must still see the providers this one skipped.
       const tempfile = `${filepath}.${process.pid}.${Date.now()}.tmp`
-      yield* fs.writeWithDirs(tempfile, text).pipe(
+      // Saving is best-effort: a read-only or full cache directory must not discard a catalog that already loaded.
+      yield* fs.writeWithDirs(tempfile, response).pipe(
         Effect.andThen(fs.rename(tempfile, filepath)),
         Effect.catch((error) =>
-          Effect.gen(function* () {
-            yield* fs.remove(tempfile, { force: true }).pipe(Effect.ignore)
-            return yield* Effect.fail(error)
-          }),
+          fs.remove(tempfile, { force: true }).pipe(
+            Effect.ignore,
+            Effect.andThen(Effect.logWarning("Could not save the Vector model catalog cache", { cause: error })),
+          ),
         ),
       )
-      yield* Ref.set(unavailable, false)
       return catalog
     })
 

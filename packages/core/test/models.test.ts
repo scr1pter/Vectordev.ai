@@ -439,16 +439,15 @@ it.live("a mirror entry needing an unbundled SDK is skipped once while the rest 
     yield* writeCache(fixture)
     const messages: unknown[] = []
     const lmstudio = fixture.lmstudio.models["lmstudio-1"]
-    const state = yield* Ref.make({
-      ...initialState,
-      body: JSON.stringify({
-        lmstudio: {
-          ...fixture.lmstudio,
-          models: { ...fixture.lmstudio.models, later: { ...lmstudio, id: "later", provider: { npm: "later-sdk" } } },
-        },
-        cerebras: { ...fixture2.cerebras, npm: "later-provider-sdk" },
-      }),
+    const body = JSON.stringify({
+      lmstudio: {
+        ...fixture.lmstudio,
+        name: "Acme Refreshed",
+        models: { ...fixture.lmstudio.models, later: { ...lmstudio, id: "later", provider: { npm: "later-sdk" } } },
+      },
+      cerebras: { ...fixture2.cerebras, npm: "later-provider-sdk" },
     })
+    const state = yield* Ref.make({ ...initialState, body: body })
     const result = yield* provided(
       state,
       Effect.gen(function* () {
@@ -459,13 +458,53 @@ it.live("a mirror entry needing an unbundled SDK is skipped once while the rest 
       }),
       true,
     ).pipe(Effect.provide(Logger.layer([Logger.make((options) => messages.push(options.message))])))
-    expect(result).toEqual(fixture)
-    expect(JSON.parse(yield* Effect.promise(() => readFile(cacheFile(), "utf8")))).toEqual(fixture)
+    expect(result).toEqual({ lmstudio: { ...fixture.lmstudio, name: "Acme Refreshed" } })
     expect((yield* Ref.get(state)).calls).toHaveLength(2)
     const skipped = messages.map((message) => JSON.stringify(message)).filter((text) => text.includes("Skipping"))
     expect(skipped).toHaveLength(2)
     expect(skipped.join()).toContain("lmstudio/later requires the unbundled SDK later-sdk")
     expect(skipped.join()).toContain("cerebras requires the unbundled SDK later-provider-sdk")
+  }),
+)
+
+it.live("the shared cache keeps the entries this build skips so a newer build still sees them", () =>
+  Effect.gen(function* () {
+    Flag.VECTOR_MODELS_URL = mirror
+    const later = { ...fixture2.cerebras, npm: "later-provider-sdk" }
+    yield* writeCache({ ...fixture, cerebras: later })
+    const body = JSON.stringify({ lmstudio: { ...fixture.lmstudio, name: "Acme Refreshed" }, cerebras: later })
+    const state = yield* Ref.make({ ...initialState, body: body })
+    const result = yield* provided(
+      state,
+      Effect.gen(function* () {
+        const service = yield* ModelCatalog.Service
+        expect(yield* service.get()).toEqual(fixture)
+        yield* service.refresh(true)
+        return yield* service.get()
+      }),
+      true,
+    )
+    expect(result).toEqual({ lmstudio: { ...fixture.lmstudio, name: "Acme Refreshed" } })
+    expect((yield* Ref.get(state)).calls).toHaveLength(1)
+    expect(yield* Effect.promise(() => readFile(cacheFile(), "utf8"))).toBe(body)
+  }),
+)
+
+it.live("a cache file that cannot be saved still returns the fetched catalog", () =>
+  Effect.gen(function* () {
+    Flag.VECTOR_MODELS_URL = mirror
+    // A non-empty directory at the cache path makes the final rename fail.
+    yield* Effect.promise(() => mkdir(path.join(cacheFile(), "occupied"), { recursive: true }))
+    const messages: string[] = []
+    const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
+    const result = yield* provided(
+      state,
+      ModelCatalog.Service.use((service) => service.get()),
+      true,
+    ).pipe(Effect.provide(Logger.layer([Logger.make((options) => messages.push(JSON.stringify(options.message)))])))
+    expect(result).toEqual(fixture2)
+    expect(messages.join()).toContain("Could not save the Vector model catalog cache")
+    expect(messages.join()).not.toContain("model catalog is unavailable")
   }),
 )
 
