@@ -9,3 +9,6 @@ packages/core/src/database/migration.gen.ts linguist-generated
 /packages/web/public/config.json text eol=lf
 /packages/web/public/tui.json text eol=lf
 /packages/web/public/install text eol=lf
+
+# Review output is compared byte-for-byte with these canonical fixtures.
+/packages/core/test/review/fixtures/*.golden.txt text eol=lf
