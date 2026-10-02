@@ -23,7 +23,7 @@ async function fixture() {
     const destination = path.join(dir, "node_modules", name)
     await mkdir(path.dirname(destination), { recursive: true })
     await symlink(
-      await realpath(path.join(root, "packages/engine/node_modules", name)),
+      await dependencyRoot(name, path.join(root, "packages/engine")),
       destination,
       process.platform === "win32" ? "junction" : "dir",
     )
@@ -99,6 +99,41 @@ async function fixture() {
     },
     [Symbol.asyncDispose]: () => rm(dir, { recursive: true, force: true }),
   }
+}
+
+async function dependencyRoot(name: string, from: string) {
+  // Follow the installed resolver layout first; export maps may not expose package.json.
+  let directory = path.dirname(Bun.resolveSync(name, from))
+  while (true) {
+    const manifest = Bun.file(path.join(directory, "package.json"))
+    if ((await manifest.exists()) && (await manifest.json()).name === name) return await realpath(directory)
+    const parent = path.dirname(directory)
+    if (parent === directory) throw new Error(`Could not locate the installed package root for ${name}`)
+    directory = parent
+  }
+}
+
+for (const layout of ["isolated", "hoisted"]) {
+  test(`packaging dependencies resolve the installed package root with ${layout} workspace links`, async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "vector-cli-dependency #%-"))
+    try {
+      const consumer = path.join(dir, "packages/engine")
+      const dependency = path.join(dir, "packages/schema")
+      const name = "@vector-fixture/schema"
+      await mkdir(consumer, { recursive: true })
+      await Bun.write(
+        path.join(dependency, "package.json"),
+        JSON.stringify({ name, type: "module", exports: { ".": "./src/index.ts", "./*": "./src/*.ts" } }),
+      )
+      await Bun.write(path.join(dependency, "src/index.ts"), 'export const identity = "installed workspace"\n')
+      const link = path.join(layout === "isolated" ? consumer : dir, "node_modules", name)
+      await mkdir(path.dirname(link), { recursive: true })
+      await symlink(dependency, link, process.platform === "win32" ? "junction" : "dir")
+      expect(await dependencyRoot(name, consumer)).toBe(await realpath(dependency))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 }
 
 async function run(command: string[], cwd: string, env: Record<string, string | undefined>) {
@@ -185,8 +220,8 @@ test("dry-run packages every target with notices and a working Vector launcher w
       const destination = path.join(tmp.dir, "installed/node_modules", manifest.name)
       await mkdir(destination, { recursive: true })
       const unpacked = await run(
-        ["tar", "-xf", path.join(folder, info.filename), "--strip-components", "1", "-C", destination],
-        cwd,
+        ["tar", "-xf", info.filename, "--strip-components", "1", "-C", destination],
+        folder,
         tmp.env,
       )
       expect(unpacked.code, unpacked.stderr).toBe(0)
