@@ -77,6 +77,22 @@ shared Core PowerShell environment helper changes. TLS, process identity,
 acknowledgement, checksum, rollback and exact certificate-cleanup checks remain
 enforced. The repaired source still requires a successful native installer run.
 
+A separate review of Microsoft's .NET Framework reference source established
+that the HTTP body's inherited `ReadAsync` checks cancellation before starting
+but does not monitor it during a blocked read. `ResponseHeadersRead` also ends
+the client's timeout coverage at the headers. The downloader now waits on each
+read with `Task.Wait(cancellationToken)` before retrieving its result, so its
+existing stream/response cleanup can execute when the five-minute deadline
+expires. This is a source-established defect; the long-running native job's
+current phase was not visible and is not inferred from its elapsed time.
+
+The native harness now publishes fixed phase notices and incremental evidence,
+and aborts its stalled-body worker after a 330-second diagnostic watchdog. Its
+actual acceptance window remains 290–325 seconds, with exact preservation of
+the old executable required. Engine typecheck, formatting, independent review
+and two real-child watchdog/evidence checks passed. Final native Windows
+PowerShell acceptance is still required before deploying this installer change.
+
 At source `013ebfeb0c081e024b3f2718461dc2b5d3ab28d2`, native typechecks,
 the website build and the free-model integration job passed. The Windows Core
 catalog wait now completes (38.26 ms), including its fresh-process deadline
