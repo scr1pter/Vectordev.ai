@@ -4,6 +4,7 @@ import { lstat, mkdir, readFile, readdir, realpath, rm, rmdir, writeFile } from 
 import path from "node:path"
 import { Schema } from "effect"
 import { CliRelease } from "@vectordevai/schema/cli-release"
+import { WindowsPowerShell } from "./windows-powershell"
 
 export type Receipt = {
   directory: string
@@ -216,7 +217,7 @@ async function launch(script: string, args: string[] = []) {
   const child = spawn(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
-    { detached: true, stdio: "ignore", windowsHide: true },
+    { detached: true, stdio: "ignore", windowsHide: true, env: WindowsPowerShell.environment("powershell.exe") },
   )
   await new Promise<void>((resolve, reject) => {
     child.once("error", reject)

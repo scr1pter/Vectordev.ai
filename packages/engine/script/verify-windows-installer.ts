@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { WindowsRemoval } from "../src/installation/windows-remove"
+import { WindowsPowerShell } from "../src/installation/windows-powershell"
 
 if (process.platform !== "win32" || process.env.CI !== "true" || process.env.VECTOR_INSTALLER_WINDOWS_FIXTURE !== "1")
   throw new Error(
@@ -33,7 +34,12 @@ const state = {
 }
 
 async function run(command: string[], env?: Record<string, string>) {
-  const child = Bun.spawn(command, { env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe", stdin: "ignore" })
+  const child = Bun.spawn(command, {
+    env: WindowsPowerShell.environment(command[0], { ...process.env, ...env }),
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+  })
   const [code, stdout, stderr] = await Promise.all([
     child.exited,
     new Response(child.stdout).text(),
@@ -117,11 +123,17 @@ assert.equal(generated.code, 0, generated.stderr)
 const der = path.join(root, "certificate.cer")
 assert.equal((await run([openssl, "x509", "-in", certificate, "-outform", "der", "-out", der])).code, 0)
 const trusted = await ps(
-  `(Import-Certificate -FilePath ${quote(der)} -CertStoreLocation Cert:\\CurrentUser\\Root).Thumbprint`,
+  `(Import-Certificate -FilePath ${quote(der)} -CertStoreLocation 'Cert:\\CurrentUser\\Root' -ErrorAction Stop).Thumbprint`,
 )
 assert.equal(trusted.code, 0, trusted.stderr)
 const thumbprint = trusted.stdout.trim()
 assert.match(thumbprint, /^[A-Fa-f0-9]{40}$/)
+await using trustedCertificate = {
+  async [Symbol.asyncDispose]() {
+    const removed = await ps(`Remove-Item -LiteralPath 'Cert:\\CurrentUser\\Root\\${thumbprint}' -ErrorAction Stop`)
+    assert.equal(removed.code, 0, removed.stderr)
+  },
+}
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 443,
@@ -307,7 +319,6 @@ try {
 } finally {
   server.stop(true)
   await writeFile(hostsPath, originalHosts)
-  await ps(`Remove-Item -LiteralPath 'Cert:\\CurrentUser\\Root\\${thumbprint}'`)
   await Bun.write(path.resolve("vector-windows-installer-evidence.json"), JSON.stringify(evidence, null, 2))
   await rm(root, { recursive: true, force: true })
 }
