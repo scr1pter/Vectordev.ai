@@ -1,8 +1,7 @@
 import { execFile } from "node:child_process"
-import { platform } from "node:os"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
-import { GH_INSTALL_COMMAND } from "./github-pr"
+import { gh, resolveGhInstall } from "./github-pr"
 import { redactText } from "./security-redaction"
 
 // Vector's read side of GitHub Actions: notice that the branch the user just
@@ -92,8 +91,7 @@ export async function listCiRuns(
   const status = await ciStatus(projectPath)
   if (!status.ok) return status
   const branch = options?.branch?.trim() || status.repo.branch
-  const result = await run(
-    "gh",
+  const result = await gh(
     ["run", "list", "--branch", branch, "--limit", String(options?.limit ?? 20), "--json", RUN_FIELDS],
     { cwd: projectPath, timeoutMs: 45_000 },
   )
@@ -118,7 +116,7 @@ export async function viewCiFailure(
 ): Promise<{ ok: true; failure: CiFailure } | CiUnavailable> {
   const status = await ciStatus(projectPath)
   if (!status.ok) return status
-  const view = await run("gh", ["run", "view", String(runId), "--json", `${RUN_FIELDS},jobs`], {
+  const view = await gh(["run", "view", String(runId), "--json", `${RUN_FIELDS},jobs`], {
     cwd: projectPath,
     timeoutMs: 45_000,
   })
@@ -131,11 +129,7 @@ export async function viewCiFailure(
       command: `gh run view ${runId}`,
     }
   }
-  const log = await run("gh", ["run", "view", String(runId), "--log-failed"], {
-    cwd: projectPath,
-    timeoutMs: 120_000,
-    maxBuffer: 64 * 1024 * 1024,
-  })
+  const log = await gh(["run", "view", String(runId), "--log-failed"], { cwd: projectPath, timeoutMs: 120_000 })
   // A run that failed to start, or one whose logs GitHub has already expired,
   // returns no log at all. The job list still names what went red, which is
   // worth more to the user than an empty panel.
@@ -327,7 +321,7 @@ export async function detectCiRepo(projectPath: string): Promise<{ ok: true; rep
 
 type RunResult = { stdout: string; stderr: string; failed: boolean }
 
-function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number } = {}) {
+function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
   return new Promise<RunResult>((resolve) => {
     execFile(
       command,
@@ -336,7 +330,7 @@ function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: 
         cwd: opts.cwd,
         env: untrustedChildEnvironment(),
         timeout: opts.timeoutMs ?? 15_000,
-        maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024,
+        maxBuffer: 8 * 1024 * 1024,
       },
       (error, stdout, stderr) =>
         resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) }),
@@ -344,19 +338,23 @@ function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: 
   })
 }
 
-async function ghAvailability(): Promise<CiUnavailable | undefined> {
-  const version = await run("gh", ["--version"], { timeoutMs: 10_000 })
+// gh is found the way the Pull Requests panel finds it: a bare `gh` with the
+// app's own PATH misses Homebrew in a Finder-launched app, so CI said "install
+// it" while the rest of the panel was already signed in.
+export async function ghAvailability(runGh = gh): Promise<CiUnavailable | undefined> {
+  const version = await runGh(["--version"], { timeoutMs: 10_000 })
   if (version.failed) {
+    const install = await resolveGhInstall()
     return {
       ok: false,
       reason: "gh-missing",
       detail: "Vector reads CI through your own GitHub CLI login. Install it, then sign in.",
-      command: GH_INSTALL_COMMAND[platform()] ?? "See https://cli.github.com",
+      command: install.command ?? `See ${install.url}`,
     }
   }
   // gh writes `auth status` to stderr on older releases and stdout on newer
   // ones, so read both before deciding the user is signed out.
-  const status = await run("gh", ["auth", "status"], { timeoutMs: 10_000 })
+  const status = await runGh(["auth", "status"], { timeoutMs: 10_000 })
   if (/logged in to/i.test(`${status.stdout}\n${status.stderr}`)) return
   return {
     ok: false,

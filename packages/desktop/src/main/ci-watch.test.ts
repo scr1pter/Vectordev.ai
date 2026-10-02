@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 import { describe, expect, test } from "bun:test"
 
-import { buildRepairPrompt, ciStatus, detectCiRepo, listCiRuns, parseFailureLog, type CiFailure } from "./ci-watch"
+import { buildRepairPrompt, detectCiRepo, ghAvailability, parseFailureLog, type CiFailure } from "./ci-watch"
+import { GH_DOWNLOAD_URL } from "./gh-install"
 
 // Real `gh run view --log-failed` output: "<job>\t<step>\t<ISO timestamp> <line>".
 const TSC_LOG = [
@@ -229,18 +230,13 @@ describe("buildRepairPrompt", () => {
 })
 
 describe("unavailable environments", () => {
-  test("reports gh as missing instead of throwing when it is not on PATH", async () => {
-    const original = process.env.PATH ?? ""
-    process.env.PATH = "/nonexistent-vector-ci-watch"
-    const status = await ciStatus(process.cwd())
-    const runs = await listCiRuns(process.cwd())
-    process.env.PATH = original
-    expect(status.ok).toBe(false)
-    expect(runs.ok).toBe(false)
-    if (status.ok || runs.ok) throw new Error("gh should not have been resolvable")
+  test("reports gh as missing with a way to install it this machine can use", async () => {
+    // What the shared gh runner answers when no gh is found anywhere it looks.
+    const status = await ghAvailability(async () => ({ stdout: "", stderr: "GitHub CLI was not found.", failed: true }))
+    if (!status) throw new Error("gh should not have been resolvable")
     expect(status.reason).toBe("gh-missing")
-    expect(status.command.length).toBeGreaterThan(0)
-    expect(runs.reason).toBe("gh-missing")
+    // Either a command a package manager on this machine can run, or the download link; never a guess.
+    expect(status.command === `See ${GH_DOWNLOAD_URL}` || /^(sudo )?\S+ (install|-S)/.test(status.command)).toBe(true)
   })
 
   test("names the command that adds a remote when the repo has none", async () => {

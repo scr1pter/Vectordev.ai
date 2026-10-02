@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process"
 import { platform } from "node:os"
-import { agentEnvironment, resolveAgentPath, shimmedCommand } from "./external-agents"
-import { GH_PACKAGE_MANAGERS, ghInstallHint, type GhPackageManager } from "./gh-install"
+import { agentEnvironment, refreshAgentEnvironment, resolveAgentPath, shimmedCommand } from "./external-agents"
+import { GH_PACKAGE_MANAGERS, ghInstallHint, ghInstallWarning, type GhPackageManager } from "./gh-install"
 import {
   requireMergeStrategy,
   requirePullRequestDirectory,
@@ -20,8 +20,9 @@ export type GhRunResult = { stdout: string; stderr: string; failed: boolean }
 
 // gh pr diff on a large PR blows past a small buffer and surfaces as a generic
 // spawn failure, so give it real headroom. List/view calls are quick; diff and
-// review can be slow on big repos.
-async function gh(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
+// review can be slow on big repos. Every gh call goes through here, so each one
+// finds gh the way detection did, through the login-shell PATH.
+export async function gh(args: string[], opts: { cwd?: string; timeoutMs?: number } = {}) {
   const environment = agentEnvironment()
   const executable = await resolveAgentPath("gh", environment)
   if (!executable) return { stdout: "", stderr: "GitHub CLI was not found.", failed: true }
@@ -41,14 +42,6 @@ async function gh(args: string[], opts: { cwd?: string; timeoutMs?: number } = {
         resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) }),
     )
   })
-}
-
-// Kept for ci-watch's one-line hint. The real answer comes from
-// resolveGhInstall below, which only ever names a manager this machine has.
-export const GH_INSTALL_COMMAND: Record<string, string> = {
-  darwin: "brew install gh",
-  win32: "winget install --id GitHub.cli -e",
-  linux: "sudo snap install gh",
 }
 
 // Looked up through the login-shell PATH for the same reason external agents
@@ -81,7 +74,9 @@ export type PullRequestCliStatus = {
   detail: string
 }
 
-export async function pullRequestCliStatus(): Promise<PullRequestCliStatus> {
+export async function pullRequestCliStatus(options: { refresh?: boolean } = {}): Promise<PullRequestCliStatus> {
+  // "Check again" after installing gh: the PATH from launch cannot know about it.
+  if (options.refresh) refreshAgentEnvironment()
   const install = await resolveGhInstall()
   const installCommand = install.command
   const installUrl = install.url
@@ -100,18 +95,22 @@ export async function pullRequestCliStatus(): Promise<PullRequestCliStatus> {
     }
   }
   // gh writes auth status to stderr on older releases and stdout on newer ones.
+  // It also exits 1 when any other account or host fails to authenticate, so
+  // the github.com sign-in line decides, not the exit code.
   const status = await gh(["auth", "status"], { timeoutMs: 10_000 })
   const combined = `${status.stdout}\n${status.stderr}`
   const login = combined.match(/Logged in to github\.com (?:account|as) ([A-Za-z0-9-]+)/)?.[1]
+  const warning = ghInstallWarning(await resolveAgentPath("gh", agentEnvironment()))
+  const signedIn = login ? `Signed in as ${login}.` : "Sign in to GitHub to load pull requests."
   return {
     installed: true,
-    authenticated: !status.failed && Boolean(login),
+    authenticated: Boolean(login),
     login,
     installCommand,
     installUrl,
     installDetail,
     authCommand,
-    detail: status.failed || !login ? "Sign in to GitHub to load pull requests." : `Signed in as ${login}.`,
+    detail: warning ? `${signedIn} ${warning}` : signedIn,
   }
 }
 

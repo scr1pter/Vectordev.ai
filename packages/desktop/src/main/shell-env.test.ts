@@ -1,6 +1,8 @@
+import { join } from "node:path"
+
 import { describe, expect, test } from "bun:test"
 
-import { isNushell, mergeShellEnv, parseShellEnv, resolveUserShell } from "./shell-env"
+import { isNushell, mergeShellEnv, parseShellEnv, resolveUserShell, toolBinDirectories } from "./shell-env"
 
 describe("shell env", () => {
   test("parseShellEnv supports null-delimited pairs", () => {
@@ -46,5 +48,21 @@ describe("shell env", () => {
     expect(isNushell("/opt/homebrew/bin/nu")).toBe(true)
     expect(isNushell("C:\\Program Files\\nu.exe")).toBe(true)
     expect(isNushell("/bin/zsh")).toBe(false)
+  })
+
+  test("Windows looks where winget, Scoop and Chocolatey put the GitHub CLI", () => {
+    // A running app keeps its launch PATH, so these are how a gh installed afterwards is found.
+    const directories = toolBinDirectories(
+      {
+        USERPROFILE: "C:\\Users\\ada",
+        LOCALAPPDATA: "C:\\Users\\ada\\AppData\\Local",
+        ProgramFiles: "C:\\Program Files",
+      },
+      "win32",
+    )
+    expect(directories).toContain(join("C:\\Program Files", "GitHub CLI"))
+    expect(directories).toContain(join("C:\\Users\\ada\\AppData\\Local", "Microsoft", "WinGet", "Links"))
+    expect(directories).toContain(join("C:\\Users\\ada", "scoop", "shims"))
+    expect(directories).toContain(join("C:\\ProgramData\\chocolatey", "bin"))
   })
 })

@@ -97,7 +97,7 @@ const api: ElectronAPI = {
     clear: () => ipcRenderer.invoke("custom-instructions-clear"),
   },
   pullRequests: {
-    status: () => ipcRenderer.invoke("pr-cli-status"),
+    status: (options) => ipcRenderer.invoke("pr-cli-status", options),
     list: (cwd, options) => ipcRenderer.invoke("pr-list", cwd, options),
     view: (cwd, number) => ipcRenderer.invoke("pr-view", cwd, number),
     diff: (cwd, number) => ipcRenderer.invoke("pr-diff", cwd, number),
@@ -310,7 +310,7 @@ const api: ElectronAPI = {
     },
   },
   github: {
-    detect: () => ipcRenderer.invoke("github-detect"),
+    detect: (options) => ipcRenderer.invoke("github-detect", options),
     publish: (input) => ipcRenderer.invoke("github-publish", input),
     auth: {
       status: () => ipcRenderer.invoke("github-auth-status"),

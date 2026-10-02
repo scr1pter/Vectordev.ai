@@ -50,7 +50,7 @@ type GithubRepo = {
 }
 
 type GithubApi = {
-  detect(): Promise<GithubStatus>
+  detect(options?: { refresh?: boolean }): Promise<GithubStatus>
   publish(input: {
     projectPath: string
     name?: string
@@ -253,14 +253,15 @@ export function DialogGithubPush(props: { projectPath: string }) {
     await detect()
   }
 
-  async function detect() {
+  // refresh is the user's "Check again": main re-reads the shell PATH, so a gh installed since launch is found.
+  async function detect(refresh = false) {
     if (!api) {
       setChecking(false)
       return
     }
     setChecking(true)
     try {
-      setStatus(await api.detect())
+      setStatus(await api.detect({ refresh }))
     } catch (error) {
       showToast({ variant: "error", title: "GitHub check failed", description: messageOf(error) })
     }
@@ -683,14 +684,15 @@ export function DialogGithubPush(props: { projectPath: string }) {
                 <div class="text-13-medium text-text-strong">{stateLabel()}</div>
                 <div class="mt-1 text-12-regular text-text-weak">
                   {status()?.authenticated
-                    ? status()?.detail || "Vector can create repositories with the GitHub CLI signed in on this computer."
+                    ? status()?.detail ||
+                      "Vector can create repositories with the GitHub CLI signed in on this computer."
                     : api
                       ? "Existing remotes push with your normal Git credentials or SSH. GitHub CLI is only required when Vector creates a new repository."
                       : "Open this project in the Vector desktop app to use native GitHub publishing."}
                 </div>
               </div>
               <Show when={api && !checking() && !status()?.authenticated}>
-                <Button type="button" size="small" onClick={() => void detect()}>
+                <Button type="button" size="small" onClick={() => void detect(true)}>
                   Check again
                 </Button>
               </Show>

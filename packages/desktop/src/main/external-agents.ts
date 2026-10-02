@@ -90,6 +90,13 @@ export function agentEnvironment(): AgentEnvironment {
   return environment
 }
 
+// Probes the login shell again, for an explicit re-check after the user
+// installed something: the cached environment still holds the PATH from launch.
+export function refreshAgentEnvironment() {
+  environment = undefined
+  return agentEnvironment()
+}
+
 function pathSeparator(platform: NodeJS.Platform) {
   return platform === "win32" ? ";" : ":"
 }

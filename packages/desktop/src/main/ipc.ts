@@ -132,7 +132,13 @@ import {
   startDeviceLogin as startGitlabLogin,
   type GitlabCreateRepoInput,
 } from "./gitlab-auth"
-import { detectExternalAgents, openInEditor, prepareWorkspace, type OpenInEditorInput } from "./external-agents"
+import {
+  detectExternalAgents,
+  openInEditor,
+  prepareWorkspace,
+  refreshAgentEnvironment,
+  type OpenInEditorInput,
+} from "./external-agents"
 import {
   createParallelWorkspace,
   discardParallelWorkspace,
@@ -309,7 +315,9 @@ export function registerIpcHandlers(deps: Deps) {
   handle("custom-instructions-read", () => readCustomInstructions())
   handle("custom-instructions-write", (_event, content: string) => writeCustomInstructions(String(content ?? "")))
   handle("custom-instructions-clear", () => clearCustomInstructions())
-  handle("pr-cli-status", () => pullRequestCliStatus())
+  handle("pr-cli-status", (_event, options?: { refresh?: boolean }) =>
+    pullRequestCliStatus({ refresh: options?.refresh === true }),
+  )
   handle("pr-list", (_event, cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) =>
     listPullRequests(cwd, options),
   )
@@ -453,7 +461,9 @@ export function registerIpcHandlers(deps: Deps) {
       if (!event.sender.isDestroyed()) event.sender.send("cloud-publish-progress", progress)
     }),
   )
-  handle("github-detect", () => detectGithub())
+  handle("github-detect", (_event, options?: { refresh?: boolean }) =>
+    detectGithub(options?.refresh === true ? refreshAgentEnvironment() : undefined),
+  )
   handle("github-publish", (_event: IpcMainInvokeEvent, input: GithubPublishInput) => publishToGithub(input))
   handle("github-auth-status", () => getAuthStatus())
   handle("github-auth-start", () => startDeviceLogin())

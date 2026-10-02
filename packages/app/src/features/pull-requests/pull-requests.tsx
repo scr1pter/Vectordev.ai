@@ -59,7 +59,7 @@ type PullRequestDetail = PullRequest & {
 }
 
 type PullRequestsApi = {
-  status: () => Promise<CliStatus>
+  status: (options?: { refresh?: boolean }) => Promise<CliStatus>
   list: (cwd: string, options?: { state?: string; limit?: number }) => Promise<PullRequest[]>
   view: (cwd: string, number: number) => Promise<PullRequestDetail>
   diff: (cwd: string, number: number) => Promise<string>
@@ -232,7 +232,8 @@ export function PullRequests(props: {
     setConfirmingMerge(false)
   }
 
-  const refresh = async (projectPath = props.projectPath) => {
+  // recheck is the user's "Check again": main re-reads the shell PATH, so a gh installed since launch is found.
+  const refresh = async (projectPath = props.projectPath, recheck = false) => {
     const request = ++refreshRequest
     const current = () => request === refreshRequest && props.open && props.projectPath === projectPath
     const bridge = api()
@@ -245,7 +246,7 @@ export function PullRequests(props: {
     }
     setBusy("Checking GitHub CLI…")
     setError(undefined)
-    const cli = await bridge.status().catch((cause: unknown) => {
+    const cli = await bridge.status({ refresh: recheck }).catch((cause: unknown) => {
       if (current()) setError(pullRequestErrorMessage(cause))
       return undefined
     })
@@ -573,7 +574,7 @@ export function PullRequests(props: {
               <button
                 type="button"
                 class="mt-4 rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white"
-                onClick={() => void refresh()}
+                onClick={() => void refresh(props.projectPath, true)}
               >
                 Check again
               </button>
@@ -588,7 +589,7 @@ export function PullRequests(props: {
               <button
                 type="button"
                 class="mt-4 rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white"
-                onClick={() => void refresh()}
+                onClick={() => void refresh(props.projectPath, true)}
               >
                 Check again
               </button>

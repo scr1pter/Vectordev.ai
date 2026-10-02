@@ -160,6 +160,12 @@ export function toolBinDirectories(env: PathEnvironment = process.env, platform:
       join(home, ".local", "bin"),
       join(home, ".deno", "bin"),
       join(home, ".cargo", "bin"),
+      // A running app keeps the PATH it started with, so a CLI that winget, its
+      // MSI, Scoop or Chocolatey installed afterwards is only found here.
+      join(env.ProgramFiles || "C:\\Program Files", "GitHub CLI"),
+      join(localAppData, "Microsoft", "WinGet", "Links"),
+      join(env.SCOOP || join(home, "scoop"), "shims"),
+      join(env.ChocolateyInstall || "C:\\ProgramData\\chocolatey", "bin"),
     ].filter((directory): directory is string => Boolean(directory))
   }
   return [

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { GH_DOWNLOAD_URL, ghInstallHint } from "./gh-install"
+import { GH_DOWNLOAD_URL, ghInstallHint, ghInstallWarning } from "./gh-install"
 
 describe("choosing how to install the GitHub CLI", () => {
   test("macOS uses Homebrew when it is actually installed", () => {
@@ -37,21 +37,26 @@ describe("choosing how to install the GitHub CLI", () => {
     expect(ghInstallHint("linux", { dnf: true }).command).toBe("sudo dnf install gh")
     expect(ghInstallHint("linux", { pacman: true }).command).toBe("sudo pacman -S github-cli")
     expect(ghInstallHint("linux", { zypper: true }).command).toBe("sudo zypper install gh")
-    expect(ghInstallHint("linux", { snap: true }).command).toBe("sudo snap install gh")
   })
 
-  test("apt alone never produces a command", () => {
-    // gh is not in Debian's or Ubuntu's default repositories, so `sudo apt
-    // install gh` answers "Unable to locate package". The official route adds
-    // GitHub's apt source first, which belongs behind a link.
-    const hint = ghInstallHint("linux", { "apt-get": true })
+  test("Homebrew on Linux is used first, because it is one of GitHub's supported routes", () => {
+    expect(ghInstallHint("linux", { brew: true, dnf: true }).command).toBe("brew install gh")
+  })
+
+  test("Ubuntu and Debian get the link to GitHub's apt repository, never the snap", () => {
+    // gh is not in Debian's or Ubuntu's default repositories, and GitHub's own
+    // Linux guide says to never install gh as a snap: it installs, then breaks.
+    const hint = ghInstallHint("linux", {})
     expect(hint.command).toBeUndefined()
     expect(hint.detail).toContain("default repositories")
+    expect(hint.detail).toContain("Avoid the snap")
     expect(hint.url).toBe(GH_DOWNLOAD_URL)
   })
 
-  test("apt plus snap uses snap, because that one works", () => {
-    expect(ghInstallHint("linux", { "apt-get": true, snap: true }).command).toBe("sudo snap install gh")
+  test("a gh that came from the snap store is called out", () => {
+    expect(ghInstallWarning("/snap/bin/gh")).toContain("sudo snap remove gh")
+    expect(ghInstallWarning("/opt/homebrew/bin/gh")).toBeUndefined()
+    expect(ghInstallWarning(undefined)).toBeUndefined()
   })
 
   test("every hint carries the download link, command or not", () => {

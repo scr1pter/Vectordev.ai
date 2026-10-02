@@ -264,7 +264,8 @@ export type CustomInstructionsAPI = {
 }
 
 export type PullRequestsAPI = {
-  status: () => Promise<PullRequestCliStatus>
+  // refresh re-reads the login-shell PATH, for "Check again" after installing gh.
+  status: (options?: { refresh?: boolean }) => Promise<PullRequestCliStatus>
   list: (
     cwd: string,
     options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number },
@@ -917,7 +918,7 @@ export type ElectronAPI = {
     }
   }
   github: {
-    detect: () => Promise<GithubStatus>
+    detect: (options?: { refresh?: boolean }) => Promise<GithubStatus>
     publish: (input: GithubPublishInput) => Promise<GithubPublishResult>
     auth: {
       status: () => Promise<GithubAuthStatus>

@@ -7,23 +7,16 @@
 // package". Telling someone to run a command that cannot work is worse than
 // telling them nothing, because they assume the failure is theirs.
 //
+// The snap is never offered either. It installs, but GitHub's own Linux guide
+// says to never install gh as a snap because of how many ways it breaks at run
+// time, so on Ubuntu it was the command that "worked" and then did not.
+//
 // Pure so the choice can be tested without a machine that has any of these.
 
 export const GH_DOWNLOAD_URL = "https://cli.github.com"
 
 // Package managers Vector looks for, in the order it prefers them.
-export const GH_PACKAGE_MANAGERS = [
-  "brew",
-  "port",
-  "winget",
-  "scoop",
-  "choco",
-  "dnf",
-  "pacman",
-  "zypper",
-  "apt-get",
-  "snap",
-] as const
+export const GH_PACKAGE_MANAGERS = ["brew", "port", "winget", "scoop", "choco", "dnf", "pacman", "zypper"] as const
 
 export type GhPackageManager = (typeof GH_PACKAGE_MANAGERS)[number]
 
@@ -37,10 +30,11 @@ export type GhInstallHint = {
 
 const MAC_ORDER: GhPackageManager[] = ["brew", "port"]
 const WINDOWS_ORDER: GhPackageManager[] = ["winget", "scoop", "choco"]
-// apt-get is deliberately absent: gh is not in Debian or Ubuntu's own
-// repositories, and the official route adds GitHub's apt source first — four
-// commands with a keyring, which is a link's job rather than a copy button's.
-const LINUX_ORDER: GhPackageManager[] = ["dnf", "pacman", "zypper", "snap"]
+// apt is deliberately absent: gh is not in Debian or Ubuntu's own repositories,
+// and the official route adds GitHub's apt source first — four commands with a
+// keyring, which is a link's job rather than a copy button's. Homebrew on Linux
+// is one of GitHub's supported routes, so it comes first when it is there.
+const LINUX_ORDER: GhPackageManager[] = ["brew", "dnf", "pacman", "zypper"]
 
 const COMMANDS: Record<GhPackageManager, string> = {
   brew: "brew install gh",
@@ -51,8 +45,6 @@ const COMMANDS: Record<GhPackageManager, string> = {
   dnf: "sudo dnf install gh",
   pacman: "sudo pacman -S github-cli",
   zypper: "sudo zypper install gh",
-  "apt-get": "sudo apt install gh",
-  snap: "sudo snap install gh",
 }
 
 function orderFor(platform: NodeJS.Platform) {
@@ -68,7 +60,14 @@ function fallbackDetail(platform: NodeJS.Platform) {
   if (platform === "win32") {
     return "No package manager Vector recognises is installed. Download the Windows installer from cli.github.com."
   }
-  return "gh is not in the default repositories on this distribution. cli.github.com has the packages and the one-time repository setup."
+  return "gh is not in the default repositories on this distribution. cli.github.com has GitHub's own apt and rpm repositories and the one-time setup. Avoid the snap: GitHub says it breaks gh."
+}
+
+// A gh that came from the snap store is found and reports a version, then
+// fails on sign-in or on the git operations behind pull requests.
+export function ghInstallWarning(executable: string | undefined) {
+  if (!executable?.startsWith("/snap/")) return undefined
+  return "This GitHub CLI was installed as a snap, which GitHub says breaks gh. Remove it with `sudo snap remove gh` and install it from cli.github.com instead."
 }
 
 export function ghInstallHint(
