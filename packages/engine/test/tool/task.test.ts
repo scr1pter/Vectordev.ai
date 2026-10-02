@@ -2043,4 +2043,152 @@ describe("tool.task", () => {
       expect(result.output).toContain("7 subagents were running for this task when this one started")
     }),
   )
+
+  background.instance("rejects overlapping ownership between sibling subagents launched together", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      // Both calls pause at the permission prompt, as parallel calls in one message do.
+      const launch = (description: string, owned: string) =>
+        Effect.exit(
+          def.execute(
+            {
+              description,
+              prompt: description,
+              subagent_type: "general",
+              owned_paths: [owned],
+              background: true,
+            },
+            {
+              ...taskContext({
+                sessionID: chat.id,
+                messageID: assistant.id,
+                promptOps: { ...stubOps(), prompt: () => Effect.never },
+              }),
+              ask: () => Effect.sleep("50 millis"),
+            },
+          ),
+        )
+
+      const exits = yield* Effect.all(
+        [launch("edit auth module", "src/auth"), launch("edit login", "src/auth/login.tsx")],
+        {
+          concurrency: "unbounded",
+        },
+      )
+
+      expect(exits.filter(Exit.isSuccess)).toHaveLength(1)
+      const failed = exits.find(Exit.isFailure)
+      if (failed) expect(Cause.pretty(failed.cause)).toContain("ownership overlaps")
+    }),
+  )
+
+  background.instance("a dependency whose child ended on an error blocks its dependents", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const release = yield* Deferred.make<void>()
+      const failing: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) =>
+          Deferred.await(release).pipe(
+            Effect.andThen(
+              sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "assistant",
+                parentID: MessageID.ascending(),
+                sessionID: input.sessionID,
+                mode: "general",
+                agent: "general",
+                cost: 0,
+                path: { cwd: "/tmp", root: "/tmp" },
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                modelID: ref.modelID,
+                providerID: ref.providerID,
+                time: { created: Date.now() },
+                error: { name: "UnknownError", data: { message: "rate limited" } },
+              } as SessionV1.Assistant),
+            ),
+            Effect.as(reply(input, "partial notes")),
+          ),
+      }
+      const upstream = yield* def.execute(
+        {
+          description: "build foundation",
+          prompt: "Build the foundation.",
+          subagent_type: "general",
+          background: true,
+        },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: failing }),
+      )
+      const prompted: SessionID[] = []
+      const queued = yield* def.execute(
+        {
+          description: "integrate feature",
+          prompt: "Integrate the feature.",
+          subagent_type: "general",
+          depends_on: [upstream.metadata.sessionId],
+          background: true,
+        },
+        taskContext({
+          sessionID: chat.id,
+          messageID: assistant.id,
+          promptOps: stubOps({ onPrompt: (input) => prompted.push(input.sessionID) }),
+        }),
+      )
+
+      yield* Deferred.succeed(release, undefined)
+      const waited = yield* jobs.wait({ id: queued.metadata.sessionId })
+      expect(waited.info?.status).toBe("error")
+      expect(waited.info?.error).toContain("rate limited")
+      // The parent still hears about the failure; the dependent child is never prompted.
+      expect(prompted).not.toContain(queued.metadata.sessionId)
+
+      const exit = yield* Effect.exit(
+        def.execute(
+          {
+            description: "integrate again",
+            prompt: "Integrate the feature.",
+            subagent_type: "general",
+            depends_on: [upstream.metadata.sessionId],
+          },
+          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() }),
+        ),
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("rate limited")
+    }),
+  )
+
+  it.instance("task_id only resumes a subagent of the calling session", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const other = yield* sessions.create({ title: "Unrelated" })
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      let prompted = false
+      const promptOps = stubOps({
+        onPrompt: () => {
+          prompted = true
+        },
+      })
+
+      for (const id of [other.id, chat.id]) {
+        const exit = yield* Effect.exit(
+          def.execute(
+            { description: "resume", prompt: "continue", subagent_type: "general", task_id: id },
+            taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+          ),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("is not a subagent of this session")
+      }
+      expect(prompted).toBe(false)
+    }),
+  )
 })

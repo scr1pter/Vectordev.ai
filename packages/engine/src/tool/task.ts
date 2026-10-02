@@ -195,6 +195,23 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    // Ownership claimed by task calls that have not registered their job yet. Sibling calls
+    // in one message run concurrently, so the job list alone cannot see each other's paths.
+    const claims = new Set<{ parentSessionID: SessionID; taskID?: string; title: string; paths: string[] }>()
+    const claimLock = Semaphore.makeUnsafe(1)
+
+    const dependencyFailure = Effect.fn("TaskTool.dependencyFailure")(function* (job: BackgroundJob.Info) {
+      if (job.status === "error") return `Dependency ${job.id} failed${job.error ? `: ${job.error}` : "."}`
+      if (job.status === "cancelled") return `Dependency ${job.id} was cancelled.`
+      if (job.status !== "completed") return undefined
+      // A job that returned normally can still have failed or been stopped inside its child.
+      const child = job.metadata?.sessionId
+      if (typeof child !== "string") return undefined
+      const failure = (yield* SubagentLifecycle.observe(sessions, SessionID.make(child)))?.failure
+      if (!failure) return undefined
+      if (failure.status === "cancelled") return `Dependency ${job.id} was cancelled.`
+      return `Dependency ${job.id} failed${failure.error ? `: ${failure.error}` : "."}`
+    })
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -208,6 +225,13 @@ export const TaskTool = Tool.define(
         )
       }
       const parent = yield* sessions.get(ctx.sessionID)
+      const session = params.task_id
+        ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        : undefined
+      // Resuming any other session would re-prompt it, or this session itself, from inside this call.
+      if (session && session.parentID !== ctx.sessionID) {
+        return yield* Effect.fail(new Error(`Task ${params.task_id} is not a subagent of this session.`))
+      }
       // The description is the title on the subagent's card, the child session and the job.
       const title = subagentTitle(params.description, params.prompt)
       const dependencies = [...new Set(params.depends_on?.map((item) => item.trim()).filter(Boolean) ?? [])]
@@ -225,12 +249,8 @@ export const TaskTool = Tool.define(
             new Error(`Dependency ${dependency} does not belong to this task's subagent group.`),
           )
         }
-        if (job.status === "error") {
-          return yield* Effect.fail(new Error(`Dependency ${dependency} failed${job.error ? `: ${job.error}` : "."}`))
-        }
-        if (job.status === "cancelled") {
-          return yield* Effect.fail(new Error(`Dependency ${dependency} was cancelled.`))
-        }
+        const failed = yield* dependencyFailure(job)
+        if (failed) return yield* Effect.fail(new Error(failed))
         if (params.task_id && dependencyReaches(jobs, dependency, params.task_id)) {
           return yield* Effect.fail(new Error(`Dependency ${dependency} would create a task cycle.`))
         }
@@ -241,26 +261,53 @@ export const TaskTool = Tool.define(
         catch: (error) => (error instanceof Error ? error : new Error(String(error))),
       })
       if (ownedPaths.length > 0) {
-        const conflicts = jobs
-          .filter(
-            (job) =>
-              job.type === id &&
-              job.status === "running" &&
-              job.id !== params.task_id &&
-              !dependencies.includes(job.id) &&
-              job.metadata?.parentSessionId === ctx.sessionID,
-          )
-          .flatMap((job) => {
-            const existing = Array.isArray(job.metadata?.ownedPaths)
-              ? job.metadata.ownedPaths.filter((item): item is string => typeof item === "string")
-              : []
-            return ownedPaths.flatMap((owned) =>
-              existing
-                .map(normalizedPath)
-                .filter((item) => item && pathsOverlap(owned, item))
-                .map((item) => `${job.title ?? job.id}: ${owned} overlaps ${item}`),
-            )
-          })
+        const conflicts = yield* claimLock.withPermits(1)(
+          Effect.gen(function* () {
+            const active = [
+              ...(yield* background.list())
+                .filter(
+                  (job) =>
+                    job.type === id &&
+                    job.status === "running" &&
+                    job.id !== params.task_id &&
+                    !dependencies.includes(job.id) &&
+                    job.metadata?.parentSessionId === ctx.sessionID,
+                )
+                .map((job) => ({
+                  label: job.title ?? job.id,
+                  paths: Array.isArray(job.metadata?.ownedPaths)
+                    ? job.metadata.ownedPaths.filter((item): item is string => typeof item === "string")
+                    : [],
+                })),
+              ...[...claims]
+                .filter(
+                  (claim) =>
+                    claim.parentSessionID === ctx.sessionID &&
+                    (!claim.taskID || (claim.taskID !== params.task_id && !dependencies.includes(claim.taskID))),
+                )
+                .map((claim) => ({ label: claim.title, paths: claim.paths })),
+            ]
+            const found = [
+              ...new Set(
+                active.flatMap((item) =>
+                  ownedPaths.flatMap((owned) =>
+                    item.paths
+                      .map(normalizedPath)
+                      .filter((existing) => existing && pathsOverlap(owned, existing))
+                      .map((existing) => `${item.label}: ${owned} overlaps ${existing}`),
+                  ),
+                ),
+              ),
+            ]
+            // Held until this call returns; by then its job, if it started, carries the paths itself.
+            if (found.length === 0) {
+              const claim = { parentSessionID: ctx.sessionID, taskID: params.task_id, title, paths: ownedPaths }
+              claims.add(claim)
+              yield* Effect.addFinalizer(() => Effect.sync(() => claims.delete(claim)))
+            }
+            return found
+          }),
+        )
         if (conflicts.length > 0) {
           return yield* Effect.fail(
             new Error(
@@ -296,10 +343,6 @@ export const TaskTool = Tool.define(
         ).length
       }
       const busy = runningSiblings + 1 > BUSY_SUBAGENTS_PER_SESSION
-
-      const session = params.task_id
-        ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        : undefined
 
       // No subagent_type, or a general-purpose alias, means the general Subagent,
       // except that resuming a task with no type continues the agent it ran.
@@ -511,14 +554,8 @@ export const TaskTool = Tool.define(
           if (!waited.info) {
             return yield* Effect.fail(new Error(`Dependency ${dependency} disappeared before this task could start.`))
           }
-          if (waited.info.status === "error") {
-            return yield* Effect.fail(
-              new Error(`Dependency ${dependency} failed${waited.info.error ? `: ${waited.info.error}` : "."}`),
-            )
-          }
-          if (waited.info.status === "cancelled") {
-            return yield* Effect.fail(new Error(`Dependency ${dependency} was cancelled.`))
-          }
+          const failed = yield* dependencyFailure(waited.info)
+          if (failed) return yield* Effect.fail(new Error(failed))
         }
         if (dependencies.length > 0) yield* transition({ status: "running" })
         const parts = yield* ops.resolvePromptParts(assignmentPrompt(params, ownedPaths))
@@ -748,7 +785,7 @@ export const TaskTool = Tool.define(
       parameters: Parameters,
       jsonSchema: flags.experimentalBackgroundSubagents ? undefined : ToolJsonSchema.fromSchema(BaseParameters),
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
-        run(params, ctx).pipe(Effect.orDie),
+        run(params, ctx).pipe(Effect.scoped, Effect.orDie),
     }
   }),
 )
