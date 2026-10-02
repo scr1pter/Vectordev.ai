@@ -10,9 +10,33 @@ export const SECRET_FIELD = /(key|secret|token|password|passphrase|credentials?|
  */
 export const MARKER = "[redacted]"
 
+// The parts of config that carry credentials. Only these are redacted: elsewhere
+// a secret-looking field name means something else, such as the permission rule
+// `"*.key": "deny"`, whose value the schema requires to stay a literal.
+const CONFIG_SECRET_PATHS = [
+  ["provider", "*", "options"],
+  ["provider", "*", "models", "*", "options"],
+  ["provider", "*", "models", "*", "headers"],
+  ["provider", "*", "models", "*", "variants"],
+  ["mcp", "*", "environment"],
+  ["mcp", "*", "headers"],
+  ["mcp", "*", "oauth"],
+  ["lsp", "*", "env"],
+  ["lsp", "*", "initialization"],
+  ["formatter", "*", "environment"],
+  ["agent", "*", "options"],
+  ["mode", "*", "options"],
+  ["plugin", "*", "1"],
+]
+
 /** Replaces every nonempty string under a secret-named field with MARKER, keeping the shape. */
 export function redact<T>(value: T): T {
   return redactValue(value) as T
+}
+
+/** Like redact, but only inside the parts of a config that carry credentials. */
+export function redactConfig<T>(config: T): T {
+  return CONFIG_SECRET_PATHS.reduce<unknown>((value, at) => redactAt(value, at), config) as T
 }
 
 /** Drops every secret-named field, whatever its value. */
@@ -45,6 +69,18 @@ function redactValue(value: unknown): unknown {
       name,
       typeof inner === "string" && inner !== "" && SECRET_FIELD.test(name) ? MARKER : redactValue(inner),
     ]),
+  )
+}
+
+// "*" in a path matches every field or array index.
+function redactAt(value: unknown, at: string[]): unknown {
+  if (at.length === 0) return redactValue(value)
+  const matches = (name: string) => at[0] === "*" || at[0] === name
+  if (Array.isArray(value))
+    return value.map((inner, index) => (matches(String(index)) ? redactAt(inner, at.slice(1)) : inner))
+  if (!isRecord(value)) return value
+  return Object.fromEntries(
+    Object.entries(value).map(([name, inner]) => [name, matches(name) ? redactAt(inner, at.slice(1)) : inner]),
   )
 }
 

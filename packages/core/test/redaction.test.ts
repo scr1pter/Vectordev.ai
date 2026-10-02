@@ -42,6 +42,29 @@ describe("Redaction", () => {
     })
   })
 
+  test("redactConfig marks secrets where config carries credentials", () => {
+    expect(Redaction.redactConfig(stored)).toEqual(Redaction.redact(stored))
+    expect(
+      Redaction.redactConfig({
+        plugin: ["plain", ["with-options", { apiKey: "plugin-secret", region: "us" }]],
+        lsp: { ts: { command: ["ts"], env: { NPM_TOKEN: "lsp-secret" } } },
+        agent: { build: { options: { apiKey: "agent-secret" } } },
+      }),
+    ).toEqual({
+      plugin: ["plain", ["with-options", { apiKey: Redaction.MARKER, region: "us" }]],
+      lsp: { ts: { command: ["ts"], env: { NPM_TOKEN: Redaction.MARKER } } },
+      agent: { build: { options: { apiKey: Redaction.MARKER } } },
+    })
+  })
+
+  test("redactConfig leaves permission rules with secret-looking patterns alone", () => {
+    const config = {
+      permission: { read: { "*.key": "deny", "cat *token": "ask" }, "*password": "deny" },
+      agent: { build: { permission: { read: { "*.key": "deny" } } } },
+    }
+    expect(Redaction.redactConfig(config)).toEqual(config)
+  })
+
   test("redact leaves an empty key alone, since it holds nothing", () => {
     expect(Redaction.redact({ apiKey: "" })).toEqual({ apiKey: "" })
   })

@@ -16,13 +16,13 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
     // `vector invite`, so stored keys go out as Redaction.MARKER. Config.update
     // treats a MARKER sent back as "unchanged".
     const get = Effect.fn("ConfigHttpApi.get")(function* () {
-      return Redaction.redact(yield* configSvc.get())
+      return Redaction.redactConfig(yield* configSvc.get())
     })
 
     const update = Effect.fn("ConfigHttpApi.update")(function* (ctx) {
       yield* configSvc.update(ctx.payload)
       yield* markInstanceForDisposal(yield* InstanceState.context)
-      return Redaction.redact(ctx.payload)
+      return Redaction.redactConfig(ctx.payload)
     })
 
     const providers = Effect.fn("ConfigHttpApi.providers")(function* () {

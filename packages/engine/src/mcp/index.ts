@@ -27,6 +27,8 @@ import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { withTimeout } from "@/util/timeout"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Redaction } from "@vectordevai/core/redaction"
+import { isRecord } from "@/util/record"
+import { mergeDeep } from "remeda"
 import { McpOAuthPendingProvider, McpOAuthProvider, OAUTH_CALLBACK_PATH } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
@@ -836,11 +838,16 @@ const layer = Layer.effect(
       }
       // Clients read config with secrets replaced by Redaction.MARKER. One that
       // sends an entry back unchanged keeps the stored values, not the marker.
-      // Runtime state holds servers added since load; config also holds disabled ones.
-      const running = (yield* InstanceState.get(state)).config
-      const configured = (yield* cfgSvc.get()).mcp ?? {}
-      const stored = [running, configured].find((entries) => Object.hasOwn(entries, name))
-      const mcp = Redaction.restore(input, stored?.[name])
+      // Loaded config and runtime state hold {env:...} references already resolved,
+      // so the config files win wherever they hold a value; the others only fill
+      // what no file holds, such as a remote config or a save that failed.
+      const configured = (yield* cfgSvc.get()).mcp?.[name]
+      const running = (yield* InstanceState.get(state)).config[name]
+      const onDisk = yield* cfgSvc.storedMcp(name)
+      const stored = [configured, running, onDisk]
+        .filter(isRecord)
+        .reduce<Record<string, unknown>>((merged, entry) => mergeDeep(merged, entry), {})
+      const mcp = Redaction.restore(input, stored)
       const unsafeHeader = mcp.type === "remote" ? unsafeCredentialHeader(mcp.headers) : undefined
       if (mcp.type === "remote" && !remoteURL(mcp.url)) {
         return {

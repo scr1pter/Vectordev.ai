@@ -12,7 +12,7 @@ import { Flag } from "@vectordevai/core/flag/flag"
 import { Auth } from "../auth"
 import { Teams } from "@vectordevai/core/teams"
 import { Env } from "../env"
-import { applyEdits, modify } from "jsonc-parser"
+import { applyEdits, modify, parse } from "jsonc-parser"
 import { InstallationLocal } from "@vectordevai/core/installation/version"
 import { existsSync } from "fs"
 import { isRecord } from "@/util/record"
@@ -131,6 +131,7 @@ export interface Interface {
   readonly updateGlobal: (config: Info) => Effect.Effect<{ info: Info; changed: boolean }>
   readonly updateMcpLocal: (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) => Effect.Effect<void>
   readonly removeMcpLocal: (name: string) => Effect.Effect<void>
+  readonly storedMcp: (name: string) => Effect.Effect<Record<string, unknown>>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
@@ -648,6 +649,41 @@ const layer = Layer.effect(
       }
     })
 
+    // The MCP entry as the config files hold it, merged in load order. get() has
+    // {env:...} and {file:...} references resolved; writing that back would put the
+    // resolved secret into a file in place of its reference.
+    const storedMcp = Effect.fn("Config.storedMcp")(function* (name: string) {
+      const ctx = yield* InstanceState.context
+      const dirs = yield* directories()
+      const project = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+        ? []
+        : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(
+            Effect.provideService(FSUtil.Service, fs),
+            Effect.provideService(EffectFlock.Service, flock),
+            Effect.orDie,
+          )
+      const files = [
+        ...["config.json", "vector.json", "vector.jsonc"].map((file) => path.join(Global.Path.config, file)),
+        ...(Flag.VECTOR_AGENT_CONFIG ? [Flag.VECTOR_AGENT_CONFIG] : []),
+        ...project,
+        ...dirs
+          .filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR)
+          .flatMap((dir) => ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES].map((file) => path.join(dir, file))),
+        ...["vector.json", "vector.jsonc"].map((file) => path.join(ConfigManaged.managedConfigDir(), file)),
+      ]
+      const entries = yield* Effect.forEach(files, (file) =>
+        readConfigFile(file).pipe(
+          Effect.map((text) => {
+            const parsed: unknown = text ? parse(text, [], { allowTrailingComma: true }) : undefined
+            return isRecord(parsed) && isRecord(parsed.mcp) ? parsed.mcp[name] : undefined
+          }),
+        ),
+      )
+      return entries
+        .filter(isRecord)
+        .reduce<Record<string, unknown>>((merged, entry) => mergeDeep(merged, entry), {})
+    })
+
     const removeMcpLocal = Effect.fn("Config.removeMcpLocal")(function* (name: string) {
       const ctx = yield* InstanceState.context
       const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
@@ -699,6 +735,7 @@ const layer = Layer.effect(
       updateGlobal,
       updateMcpLocal,
       removeMcpLocal,
+      storedMcp,
       invalidate,
       directories,
       waitForDependencies,

@@ -81,13 +81,13 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {
-      return Redaction.redact(yield* config.getGlobal())
+      return Redaction.redactConfig(yield* config.getGlobal())
     })
 
     const configUpdate = Effect.fn("GlobalHttpApi.configUpdate")(function* (ctx) {
       const result = yield* config.updateGlobal(ctx.payload)
       if (result.changed) bridge.fork(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
-      return Redaction.redact(result.info)
+      return Redaction.redactConfig(result.info)
     })
 
     const dispose = Effect.fn("GlobalHttpApi.dispose")(function* () {
