@@ -377,7 +377,6 @@ export const VectorTheme = {
 } as unknown as ThemeRegistrationResolved
 
 registerCustomTheme("Vector", () => Promise.resolve(VectorTheme))
-registerCustomTheme("Vector", () => Promise.resolve(VectorTheme))
 
 function renderMathInText(text: string): string {
   let result = text

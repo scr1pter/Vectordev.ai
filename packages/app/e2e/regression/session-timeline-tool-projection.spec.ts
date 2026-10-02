@@ -8,11 +8,12 @@ import {
 } from "../performance/timeline-stability/fixture"
 
 test("renders every tool error outcome without leaking hidden tools", async ({ page }) => {
-  const ordinary = ["bash", "edit", "write", "apply_patch", "webfetch", "websearch", "task", "skill", "mcp_probe"]
+  const ordinary = ["bash", "edit", "write", "apply_patch", "webfetch", "websearch", "skill", "mcp_probe"]
   const parts = ordinary.map((tool, index) =>
     toolPart(`prt_error_${index}`, tool, "error", errorInput(tool), { error: `${tool} failed visibly` }),
   )
   parts.push(
+    toolPart("prt_task_error", "task", "error", errorInput("task"), { error: "task failed visibly" }),
     toolPart("prt_question_dismissed", "question", "error", questionInput(), {
       error: "The user dismissed this question",
     }),
@@ -25,8 +26,22 @@ test("renders every tool error outcome without leaking hidden tools", async ({ p
   await expect(page.getByText(/dismissed/i)).toBeVisible()
   await expect(page.locator('[data-timeline-part-id="prt_todo_error"]')).toHaveCount(0)
   for (let index = 0; index < ordinary.length; index++) {
-    await expect(page.locator(`[data-timeline-part-id="prt_error_${index}"]`)).toBeVisible()
+    const row = page.locator(`[data-timeline-part-id="prt_error_${index}"]`)
+    await expect(row).toBeVisible()
+    await row.getByRole("button", { name: /Failed/ }).click()
+    await expect(row.getByText(`${ordinary[index]} failed visibly`, { exact: true })).toBeVisible()
   }
+  const question = page.locator('[data-timeline-part-id="prt_question_error"]')
+  await question.getByRole("button", { name: /Failed/ }).click()
+  await expect(question.getByText("Question transport failed", { exact: true })).toBeVisible()
+
+  const task = page.locator('[data-timeline-part-id="prt_task_error"]')
+  const chip = task.getByRole("button", { name: /Fail task.*1 failed.*Show in Background tasks/ })
+  await expect(chip).toHaveAttribute("data-status", "failed")
+  await chip.click()
+  const detail = page.getByRole("button", { name: /Open Fail task.*Failed/ })
+  await expect(detail).toBeVisible()
+  await expect(detail).toHaveAttribute("title", /task failed visibly/)
 })
 
 test("transitions shell and question through running error outcomes", async ({ page }) => {

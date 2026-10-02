@@ -91,9 +91,10 @@ async function openChildFromParent(page: Page) {
   await page.goto(sessionHref(parentID))
   await expectSessionTitle(page, parentTitle)
 
-  const card = page.locator(`a[href="${sessionHref(childID)}"]`)
+  const card = page.getByRole("button", { name: new RegExp(`${taskDescription}.*Show in Background tasks`) })
   await expect(card).toBeVisible()
-  await card.click()
+  // A normal click opens Background tasks; the single-agent modifier opens its session.
+  await card.click({ modifiers: ["ControlOrMeta"] })
 
   await expect(page).toHaveURL(new RegExp(`/server/.+/session/${childID}$`), { timeout: 15_000 })
 }

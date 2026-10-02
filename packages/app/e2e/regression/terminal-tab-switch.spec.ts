@@ -89,28 +89,34 @@ async function setup(page: Page) {
     sessions: [session(sessionA, titleA, 1700000000000), session(sessionB, titleB, 1700000001000)],
     pageMessages: () => ({ items: [] }),
   })
-  await page.route("**/pty", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ id: ptyID, title: "Terminal 1" }),
-    }),
-  )
-  await page.route(`**/pty/${ptyID}`, (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: "{}" }),
-  )
-  await page.route(`**/pty/${ptyID}/connect-token*`, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      headers: { "access-control-allow-origin": "*" },
-      body: JSON.stringify({ ticket: "e2e-ticket" }),
-    }),
+  // Directory-scoped SDK requests include a query string, so match exact paths.
+  await page.route(
+    (url) => ["/pty", `/pty/${ptyID}`, `/pty/${ptyID}/connect-token`].includes(url.pathname),
+    (route) => {
+      const url = new URL(route.request().url())
+      expect(url.searchParams.get("directory")).toBe(directory)
+      expect(route.request().method()).toBe(url.pathname === `/pty/${ptyID}` ? "PUT" : "POST")
+      if (url.pathname.endsWith("/connect-token")) expect(route.request().headers()["x-vector-ticket"]).toBe("1")
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": "*" },
+        body: JSON.stringify(
+          url.pathname.endsWith("/connect-token") ? { ticket: "e2e-ticket" } : { id: ptyID, title: "Terminal 1" },
+        ),
+      })
+    },
   )
   const connections: string[] = []
-  await page.routeWebSocket(new RegExp(`/pty/${ptyID}/connect`), (ws) => {
-    connections.push(ws.url())
-  })
+  await page.routeWebSocket(
+    (url) => url.pathname === `/pty/${ptyID}/connect`,
+    (ws) => {
+      const url = new URL(ws.url())
+      expect(url.searchParams.get("directory")).toBe(directory)
+      expect(url.searchParams.get("ticket")).toBe("e2e-ticket")
+      connections.push(ws.url())
+    },
+  )
 
   await page.addInitScript(
     ({ directory, server, sessions }) => {
