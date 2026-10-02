@@ -8,7 +8,17 @@
 
 </div>
 
-Vector brings an editor, terminal, controlled browser, and AI agents together around the repository on your computer. Ask for a change, watch agents edit files and run checks, then inspect the result before you merge or publish it. Use the desktop workspace, the terminal agent, or GitHub automation; connect the model provider you choose. Your working files stay local, while relevant context is sent to the providers and tools you use.
+Vector is an agentic engineering workspace. It puts an editor, a terminal, a controlled browser and AI agents around the repository on your computer: you describe a change, watch agents edit files and run checks, and inspect the result before you merge or publish it.
+
+Vector works in three places:
+
+- **Desktop app** (macOS, Windows, Linux). Agent and Editor views of the same session, with the terminal, browser and pull-request review in one window. Run several agents at once, each in its own checkout or sharing yours, and run Claude Code, Codex and Cursor Agent inside Vector using your own installed, signed-in tools.
+- **Terminal agent** (`@vectordevai/cli`). Run `vector` in any repository. `vector invite` shares your live workspace over one link that a teammate on a network that can reach your computer can open.
+- **GitHub.** `vector github install` sets up pull requests from issue comments and reviews by **Vectorscope**, Vector's code reviewer, which reads the repository around a change and comments on exact lines. `vector vectorscope` reviews your branch locally before you push.
+
+**Models and keys.** You bring the model. Connect a provider with your own API key in Settings or with `vector auth login`, sign in with ChatGPT for OpenAI models, use Connect OpenRouter with your own OpenRouter account, or point Vector at a local model or company gateway in `vector.json`. Keys are stored by Vector on your machine, and Vector's server does not send them back to connected clients or invite guests; an invite guest can still use your terminal and agents, so share invite links only with people you trust. Prompts and relevant context go only to the providers and tools you choose.
+
+The desktop app is $10 a month or $99 a year. The terminal agent is free with a Vector account.
 
 ```bash
 npm install -g @vectordevai/cli
@@ -17,9 +27,7 @@ vector auth login
 vector
 ```
 
-**Current downloads and this source candidate are separate.** Connect a provider you already use with `vector auth login`. The upcoming candidate adds free-model routing through OpenRouter, consent-based Vector session sharing, native installers and Vector Teams. Shared model access remains disabled pending owner setup; provider sign-ins requiring registrations remain gated. These source changes do not announce a published installer or enabled service. See the [candidate release draft](docs/vector/SERVICE-INDEPENDENCE-RELEASE-DRAFT.md) for status and the [public release notes](https://vectordev.ai/releases) for published builds.
-
-Vector desktop remains available for macOS, Windows and Linux at [vectordev.ai](https://vectordev.ai) for $10 a month or $99 a year; the subscription covers Vector itself. Creating an account does not start a subscription. The terminal agent is free with a Vector account. This work does not change pricing, payments or HULK licensing. External Claude Code, Codex and Cursor runtimes continue to use your own installed, authenticated CLIs.
+Published builds and their notes are at [vectordev.ai/releases](https://vectordev.ai/releases).
 
 ## Features
 
@@ -31,7 +39,7 @@ Vector desktop remains available for macOS, Windows and Linux at [vectordev.ai](
 
 **The agents you already use.** Claude Code, Codex and Cursor Agent run inside Vector on subscriptions you already have, in readable conversations that answer like any other chat.
 
-**Verified before done.** A judge reviews finished work against what was asked before it reaches you, so "done" means checked rather than claimed.
+**Verified completion.** Turn on LLM-as-a-judge and the agent writes down what success looks like before it starts, exercises the work when it finishes, and hands it to the Judge, a read-only specialist that compares the result with your request and sends it back with a specific repair if it falls short. It is opt-in and costs extra model calls.
 
 ### Workspace
 
