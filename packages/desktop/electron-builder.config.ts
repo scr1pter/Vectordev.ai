@@ -44,6 +44,7 @@ const channel = (() => {
   if (raw === "dev" || raw === "beta" || raw === "prod") return raw
   return "dev"
 })()
+const unsignedMac = allowUnsignedRelease && !signMac && channel !== "dev"
 
 if (process.env.GITHUB_ACTIONS === "true" && channel === "prod" && !allowUnsignedRelease) {
   if (process.platform === "darwin" && (!signMac || !notarizeMac || !signDmg)) {
@@ -85,6 +86,12 @@ const getBase = (appId: string, executableName: string): Configuration => ({
     desktopName: `${appId}.desktop`,
   },
   files: ["out/**/*", "resources/**/*"],
+  afterPack: unsignedMac
+    ? async (context) => {
+        if (context.electronPlatformName !== "darwin") return
+        await signUnsignedMac(path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`))
+      }
+    : undefined,
   extraResources: [
     {
       // Written by the same build invocation that compiles CHANNEL into the
@@ -124,7 +131,9 @@ const getBase = (appId: string, executableName: string): Configuration => ({
         "Vector uses microphone access only when you start voice dictation or a voice-enabled agent session.",
     },
     hardenedRuntime: true,
-    identity: signMac ? undefined : "-",
+    // Even identity "-" enumerates keychains in the pinned builder. Apply the
+    // ad-hoc signature ourselves, then let fuse reset re-seal the modified app.
+    identity: signMac ? undefined : unsignedMac ? null : "-",
     gatekeeperAssess: false,
     entitlements: "resources/entitlements.plist",
     entitlementsInherit: "resources/entitlements.plist",
@@ -178,6 +187,9 @@ const getBase = (appId: string, executableName: string): Configuration => ({
 function getConfig() {
   const appId = APP_IDS[channel]
   const base = getBase(appId, EXECUTABLE_NAMES[channel])
+  const electronFuses = unsignedMac
+    ? { ...releaseElectronFuses, resetAdHocDarwinSignature: true }
+    : releaseElectronFuses
 
   if (channel === "dev") {
     return {
@@ -195,7 +207,7 @@ function getConfig() {
       protocols: { name: "Vector Beta", schemes: ["vector"] },
       publish: { provider: "generic", url: `${updateBaseUrl}/vector-beta-updates` },
       rpm: { packageName: "vector-beta" },
-      electronFuses: releaseElectronFuses,
+      electronFuses,
     }
   }
   return {
@@ -206,8 +218,24 @@ function getConfig() {
     publish: { provider: "generic", url: `${updateBaseUrl}/vector-updates` },
     deb: { fpm: [desktopEntryFpm] },
     rpm: { packageName: "vector", fpm: [desktopEntryFpm] },
-    electronFuses: releaseElectronFuses,
+    electronFuses,
   }
+}
+
+export async function signUnsignedMac(appPath: string) {
+  await execFileAsync("/usr/bin/codesign", [
+    "--force",
+    "--deep",
+    "--sign",
+    "-",
+    "--options",
+    "runtime",
+    "--timestamp=none",
+    "--entitlements",
+    path.join(packageDir, "resources/entitlements.plist"),
+    appPath,
+  ])
+  await execFileAsync("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath])
 }
 
 export default getConfig()

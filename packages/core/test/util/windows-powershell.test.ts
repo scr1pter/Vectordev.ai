@@ -101,16 +101,44 @@ test.skipIf(process.platform !== "win32")(
           "-EncodedCommand",
           Buffer.from(
             `$ErrorActionPreference = 'Stop'
-$details = @{ phase = 'pwsh-started'; bunPath = ${quote(process.execPath)}; entryPath = ${quote(entry)}; entryExists = [IO.File]::Exists(${quote(entry)}); arguments = @('run', '--no-env-file', ${quote(entry)}) }
+$details = @{ phase = 'pwsh-started'; bunPath = ${quote(process.execPath)}; entryPath = ${quote(entry)}; entryExists = [IO.File]::Exists(${quote(entry)}); arguments = @('run', '--no-env-file', ${quote(entry)}); pathExt = $env:PATHEXT; comSpec = $env:ComSpec }
 [IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
-& ${quote(process.execPath)} run --no-env-file ${quote(entry)}
-$nativeSuccess = $?
-$nativeExitCode = $LASTEXITCODE
-$details.phase = 'bun-invocation-finished'
-$details.success = $nativeSuccess
-$details.exitCode = $nativeExitCode
-[IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
-exit $nativeExitCode`,
+$start = [Diagnostics.ProcessStartInfo]::new()
+$start.FileName = ${quote(process.execPath)}
+$start.UseShellExecute = $false
+$start.CreateNoWindow = $true
+$start.RedirectStandardOutput = $true
+$start.RedirectStandardError = $true
+foreach ($argument in $details.arguments) { $start.ArgumentList.Add($argument) }
+$process = [Diagnostics.Process]::new()
+$process.StartInfo = $start
+try {
+  if (-not $process.Start()) { throw 'Bun child did not start' }
+  $details.phase = 'bun-process-started'
+  $details.processId = $process.Id
+  [IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
+  $output = $process.StandardOutput.ReadToEndAsync()
+  $errorOutput = $process.StandardError.ReadToEndAsync()
+  if (-not $process.WaitForExit(15000)) { throw 'Bun child did not exit before the native deadline' }
+  if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($output, $errorOutput), 1000)) { throw 'Bun child streams did not close' }
+  $details.phase = 'bun-invocation-finished'
+  $details.exitCode = $process.ExitCode
+  $details.stdoutBytes = [Text.Encoding]::UTF8.GetByteCount($output.Result)
+  $details.stderrBytes = [Text.Encoding]::UTF8.GetByteCount($errorOutput.Result)
+  [IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
+  [Console]::Out.Write($output.Result)
+  [Console]::Error.Write($errorOutput.Result)
+  exit $process.ExitCode
+} finally {
+  try {
+    if ($details.ContainsKey('processId') -and -not $process.HasExited) {
+      $process.Kill($true)
+      if (-not $process.WaitForExit(1000)) { throw 'Bun child did not exit after cleanup' }
+    }
+  } finally {
+    $process.Dispose()
+  }
+}`,
             "utf16le",
           ).toString("base64"),
         ],
