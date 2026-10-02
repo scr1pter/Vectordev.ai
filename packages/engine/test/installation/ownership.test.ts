@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { InstallationOwnership } from "../../src/installation/ownership"
 import { Standalone } from "../../src/installation/standalone"
 
 async function directory() {
-  const root = await mkdtemp(path.join(os.tmpdir(), "vector-ownership-"))
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "vector-ownership-")))
   return {
     root,
     async [Symbol.asyncDispose]() {
@@ -37,6 +37,16 @@ test("standalone ownership requires the exact current binary hash and uninstalls
   expect(await Standalone.receipt(executable)).toBeUndefined()
   await Bun.write(executable, "synthetic executable")
   await Bun.write(path.join(metadata, "keep-user-file"), "user data")
+  if (process.platform === "win32") {
+    await expect(Standalone.uninstall(owned!, noCommand)).rejects.toThrow(
+      "Could not identify Vector for deferred removal",
+    )
+    expect(await Bun.file(executable).text()).toBe("synthetic executable")
+    expect(await Bun.file(path.join(metadata, "receipt.tsv")).exists()).toBe(true)
+    for (const name of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md", "keep-user-file"])
+      expect(await Bun.file(path.join(metadata, name)).text()).toBe(name === "keep-user-file" ? "user data" : name)
+    return
+  }
   expect(await Standalone.uninstall(owned!, noCommand)).toEqual({ status: "complete" })
   expect(await Bun.file(executable).exists()).toBe(false)
   expect(await Bun.file(path.join(metadata, "receipt.tsv")).exists()).toBe(false)
@@ -145,3 +155,104 @@ test("Homebrew and Scoop use recorded manager identities rather than invented re
     ),
   ).toEqual({ method: "scoop", package: "fixture-bucket/vector", latest: "1.2.4" })
 })
+
+for (const replacement of [false, true]) {
+  test.skipIf(process.platform !== "win32")(
+    `Windows deferred standalone removal ${replacement ? "preserves a replaced executable" : "removes only owned files after its parent exits"}`,
+    async () => {
+      await using fixture = await directory()
+      const executable = path.join(fixture.root, "vector.exe")
+      const metadata = path.join(fixture.root, ".vector-vector.exe")
+      await mkdir(metadata)
+      await Bun.write(executable, "synthetic executable")
+      await Bun.write(
+        path.join(metadata, "receipt.tsv"),
+        `vector-standalone\t1\t1.2.3\twindows-x64\tlatest\tvector.exe\t${createHash("sha256").update("synthetic executable").digest("hex")}\t${"a".repeat(64)}\n`,
+      )
+      for (const name of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"])
+        await Bun.write(path.join(metadata, name), name)
+      await Bun.write(path.join(metadata, "keep-user-file"), "user data")
+      // Run the real deferred-uninstall path from a disposable parent. The worker must wait for
+      // that exact process to exit; using the test runner's PID would leave it waiting for the suite.
+      const script = `
+        import { Standalone } from ${JSON.stringify(new URL("../../src/installation/standalone.ts", import.meta.url).href)};
+        const receipt = await Standalone.receipt(${JSON.stringify(executable)});
+        if (!receipt) throw new Error("Fixture receipt was rejected");
+        const result = await Standalone.uninstall(receipt, async (command) => {
+          const child = Bun.spawn(command, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+          const [code, stdout, stderr] = await Promise.all([
+            child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+          ]);
+          return { code, stdout, stderr };
+        });
+        console.log(JSON.stringify(result));
+        await Bun.stdin.text();
+      `
+      const child = Bun.spawn([process.execPath, "--eval", script], {
+        cwd: path.resolve(import.meta.dir, "../.."),
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const reader = child.stdout.getReader()
+      const stderr = new Response(child.stderr).text()
+      const timeout = setTimeout(() => child.kill(), 30_000)
+      const cleanupDeadline = Date.now() + 40_000
+      const output: string[] = []
+      try {
+        while (!output.join("").includes("\n")) {
+          const chunk = await reader.read()
+          if (chunk.done) throw new Error(`Uninstall parent exited before scheduling: ${await stderr}`)
+          output.push(new TextDecoder().decode(chunk.value))
+        }
+        const result = JSON.parse(output.join("")) as Standalone.Result
+        expect(result.status).toBe("scheduled")
+        if (result.status !== "scheduled") throw new Error("Windows removal was not deferred")
+        expect(path.dirname(result.statusFile)).toBe(fixture.root)
+        expect((await Bun.file(result.statusFile).json()).state).toBe("prepared")
+        expect(await Bun.file(executable).text()).toBe("synthetic executable")
+        expect(await Bun.file(path.join(metadata, "receipt.tsv")).exists()).toBe(true)
+        if (replacement) await Bun.write(executable, "unrelated replacement")
+        child.stdin.end()
+        expect(await child.exited, await stderr).toBe(0)
+        // The worker writes its final status before releasing the lock. Wait for its cleanup
+        // acknowledgement so status reads cannot race a write or fixture removal a live worker.
+        expect(await waitForRemovalCleanup(fixture.root, cleanupDeadline)).toEqual([])
+        const status = await Bun.file(result.statusFile).json()
+        expect(status.state).toBe(replacement ? "failed" : "complete")
+        if (replacement) {
+          expect(status.message).toContain("Installation changed; removal canceled")
+          expect(await Bun.file(executable).text()).toBe("unrelated replacement")
+          expect(await Bun.file(path.join(metadata, "receipt.tsv")).exists()).toBe(true)
+          for (const name of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"])
+            expect(await Bun.file(path.join(metadata, name)).text()).toBe(name)
+        }
+        if (!replacement) {
+          expect(await Bun.file(executable).exists()).toBe(false)
+          expect(await Bun.file(path.join(metadata, "receipt.tsv")).exists()).toBe(false)
+          for (const name of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"])
+            expect(await Bun.file(path.join(metadata, name)).exists()).toBe(false)
+        }
+        expect(await Bun.file(path.join(metadata, "keep-user-file")).text()).toBe("user data")
+      } finally {
+        clearTimeout(timeout)
+        child.kill()
+        await child.exited
+        await waitForRemovalCleanup(fixture.root, cleanupDeadline)
+        reader.releaseLock()
+      }
+    },
+    45_000,
+  )
+}
+
+async function waitForRemovalCleanup(root: string, deadline: number) {
+  while (true) {
+    const pending = (await readdir(root)).filter(
+      (name) =>
+        name === ".vector-vector.exe.lock" || name.startsWith(".vector-uninstall-") || name.endsWith(".json.ready"),
+    )
+    if (pending.length === 0 || Date.now() >= deadline) return pending
+    await Bun.sleep(50)
+  }
+}
