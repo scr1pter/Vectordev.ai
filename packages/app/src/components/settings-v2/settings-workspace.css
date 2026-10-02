@@ -445,10 +445,6 @@
   box-shadow: none;
 }
 
-.settings-v2-workspace .settings-license-card--summary {
-  background: transparent;
-}
-
 .settings-v2-workspace .settings-license-card h3 {
   color: var(--settings-text);
   font-size: 13px;
@@ -460,13 +456,11 @@
   font-size: 12px;
 }
 
-.settings-v2-workspace .settings-license-facts,
 .settings-v2-workspace .settings-notice-list {
   border-color: var(--settings-line);
   background: var(--settings-line);
 }
 
-.settings-v2-workspace .settings-license-facts > div,
 .settings-v2-workspace .settings-notice-list > div {
   background: var(--settings-control);
 }

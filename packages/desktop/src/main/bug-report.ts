@@ -2,8 +2,7 @@ import { app } from "electron"
 import { arch, platform } from "node:os"
 
 // Bug reports are sent from the main process so the packaged renderer, which
-// runs on a custom protocol, never has to reach the network itself. Mirrors
-// the license service's endpoint convention.
+// runs on a custom protocol, never has to reach the network itself.
 const API = (process.env.VECTOR_SUPPORT_API_URL || "https://vectordev.ai/api/support").replace(/\/$/, "")
 
 export type BugReportInput = { message: string; email?: string }

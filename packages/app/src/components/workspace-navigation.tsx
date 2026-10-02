@@ -59,6 +59,8 @@ export function WorkspaceNavigation(props: {
   resizing: boolean
   projectName: string
   mainLabel: string
+  /** The main checkout's current branch; it changes when the branch picker switches it. */
+  mainBranch?: string
   mainActive: boolean
   treeOpen: boolean
   items: WorkspaceNavigationItem[]
@@ -286,7 +288,7 @@ export function WorkspaceNavigation(props: {
                   <span class="block truncate text-[13px] font-medium">{props.mainLabel}</span>
                   <span class="mt-0.5 flex items-center gap-1.5 truncate text-[12px] text-[color:var(--vx-workspace-text-secondary)]">
                     <span class="size-1.5 shrink-0 rounded-full bg-emerald-400" />
-                    <span class="truncate">main · Ready</span>
+                    <span class="truncate">{props.mainBranch ?? "main"} · Ready</span>
                   </span>
                 </span>
                 <span class="shrink-0 rounded-[4px] border border-white/[0.08] px-1.5 py-0.5 text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">

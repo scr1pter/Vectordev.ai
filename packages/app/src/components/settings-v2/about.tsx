@@ -82,10 +82,7 @@ export function SettingsAboutV2() {
         <div class="settings-license-card">
           <div class="settings-license-card-copy">
             <h3>Vector software license</h3>
-            <p>
-              Vector is proprietary software. A paid license grants one person access on one active computer during the
-              subscription term.
-            </p>
+            <p>Vector is free to download and use with a Vector account.</p>
           </div>
           <div class="settings-license-buttons">
             <ButtonV2 variant="outline" icon="link" onClick={() => open("/legal/license")}>

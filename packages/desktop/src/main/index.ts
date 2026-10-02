@@ -40,12 +40,11 @@ import { createWslServersController } from "./wsl/servers"
 import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
-import { cleanupStoreFiles } from "./store-cleanup"
+import { cleanupStoreFiles, removeLegacyAccessFiles } from "./store-cleanup"
 import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
 import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
 import { handleCloudOAuthDeepLinks } from "./cloud-connections"
-import { createLicenseService } from "./license-service"
 import { registerManagedVectorAccount, vectorAccount } from "./vector-account-runtime"
 import { backgroundModeStatus, requestQuit } from "./background-mode"
 import {
@@ -352,16 +351,11 @@ const main = Effect.gen(function* () {
       }),
     ),
   )
+  void removeLegacyAccessFiles(app.getPath("userData"))
   app.setAsDefaultProtocolClient("vector")
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater(stopSidecars)
-  const license = createLicenseService({
-    userDataPath: app.getPath("userData"),
-    version: app.getVersion(),
-    packaged: app.isPackaged,
-    channel: CHANNEL,
-  })
   registerIpcHandlers({
     killSidecar: () => killSidecar(),
     relaunch,
@@ -383,7 +377,6 @@ const main = Effect.gen(function* () {
     checkAppExists: (appName) => checkAppExists(appName),
     resolveAppPath: async (appName) => resolveAppPath(appName),
     updater,
-    license,
     showUpdater: () => showUpdaterDialog(updater, true),
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),

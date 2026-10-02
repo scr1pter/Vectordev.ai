@@ -32,6 +32,17 @@ export const prerender = true
             responsibility to reduce conflicts and make review easier.
           </p>
 
+          <h2 id="change-branch">Change an agent's branch</h2>
+          <p>
+            The session header shows the branch the agent's checkout is on. Click it to switch that checkout to
+            another local branch, or type a new name and choose Create branch to make one from the current commit.
+            Vector runs an ordinary <code>git switch</code>: it never stashes or discards your work, so a switch that
+            would overwrite uncommitted changes is refused with git's reason. Branches already checked out in another
+            agent's workspace are shown but cannot be picked, and Vector refuses to switch while one of its agents is
+            running in that checkout. In an agent workspace Vector manages, you can create a new branch but not switch to
+            an existing one, because that workspace merges back from the commit it started on.
+          </p>
+
           <h2 id="coordinated-runs">Coordinated runs: one objective, a team of agents</h2>
           <p>
             Instead of naming each workspace yourself, choose <strong>Coordinate agents</strong> in the launcher and

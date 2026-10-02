@@ -1,15 +1,6 @@
 import { ApiError } from "./http.js"
 
-// Public installer downloads. Deliberately separate from api/billing/download,
-// which serves the SAME files to a licensed customer and counts the download
-// against their allowance. This path has no token, no customer and no Stripe
-// call — anyone can fetch an installer, and licensing is enforced inside the
-// app on launch instead of at the door.
-//
-// Stripe is not merely unused here, it is the point: the licensed endpoint
-// calls stripeClient(), so while STRIPE_SECRET_KEY is unset every download 503s
-// even though the installers are sitting in the blob store, reachable and
-// signed. Public downloads must not inherit that failure.
+// Installer targets and the release manifest behind account-gated downloads and public checksums.
 
 export const PUBLIC_DOWNLOAD_TARGETS: Record<string, string> = {
   "mac-arm64": "vector-desktop-mac-arm64.dmg",

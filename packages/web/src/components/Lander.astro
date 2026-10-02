@@ -33,7 +33,8 @@ import MarketingNav from "./marketing/MarketingNav.astro"
 import ProductDemo from "./marketing/ProductDemo.astro"
 import LanderMotion from "./marketing/LanderMotion.astro"
 import LanderMaterials from "./marketing/LanderMaterials.astro"
-import LandingFooter from "./marketing/LandingFooter.astro"
+import SiteFooter from "./marketing/SiteFooter.astro"
+import { wordmarkCells } from "../lib/wordmark"
 import ScrollTicks from "./marketing/ScrollTicks.astro"
 
 // The landing page is the whole product tour: the hero and its one interactive
@@ -85,21 +86,6 @@ const pluginNames = [
   "Playwright",
   "Your own MCP server",
 ]
-
-const pixelFont: Record<string, string[]> = {
-  V: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
-  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-  C: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
-  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
-  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
-  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
-}
-
-const wordmarkCells = "VECTOR".split("").flatMap((letter, letterIndex) =>
-  pixelFont[letter].flatMap((row, y) =>
-    row.split("").flatMap((cell, x) => (cell === "1" ? [{ x: letterIndex * 7 + x, y }] : [])),
-  ),
-)
 
 // The shelf of things Vector does, each sentence checked against the code that
 // ships it and linked to the docs section that describes it in full. Order:
@@ -241,10 +227,10 @@ const trustCards = [
   },
   {
     icon: Sparkles,
-    lead: "Start with no key at all.",
-    text: "Models come included with Vector, in the desktop app and the terminal alike, before you connect a provider.",
-    href: "/docs/models",
-    more: "Read about the models included with Vector",
+    lead: "Free models on your own account.",
+    text: "From 1.99.99, connect a free OpenRouter account and Vector offers its zero-price coding models, stopping at their limits instead of switching to a paid one.",
+    href: "/docs/models#free-models",
+    more: "Read about free models inside of Vector",
   },
   {
     icon: Coins,
@@ -316,7 +302,7 @@ const trustCards = [
             </a>
             <a class="simple-secondary" href="/docs/terminal-agent#install-the-cli">Install the CLI</a>
           </div>
-          <p class="hero-note">$10/month or $99/year. macOS, Windows, and Linux.</p>
+          <p class="hero-note">Free with a Vector account. macOS, Windows, and Linux.</p>
         </div>
 
         <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface">
@@ -361,7 +347,6 @@ const trustCards = [
           {pluginNames.map((name) => <li>{name}</li>)}
         </ul>
         <div class="story-action" data-reveal>
-          <a class="landing-pill" href="/why-vector">Why Vector</a>
           <a class="landing-pill" href="/docs">See everything Vector does</a>
         </div>
       </div>
@@ -423,7 +408,7 @@ const trustCards = [
     </section>
   </main>
 
-  <LandingFooter cells={wordmarkCells} />
+  <SiteFooter />
   <ScrollTicks />
 </div>
 

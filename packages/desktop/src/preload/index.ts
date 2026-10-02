@@ -55,13 +55,6 @@ const api: ElectronAPI = {
     check: () => ipcRenderer.invoke("updater-check"),
     install: () => ipcRenderer.invoke("updater-install"),
   },
-  license: {
-    status: () => ipcRenderer.invoke("license-status"),
-    activate: (licenseKey) => ipcRenderer.invoke("license-activate", licenseKey),
-    deactivate: () => ipcRenderer.invoke("license-deactivate"),
-    setCancellation: (cancel) => ipcRenderer.invoke("license-set-cancellation", cancel),
-    openBillingPortal: () => ipcRenderer.invoke("license-open-billing-portal"),
-  },
   reportBug: (input) => ipcRenderer.invoke("report-bug", input),
   askHelpAssistant: (input) => ipcRenderer.invoke("help-assistant-ask", input),
   agentTeams: {

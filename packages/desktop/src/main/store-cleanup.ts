@@ -73,6 +73,16 @@ export async function deleteStoreFileIfEmpty(userDataPath: string, name: string)
   return true
 }
 
+// Earlier builds stored an activation key and a salted device hash here. Vector
+// no longer uses them, so drop them from existing installs. Best effort only.
+export async function removeLegacyAccessFiles(userDataPath: string) {
+  await Promise.all(
+    ["vector-license.json", "vector-license.json.tmp", "vector-license-config.json"].map((name) =>
+      rm(join(userDataPath, name), { force: true }).catch(() => undefined),
+    ),
+  )
+}
+
 function storeKind(name: string): StoreKind | undefined {
   if (/^vector\.draft\..+\.dat$/.test(name)) return "draft"
   if (/^vector\.workspace\..+\.dat$/.test(name)) return "workspace"

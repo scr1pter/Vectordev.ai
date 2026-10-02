@@ -109,7 +109,7 @@ scoop uninstall vector
 
 The package managers own installed files and their normal receipts. No standalone-installer receipt is created. Homebrew retains notices under its package share/licenses directory; Scoop retains them alongside vector.exe. Intel targets use baseline binaries for CPU compatibility. Homebrew Linux targets use glibc; musl users use the standalone installer. These stable definitions deliberately use immutable versioned URLs and exact hashes; regenerate and review them for every release. No unchecked autoupdate or moving binary URL is emitted.
 
-Vector's commercial license: https://vectordev.ai/legal/license. Bundled third-party licenses remain in the included notices. Creating these files does not change the product's license or subscription model.
+Vector's commercial license: https://vectordev.ai/legal/license. Bundled third-party licenses remain in the included notices. Creating these files does not change the product's license.
 `
   return { formula, scoop, readme }
 }

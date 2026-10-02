@@ -10,7 +10,7 @@ const userAgent = {
 describe("download target selection", () => {
   test("a valid explicit target takes precedence over browser detection", () => {
     expect(selectedDownloadTarget("?target=linux-arm64", userAgent.mac).id).toBe("linux-arm64")
-    expect(selectedDownloadTarget("?checkout=cancelled&target=mac-x64", userAgent.windows).id).toBe("mac-x64")
+    expect(selectedDownloadTarget("?ref=docs&target=mac-x64", userAgent.windows).id).toBe("mac-x64")
   })
 
   test("an invalid or missing target falls back to browser detection", () => {

@@ -25,8 +25,8 @@ export const launchScreen = {
   yield: (reason: LaunchYieldReason) => call((api) => api.yield(reason)),
 }
 
-// Hand a blocking screen (ErrorPage, ConnectionError, licence activation) the
-// window right away, skipping every ready signal and the minimum visible time.
+// Hand a blocking screen (ErrorPage, ConnectionError) the window right away, skipping every
+// ready signal and the minimum visible time.
 export function yieldLaunchScreen(reason: LaunchYieldReason) {
   launchScreen.yield(reason)
 }

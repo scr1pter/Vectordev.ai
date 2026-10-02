@@ -49,7 +49,6 @@ import {
   updateTitlebar,
 } from "./windows"
 import type { UpdaterController } from "./updater-controller"
-import type { VectorLicenseService } from "./license-service"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { runBrowserAgent } from "./browser-agent"
 import { prepareAgentTask } from "./context-budget"
@@ -197,7 +196,6 @@ type Deps = {
   checkAppExists: (appName: string) => Promise<boolean> | boolean
   resolveAppPath: (appName: string) => Promise<string | null>
   updater: UpdaterController
-  license: VectorLicenseService
   showUpdater: () => Promise<void> | void
   setBackgroundColor: (color: string) => void
   exportDebugLogs: () => Promise<string>
@@ -334,15 +332,6 @@ export function registerIpcHandlers(deps: Deps) {
   handle("pr-merge", (_event, input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) =>
     mergePullRequest(input),
   )
-  handle("license-status", () => deps.license.status())
-  handle("license-activate", (_event, licenseKey: string) => deps.license.activate(licenseKey))
-  handle("license-deactivate", () => deps.license.deactivate())
-  handle("license-set-cancellation", (_event, cancel: boolean) => deps.license.setCancellation(Boolean(cancel)))
-  handle("license-open-billing-portal", async () => {
-    const url = await deps.license.openBillingPortal()
-    await shell.openExternal(url)
-    return url
-  })
   handle("updater-unsubscribe", (event) => updaterSubscriptions.delete(event.sender.id))
   handle("updater-check", () => deps.updater.check())
   handle("updater-install", () => deps.updater.install())

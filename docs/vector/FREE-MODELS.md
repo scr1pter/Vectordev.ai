@@ -1,6 +1,6 @@
 # Free models inside of Vector
 
-This describes the guarded personal-account setup prepared for the upcoming **1.999.99** release. It is not a feature announcement for the currently downloadable desktop **1.99.8**. The shared Vector service remains disabled.
+This describes the guarded personal-account setup prepared for the upcoming **1.99.99** release. It is not a feature announcement for the currently downloadable desktop **1.99.8**. The shared Vector service remains disabled.
 
 Connect your own free OpenRouter account, then choose an eligible model under **Free models inside of Vector**. The upcoming personal section works independently of the shared service flag. Its initial selection is limited to explicit `:free` models with online, tool-capable, zero-price endpoints in OpenRouter's zero data retention (ZDR) endpoint list. Discovery matches each model ID and endpoint tag; it does not include every model advertised as free. Names omit the `:free` suffix; routing IDs retain it. A failed catalog check does not authorize an unlisted endpoint or a paid fallback.
 
@@ -14,7 +14,7 @@ OpenRouter currently lists up to **50 free-model requests per day** and **20 per
 
 The guarded personal route restricts requests to eligible explicit free IDs and zero-price endpoints, enforces `provider.zdr: true` and `data_collection: "deny"`, disables paid plugins and paid model/provider fallbacks, and stops if those constraints cannot be satisfied. The endpoint list is supplied by OpenRouter, not an independent Vector audit of each provider. See [OpenRouter's ZDR endpoint API](https://openrouter.ai/docs/api/api-reference/endpoints/preview-the-impact-of-zdr-on-the-available-endpoints) and [routing controls](https://openrouter.ai/docs/guides/routing/provider-selection).
 
-Selecting another provider, using an external agent, or enabling a paid external tool is separate from this setup and is not covered by the free-model route. Vector's own desktop subscription terms are unchanged; free model access does not make other services free.
+Selecting another provider, using an external agent, or enabling a paid external tool is separate from this setup and is not covered by the free-model route. Free model access does not make other services free.
 
 ## Connect your account
 

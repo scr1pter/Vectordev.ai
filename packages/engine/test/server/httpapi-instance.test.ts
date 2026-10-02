@@ -262,4 +262,42 @@ describe("instance HttpApi", () => {
       )
     }),
   )
+  it.live("lists branches and switches with typed errors", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const switchTo = (body: { branch: string; create?: boolean }) =>
+        HttpClientRequest.post(InstancePaths.vcsSwitch).pipe(
+          directoryHeader(dir),
+          HttpClientRequest.bodyJson(body),
+          Effect.flatMap(HttpClient.execute),
+        )
+
+      const created = yield* switchTo({ branch: "agent/http", create: true })
+      expect(created.status).toBe(200)
+      expect(yield* created.json).toMatchObject({ branch: "agent/http" })
+
+      const branches = yield* HttpClientRequest.get(InstancePaths.vcsBranches).pipe(
+        directoryHeader(dir),
+        HttpClient.execute,
+      )
+      expect(branches.status).toBe(200)
+      expect(yield* branches.json).toMatchObject({
+        current: "agent/http",
+        branches: expect.arrayContaining([{ name: "agent/http", current: true }]),
+      })
+
+      const invalid = yield* switchTo({ branch: "bad..name" })
+      expect(invalid.status).toBe(400)
+      expect(yield* invalid.json).toMatchObject({ name: "VcsSwitchError", data: { reason: "invalid-name" } })
+
+      // Vector-managed agent workspaces may only create branches; the new reason reaches clients typed.
+      expect((yield* switchTo({ branch: "vector-parallel/http-1a2b3c4d", create: true })).status).toBe(200)
+      const managed = yield* switchTo({ branch: "agent/http" })
+      expect(managed.status).toBe(400)
+      expect(yield* managed.json).toMatchObject({
+        name: "VcsSwitchError",
+        data: { reason: "managed", message: expect.stringContaining("managed by Vector") },
+      })
+    }),
+  )
 })

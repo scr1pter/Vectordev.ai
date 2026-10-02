@@ -57,7 +57,7 @@ describe("account API responses", () => {
 
 describe("account return paths", () => {
   test("preserves a local account destination", () => {
-    expect(safeReturnPath("/account?checkout=cancelled#billing")).toBe("/account?checkout=cancelled#billing")
+    expect(safeReturnPath("/account?target=mac-arm64#download")).toBe("/account?target=mac-arm64#download")
   })
 
   test("rejects absolute and protocol-relative destinations", () => {

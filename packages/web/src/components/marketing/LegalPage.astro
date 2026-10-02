@@ -1,5 +1,5 @@
 ---
-import MarketingFooter from "./MarketingFooter.astro"
+import SiteFooter from "./SiteFooter.astro"
 import MarketingLayout from "./MarketingLayout.astro"
 import MarketingNav from "./MarketingNav.astro"
 
@@ -25,7 +25,7 @@ const { title, description, eyebrow, updated = "August 4, 2026" } = Astro.props
       </header>
       <article><slot /></article>
     </main>
-    <MarketingFooter />
+    <SiteFooter />
   </div>
 </MarketingLayout>
 

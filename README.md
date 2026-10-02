@@ -10,6 +10,8 @@
 
 Vector is an agentic engineering workspace. It puts an editor, a terminal, a controlled browser and AI agents around the repository on your computer: you describe a change, watch agents edit files and run checks, and inspect the result before you merge or publish it.
 
+Vector is free. Create a free Vector account at [vectordev.ai](https://vectordev.ai) to download the desktop app; the same account signs in the terminal agent.
+
 Vector works in three places:
 
 - **Desktop app** (macOS, Windows, Linux). Agent and Editor views of the same session, with the terminal, browser and pull-request review in one window. Run several agents at once, each in its own checkout or sharing yours, and run Claude Code, Codex and Cursor Agent inside Vector using your own installed, signed-in tools.
@@ -17,8 +19,6 @@ Vector works in three places:
 - **GitHub.** `vector github install` sets up pull requests from issue comments and reviews by **Vectorscope**, Vector's code reviewer, which reads the repository around a change and comments on exact lines. `vector vectorscope` reviews your branch locally before you push.
 
 **Models and keys.** You bring the model. Connect a provider with your own API key in Settings or with `vector auth login`, sign in with ChatGPT for OpenAI models, use Connect OpenRouter with your own OpenRouter account, or point Vector at a local model or company gateway in `vector.json`. Keys are stored by Vector on your machine, and Vector's server does not send them back to connected clients or invite guests; an invite guest can still use your terminal and agents, so share invite links only with people you trust. Prompts and relevant context go only to the providers and tools you choose.
-
-The desktop app is $10 a month or $99 a year. The terminal agent is free with a Vector account.
 
 ```bash
 npm install -g @vectordevai/cli
@@ -37,6 +37,8 @@ Published builds and their notes are at [vectordev.ai/releases](https://vectorde
 
 **No agent limit.** For separate lines of work, run as many agents at once as your machine can handle, each in its own checkout or sharing yours, merged only when you say so. Vector tells you when a large run will strain your processor or disk.
 
+**Change an agent's branch.** Click the branch name in a session's header to switch that checkout to another local branch, or type a new name to create one from the current commit. Vector never stashes or discards your work to switch, and it refuses to switch while a Vector agent is running in that checkout. In agent workspaces Vector manages, you can create a branch there but not switch to an existing one.
+
 **The agents you already use.** Claude Code, Codex and Cursor Agent run inside Vector on subscriptions you already have, in readable conversations that answer like any other chat.
 
 **Verified completion.** Turn on LLM-as-a-judge and the agent writes down what success looks like before it starts, exercises the work when it finishes, and hands it to the Judge, a read-only specialist that compares the result with your request and sends it back with a specific repair if it falls short. It is opt-in and costs extra model calls.
@@ -53,7 +55,7 @@ Published builds and their notes are at [vectordev.ai/releases](https://vectorde
 
 ### Models
 
-**Choose your provider.** Connect API-key providers, local models or an explicit company gateway in Settings or with `vector auth login`. Upcoming 1.999.99 adds guarded free-model access through your own free OpenRouter account while Vector's shared allowance remains off. Connect through Settings or `vector providers login`, or set `OPENROUTER_API_KEY`; a project-only `provider.openrouter.options.apiKey` is insufficient. Keep the account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials or default/enforced paid plugins. Unavailable eligible endpoints or exhausted limits stop the request without a paid fallback. See [free-model setup](docs/vector/FREE-MODELS.md); this behavior is not in the currently downloadable desktop 1.99.8 or npm CLI 1.99.7. Native Copilot, GitLab Duo, xAI, DigitalOcean and Poe sign-ins have prepared Vector-owned flows but remain disabled pending registrations or approval. Sign in with ChatGPT is available for OpenAI models; the separate Codex runtime is unchanged.
+**Choose your provider.** Connect API-key providers, local models or an explicit company gateway in Settings or with `vector auth login`. Upcoming 1.99.99 adds guarded free-model access through your own free OpenRouter account while Vector's shared allowance remains off. Connect through Settings or `vector providers login`, or set `OPENROUTER_API_KEY`; a project-only `provider.openrouter.options.apiKey` is insufficient. Keep the account free: no credit purchase, payment method, automatic top-ups, paid upstream BYOK credentials or default/enforced paid plugins. Unavailable eligible endpoints or exhausted limits stop the request without a paid fallback. See [free-model setup](docs/vector/FREE-MODELS.md); this behavior is not in the currently downloadable desktop 1.99.8 or npm CLI 1.99.7. Native Copilot, GitLab Duo, xAI, DigitalOcean and Poe sign-ins have prepared Vector-owned flows but remain disabled pending registrations or approval. Sign in with ChatGPT is available for OpenAI models; the separate Codex runtime is unchanged.
 
 **Every model in one picker.** Connected providers use the bundled catalog with an optional validated refresh. The upcoming personal free section is limited to explicit `:free` variants with online, tool-capable, zero-price endpoints listed by OpenRouter as ZDR. Requests enforce ZDR and deny data collection; this is OpenRouter's endpoint classification, not an independent policy audit or a promise about local history and account logging. A bundled price of zero alone does not establish eligibility.
 
@@ -75,10 +77,10 @@ Vectorscope only ever comments — it never approves or blocks a pull request un
 
 ## Install
 
-| Surface                         | How                                                    |
-| ------------------------------- | ------------------------------------------------------ |
-| Desktop (macOS, Windows, Linux) | Download from [vectordev.ai](https://vectordev.ai)     |
-| Terminal                        | `npm install -g @vectordevai/cli`, then `vector login` |
+| Surface                         | How                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Desktop (macOS, Windows, Linux) | Create a free Vector account, then download from [vectordev.ai/download](https://vectordev.ai/download) |
+| Terminal                        | `npm install -g @vectordevai/cli`, then `vector login`                                                  |
 
 Run `vector` inside any repository to start the agent. `vector auth login` adds your own provider keys, `vector invite` shares the workspace, and `vector github install` sets up GitHub: pull requests from issues, and reviews of pull requests. `vector review` reviews your branch locally.
 

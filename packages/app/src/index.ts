@@ -5,7 +5,6 @@ export { loadLocaleDict, normalizeLocale, type Locale } from "./context/language
 export { useWslServers } from "./wsl/context"
 export { type DisplayBackend, type FatalRendererErrorLog, type Platform, PlatformProvider } from "./context/platform"
 export { type UpdaterPlatform, type UpdaterState } from "./updater"
-export { type VectorLicensePlatform, type VectorLicenseState, type VectorLicenseStatus } from "./license"
 export {
   type WslDistroProbe,
   type WslInstalledDistro,

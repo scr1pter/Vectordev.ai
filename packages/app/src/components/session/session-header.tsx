@@ -27,6 +27,7 @@ import { decode64 } from "@/utils/base64"
 import { Persist, persisted } from "@/utils/persist"
 import { hasActiveVerification } from "@/utils/session-activity"
 import { StatusPopover } from "../status-popover"
+import { BranchPicker } from "./branch-picker"
 import { PresenceBanner } from "../presence-banner"
 import { BackgroundTasksButton } from "@/features/background-tasks/background-tasks-button"
 
@@ -318,7 +319,9 @@ export function SessionHeader() {
 
           <div data-vector-session-controls>
             <PresenceBanner />
-            <span data-vector-session-branch>{branch()}</span>
+            <Show when={sync().data.vcs?.branch} fallback={<span data-vector-session-branch>{branch()}</span>}>
+              <BranchPicker branch={branch()} />
+            </Show>
             <span data-vector-session-status data-status={activity().status}>
               <span aria-hidden="true" />
               {activity().label}

@@ -10,7 +10,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "install",
         title: "Install Vector",
-        blurb: "Download the installer for your computer and run it.",
+        blurb: "Create a free account, download the installer for your computer and run it.",
       },
       {
         id: "first-task",
@@ -85,7 +85,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "checkpoints",
         title: "Checkpoints and recovery",
-        blurb: "Vector snapshots the files an agent changed as named checkpoints you can restore.",
+        blurb: "Rewind an agent's file changes and the conversation, one request at a time.",
       },
       {
         id: "local-memory",
@@ -95,7 +95,7 @@ export const docsNav: DocGroup[] = [
       {
         id: "models",
         title: "Models, free models and your own keys",
-        blurb: "Connect a provider account or API key, or use Free models inside of Vector where eligible.",
+        blurb: "Connect a provider account or API key. From 1.99.99, your own OpenRouter account adds free models.",
       },
       {
         id: "cloud-services",
@@ -200,7 +200,6 @@ export const docsMoved: Record<string, string> = {
   "cli-maintenance": "terminal-agent#cli-maintenance",
   faq: "troubleshooting#faq",
   "delete-account": "troubleshooting#delete-account",
-  hulk: "troubleshooting#faq",
 }
 
 export const groupOf = (id: string) => docsNav.find((group) => group.links.some((link) => link.id === id))?.label ?? ""

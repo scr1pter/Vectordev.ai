@@ -86,7 +86,7 @@ describe("decideLaunchPhase", () => {
   })
 
   test("a blocking screen takes over at once", () => {
-    for (const reason of ["error", "unreachable", "license"] as const) {
+    for (const reason of ["error", "unreachable"] as const) {
       expect(decideLaunchPhase(booting({ elapsed: 10, yielded: reason }))).toBe("revealing")
       expect(decideLaunchPhase(booting({ elapsed: 70_000, current: "failed", yielded: reason }))).toBe("revealing")
     }

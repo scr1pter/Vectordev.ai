@@ -47,8 +47,6 @@ export const prerender = true
           <h3 id="what-deletion-does">What deletion does</h3>
           <dl class="doc-rows">
             <div><dt>Your sign-in</dt><dd>The account and its email and name are deleted. You can create a new account with the same address afterwards; it will not be the same account, and nothing is restored to it.</dd></div>
-            <div><dt>Your subscription</dt><dd>An active subscription is cancelled so nothing charges again, and your customer record at Stripe — the name and email it holds — is deleted. Stripe keeps the underlying invoices for tax and accounting, no longer attached to a person.</dd></div>
-            <div><dt>Your licence key</dt><dd>Revoked. A desktop app activated with it stops passing activation.</dd></div>
             <div><dt>CLI tokens</dt><dd>Revoked, so a terminal already signed in with <code>vector login</code> stops verifying. Without this they would keep working until they expired, up to ninety days later.</dd></div>
           </dl>
 

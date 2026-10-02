@@ -1,6 +1,6 @@
 # Vector service independence — upcoming release candidate
 
-**Unversioned source candidate.** No release date or new version is assigned here. These notes describe the cumulative implementation of Part 1 and Parts 2.1–2.28, including features prepared behind disabled switches. They do not announce a production service, npm publication, installer, signed update feed or replacement Mac app. Final cumulative acceptance and publication evidence belong to the release coordinator. Pricing, subscriptions and HULK behavior are unchanged.
+**Unversioned source candidate.** No release date or new version is assigned here. These notes describe the cumulative implementation of Part 1 and Parts 2.1–2.28, including features prepared behind disabled switches. They do not announce a production service, npm publication, installer, signed update feed or replacement Mac app. Final cumulative acceptance and publication evidence belong to the release coordinator.
 
 ## Public release note
 
