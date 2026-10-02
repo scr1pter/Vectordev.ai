@@ -41,8 +41,10 @@ other work and is not the release workspace.
 
 The catalog and npm inputs remain incomplete. No 1.999.99 installers, npm packages,
 or standalone archives are claimed as published. Public desktop downloads remain
-at 1.99.8 and npm CLI at 1.99.7. The Mac's separately installed 1.99.91 app is an
-older local build and must not be relabelled as this candidate.
+at 1.99.8 and npm CLI at 1.99.7, rechecked at 20:35 UTC. Another task replaced
+the local Mac app during validation; it now reports 1.999.99. Its bundled build
+metadata records the version and channel without a source commit, so that local
+installation does not establish this candidate's provenance or publication.
 
 ## GitHub Actions is executing
 
