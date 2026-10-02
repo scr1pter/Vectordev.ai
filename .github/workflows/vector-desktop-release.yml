@@ -451,7 +451,7 @@ jobs:
             {
               echo "## Unsigned installer notice"
               echo
-              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. Your operating system may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
+              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. Installed copies receive it through Check for Updates; a new install may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
               echo
               cat release-notes.md
             } > "$unsigned_notes"
@@ -1421,32 +1421,6 @@ jobs:
           fi
           echo "Stable release order verified: current=$current_version candidate=$version"
 
-      - name: Preserve current automatic-update feeds for an unsigned release
-        if: env.RELEASE_UNSIGNED == 'true'
-        env:
-          RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
-        run: |
-          set -euo pipefail
-          output="$RUNNER_TEMP/vector-updater-before"
-          mkdir -p "$output"
-          feeds=(latest-mac.yml latest.yml latest-linux.yml latest-linux-arm64.yml)
-          for feed in "${feeds[@]}"; do
-            curl \
-              --fail \
-              --show-error \
-              --silent \
-              --location \
-              --retry 5 \
-              --retry-all-errors \
-              --connect-timeout 20 \
-              --max-time 120 \
-              --header "Cache-Control: no-cache" \
-              --header "Pragma: no-cache" \
-              "${RELEASE_ORIGIN%/}/releases/vector-updates/$feed?before=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --output "$output/$feed"
-            test -s "$output/$feed"
-          done
-
       - name: Verify production account gate before publishing
         env:
           API_ORIGIN: https://vectordev.ai
@@ -1507,8 +1481,9 @@ jobs:
           }
           channel=latest
           if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
+          # The owner chose to ship unsigned releases through the update feed as well, so installed copies
+          # find them with Check for Updates. Signed releases do the same.
           scope=full
-          if [ "$RELEASE_UNSIGNED" = "true" ]; then scope=downloads; fi
           VECTOR_RELEASE_VERSION="${TAG#v}" \
           VECTOR_RELEASE_CHANNEL="$channel" \
           VECTOR_RELEASE_PHASE=commit \
@@ -1593,17 +1568,6 @@ jobs:
               echo "Staged $feed does not advertise $version"
               exit 1
             }
-            if [ "$RELEASE_UNSIGNED" = "true" ]; then
-              curl "${curl_args[@]}" \
-                "$origin/$committed_prefix/$feed?$cache_buster" \
-                --output "$committed"
-              cmp --silent "$RUNNER_TEMP/vector-updater-before/$feed" "$committed" || {
-                echo "Unsigned release changed automatic-update feed $feed"
-                exit 1
-              }
-              echo "Verified automatic-update feed $feed was preserved"
-              continue
-            fi
             fetch_exact_copy \
               "$staged" \
               "$origin/$committed_prefix/$feed" \
