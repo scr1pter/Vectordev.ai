@@ -60,10 +60,10 @@ export function createClient(
     // wait is short and then serves the last catalog seen, stale, or OFF on a first run; only a request
     // that actually fails falls back to the reviewed list, inside load().
     if (saved && !saved.enabled) return OFF
-    return Promise.race([
-      refresh,
-      new Promise<FreeModelCatalog>((resolve) => setTimeout(() => resolve(saved ?? OFF), input.wait ?? 1_500).unref()),
-    ])
+    const fallback = Promise.withResolvers<FreeModelCatalog>()
+    // This deadline settles an awaited operation; keep it alive until the race finishes.
+    const timer = setTimeout(() => fallback.resolve(saved ?? OFF), input.wait ?? 1_500)
+    return Promise.race([refresh, fallback.promise]).finally(() => clearTimeout(timer))
   }
   const load = (saved: FreeModelCatalog | undefined) => {
     const pending = (async () => {
