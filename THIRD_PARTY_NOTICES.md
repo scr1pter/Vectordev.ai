@@ -7395,7 +7395,7 @@ SHA-256 of reproduced text: `927d41a546253817c6a83fdb7fe044622e83665d625be2cf83e
 
 ## Model catalog data and provider artwork
 
-Catalog metadata and provider SVG artwork derive from the MIT-licensed Models.dev data project. Source: https://github.com/anomalyco/models.dev. The catalog bundled with Vector and served at https://vectordev.ai/models/api.json is a snapshot of that project's published data, taken on 2 October 2026 and filtered by Vector's provider and SDK allowlists. From 1.99.91, Vector reads that copy by default rather than the original service. Provider names and logos identify their respective providers; this attribution grants no trademark rights or endorsement.
+Catalog metadata and provider SVG artwork derive from the MIT-licensed Models.dev data project. Original source: https://github.com/anomalyco/models.dev. Vector's reviewed source is the owner fork at https://github.com/scr1pter/vector-model-catalog/tree/690fd27d61c7a8acc5fd93aeda4f128d67d149fd. The catalog bundled with Vector and served at https://vectordev.ai/models/api.json was generated locally from that fork on 2 October 2026, committed as vector/api.json, and filtered by Vector's provider and SDK allowlists. The fork records the provider artwork normalizations in vector/README.md. From 1.99.91, Vector reads its own copy by default rather than the original service. Provider names and logos identify their respective providers; this attribution grants no trademark rights or endorsement.
 
 MIT License
 

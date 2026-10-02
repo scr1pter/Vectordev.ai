@@ -32,11 +32,11 @@ on:
         type: choice
         options: [skip, prepare, publish]
       phase:
-        description: Prepare archives, stage immutable bytes, or verify and commit a staged release
+        description: Publish only the pinned catalog, prepare archives, stage bytes, or commit a staged release
         required: true
         default: prepare
         type: choice
-        options: [prepare, stage, commit]
+        options: [catalog, prepare, stage, commit]
 
 # Blob does not provide compare-and-swap for the channel pointer. Serialize all
 # attempts, including retries, so an earlier commit cannot replace a later one.
@@ -59,8 +59,85 @@ env:
   VECTOR_CLI_RELEASE_DIR: ${{ github.workspace }}/cli-release
 
 jobs:
+  catalog:
+    name: Publish only the reviewed immutable catalog
+    if: inputs.phase == 'catalog'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VECTOR_CATALOG_FORK_PATH: ${{ github.workspace }}/tmp/model-catalog-fork
+      VECTOR_CATALOG_FORK_REPOSITORY: ${{ vars.VECTOR_CATALOG_FORK_REPOSITORY }}
+      VECTOR_CATALOG_FORK_REVISION: ${{ vars.VECTOR_CATALOG_FORK_REVISION }}
+      VECTOR_CATALOG_FILE: ${{ github.workspace }}/release-catalog/api.json
+    steps:
+      - name: Check out the exact reviewed source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+
+      - name: Set up pinned Bun and dependencies
+        uses: ./.github/actions/setup-bun
+        with:
+          install-flags: --frozen-lockfile --ignore-scripts
+
+      - name: Validate the source, release inputs, and catalog origin
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$VECTOR_SOURCE_REVISION"
+          test "$GITHUB_SHA" = "$VECTOR_SOURCE_REVISION"
+          bun packages/cloud/src/prepare-cli-release-catalog.ts --validate
+          bun -e '
+            import { releaseCatalogURL } from "./packages/engine/script/release-catalog"
+            if (new URL(releaseCatalogURL(process.env.VECTOR_RELEASE_VERSION)).origin !== process.env.VECTOR_CLI_BLOB_ORIGIN)
+              throw new Error("CLI and desktop release catalog origins must match")
+            if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\/[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(process.env.VECTOR_CATALOG_FORK_REPOSITORY ?? ""))
+              throw new Error("Configure the owner-reviewed catalog fork repository")
+            if (!/^[a-f0-9]{40}$/.test(process.env.VECTOR_CATALOG_FORK_REVISION ?? ""))
+              throw new Error("Pin the catalog fork to a full lowercase commit SHA")
+          '
+
+      - name: Check out the exact owner-reviewed catalog fork
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ vars.VECTOR_CATALOG_FORK_REPOSITORY }}
+          ref: ${{ vars.VECTOR_CATALOG_FORK_REVISION }}
+          path: tmp/model-catalog-fork
+          persist-credentials: false
+
+      - name: Prepare and verify the reviewed catalog before publication
+        run: |
+          set -euo pipefail
+          bun packages/engine/script/generate.ts --fresh-catalog
+          printf '%s  %s\n' "$VECTOR_CATALOG_SHA256" "$VECTOR_CATALOG_FILE" | sha256sum --check
+          printf '%s  api.json\n' "$VECTOR_CATALOG_SHA256" > release-catalog/api.sha256
+
+      - name: Check immutable catalog publication and readback
+        working-directory: packages/cloud
+        run: bun test src/upload-model-catalog.test.ts src/prepare-cli-release-catalog.test.ts
+
+      - name: Preserve the exact catalog and fork provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vector-model-catalog-${{ inputs.version }}-${{ github.run_attempt }}
+          path: release-catalog/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish or verify the immutable catalog without changing the mirror
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+        run: bun packages/cloud/src/upload-model-catalog.ts
+
+      - name: Read back the exact immutable catalog
+        run: |
+          set -euo pipefail
+          bun packages/cloud/src/prepare-cli-release-catalog.ts
+          cmp "$VECTOR_CATALOG_FILE" cli-release-catalog/api.json
+
   release:
     name: Prepare or publish all twelve native targets
+    if: inputs.phase == 'prepare' || inputs.phase == 'stage' || inputs.phase == 'commit'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -88,11 +165,11 @@ jobs:
           bun test src/cli-release-package.test.ts src/upload-cli-release.test.ts src/cli-package-managers.test.ts src/prepare-cli-release-catalog.test.ts src/cli-container.test.ts
 
       - name: Read the exact previously published catalog
-        if: inputs.phase != 'commit'
+        if: inputs.phase == 'prepare' || inputs.phase == 'stage'
         run: bun packages/cloud/src/prepare-cli-release-catalog.ts
 
       - name: Build all twelve standalone native binaries
-        if: inputs.phase != 'commit'
+        if: inputs.phase == 'prepare' || inputs.phase == 'stage'
         working-directory: packages/engine
         env:
           VECTOR_VERSION: ${{ inputs.version }}
@@ -104,11 +181,11 @@ jobs:
         run: bun script/build.ts
 
       - name: Prepare immutable native archives and manifest
-        if: inputs.phase != 'commit'
+        if: inputs.phase == 'prepare' || inputs.phase == 'stage'
         run: bun packages/cloud/src/upload-cli-release.ts prepare
 
       - name: Preserve the exact prepared bytes
-        if: inputs.phase != 'commit'
+        if: inputs.phase == 'prepare' || inputs.phase == 'stage'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vector-cli-${{ inputs.version }}-${{ github.run_attempt }}
@@ -118,7 +195,7 @@ jobs:
           retention-days: 30
 
       - name: Preserve musl inputs for container jobs
-        if: inputs.phase != 'commit' && inputs.containers != 'skip'
+        if: (inputs.phase == 'prepare' || inputs.phase == 'stage') && inputs.containers != 'skip'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: vector-container-inputs-${{ inputs.version }}-${{ github.run_attempt }}
@@ -144,7 +221,7 @@ jobs:
 
   containers:
     needs: release
-    if: inputs.phase != 'commit' && inputs.containers != 'skip'
+    if: (inputs.phase == 'prepare' || inputs.phase == 'stage') && inputs.containers != 'skip'
     permissions:
       contents: read
       packages: write

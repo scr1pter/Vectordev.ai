@@ -26,8 +26,21 @@ parent identity command succeeded. Commit `81d6e89d8` encodes the nested fixture
 command; `6b5a70ec3` starts the worker in an independent minimized console and
 encodes path data, including Unicode and PowerShell quote characters. Local
 ownership checks passed five cases with two native-only skips; Engine types and
-independent review passed. Native Windows acceptance of these repairs and checks
-of the combined source are still required. No test deadlines were increased.
+independent review passed. The focused native Windows job at `0e8e9e127` passed all three Core
+PowerShell cases (11 assertions) and all eight Engine identity/ownership cases
+(52 assertions). The real Windows installer job also passed. Both browser jobs
+passed, and the complete Linux job passed its unit tests, generated-client check
+and HTTP gates. The full Windows unit step reached its existing 20-minute limit;
+its detailed log is being investigated. These focused passes do not replace the
+incomplete full Windows suite. No test deadlines were increased.
+
+The complete Windows log reports one Core fixture failure: the outer PowerShell
+call returned success without a native child exit code or child output. Core
+finished with 1,554 passes, 13 skips and one failure. Engine showed no assertion
+failures before the job cutoff, but its quiet output does not identify the
+unfinished test. The next run explicitly waits for the nested Bun process and
+splits Engine across two native Bun file shards, with full output and unchanged
+per-test and job-step deadlines. Those changes still require native acceptance.
 
 Vector Cloud registration is limited to Vercel and Supabase. Netlify registration
 was canceled at the owner's request. The prepared Vercel agreement requires owner
@@ -96,10 +109,14 @@ other work and is not the release workspace.
 
 ## Remaining release inputs
 
-- Supply the owner-controlled public catalog fork, its committed `vector/api.json`
-  export, and an exact reviewed commit. Follow [model catalog preparation](model-catalog.md).
-  Old caches generated from the original live service do not establish fork
-  provenance and cannot substitute for this input.
+- Publish and verify the prepared catalog from the owner-approved public
+  `scr1pter/vector-model-catalog` fork at
+  `690fd27d61c7a8acc5fd93aeda4f128d67d149fd`. Its committed export and artwork pass
+  the existing gates; canonical SHA-256 is
+  `a96b465110dd2fcc38e0dcca1a4115e12ea43ddaafdb0ebf587e15026767bf14`.
+  Follow [model catalog preparation](model-catalog.md). The new catalog-only CLI
+  workflow phase uses the existing protected Blob secret without retrieving its
+  value or changing the shared mirror.
 - Authenticate npm on the publishing machine. `npm whoami` returned `E401` at this
   checkpoint. Run `npm login` yourself; never paste a token or password into source,
   a task, or logs.
@@ -110,10 +127,11 @@ other work and is not the release workspace.
 - Verify the exact release source in CI before publication. Local passing suites
   do not replace the macOS, Windows, and Linux release jobs.
 
-The catalog and npm inputs remain incomplete. No 1.99.99 installers, npm packages,
+Immutable catalog publication and npm authentication remain incomplete. No 1.99.99 installers, npm packages,
 or standalone archives are claimed as published. Public desktop downloads remain
 at 1.99.8 and npm CLI at 1.99.7, rechecked at 20:35 UTC. Another task replaced
-the local Mac app during validation; it now reports 1.999.99. Its bundled build
+the local Mac app during validation; it now reports 1.99.99 (the earlier local
+1.999.99 checkpoint is historical). Its bundled build
 metadata records the version and channel without a source commit, so that local
 installation does not establish this candidate's provenance or publication.
 
