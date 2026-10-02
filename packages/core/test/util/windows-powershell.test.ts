@@ -62,6 +62,7 @@ test.skipIf(process.platform !== "win32")(
     const file = path.join(root, "hash fixture.txt")
     const entry = path.join(root, "child.ts")
     const diagnostic = path.join(root, "diagnostic.json")
+    const outerDiagnostic = path.join(root, "pwsh-diagnostic.json")
     const quote = (value: string) => `'${value.replaceAll("'", "''")}'`
     try {
       await Bun.write(file, "installer hash fixture\n")
@@ -99,7 +100,17 @@ test.skipIf(process.platform !== "win32")(
           // Keep the nested script out of Windows argument quoting; fixture paths contain spaces and apostrophes.
           "-EncodedCommand",
           Buffer.from(
-            `$ErrorActionPreference = 'Stop'; [IO.File]::WriteAllText(${quote(diagnostic)}, '{"phase":"pwsh-started"}'); & ${quote(process.execPath)} --no-env-file ${quote(entry)}; exit $LASTEXITCODE`,
+            `$ErrorActionPreference = 'Stop'
+$details = @{ phase = 'pwsh-started'; bunPath = ${quote(process.execPath)}; entryPath = ${quote(entry)}; entryExists = [IO.File]::Exists(${quote(entry)}); arguments = @('run', '--no-env-file', ${quote(entry)}) }
+[IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
+& ${quote(process.execPath)} run --no-env-file ${quote(entry)}
+$nativeSuccess = $?
+$nativeExitCode = $LASTEXITCODE
+$details.phase = 'bun-invocation-finished'
+$details.success = $nativeSuccess
+$details.exitCode = $nativeExitCode
+[IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
+exit $nativeExitCode`,
             "utf16le",
           ).toString("base64"),
         ],
@@ -120,6 +131,9 @@ test.skipIf(process.platform !== "win32")(
         const details = JSON.stringify({
           pwsh,
           stderr,
+          outerDiagnostic: await Bun.file(outerDiagnostic)
+            .text()
+            .catch(() => "not written"),
           diagnostic: await Bun.file(diagnostic)
             .text()
             .catch(() => "not written"),

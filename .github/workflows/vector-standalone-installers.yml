@@ -5,6 +5,7 @@ on:
     paths:
       - packages/web/public/install*
       - packages/core/src/util/windows-powershell.ts
+      - packages/core/test/util/windows-powershell.test.ts
       - packages/engine/src/installation/**
       - packages/engine/script/verify-windows-installer.ts
       - packages/engine/test/installation/**
@@ -12,6 +13,21 @@ on:
 permissions:
   contents: read
 jobs:
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: ./.github/actions/setup-bun
+      - name: Verify nested native PowerShell commands
+        working-directory: packages/core
+        shell: pwsh
+        run: bun test test/util/windows-powershell.test.ts
+      - name: Verify native installer identity and ownership
+        if: success() || failure()
+        working-directory: packages/engine
+        shell: pwsh
+        run: bun test test/installation/native-identity.test.ts test/installation/ownership.test.ts
   windows:
     runs-on: windows-latest
     timeout-minutes: 15
