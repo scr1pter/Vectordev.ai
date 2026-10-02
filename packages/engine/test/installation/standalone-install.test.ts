@@ -67,7 +67,8 @@ async function fixture() {
     "chmod",
     "rm",
     "rmdir",
-    "shasum",
+    // Git Bash ships GNU sha256sum; macOS provides the installer's shasum fallback.
+    process.platform === "win32" ? "sha256sum" : "shasum",
     "find",
   ]) {
     const actual = await shellCommand(command)
