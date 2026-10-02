@@ -24,16 +24,16 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
   </p>
   <h3>Upcoming native installation</h3>
   <p>
-    The unversioned candidate prepares Vector shell and PowerShell installers that verify native archives and
-    do not require Node.js or npm. <code>vector upgrade</code> and <code>vector uninstall</code> respect the verified
+    Vector's source includes Vector shell and PowerShell installers that verify native archives and do not
+    require Node.js or npm; they stay unpublished until Vector completes their setup. <code>vector upgrade</code> and <code>vector uninstall</code> respect the verified
     installer or package manager that owns the running executable. On Windows, replacement of a running executable
     is scheduled after it exits; scheduled does not mean completed. Installer publication and Windows acceptance
     are still pending. Use the <a href="/releases">published release instructions</a> for available downloads.
   </p>
   <h3>Windows Subsystem for Linux</h3>
   <p>
-    In the candidate, Install Vector in server settings uses the native Vector installer with a separately pinned,
-    exact CLI version required by the desktop. It installs <code>~/.vector/bin/vector-native</code> using Linux
+    Once the native installers are published, Install Vector in server settings uses the native Vector installer
+    with a separately pinned, exact CLI version required by the desktop. It installs <code>~/.vector/bin/vector-native</code> using Linux
     download, archive and SHA-256 tools. Node.js and npm are not required. A matching installed engine can start
     without the download tools; a version mismatch requires an update.
   </p>
@@ -47,7 +47,8 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
   </p>
   <h3>Public transcripts and teams</h3>
   <p>
-    The candidate restores public transcript sharing on Vector's service. Preview the content, explicitly choose
+    Vector's source includes public transcript sharing on Vector's own service; it stays off until Vector
+    completes its setup. Preview the content, explicitly choose
     publication and future updates, and set an expiry before sharing. Public links can expose visible prompts,
     code and tool output; importing creates passive local history. Removing a new Vector share does not remove a
     historical copy on another service. <code>vector invite</code> remains the separate live-workspace feature.
