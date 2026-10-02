@@ -6,6 +6,7 @@
     "types": ["node", "bun"]
   },
   "include": [
+    "./public-viewer.playwright.config.ts",
     "./performance/timeline-stability/**/*.spec.ts",
     "./performance/timeline-stability/fixture.test.ts",
     "./performance/timeline-stability/fixture.ts",
@@ -19,6 +20,7 @@
     "./regression/agent-launcher.spec.ts",
     "./regression/external-agent-chat.spec.ts",
     "./regression/free-models.spec.ts",
+    "./regression/mock-server-events.spec.ts",
     "./regression/public-share-consent.spec.ts",
     "./regression/public-share-delete.spec.ts",
     "./regression/public-share-viewer.spec.ts",
