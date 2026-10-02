@@ -43,6 +43,49 @@ older local build and must not be relabelled as this candidate.
 
 ## GitHub Actions is executing
 
+At source `013ebfeb0c081e024b3f2718461dc2b5d3ab28d2`, native typechecks,
+the website build and the free-model integration job passed. The Windows Core
+catalog wait now completes (38.26 ms), including its fresh-process deadline
+regression (641.74 ms). The completed Windows Core suite reported 1,532 passes,
+13 skips and 20 failures: one SDK file-URL resolution fixture, four searches
+interrupted during first-use Ripgrep installation, two POSIX permission
+assumptions, and 13 CRLF-converted review golden files. Turbo stopped Engine
+after Core failed, so this run does not verify Engine notice or uninstall fixes.
+Linux browser validation reported 94 passes, eight passing retries, one skip
+and one persistent loading timeout; its viewer command was not reached.
+
+Subsequent repairs prepare the real Ripgrep binary in a bounded setup hook while
+retaining five-second search assertions, share native PowerShell module handling
+from Core, resolve the SDK fixture with a native parent path, and keep review
+golden bytes at LF. OAuth fixtures retain POSIX privacy checks where supported
+and exercise malformed-schema and approval-identity rejection on every OS.
+All 13 golden files remain byte-identical in a real autocrlf checkout. Focused
+approval/review checks passed 48 cases; SDK/search checks passed eight. A real
+empty-cache Mac download, extraction and execution of Ripgrep also passed.
+The complete local Core suite after these changes passed 1,565 tests with one
+Windows-only skip, zero failures and 5,947 assertions. Engine installation
+checks passed 14 cases with two Windows-only skips; Core and Engine types passed.
+
+The Windows browser trace showed hundreds of module requests passing through
+test-worker routing, including 819 continue calls and individual replies taking
+over 11 seconds. API mocks now use serializable matchers, retain exact backend
+responses, and leave document/module handling to the real server. Three routing
+regressions passed. An affected subset passed 13 cases with one skip at two
+workers; five workers still produced one timeout. Other local build activity
+limits that timing comparison. Both hosted platforms now use one browser worker,
+following [Playwright's CI guidance](https://playwright.dev/docs/ci#workers), with
+all test deadlines and assertions preserved. Independent unit tasks continue
+after a peer fails so the job can report more failures without becoming green.
+
+The native standalone harness at `013ebfeb0` passed the missing-module boundary
+but then failed on an interactive CurrentUser certificate trust prompt. Its
+replacement is restricted to disposable GitHub-hosted Windows runners, checks
+administrator access, and imports the generated fixture into LocalMachine Root.
+Cleanup is registered before import, targets only the exact generated thumbprint,
+and verifies removal. TLS, ownership, hash and rollback checks remain enforced;
+native acceptance is still required. npm authentication still returned `E401`
+when rechecked at 20:04 UTC. No new installers or packages are published.
+
 The [candidate PR](https://github.com/scr1pter/Vectordev.ai/pull/5) is a draft.
 At source `948649315e75e060c2e47a3aefecd141fc10c640`, the
 [native test run](https://github.com/scr1pter/Vectordev.ai/actions/runs/37054778865)
