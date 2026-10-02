@@ -27,12 +27,32 @@ test("published schemas and dependency notices match their generators", async ()
       new Response(child.stdout).text(),
     ])
     expect(code, error).toBe(0)
-    for (const [committed, generated] of outputs)
-      expect(
-        Buffer.from(await Bun.file(path.join(root, committed)).arrayBuffer()).equals(
-          Buffer.from(await Bun.file(path.join(tmp.path, generated)).arrayBuffer()),
-        ),
-        committed,
-      ).toBe(true)
+    for (const [committed, generated] of outputs) {
+      const expected = Buffer.from(await Bun.file(path.join(root, committed)).arrayBuffer())
+      const actual = Buffer.from(await Bun.file(path.join(tmp.path, generated)).arrayBuffer())
+      const matches = expected.equals(actual)
+      expect(matches, matches ? committed : difference(committed, expected, actual)).toBe(true)
+    }
   }
 }, 60_000)
+
+function difference(file: string, expected: Buffer, actual: Buffer) {
+  const before = expected.toString("utf8").split("\n")
+  const after = actual.toString("utf8").split("\n")
+  const mismatch = before.findIndex((line, index) => line !== after[index])
+  const index = mismatch < 0 ? before.length : mismatch
+  const context = (lines: string[], bytes: number) => ({
+    bytes,
+    heading: lines
+      .slice(0, index + 1)
+      .findLast((line) => /^##\s/.test(line))
+      ?.slice(0, 300),
+    // Preserve CR and other control characters in the diagnostic; equality remains byte-exact.
+    line: lines[index]?.slice(0, 400) ?? "<end of file>",
+  })
+  return `${file}: first different line ${index + 1}\n${JSON.stringify(
+    { committed: context(before, expected.length), generated: context(after, actual.length) },
+    null,
+    2,
+  )}`
+}
