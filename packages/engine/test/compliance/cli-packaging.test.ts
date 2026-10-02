@@ -323,3 +323,44 @@ process.exit(35)
     expect(stdout).not.toContain("published @vectordevai/cli")
   },
 )
+
+test("the plugin publisher audits its staged package and refuses the former product name before npm runs", async () => {
+  await using tmp = await fixture()
+  const plugin = path.join(tmp.dir, "packages/plugin")
+  for (const script of ["publish.ts", "build.ts"]) {
+    await Bun.write(path.join(plugin, "script", script), Bun.file(path.join(root, "packages/plugin/script", script)))
+  }
+  await Bun.write(
+    path.join(plugin, "dist-publish/package.json"),
+    JSON.stringify({
+      name: "@vectordevai/plugin",
+      version,
+      exports: { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" } },
+      license: "SEE LICENSE IN LICENSE",
+      files: ["dist", ...notices],
+    }),
+  )
+  for (const notice of notices) await Bun.write(path.join(plugin, "dist-publish", notice), `Fixture ${notice}`)
+  await Bun.write(path.join(plugin, "dist-publish/dist/index.d.ts"), "export {}\n")
+  await Bun.write(
+    path.join(plugin, "dist-publish/dist/index.js"),
+    `export const agent = "${formerName?.toUpperCase()}"\n`,
+  )
+  const npm = path.join(tmp.dir, "fake-bin/npm")
+  await Bun.write(
+    npm,
+    `#!/usr/bin/env node
+require("node:fs").writeFileSync(${JSON.stringify(path.join(tmp.dir, "npm-ran"))}, process.argv.slice(2).join(" "))
+process.exit(1)
+`,
+  )
+  await chmod(npm, 0o755)
+  const result = await run([process.execPath, "script/publish.ts", "--skip-build", "--publish"], plugin, {
+    ...tmp.env,
+    VECTOR_PLUGIN_VERSION: version,
+    PATH: path.dirname(npm) + path.delimiter + tmp.env.PATH,
+  })
+  expect(result.code).not.toBe(0)
+  expect(result.stdout + result.stderr).toContain("artifact audit violation")
+  expect(await Bun.file(path.join(tmp.dir, "npm-ran")).exists()).toBe(false)
+})

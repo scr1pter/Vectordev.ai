@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { $ } from "bun"
 import path from "node:path"
+import { assertCleanArtifacts } from "../../../script/artifact-audit"
 import { stagePlugin, verifyPlugin } from "./build"
 
 const directory = path.resolve(import.meta.dirname, "..")
@@ -11,6 +12,8 @@ const output = process.argv.includes("--skip-build")
   ? path.join(directory, "dist-publish")
   : await stagePlugin(directory)
 await verifyPlugin(output)
+// The same byte audit as the CLI packages: nothing is packed or published until it passes.
+await assertCleanArtifacts([output])
 const manifest = await Bun.file(path.join(output, "package.json")).json()
 
 if (!publish) {
