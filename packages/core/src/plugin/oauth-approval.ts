@@ -310,11 +310,24 @@ function save(approvals: OAuthApproval[]) {
 }
 
 function readApprovalText(file: string) {
+  // O_NOFOLLOW is not enforced by every Windows runtime. Check the directory
+  // entry and its identity around open so a symlink cannot borrow its target's approvals.
+  const before = lstatSync(file)
+  if (!before.isFile() || before.isSymbolicLink()) {
+    throw new Error("OAuth approvals require a private, user-owned regular file.")
+  }
   const descriptor = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const stat = fstatSync(descriptor)
+    const after = lstatSync(file)
     if (
       !stat.isFile() ||
+      !after.isFile() ||
+      after.isSymbolicLink() ||
+      before.dev !== stat.dev ||
+      before.ino !== stat.ino ||
+      after.dev !== stat.dev ||
+      after.ino !== stat.ino ||
       stat.nlink !== 1 ||
       stat.size > 65_536 ||
       (process.platform !== "win32" && ((stat.mode & 0o077) !== 0 || stat.uid !== process.getuid?.()))

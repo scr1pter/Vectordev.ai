@@ -220,8 +220,14 @@ test("dry-run packages every target with notices and a working Vector launcher w
       const destination = path.join(tmp.dir, "installed/node_modules", manifest.name)
       await mkdir(destination, { recursive: true })
       const unpacked = await run(
-        ["tar", "-xf", info.filename, "--strip-components", "1", "-C", destination],
-        folder,
+        [
+          "tar",
+          "-xf",
+          path.relative(destination, path.join(folder, info.filename)).split(path.sep).join("/"),
+          "--strip-components",
+          "1",
+        ],
+        destination,
         tmp.env,
       )
       expect(unpacked.code, unpacked.stderr).toBe(0)

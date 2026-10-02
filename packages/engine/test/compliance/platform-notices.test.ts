@@ -36,6 +36,7 @@ async function fixture() {
   await Bun.write(
     path.join(tmp.path, "bun.lock"),
     JSON.stringify({
+      workspaces: Object.fromEntries(["engine", "app", "desktop", "tui", "ui"].map((name) => [`packages/${name}`, {}])),
       packages: {
         wrapper: ["wrapper@1.0.0", "", { optionalDependencies: { "fixture-native": "~1.2.0" } }, "sha512-wrapper"],
         "fixture-native": ["fixture-native@1.2.3", "", { os: "linux", cpu: "x64" }, platform.integrity],

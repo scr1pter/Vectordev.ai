@@ -59,23 +59,30 @@ test.skipIf(process.platform !== "win32")(
     const root = await mkdtemp(path.join(os.tmpdir(), "vector powershell '"))
     const file = path.join(root, "hash fixture.txt")
     const entry = path.join(root, "child.ts")
+    const diagnostic = path.join(root, "diagnostic.json")
     const quote = (value: string) => `'${value.replaceAll("'", "''")}'`
     try {
       await Bun.write(file, "installer hash fixture\n")
       await Bun.write(
         entry,
         `import assert from "node:assert/strict"
-      import { WindowsPowerShell } from ${JSON.stringify(new URL("../../src/util/windows-powershell.ts", import.meta.url).href)}
+      const checkpoint = (phase, details = {}) => Bun.write(${JSON.stringify(diagnostic)}, JSON.stringify({ phase, ...details }))
+      await checkpoint("bun-started")
+      const { WindowsPowerShell } = await import(${JSON.stringify(new URL("../../src/util/windows-powershell.ts", import.meta.url).href)})
+      await checkpoint("helper-imported")
       assert.ok(process.env.PSModulePath, "pwsh must pass its module paths through Bun")
       const powershell = ${JSON.stringify(path.join(process.env.SYSTEMROOT!, "System32/WindowsPowerShell/v1.0/powershell.exe"))}
       const child = Bun.spawn([powershell, "-NoProfile", "-NonInteractive", "-Command", ${JSON.stringify(
         `$ErrorActionPreference = 'Stop'; [pscustomobject]@{ Edition = $PSEdition; CertificateProvider = (Get-PSDrive Cert).Provider.Name; ArchiveCommand = (Get-Command Expand-Archive -ErrorAction Stop).Name; ProcessId = (Get-Process -Id $PID).Id; Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath ${quote(file)}).Hash; Marker = $env:VECTOR_INSTALLER_ENV_MARKER } | ConvertTo-Json -Compress`,
       )}], { env: WindowsPowerShell.environment(powershell), stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+      await checkpoint("native-started", { pid: child.pid })
       const timeout = setTimeout(() => child.kill(), 15_000)
       try {
         const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+        await checkpoint("native-finished", { code, stdout, stderr })
         assert.equal(code, 0, stderr)
-        console.log(stdout)
+        await Bun.write(Bun.stdout, stdout)
+        await checkpoint("bun-output-written")
       } finally {
         clearTimeout(timeout)
         child.kill()
@@ -104,7 +111,14 @@ test.skipIf(process.platform !== "win32")(
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
         ])
-        expect(code, stderr).toBe(0)
+        const details = JSON.stringify({
+          stderr,
+          diagnostic: await Bun.file(diagnostic)
+            .text()
+            .catch(() => "not written"),
+        })
+        expect(code, details).toBe(0)
+        expect(stdout.trim(), details).not.toBe("")
         expect(JSON.parse(stdout)).toEqual({
           Edition: "Desktop",
           CertificateProvider: "Certificate",
