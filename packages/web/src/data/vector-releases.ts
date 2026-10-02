@@ -18,6 +18,11 @@ export const upcomingRelease = {
     "No version or release date is announced for these. Each one is enabled only after its service setup, legal review or package publication is complete. Pricing and licensing behavior are unchanged.",
 }
 
+// The desktop release the download page offers today. Not every entry in release199 was published as a
+// desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
+// Update it in the same change that publishes the next desktop installers.
+export const publishedDesktopVersion = "1.99.8"
+
 export const releaseSeries: VectorRelease[] = [
   {
     version: "1.0",
