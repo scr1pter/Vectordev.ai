@@ -1,2 +1,11 @@
 packages/core/migration/**/snapshot.json linguist-generated
 packages/core/src/database/migration.gen.ts linguist-generated
+
+# Release audits compare these checked-in bytes with recorded hashes and generated output.
+/LICENSE text eol=lf
+/THIRD_PARTY_NOTICES.md text eol=lf
+/DEPENDENCY_NOTICES.md text eol=lf
+/licenses/** text eol=lf
+/packages/web/public/config.json text eol=lf
+/packages/web/public/tui.json text eol=lf
+/packages/web/public/install text eol=lf

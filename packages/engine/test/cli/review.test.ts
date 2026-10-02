@@ -64,6 +64,8 @@ const OTHER = "export const other = 1\n"
 const branched = Effect.gen(function* () {
   const tmp = yield* scopedTmpdir({ git: true })
   const dir = tmp.path
+  // This fixture asserts exact worktree bytes after checkout on every host.
+  yield* git(dir, "config", "core.autocrlf", "false")
   yield* git(dir, "branch", "-M", "main")
   const main = yield* commit(dir, "base", { "src/list.ts": LIST, "src/other.ts": OTHER, "bun.lock": "{}\n" })
   yield* git(dir, "checkout", "-q", "-b", "feature")
