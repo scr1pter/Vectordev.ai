@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { logo } from "@vectordevai/tui/logo"
+import { EOL } from "node:os"
 import path from "node:path"
 
 test("non-TTY CLI output uses the shared Vector glyphs without ANSI colors", async () => {
@@ -17,7 +18,7 @@ test("non-TTY CLI output uses the shared Vector glyphs without ANSI colors", asy
   expect(output).toBe(
     logo.left
       .map((row, index) => `  ${row} ${logo.right[index]}`.replaceAll("_", " ").replace(/[~^]/g, "▀"))
-      .join("\n")
+      .join(EOL)
       .trimEnd(),
   )
   expect(Bun.stripANSI(output)).toBe(output)
