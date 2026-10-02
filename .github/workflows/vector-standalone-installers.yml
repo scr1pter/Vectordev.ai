@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - packages/web/public/install*
+      - packages/core/src/util/windows-powershell.ts
       - packages/engine/src/installation/**
       - packages/engine/script/verify-windows-installer.ts
       - packages/engine/test/installation/**
