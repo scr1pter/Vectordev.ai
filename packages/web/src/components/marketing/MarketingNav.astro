@@ -1,6 +1,6 @@
 ---
 interface Props {
-  active?: "home" | "product" | "why" | "docs" | "releases" | "login" | "about"
+  active?: "home" | "product" | "docs" | "releases" | "login" | "about"
 }
 
 const { active = "home" } = Astro.props
@@ -13,7 +13,6 @@ const { active = "home" } = Astro.props
     </a>
 
     <nav class="desktop-links" aria-label="Primary navigation">
-      <a class:list={{ active: active === "why" }} href="/why-vector">Why Vector</a>
       <a class:list={{ active: active === "docs" }} href="/docs">Docs</a>
       <a class:list={{ active: active === "releases" }} href="/releases">Releases</a>
       <a class:list={{ active: active === "about" }} href="/about">About</a>
@@ -47,7 +46,6 @@ const { active = "home" } = Astro.props
             Open a repository, direct agents, inspect their work, and ship from one desktop workspace.
           </p>
           <nav class="mobile-nav-links" aria-label="Mobile navigation">
-            <a href="/why-vector" aria-current={active === "why" ? "page" : undefined} class:list={{ current: active === "why" }}>Why Vector</a>
             <a href="/docs" aria-current={active === "docs" ? "page" : undefined} class:list={{ current: active === "docs" }}>Documentation</a>
             <a href="/releases" aria-current={active === "releases" ? "page" : undefined} class:list={{ current: active === "releases" }}>Releases</a>
             <a href="/about" aria-current={active === "about" ? "page" : undefined} class:list={{ current: active === "about" }}>About</a>

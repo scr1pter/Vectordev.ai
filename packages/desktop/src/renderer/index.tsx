@@ -266,14 +266,6 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     vectorAccount: window.api.vectorAccount,
 
-    license: {
-      status: () => window.api.license.status(),
-      activate: (licenseKey) => window.api.license.activate(licenseKey),
-      deactivate: () => window.api.license.deactivate(),
-      setCancellation: (cancel) => window.api.license.setCancellation(cancel),
-      openBillingPortal: () => window.api.license.openBillingPortal(),
-    },
-
     exportDebugLogs: () => window.api.exportDebugLogs(),
 
     recordFatalRendererError: (error) => window.api.recordFatalRendererError(error),

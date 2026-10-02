@@ -7,7 +7,6 @@
     ".": "./src/index.ts",
     "./desktop-menu": "./src/desktop-menu.ts",
     "./updater": "./src/updater.ts",
-    "./license": "./src/license.ts",
     "./vector-account": "./src/vector-account.ts",
     "./schedule": "./src/features/scheduled/schedule-model.ts",
     "./wsl/types": "./src/wsl/types.ts",

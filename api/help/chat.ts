@@ -40,6 +40,12 @@ const PRODUCT_DOCUMENTATION = [
   },
   {
     section: "Start here",
+    title: "Pricing and your Vector account",
+    where: "vectordev.ai — create a free account, then download from vectordev.ai/download.",
+    body: "Vector is free and costs nothing to download or use. A free Vector account is all anyone needs to download the desktop app, and the same account signs in the terminal agent. Model providers connected with the user's own key bill the user directly for their usage.",
+  },
+  {
+    section: "Start here",
     title: "Overview",
     where: "The house icon at the top of the sidebar — Vector's home.",
     body: "Open a project, start a focused session, resume a searchable recent session, and view local activity such as token use, completed chats, and favorite model.",
@@ -142,15 +148,15 @@ const PRODUCT_DOCUMENTATION = [
   },
   {
     section: "Project tools",
+    title: "Rewind code + chat",
+    where: "Command palette (⌘⇧P, or Ctrl+Shift+P on Windows/Linux) inside a session, or type /undo or /redo in the message box.",
+    body: "Undo an agent's work one request at a time. Rewind code + chat restores the files and the conversation to before the last request, stopping the agent first if it is still working, and puts that request's text back in the message box. Run it again to go back further. Move rewind forward (or /redo) restores the next request.",
+  },
+  {
+    section: "Project tools",
     title: "Terminal",
     where: "Project group in the sidebar, inside an active task.",
     body: "Open a real shell in the project directory to run development servers, git commands, package installs, and other commands. It requires an active task.",
-  },
-  {
-    section: "Your safety net",
-    title: "Code Archaeology",
-    where: "Inside a task — open it from the session's side panel.",
-    body: "Vector captures checkpoints when an agent edits files. Inspect touched-file diffs, rename and annotate checkpoints, or restore stored file snapshots to undo an agent run.",
   },
   {
     section: "Everyday flow",

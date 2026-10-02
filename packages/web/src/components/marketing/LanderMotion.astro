@@ -230,7 +230,6 @@
      one rule each so nothing has to be touched component by component. */
 
   .feature-card,
-  .licensing-card,
   .runtime-list article,
   .crew-card,
   .suite-card,
@@ -243,7 +242,6 @@
   }
 
   .feature-card:hover,
-  .licensing-card:hover,
   .runtime-list article:hover,
   .crew-card:hover,
   .suite-card:hover {
@@ -254,8 +252,7 @@
   /* Icons and marks brighten with their card rather than staying inert. */
   .suite-icon,
   .hero-loop-icon,
-  .section-kicker,
-  .licensing-tag {
+  .section-kicker {
     transition:
       color 340ms ease,
       opacity 340ms ease,
@@ -263,7 +260,6 @@
   }
 
   .feature:hover .section-kicker,
-  .licensing-card:hover .licensing-tag,
   .suite-card:hover .suite-icon {
     opacity: 1;
     transform: translateY(-1px);
@@ -325,7 +321,6 @@
     }
 
     .feature-card:hover,
-    .licensing-card:hover,
     .runtime-list article:hover,
     .crew-card:hover,
     .suite-card:hover {
@@ -354,14 +349,6 @@
   .runtime-list article:nth-child(6) { --rd: 350ms; }
   .runtime-list article:nth-child(7) { --rd: 420ms; }
   .runtime-list article:nth-child(8) { --rd: 490ms; }
-  .licensing-grid > article:nth-child(1) { --rd: 0ms; }
-  .licensing-grid > article:nth-child(2) { --rd: 70ms; }
-  .licensing-grid > article:nth-child(3) { --rd: 140ms; }
-  .licensing-grid > article:nth-child(4) { --rd: 210ms; }
-  .licensing-grid > article:nth-child(5) { --rd: 280ms; }
-  .licensing-grid > article:nth-child(6) { --rd: 350ms; }
-  .licensing-grid > article:nth-child(7) { --rd: 420ms; }
-  .licensing-grid > article:nth-child(8) { --rd: 490ms; }
   .crew-grid > *:nth-child(1) { --rd: 0ms; }
   .crew-grid > *:nth-child(2) { --rd: 70ms; }
   .crew-grid > *:nth-child(3) { --rd: 140ms; }
@@ -391,7 +378,6 @@
   @media (prefers-reduced-motion: reduce) {
     .tally > div { --rd: 0ms; }
     .runtime-list article { --rd: 0ms; }
-    .licensing-grid > article { --rd: 0ms; }
     .crew-grid > * { --rd: 0ms; }
   }
 

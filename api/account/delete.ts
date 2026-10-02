@@ -1,6 +1,5 @@
 import { requireAccountUser } from "../_lib/account.js"
 import { enforceRateLimit, requireTrustedJsonRequest } from "../_lib/abuse.js"
-import { deleteAccountBilling } from "../_lib/billing.js"
 import {
   ApiError,
   handleApiError,
@@ -21,8 +20,7 @@ import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js
  *      misconfigured deployment fails with nothing half-done
  *   3. revoke CLI tokens, which are stateless and would otherwise keep a
  *      terminal signed in for up to ninety days
- *   4. cancel billing and delete the Stripe customer
- *   5. delete the identity itself
+ *   4. delete the identity itself
  *
  * The response says which of those actually happened.
  */
@@ -55,18 +53,11 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     }
 
     const tokensRevoked = await revokeAccountTokens(user.id)
-    const billing = await deleteAccountBilling(user).catch((error: unknown) => {
-      // A billing failure must not strand the person with an account they asked
-      // to close, but they should be told, because money is involved.
-      return { billing: "failed" as const, reason: error instanceof Error ? error.message : "unknown" }
-    })
-
     await deleteAccountUser(admin, user.id)
 
     json(response, 200, {
       deleted: true,
       email: user.email,
-      billing,
       cliTokens: tokensRevoked ? "revoked" : revocationConfigured() ? "revocation-failed" : "expire-within-90-days",
     })
   } catch (error) {

@@ -13,7 +13,6 @@
 //   neumorphism    the hero's three-stage loop — soft controls, pressed when on
 //   claymorphism   every icon tile, the one place chunky and toyish is allowed
 //   glassmorphism  feature and connection cards (already the house style)
-//   brutalism      licensing — hard facts deserve hard edges and no decoration
 //   minimalism     the feature sections, which is the air the loud zones need
 //   maximalism     the tally and the logo belt — one deliberate crescendo
 //
@@ -318,59 +317,6 @@
   }
 
   /* ==================================================================
-     6. BRUTALISM — licensing
-     No radius, no blur, no gradient, no glow. A 2px border, a hard offset
-     shadow that is a printing artefact rather than a light effect, and
-     monospace throughout. This section is the money and the legal terms;
-     making it the least decorated thing on the page is the point.
-     ================================================================== */
-  .vector-marketing .licensing .licensing-card {
-    border-radius: 0;
-    border: 2px solid var(--ink);
-    background: rgba(10, 7, 16, 0.72);
-    box-shadow: 9px 9px 0 rgba(143, 82, 255, 0.92);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    transition:
-      transform 160ms steps(3, end),
-      box-shadow 160ms steps(3, end);
-  }
-
-  .vector-marketing .licensing .licensing-card:hover {
-    /* it slides onto its own shadow, mechanically, in three steps — no
-       easing, because brutalism does not ease */
-    transform: translate(4px, 4px);
-    box-shadow: 5px 5px 0 rgba(143, 82, 255, 0.92);
-  }
-
-  .vector-marketing .licensing .licensing-card h3 {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    letter-spacing: -0.02em;
-    text-transform: uppercase;
-  }
-
-  .vector-marketing .licensing .licensing-tag {
-    padding: 5px 8px;
-    display: inline-block;
-    color: #0b0710;
-    background: var(--ink);
-    letter-spacing: 0.1em;
-  }
-
-  .vector-marketing .licensing .licensing-card dt {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-  }
-
-  /* exposed structure: brutalism shows the grid instead of hiding it */
-  .vector-marketing .licensing .licensing-card dl {
-    border-top: 2px solid var(--line-strong);
-    padding-top: 16px;
-  }
-
-  /* ==================================================================
      7. MINIMALISM — the feature sections
      The restraint that makes everything above legible. Decoration is
      removed rather than added: no card, no border box, one hairline, and
@@ -491,8 +437,7 @@
      ================================================================== */
   @media (prefers-reduced-motion: reduce) {
     .vector-marketing .crew .crew-grid > article:hover,
-    .vector-marketing .suite-grid .suite-icon:hover,
-    .vector-marketing .licensing .licensing-card:hover {
+    .vector-marketing .suite-grid .suite-icon:hover {
       transform: none;
     }
 

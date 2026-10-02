@@ -3,11 +3,10 @@ import { filterSettingsGroups, isSettingsTab, settingsGroups, settingsItemCount 
 
 describe("settings registry", () => {
   test("keeps every settings page reachable", () => {
-    expect(settingsItemCount(settingsGroups)).toBe(16)
+    expect(settingsItemCount(settingsGroups)).toBe(15)
     expect(settingsGroups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
       "general",
       "usage",
-      "billing",
       "appearance",
       "voice",
       "personalization",

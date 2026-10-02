@@ -93,8 +93,9 @@ export function CliLaunchPanel(props: { accessToken: string; previewToken?: stri
       </div>
       <p className="acct-fine">
         The token is your personal CLI credential — it expires in 90 days, and you can generate a fresh one at any time
-        from this page. Connect your own provider with <code>vector auth login</code>. Eligible accounts may also see
-        Free models inside of Vector, with availability and usage limits shown in the app.
+        from this page. Connect your own provider with <code>vector auth login</code>. From 1.99.99, connecting your own
+        OpenRouter account also adds its eligible zero-price models under Free models inside of Vector, within
+        OpenRouter's limits.
       </p>
     </section>
   )

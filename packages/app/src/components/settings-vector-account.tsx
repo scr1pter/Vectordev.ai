@@ -38,8 +38,7 @@ export function SettingsVectorAccount() {
             Vector account
           </h3>
           <p class="text-12-regular text-text-weak mt-1">
-            Sign in to connect this desktop to your Vector account. Your provider keys and workspace subscription are
-            managed separately.
+            Sign in to connect this desktop to your Vector account. Your provider keys are managed separately.
           </p>
         </div>
         <Show when={status().email}>

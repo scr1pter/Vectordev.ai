@@ -6,7 +6,7 @@
 export type LaunchPhase = "veiled" | "slow" | "failed" | "revealing" | "gone"
 
 // Screens the app must show at once, without waiting for any ready signal.
-export type LaunchYieldReason = "error" | "unreachable" | "license"
+export type LaunchYieldReason = "error" | "unreachable"
 
 export type LaunchSignals = {
   // ms since the launch screen first painted
@@ -78,8 +78,8 @@ function canReveal(input: LaunchSignals) {
 export function decideLaunchPhase(input: LaunchSignals): LaunchPhase {
   // Monotonic: once revealing starts nothing can bring the glass back.
   if (input.current === "revealing" || input.current === "gone") return input.current
-  // A blocking screen (ErrorPage, ConnectionError, licence activation) wins
-  // over everything, including a failure and the minimum visible time.
+  // A blocking screen (ErrorPage, ConnectionError) wins over everything, including a failure
+  // and the minimum visible time.
   if (input.yielded) return "revealing"
   // A late recovery still reveals, even from the failed state and even after
   // a bundle failure: the host only infers one (an early uncaught error, a

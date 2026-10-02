@@ -2,7 +2,6 @@ import type { VectorAccountPlatform } from "@vectordevai/app/vector-account"
 import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
 import type { WslServersPlatform } from "@vectordevai/app/wsl/types"
 import type { UpdaterState } from "@vectordevai/app/updater"
-import type { VectorLicenseStatus } from "@vectordevai/app/license"
 import type {
   CloudRuntimeLogResult,
   PublishProgressEvent,
@@ -169,14 +168,6 @@ export type UpdaterAPI = {
   subscribe: (cb: (state: UpdaterState) => void) => Promise<() => void>
   check: () => Promise<UpdaterState>
   install: () => Promise<void>
-}
-
-export type LicenseAPI = {
-  status: () => Promise<VectorLicenseStatus>
-  activate: (licenseKey: string) => Promise<VectorLicenseStatus>
-  deactivate: () => Promise<VectorLicenseStatus>
-  setCancellation: (cancel: boolean) => Promise<VectorLicenseStatus>
-  openBillingPortal: () => Promise<string>
 }
 
 export type AgentTeamsAPI = {
@@ -702,7 +693,6 @@ export type ElectronAPI = {
   wslServers: WslServersAPI
   updater: UpdaterAPI
   vectorAccount: VectorAccountPlatform
-  license: LicenseAPI
   reportBug: (input: { message: string; email?: string }) => Promise<{ delivered: boolean; error?: string }>
   askHelpAssistant: (input: {
     messages: { role: "user" | "assistant"; content: string }[]

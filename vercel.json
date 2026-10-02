@@ -225,19 +225,29 @@
       "permanent": true
     },
     {
-      "source": "/docs/hulk",
-      "destination": "/docs/troubleshooting#faq",
-      "permanent": true
-    },
-    {
       "source": "/docs/product",
       "destination": "/",
       "permanent": true
     },
     {
       "source": "/billing",
-      "destination": "/account#billing",
+      "destination": "/account",
       "permanent": false
+    },
+    {
+      "source": "/license",
+      "destination": "/account",
+      "permanent": false
+    },
+    {
+      "source": "/license/:path*",
+      "destination": "/account",
+      "permanent": false
+    },
+    {
+      "source": "/why-vector",
+      "destination": "/",
+      "permanent": true
     },
     {
       "source": "/settings",
@@ -333,7 +343,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), geolocation=(), payment=(self), microphone=()"
+          "value": "camera=(), geolocation=(), payment=(), microphone=()"
         }
       ]
     },

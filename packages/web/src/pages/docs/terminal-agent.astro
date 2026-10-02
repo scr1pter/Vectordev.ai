@@ -15,7 +15,7 @@ vector ~/code/myapp --model anthropic/claude-sonnet-5</code><button class="doc-c
             It takes the same session flags as <code>run</code>: <code>--model</code>, <code>--agent</code>, <code>--prompt</code>, <code>--continue</code>, <code>--session</code> and <code>--fork</code>. <code>--mini</code> starts a minimal interface, and <code>--replay</code>, <code>--no-replay</code> and <code>--replay-limit</code> control how much history is redrawn when you resume or resize.
           </p>
           <p>
-            For guarded personal free-model access in the upcoming 1.999.99 release, connect your free OpenRouter
+            For guarded personal free-model access in the upcoming 1.99.99 release, connect your free OpenRouter
             account with <code>vector providers login --provider openrouter --method "Connect OpenRouter"</code>,
             then use <code>vector models</code> to find eligible models. Use the saved provider connection or
             <code>OPENROUTER_API_KEY</code>; a project-only <code>provider.openrouter.options.apiKey</code> is insufficient.
@@ -80,11 +80,11 @@ vector import session.json</code><button class="doc-cmd-copy" type="button" aria
           <p class="doc-cmd"><code>vector serve --port 4096
 vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
-            From 1.999.99, the next release, configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally,
+            From 1.99.99, the next release, configure <code>VECTOR_SERVER_PASSWORD</code> and, optionally,
             <code>VECTOR_SERVER_USERNAME</code>; the default username is <code>vector</code>, and non-loopback binding requires
-            a password unless you explicitly choose <code>--unsecured</code>. Releases before 1.999.99, such as desktop 1.99.8 and npm CLI 1.99.7, do not read these names or
+            a password unless you explicitly choose <code>--unsecured</code>. Releases before 1.99.99, such as desktop 1.99.8 and npm CLI 1.99.7, do not read these names or
             enforce that rule, so keep <code>vector serve</code> on loopback until you upgrade. Use a protected secret source
-            for server passwords. From 1.999.99, the settings and database overrides are <code>VECTOR_AGENT_CONFIG</code>,
+            for server passwords. From 1.99.99, the settings and database overrides are <code>VECTOR_AGENT_CONFIG</code>,
             <code>VECTOR_AGENT_CONFIG_DIR</code> and <code>VECTOR_AGENT_DB</code>.
             Keep the existing database file when migrating an ambiguous historical override.
           </p>
@@ -94,7 +94,7 @@ vector attach http://localhost:4096 --dir ~/code/myapp</code><button class="doc-
           </p>
           <h3 id="wsl">Windows Subsystem for Linux</h3>
           <p>
-            From 1.999.99, the next desktop release, Install Vector in server settings runs the shell installer with the exact
+            From 1.99.99, the next desktop release, Install Vector in server settings runs the shell installer with the exact
             CLI version that desktop requires, and that desktop release is published only after its required CLI version is
             available to the installer. It installs <code>~/.vector/bin/vector-native</code> using Linux download, archive and
             SHA-256 tools. Node.js and npm are not required. A matching installed engine can start without the download

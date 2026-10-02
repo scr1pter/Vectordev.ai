@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readdir, rm, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { cleanupStoreFiles, deleteStoreFileIfEmpty } from "./store-cleanup"
+import { cleanupStoreFiles, deleteStoreFileIfEmpty, removeLegacyAccessFiles } from "./store-cleanup"
 
 const roots: string[] = []
 
@@ -88,6 +88,19 @@ describe("store cleanup", () => {
 
     expect(await deleteStoreFileIfEmpty(root, "vector.draft.empty.dat")).toBe(true)
     expect(await deleteStoreFileIfEmpty(root, "vector.global.dat")).toBe(false)
+    expect(await readdir(root)).toEqual(["vector.global.dat"])
+  })
+
+  test("removes legacy access files and tolerates ones that are already gone", async () => {
+    const root = await tempRoot()
+    const now = new Date("2026-07-01T00:00:00.000Z")
+    await writeStore(root, "vector-license.json", "{}", now)
+    await writeStore(root, "vector-license-config.json", "{}", now)
+    await writeStore(root, "vector.global.dat", "{}", now)
+
+    await removeLegacyAccessFiles(root)
+    await removeLegacyAccessFiles(join(root, "missing"))
+
     expect(await readdir(root)).toEqual(["vector.global.dat"])
   })
 })
