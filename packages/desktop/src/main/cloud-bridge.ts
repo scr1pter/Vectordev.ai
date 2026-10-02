@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http"
 
 import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments } from "./cloud-console"
 import {
+  cachedCloudProviderConnection,
   getSupabaseServiceSnapshot,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
@@ -12,7 +13,7 @@ import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
 import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
 import { createCloudDatabase } from "./cloud-provision"
-import { publishProject } from "./publish"
+import { publishProject, type PublishTargetId } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
 
@@ -52,7 +53,12 @@ let bridgeServer: Server | undefined
 let bridgeUrl = ""
 let bridgeToken = ""
 
-export async function startCloudBridge() {
+type CloudBridgeOptions = {
+  publish?: typeof publishProject
+  awsStatus?: typeof getCloudAwsStatus
+}
+
+export async function startCloudBridge(options: CloudBridgeOptions = {}) {
   if (bridgeServer) return { url: bridgeUrl, token: bridgeToken }
 
   bridgeToken = randomUUID()
@@ -85,7 +91,7 @@ export async function startCloudBridge() {
 
     const result = await Promise.resolve()
       .then(() => parseCloudCommandInput(JSON.parse(Buffer.concat(chunks).toString("utf8"))))
-      .then(runCloudCommand)
+      .then((input) => runCloudCommand(input, options))
       .catch((error) => ({
         ok: false,
         error: error instanceof Error ? error.message : String(error),
@@ -184,16 +190,31 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   }
 }
 
-async function runCloudCommand(input: CloudCommandInput) {
+function configuredPublishTargets(input: CloudCommandInput) {
+  const links = listCloudProviderProjectLinks(input.projectPath, input.taskId)
+  const targets: { id: PublishTargetId; label: string; projectName?: string }[] = []
+  if (process.env.VECTOR_CLOUD_URL && process.env.VECTOR_CLOUD_TOKEN) {
+    targets.push({ id: "vector-cloud", label: "Vector Cloud" })
+  }
+  for (const provider of ["vercel", "netlify"] as const) {
+    const link = links.find((item) => item.provider === provider)
+    if (link && cachedCloudProviderConnection(provider).connected) {
+      targets.push({ id: provider, label: provider === "vercel" ? "Vercel" : "Netlify", projectName: link.projectName })
+    }
+  }
+  return targets
+}
+
+async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOptions) {
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
-    const [connections, aws] = await Promise.all([
-      listCloudProviderConnections().catch(() => []),
-      getCloudAwsStatus().catch(() => undefined),
-    ])
+    const connections = (["vercel", "netlify", "supabase"] as const).map(cachedCloudProviderConnection)
+    const targets = configuredPublishTargets(input)
+    const aws = await (options.awsStatus ?? getCloudAwsStatus)().catch(() => undefined)
     return {
       ok: true,
-      configured: Boolean(process.env.VECTOR_CLOUD_URL && process.env.VECTOR_CLOUD_TOKEN),
+      configured: targets.length > 0,
+      targets,
       build: getBuildSettings(input.projectPath, input.taskId),
       database: database
         ? { connected: true, provider: database.provider, host: new URL(database.url).hostname }
@@ -280,10 +301,23 @@ async function runCloudCommand(input: CloudCommandInput) {
       dryRun: input.dryRun === true,
     })
   }
-  return publishProject({
+  const targets = configuredPublishTargets(input)
+  const target = input.target ?? (targets.length === 1 ? targets[0].id : undefined)
+  if (!target) {
+    return {
+      ok: false,
+      needsChoice: targets.length > 1,
+      needsSetup: targets.length === 0,
+      targets,
+      error: targets.length
+        ? "Choose a publish target: more than one hosting destination is configured for this project."
+        : "Connect and link a Vercel or Netlify project in Vector Cloud before publishing.",
+    }
+  }
+  return (options.publish ?? publishProject)({
     projectPath: input.projectPath,
     taskId: input.taskId,
-    target: input.target ?? "vector-cloud",
+    target,
     production: input.production !== false,
     runId: randomUUID(),
   })

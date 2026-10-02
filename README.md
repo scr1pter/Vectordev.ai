@@ -63,7 +63,7 @@ Published builds and their notes are at [vectordev.ai/releases](https://vectorde
 
 ### Cloud and GitHub
 
-**Cloud work in the loop.** The agent can create a real Supabase project on your own account, write the keys into your repository, apply the migrations you keep there, sync environment values, and publish to your own Vercel or Netlify account. Then it loads the deployed URL in a real browser and reports what it found, and reads the logs when a deploy misbehaves. Everything that creates, changes or spends asks first.
+**Cloud work in the loop.** Connect your own Vercel, Netlify or Supabase account, link a project, manage its environment, apply repository migrations and publish from the task. The upcoming 1.999.99 build uses a single linked hosting destination automatically and asks when several are available. It protects environment drafts when you switch projects, writes local `.env` files privately, and keeps OAuth client secrets on the hosted broker. Provider sign-in requires Vector's OAuth registrations; manual token connections remain available where supported. Hosting, databases and domains follow your provider's plan and are separate from free model access. See [Cloud setup](docs/vector/CLOUD-OAUTH.md).
 
 **Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Tasks and reviews use `/vector`, `/vx`, `/vectorscope`, or `/vs`. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
