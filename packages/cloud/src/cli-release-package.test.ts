@@ -93,6 +93,25 @@ test("refuses missing targets, wrong native headers, mismatched notices, and sou
   }
 })
 
+test.each(["former name", "borrowed registration"])(
+  "refuses to prepare any archive when one binary carries a %s",
+  async (planted) => {
+    await using fixture = await cliReleaseFixture()
+    // Derived from the required MIT notice, as the audit itself does; never written here.
+    const name = (await Bun.file(path.resolve(import.meta.dir, "../../../THIRD_PARTY_NOTICES.md")).text())
+      .split("<!-- vector-upstream-attribution -->")[1]
+      ?.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
+      ?.trim() as string
+    const binary = path.join(fixture.input.source, "vector-windows-arm64/bin/vector.exe")
+    const bytes = await Bun.file(binary).bytes()
+    bytes.set(new TextEncoder().encode(planted === "former name" ? name : "Ov23li8tweQw6odWQebz"), 200)
+    await Bun.write(binary, bytes)
+    await expect(packageCliRelease(fixture.input)).rejects.toThrow("artifact audit violation")
+    for (const target of CliRelease.targets)
+      expect(await Bun.file(path.join(fixture.input.output, CliRelease.filename(target))).exists()).toBe(false)
+  },
+)
+
 test("refuses wrong prepared catalog and never overwrites conflicting prepared archives", async () => {
   await using fixture = await cliReleaseFixture()
   await expect(packageCliRelease({ ...fixture.input, catalogSha256: "0".repeat(64) })).rejects.toThrow("pinned digest")

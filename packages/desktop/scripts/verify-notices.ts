@@ -2,6 +2,8 @@ import { stat } from "node:fs/promises"
 import path from "node:path"
 import { assertCleanArtifacts } from "../../../script/artifact-audit"
 
+// Every desktop release path (verify-package.ts on macOS, this script on Windows and Linux)
+// checks each unpacked app here, so the byte audit runs with the notice check before upload.
 export async function verifyNotices(directory: string, platform: "darwin" | "win32" | "linux") {
   const resources =
     platform === "darwin" ? path.join(directory, "Contents/Resources") : path.join(directory, "resources")
@@ -17,6 +19,7 @@ export async function verifyNotices(directory: string, platform: "darwin" | "win
     const info = await stat(file).catch(() => undefined)
     if (!info?.isFile() || info.size === 0) throw new Error(`Packaged license notice is missing or empty: ${file}`)
   }
+  return assertCleanArtifacts([directory])
 }
 
 if (import.meta.main) {
@@ -26,8 +29,6 @@ if (import.meta.main) {
   if (process.argv.length < 4) throw new Error("Specify each unpacked application directory")
   for (const directory of process.argv.slice(3)) {
     await verifyNotices(directory, platform)
-    console.log(`Verified bundled license notices: ${directory}`)
-    // The release workflow verifies every unpacked app here before uploading its installers.
-    await assertCleanArtifacts([directory])
+    console.log(`Verified bundled license notices and artifact audit: ${directory}`)
   }
 }

@@ -5,6 +5,7 @@ import { create } from "tar"
 import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js"
 import { CliRelease } from "@vectordevai/schema/cli-release"
 import { releaseCatalogText } from "./upload-model-catalog"
+import { assertCleanArtifacts } from "../../../script/artifact-audit"
 
 export const cliNotices = ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"] as const
 
@@ -114,7 +115,12 @@ export async function packageCliRelease(input: {
       }
       const archive = path.join(temporary, CliRelease.filename(target))
       await writeArchive(archive, staging, binary, entries)
-      const record = { ...skeleton.targets[target]!, ...(await hashCliFile(archive)) }
+      targets[target] = { ...skeleton.targets[target]!, ...(await hashCliFile(archive)) }
+    }
+    // Container jobs consume the prepared archives directly, so no archive reaches the output
+    // directory until all twelve pass the release byte audit.
+    await assertCleanArtifacts(Object.values(targets).map((record) => path.join(temporary, record.filename)))
+    for (const record of Object.values(targets)) {
       const output = path.join(input.output, record.filename)
       const exists = await Bun.file(output).exists()
       if (exists) {
@@ -122,8 +128,7 @@ export async function packageCliRelease(input: {
         if (existing.sha256 !== record.sha256 || existing.size !== record.size)
           throw new Error(`Refusing to replace different prepared CLI bytes: ${record.filename}.`)
       }
-      if (!exists) await copyFile(archive, output)
-      targets[target] = record
+      if (!exists) await copyFile(path.join(temporary, record.filename), output)
     }
     const manifest = CliRelease.decode({ ...skeleton, targets }, input.origin)
     const output = path.join(input.output, "manifest.json")

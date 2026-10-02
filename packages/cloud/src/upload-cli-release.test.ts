@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises"
 import path from "node:path"
 import { CliRelease } from "@vectordevai/schema/cli-release"
 import { cliReleaseFixture } from "./cli-release-fixture"
-import { packageCliRelease } from "./cli-release-package"
+import { hashCliFile, packageCliRelease } from "./cli-release-package"
 import { commitCliRelease, stageCliRelease, verifyStagedCliRelease, type CliReleaseStore } from "./upload-cli-release"
 
 async function fixture() {
@@ -76,6 +76,27 @@ test("a missing final local target prevents every upload", async () => {
   await using f = await fixture()
   await rm(path.join(f.local.input.output, f.manifest.targets[CliRelease.targets.at(-1)!]!.filename))
   await expect(f.stage()).rejects.toThrow()
+  expect(f.writes).toEqual([])
+})
+
+test("a prepared archive that fails the byte audit prevents every upload", async () => {
+  await using f = await fixture()
+  // Derived from the required MIT notice, as the audit itself does; never written here.
+  const name = (await Bun.file(path.resolve(import.meta.dir, "../../../THIRD_PARTY_NOTICES.md")).text())
+    .split("<!-- vector-upstream-attribution -->")[1]
+    ?.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
+    ?.trim() as string
+  const target = CliRelease.targets.find((item) => item.startsWith("linux-"))!
+  const archive = path.join(f.local.input.output, f.manifest.targets[target]!.filename)
+  // A consistent manifest, so only the audit can stop this archive.
+  await Bun.write(archive, Bun.gzipSync(new TextEncoder().encode(`vector\0${name} agent\0`)))
+  const manifest = {
+    ...f.manifest,
+    targets: { ...f.manifest.targets, [target]: { ...f.manifest.targets[target]!, ...(await hashCliFile(archive)) } },
+  }
+  await expect(stageCliRelease({ directory: f.local.input.output, manifest, store: f.store })).rejects.toThrow(
+    "artifact audit violation",
+  )
   expect(f.writes).toEqual([])
 })
 

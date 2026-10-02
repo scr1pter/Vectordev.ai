@@ -33,6 +33,36 @@ for (const platform of ["darwin", "win32", "linux"] as const) {
   })
 }
 
+test.each(["former name", "borrowed registration"])(
+  "an unpacked app carrying a %s fails the release byte audit",
+  async (planted) => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "vector-notices-"))
+    try {
+      for (const file of [
+        ...["LICENSE.txt", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"].map((file) =>
+          path.join("resources", file),
+        ),
+        "LICENSE.electron.txt",
+        "LICENSES.chromium.html",
+      ])
+        await Bun.write(path.join(directory, file), "Fixture license text")
+      await verifyNotices(directory, "linux")
+      // Derived from the required MIT notice, as the audit itself does; never written here.
+      const name = (await Bun.file(path.resolve(import.meta.dir, "../../../THIRD_PARTY_NOTICES.md")).text())
+        .split("<!-- vector-upstream-attribution -->")[1]
+        ?.match(/^Copyright \(c\) \d{4} (.+)$/m)?.[1]
+        ?.trim() as string
+      await Bun.write(
+        path.join(directory, "resources/app.asar"),
+        planted === "former name" ? `window.title = "${name} desktop"` : 'clientId:"Ov23li8tweQw6odWQebz"',
+      )
+      await expect(verifyNotices(directory, "linux")).rejects.toThrow("artifact audit violation")
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  },
+)
+
 test("the pinned electron-builder renames Electron's LICENSE on Windows and Linux", async () => {
   // verify-notices.ts looks for this name; an electron-builder upgrade that changes it must fail here, not in CI.
   expect(

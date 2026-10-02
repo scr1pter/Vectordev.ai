@@ -11,7 +11,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { verifyNotices } from "./verify-notices"
 import { BUILD_IDENTITY_FILE, parseBuildIdentity } from "./build-identity"
-import { assertCleanArtifacts } from "../../../script/artifact-audit"
 
 export type PackageCheck = { ok: true } | { ok: false; problem: string }
 
@@ -121,9 +120,9 @@ if (import.meta.main) {
     process.exit(2)
   }
   for (const appPath of targets) {
+    // Also runs the release byte audit over the whole .app.
     await verifyNotices(appPath, "darwin")
     verify(appPath)
-    await assertCleanArtifacts([appPath])
   }
   process.exit(0)
 }
