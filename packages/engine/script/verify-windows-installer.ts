@@ -44,6 +44,14 @@ const state = {
   requests: [] as string[],
 }
 
+async function checkpoint(phase: string) {
+  evidence.phase = phase
+  evidence.phaseStartedAt = new Date().toISOString()
+  console.log(`Windows standalone installer: ${phase}`)
+  console.log(`::notice title=Windows installer checkpoint::${phase}`)
+  await Bun.write(path.resolve("vector-windows-installer-evidence.json"), JSON.stringify(evidence, null, 2))
+}
+
 async function run(command: string[], env?: Record<string, string>, signal?: AbortSignal) {
   const child = Bun.spawn(command, {
     env: WindowsPowerShell.environment(command[0], { ...process.env, ...env }),
@@ -156,6 +164,7 @@ async function waitStatus(file: string, expected: string, operation: ReturnType<
 }
 
 // Exercise the actual atomic status writer before deferred installation can hide a replacement error.
+await checkpoint("atomic status transitions")
 const statusWriter = (await Bun.file(installer).text()).match(
   /^function Write-OperationStatus\([^\n]+\) \{[\s\S]*?^\}/m,
 )?.[0]
@@ -166,6 +175,7 @@ const statusTransitions = await ps(
 assert.equal(statusTransitions.code, 0, statusTransitions.stderr + statusTransitions.stdout)
 evidence.atomicStatusTransitions = true
 
+await checkpoint("temporary certificate trust")
 const certificate = path.join(root, "certificate.pem")
 const key = path.join(root, "key.pem")
 const administrator = await ps(
@@ -253,6 +263,7 @@ const server = Bun.serve({
   },
 })
 try {
+  await checkpoint("initial fixture archive")
   await writeFile(
     hostsPath,
     Buffer.concat([
@@ -261,6 +272,7 @@ try {
     ]),
   )
   await pack("1.99.42")
+  await checkpoint("initial beta installation")
   const initial = await install(["-Version", "beta"])
   assert.equal(initial.code, 0, initial.stderr)
   const executable = path.join(installDir, "vector.exe")
@@ -269,16 +281,20 @@ try {
   assert.equal((await Bun.file(receipt).text()).split("\t")[4], "beta")
   evidence.nodeFreeInstall = true
   evidence.betaChannel = true
+  await checkpoint("checksum rejection")
   state.corrupt = true
   assert.notEqual((await install()).code, 0)
   assert.deepEqual(await Bun.file(executable).bytes(), first)
   state.corrupt = false
+  await checkpoint("redirect rejection")
   state.redirect = true
   assert.notEqual((await install()).code, 0)
   assert.deepEqual(await Bun.file(executable).bytes(), first)
   state.redirect = false
   evidence.checksumAndRedirectPreserveOld = true
+  await checkpoint("update fixture archive")
   await pack("1.99.43")
+  await checkpoint("unacknowledged update preparation")
   const abandoned = Bun.spawn([executable, "--hold"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
   await using abandonedCleanup = processCleanup(() => abandoned.kill(), abandoned.exited)
   const abandonedIdentity = await ps(`(Get-Process -Id ${abandoned.pid}).StartTime.ToUniversalTime().Ticks.ToString()`)
@@ -308,6 +324,7 @@ try {
   assert.notEqual((await unacknowledged).code, 0)
   assert.deepEqual(await Bun.file(executable).bytes(), first)
   evidence.unacknowledgedExitPreservesOld = true
+  await checkpoint("running executable update preparation")
   const holder = Bun.spawn([executable, "--hold"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
   await using holderCleanup = processCleanup(() => holder.kill(), holder.exited)
   const identity = await ps(`(Get-Process -Id ${holder.pid}).StartTime.ToUniversalTime().Ticks.ToString()`)
@@ -340,21 +357,33 @@ try {
   } finally {
     await holderCleanup[Symbol.asyncDispose]()
   }
+  await checkpoint("running executable replacement")
   const replaced = await pending
   assert.equal(replaced.code, 0, replaced.stderr)
   await waitStatus(status, "complete", pending)
   assert.equal((await Bun.file(receipt).text()).split("\t")[2], "1.99.43")
   evidence.runningExecutableReplacement = true
   const current = await Bun.file(executable).bytes()
+  await checkpoint("stalled body five-minute deadline")
   state.stall = true
   const started = Date.now()
-  const stalled = await install()
+  const stalledController = new AbortController()
+  const watchdog = setTimeout(() => {
+    evidence.stalledBodyWatchdog = true
+    console.error("Stalled-body installer exceeded the 330-second harness watchdog")
+    stalledController.abort()
+  }, 330_000)
+  const stalledOperation = install([], stalledController.signal)
+  await using stalledCleanup = processCleanup(() => stalledController.abort(), stalledOperation)
+  const stalled = await stalledOperation.finally(() => clearTimeout(watchdog))
+  assert.equal(stalledController.signal.aborted, false, "Stalled-body installer exceeded the harness watchdog")
   assert.notEqual(stalled.code, 0)
   assert(Date.now() - started < 325_000, "Stalled body must terminate at the five-minute download deadline")
   assert(Date.now() - started >= 290_000, "The fixture must remain connected until the actual body deadline")
   assert.deepEqual(await Bun.file(executable).bytes(), current)
   evidence.stalledBodyMilliseconds = Date.now() - started
   evidence.stalledBodyPreservesOld = true
+  await checkpoint("running executable removal preparation")
   const removalHolder = Bun.spawn([executable, "--hold"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
   await using removalHolderCleanup = processCleanup(() => removalHolder.kill(), removalHolder.exited)
   const removalIdentity = await ps(
@@ -400,6 +429,7 @@ try {
   } finally {
     await removalHolderCleanup[Symbol.asyncDispose]()
   }
+  await checkpoint("running executable removal")
   const removed = await removing
   assert.equal(removed.code, 0, removed.stderr)
   await waitStatus(removalStatus, "complete", removing)
@@ -407,6 +437,7 @@ try {
   assert.equal(await Bun.file(receipt).exists(), false)
   assert.equal(await Bun.file(path.join(metadata, "keep-user-file")).text(), "preserve")
   evidence.runningExecutableUninstall = true
+  await checkpoint("acceptance checks complete")
 } finally {
   server.stop(true)
   await writeFile(hostsPath, originalHosts)
