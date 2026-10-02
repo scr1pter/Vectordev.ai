@@ -1,17 +1,25 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
 const root = path.resolve(import.meta.dir, "../../../..")
 
 async function fixture() {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "vector-notices-"))
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), "vector-notices-")))
   await Bun.write(
     path.join(dir, "bun.lock"),
     JSON.stringify({
+      workspaces: Object.fromEntries(["engine", "app", "desktop", "tui", "ui"].map((name) => [`packages/${name}`, {}])),
+      overrides: { transitive: "1.0.0" },
       packages: {
         unavailable: ["unavailable@1.0.0", "", { os: "win32" }, "sha512-fixture"],
+        ...Object.fromEntries(
+          ["direct", "transitive", "installed", "renderer", "buildtool", "electron"].map((name) => [
+            name,
+            [`${name}@1.0.0`, "", {}, "sha512-fixture"],
+          ]),
+        ),
       },
     }),
   )
@@ -48,7 +56,7 @@ async function fixture() {
         name,
         version: "1.0.0",
         license: "MIT",
-        dependencies: name === "direct" ? { transitive: "1.0.0" } : name === "transitive" ? { direct: "1.0.0" } : {},
+        dependencies: name === "direct" ? { transitive: "0.9.0" } : name === "transitive" ? { direct: "1.0.0" } : {},
       }),
     )
     await Bun.write(
@@ -115,4 +123,133 @@ test("an unresolved required runtime dependency fails instead of silently omitti
   const result = await generate(tmp.dir)
   expect(result.code).not.toBe(0)
   expect(result.stderr).toContain("Missing installed runtime dependency transitive of direct")
+})
+
+async function versionedFixture() {
+  const tmp = await fixture()
+  const lock = await Bun.file(path.join(tmp.dir, "bun.lock")).json()
+  await Bun.write(
+    path.join(tmp.dir, "bun.lock"),
+    JSON.stringify({
+      ...lock,
+      packages: {
+        ...lock.packages,
+        dual: ["dual@1.0.0", "", {}, "sha512-fixture"],
+        "engine/dual": ["dual@2.0.0", "", {}, "sha512-fixture"],
+        "engine/dual/old-dual": ["dual@1.0.0", "", {}, "sha512-fixture"],
+        renamed: ["original@1.0.0", "", {}, "sha512-fixture"],
+      },
+    }),
+  )
+  for (const name of ["engine", "app"]) {
+    const file = Bun.file(path.join(tmp.dir, "packages", name, "package.json"))
+    const pkg = await file.json()
+    await Bun.write(
+      file,
+      JSON.stringify({
+        ...pkg,
+        dependencies: {
+          ...pkg.dependencies,
+          dual: name === "engine" ? "2.0.0" : "1.0.0",
+          renamed: "npm:original@^1.0.0",
+        },
+      }),
+    )
+  }
+  for (const [folder, name, version] of [
+    ["node_modules/dual", "dual", "1.0.0"],
+    ["packages/engine/node_modules/dual", "dual", "2.0.0"],
+    ["packages/engine/node_modules/dual/node_modules/old-dual", "dual", "1.0.0"],
+    ["node_modules/renamed", "original", "1.0.0"],
+  ]) {
+    await Bun.write(
+      path.join(tmp.dir, folder, "package.json"),
+      JSON.stringify({
+        name,
+        version,
+        license: "MIT",
+        exports: "./dist/entry.js",
+        dependencies: version === "2.0.0" ? { "old-dual": "npm:dual@1.0.0" } : {},
+      }),
+    )
+    await Bun.write(path.join(tmp.dir, folder, "dist/entry.js"), `export default ${JSON.stringify(version)}\n`)
+    await Bun.write(path.join(tmp.dir, folder, "dist/package.json"), JSON.stringify({ name, version, type: "module" }))
+    await Bun.write(path.join(tmp.dir, folder, "LICENSE"), `Exact fixture notice for ${name}@${version}\n`)
+  }
+  return tmp
+}
+
+test("notices preserve both installed versions across hoisted and package-local dependencies, including npm aliases", async () => {
+  await using tmp = await versionedFixture()
+  const result = await generate(tmp.dir)
+  expect(result.code, result.stderr).toBe(0)
+  const output = await Bun.file(path.join(tmp.dir, "DEPENDENCY_NOTICES.md")).text()
+  for (const identity of ["dual@1.0.0", "dual@2.0.0", "original@1.0.0"]) {
+    expect(output).toContain(`## ${identity}\n\nLicense: MIT`)
+    expect(output).toContain(`Exact fixture notice for ${identity}`)
+    expect(output.split(`## ${identity}`).length).toBe(2)
+  }
+  expect(output).not.toContain("## renamed@")
+})
+
+test("a missing locked version fails instead of substituting a different hoisted version", async () => {
+  await using tmp = await versionedFixture()
+  await rm(path.join(tmp.dir, "packages/engine/node_modules/dual"), { recursive: true })
+  const result = await generate(tmp.dir)
+  expect(result.code).not.toBe(0)
+  expect(result.stderr).toContain("Installed runtime dependency dual@2.0.0 of engine")
+  expect(result.stderr).toContain("found dual@1.0.0")
+  expect(await Bun.file(path.join(tmp.dir, "DEPENDENCY_NOTICES.md")).exists()).toBe(false)
+})
+
+test("a range-compatible installed version must still be present in the lock", async () => {
+  await using tmp = await versionedFixture()
+  const app = Bun.file(path.join(tmp.dir, "packages/app/package.json"))
+  const pkg = await app.json()
+  await Bun.write(app, JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, dual: "^1.0.0" } }))
+  for (const file of ["package.json", "dist/package.json"]) {
+    const manifest = Bun.file(path.join(tmp.dir, "node_modules/dual", file))
+    await Bun.write(manifest, JSON.stringify({ ...(await manifest.json()), version: "1.1.0" }))
+  }
+  const result = await generate(tmp.dir)
+  expect(result.code).not.toBe(0)
+  expect(result.stderr).toContain("Installed runtime dependency dual@^1.0.0 of app")
+  expect(result.stderr).toContain("found dual@1.1.0")
+  expect(await Bun.file(path.join(tmp.dir, "DEPENDENCY_NOTICES.md")).exists()).toBe(false)
+})
+
+test("pinned Git dependencies retain their package notices with Bun's abbreviated lock commit", async () => {
+  await using tmp = await fixture()
+  const spec = `github:fixture/installed#${"a".repeat(40)}`
+  const engine = Bun.file(path.join(tmp.dir, "packages/engine/package.json"))
+  const pkg = await engine.json()
+  await Bun.write(
+    engine,
+    JSON.stringify({ ...pkg, optionalDependencies: { ...pkg.optionalDependencies, installed: spec } }),
+  )
+  const file = Bun.file(path.join(tmp.dir, "bun.lock"))
+  const lock = await file.json()
+  await Bun.write(
+    file,
+    JSON.stringify({
+      ...lock,
+      packages: {
+        ...lock.packages,
+        installed: ["installed@github:fixture/installed#aaaaaaa", {}, "fixture-installed-aaaaaaa"],
+      },
+    }),
+  )
+  const result = await generate(tmp.dir)
+  expect(result.code, result.stderr).toBe(0)
+  expect(await Bun.file(path.join(tmp.dir, "DEPENDENCY_NOTICES.md")).text()).toContain("## installed@1.0.0")
+  await Bun.write(
+    engine,
+    JSON.stringify({
+      ...pkg,
+      optionalDependencies: { ...pkg.optionalDependencies, installed: spec.replace(/a+$/, "b".repeat(40)) },
+    }),
+  )
+  const mismatch = await generate(tmp.dir)
+  expect(mismatch.code).not.toBe(0)
+  expect(mismatch.stderr).toContain("does not match its locked identity/version")
 })

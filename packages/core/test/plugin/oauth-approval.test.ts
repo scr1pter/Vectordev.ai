@@ -163,8 +163,11 @@ test("refuses symlinked content and malformed approval stores, enforcing POSIX p
   const value = fixture()
   const approval = value.approval()
   symlinkSync(value.entry, path.join(value.root, "linked.js"))
-  expect(() => value.approval()).toThrow("symlinks")
-  rmSync(path.join(value.root, "linked.js"))
+  try {
+    expect(() => value.approval()).toThrow("symlinks")
+  } finally {
+    rmSync(path.join(value.root, "linked.js"))
+  }
   writeOAuthApproval(approval)
   const text = readFileSync(approvalFile(), "utf8")
   if (process.platform !== "win32") {
@@ -187,7 +190,11 @@ test("refuses symlinked content and malformed approval stores, enforcing POSIX p
   const target = path.join(value.root, "approvals.json")
   writeFileSync(target, text, { mode: 0o600 })
   symlinkSync(target, approvalFile())
-  expect(readOAuthApprovals()).toEqual([])
-  expect(() => writeOAuthApproval(value.approval())).toThrow("non-regular")
-  rmSync(approvalFile())
+  try {
+    expect(readOAuthApprovals()).toEqual([])
+    expect(() => writeOAuthApproval(value.approval())).toThrow("non-regular")
+    expect(readFileSync(target, "utf8")).toBe(text)
+  } finally {
+    rmSync(approvalFile())
+  }
 })

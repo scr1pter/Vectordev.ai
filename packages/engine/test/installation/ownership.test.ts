@@ -174,19 +174,27 @@ for (const replacement of [false, true]) {
       await Bun.write(path.join(metadata, "keep-user-file"), "user data")
       // Run the real deferred-uninstall path from a disposable parent. The worker must wait for
       // that exact process to exit; using the test runner's PID would leave it waiting for the suite.
+      const diagnostic = path.join(fixture.root, "uninstall-diagnostic.json")
       const script = `
-        import { Standalone } from ${JSON.stringify(new URL("../../src/installation/standalone.ts", import.meta.url).href)};
-        import { WindowsPowerShell } from ${JSON.stringify(new URL("../../../core/src/util/windows-powershell.ts", import.meta.url).href)};
+        const checkpoint = (phase, details = {}) => Bun.write(${JSON.stringify(diagnostic)}, JSON.stringify({ phase, ...details }));
+        await checkpoint("bun-started");
+        const { Standalone } = await import( ${JSON.stringify(new URL("../../src/installation/standalone.ts", import.meta.url).href)});
+        await checkpoint("standalone-imported");
+        const { WindowsPowerShell } = await import(${JSON.stringify(new URL("../../../core/src/util/windows-powershell.ts", import.meta.url).href)});
         const receipt = await Standalone.receipt(${JSON.stringify(executable)});
         if (!receipt) throw new Error("Fixture receipt was rejected");
+        await checkpoint("receipt-read");
         const result = await Standalone.uninstall(receipt, async (command) => {
+          await checkpoint("identity-command-starting");
           const child = Bun.spawn(command, { env: WindowsPowerShell.environment(command[0]), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
           const [code, stdout, stderr] = await Promise.all([
             child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
           ]);
+          await checkpoint("identity-command-finished", { code, stdout, stderr });
           return { code, stdout, stderr };
         });
-        console.log(JSON.stringify(result));
+        await checkpoint("uninstall-returned", { status: result.status });
+        await Bun.write(Bun.stdout, JSON.stringify(result) + "\\n");
         await Bun.stdin.text();
       `
       const child = Bun.spawn([process.execPath, "--eval", script], {
@@ -210,7 +218,14 @@ for (const replacement of [false, true]) {
                 .map(async (name) => ({ name, status: await Bun.file(path.join(fixture.root, name)).text() })),
             )
             throw new Error(
-              `Uninstall parent exited before scheduling: ${JSON.stringify({ exitCode: await child.exited, stderr: await stderr, statuses })}`,
+              `Uninstall parent exited before scheduling: ${JSON.stringify({
+                exitCode: await child.exited,
+                stderr: await stderr,
+                statuses,
+                diagnostic: await Bun.file(diagnostic)
+                  .text()
+                  .catch(() => "not written"),
+              })}`,
             )
           }
           output.push(new TextDecoder().decode(chunk.value))

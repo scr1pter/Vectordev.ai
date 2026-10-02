@@ -1,13 +1,19 @@
 import { expect, test } from "@playwright/test"
-
-// The demo-path tests run as a returning user (tour seen, onboarding dismissed);
-// onboarding itself has its own first-run test below.
-const RETURNING_USER = () => localStorage.setItem("vector.onboarding.v1", JSON.stringify({ tour: true, dismissed: true }))
+import { mockVectorServer } from "./utils/mock-server"
 
 // First launch: the short activation checklist appears on Home without taking
 // the user through an unsolicited tour. Dismissing it sticks across reloads;
 // the exhaustive spotlight tour remains available from Help.
 test("first run shows the activation checklist and dismissing persists", async ({ page }) => {
+  // The browser suite starts the frontend only. Keep the backend fixture alive
+  // across reloads so this checks onboarding persistence rather than connection timing.
+  await mockVectorServer(page, {
+    directory: "C:/Vector/Onboarding",
+    project: { id: "project-onboarding", worktree: "C:/Vector/Onboarding", vcs: "git", name: "Onboarding" },
+    provider: { all: [], connected: [], default: {} },
+    sessions: [],
+    pageMessages: () => ({ items: [] }),
+  })
   await page.goto("/")
   const checklist = page.getByRole("heading", { name: /first steps/i })
   await expect(checklist).toBeVisible({ timeout: 15_000 })
