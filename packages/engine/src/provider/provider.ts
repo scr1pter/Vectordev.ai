@@ -1032,10 +1032,14 @@ export function toClientInfo(provider: Info): Info {
   return { ...info, options, models }
 }
 
-export function defaultModelIDs<T extends { models: Record<string, { id: string }> }>(providers: Record<string, T>) {
+export function defaultModelIDs<
+  T extends { models: Record<string, { id: string; freeModel?: { source: "shared" | "openrouter" } }> },
+>(providers: Record<string, T>) {
   return Object.fromEntries(
     Object.entries(providers).flatMap(([id, item]) => {
-      const model = sort(Object.values(item.models))[0]
+      const model = sort(
+        Object.values(item.models).filter((model) => id !== "openrouter" || model.freeModel?.source === "openrouter"),
+      )[0]
       return model ? [[id, model.id]] : []
     }),
   )
@@ -1628,13 +1632,19 @@ const layer = Layer.effect(
         const vectorToken = yield* freeCredentials.get("vector")
         const openRouterKey = yield* freeCredentials.get("openrouter")
         const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
+        const router = providers[ProviderV2.ID.openrouter]
+        if (router) {
+          for (const modelID of Object.keys(router.models)) {
+            if (modelID.toLowerCase().endsWith(":free")) delete router.models[modelID]
+          }
+        }
         delete providers[ProviderV2.ID.vector]
         if (freeCatalog.enabled && isProviderAllowed(ProviderV2.ID.vector) && (vectorToken || openRouterKey)) {
           const models = openRouterKey ? ownedFree : freeCatalog.models
           if (models.length) providers[ProviderV2.ID.vector] = fromFreeModels(models)
         }
         if (!freeCatalog.enabled) delete providers[ProviderV2.ID.vector]
-        if (freeCatalog.enabled && ownedFree.length && isProviderAllowed(ProviderV2.ID.openrouter)) {
+        if (openRouterKey && isProviderAllowed(ProviderV2.ID.openrouter)) {
           providers[ProviderV2.ID.openrouter] ??= fromFreeModels([], "openrouter")
           Object.assign(providers[ProviderV2.ID.openrouter].models, fromFreeModels(ownedFree, "openrouter").models)
         }
@@ -1699,7 +1709,9 @@ const layer = Layer.effect(
             }
           }
 
-          if (Object.keys(provider.models).length === 0) {
+          // Keep a connected free account visible when discovery or filters leave it empty.
+          // Otherwise downstream default selection could mistake a paid provider for the only choice.
+          if (Object.keys(provider.models).length === 0 && !(providerID === "openrouter" && openRouterKey)) {
             delete providers[providerID]
             continue
           }
@@ -1740,7 +1752,11 @@ const layer = Layer.effect(
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
         const provider = s.providers[model.providerID]
-        if (model.providerID === "vector" || model.freeModel) {
+        if (
+          model.providerID === "vector" ||
+          model.freeModel ||
+          (model.providerID === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+        ) {
           const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible")
           return createOpenAICompatible({
             name: model.providerID,
@@ -1767,7 +1783,7 @@ const layer = Layer.effect(
                     "X-OpenRouter-Title": "Vector",
                   },
                   body: serializeFreeModelRequest(
-                    freeModelRequest({ ...body, model: model.id }, route.models),
+                    freeModelRequest({ ...body, model: model.id }, route.models, route.source === "openrouter"),
                     route.url === FreeModels.SHARED_CHAT_URL,
                   ),
                 }).then(FreeModels.preserveLimit)
@@ -2079,6 +2095,11 @@ const layer = Layer.effect(
     const savedModel = Effect.fn("Provider.savedModel")(function* (model: { providerID: string; modelID: string }) {
       const s = yield* InstanceState.get(state)
       const current = renamedModel(model)
+      if (
+        current.providerID === "vector" &&
+        s.providers[ProviderV2.ID.openrouter]?.models[current.modelID]?.freeModel?.source === "openrouter"
+      )
+        return { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(current.modelID) }
       if (providerRetired(current.providerID, (id) => s.declared.has(id) || id in s.providers)) return
       return { providerID: ProviderV2.ID.make(current.providerID), modelID: ModelV2.ID.make(current.modelID) }
     })
@@ -2103,8 +2124,13 @@ const layer = Layer.effect(
         Effect.catch(() => Effect.succeed([] as { providerID: ProviderV2.ID; modelID: ModelV2.ID }[])),
       )
       for (const entry of recent) {
-        if (entry.providerID === "vector" && Object.keys(s.providers).some((id) => id !== "vector")) continue
+        const owned = s.providers[ProviderV2.ID.openrouter]?.models[entry.modelID]
+        if (entry.providerID === "vector" && owned?.freeModel?.source === "openrouter")
+          return { providerID: ProviderV2.ID.openrouter, modelID: owned.id }
         const provider = s.providers[entry.providerID]
+        // A vanished free choice must fail as unavailable, never quietly select a paid model.
+        if (["vector", "openrouter"].includes(entry.providerID) && entry.modelID.toLowerCase().endsWith(":free"))
+          return entry
         if (!provider) continue
         if (!provider.models[entry.modelID]) continue
         return { providerID: entry.providerID, modelID: entry.modelID }
@@ -2112,6 +2138,12 @@ const layer = Layer.effect(
 
       const configured = Object.keys(cfg.provider ?? {})
       const providers = Object.values(s.providers).filter((p) => configured.length === 0 || configured.includes(p.id))
+      const free = sort(Object.values(s.providers).flatMap((provider) => Object.values(provider.models))).find(
+        (model) => model.freeModel?.source === "openrouter",
+      )
+      if (free) return { providerID: free.providerID, modelID: free.id }
+      if (s.providers[ProviderV2.ID.openrouter])
+        return yield* new NoModelsError({ providerID: ProviderV2.ID.openrouter })
       const provider = providers.find((p) => p.id !== "vector") ?? providers[0]
       if (!provider) return yield* new NoProvidersError()
       const [model] = sort(Object.values(provider.models))
@@ -2138,9 +2170,13 @@ const layer = Layer.effect(
 
 const priority = ["gpt-5", "claude-sonnet-4", "gemini-3-pro"]
 const smallModelFamilyPriority = ["gemini-flash", "gpt-nano", "claude-haiku"]
-export function sort<T extends { id: string }>(models: T[]) {
+export function sort<
+  T extends { id: string; freeModel?: { source: "shared" | "openrouter" }; limit?: { context: number } },
+>(models: T[]) {
   return sortBy(
     models,
+    [(model) => (model.freeModel?.source === "openrouter" ? 0 : 1), "asc"],
+    [(model) => (model.freeModel?.source === "openrouter" ? (model.limit?.context ?? 0) : 0), "desc"],
     [(model) => priority.findIndex((filter) => model.id.includes(filter)), "desc"],
     [(model) => (model.id.includes("latest") ? 0 : 1), "asc"],
     [(model) => model.id, "desc"],

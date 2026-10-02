@@ -7,7 +7,7 @@ export type FreeModelChoice = {
 
 export const FREE_MODELS_TITLE = "Free models inside of Vector"
 export const OPENROUTER_ACCOUNT_COPY =
-  "Uses your own free OpenRouter account: 50 requests a day, or 1,000 if you've ever added $10 of OpenRouter credits."
+  "Use your own free OpenRouter account: up to 50 requests a day, subject to availability. No payment or credits needed. Keep automatic top-ups, default or enforced account plugins, and external provider keys disabled."
 export const OPENROUTER_REMOTE_COPY =
   "OpenRouter browser sign-in requires a callback on the engine's localhost. For a remote engine, use an OpenRouter API key or connect through a local engine with the callback port forwarded."
 

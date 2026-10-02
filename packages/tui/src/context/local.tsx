@@ -71,13 +71,24 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID]
     }
 
+    function resolveSelection(saved: { providerID: string; modelID: string }) {
+      const model = renamedModel(saved)
+      const own = sync.data.provider.find((provider) => provider.id === "openrouter")?.models[model.modelID]
+      return model.providerID === "vector" && own?.freeModel?.source === "openrouter"
+        ? { ...model, providerID: "openrouter" }
+        : model
+    }
+
+    const freeSelection = (model: { providerID: string; modelID: string }) =>
+      ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+
     // Saved choices follow a provider rename, so they keep working with their carried-over credential.
     function getFirstValidModel(...modelFns: (() => { providerID: string; modelID: string } | undefined)[]) {
       for (const modelFn of modelFns) {
         const saved = modelFn()
         if (!saved) continue
-        const model = renamedModel(saved)
-        if (isModelValid(model)) return model
+        const model = resolveSelection(saved)
+        if (isModelValid(model) || freeSelection(model)) return model
       }
     }
 
@@ -203,25 +214,26 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       const fallbackModel = createMemo(() => {
         if (args.model) {
-          const { providerID, modelID } = parseModel(args.model)
-          if (isModelValid({ providerID, modelID })) {
-            return {
-              providerID,
-              modelID,
-            }
-          }
+          const model = resolveSelection(parseModel(args.model))
+          if (isModelValid(model) || freeSelection(model)) return model
         }
 
         if (sync.data.config.model) {
-          const model = renamedModel(parseModel(sync.data.config.model))
-          if (isModelValid(model)) return model
+          const model = resolveSelection(parseModel(sync.data.config.model))
+          if (isModelValid(model) || freeSelection(model)) return model
         }
 
         for (const item of modelStore.recent) {
-          const model = renamedModel(item)
-          if (isModelValid(model)) return model
+          const model = resolveSelection(item)
+          if (isModelValid(model) || freeSelection(model)) return model
         }
 
+        const free = sync.data.provider
+          .flatMap((provider) => Object.values(provider.models))
+          .filter((model) => model.freeModel?.source === "openrouter")
+          .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+        if (free) return { providerID: "openrouter", modelID: free.id }
+        if (sync.data.provider.some((provider) => provider.id === "openrouter")) return
         const provider =
           sync.data.provider.find((provider) =>
             Object.values(provider.models).some((model) => model.freeModel?.source !== "shared"),
@@ -244,7 +256,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           () => a && a.model,
           fallbackModel,
         )
-        if (!selected) return
+        if (!selected || !isModelValid(selected)) return
         const provider = sync.data.provider.find((provider) => provider.id === selected.providerID)
         if (provider?.models[selected.modelID]?.freeModel?.source !== "shared") return selected
         const own = sync.data.provider.find((provider) => provider.id === "openrouter")?.models[selected.modelID]

@@ -222,10 +222,19 @@ export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, creden
   withVariant(model, session.model?.variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential)))
 
 export const supported = (model: ModelV2.Info) =>
-  model.api.type === "aisdk" &&
-  (model.api.package === "@ai-sdk/openai" ||
-    model.api.package === "@ai-sdk/anthropic" ||
-    (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined))
+  requiresFreeRoute(model) ||
+  (model.api.type === "aisdk" &&
+    (model.api.package === "@ai-sdk/openai" ||
+      model.api.package === "@ai-sdk/anthropic" ||
+      (model.api.package === "@ai-sdk/openai-compatible" && model.api.url !== undefined)))
+
+function requiresFreeRoute(model: ModelV2.Info) {
+  return (
+    model.providerID === "vector" ||
+    !!model.freeModel ||
+    (model.providerID === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+  )
+}
 
 /** Resolves models from the catalog belonging to the current Location runtime. */
 export const locationLayer = Layer.effect(
@@ -238,10 +247,25 @@ export const locationLayer = Layer.effect(
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
         // Location plugins populate and filter the catalog asynchronously during layer startup.
-        const defaultModel = session.model ? undefined : yield* catalog.model.default()
+        const defaultModel = session.model
+          ? undefined
+          : yield* catalog.model
+              .default()
+              .pipe(
+                Effect.mapError((error) =>
+                  error._tag === "Catalog.DefaultModelUnavailableError"
+                    ? new ModelUnavailableError({ providerID: error.providerID, modelID: error.modelID })
+                    : new ModelNotSelectedError({ sessionID: session.id }),
+                ),
+              )
         const selected = session.model
           ? (yield* catalog.model.available()).find(
-              (model) => model.providerID === session.model?.providerID && model.id === session.model.id,
+              (model) =>
+                model.id === session.model?.id &&
+                (model.providerID === session.model.providerID ||
+                  (session.model.providerID === "vector" &&
+                    model.providerID === "openrouter" &&
+                    model.freeModel?.source === "openrouter")),
             )
           : defaultModel && supported(defaultModel)
             ? defaultModel
@@ -252,8 +276,12 @@ export const locationLayer = Layer.effect(
             modelID: session.model.id,
           })
         if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
-        if (selected.providerID === "vector" || selected.freeModel)
-          return withPricing(freeModelRoute(selected, freeModels, freeCredentials), selected.cost)
+        // Configuration can overwrite API metadata or add a free ID after catalog validation.
+        // Free intent always crosses the final eligibility and zero-price request guard.
+        if (requiresFreeRoute(selected))
+          return withPricing(freeModelRoute(selected, freeModels, freeCredentials), [
+            { input: 0, output: 0, cache: { read: 0, write: 0 } },
+          ])
         const provider = yield* catalog.provider.get(selected.providerID)
         const connection = yield* integrations.connection.active(
           provider?.integrationID ?? Integration.ID.make(selected.providerID),

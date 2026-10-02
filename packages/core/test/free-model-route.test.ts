@@ -53,6 +53,7 @@ test("native free route fixes destination and body after all caller overlays, re
     if (prepared.request.body._tag !== "Uint8Array") throw new Error("Expected JSON bytes")
     const body = JSON.parse(new TextDecoder().decode(prepared.request.body.body))
     expect(body.provider.max_price).toEqual({ prompt: 0, completion: 0, request: 0, image: 0 })
+    expect(body.provider.zdr).toBe(true)
     expect(body.models).toEqual(catalog.models.map((item) => item.id))
     expect(body).not.toHaveProperty("web_search_options")
     expect(body).not.toHaveProperty("apiKey")

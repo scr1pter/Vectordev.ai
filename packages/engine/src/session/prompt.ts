@@ -299,7 +299,10 @@ const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
       const { task: taskTool } = yield* registry.named()
-      const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
+      const taskModel =
+        isFreeSelection({ providerID: model.providerID, modelID: model.id }) || !task.model
+          ? model
+          : yield* getModel(task.model.providerID, task.model.modelID, sessionID)
       const assistantMessage: SessionV1.Assistant = yield* sessions.updateMessage({
         id: MessageID.ascending(),
         role: "assistant",
@@ -502,7 +505,7 @@ const layer = Layer.effect(
               yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
               throw error
             }
-            const model = input.model ?? agent.model ?? (yield* currentModel(input.sessionID))
+            const model = input.model ?? (yield* currentModel(input.sessionID, agent.model))
             const userMsg: SessionV1.User = {
               id: input.messageID ?? MessageID.ascending(),
               sessionID: input.sessionID,
@@ -644,7 +647,7 @@ const layer = Layer.effect(
       return yield* Effect.die(err)
     })
 
-    const currentModel = Effect.fnUntraced(function* (sessionID: SessionID) {
+    const currentModel = Effect.fnUntraced(function* (sessionID: SessionID, configured?: PromptInput["model"]) {
       const current = yield* db
         .select({ model: SessionTable.model })
         .from(SessionTable)
@@ -655,19 +658,22 @@ const layer = Layer.effect(
       // the rename, or continue with the usual default instead of failing with "Model not found".
       if (current?.model) {
         const saved = yield* provider.savedModel({ providerID: current.model.providerID, modelID: current.model.id })
-        if (saved)
+        if (saved) {
+          if (configured && !isFreeSelection(saved)) return configured
           return {
             ...saved,
             ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
           }
+        }
       }
       const match = yield* sessions
         .findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model)
         .pipe(Effect.orDie)
       if (Option.isSome(match) && match.value.info.role === "user") {
         const saved = yield* provider.savedModel(match.value.info.model)
-        if (saved) return { ...match.value.info.model, ...saved }
+        if (saved) return configured && !isFreeSelection(saved) ? configured : { ...match.value.info.model, ...saved }
       }
+      if (configured) return configured
       return yield* provider.defaultModel().pipe(Effect.orDie)
     })
 
@@ -682,7 +688,7 @@ const layer = Layer.effect(
         throw error
       }
 
-      const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      const model = input.model ?? (yield* currentModel(input.sessionID, ag.model))
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
@@ -1557,15 +1563,16 @@ const layer = Layer.effect(
       }
       template = template.trim()
 
-      const taskModel = yield* Effect.gen(function* () {
-        if (cmd.model) return Provider.parseModel(cmd.model)
-        if (cmd.agent) {
-          const cmdAgent = yield* agents.get(cmd.agent)
-          if (cmdAgent?.model) return cmdAgent.model
-        }
-        if (input.model) return Provider.parseModel(input.model)
-        return yield* currentModel(input.sessionID)
-      })
+      const commandModel = cmd.model
+        ? Provider.parseModel(cmd.model)
+        : cmd.agent
+          ? (yield* agents.get(cmd.agent))?.model
+          : undefined
+      const selectedModel = input.model
+        ? Provider.parseModel(input.model)
+        : yield* currentModel(input.sessionID, commandModel)
+      // Command and agent defaults cannot spend money on behalf of a free selection.
+      const taskModel = isFreeSelection(selectedModel) ? selectedModel : (commandModel ?? selectedModel)
 
       yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID)
 
@@ -1642,6 +1649,10 @@ const layer = Layer.effect(
     })
   }),
 )
+
+function isFreeSelection(model: { providerID: string; modelID: string }) {
+  return ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+}
 
 const ModelRef = Schema.Struct({
   providerID: ProviderV2.ID,

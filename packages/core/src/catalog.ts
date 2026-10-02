@@ -18,6 +18,24 @@ export type ProviderRecord = {
 
 export type DefaultModel = { providerID: ProviderV2.ID; modelID: ModelV2.ID }
 
+export class DefaultModelUnavailableError extends Schema.TaggedErrorClass<DefaultModelUnavailableError>()(
+  "Catalog.DefaultModelUnavailableError",
+  { providerID: ProviderV2.ID, modelID: ModelV2.ID },
+) {
+  override get message() {
+    return `Free model unavailable: ${this.providerID}/${this.modelID}. Choose another free model.`
+  }
+}
+
+export class FreeModelsUnavailableError extends Schema.TaggedErrorClass<FreeModelsUnavailableError>()(
+  "Catalog.FreeModelsUnavailableError",
+  {},
+) {
+  override get message() {
+    return "No verified free OpenRouter models are available. Try again later or explicitly select another model."
+  }
+}
+
 export const PolicyActions = Schema.Literals(["provider.use"])
 
 export const Event = Catalog.Event
@@ -55,7 +73,10 @@ export interface Interface extends State.Transformable<Draft> {
     readonly get: (providerID: ProviderV2.ID, modelID: ModelV2.ID) => Effect.Effect<ModelV2.Info | undefined>
     readonly all: () => Effect.Effect<ModelV2.Info[]>
     readonly available: () => Effect.Effect<ModelV2.Info[]>
-    readonly default: () => Effect.Effect<ModelV2.Info | undefined>
+    readonly default: () => Effect.Effect<
+      ModelV2.Info | undefined,
+      DefaultModelUnavailableError | FreeModelsUnavailableError
+    >
     readonly small: (providerID: ProviderV2.ID) => Effect.Effect<ModelV2.Info | undefined>
   }
 }
@@ -228,14 +249,34 @@ const layer = Layer.effect(
         default: Effect.fn("CatalogV2.model.default")(function* () {
           const defaultModel = state.get().defaultModel
           if (defaultModel) {
+            if (defaultModel.providerID === "vector") {
+              const own = (yield* result.model.available()).find(
+                (model) =>
+                  model.providerID === "openrouter" &&
+                  model.id === defaultModel.modelID &&
+                  model.freeModel?.source === "openrouter",
+              )
+              if (own) return own
+            }
             const provider = yield* result.provider.get(defaultModel.providerID)
             if (provider && (yield* result.provider.available()).some((item) => item.id === provider.id)) {
               const model = yield* result.model.get(defaultModel.providerID, defaultModel.modelID)
               if (model?.enabled) return model
             }
+            if (
+              ["vector", "openrouter"].includes(defaultModel.providerID) &&
+              defaultModel.modelID.toLowerCase().endsWith(":free")
+            )
+              return yield* new DefaultModelUnavailableError(defaultModel)
           }
 
           const models = yield* result.model.available()
+          const free = models
+            .filter((model) => model.freeModel?.source === "openrouter")
+            .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+          if (free) return free
+          if ((yield* result.provider.available()).some((provider) => provider.id === "openrouter"))
+            return yield* new FreeModelsUnavailableError()
           const connected = models.filter((model) => model.providerID !== "vector")
           return Option.getOrUndefined(
             pipe(

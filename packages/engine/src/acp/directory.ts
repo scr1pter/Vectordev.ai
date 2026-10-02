@@ -75,6 +75,8 @@ export const build = (input: {
         providerName: provider.name,
         modelID: model.id,
         modelName: model.name,
+        freeModel: model.freeModel,
+        limit: model.limit,
       })),
     ),
   ).map((model) => ({

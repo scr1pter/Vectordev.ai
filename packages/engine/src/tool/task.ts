@@ -362,13 +362,20 @@ export const TaskTool = Tool.define(
       if (msg.info.role !== "assistant") return yield* Effect.fail(new Error("Not an assistant message"))
       const variant = msg.info.variant
 
-      const model = next.model ?? {
-        modelID: msg.info.modelID,
-        providerID: msg.info.providerID,
-      }
-      const childVariant = next.model ? undefined : variant
+      // Keep the parent's free route even if its model became unavailable after the tool call.
+      const inherit =
+        !next.model ||
+        (["vector", "openrouter"].includes(msg.info.providerID) && msg.info.modelID.toLowerCase().endsWith(":free"))
+      const model =
+        !inherit && next.model
+          ? next.model
+          : {
+              modelID: msg.info.modelID,
+              providerID: msg.info.providerID,
+            }
+      const childVariant = inherit ? variant : undefined
       // An agent with its own model runs with its own variant, so the record names that one.
-      const recordedVariant = childVariant ?? (next.model ? next.variant : undefined)
+      const recordedVariant = childVariant ?? (!inherit ? next.variant : undefined)
       const modelRef = { ...model, ...(recordedVariant ? { variant: recordedVariant } : {}) }
       const { kind, custom } = subagentKind(next)
       // tools.ts resets the part's time.start on every metadata write, so the launch time travels as startedAt.

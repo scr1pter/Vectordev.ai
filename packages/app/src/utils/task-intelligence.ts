@@ -14,6 +14,7 @@ type RoutableModel = {
   family?: string
   status?: string
   provider: { id: string }
+  freeModel?: { source: "shared" | "openrouter" }
   capabilities?: {
     reasoning?: boolean
     toolcall?: boolean
@@ -27,6 +28,14 @@ type RoutableModel = {
 export function supportsImageInput(model: RoutableModel) {
   if (model.capabilities?.input?.image === true) return true
   return model.modalities?.input?.includes("image") === true
+}
+
+export function isFreeModelSelection(model: RoutableModel) {
+  return (
+    model.provider.id === "vector" ||
+    !!model.freeModel ||
+    (model.provider.id === "openrouter" && model.id.toLowerCase().endsWith(":free"))
+  )
 }
 
 const TRIVIAL_TASK =
@@ -85,6 +94,7 @@ export function routeModelForTask<T extends RoutableModel>(input: {
   if (input.difficulty !== "complex") return { model: input.current, routed: false }
   const candidates = input.available
     .filter((model) => model.provider.id === input.current.provider.id)
+    .filter((model) => !isFreeModelSelection(input.current) || model.freeModel)
     .filter((model) => model.status !== "deprecated" && model.capabilities?.toolcall !== false)
     .toSorted((left, right) => qualityScore(right) - qualityScore(left))
   const strongest = candidates[0]
@@ -98,6 +108,8 @@ export function routeModelForImages<T extends RoutableModel>(input: {
   current: T
   available: T[]
 }): { model: T | undefined; routed: boolean } {
+  // The guarded free route accepts text only; an image must never silently switch to paid inference.
+  if (isFreeModelSelection(input.current)) return { model: undefined, routed: false }
   if (supportsImageInput(input.current)) return { model: input.current, routed: false }
   const candidates = input.available
     .filter((model) => supportsImageInput(model))

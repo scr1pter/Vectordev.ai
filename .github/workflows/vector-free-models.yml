@@ -5,6 +5,9 @@ on:
     paths:
       - api/**
       - packages/schema/**
+      - packages/core/src/free-model*.ts
+      - packages/core/src/session/runner/free-model-route.ts
+      - packages/core/test/free-model*.test.ts
       - packages/web/test/**
       - packages/web/src/lib/desktop-sign-in.ts
       - packages/desktop/src/main/vector-account.ts
@@ -37,6 +40,9 @@ jobs:
       - name: Typecheck hosted API
         working-directory: packages/engine
         run: bun typecheck --project ../../tsconfig.json
+      - name: Exercise free request and routing safeguards
+        working-directory: packages/core
+        run: bun test test/free-model-request.test.ts test/free-models.test.ts test/free-model-route.test.ts
       - name: Exercise proxy, real atomic quotas and desktop sign-in
         working-directory: packages/web
         env:

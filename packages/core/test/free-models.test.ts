@@ -44,7 +44,6 @@ test("a known OFF catalog answers at once and refreshes in the background", asyn
       },
     })
     expect(await client.catalog()).toEqual(off)
-    expect(await client.forKey("synthetic-secret")).toEqual([])
     expect(requests).toEqual([FreeModels.CATALOG_URL])
 
     reply.resolve()
@@ -134,39 +133,6 @@ test("a failed optional cache rename removes the temporary file and keeps the va
   }
 })
 
-test("own-key model discovery intersects the curated catalog and excludes paid models", async () => {
-  const requests: Array<{ url: string; init: RequestInit }> = []
-  const client = FreeModels.createClient({
-    request: async (url, init) => {
-      requests.push({ url, init })
-      if (url === FreeModels.CATALOG_URL) return Response.json(enabled)
-      return Response.json({
-        data: [
-          {
-            id: enabled.models[0].id,
-            pricing: { prompt: "0", completion: "0" },
-            supported_parameters: ["tools", "tool_choice"],
-          },
-          {
-            id: enabled.models[1].id,
-            pricing: { prompt: "0", completion: "0.01" },
-            supported_parameters: ["tools", "tool_choice"],
-          },
-          {
-            id: "unreviewed/model:free",
-            pricing: { prompt: "0", completion: "0" },
-            supported_parameters: ["tools", "tool_choice"],
-          },
-        ],
-      })
-    },
-  })
-  expect(await client.forKey("synthetic-secret")).toEqual([enabled.models[0]])
-  expect(requests[1].url).toBe(`${FreeModels.OPENROUTER_ROOT}/models/user`)
-  expect(new Headers(requests[1].init.headers).get("authorization")).toBe("Bearer synthetic-secret")
-  expect(requests[1].init.redirect).toBe("error")
-})
-
 test("saved shared selection prefers own key and never silently consumes shared allowance after privacy rejection", async () => {
   const route = {
     provider: "vector" as const,
@@ -183,7 +149,17 @@ test("saved shared selection prefers own key and never silently consumes shared 
       credential: async (provider) => (provider === "vector" ? "vct_shared" : undefined),
     }),
   ).toMatchObject({ url: FreeModels.SHARED_CHAT_URL, key: "vct_shared" })
-  await expect(FreeModels.resolveRoute({ ...route, catalog: async () => off })).rejects.toThrow("unavailable")
+  expect(await FreeModels.resolveRoute({ ...route, catalog: async () => off })).toMatchObject({
+    url: FreeModels.OPENROUTER_CHAT_URL,
+    key: "own-key",
+  })
+  await expect(
+    FreeModels.resolveRoute({
+      ...route,
+      catalog: async () => off,
+      credential: async (provider) => (provider === "vector" ? "vct_shared" : undefined),
+    }),
+  ).rejects.toThrow("unavailable")
 })
 
 test("free request guard removes overrides, clamps tokens and forbids paid plugins, media and hosted tools", () => {
@@ -207,8 +183,9 @@ test("free request guard removes overrides, clamps tokens and forbids paid plugi
   expect(request).not.toHaveProperty("user")
   expect(request).not.toHaveProperty("web_search_options")
   expect(request.messages).toEqual([{ role: "user", content: "hello" }])
-  for (const key of ["plugins", "preset", "modalities"])
+  for (const key of ["preset", "modalities"])
     expect(() => freeModelRequest({ ...request, [key]: [] }, enabled.models)).toThrow()
+  expect(() => freeModelRequest({ ...request, plugins: [{ id: "web" }] }, enabled.models)).toThrow()
   expect(() => freeModelRequest({ ...request, model: "paid/model" }, enabled.models)).toThrow()
   expect(() =>
     freeModelRequest(

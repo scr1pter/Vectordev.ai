@@ -14,6 +14,7 @@ type TestModel = {
   family: string
   status: string
   provider: { id: string }
+  freeModel?: { source: "shared" | "openrouter" }
   capabilities: {
     reasoning: boolean
     toolcall: boolean
@@ -36,6 +37,40 @@ const model = (id: string, input: Partial<TestModel> = {}): TestModel => ({
 })
 
 describe("task intelligence", () => {
+  test("automatic routing cannot upgrade a guarded free choice to a paid model", () => {
+    const current = model("acme/mini:free", { provider: { id: "openrouter" }, freeModel: { source: "openrouter" } })
+    const paid = model("gpt-5.6", {
+      provider: { id: "openrouter" },
+      capabilities: { reasoning: true, toolcall: true, input: { image: true } },
+    })
+    const unverified = model("gpt-5.6:free", { provider: { id: "openrouter" } })
+    expect(routeModelForTask({ difficulty: "complex", current, available: [current, paid, unverified] })).toEqual({
+      model: current,
+      routed: false,
+    })
+    expect(routeModelForImages({ current, available: [current, paid] })).toEqual({ model: undefined, routed: false })
+    expect(
+      routeModelForImages({ current: { ...current, freeModel: { source: "shared" } }, available: [paid] }),
+    ).toEqual({ model: undefined, routed: false })
+  })
+
+  for (const id of ["maker/mini:free", "maker/mini:FREE"])
+    test(`an unverified configured ${id} cannot auto-route to paid task or image models`, () => {
+      const current = model(id, {
+        provider: { id: "openrouter" },
+        capabilities: { reasoning: false, toolcall: true },
+      })
+      const paid = model("gpt-5.6", {
+        provider: { id: "openrouter" },
+        capabilities: { reasoning: true, toolcall: true, input: { image: true } },
+      })
+      expect(routeModelForTask({ difficulty: "complex", current, available: [current, paid] })).toEqual({
+        model: current,
+        routed: false,
+      })
+      expect(routeModelForImages({ current, available: [current, paid] })).toEqual({ model: undefined, routed: false })
+    })
+
   test("keeps conversational messages in the quick lane", () => {
     expect(classifyTaskDifficulty("hello!")).toBe("trivial")
     expect(classifyTaskDifficulty("fix login.ts")).toBe("standard")

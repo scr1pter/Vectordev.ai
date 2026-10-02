@@ -372,3 +372,48 @@ it.effect("small model selection keeps zero-priced models", () =>
     expect((yield* catalog.model.small(providerID))?.id).toBe(ModelV2.ID.make("coder:free"))
   }),
 )
+
+it.effect("a configured free model moves to the owned route and fails closed if it disappears", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const free = ModelV2.ID.make("acme/coder:free")
+    const paid = ModelV2.ID.make("acme/paid")
+    yield* catalog.transform((draft) => {
+      draft.provider.update(ProviderV2.ID.openrouter, () => {})
+      draft.model.update(ProviderV2.ID.openrouter, free, (model) => {
+        model.freeModel = { source: "openrouter" }
+      })
+      draft.model.update(ProviderV2.ID.openrouter, paid, () => {})
+      draft.model.default.set(ProviderV2.ID.vector, free)
+    })
+    expect(yield* catalog.model.default()).toMatchObject({ id: free, providerID: "openrouter" })
+    yield* catalog.transform((draft) => {
+      draft.model.update(ProviderV2.ID.openrouter, free, (model) => {
+        model.enabled = false
+      })
+    })
+    expect(yield* catalog.model.default().pipe(Effect.result)).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "Catalog.DefaultModelUnavailableError", modelID: free },
+    })
+    yield* catalog.transform((draft) => draft.model.default.set(ProviderV2.ID.openrouter, paid))
+    expect(yield* catalog.model.default()).toMatchObject({ id: paid, providerID: "openrouter" })
+  }),
+)
+
+it.effect("a connected OpenRouter account without verified free models requires an explicit model choice", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const paid = ModelV2.ID.make("acme/paid")
+    yield* catalog.transform((draft) => {
+      draft.provider.update(ProviderV2.ID.openrouter, () => {})
+      draft.model.update(ProviderV2.ID.openrouter, paid, () => {})
+    })
+    expect(yield* catalog.model.default().pipe(Effect.result)).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "Catalog.FreeModelsUnavailableError" },
+    })
+    yield* catalog.transform((draft) => draft.model.default.set(ProviderV2.ID.openrouter, paid))
+    expect(yield* catalog.model.default()).toMatchObject({ id: paid })
+  }),
+)

@@ -25,6 +25,7 @@ import { ScopedKey } from "@/utils/server-scope"
 import { createPromptSubmissionState } from "./submission-state"
 import {
   classifyTaskDifficulty,
+  isFreeModelSelection,
   routeModelForImages,
   routeModelForTask,
   routeVariantForTask,
@@ -435,9 +436,8 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     )
     // Automatic routing upgrades the model for work it judges complex, which
     // spends the user's own key at up to an order of magnitude more per token.
-    // Opt-in only. Image routing below is deliberately NOT gated: that one is a
-    // capability fallback — without an image-capable model the request simply
-    // cannot be served — rather than a cost decision made on the user's behalf.
+    // Opt-in only. A free selection remains within guarded free models, and
+    // unsupported images require the user to explicitly choose another model.
     const taskRoute = input.autoModelRouting?.()
       ? routeModelForTask({ difficulty, current: currentModel, available: availableModels })
       : { model: currentModel, routed: false }
@@ -448,8 +448,9 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     if (hasImageInput && !imageRoute?.model) {
       showToast({
         title: "Connect an image-capable model",
-        description:
-          "The connected models only accept text. Choose or connect a model with image input, then send again.",
+        description: isFreeModelSelection(currentModel)
+          ? "Free models currently accept text only. Remove the image to continue with your free model."
+          : "The connected models only accept text. Choose or connect a model with image input, then send again.",
         variant: "error",
         duration: 10_000,
       })

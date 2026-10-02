@@ -17,6 +17,7 @@ import { Flag } from "./flag/flag"
 import { Global } from "./global"
 import { VectorAccount } from "./vector-account"
 import { makeGlobalNode } from "./effect/app-node"
+import { FreeModelMetadata, eligibleFreeModel, freeModelInfo, isFreeModelID } from "./free-model-catalog"
 
 export const CATALOG_URL = "https://vectordev.ai/api/free-models/models"
 export const SHARED_CHAT_URL = "https://vectordev.ai/api/free-models/chat"
@@ -25,13 +26,7 @@ export const OPENROUTER_CHAT_URL = `${OPENROUTER_ROOT}/chat/completions`
 const OFF: FreeModelCatalog = { enabled: false, updatedAt: 0, models: [] }
 const TTL = 5 * 60_000
 
-const UserModel = Schema.Struct({
-  id: Schema.String,
-  pricing: Schema.Struct({ prompt: Schema.String, completion: Schema.String }),
-  supported_parameters: Schema.Array(Schema.String),
-  expiration_date: Schema.optional(Schema.NullOr(Schema.String)),
-})
-const UserModels = Schema.Struct({ data: Schema.Array(Schema.Unknown) })
+const MetadataList = Schema.Struct({ data: Schema.Array(Schema.Unknown) })
 
 export function createClient(
   input: {
@@ -89,7 +84,7 @@ export function createClient(
         (!parsed.enabled ||
           parsed.models.every(
             (model) =>
-              model.id.endsWith(":free") &&
+              isFreeModelID(model.id) &&
               Number.isSafeInteger(model.contextLength) &&
               model.contextLength > 0 &&
               Number.isSafeInteger(model.maxOutputTokens) &&
@@ -100,7 +95,6 @@ export function createClient(
       const value = valid ? (parsed.enabled ? parsed : OFF) : unreachable(saved)
       state.value = value
       state.expires = now() + TTL
-      if (!value.enabled) users.clear()
       if (input.file && valid) {
         const file = input.file
         const temporary = `${file}.${randomUUID()}.tmp`
@@ -118,51 +112,44 @@ export function createClient(
     return pending
   }
   const forKey = async (key: string, force = false) => {
-    const curated = await catalog(force)
-    if (!curated.enabled || !key) return []
+    if (!key || input.disabled?.()) return []
     const digest = createHash("sha256").update(key).digest("hex")
     const cached = users.get(digest)
-    if (!force && cached && cached.expires > now())
-      return curated.models.filter((model) => cached.models.some((item) => item.id === model.id))
-    const response = input.disabled?.()
-      ? undefined
-      : await request(`${OPENROUTER_ROOT}/models/user`, {
-          redirect: "error",
-          signal: AbortSignal.timeout(8_000),
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "HTTP-Referer": "https://vectordev.ai/",
-            "X-OpenRouter-Title": "Vector",
-          },
-        }).catch(() => undefined)
-    const parsed = response?.ok
-      ? Option.getOrUndefined(Schema.decodeUnknownOption(UserModels)(await response.json().catch(() => undefined)))
-      : undefined
-    // A rejected key or changed privacy policy must never revive stale, unavailable models.
-    if (!parsed) {
+    if (!force && cached && cached.expires > now()) return cached.models
+    // Personal access depends only on OpenRouter, not the optional hosted shared allowance.
+    const read = async <T>(url: string, schema: Schema.Decoder<T>, authenticated = false) => {
+      const response = await request(url, {
+        redirect: "error",
+        signal: AbortSignal.timeout(8_000),
+        headers: authenticated
+          ? {
+              Authorization: `Bearer ${key}`,
+              "HTTP-Referer": "https://vectordev.ai/",
+              "X-OpenRouter-Title": "Vector",
+            }
+          : { accept: "application/json" },
+      }).catch(() => undefined)
+      return response?.ok
+        ? Option.getOrUndefined(Schema.decodeUnknownOption(schema)(await response.json().catch(() => undefined)))
+        : undefined
+    }
+    const [available, endpoints] = await Promise.all([
+      read(`${OPENROUTER_ROOT}/models/user`, MetadataList, true),
+      read(`${OPENROUTER_ROOT}/endpoints/zdr`, MetadataList),
+    ])
+    // A rejected key or changed price/privacy policy must never revive stale models.
+    if (!available || !endpoints) {
       users.delete(digest)
       return []
     }
-    const permitted = new Set(
-      parsed.data
-        .flatMap((value) => {
-          const model = Schema.decodeUnknownOption(UserModel)(value)
-          return Option.isSome(model) ? [model.value] : []
-        })
-        .filter(
-          (model) =>
-            model.id.endsWith(":free") &&
-            model.pricing.prompt.trim() !== "" &&
-            model.pricing.completion.trim() !== "" &&
-            Number(model.pricing.prompt) === 0 &&
-            Number(model.pricing.completion) === 0 &&
-            model.supported_parameters.includes("tools") &&
-            model.supported_parameters.includes("tool_choice") &&
-            (!model.expiration_date || Date.parse(model.expiration_date) > now() + 7 * 86400000),
-        )
-        .map((model) => model.id),
-    )
-    const models = curated.models.filter((model) => permitted.has(model.id))
+    const candidates = available.data.flatMap((value) => {
+      const model = Schema.decodeUnknownOption(FreeModelMetadata)(value)
+      return Option.isSome(model) && eligibleFreeModel(model.value, now()) ? [model.value] : []
+    })
+    const models = candidates
+      .map((model) => freeModelInfo(model, endpoints.data, { zdr: true }))
+      .filter((model): model is FreeModelInfo => model !== undefined)
+      .sort((a, b) => b.contextLength - a.contextLength || a.id.localeCompare(b.id))
     users.set(digest, { expires: now() + TTL, models })
     return models
   }
@@ -235,9 +222,6 @@ export async function resolveRoute(input: {
   forKey: (key: string) => Promise<FreeModelInfo[]>
   credential: (provider: "vector" | "openrouter") => Promise<string | undefined>
 }) {
-  const catalog = await input.catalog()
-  if (!catalog.enabled || !catalog.models.some((model) => model.id === input.modelID))
-    throw new Error("That free model is unavailable. Choose another model in Vector.")
   const ownKey = await input.credential("openrouter")
   if (ownKey) {
     const models = await input.forKey(ownKey)
@@ -248,6 +232,9 @@ export async function resolveRoute(input: {
     return { url: OPENROUTER_CHAT_URL, key: ownKey, models, source: "openrouter" as const }
   }
   if (input.provider === "openrouter") throw new Error("Connect OpenRouter to use your own free allowance.")
+  const catalog = await input.catalog()
+  if (!catalog.enabled || !catalog.models.some((model) => model.id === input.modelID))
+    throw new Error("That free model is unavailable. Choose another model in Vector.")
   const token = await input.credential("vector")
   if (!token) throw new Error("Sign in to Vector to use the shared free allowance, or connect OpenRouter.")
   return { url: SHARED_CHAT_URL, key: token, models: catalog.models, source: "shared" as const }

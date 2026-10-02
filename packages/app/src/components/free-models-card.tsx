@@ -7,7 +7,7 @@ import { FREE_MODELS_TITLE, OPENROUTER_ACCOUNT_COPY } from "@vectordevai/core/fr
 import { useProviders } from "@/hooks/use-providers"
 import { DialogConnectProvider } from "./dialog-connect-provider"
 
-/** No fallback list or remembered client flag can enable this card. */
+/** Shared sign-in is offered only while the server advertises its allowance. */
 export function FreeModelsCard() {
   const platform = usePlatform()
   const [status, setStatus] = createStore<VectorAccountStatus>({ authenticated: false, pending: false })
@@ -28,37 +28,39 @@ export function FreeModelsCard() {
   }
   const providers = useProviders()
   const dialog = useDialog()
-  const enabled = () =>
-    [...providers.all().values()].some((provider) => Object.values(provider.models).some((model) => model.freeModel))
+  const shared = () =>
+    [...providers.all().values()].some((provider) =>
+      Object.values(provider.models).some((model) => model.freeModel?.source === "shared"),
+    )
   return (
-    <Show when={enabled()}>
-      <section data-component="free-models-card" class="mb-3 rounded-lg border border-border-base p-3 text-text-base">
-        <h3 class="text-14-medium">{FREE_MODELS_TITLE}</h3>
-        <p class="mt-2 text-12-regular">
-          Start with a shared allowance by signing in to Vector, or connect your own OpenRouter account. OpenRouter and
-          its model providers process your prompts.
-        </p>
-        <p class="mt-2 text-12-regular">{OPENROUTER_ACCOUNT_COPY}</p>
-        <Show when={status.error}>
-          <p role="alert">{status.error}</p>
-        </Show>
-        <Show when={status.pending}>
-          <p role="status">Finish signing in in your browser, then return to Vector.</p>
-        </Show>
-        <div class="mt-3 flex flex-wrap gap-3 text-12-medium">
-          <Show when={platform.vectorAccount && !status.authenticated}>
-            <button type="button" disabled={status.pending} onClick={signIn}>
-              Sign in to Vector
-            </button>
-          </Show>
-          <button
-            type="button"
-            onClick={() => dialog.show(() => <DialogConnectProvider provider="openrouter" preferredMethod="oauth" />)}
-          >
-            Connect OpenRouter
+    <section data-component="free-models-card" class="mb-3 rounded-lg border border-border-base p-3 text-text-base">
+      <h3 class="text-14-medium">{FREE_MODELS_TITLE}</h3>
+      <p class="mt-2 text-12-regular">
+        Connect your own free OpenRouter account. OpenRouter and its model providers process your prompts.
+      </p>
+      <Show when={shared()}>
+        <p class="mt-2 text-12-regular">A shared allowance is also available by signing in to Vector.</p>
+      </Show>
+      <p class="mt-2 text-12-regular">{OPENROUTER_ACCOUNT_COPY}</p>
+      <Show when={status.error}>
+        <p role="alert">{status.error}</p>
+      </Show>
+      <Show when={status.pending}>
+        <p role="status">Finish signing in in your browser, then return to Vector.</p>
+      </Show>
+      <div class="mt-3 flex flex-wrap gap-3 text-12-medium">
+        <Show when={shared() && platform.vectorAccount && !status.authenticated}>
+          <button type="button" disabled={status.pending} onClick={signIn}>
+            Sign in to Vector
           </button>
-        </div>
-      </section>
-    </Show>
+        </Show>
+        <button
+          type="button"
+          onClick={() => dialog.show(() => <DialogConnectProvider provider="openrouter" preferredMethod="oauth" />)}
+        >
+          Connect OpenRouter
+        </button>
+      </div>
+    </section>
   )
 }

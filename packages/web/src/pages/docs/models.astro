@@ -7,8 +7,8 @@ export const prerender = true
 <DocsPage id="models">
 
           <p>
-            Connect a provider account or API key to start. Eligible accounts may also see Free models inside of
-            Vector, with availability and usage limits shown in the app.
+            Connect a provider account or API key to start. The upcoming 1.999.99 release adds guarded free-model
+            access through your own free OpenRouter account, with setup and limits described below.
           </p>
 
           <h2 id="byok">Bring your own key</h2>
@@ -29,35 +29,57 @@ export const prerender = true
 
           <h2 id="free-models">Free models inside of Vector</h2>
           <p>
-            The upcoming release adds a section for approved OpenRouter free models when the service is enabled.
-            Sign in to Vector for a shared allowance, or choose Connect OpenRouter to use your own account directly.
-            Each model identifies its source: Shared Vector allowance or Your OpenRouter account.
-            When both offer the same model, your account takes precedence. The section is hidden when the service is off.
+            The upcoming 1.999.99 release adds guarded access through your own free OpenRouter account.
+            In Settings → Providers, choose Connect OpenRouter, then choose an eligible model under
+            Free models inside of Vector, marked Your OpenRouter account. This personal section works while
+            Vector's shared allowance is off. Its initial selection is limited to explicit free variants with
+            online, tool-capable, zero-price endpoints in OpenRouter's zero data retention (ZDR) list.
+            It does not include every model OpenRouter lists as free.
           </p>
           <p>
-            Uses your own free OpenRouter account: 50 requests a day, or 1,000 if you've ever added $10 of OpenRouter credits.
-            OpenRouter supplies this free access; Vector does not charge for, provide, or pay for these tokens.
-            When the shared allowance is exhausted, Vector shows its expected reset time and lets you connect OpenRouter
-            to continue the same conversation. Workspace subscription terms are unchanged.
+            Keep that account free: do not buy credits, add a payment method, enable automatic top-ups,
+            attach paid provider keys through OpenRouter's BYOK settings, or enable default or enforced paid plugins.
+            OpenRouter currently lists up to 50 requests a day and 20 a minute without a credit purchase;
+            availability can be lower, and a coding task can consume many requests. At a limit, wait for the reset.
+            The guarded route stops when no eligible zero-price endpoint is available and does not switch to
+            a paid model or provider. <a href="https://openrouter.ai/docs/api_reference/limits">Check OpenRouter's current limits.</a>
           </p>
           <p>
-            Prompts are processed by OpenRouter and the selected model provider. Retention and training policies vary
-            by provider; review those policies before sending confidential code. This describes upcoming functionality,
-            not an announcement that the shared service is enabled in production.
+            Prompts are processed by OpenRouter and the selected model provider. The guarded route enforces ZDR and
+            denies data collection using OpenRouter's routing controls. This relies on
+            <a href="https://openrouter.ai/docs/api/api-reference/endpoints/preview-the-impact-of-zdr-on-the-available-endpoints">OpenRouter's endpoint classification</a>,
+            not an independent policy audit. It does not promise zero retention for Vector's local history,
+            OpenRouter account logging or other connected services. Review those settings before sending confidential code.
+            Vector's subscription terms and other provider connections are separate. This describes upcoming functionality,
+            not functionality in the currently downloadable desktop 1.99.8. The shared service remains off.
+          </p>
+          <p>
+            For guarded free models, save an API key through Settings → Providers or set
+            <code>OPENROUTER_API_KEY</code> in the engine environment. A key stored only in a project's
+            <code>provider.openrouter.options.apiKey</code> does not enable this route; migrate it to a provider
+            connection or environment variable without committing it to the project.
+            <a href="https://openrouter.ai/docs/guides/routing/provider-selection">OpenRouter routing documentation</a>
+            describes the ZDR and data-collection controls.
           </p>
 
           <h2 id="cli-models">Models in the terminal</h2>
           <p>
-            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release. From 1.99.91, the next release, <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>, <code>VECTOR_MODELS_PATH</code> selects a local catalog, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
+            <code>vector models</code> lists the supported model catalog. Connect a provider with <code>vector providers login</code> to use its models. Pass a provider id to filter and <code>--verbose</code> for metadata such as per-token cost. The catalog is bundled with the release. From 1.999.99, the next release, <code>--refresh</code> only fetches when a mirror is explicitly configured with <code>VECTOR_MODELS_URL</code>, <code>VECTOR_MODELS_PATH</code> selects a local catalog, and <code>VECTOR_DISABLE_MODELS_FETCH=1</code> disables refresh.
           </p>
           <p class="doc-cmd"><code>vector models
 vector models anthropic --verbose</code><button class="doc-cmd-copy" type="button" aria-label="Copy this command">Copy</button></p>
           <p>
-            In the upcoming release, an enabled service adds the heading <strong>Free models inside of Vector</strong>,
-            with shared allowance or own OpenRouter account captions. Display names omit <code>:free</code>;
-            selectors retain it. Your account takes precedence over a duplicate shared model. Human guidance goes
-            to stderr, while stdout keeps plain model selectors. Connect your own account with
+            In the upcoming 1.999.99 release, your personal account adds eligible models under
+            <strong>Free models inside of Vector</strong>, marked Your OpenRouter account, independently of the
+            disabled shared allowance. Display names omit <code>:free</code>; selectors retain it. Human guidance
+            goes to stderr, while stdout keeps plain model selectors. Connect your own account with
             <code>vector providers login --provider openrouter --method "Connect OpenRouter"</code>.
+          </p>
+          <p>
+            Browser authorization returns to the engine's localhost. If you use a remote engine without access
+            to that callback port, connect through the API-key method or set <code>OPENROUTER_API_KEY</code> on
+            that engine. A project-only provider key does not enable guarded free models. This setup is not
+            included in the currently published CLI 1.99.7 or desktop 1.99.8.
           </p>
           <p>
             Models that expose reasoning effort take <code>--variant</code>. The level resolves from the flag, then your saved preference, then what the session last used, and your choice is kept per provider and model.

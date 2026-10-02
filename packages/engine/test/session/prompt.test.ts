@@ -2,11 +2,14 @@ import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Database } from "@vectordevai/core/database/database"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { FreeModels } from "@vectordevai/core/free-models"
+import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
+import { LLMEvent } from "@vectordevai/llm"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { expect } from "bun:test"
-import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
 import { fileURLToPath } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
@@ -243,6 +246,40 @@ function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[
 const it = testEffect(makeHttp())
 const noLLMServer = testEffect(makeHttpNoLLMServer())
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
+const freePrompts = testEffect(
+  LayerNode.compile(promptRoot, [
+    [SessionSummary.node, summary],
+    [LSP.node, lsp],
+    [MCP.node, makeMcp()],
+    [RuntimeFlags.node, runtimeFlags],
+    [
+      FreeModels.node,
+      Layer.succeed(FreeModels.Service, {
+        catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
+        forKey: () => Effect.succeed([FREE_MODEL_FALLBACKS[0]]),
+      }),
+    ],
+    [
+      FreeModels.credentialsNode,
+      Layer.succeed(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "openrouter" ? "synthetic-key" : undefined),
+      }),
+    ],
+    [
+      LLM.node,
+      Layer.succeed(LLM.Service, {
+        stream: (input) =>
+          Stream.make(
+            LLMEvent.textStart({ id: "model" }),
+            LLMEvent.textDelta({ id: "model", text: `${input.model.providerID}/${input.model.id}` }),
+            LLMEvent.textEnd({ id: "model" }),
+            LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+            LLMEvent.finish({ reason: "stop" }),
+          ),
+      }),
+    ],
+  ]),
+)
 const withMcpInstructions = testEffect(
   makeHttp({
     mcpInstructions: [
@@ -2520,6 +2557,143 @@ noLLMServer.instance(
     },
   },
 )
+
+const freeRef = { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(FREE_MODEL_FALLBACKS[0].id) }
+const paidCommandConfig = {
+  ...cfg,
+  agent: {
+    "paid-primary": { mode: "primary" as const, model: "lmstudio/test-model" },
+    "paid-specialist": { mode: "subagent" as const, model: "lmstudio/test-model" },
+  },
+  command: {
+    "paid-command": { template: "Inspect this change.", model: "lmstudio/test-model" },
+    "paid-agent": { template: "Inspect this change.", agent: "paid-primary" },
+    "paid-subtask": { template: "Inspect this change.", agent: "paid-specialist", subtask: true },
+  },
+}
+
+freePrompts.instance(
+  "free command selections survive configured command and agent models",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      for (const command of ["paid-command", "paid-agent", "paid-subtask"]) {
+        for (const explicit of [false, true]) {
+          const chat = yield* sessions.create({
+            title: "Pinned",
+            model: { providerID: freeRef.providerID, id: freeRef.modelID },
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          const result = yield* prompt.command({
+            sessionID: chat.id,
+            command,
+            arguments: "",
+            ...(explicit ? { model: `${freeRef.providerID}/${freeRef.modelID}` } : {}),
+          })
+          expect(result.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
+          expect(result.parts).toContainEqual(
+            expect.objectContaining({ type: "text", text: `openrouter/${freeRef.modelID}` }),
+          )
+          for (const message of yield* sessions.messages({ sessionID: chat.id })) {
+            if (message.info.role === "assistant")
+              expect(message.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
+          }
+        }
+      }
+    }),
+  { config: paidCommandConfig },
+  30_000,
+)
+
+freePrompts.instance(
+  "free parent ignores a paid model embedded in a subtask",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const result = yield* prompt.prompt({
+        sessionID: chat.id,
+        model: freeRef,
+        parts: [{ type: "subtask", agent: "paid-specialist", prompt: "Inspect.", description: "inspect", model: ref }],
+      })
+      expect(result.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
+      const children = yield* sessions.children(chat.id)
+      expect(children).toHaveLength(1)
+      for (const message of yield* sessions.messages({ sessionID: children[0].id })) {
+        if (message.info.role === "assistant")
+          expect(message.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
+      }
+    }),
+  { config: paidCommandConfig },
+)
+
+freePrompts.instance(
+  "omitted prompt models keep the current free selection while explicit paid selections work",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        model: { providerID: freeRef.providerID, id: freeRef.modelID },
+      })
+      const free = yield* prompt.prompt({ sessionID: chat.id, agent: "paid-primary", noReply: true, parts: [] })
+      expect(free.info).toMatchObject({ model: freeRef })
+      const paid = yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "paid-primary",
+        model: ref,
+        noReply: true,
+        parts: [],
+      })
+      expect(paid.info).toMatchObject({ model: ref })
+      const command = yield* prompt.command({
+        sessionID: chat.id,
+        command: "paid-command",
+        model: "lmstudio/test-model",
+        arguments: "",
+      })
+      expect(command.info).toMatchObject({ providerID: ref.providerID, modelID: ref.modelID })
+    }),
+  { config: paidCommandConfig },
+)
+
+freePrompts.instance(
+  "configured paid commands still work without a saved model or available default",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const provider = yield* ProviderSvc.Service
+      expect(yield* provider.defaultModel().pipe(Effect.result)).toMatchObject({ _tag: "Failure" })
+      const chat = yield* sessions.create({ title: "Pinned" })
+      const result = yield* prompt.command({ sessionID: chat.id, command: "paid-command", arguments: "" })
+      expect(result.info).toMatchObject({ providerID: ref.providerID, modelID: ref.modelID })
+    }),
+  { config: { ...paidCommandConfig, provider: { ...paidCommandConfig.provider, openrouter: { whitelist: [] } } } },
+)
+
+if (process.platform !== "win32")
+  freePrompts.instance(
+    "omitted shell models preserve the current free session",
+    () =>
+      Effect.gen(function* () {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({
+          title: "Pinned",
+          model: { providerID: freeRef.providerID, id: freeRef.modelID },
+        })
+        const result = yield* prompt.shell({ sessionID: chat.id, agent: "paid-primary", command: ":" })
+        expect(result.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
+      }),
+    { config: paidCommandConfig },
+  )
 
 // Agent / command resolution errors
 

@@ -110,13 +110,24 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       return !!provider?.models[model.modelID] && connected().has(model.providerID)
     }
 
+    const resolveSelection = (saved: ModelKey) => {
+      const model = renamedModel(saved)
+      const own = providers.all().get("openrouter")?.models[model.modelID]
+      return model.providerID === "vector" && own?.freeModel?.source === "openrouter"
+        ? { ...model, providerID: "openrouter" }
+        : model
+    }
+
+    const freeSelection = (model: ModelKey) =>
+      ["vector", "openrouter"].includes(model.providerID) && model.modelID.toLowerCase().endsWith(":free")
+
     // Saved choices follow a provider rename, so they keep working with their carried-over credential.
     const firstModel = (...items: Array<() => ModelKey | undefined>) => {
       for (const item of items) {
         const saved = item()
         if (!saved) continue
-        const model = renamedModel(saved)
-        if (validModel(model)) return model
+        const model = resolveSelection(saved)
+        if (validModel(model) || freeSelection(model)) return model
       }
     }
 
@@ -164,20 +175,26 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const configured = sync().data.config.model
       if (!configured) return
       const [providerID, ...rest] = configured.split("/")
-      const model = renamedModel({ providerID, modelID: rest.join("/") })
-      if (validModel(model)) return model
+      const model = resolveSelection({ providerID, modelID: rest.join("/") })
+      if (validModel(model) || freeSelection(model)) return model
     }
 
     const recentModel = () => {
       for (const item of models.recent.list()) {
-        const model = renamedModel(item)
-        if (validModel(model)) return model
+        const model = resolveSelection(item)
+        if (validModel(model) || freeSelection(model)) return model
       }
     }
 
     const defaultModel = () => {
       const defaults = providers.default()
       const connected = providers.connected()
+      const free = connected
+        .flatMap((provider) => Object.values(provider.models))
+        .filter((model) => model.freeModel?.source === "openrouter")
+        .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+      if (free) return { providerID: "openrouter", modelID: free.id }
+      if (connected.some((provider) => provider.id === "openrouter")) return
       const own = connected.filter((provider) =>
         Object.values(provider.models).some((model) => model.freeModel?.source !== "shared"),
       )

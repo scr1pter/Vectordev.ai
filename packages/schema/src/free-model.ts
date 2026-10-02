@@ -149,7 +149,7 @@ export const FREE_MODEL_FALLBACKS: readonly FreeModelInfo[] = [
 export function isFreeModel(model: { providerID: string; id: string; cost?: { input: number; output: number } }) {
   return (
     (model.providerID === "vector" || model.providerID === "openrouter") &&
-    model.id.endsWith(":free") &&
+    model.id.toLowerCase().endsWith(":free") &&
     model.cost?.input === 0 &&
     model.cost.output === 0
   )

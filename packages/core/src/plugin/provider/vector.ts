@@ -13,20 +13,27 @@ export const VectorPlugin = define({
     yield* ctx.catalog.transform(
       Effect.fn(function* (catalog) {
         const current = yield* freeModels.catalog()
-        if (!current.enabled) return
         const vector = yield* credentials.get("vector")
         const openrouter = yield* credentials.get("openrouter")
         const owned = openrouter ? yield* freeModels.forKey(openrouter) : []
-        catalog.provider.update("vector", (provider) => {
-          provider.name = "Vector"
-          provider.disabled = !vector && !openrouter
-          provider.api = {
-            type: "aisdk",
-            package: "@ai-sdk/openai-compatible",
-            url: "https://vectordev.ai/api/free-models",
+        if (openrouter) catalog.provider.update("openrouter", () => {})
+        for (const item of catalog.provider.list()) {
+          if (item.provider.id !== "openrouter") continue
+          for (const model of item.models.values()) {
+            if (model.id.toLowerCase().endsWith(":free")) catalog.model.remove("openrouter", model.id)
           }
-        })
-        for (const model of current.models) {
+        }
+        if (current.enabled)
+          catalog.provider.update("vector", (provider) => {
+            provider.name = "Vector"
+            provider.disabled = !vector && !openrouter
+            provider.api = {
+              type: "aisdk",
+              package: "@ai-sdk/openai-compatible",
+              url: "https://vectordev.ai/api/free-models",
+            }
+          })
+        for (const model of current.enabled ? current.models : []) {
           catalog.model.update("vector", model.id, (draft) => {
             draft.name = model.name
             draft.api = {

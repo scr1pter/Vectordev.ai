@@ -1,22 +1,35 @@
-# OpenRouter activation — owner actions
+# OpenRouter free access — owner actions
 
-Status: built behind `FREE_MODELS_ENABLED=false`; production activation is pending the actions below. No account was created, terms accepted, purchase made, key read, privacy setting changed or message sent by the implementation agent. Account-specific endpoint viability has **not** been verified. The public metadata was checked on 25 September 2026.
+Decision: use each user's own free OpenRouter account for the upcoming **1.999.99** release. Personal free-model discovery and setup work independently of `FREE_MODELS_ENABLED=false`. Leave the shared service off; do not add a shared key, activate KV for this feature, or purchase credits. The currently downloadable desktop **1.99.8** does not include this guarded setup.
 
-## Checklist
+No account was created, terms accepted, purchase made, key read, privacy setting changed or message sent by the implementation agent. Account-specific endpoint viability has **not** been verified. The candidate snapshot below was checked on 25 September 2026; it is not a promise of current availability.
+
+## Selected setup: personal free accounts
+
+1. Each user connects their own OpenRouter account through **Connect OpenRouter** in Vector, saves their API key in Settings → Providers, or sets `OPENROUTER_API_KEY` in the engine environment. A project-only `provider.openrouter.options.apiKey` value is insufficient for guarded free access; migrate it to the provider connection or environment without committing or printing it. A shared Vector account or shared OpenRouter credential is not needed for model routing. See [connection instructions](../FREE-MODELS.md).
+2. Keep that OpenRouter account free: no credit purchase, payment method, automatic top-ups, paid upstream provider keys in OpenRouter's BYOK settings, or default/enforced paid plugins. Check the account's settings directly; Vector cannot remove account-level payment arrangements on the user's behalf.
+3. Select an eligible model under **Free models inside of Vector → Your OpenRouter account**. The initial scope is explicit `:free` models with online, tool-capable, zero-price endpoints listed by OpenRouter's `/api/v1/endpoints/zdr`. Discovery matches model ID and endpoint tag. This is OpenRouter's ZDR classification, not an independent manual policy audit or a list of every free model.
+4. Keep zero-price routing, `provider.zdr: true`, `data_collection: "deny"`, and the protections against paid plugins and paid model/provider fallbacks. Missing eligibility, an unavailable endpoint, and exhausted limits must stop the request. Do not relax the constraints to make a request succeed.
+5. OpenRouter currently lists up to 50 requests/day and 20 requests/minute without buying credits. A coding task can require many requests. Wait for a reset when limits are reached; do not purchase a higher allowance or create accounts to evade limits. See the [current upstream policy](https://openrouter.ai/docs/api_reference/limits).
+6. Review the user's OpenRouter privacy settings and downstream policies. The ZDR routing restriction does not cover Vector's local history, OpenRouter account logging, or every external tool/service. Keep Vector's subscription and other independently configured providers/tools distinct from free model access.
+
+## Optional future shared service — not part of this activation
+
+The remaining checklist is retained for a separately authorized future shared allowance. It is not a prerequisite for personal access and does not authorize any service activation, expenditure, or message. The shared catalog's legacy `/api/frontend/all-providers` metadata source returned HTTP 404 on 2 October 2026. Repair and revalidate that dependency before considering activation; the personal ZDR endpoint selection does not depend on it.
 
 1. Create or select the single OpenRouter account owned by Vector. Do not create extra accounts or keys to evade account limits.
-2. Decide whether to make the optional one-time $10 credit purchase. This is not a request to fund model usage: these routes only permit zero-price models and endpoints. Without that historical purchase, the published allowance is 50 requests/day; with it, 1,000/day, subject to OpenRouter's current account rules. Both have a 20 requests/minute limit. Confirm the actual account values with `/api/v1/key`.
+2. Keep the account unfunded with no payment method, automatic top-ups, paid plugins, or paid upstream BYOK credentials. A credit purchase is not authorized. Confirm the actual free account limits with `/api/v1/key` without making an inference request.
 3. In that account's privacy settings, disable training for paid and free models, OpenRouter use of inputs, and prompt/chat logging. Keep the settings private; record that they were checked, never a screenshot containing a key.
 4. Send the draft below and obtain written confirmation for the shared, no-charge allowance, the applicable provider terms, and any account exemption or enterprise agreement. The code remains off until this is resolved. This is a legal review gate, not a claim that the feature is forbidden.
 5. Add `OPENROUTER_API_KEY` to the Vercel server environment. Add the existing KV/Upstash URL/token, `VECTOR_ABUSE_SECRET`, `VECTOR_CLI_TOKEN_SECRET`, account configuration and `CRON_SECRET` there. Do not put any value in Git, an app build, a ticket, a URL or a support reply. Use the existing desktop/account setup in [desktop-cli-vault.md](desktop-cli-vault.md).
-6. Choose `FREE_MODELS_DAILY_PER_USER` and optionally `FREE_MODELS_MINUTE_PER_USER`. If omitted, the daily default is one tenth of the verified account limit, rounded down, with a minimum of 1 and maximum of 20; that is 5 on a 50/day account and 20 on a 1,000/day account. The minute default is 4. A coding task consumes multiple model requests, so these are onboarding allowances, not task guarantees. Failed admitted requests can consume a local fairness counter.
+6. Choose `FREE_MODELS_DAILY_PER_USER` and optionally `FREE_MODELS_MINUTE_PER_USER` within the verified free account allowance. A coding task consumes multiple model requests, so these would be onboarding allowances, not task guarantees. Failed admitted requests can consume a local fairness counter.
 7. Approve the separate legal-copy draft. Prompts, code and tool output travel to OpenRouter and its chosen endpoint. No-training and no-retention are different claims; do not promise zero retention for every candidate.
 8. In a controlled deployment, enable the flag, invoke the authenticated refresh route, inspect the resulting public catalog, and run the harmless acceptance below. The daily cron is 03:17 UTC. Catalogs expire after 30 hours; absence, staleness, invalid metadata or unavailable KV fails closed.
-9. If every check passes, deploy the same reviewed code/configuration to production. If any check fails, set `FREE_MODELS_ENABLED=false`; the public endpoint returns an empty catalog and the free-model section disappears. OpenRouter PKCE and ordinary API-key providers continue to work independently.
+9. Only after a separate owner decision and passing checks, deploy the reviewed shared configuration. If any check fails, keep `FREE_MODELS_ENABLED=false`; the shared endpoint returns an empty catalog. The guarded personal OpenRouter section and connection methods continue to work independently.
 
-## Owner-run acceptance with the actual account
+## Future shared-service acceptance with the actual account
 
-Run this locally under the owner's control; report only model IDs, HTTP status, endpoint availability, reset times and whether the balance changed. Never send the implementation agent a key or request headers.
+This is not part of the current personal-account rollout. If a shared pilot is separately authorized, run it locally under the owner's control; report only model IDs, HTTP status, endpoint availability, reset times and whether the balance changed. Never send the implementation agent a key or request headers.
 
 - Confirm `/api/v1/models/user` includes each selected free model after privacy settings are applied.
 - Submit a harmless text/tool-calling prompt with `data_collection: "deny"`, the curated provider allowlist and zero `max_price` for prompt, completion, request and image. Test each candidate; remove any with no eligible endpoint. Do not relax the privacy or price constraints to make it pass.
@@ -25,9 +38,9 @@ Run this locally under the owner's control; report only model IDs, HTTP status, 
 - At the cap, verify reset time and Connect OpenRouter. Complete PKCE on the user's own account, continue the same conversation, and confirm the shared counter is no longer used. Disconnect and confirm the user key is removed.
 - Test missing KV, revoked Vector identity, expired catalog, upstream 402/429 before and during streaming, cancellation, and OFF after an earlier ON session. These paths also have isolated automated coverage; this step validates the actual deployed configuration.
 
-## Current candidate set and unresolved provider coverage
+## Historical shared candidates and unresolved provider coverage
 
-The live public catalog contained 22 models with zero prompt/completion prices, 14 explicit free variants with both tools and tool choice, and 7 candidates after exclusions. Expired preview IDs from the earlier brief are no longer selected. This is a dated observation; daily refresh computes the current list.
+The 25 September 2026 snapshot contained 22 models with zero prompt/completion prices, 14 explicit free variants with both tools and tool choice, and 7 candidates after exclusions. This historical shared-catalog snapshot is not the personal ZDR selection or a claim that shared refresh currently works. Its legacy metadata dependency remains unresolved.
 
 | Candidate                  | Endpoint   | Public policy metadata                      | Owner review                                                                   |
 | -------------------------- | ---------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -37,7 +50,7 @@ The live public catalog contained 22 models with zero prompt/completion prices, 
 | Dots3-Note Preview         | AtlasCloud | No training; retention duration unspecified | Confirm terms and retention                                                    |
 | Ling 3.0 Flash Sante / Fin | NovitaAI   | No training or prompt retention             | Confirm applicable commercial model/provider terms                             |
 
-NVIDIA, Stealth, Thinking Machines, Liquid and Google endpoints remain excluded. Google's unpaid-service terms permit use of submitted content for product improvement; the exact tier behind the free endpoints was not established, so exclusion is conservative. An unknown endpoint policy is also excluded. Public metadata is not a substitute for the written coverage review.
+The historical shared catalog excluded NVIDIA, Stealth, Thinking Machines, Liquid and Google endpoints. The exact tier behind Google's free endpoints was not established, so that exclusion was conservative. Unknown endpoint policies were also excluded. These observations are not current personal-routing rules or a substitute for a future shared-service coverage review.
 
 ## Ready-to-send draft — not sent
 
@@ -62,5 +75,6 @@ Vector
 - [Enterprise terms](https://openrouter.ai/terms-of-service-enterprise): separate signed-order coverage must be confirmed by OpenRouter.
 - [Limits and account counters](https://openrouter.ai/docs/api_reference/limits): free account capacity and 402/429 behavior.
 - [Provider routing](https://openrouter.ai/docs/guides/routing/provider-selection): privacy, provider allowlists and zero-price ceilings.
-- [Public models API](https://openrouter.ai/api/v1/models) and [provider-policy metadata](https://openrouter.ai/api/frontend/all-providers): dated candidate data.
+- [ZDR endpoint API](https://openrouter.ai/docs/api/api-reference/endpoints/preview-the-impact-of-zdr-on-the-available-endpoints): current personal discovery source, matched by model ID and endpoint tag.
+- [Public models API](https://openrouter.ai/api/v1/models): current model metadata. The historical shared candidate snapshot used `/api/frontend/all-providers`, which now returns 404; it is not a working source for this rollout.
 - [Google API terms](https://ai.google.dev/gemini-api/terms), [Modular terms](https://www.modular.com/legal/terms), [Cohere terms](https://cohere.com/terms-of-use), [Poolside legal](https://poolside.ai/legal), [AtlasCloud privacy](https://www.atlascloud.ai/privacy), [Novita terms](https://novita.ai/legal/terms-of-service): provider review inputs, not legal approval.

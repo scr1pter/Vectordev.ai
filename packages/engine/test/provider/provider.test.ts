@@ -1981,23 +1981,25 @@ it.instance(
   },
 )
 
-it.instance("Vector auth content admits API keys and ChatGPT sign-in, and rejects unsupported providers and paused OAuth", () =>
-  Effect.gen(function* () {
-    yield* set(
-      "VECTOR_AUTH_CONTENT",
-      JSON.stringify({
-        anthropic: { type: "api", key: "placeholder-current" },
-        "unsupported-fixture": { type: "api", key: "placeholder-unsupported" },
-        openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
-        xai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
-      }),
-    )
-    const providers = yield* Provider.use.list()
-    expect(providers[ProviderV2.ID.anthropic].key).toBe("placeholder-current")
-    expect(providers[ProviderV2.ID.make("unsupported-fixture")]).toBeUndefined()
-    expect(providers[ProviderV2.ID.openai]).toBeDefined()
-    expect(providers[ProviderV2.ID.make("xai")]).toBeUndefined()
-  }),
+it.instance(
+  "Vector auth content admits API keys and ChatGPT sign-in, and rejects unsupported providers and paused OAuth",
+  () =>
+    Effect.gen(function* () {
+      yield* set(
+        "VECTOR_AUTH_CONTENT",
+        JSON.stringify({
+          anthropic: { type: "api", key: "placeholder-current" },
+          "unsupported-fixture": { type: "api", key: "placeholder-unsupported" },
+          openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
+          xai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
+        }),
+      )
+      const providers = yield* Provider.use.list()
+      expect(providers[ProviderV2.ID.anthropic].key).toBe("placeholder-current")
+      expect(providers[ProviderV2.ID.make("unsupported-fixture")]).toBeUndefined()
+      expect(providers[ProviderV2.ID.openai]).toBeDefined()
+      expect(providers[ProviderV2.ID.make("xai")]).toBeUndefined()
+    }),
 )
 
 it.instance("plugin-defined provider models retain custom provenance with a stored key", () =>
@@ -2047,32 +2049,6 @@ it.instance("plugin-defined provider models retain custom provenance with a stor
       models: { chat: { api: { npm: "@ai-sdk/openai-compatible", url: "http://127.0.0.1:9/v1" } } },
     })
   }),
-)
-
-it.instance(
-  "free primary models stay free despite a paid small-model override",
-  Effect.gen(function* () {
-    const primary = ModelV2.ID.make("acme/coder:free")
-    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("openrouter"), primary)
-    expect(model?.id).toBe(primary)
-    expect(model?.cost.input).toBe(0)
-    expect(model?.cost.output).toBe(0)
-  }),
-  {
-    config: {
-      small_model: "openrouter/acme/flash",
-      provider: {
-        openrouter: {
-          npm: "@ai-sdk/openai-compatible",
-          options: { apiKey: "test-only" },
-          models: {
-            "acme/coder:free": { cost: { input: 0, output: 0 }, limit: { context: 128000, output: 8000 } },
-            "acme/flash": { family: "gemini-flash", cost: { input: 1, output: 1 } },
-          },
-        },
-      },
-    },
-  },
 )
 
 for (const entry of [

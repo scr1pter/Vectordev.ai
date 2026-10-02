@@ -146,6 +146,8 @@ describe("ACP service sessions", () => {
     messages: readonly { info: unknown; parts: readonly unknown[] }[] = [],
     options?: {
       noProviders?: boolean
+      providers?: Provider.Info[]
+      model?: string
       abort?: (input: { sessionID: string }) => Promise<{ data: boolean }>
       prompt?: (input: unknown) => Promise<{ data: { info: ReturnType<typeof assistantInfo> } }>
     },
@@ -168,9 +170,12 @@ describe("ACP service sessions", () => {
       config: {
         providers: () =>
           Promise.resolve({
-            data: { providers: options?.noProviders ? [] : [provider], default: { [providerID]: modelID } },
+            data: {
+              providers: options?.noProviders ? [] : (options?.providers ?? [provider]),
+              default: { [providerID]: modelID },
+            },
           }),
-        get: () => Promise.resolve({ data: {} }),
+        get: () => Promise.resolve({ data: options?.model ? { model: options.model } : {} }),
       },
       app: {
         agents: () =>
@@ -685,6 +690,28 @@ describe("ACP service sessions", () => {
     expect(result.sessionId).toBe("configured-model")
     expect(result.configOptions?.find((option) => option.id === "model")?.currentValue).toBe(
       "lmstudio/configured-model",
+    )
+  })
+
+  it("requires an explicit model choice when connected OpenRouter has no verified free models", async () => {
+    const router = {
+      ...provider,
+      id: ProviderV2.ID.openrouter,
+      models: Object.fromEntries(
+        Object.entries(provider.models).map(([id, model]) => [id, { ...model, providerID: ProviderV2.ID.openrouter }]),
+      ),
+    }
+    const blocked = makeService([], { providers: [router] })
+    expect(
+      await Effect.runPromise(blocked.service.newSession({ cwd: "/workspace", mcpServers: [] }).pipe(Effect.result)),
+    ).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "ACPAuthRequiredError" },
+    })
+    const explicit = makeService([], { providers: [router], model: "openrouter/configured-model" })
+    const created = await Effect.runPromise(explicit.service.newSession({ cwd: "/workspace", mcpServers: [] }))
+    expect(created.configOptions?.find((option) => option.id === "model")?.currentValue).toBe(
+      "openrouter/configured-model",
     )
   })
 

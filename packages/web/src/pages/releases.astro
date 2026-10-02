@@ -23,7 +23,7 @@ type ReleasePost = VectorRelease & {
 const posts: ReleasePost[] = [
   ...[...release199].reverse().map((release) => ({
     ...release,
-    line: "Vector 1.99",
+    line: `Vector ${release.version.split(".").slice(0, 2).join(".")}`,
   })),
   ...[...release119].reverse().map((release) => ({
     ...release,

@@ -58,6 +58,38 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
 const it = testEffect(layer())
 const background = testEffect(layer({ experimentalBackgroundSubagents: true }))
 
+for (const id of ["acme/coder:free", "acme/coder:FREE"])
+  it.instance(
+    `a free parent ${id} keeps subagents on its model despite a paid specialist override`,
+    () =>
+      Effect.gen(function* () {
+        const model = { providerID: ProviderV2.ID.openrouter, modelID: ModelV2.ID.make(id) }
+        const seeded = yield* seed("Free parent", model)
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        const prompts: SessionPrompt.PromptInput[] = []
+        const result = yield* def.execute(
+          { description: "inspect free task", prompt: "inspect the change", subagent_type: "paid-specialist" },
+          taskContext({
+            sessionID: seeded.chat.id,
+            messageID: seeded.assistant.id,
+            promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+          }),
+        )
+        expect(prompts).toHaveLength(1)
+        expect(prompts[0].model).toEqual(model)
+        expect(prompts[0].variant).toBe("xhigh")
+        expect(result.metadata.model).toEqual({ ...model, variant: "xhigh" })
+      }),
+    {
+      config: {
+        agent: {
+          "paid-specialist": { mode: "subagent", model: "openrouter/acme/paid", variant: "high" },
+        },
+      },
+    },
+  )
+
 function defer<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
   const promise = new Promise<T>((done) => {
@@ -66,7 +98,7 @@ function defer<T>() {
   return { promise, resolve }
 }
 
-const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
+const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned", model = ref) {
   const session = yield* Session.Service
   const chat = yield* session.create({ title })
   const user = yield* session.updateMessage({
@@ -74,7 +106,7 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
     role: "user",
     sessionID: chat.id,
     agent: "build",
-    model: ref,
+    model,
     time: { created: Date.now() },
   })
   const assistant: SessionV1.Assistant = {
@@ -87,8 +119,8 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned") {
     cost: 0,
     path: { cwd: "/tmp", root: "/tmp" },
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-    modelID: ref.modelID,
-    providerID: ref.providerID,
+    modelID: model.modelID,
+    providerID: model.providerID,
     variant: "xhigh",
     time: { created: Date.now() },
   }

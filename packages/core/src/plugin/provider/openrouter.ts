@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { ModelV2 } from "../../model"
 import { define } from "../internal"
 import { OpenRouterOAuth } from "../../oauth/openrouter"
+import { OPENROUTER_ACCOUNT_COPY } from "../../free-model-choice"
 
 export const OpenRouterPlugin = define({
   id: "openrouter",
@@ -23,8 +24,7 @@ export const OpenRouterPlugin = define({
             yield* Effect.addFinalizer(() => Effect.sync(() => attempt.close()))
             return {
               url: attempt.url,
-              instructions:
-                "Uses your own free OpenRouter account: 50 requests a day, or 1,000 if you've ever added $10 of OpenRouter credits. Finish connecting in a browser on this computer. For a remote engine, forward the loopback callback port or use an API key.",
+              instructions: `${OPENROUTER_ACCOUNT_COPY} Finish connecting in a browser on this computer. For a remote engine, forward the loopback callback port or use an API key.`,
               mode: "auto" as const,
               callback: Effect.tryPromise({ try: () => attempt.key, catch: (cause) => cause }).pipe(
                 Effect.map((key) => ({ type: "key" as const, key })),
