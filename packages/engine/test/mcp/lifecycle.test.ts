@@ -66,6 +66,8 @@ const stdioOptsByName = new Map<string, any>()
 // Local server commands whose connect, or whose tool listing, never finishes
 const hangingConnects = new Set<string>()
 const hangingListings = new Set<string>()
+// Local server commands whose tool listing has started and is hanging
+const stuckListings = new Set<string>()
 // Clients that connected and have not been closed yet
 const liveClients = new Set<{ transport: any }>()
 
@@ -204,7 +206,10 @@ void mock.module("@modelcontextprotocol/sdk/client/index.js", () => ({
 
     async listTools(params?: { cursor?: string }) {
       if (this._state) this._state.listToolsCalls++
-      if (hangingListings.has(this.transport?.command)) return new Promise<never>(() => {})
+      if (hangingListings.has(this.transport?.command)) {
+        stuckListings.add(this.transport.command)
+        return new Promise<never>(() => {})
+      }
       if (this._state?.listToolsShouldFail) {
         throw new Error(this._state.listToolsError)
       }
@@ -282,6 +287,7 @@ beforeEach(() => {
   transportCloseCount = 0
   hangingConnects.clear()
   hangingListings.clear()
+  stuckListings.clear()
   liveClients.clear()
 })
 
@@ -618,9 +624,15 @@ it.instance(
         const first = yield* mcp.status().pipe(Effect.forkChild)
         // Wait until "fast" is fully connected and "listing" is connected but still listing its tools.
         yield* Effect.sleep("5 millis").pipe(
-          Effect.repeat({ until: () => liveCommands().join() === "fast,listing", times: 200 }),
+          Effect.repeat({
+            until: () => liveCommands().join() === "fast,listing" && stuckListings.has("listing"),
+            times: 200,
+          }),
         )
         yield* Effect.sleep("20 millis")
+        // The interrupt must land on a half-started load, or this test proves nothing.
+        expect(liveCommands()).toEqual(["fast", "listing"])
+        expect([...stuckListings]).toEqual(["listing"])
         yield* Fiber.interrupt(first)
 
         hangingConnects.clear()
