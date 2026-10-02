@@ -1618,9 +1618,155 @@ html[data-vector-navigation-resizing] * {
   box-shadow: var(--vx-shadow-float) !important;
 }
 
-[data-component="dialog-v2"] [data-slot="dialog-container"] {
-  border-color: var(--vx-line-strong) !important;
-  box-shadow: var(--vx-shadow-float) !important;
+/* Vector dialogs. One look for every dialog except Settings, which has its own
+ * shell: a violet-tinted panel with the signature gradient as a hairline
+ * across the top, a footer tray for the actions, a gradient primary button
+ * and one soft violet ring on fields. The library's flat grey panel, grey
+ * primary button and doubled focus ring are what made dialogs look generic. */
+[data-component="dialog-overlay"] {
+  background-color: rgba(9, 7, 13, 0.6) !important;
+  backdrop-filter: blur(6px) saturate(120%);
+}
+
+:root[data-vector-theme="light"] [data-component="dialog-overlay"] {
+  background-color: rgba(20, 16, 30, 0.24) !important;
+}
+
+:is(
+    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-container"],
+    [data-component="dialog"] [data-slot="dialog-content"]
+  ) {
+  position: relative;
+  border: 1px solid var(--vx-line-strong) !important;
+  border-radius: 14px !important;
+  background:
+    radial-gradient(120% 96px at 50% 0%, var(--vx-purple-soft), transparent 72%),
+    var(--vx-surface) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    var(--vx-shadow-float) !important;
+}
+
+:is(
+    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-container"],
+    [data-component="dialog"] [data-slot="dialog-content"]
+  )::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  z-index: 1;
+  height: 1px;
+  background: var(--vx-gradient);
+  mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+  pointer-events: none;
+}
+
+[data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-header"] {
+  padding: 18px 20px 14px !important;
+}
+
+:is([data-component="dialog-v2"]:not([data-variant="settings"]), [data-component="dialog"]) [data-slot="dialog-title"] {
+  color: var(--vx-text) !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  line-height: 22px !important;
+  letter-spacing: -0.01em !important;
+}
+
+:is([data-component="dialog-v2"]:not([data-variant="settings"]), [data-component="dialog"]) [data-slot="dialog-description"] {
+  color: var(--vx-text-muted) !important;
+  font-size: 13px !important;
+  line-height: 19px !important;
+}
+
+[data-component="dialog-v2"]:not([data-variant="settings"]) [data-slot="dialog-footer"] {
+  align-items: center !important;
+  margin-top: 12px;
+  padding: 12px 16px !important;
+  border-top: 1px solid var(--vx-line);
+  background: color-mix(in srgb, var(--vx-canvas) 62%, transparent);
+}
+
+/* Footer actions read as buttons, not text: a quiet outlined secondary and a
+ * gradient primary, both one size up from the library's 28px. */
+[data-component="dialog-v2"]:not([data-variant="settings"])
+  [data-slot="dialog-footer"]
+  [data-component="button-v2"] {
+  height: 32px !important;
+  padding: 0 14px !important;
+  border-radius: 8px !important;
+}
+
+[data-component="dialog-v2"]:not([data-variant="settings"])
+  [data-slot="dialog-footer"]
+  [data-component="button-v2"][data-variant="ghost"] {
+  border: 1px solid var(--vx-line-strong) !important;
+  color: var(--vx-text-subtle) !important;
+}
+
+[data-component="dialog-v2"]:not([data-variant="settings"])
+  [data-slot="dialog-footer"]
+  [data-component="button-v2"][data-variant="ghost"]:hover:not(:disabled) {
+  background: var(--vx-control) !important;
+  color: var(--vx-text) !important;
+}
+
+:is(
+    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-component="button-v2"][data-variant="contrast"],
+    [data-component="dialog"] [data-component="button"][data-variant="primary"]
+  ) {
+  border-color: transparent !important;
+  background: var(--vx-gradient) !important;
+  color: #fff !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 0 0 1px rgba(118, 89, 208, 0.55),
+    0 6px 18px -8px rgba(118, 89, 208, 0.9) !important;
+}
+
+:is(
+    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-component="button-v2"][data-variant="contrast"],
+    [data-component="dialog"] [data-component="button"][data-variant="primary"]
+  ):hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+:is(
+    [data-component="dialog-v2"]:not([data-variant="settings"]) [data-component="button-v2"][data-variant="contrast"],
+    [data-component="dialog"] [data-component="button"][data-variant="primary"]
+  ):disabled {
+  opacity: 0.45;
+  box-shadow: none !important;
+}
+
+[data-component="dialog"] [data-component="button"][data-variant="primary"] [data-slot="icon-svg"] {
+  color: #fff !important;
+}
+
+/* Fields: the dialog's own text inputs, the library text field and the v2 text
+ * input all share one surface and one ring. */
+.vector-dialog-field,
+[data-component="dialog"] [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"],
+[data-component="dialog-v2"]:not([data-variant="settings"])
+  [data-slot="dialog-content"]:not(.vector-select-model-dialog)
+  [data-component="text-input-v2"] {
+  border: 1px solid var(--vx-line-strong) !important;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--vx-canvas) 70%, transparent) !important;
+  transition:
+    border-color 140ms var(--vx-ease),
+    box-shadow 140ms var(--vx-ease);
+}
+
+.vector-dialog-field:focus,
+[data-component="dialog"] [data-component="input"][data-variant="normal"] [data-slot="input-wrapper"]:focus-within:not(:has([data-readonly])),
+[data-component="dialog-v2"]:not([data-variant="settings"])
+  [data-slot="dialog-content"]:not(.vector-select-model-dialog)
+  [data-component="text-input-v2"]:focus-within {
+  border-color: var(--vx-purple) !important;
+  box-shadow: 0 0 0 3px var(--vx-purple-soft) !important;
 }
 
 [data-component="dialog-v2"][data-variant="settings"].settings-v2-dialog [data-slot="dialog-container"] {

@@ -991,12 +991,12 @@ export function MessageTimeline(props: {
         <DialogHeader>
           <DialogTitleGroup title={language.t("common.rename")} description="Give this project session a clear name." />
         </DialogHeader>
-        <form class="flex min-w-[360px] flex-col gap-4 px-5 pb-2" onSubmit={submit}>
+        <form class="flex min-w-[360px] flex-col gap-4 self-stretch px-5 pb-2" onSubmit={submit}>
           <input
             ref={input}
             value={value()}
             onInput={(event) => setValue(event.currentTarget.value)}
-            class="h-10 w-full rounded-xl border border-[color:var(--vx-line)] bg-black/30 px-3 text-sm text-white outline-none transition focus:border-[#9b6cff]/70"
+            class="vector-dialog-field h-10 w-full px-3 text-sm text-[color:var(--vx-text)] outline-none"
             aria-label={language.t("common.rename")}
           />
         </form>

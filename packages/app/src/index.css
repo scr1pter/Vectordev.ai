@@ -286,6 +286,14 @@
     outline: none !important;
   }
 
+  /* Dialog fields draw their own violet ring (vector-premium.css); the outline above
+     would add a second ring around it. Settings keeps the outline. */
+  html[data-vector-focus-indicators="true"]
+    :is([data-component="dialog-v2"]:not([data-variant="settings"]), [data-component="dialog"])
+    :is(input:not([type="checkbox"], [type="radio"], [type="range"]), textarea):focus-visible {
+    outline: none !important;
+  }
+
   /* The isolated-agent mission fields share one focus-within surface. Keep the
      accessible halo on that surface instead of drawing a second bright box
      around the individual input or textarea. */
