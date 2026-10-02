@@ -185,6 +185,55 @@ describe("pty", () => {
     }),
   )
 
+  ptyTest("keeps Vector's internal secrets out of the terminal while preserving the user's environment", () =>
+    Effect.gen(function* () {
+      const pty = yield* Pty.Service
+      // The desktop and the engine put these into their own process environment at startup.
+      const injected = {
+        VECTOR_CREDENTIAL_KEY: "synthetic-vault-key",
+        VECTOR_SERVER_PASSWORD: "synthetic-server-password",
+        VECTOR_SERVER_GUEST_PASSWORD: "synthetic-guest-password",
+        VECTOR_MCP_AUTH_KEY: "synthetic-mcp-key",
+        VECTOR_BROWSER_BRIDGE_TOKEN: "synthetic-bridge-token",
+        VECTOR_PTY_TEST_USER_VALUE: "kept-from-process",
+      }
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          const previous = Object.fromEntries(Object.keys(injected).map((key) => [key, process.env[key]]))
+          Object.assign(process.env, injected)
+          return previous
+        }),
+        (previous) =>
+          Effect.sync(() =>
+            Object.entries(previous).forEach(([key, value]) => {
+              if (value === undefined) delete process.env[key]
+              if (value !== undefined) process.env[key] = value
+            }),
+          ),
+      )
+      const info = yield* Effect.acquireRelease(
+        pty.create({
+          command: "/usr/bin/env",
+          args: [
+            "sh",
+            "-c",
+            'printf "leak=%s%s%s%s%s|user=%s|input=%s|path=%s|term=%s|marker=%s|END\\n" "$VECTOR_CREDENTIAL_KEY" "$VECTOR_SERVER_PASSWORD" "$VECTOR_SERVER_GUEST_PASSWORD" "$VECTOR_MCP_AUTH_KEY" "$VECTOR_BROWSER_BRIDGE_TOKEN" "$VECTOR_PTY_TEST_USER_VALUE" "$VECTOR_PTY_TEST_INPUT_VALUE" "${PATH:+set}" "$TERM" "$VECTOR_TERMINAL"; cat',
+          ],
+          cwd: "/tmp",
+          env: { VECTOR_PTY_TEST_INPUT_VALUE: "kept-from-input", VECTOR_CLOUD_TOKEN: "synthetic-cloud-token" },
+        }),
+        (created) => pty.remove(created.id).pipe(Effect.ignore),
+      )
+      const attached = yield* attachCollecting(info.id)
+      const output = yield* waitForOutput(attached.output, "|END")
+
+      expect(output).toContain(
+        "leak=|user=kept-from-process|input=kept-from-input|path=set|term=xterm-256color|marker=1|END",
+      )
+      expect(output).not.toContain("synthetic")
+    }),
+  )
+
   ptyTest("notifies attachments with the exit code and rejects attach after exit", () =>
     Effect.gen(function* () {
       const pty = yield* Pty.Service

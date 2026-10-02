@@ -7,6 +7,7 @@ import { Pty } from "@vectordevai/schema/pty"
 import { Config } from "./config"
 import { EventV2 } from "./event"
 import { Location } from "./location"
+import { untrustedChildEnvironment } from "./child-environment"
 import { PtyID } from "./pty/schema"
 import { Shell } from "./shell"
 import { lazy } from "./util/lazy"
@@ -167,12 +168,13 @@ const layer = Layer.effect(
       const command = input.command || Shell.preferred(Config.latest(yield* config.entries(), "shell"))
       const args = Shell.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
-      const env = {
-        ...process.env,
-        ...input.env,
+      // The terminal runs whatever the user or a project script launches, so it must not inherit
+      // Vector's vault key, server passwords or bridge tokens that live in this process.
+      const env: Record<string, string> = {
+        ...untrustedChildEnvironment(process.env, input.env),
         TERM: "xterm-256color",
         VECTOR_TERMINAL: "1",
-      } as Record<string, string>
+      }
       if (process.platform === "win32") {
         env.LC_ALL = "C.UTF-8"
         env.LC_CTYPE = "C.UTF-8"
