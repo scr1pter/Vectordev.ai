@@ -294,21 +294,19 @@ const layer = Layer.effect(
       return result
     })
 
-    // Uninterruptible so a caller stopped during the first load cannot leave the interruption cached for every
-    // later caller.
     const [cachedGlobal, invalidateGlobal] = yield* Effect.cachedInvalidateWithTTL(
       loadGlobal().pipe(
         Effect.tapError((error) =>
           Effect.logError("failed to load global config, using defaults", { error: String(error) }),
         ),
         Effect.orElseSucceed((): Info => ({})),
-        Effect.uninterruptible,
       ),
       Duration.infinity,
     )
 
     const getGlobal = Effect.fn("Config.getGlobal")(function* () {
-      return yield* cachedGlobal
+      // Mask cache publication too: protecting only the loader lets its pending interruption become the cached exit.
+      return yield* Effect.uninterruptible(cachedGlobal)
     })
 
     const ensureGitignore = Effect.fn("Config.ensureGitignore")(function* (dir: string) {

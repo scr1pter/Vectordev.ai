@@ -1,10 +1,11 @@
 import { describe, expect, beforeAll, beforeEach, afterAll } from "bun:test"
-import { Effect, Layer, Logger, References, Ref } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Logger, References, Ref } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { Global } from "@vectordevai/core/global"
+import { FSUtil } from "@vectordevai/core/fs-util"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import { InstallationChannel, InstallationVersion } from "@vectordevai/core/installation/version"
 import { Hash } from "@vectordevai/core/util/hash"
@@ -154,6 +155,46 @@ const initialState: MockState = {
 }
 
 describe("ModelCatalog Service", () => {
+  it.live("an interrupted initial load publishes its successful cache before cancellation", () =>
+    Effect.gen(function* () {
+      yield* writeCache(fixture)
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let reads = 0
+      const filesystem = Layer.effect(
+        FSUtil.Service,
+        Effect.gen(function* () {
+          const fs = yield* FSUtil.Service
+          return FSUtil.Service.of({
+            ...fs,
+            readJson: (file) =>
+              Effect.gen(function* () {
+                reads++
+                yield* Deferred.succeed(started, undefined)
+                yield* Deferred.await(release)
+                return yield* fs.readJson(file)
+              }),
+          })
+        }),
+      ).pipe(Layer.provide(AppNodeBuilder.build(FSUtil.node)))
+      yield* Effect.gen(function* () {
+        const catalog = yield* ModelCatalog.Service
+        const first = yield* catalog.get().pipe(Effect.forkChild)
+        yield* Deferred.await(started)
+        const cancellation = yield* Fiber.interrupt(first).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(cancellation)
+        expect(Exit.hasInterrupts(yield* Fiber.await(first))).toBe(true)
+
+        const loaded = yield* catalog.get().pipe(Effect.exit)
+        expect(Exit.isSuccess(loaded)).toBe(true)
+        if (Exit.isSuccess(loaded)) expect(loaded.value).toEqual(fixture)
+        expect(yield* catalog.get()).toEqual(fixture)
+        expect(reads).toBe(1)
+      }).pipe(Effect.provide(Layer.fresh(AppNodeBuilder.build(ModelCatalog.node, [[FSUtil.node, filesystem]]))))
+    }),
+  )
+
   it.live("get() returns providers from disk when cache file exists", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
