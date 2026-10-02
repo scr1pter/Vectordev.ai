@@ -1,4 +1,4 @@
-// Runs only in an isolated Windows CI runner: installs an ephemeral fixture CA and restores hosts/trust in finally.
+// Runs only in a disposable GitHub-hosted Windows runner: restores hosts and removes its exact fixture CA.
 import assert from "node:assert/strict"
 import { createHash, randomBytes } from "node:crypto"
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
@@ -7,12 +7,23 @@ import path from "node:path"
 import { WindowsRemoval } from "../src/installation/windows-remove"
 import { WindowsPowerShell } from "../src/installation/windows-powershell"
 
-if (process.platform !== "win32" || process.env.CI !== "true" || process.env.VECTOR_INSTALLER_WINDOWS_FIXTURE !== "1")
+if (
+  process.platform !== "win32" ||
+  process.env.CI !== "true" ||
+  process.env.GITHUB_ACTIONS !== "true" ||
+  process.env.RUNNER_ENVIRONMENT !== "github-hosted" ||
+  process.env.VECTOR_INSTALLER_WINDOWS_FIXTURE !== "1"
+)
   throw new Error(
-    "This fixture requires the isolated Windows CI job; it changes temporary certificate trust and hosts mappings.",
+    "This fixture requires the disposable GitHub-hosted Windows CI job; it changes temporary certificate trust and hosts mappings.",
   )
 
 const root = await mkdtemp(path.join(os.tmpdir(), "vector installer '"))
+await using temporaryDirectory = {
+  async [Symbol.asyncDispose]() {
+    await rm(root, { recursive: true, force: true })
+  },
+}
 const installer = path.resolve(import.meta.dir, "../../web/public/install.ps1")
 const installDir = path.join(root, "installed with spaces")
 const files = path.join(root, "archive")
@@ -101,6 +112,10 @@ async function waitStatus(file: string, expected: string) {
 
 const certificate = path.join(root, "certificate.pem")
 const key = path.join(root, "key.pem")
+const administrator = await ps(
+  "$ErrorActionPreference = 'Stop'; $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()); if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'The disposable Windows installer fixture requires administrator access to LocalMachine Root.' }",
+)
+assert.equal(administrator.code, 0, administrator.stderr)
 const generated = await run([
   openssl,
   "req",
@@ -122,18 +137,30 @@ const generated = await run([
 assert.equal(generated.code, 0, generated.stderr)
 const der = path.join(root, "certificate.cer")
 assert.equal((await run([openssl, "x509", "-in", certificate, "-outform", "der", "-out", der])).code, 0)
-const trusted = await ps(
-  `(Import-Certificate -FilePath ${quote(der)} -CertStoreLocation 'Cert:\\CurrentUser\\Root' -ErrorAction Stop).Thumbprint`,
+const thumbprint = createHash("sha1")
+  .update(await Bun.file(der).bytes())
+  .digest("hex")
+  .toUpperCase()
+const certificatePath = `Cert:\\LocalMachine\\Root\\${thumbprint}`
+const absent = await ps(
+  `$ErrorActionPreference = 'Stop'; if (Test-Path -LiteralPath ${quote(certificatePath)}) { throw 'The fixture certificate already exists; refusing to take ownership.' }`,
 )
-assert.equal(trusted.code, 0, trusted.stderr)
-const thumbprint = trusted.stdout.trim()
-assert.match(thumbprint, /^[A-Fa-f0-9]{40}$/)
+assert.equal(absent.code, 0, absent.stderr)
+// Register before import so partial failures still remove only this newly generated certificate.
 await using trustedCertificate = {
   async [Symbol.asyncDispose]() {
-    const removed = await ps(`Remove-Item -LiteralPath 'Cert:\\CurrentUser\\Root\\${thumbprint}' -ErrorAction Stop`)
+    const removed = await ps(
+      `$ErrorActionPreference = 'Stop'; if (Test-Path -LiteralPath ${quote(certificatePath)}) { Remove-Item -LiteralPath ${quote(certificatePath)} -ErrorAction Stop }; if (Test-Path -LiteralPath ${quote(certificatePath)}) { throw 'The fixture certificate was not removed.' }`,
+    )
     assert.equal(removed.code, 0, removed.stderr)
   },
 }
+// CurrentUser Root can require UI even on CI; the disposable hosted runner is an administrator.
+const trusted = await ps(
+  `(Import-Certificate -FilePath ${quote(der)} -CertStoreLocation 'Cert:\\LocalMachine\\Root' -ErrorAction Stop).Thumbprint`,
+)
+assert.equal(trusted.code, 0, trusted.stderr)
+assert.equal(trusted.stdout.trim().toUpperCase(), thumbprint)
 const server = Bun.serve({
   hostname: "127.0.0.1",
   port: 443,
@@ -320,6 +347,5 @@ try {
   server.stop(true)
   await writeFile(hostsPath, originalHosts)
   await Bun.write(path.resolve("vector-windows-installer-evidence.json"), JSON.stringify(evidence, null, 2))
-  await rm(root, { recursive: true, force: true })
 }
 console.log("Windows standalone installer acceptance passed", evidence)
