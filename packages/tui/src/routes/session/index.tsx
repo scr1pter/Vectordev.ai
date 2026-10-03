@@ -185,8 +185,9 @@ export function Session() {
       .toSorted((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   })
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
+  // A subagent's own tasks cannot move to the background, so its view offers no way to try.
   const foregroundTasks = createMemo(() =>
-    sync.data.capabilities.experimentalBackgroundSubagents
+    sync.data.capabilities.experimentalBackgroundSubagents && !session()?.parentID
       ? messages().flatMap((message) =>
           (sync.data.part[message.id] ?? []).filter(
             (part): part is ToolPart =>

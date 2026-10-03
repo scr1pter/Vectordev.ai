@@ -1842,6 +1842,48 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("Stop halts the parent before its subagent finishes unwinding, so the parent takes no further step", () =>
+    Effect.gen(function* () {
+      const runState = yield* SessionRunState.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const childStarted = yield* Deferred.make<void>()
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        cancel: (sessionID) => runState.cancel(sessionID),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) return Effect.succeed(reply(input, "noted"))
+          // The subagent is inside a shell command that takes a while to die.
+          const work = Deferred.succeed(childStarted, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Effect.sleep("300 millis")),
+            Effect.as(reply(input, "done")),
+          )
+          return runState.ensureRunning(input.sessionID, Effect.succeed(reply(input, "stopped")), work)
+        },
+      }
+      let steppedAfterStop = false
+      const parent = reply({ sessionID: chat.id, parts: [] } as unknown as SessionPrompt.PromptInput, "stopped")
+      const turn = def
+        .execute(
+          { description: "inspect", prompt: "Inspect.", subagent_type: "general" },
+          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+        )
+        // With the task's result in hand, the parent's loop would send its next provider request.
+        .pipe(
+          Effect.tap(() => Effect.sync(() => (steppedAfterStop = true))),
+          Effect.as(parent),
+        )
+      yield* runState.ensureRunning(chat.id, Effect.succeed(parent), turn).pipe(Effect.forkChild)
+      yield* awaitWithTimeout(Deferred.await(childStarted), "the subagent never started", "2 seconds")
+
+      yield* runState.cancel(chat.id)
+      yield* Effect.sleep("400 millis")
+
+      expect(steppedAfterStop).toBe(false)
+    }),
+  )
+
   background.instance("a task launched while Stop is still cancelling the others is cancelled too", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
@@ -1861,16 +1903,19 @@ describe("tool.task", () => {
           return runState.ensureRunning(input.sessionID, Effect.succeed(reply(input, "stopped")), work)
         },
       }
+      // The parent's run holds the signal its tool calls carry, aborted when the run is interrupted, as llm.stream's is.
+      const signal = new AbortController()
       const parent = reply({ sessionID: chat.id, parts: [] } as unknown as SessionPrompt.PromptInput, "stopped")
-      yield* runState.ensureRunning(chat.id, Effect.succeed(parent), Effect.never).pipe(Effect.forkChild)
+      const run = Effect.never.pipe(Effect.onInterrupt(() => Effect.sync(() => signal.abort())))
+      yield* runState.ensureRunning(chat.id, Effect.succeed(parent), run).pipe(Effect.forkChild)
       const launch = (prompt: string) =>
         def.execute(
           { description: "inspect", prompt, subagent_type: "general", background: true },
-          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+          { ...taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }), abort: signal.signal },
         )
       const first = yield* launch("Inspect the cache.")
 
-      // The parent's stream is still live while Stop waits for the first task to unwind, so it can launch another.
+      // A launch the parent's stream finishes while Stop waits for the first task to unwind.
       const stopping = yield* runState.cancel(chat.id).pipe(Effect.forkChild)
       yield* Effect.sleep("50 millis")
       const late = yield* launch("Inspect the queue.")

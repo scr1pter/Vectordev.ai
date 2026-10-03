@@ -1176,6 +1176,12 @@ const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
+      const result = yield* loop({ sessionID: input.sessionID })
+      // A prompt sent while the session is busy joins the run already going, and that run can end without reading it:
+      // a rejected permission, a content filter or a provider error ends the loop where it is. It is answered now,
+      // unless the run was stopped.
+      if (result.info.id > message.info.id) return result
+      if (result.info.role === "assistant" && SessionV1.AbortedError.isInstance(result.info.error)) return result
       return yield* loop({ sessionID: input.sessionID })
     })
 

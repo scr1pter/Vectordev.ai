@@ -9,7 +9,7 @@ import type { SessionID } from "@/session/schema"
 import { ToolJsonSchema } from "@/tool/json-schema"
 import { ToolRegistry } from "@/tool/registry"
 import { Worktree } from "@/worktree"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -109,6 +109,10 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       params: { sessionID: SessionID }
     }) {
       if (!flags.experimentalBackgroundSubagents) return false
+      // A subagent's own tasks stay in the foreground, as the task tool keeps them: a background result would start a
+      // turn of the subagent after its run ended, which no one reads and stopping the root cannot reach.
+      const session = yield* sessions.get(ctx.params.sessionID).pipe(Effect.option)
+      if (Option.isNone(session) || session.value.parentID) return false
       const jobs = (yield* background.list()).filter(
         (job) =>
           job.type === "task" &&

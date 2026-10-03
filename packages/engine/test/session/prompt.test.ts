@@ -1851,6 +1851,51 @@ it.instance("prompt submitted during an active run is included in the next LLM i
   }),
 )
 
+it.instance("a prompt that joins a run which then stops without reading it is still answered", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const gate = yield* Deferred.make<void>()
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+
+    // The first turn ends on a content filter, which stops the loop where it is.
+    yield* llm.push(reply().wait(deferredAsPromise(gate)).contentFilter())
+    yield* llm.text("second answered")
+
+    const a = yield* prompt
+      .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "first" }] })
+      .pipe(Effect.forkChild)
+    yield* llm.wait(1)
+    yield* waitForBusy(chat.id)
+
+    const id = MessageID.ascending()
+    const b = yield* prompt
+      .prompt({
+        sessionID: chat.id,
+        messageID: id,
+        agent: "build",
+        model: ref,
+        parts: [{ type: "text", text: "second" }],
+      })
+      .pipe(Effect.forkChild)
+    yield* pollWithTimeout(
+      sessions
+        .messages({ sessionID: chat.id })
+        .pipe(
+          Effect.map((msgs) => (msgs.some((msg) => msg.info.role === "user" && msg.info.id === id) ? true : undefined)),
+        ),
+      "timed out waiting for second prompt to save",
+    )
+    yield* Deferred.succeed(gate, void 0)
+    yield* Effect.all([Fiber.await(a), Fiber.await(b)])
+
+    expect(yield* llm.calls).toBe(2)
+    const last = (yield* sessions.messages({ sessionID: chat.id })).at(-1)
+    expect(last?.info.role === "assistant" && last.info.parentID).toBe(id)
+  }),
+)
+
 it.instance("assertNotBusy fails with BusyError when loop running", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

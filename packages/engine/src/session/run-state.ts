@@ -80,16 +80,14 @@ const layer = Layer.effect(
     })
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
-      yield* cancelBackgroundJobs(background, sessionID)
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(sessionID)
-      if (!existing) {
-        yield* status.set(sessionID, { type: "idle" })
-        return
-      }
-      yield* existing.cancel
-      // The parent's stream stays live while the sweep above waits for running subagents to unwind, so a task it
-      // launched in that window is only reached once the runner is cancelled. Later launches see the aborted signal.
+      // The runner stops first. Sweeping the subagents first left the parent's loop live while they unwound, so a
+      // foreground task call could return its "stopped" result and the parent take another step, or launch another
+      // task, after Stop. Interrupting the runner cancels the foreground task calls it is waiting on and aborts the
+      // signal a launch still in progress checks; the sweep then stops the background ones.
+      if (existing) yield* existing.cancel
+      else yield* status.set(sessionID, { type: "idle" })
       yield* cancelBackgroundJobs(background, sessionID)
     })
 
