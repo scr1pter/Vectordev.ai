@@ -12,6 +12,11 @@ import PROMPT_PLAN from "./prompt/plan.txt"
 import BUILD_SWITCH from "./prompt/build-switch.txt"
 import PLAN_MODE from "./prompt/plan-mode.txt"
 
+// Later messages of a planning stretch point back to the full reminder its first message carries, rather than repeating
+// it on every message of the history.
+export const PLAN_STILL_ACTIVE =
+  "<system-reminder>Plan mode is still active: the read-only rules of the plan mode reminder above still apply.</system-reminder>"
+
 export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   messages: SessionV1.WithParts[]
   agent: Agent.Info
@@ -31,10 +36,13 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
       if (message.info.role !== "user") return
       const agent = message === userMessage ? input.agent.name : message.info.agent
       const previous = input.messages.slice(0, index).findLast((msg) => msg.info.role === "assistant")
+      const afterPlan = previous?.info.role === "assistant" && previous.info.agent === "plan"
       const text =
         agent === "plan"
-          ? PROMPT_PLAN
-          : agent === "build" && previous?.info.role === "assistant" && previous.info.agent === "plan"
+          ? afterPlan
+            ? PLAN_STILL_ACTIVE
+            : PROMPT_PLAN
+          : agent === "build" && afterPlan
             ? BUILD_SWITCH
             : undefined
       if (!text) return

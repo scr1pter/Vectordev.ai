@@ -147,7 +147,8 @@ type FileCandidate = {
 
 type PersistedIndexes = Record<string, ContextProjectIndex>
 
-const TRIVIAL_TASK = /^(?:hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|good morning|good afternoon|good evening)[!.?\s]*$/i
+const TRIVIAL_TASK =
+  /^(?:hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|good morning|good afternoon|good evening)[!.?\s]*$/i
 const COMPLEX_TERMS = [
   /\barchitecture\b/i,
   /\bmigrat(?:e|ion)\b/i,
@@ -161,7 +162,8 @@ const COMPLEX_TERMS = [
   /\bsecurity\b/i,
   /\b(?:build|implement|fix|test) (?:everything|all|the entire|the whole)\b/i,
 ]
-const ACTION_TERMS = /\b(?:add|build|change|debug|delete|edit|fix|implement|improve|investigate|refactor|remove|rename|repair|test|update)\b/i
+const ACTION_TERMS =
+  /\b(?:add|build|change|debug|delete|edit|fix|implement|improve|investigate|refactor|remove|rename|repair|test|update)\b/i
 
 export function classifyTaskDifficulty(task: string): TaskDifficulty {
   const text = task.trim()
@@ -329,9 +331,7 @@ export async function buildContextIndex(root: string, force = false): Promise<Co
 }
 
 function taskTerms(task: string) {
-  return [...new Set(task.toLowerCase().match(/[a-z_$][a-z0-9_$-]{2,}/g) ?? [])].filter(
-    (term) => !STOP_WORDS.has(term),
-  )
+  return [...new Set(task.toLowerCase().match(/[a-z_$][a-z0-9_$-]{2,}/g) ?? [])].filter((term) => !STOP_WORDS.has(term))
 }
 
 function explicitPaths(task: string) {
@@ -435,10 +435,16 @@ async function keywordContextBudgetPack(
       addScore(file.path, 1_000, "explicitly named in the task")
     }
     const pathMatches = terms.filter((term) => pathLower.includes(term))
-    if (pathMatches.length) addScore(file.path, pathMatches.length * 32, `path matches ${pathMatches.slice(0, 3).join(", ")}`)
+    if (pathMatches.length)
+      addScore(file.path, pathMatches.length * 32, `path matches ${pathMatches.slice(0, 3).join(", ")}`)
     const symbolMatches = terms.filter((term) => file.symbols.some((symbol) => symbol.toLowerCase() === term))
-    if (symbolMatches.length) addScore(file.path, symbolMatches.length * 24, `defines ${symbolMatches.slice(0, 3).join(", ")}`)
-    if (/^(package\.json|pyproject\.toml|cargo\.toml|go\.mod|vite\.config\.|next\.config\.|src\/.*(?:app|main|index)\.)/i.test(file.path)) {
+    if (symbolMatches.length)
+      addScore(file.path, symbolMatches.length * 24, `defines ${symbolMatches.slice(0, 3).join(", ")}`)
+    if (
+      /^(package\.json|pyproject\.toml|cargo\.toml|go\.mod|vite\.config\.|next\.config\.|src\/.*(?:app|main|index)\.)/i.test(
+        file.path,
+      )
+    ) {
       addScore(file.path, 5, "project entry/configuration file")
     }
   }
@@ -484,15 +490,18 @@ async function keywordContextBudgetPack(
   }
 }
 
+// The agent gets a short starting point, not a reading list: telling it to read tens of thousands of tokens of
+// low-precision picks first costs more than the searches it saves.
+const AGENT_FILE_HINTS = 12
+
 export function formatContextBudgetForAgent(pack: ContextBudgetPack) {
   if (!pack.files.length) {
-    return `Vector indexed ${pack.indexedFileCount} source files but found no high-confidence task matches. Inspect the repository structure before selecting files.`
+    return `Vector indexed ${pack.indexedFileCount} source files but found no high-confidence task matches.`
   }
   return [
     `Vector local context index: ${pack.architectureSummary}`,
-    `Context budget: inspect these ${pack.selectedFileCount} files first (about ${pack.estimatedTokens.toLocaleString()} tokens if all are read; budget ${pack.tokenBudget.toLocaleString()}):`,
-    ...pack.files.map((file) => `- ${file.path} — ${file.reason}`),
-    "You may inspect additional files only when imports, references, test failures, or the task prove they are needed.",
+    "Likely relevant files, as a starting point; search further whenever the task leads elsewhere:",
+    ...pack.files.slice(0, AGENT_FILE_HINTS).map((file) => `- ${file.path} — ${file.reason}`),
   ].join("\n")
 }
 
@@ -509,25 +518,21 @@ export async function prepareAgentTask(root: string, task: string): Promise<Agen
 
   const budget = contextBudgetForDifficulty(difficulty)
   const context = await createContextBudgetPack(root, task, budget)
+  // Project memory, the browser and when to delegate are covered by the engine's own prompt, which knows what is
+  // available to the agent; repeating them here only adds tokens to the message.
   const workflow =
     difficulty === "complex"
       ? [
           "Create and maintain a visible implementation plan before broad edits.",
-          "Use independent subagents for parallel codebase exploration or review when that reduces risk.",
           "After editing, run the strongest relevant build, typecheck, lint, or test commands available.",
-          "If validation or the controlled browser reports a failure, diagnose from the evidence, repair it, and validate again. Allow up to two evidence-driven repair passes.",
-          "Use the controlled browser when UI behavior matters: inspect the live page, console, runtime errors, and failed requests, then retest after repairs.",
+          "If validation reports a failure, diagnose from the evidence, repair it, and validate again. Allow up to two evidence-driven repair passes.",
         ]
       : difficulty === "standard"
         ? [
             "Write a concise implementation plan, keep it updated while working, and avoid unrelated edits.",
             "Run a targeted validation after editing. If it fails, make one evidence-driven repair pass and rerun it.",
-            "Use the controlled browser for user-facing behavior when it is attached in Preview.",
           ]
-        : [
-            "Inspect only the most relevant files first and keep the change tightly scoped.",
-            "Run a targeted syntax, type, or test check when code changes.",
-          ]
+        : ["Keep the change tightly scoped and run a targeted syntax, type, or test check when code changes."]
 
   return {
     difficulty,
@@ -539,8 +544,6 @@ export async function prepareAgentTask(root: string, task: string): Promise<Agen
       `<vector_task_intelligence difficulty="${difficulty}" retry_limit="${difficulty === "complex" ? 2 : difficulty === "standard" ? 1 : 0}">`,
       formatContextBudgetForAgent(context),
       ...workflow,
-      "Read .vector/BRAIN.md when present. After a successful meaningful task, update it only with durable architecture decisions, accepted conventions, user corrections, or recurring failure lessons; never store secrets or routine narration.",
-      "Treat this index as a starting map, not a hard boundary: expand context when imports, references, errors, or test evidence require it.",
       "</vector_task_intelligence>",
     ].join("\n"),
   }

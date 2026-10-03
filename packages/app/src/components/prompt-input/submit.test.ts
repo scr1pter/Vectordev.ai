@@ -546,7 +546,7 @@ describe("follow-up optimistic echo", () => {
     }
   }
 
-  const send = async (draft: Partial<import("./submit").FollowupDraft> = {}) => {
+  const send = async (draft: Partial<import("./submit").FollowupDraft> = {}, history: { role: string }[] = []) => {
     const { sendFollowupDraft } = await import("./submit")
     // One ordered log, so a test also sees when the echo happens relative to the request.
     const steps: Step[] = []
@@ -561,7 +561,7 @@ describe("follow-up optimistic echo", () => {
       } as unknown as SendInput["client"],
       serverSync: { session: { set: () => undefined } } as unknown as SendInput["serverSync"],
       sync: {
-        data: { command: [] },
+        data: { command: [], message: { "session-1": history } },
         session: {
           optimistic: {
             add: (value: { parts: SentPart[] }) => void steps.push({ kind: "echo", parts: value.parts }),
@@ -614,6 +614,10 @@ describe("follow-up optimistic echo", () => {
 
   test("sends exactly the echoed parts when nothing is added", async () => {
     expectOneEchoBeforeRequest(await send(), 0)
+  })
+
+  test("adds the desktop's file map only before the session's first reply", async () => {
+    expectOneEchoBeforeRequest(await withDesktopContext(() => send({}, [{ role: "user" }, { role: "assistant" }])), 0)
   })
 })
 

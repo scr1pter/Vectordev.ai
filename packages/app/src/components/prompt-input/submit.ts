@@ -217,8 +217,13 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
+    // The file map is a starting point for a session. On a later message it would stay in the history and be sent
+    // again on every request, while the agent already knows the code it has read.
+    const replied = (input.sync.data.message?.[input.draft.sessionID] ?? []).some(
+      (message) => message.role === "assistant",
+    )
     const preparation =
-      difficulty === "trivial"
+      difficulty === "trivial" || replied
         ? undefined
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
     const syntheticText = [

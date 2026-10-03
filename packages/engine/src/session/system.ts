@@ -273,6 +273,9 @@ const layer = Layer.effect(
         ].filter((part): part is string => part !== undefined)
         // Without a tools list every policy is sent, as for callers that do not know what is offered.
         const offered = (id: string) => options?.tools === undefined || options.tools.includes(id)
+        // Read-only agents such as explore and review cannot change the project or stop processes, so the
+        // implementation loop and process-safety rules are not theirs to follow.
+        const changes = ["edit", "write", "apply_patch"].some(offered)
         const stable = [
           [
             `You are Vector, an AI coding workspace for planning, editing, reviewing, and running software projects.`,
@@ -280,7 +283,7 @@ const layer = Layer.effect(
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
           ].join("\n"),
           subagentPolicy(options?.subagents ?? ALL_SUBAGENTS),
-          COMPLETION_POLICY,
+          changes && COMPLETION_POLICY,
           offered("browser") &&
             [
               "<browser_engineering_policy>",
@@ -300,13 +303,14 @@ const layer = Layer.effect(
               "Use a directly named provider such as Vercel, Netlify, or Supabase only when the user explicitly requests that provider.",
               "</vector_cloud_policy>",
             ].join("\n"),
-          [
-            "<process_safety_policy>",
-            "Never stop, kill, or replace a process unless you started it during the current task or the user explicitly approved stopping that specific process.",
-            "When a preferred development port is occupied, choose another available port and report it instead of terminating the existing listener.",
-            "Treat broad kill commands, PID discovery pipelines followed by kill, and process-name termination as destructive host actions requiring explicit user approval.",
-            "</process_safety_policy>",
-          ].join("\n"),
+          changes &&
+            [
+              "<process_safety_policy>",
+              "Never stop, kill, or replace a process unless you started it during the current task or the user explicitly approved stopping that specific process.",
+              "When a preferred development port is occupied, choose another available port and report it instead of terminating the existing listener.",
+              "Treat broad kill commands, PID discovery pipelines followed by kill, and process-name termination as destructive host actions requiring explicit user approval.",
+              "</process_safety_policy>",
+            ].join("\n"),
           LOCAL_MEMORY_POLICY,
           [
             "<vector_project_memory>",

@@ -75,4 +75,18 @@ describe("session reminders", () => {
       expect(texts(second[4])).toEqual([])
     }),
   )
+
+  it.instance("a planning stretch carries the full plan reminder once, then a short pointer", () =>
+    Effect.gen(function* () {
+      const history = [user("plan"), assistant("plan"), user("plan"), assistant("plan"), user("plan")]
+      const applied = yield* SessionReminders.apply({
+        messages: fresh(history),
+        agent: { name: "plan" } as Agent.Info,
+        session: { id: sessionID } as Session.Info,
+      })
+      expect(texts(applied[0])).toEqual([PROMPT_PLAN])
+      expect(texts(applied[2])).toEqual([SessionReminders.PLAN_STILL_ACTIVE])
+      expect(texts(applied[4])).toEqual([SessionReminders.PLAN_STILL_ACTIVE])
+    }),
+  )
 })

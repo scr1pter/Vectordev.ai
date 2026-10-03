@@ -802,7 +802,34 @@ it.instance(
       // The browser and cloud tools are not offered outside the desktop, so their policies are left out too.
       expect(body).not.toContain("<browser_engineering_policy>")
       expect(body).not.toContain("<vector_cloud_policy>")
+      expect(body).toContain("<completion_policy>")
     }),
+  15_000,
+)
+
+it.instance(
+  "an agent that may not use the browser tool gets no browser policy, even where the tool exists",
+  () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        process.env.VECTOR_BROWSER_BRIDGE_URL = "http://127.0.0.1:1"
+        process.env.VECTOR_BROWSER_BRIDGE_TOKEN = "test"
+      }),
+      () =>
+        Effect.gen(function* () {
+          // explore denies every tool but its read-only set, browser included.
+          const body = yield* firstRequestBody({ agent: "explore" })
+          expect(body).not.toContain("<browser_engineering_policy>")
+          // Nor the implementation-loop and process rules of an agent that can change the project.
+          expect(body).not.toContain("<completion_policy>")
+          expect(body).not.toContain("<process_safety_policy>")
+        }),
+      () =>
+        Effect.sync(() => {
+          delete process.env.VECTOR_BROWSER_BRIDGE_URL
+          delete process.env.VECTOR_BROWSER_BRIDGE_TOKEN
+        }),
+    ),
   15_000,
 )
 

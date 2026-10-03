@@ -13,6 +13,7 @@ import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 import { Question } from "@/question"
 import { ProviderTransform } from "@/provider/transform"
+import { LLMRequestPrep } from "./llm/request"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -1385,6 +1386,11 @@ const layer = Layer.effect(
           yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
           const quick = agent.name === "quick" || agent.name === "autocomplete"
+          // Policies for a tool go only with a request that offers it, after this agent's permissions remove what it
+          // may not use, as the request itself is built.
+          const offered = Object.keys(
+            LLMRequestPrep.resolveTools({ tools, agent, permission: session.permission, user: lastUser }),
+          )
           const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
             quick ? Effect.succeed(undefined) : sys.skills(agent),
             quick
@@ -1403,9 +1409,9 @@ const layer = Layer.effect(
                           agent: agent.name,
                           nested: session.parentID !== undefined,
                         }),
-                        teammates: "send_teammate_message" in tools,
+                        teammates: offered.includes("send_teammate_message"),
                       },
-                      tools: Object.keys(tools),
+                      tools: offered,
                     }),
                   ),
                 ),
