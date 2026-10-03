@@ -1,15 +1,77 @@
 # Release approval and external prerequisites
 
-Status checked October 2, 2026. The owner reserved version 2 and allowed an
-interim 1.x version. The candidate now follows main's **1.99.99** desktop and CLI
-version; earlier **1.999.99** preparation records remain historical. The owner
-approved unsigned builds and requested publication across supported operating
-systems plus replacement of the local Mac app after verification. Version 2 is
-reserved. The latest instruction holds further pushes to `main`; prepare and
-commit release work on the candidate branch until that restriction is lifted.
-The publication request does not authorize purchases or changes to billing.
+Status checked October 3, 2026 UTC. The owner reserved version 2 and allowed an
+interim 1.x release. The candidate follows main's **1.99.99** desktop and CLI
+version; earlier **1.999.99** preparation records remain historical. Unsigned
+builds are approved, but they must preserve the existing signed automatic-update
+feeds. New unsigned installers require a manual download.
+
+The latest owner instruction authorizes landing the verified candidate on `main`
+by a normal fast-forward after the release checks pass. If main advances, integrate
+it and recheck parity before landing; never force-push main. The owner will start
+the desktop release workflow. Neither main landing nor publication is claimed at
+this checkpoint. No purchases or paid model fallbacks are authorized.
 
 ## Current checkpoint
+
+The `release-validation` candidate and [draft PR #7](https://github.com/scr1pter/Vectordev.ai/pull/7)
+include main `9252aba12694b8a6729a4b31cca0f4205e0d3e13` as an ancestor. Main's
+free-access changes, branch switching, VCS behavior, footer and removal of Code
+Archaeology and Why Vector are preserved. The owner's newer signed-feed decision
+supersedes main's earlier unsigned automatic-update policy. This task has not
+landed the candidate on main.
+
+Native validation at `1c7187dba6a14267c329224ba44c6c1c228c286f` has passed both
+ordinary unit jobs, Linux's generated-client and full HTTP API gates, both browser
+jobs, all four Windows Engine shards, all four typecheck jobs, the website build,
+free-model and public-sharing integrations, and the real Windows installer. The
+complete general test workflow passed at the saved 02:04:39 UTC checkpoint. The
+separate focused Windows environment diagnostic failed under strict Turbo while passing
+with its inherited environment. Its Security and WSMan imports completed before
+the command-discovery boundary stalled. Follow-up one-variable runner cache
+controls are prepared; they do not yet prove a fix or authorize broad environment
+passthrough. Subsequent shell-output and stream-compatibility repairs require their
+own final source checks. This is not full release acceptance.
+
+The publishing machine's ordinary `npm whoami` check now succeeds after the owner
+logged in. Earlier `E401` records below are historical. The public catalog fork
+exists at the reviewed revision
+`690fd27d61c7a8acc5fd93aeda4f128d67d149fd`; its canonical release catalog remains
+SHA-256 `a96b465110dd2fcc38e0dcca1a4115e12ea43ddaafdb0ebf587e15026767bf14`.
+Saving the final Actions revision still awaits the owner's GitHub passkey
+confirmation. If both catalog variables are unset, the reviewed committed-export
+fallback is available; a partial pair must fail closed. No immutable catalog
+publication or installer publication is claimed here.
+
+Vercel agreement/Create and Supabase OAuth confirmation remain owner actions.
+Netlify registration was canceled and is not a blocker for this requested rollout.
+No new OAuth credentials or live customer consent flow are claimed. Real personal
+OpenRouter acceptance with an unfunded account also remains unverified: eligibility
+and zero-price/privacy guards stay enforced, and rejection stops the request.
+Do not add credit, a payment method, top-ups, paid plugins or a paid fallback to
+make that check pass. Stripe was signed out, so its account-side wind-down still
+requires the owner. The five retired billing/access environment variables are
+absent; the existing nonbilling service variables were preserved.
+
+The last verified public versions remain desktop **1.99.8** and CLI **1.99.7**.
+A local app reporting 1.99.99 without source metadata does not prove installation
+of this candidate. Verified local Mac artifacts from an earlier source likewise
+do not establish a build or publication of the final landing commit.
+
+Protected review runtime files, CLI commands and Vectorscope documentation are
+unchanged relative to main. Four inherited test-only differences already existed
+at resumed source `30aede8ab8bbef18710b9f628c9746684223f18a`: `github.auth.test.ts`
+uses a file URL for the child import; `github.lifecycle.test.ts` preserves native
+POSIX signals and exercises handlers through stdin on Windows; `cli/review.test.ts`
+disables autocrlf for its exact-byte fixture; and `review/source.test.ts` does the
+same during its clone. None of those four files changed after that resumed source.
+No new Vectorscope change is part of this landing work.
+
+All sections below record earlier checkpoints. Their branch holds, npm failures,
+unfinished checks and owner-input lists describe those dates; the current status
+above supersedes them without discarding their evidence.
+
+## Historical integrated-main checkpoint
 
 The candidate incorporates main through `9b6f2a45d`, including free Vector access,
 session branch switching and removal of Code Archaeology. Another session pushed
