@@ -128,6 +128,32 @@ as unknown, never as zero.
 Compare cost only between runs on the same model: a cheaper model is not a
 more efficient agent.
 
+## Request cost without a model
+
+`footprint.ts` measures what Vector sends, with no API key, no network and no
+model variance. It runs the real `vector run` against a local fake model server
+that plays a fixed script of tool calls on one of the fixtures, records every
+request, and prices each one under Anthropic's prompt-caching rules (Claude
+Sonnet 4.5 list prices, 5-minute cache writes, breakpoints as the request
+places them, nothing under 1,024 tokens cached).
+
+```
+bun script/agent-eval/footprint.ts
+bun script/agent-eval/footprint.ts --scenario delegate-explore --out report.json
+```
+
+Per request it reports the system prompt, tool definitions and messages, the
+input read from and written to the cache, and the cost; per scenario the share
+of input read from the cache, the fixed tokens every request pays, the cost with
+and without caching, and the size of each tool definition for the main agent and
+for a subagent. The same build always gives the same numbers, so run it before
+and after a change to see exactly what the change saved. Tokens are estimated as
+characters / 4, the same way everywhere.
+
+Scenarios: `solo-fix` (run the tests, read, edit, re-run), `delegate-explore`
+(an explore subagent finds the bug, the parent fixes it) and `long-loop` (a
+12-step investigation, to show how the cache holds up as a loop grows).
+
 ## Unavailable is not zero
 
 The rule this harness must never break: **a runtime that cannot be measured is
