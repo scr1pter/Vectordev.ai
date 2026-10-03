@@ -5,6 +5,8 @@ import { access, mkdir, rename, rm, writeFile } from "node:fs/promises"
 import * as Tool from "./tool"
 import DESCRIPTION from "./teammate.txt"
 import { InstanceState } from "@/effect/instance-state"
+import { Session } from "@/session/session"
+import type { SessionID } from "@/session/schema"
 
 // Agents reach teammates through an on-disk outbox rather than a direct call:
 // the tool runs in the engine sidecar, which has no access to the desktop's
@@ -45,9 +47,18 @@ export type OutboxEntry = {
   createdAt: string
 }
 
-export const TeammateMessageTool = Tool.define<typeof Parameters, Metadata, never>(
+export const TeammateMessageTool = Tool.define<typeof Parameters, Metadata, Session.Service>(
   "send_teammate_message",
   Effect.gen(function* () {
+    const sessions = yield* Session.Service
+    // The orchestrator knows each teammate by its own session, and a subagent works in a child of it, so a message is
+    // sent as the session at the top of the chain. Sent as the subagent, it was credited to whichever teammate drained
+    // a shared outbox first.
+    const teammateSession = (sessionID: SessionID): Effect.Effect<SessionID> =>
+      sessions.get(sessionID).pipe(
+        Effect.flatMap((info) => (info.parentID ? teammateSession(info.parentID) : Effect.succeed(info.id))),
+        Effect.catch(() => Effect.succeed(sessionID)),
+      )
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -77,7 +88,7 @@ export const TeammateMessageTool = Tool.define<typeof Parameters, Metadata, neve
             id: randomUUID(),
             to: params.to?.trim() || undefined,
             message,
-            sessionID: ctx.sessionID,
+            sessionID: yield* teammateSession(ctx.sessionID),
             createdAt: new Date().toISOString(),
           }
 

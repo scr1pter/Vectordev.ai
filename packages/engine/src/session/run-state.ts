@@ -88,6 +88,9 @@ const layer = Layer.effect(
         return
       }
       yield* existing.cancel
+      // The parent's stream stays live while the sweep above waits for running subagents to unwind, so a task it
+      // launched in that window is only reached once the runner is cancelled. Later launches see the aborted signal.
+      yield* cancelBackgroundJobs(background, sessionID)
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (

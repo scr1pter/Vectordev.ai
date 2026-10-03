@@ -1840,6 +1840,45 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("a task launched while Stop is still cancelling the others is cancelled too", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const runState = yield* SessionRunState.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        cancel: (sessionID) => runState.cancel(sessionID),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) return Effect.succeed(reply(input, "noted"))
+          // A subagent's loop runs in the run-state scope and takes a while to unwind, as processor cleanup does.
+          const work = Effect.never.pipe(
+            Effect.onInterrupt(() => Effect.sleep("300 millis")),
+            Effect.as(reply(input, "done")),
+          )
+          return runState.ensureRunning(input.sessionID, Effect.succeed(reply(input, "stopped")), work)
+        },
+      }
+      const parent = reply({ sessionID: chat.id, parts: [] } as unknown as SessionPrompt.PromptInput, "stopped")
+      yield* runState.ensureRunning(chat.id, Effect.succeed(parent), Effect.never).pipe(Effect.forkChild)
+      const launch = (prompt: string) =>
+        def.execute(
+          { description: "inspect", prompt, subagent_type: "general", background: true },
+          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+        )
+      const first = yield* launch("Inspect the cache.")
+
+      // The parent's stream is still live while Stop waits for the first task to unwind, so it can launch another.
+      const stopping = yield* runState.cancel(chat.id).pipe(Effect.forkChild)
+      yield* Effect.sleep("50 millis")
+      const late = yield* launch("Inspect the queue.")
+      yield* Fiber.join(stopping)
+
+      expect((yield* jobs.get(first.metadata.sessionId))?.status).toBe("cancelled")
+      expect((yield* jobs.get(late.metadata.sessionId))?.status).toBe("cancelled")
+    }),
+  )
+
   background.instance("stopping the parent stops a task_id follow-up run, not just its job", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
