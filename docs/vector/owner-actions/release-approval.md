@@ -3,8 +3,9 @@
 Status checked October 3, 2026 UTC. The owner reserved version 2 and allowed an
 interim 1.x release. The candidate follows main's **1.99.99** desktop and CLI
 version; earlier **1.999.99** preparation records remain historical. Unsigned
-builds are approved, but they must preserve the existing signed automatic-update
-feeds. New unsigned installers require a manual download.
+builds are approved, and on October 3, 2026 the owner confirmed that unsigned
+releases also update the in-app update feeds: everyone can download 1.99.99, and
+installed copies update to it with Check for Updates.
 
 The latest owner instruction authorizes landing the verified candidate on `main`
 by a normal fast-forward after the release checks pass. If main advances, integrate
@@ -17,9 +18,9 @@ this checkpoint. No purchases or paid model fallbacks are authorized.
 The `release-validation` candidate and [draft PR #7](https://github.com/scr1pter/Vectordev.ai/pull/7)
 include main `9252aba12694b8a6729a4b31cca0f4205e0d3e13` as an ancestor. Main's
 free-access changes, branch switching, VCS behavior, footer and removal of Code
-Archaeology and Why Vector are preserved. The owner's newer signed-feed decision
-supersedes main's earlier unsigned automatic-update policy. This task has not
-landed the candidate on main.
+Archaeology and Why Vector are preserved. The signed-feed-only rule this candidate
+briefly restored was reverted on the owner's confirmation: unsigned releases update
+the in-app feeds. This candidate has since landed on main as `a3818c26d`.
 
 Native validation at `1c7187dba6a14267c329224ba44c6c1c228c286f` has passed both
 ordinary unit jobs, Linux's generated-client and full HTTP API gates, both browser
