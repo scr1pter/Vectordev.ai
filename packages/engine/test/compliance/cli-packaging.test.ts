@@ -136,14 +136,23 @@ for (const layout of ["isolated", "hoisted"]) {
   })
 }
 
-async function run(command: string[], cwd: string, env: Record<string, string | undefined>) {
+async function run(command: string[], cwd: string, env: Record<string, string | undefined>, phase?: string) {
+  const started = performance.now()
+  if (phase) console.info(`[cli-packaging] ${phase}: started`)
   const proc = Bun.spawn(command, { cwd, env, stdout: "pipe", stderr: "pipe" })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  return { stdout, stderr, code }
+  try {
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    if (phase)
+      console.info(`[cli-packaging] ${phase}: exited ${code} after ${Math.round(performance.now() - started)}ms`)
+    return { stdout, stderr, code }
+  } finally {
+    proc.kill()
+    await proc.exited
+  }
 }
 
 test("dry-run packages every target with notices and a working Vector launcher without registry access", async () => {
@@ -163,14 +172,19 @@ test("dry-run packages every target with notices and a working Vector launcher w
       path.join(cwd, "script/build.ts"),
       'await Bun.write("build-env.json", JSON.stringify({ version: process.env.VECTOR_VERSION, targets: process.env.VECTOR_TARGETS, release: process.env.VECTOR_RELEASE, catalog: process.env.VECTOR_RELEASE_CATALOG_PATH, digest: process.env.VECTOR_RELEASE_CATALOG_SHA256 }))\n',
     )
-    const result = await run([process.execPath, "script/publish-vector.ts", "--dry-run"], cwd, {
-      ...tmp.env,
-      NPM_CONFIG_REGISTRY: registry.url.toString(),
-      VECTOR_VERSION: "stale-inherited-version",
-      VECTOR_TARGETS: "stale-inherited-target",
-      VECTOR_RELEASE: "true",
-      VECTOR_CLI_VERSION: version,
-    })
+    const result = await run(
+      [process.execPath, "script/publish-vector.ts", "--dry-run"],
+      cwd,
+      {
+        ...tmp.env,
+        NPM_CONFIG_REGISTRY: registry.url.toString(),
+        VECTOR_VERSION: "stale-inherited-version",
+        VECTOR_TARGETS: "stale-inherited-target",
+        VECTOR_RELEASE: "true",
+        VECTOR_CLI_VERSION: version,
+      },
+      "publisher dry-run",
+    )
     expect(result.code, result.stderr).toBe(0)
     expect(requests).toEqual([])
     expect(await Bun.file(path.join(tmp.dir, "packages/plugin/publisher-args.json")).json()).toEqual(["--dry-run"])
@@ -182,16 +196,40 @@ test("dry-run packages every target with notices and a working Vector launcher w
       digest: tmp.env.VECTOR_RELEASE_CATALOG_SHA256,
     })
 
+    const packedDirectory = path.join(tmp.dir, "packed")
+    await mkdir(packedDirectory)
+    // npm accepts multiple local packages; keep every real tarball check without seven extra npm startups.
+    const packed = await run(
+      [
+        "npm",
+        "pack",
+        "--json",
+        "--offline",
+        "--pack-destination",
+        packedDirectory,
+        ...targets.map((target) => `./dist/vector-${target}`),
+        "./dist/vectordev-cli",
+      ],
+      cwd,
+      { ...tmp.env, NPM_CONFIG_REGISTRY: registry.url.toString() },
+      "pack all seven staged packages",
+    )
+    expect(packed.code, packed.stderr).toBe(0)
+    const packages = JSON.parse(packed.stdout) as { name: string; filename: string; files: { path: string }[] }[]
+    expect(packages.map((item) => item.name).toSorted()).toEqual(
+      [...targets.map((target) => `@vectordevai/cli-${target}`), "@vectordevai/cli"].toSorted(),
+    )
+
     for (const target of [...targets, "umbrella"]) {
       const folder = path.join(cwd, "dist", target === "umbrella" ? "vectordev-cli" : `vector-${target}`)
       const manifest = await Bun.file(path.join(folder, "package.json")).json()
       expect(manifest.version).toBe(version)
       expect(manifest.license).toBe("SEE LICENSE IN LICENSE")
       expect(manifest.name).toBe(target === "umbrella" ? "@vectordevai/cli" : `@vectordevai/cli-${target}`)
-      const packed = await run(["npm", "pack", "--json", "--offline"], folder, tmp.env)
-      expect(packed.code, packed.stderr).toBe(0)
-      const info = JSON.parse(packed.stdout)[0]
-      const files = info.files.map((file: { path: string }) => file.path)
+      const info = packages.find((item) => item.name === manifest.name)
+      if (!info) throw new Error(`npm did not pack ${manifest.name}`)
+      expect(await Bun.file(path.join(packedDirectory, info.filename)).exists()).toBe(true)
+      const files = info.files.map((file) => file.path)
       for (const notice of notices) expect(files).toContain(notice)
       expect(files.filter((name: string) => name.startsWith("bin/"))).toEqual([
         target === "umbrella" ? "bin/vector.cjs" : target.startsWith("windows") ? "bin/vector.exe" : "bin/vector",
@@ -223,12 +261,13 @@ test("dry-run packages every target with notices and a working Vector launcher w
         [
           "tar",
           "-xf",
-          path.relative(destination, path.join(folder, info.filename)).split(path.sep).join("/"),
+          path.relative(destination, path.join(packedDirectory, info.filename)).split(path.sep).join("/"),
           "--strip-components",
           "1",
         ],
         destination,
         tmp.env,
+        `extract ${target}`,
       )
       expect(unpacked.code, unpacked.stderr).toBe(0)
       for (const notice of notices)
@@ -236,6 +275,7 @@ test("dry-run packages every target with notices and a working Vector launcher w
           await Bun.file(path.join(tmp.dir, notice)).text(),
         )
     }
+    expect(requests).toEqual([])
     // The fixture is a script; Windows requires a compiled PE executable for this final smoke check.
     if (process.platform === "win32") return
     const launched = await run(
@@ -247,6 +287,7 @@ test("dry-run packages every target with notices and a working Vector launcher w
       ],
       cwd,
       tmp.env,
+      "launch installed umbrella",
     )
     expect(launched.code, launched.stderr).toBe(0)
     expect(JSON.parse(launched.stdout)).toEqual({ args: ["argument with spaces", "--version"], vector: "1" })

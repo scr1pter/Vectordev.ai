@@ -68,23 +68,50 @@ test.skipIf(process.platform !== "win32")(
     const entry = path.join(root, "child.ts")
     const diagnostic = path.join(root, "diagnostic.json")
     const outerDiagnostic = path.join(root, "pwsh-diagnostic.json")
+    const nativeDiagnostic = path.join(root, "native-diagnostic.json")
     const quote = (value: string) => `'${value.replaceAll("'", "''")}'`
     try {
       await Bun.write(file, "installer hash fixture\n")
       await Bun.write(
         entry,
         `import assert from "node:assert/strict"
-      const checkpoint = (phase, details = {}) => Bun.write(${JSON.stringify(diagnostic)}, JSON.stringify({ phase, ...details }))
+      import { appendFileSync } from "node:fs"
+      const started = performance.now()
+      // Preserve timeout evidence synchronously before termination can stop this process.
+      const checkpoint = (phase, details = {}) => appendFileSync(${JSON.stringify(diagnostic)}, JSON.stringify({ phase, at: new Date().toISOString(), elapsedMs: performance.now() - started, ...details }) + "\\n")
       await checkpoint("bun-started")
       const { WindowsPowerShell } = await import(${JSON.stringify(new URL("../../src/util/windows-powershell.ts", import.meta.url).href)})
       await checkpoint("helper-imported")
       assert.ok(process.env.PSModulePath, "pwsh must pass its module paths through Bun")
       const powershell = ${JSON.stringify(path.join(process.env.SYSTEMROOT!, "System32/WindowsPowerShell/v1.0/powershell.exe"))}
+      const environment = WindowsPowerShell.environment(powershell)
+      const presence = (env) => Object.fromEntries(["USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "SYSTEMROOT", "PSModulePath"].map(name => [name, Object.entries(env).some(([key, value]) => key.toUpperCase() === name.toUpperCase() && value !== undefined)]))
+      await checkpoint("environment-presence", { inherited: presence(process.env), native: presence(environment) })
       const child = Bun.spawn([powershell, "-NoProfile", "-NonInteractive", "-Command", ${JSON.stringify(
-        `$ErrorActionPreference = 'Stop'; [pscustomobject]@{ Edition = $PSEdition; CertificateProvider = (Get-PSDrive Cert).Provider.Name; ArchiveCommand = (Get-Command Expand-Archive -ErrorAction Stop).Name; ProcessId = (Get-Process -Id $PID).Id; Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath ${quote(file)}).Hash; Marker = $env:VECTOR_INSTALLER_ENV_MARKER } | ConvertTo-Json -Compress`,
-      )}], { env: WindowsPowerShell.environment(powershell), stdin: "ignore", stdout: "pipe", stderr: "pipe" })
+        `$ErrorActionPreference = 'Stop'
+function Write-FixtureCheckpoint([string] $phase) {
+  [IO.File]::AppendAllText(${quote(nativeDiagnostic)}, ([DateTime]::UtcNow.ToString('o') + ' ' + $phase + [Environment]::NewLine))
+}
+Write-FixtureCheckpoint 'native-script-started'
+$certificateProvider = (Get-PSDrive Cert).Provider.Name
+Write-FixtureCheckpoint 'certificate-provider-loaded'
+$archiveCommand = (Get-Command Expand-Archive -ErrorAction Stop).Name
+Write-FixtureCheckpoint 'archive-command-loaded'
+$processId = (Get-Process -Id $PID).Id
+Write-FixtureCheckpoint 'process-command-finished'
+$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath ${quote(file)}).Hash
+Write-FixtureCheckpoint 'file-hash-finished'
+[pscustomobject]@{ Edition = $PSEdition; CertificateProvider = $certificateProvider; ArchiveCommand = $archiveCommand; ProcessId = $processId; Hash = $hash; Marker = $env:VECTOR_INSTALLER_ENV_MARKER } | ConvertTo-Json -Compress
+Write-FixtureCheckpoint 'native-output-written'`,
+      )}], { env: environment, stdin: "ignore", stdout: "pipe", stderr: "pipe" })
       await checkpoint("native-started", { pid: child.pid })
-      const timeout = setTimeout(() => child.kill(), 15_000)
+      const timeout = setTimeout(() => {
+        try {
+          checkpoint("native-watchdog-fired", { pid: child.pid })
+        } finally {
+          child.kill()
+        }
+      }, 15_000)
       try {
         const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
         await checkpoint("native-finished", { code, stdout, stderr })
@@ -106,8 +133,15 @@ test.skipIf(process.platform !== "win32")(
           "-EncodedCommand",
           Buffer.from(
             `$ErrorActionPreference = 'Stop'
-$details = @{ phase = 'pwsh-started'; bunPath = ${quote(process.execPath)}; entryPath = ${quote(entry)}; entryExists = [IO.File]::Exists(${quote(entry)}); arguments = @('run', '--no-env-file', ${quote(entry)}); pathExt = $env:PATHEXT; comSpec = $env:ComSpec }
-[IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
+$clock = [Diagnostics.Stopwatch]::StartNew()
+$details = @{ bunPath = ${quote(process.execPath)}; entryPath = ${quote(entry)}; entryExists = [IO.File]::Exists(${quote(entry)}); arguments = @('run', '--no-env-file', ${quote(entry)}); pathExt = $env:PATHEXT; comSpec = $env:ComSpec }
+function Write-FixtureCheckpoint([string] $phase) {
+  $details.phase = $phase
+  $details.at = [DateTime]::UtcNow.ToString('o')
+  $details.elapsedMs = $clock.ElapsedMilliseconds
+  [IO.File]::AppendAllText(${quote(outerDiagnostic)}, (($details | ConvertTo-Json -Compress) + [Environment]::NewLine))
+}
+Write-FixtureCheckpoint 'pwsh-started'
 $start = [Diagnostics.ProcessStartInfo]::new()
 $start.FileName = ${quote(process.execPath)}
 $start.UseShellExecute = $false
@@ -119,26 +153,40 @@ $process = [Diagnostics.Process]::new()
 $process.StartInfo = $start
 try {
   if (-not $process.Start()) { throw 'Bun child did not start' }
-  $details.phase = 'bun-process-started'
   $details.processId = $process.Id
-  [IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
+  Write-FixtureCheckpoint 'bun-process-started'
   $output = $process.StandardOutput.ReadToEndAsync()
   $errorOutput = $process.StandardError.ReadToEndAsync()
-  if (-not $process.WaitForExit(15000)) { throw 'Bun child did not exit before the native deadline' }
-  if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($output, $errorOutput), 1000)) { throw 'Bun child streams did not close' }
-  $details.phase = 'bun-invocation-finished'
+  if (-not $process.WaitForExit(15000)) {
+    Write-FixtureCheckpoint 'bun-wait-deadline'
+    throw 'Bun child did not exit before the native deadline'
+  }
+  Write-FixtureCheckpoint 'bun-process-exited'
+  if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($output, $errorOutput), 1000)) {
+    Write-FixtureCheckpoint 'bun-stream-deadline'
+    throw 'Bun child streams did not close'
+  }
   $details.exitCode = $process.ExitCode
   $details.stdoutBytes = [Text.Encoding]::UTF8.GetByteCount($output.Result)
   $details.stderrBytes = [Text.Encoding]::UTF8.GetByteCount($errorOutput.Result)
-  [IO.File]::WriteAllText(${quote(outerDiagnostic)}, ($details | ConvertTo-Json -Compress))
+  Write-FixtureCheckpoint 'bun-invocation-finished'
   [Console]::Out.Write($output.Result)
   [Console]::Error.Write($errorOutput.Result)
   exit $process.ExitCode
 } finally {
   try {
     if ($details.ContainsKey('processId') -and -not $process.HasExited) {
-      $process.Kill($true)
-      if (-not $process.WaitForExit(1000)) { throw 'Bun child did not exit after cleanup' }
+      try {
+        Write-FixtureCheckpoint 'bun-tree-kill-started'
+      } finally {
+        $process.Kill($true)
+        try {
+          Write-FixtureCheckpoint 'bun-tree-kill-returned'
+        } finally {
+          if (-not $process.WaitForExit(1000)) { throw 'Bun child did not exit after cleanup' }
+        }
+      }
+      Write-FixtureCheckpoint 'bun-tree-cleanup-finished'
     }
   } finally {
     $process.Dispose()
@@ -154,20 +202,31 @@ try {
           stderr: "pipe",
         },
       )
-      const timeout = setTimeout(() => child.kill(), 20_000)
+      const watchdog = { fired: false }
+      const timeout = setTimeout(() => {
+        watchdog.fired = true
+        child.kill()
+      }, 20_000)
       try {
         const [code, stdout, stderr] = await Promise.all([
           child.exited,
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
         ])
+        const checkpoints = await Bun.file(diagnostic)
+          .text()
+          .catch(() => "not written")
+        for (const line of checkpoints.split(/\r?\n/).filter((line) => line.includes('"phase":"environment-presence"')))
+          console.info(`[windows-powershell] ${line}`)
         const details = JSON.stringify({
           pwsh,
           stderr,
+          outerWatchdogFired: watchdog.fired,
           outerDiagnostic: await Bun.file(outerDiagnostic)
             .text()
             .catch(() => "not written"),
-          diagnostic: await Bun.file(diagnostic)
+          diagnostic: checkpoints,
+          nativeDiagnostic: await Bun.file(nativeDiagnostic)
             .text()
             .catch(() => "not written"),
         })
