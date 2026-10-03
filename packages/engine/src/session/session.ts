@@ -448,7 +448,17 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
       ? input.model.cost.experimentalOver200K
       : input.model.cost)
   const totalNanoAiu = input.metadata?.["copilot"]?.["totalNanoAiu"]
-  const billed = typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0
+  // OpenRouter reports what it billed for each step. A model the catalog lists no price for, as an OpenRouter model
+  // added by hand often is, takes that amount instead of reading as unpriced.
+  // @ts-expect-error provider metadata is untyped JSON
+  const reported: unknown = input.metadata?.["openrouter"]?.["usage"]?.["cost"]
+  const reportedCost =
+    input.model.cost?.unpriced === true && typeof reported === "number" && Number.isFinite(reported) && reported >= 0
+      ? reported
+      : undefined
+  const billed =
+    (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0) ||
+    reportedCost !== undefined
   return {
     // The model lists no price and the provider reported no charge, so the cost below is 0 for want of a price.
     // A step that used no tokens owes nothing either way.
@@ -456,20 +466,23 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
       !billed &&
       input.model.cost?.unpriced === true &&
       tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write > 0,
-    cost: billed
-      ? // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
-        new Decimal(totalNanoAiu).div(100_000_000_000).toNumber()
-      : safe(
-          new Decimal(0)
-            .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
-            .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
-            .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
-            .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
-            // TODO: extend the catalog pricing model, for now:
-            // charge reasoning tokens at the same rate as output tokens
-            .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
-            .toNumber(),
-        ),
+    cost:
+      reportedCost !== undefined
+        ? reportedCost
+        : billed
+          ? // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
+            new Decimal(Number(totalNanoAiu)).div(100_000_000_000).toNumber()
+          : safe(
+              new Decimal(0)
+                .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
+                .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
+                .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
+                .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
+                // TODO: extend the catalog pricing model, for now:
+                // charge reasoning tokens at the same rate as output tokens
+                .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
+                .toNumber(),
+            ),
     tokens,
   }
 }

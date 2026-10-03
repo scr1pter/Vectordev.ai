@@ -199,7 +199,14 @@ export const TaskTool = Tool.define(
     const provider = yield* Provider.Service
     // Ownership claimed by task calls that have not registered their job yet. Sibling calls
     // in one message run concurrently, so the job list alone cannot see each other's paths.
-    const claims = new Set<{ parentSessionID: SessionID; taskID?: string; title: string; paths: string[] }>()
+    const claims = new Set<{
+      parentSessionID: SessionID
+      taskID?: string
+      title: string
+      paths: string[]
+      // Held for a running task until it settles, rather than for the length of one call.
+      held?: boolean
+    }>()
     const claimLock = Semaphore.makeUnsafe(1)
 
     const dependencyFailure = Effect.fn("TaskTool.dependencyFailure")(function* (job: BackgroundJob.Info) {
@@ -267,8 +274,9 @@ export const TaskTool = Tool.define(
       if (ownedPaths.length > 0) {
         const conflicts = yield* claimLock.withPermits(1)(
           Effect.gen(function* () {
+            const running = (yield* background.list()).filter((job) => job.status === "running")
             const active = [
-              ...(yield* background.list())
+              ...running
                 .filter(
                   (job) =>
                     job.type === id &&
@@ -287,7 +295,10 @@ export const TaskTool = Tool.define(
                 .filter(
                   (claim) =>
                     claim.parentSessionID === ctx.sessionID &&
-                    (!claim.taskID || (claim.taskID !== params.task_id && !dependencies.includes(claim.taskID))),
+                    (!claim.taskID || (claim.taskID !== params.task_id && !dependencies.includes(claim.taskID))) &&
+                    // A claim held for a running task lapses with that task, even if its release never ran (an
+                    // instance disposed mid-task closes its jobs without settling them).
+                    (!claim.held || running.some((job) => job.id === claim.taskID)),
                 )
                 .map((claim) => ({ label: claim.title, paths: claim.paths })),
             ]
@@ -422,7 +433,24 @@ export const TaskTool = Tool.define(
         next.name === "explore" && !next.model && !freeRoute
           ? yield* provider.getSmallModel(msg.info.providerID, msg.info.modelID)
           : undefined
-      const cheap = small?.capabilities.toolcall && small.id !== msg.info.modelID ? small : undefined
+      // Only a move that is known to cost less: the "small" model of a provider is not always cheaper than a parent
+      // already on a budget model, and an unpriced or free parent stays where it is.
+      const parentModel =
+        small && small.capabilities.toolcall && small.id !== msg.info.modelID
+          ? yield* provider
+              .getModel(msg.info.providerID, msg.info.modelID)
+              .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+          : undefined
+      const cheap =
+        small &&
+        parentModel &&
+        !small.cost.unpriced &&
+        !parentModel.cost.unpriced &&
+        small.cost.input <= parentModel.cost.input &&
+        small.cost.output <= parentModel.cost.output &&
+        small.cost.input + small.cost.output < parentModel.cost.input + parentModel.cost.output
+          ? small
+          : undefined
       const model = cheap
         ? { modelID: cheap.id, providerID: cheap.providerID }
         : !inherit && next.model
@@ -612,15 +640,18 @@ export const TaskTool = Tool.define(
       ) {
         // Any prompt commits a pending revert, deleting the reverted messages and the redo, so a note never does: it
         // waits until the user resolves the revert, and is dropped when that removed the call that launched the task.
-        const unreverted = (): Effect.Effect<Session.Info, Session.NotFound> =>
+        // Checks back at a growing interval, up to a minute, since a revert can stay pending for a long time.
+        const unreverted = (wait: number): Effect.Effect<Session.Info, Session.NotFound> =>
           sessions
             .get(ctx.sessionID)
             .pipe(
               Effect.flatMap((current) =>
-                current.revert ? Effect.sleep("1 second").pipe(Effect.andThen(unreverted)) : Effect.succeed(current),
+                current.revert
+                  ? Effect.sleep(wait).pipe(Effect.andThen(() => unreverted(Math.min(wait * 2, 60_000))))
+                  : Effect.succeed(current),
               ),
             )
-        const currentParent = yield* unreverted()
+        const currentParent = yield* unreverted(1_000)
         const launch = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
           Effect.provideService(Database.Service, database),
           Effect.option,
@@ -642,7 +673,7 @@ export const TaskTool = Tool.define(
             ...(latest
               ? {
                   model: { providerID: latest.model.providerID, modelID: latest.model.modelID },
-                  variant: latest.model.variant ?? variant,
+                  variant: latest.model.variant,
                   ...(latest.executionMode ? { executionMode: latest.executionMode } : {}),
                   ...(latest.format ? { format: latest.format } : {}),
                 }
@@ -697,7 +728,7 @@ export const TaskTool = Tool.define(
         // The job still lists only the paths it started with, so paths this update hands the running task stay
         // reserved against sibling launches until that run settles.
         if (ownedPaths.length > 0) {
-          const claim = { parentSessionID: ctx.sessionID, taskID: nextSession.id, title, paths: ownedPaths }
+          const claim = { parentSessionID: ctx.sessionID, taskID: nextSession.id, title, paths: ownedPaths, held: true }
           claims.add(claim)
           yield* background
             .wait({ id: nextSession.id })
@@ -743,6 +774,15 @@ export const TaskTool = Tool.define(
       // provider after a stop; every run, first or added, stops the child when interrupted.
       const guardedRun = () => runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id)))
       const extendRun = () => background.extend({ id: nextSession.id, run: guardedRun() })
+      // A foreground run reports its result to the call that started it, so another call cannot add to it and be told
+      // it will be notified later.
+      const foreground = Effect.fn("TaskTool.foreground")(function* (job: BackgroundJob.Info | undefined) {
+        if (job?.status !== "running" || job.metadata?.background === true) return
+        return yield* Effect.fail(
+          new Error(`Task ${nextSession.id} is still running; wait for its result before sending it more.`),
+        )
+      })
+      yield* foreground(yield* background.get(nextSession.id))
       if (yield* extendRun()) return yield* joined()
 
       // A resumed child starts a new run: point its record at this call.
@@ -783,6 +823,7 @@ export const TaskTool = Tool.define(
             ...(typeof info.metadata?.startedAt === "number" ? { startedAt: info.metadata.startedAt } : {}),
             background: info.metadata?.background === true,
           })
+        yield* foreground(info)
         if (yield* extendRun()) return yield* joined()
         return yield* Effect.fail(
           new Error(`Task ${nextSession.id} was resumed by another call that has already finished; resume it again.`),

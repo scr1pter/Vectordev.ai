@@ -593,6 +593,63 @@ describe("session.compaction.isOverflow", () => {
   )
 
   it.live(
+    "price bands below 200K and the 200K stand-in next to exact tiers do not set where to compact",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const tokens = { input: 150_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        const tier = (size: number) => ({
+          tier: { type: "context" as const, size },
+          input: 1,
+          output: 1,
+          cache: { read: 0, write: 0 },
+        })
+        // Qwen-style input bands from 32K: compacting at 12K would follow every step.
+        const banded = createModel({
+          context: 1_000_000,
+          output: 32_000,
+          cost: {
+            input: 1,
+            output: 1,
+            cache: { read: 0, write: 0 },
+            tiers: [tier(32_000), tier(128_000), tier(256_000)],
+          },
+        })
+        expect(yield* compact.isOverflow({ tokens, model: banded })).toBe(false)
+        expect(yield* compact.isOverflow({ tokens: { ...tokens, input: 240_000 }, model: banded })).toBe(true)
+        // GPT-5.4 lists its exact 272K tier and models.dev's 200K stand-in; the exact tier wins.
+        const exact = createModel({
+          context: 1_050_000,
+          output: 32_000,
+          cost: {
+            input: 1,
+            output: 1,
+            cache: { read: 0, write: 0 },
+            tiers: [tier(272_000)],
+            experimentalOver200K: { input: 2, output: 2, cache: { read: 0, write: 0 } },
+          },
+        })
+        expect(yield* compact.isOverflow({ tokens: { ...tokens, input: 230_000 }, model: exact })).toBe(false)
+      }),
+    ),
+  )
+
+  it.live(
+    "a tiny configured max_context still leaves room beyond the fixed prompt",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const tokens = { input: 30_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+          expect(yield* compact.isOverflow({ tokens, model: createModel({ context: 200_000, output: 32_000 }) })).toBe(
+            false,
+          )
+        }),
+      { config: { compaction: { max_context: 10_000 } } },
+    ),
+  )
+
+  it.live(
     "a configured max_context of 0 keeps the model's whole window",
     provideTmpdirInstance(
       () =>
@@ -690,6 +747,7 @@ describe("session.compaction.prune", () => {
       compact,
       sessionID,
     ) => compact.prune({ sessionID }),
+    tool = "bash",
   ) =>
     Effect.gen(function* () {
       const compact = yield* SessionCompaction.Service
@@ -737,7 +795,7 @@ describe("session.compaction.prune", () => {
         sessionID: info.id,
         type: "tool",
         callID: crypto.randomUUID(),
-        tool: "bash",
+        tool,
         state: {
           status: "completed",
           input: {},
@@ -763,6 +821,8 @@ describe("session.compaction.prune", () => {
           type: "text",
           text,
         })
+        // A later reply, so the tool output above has been sent to the model before.
+        yield* ssn.updateMessage({ ...b, id: MessageID.ascending(), parentID: msg.id })
       }
 
       yield* act(compact, info.id)
@@ -777,6 +837,17 @@ describe("session.compaction.prune", () => {
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
         expect(yield* prunedAfter(dir, 2 * 60 * 60_000)).toBeNumber()
+      }),
+    ),
+  )
+
+  it.live(
+    "never clears the user's answers or a subagent's report, which cannot be fetched again",
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const prune = (compact: SessionCompaction.Interface, sessionID: SessionID) => compact.prune({ sessionID })
+        expect(yield* prunedAfter(dir, 2 * 60 * 60_000, prune, "question")).toBeUndefined()
+        expect(yield* prunedAfter(dir, 2 * 60 * 60_000, prune, "task")).toBeUndefined()
       }),
     ),
   )
@@ -799,6 +870,61 @@ describe("session.compaction.prune", () => {
         Effect.gen(function* () {
           const cleared = prunedAfter(dir, 0, (compact, sessionID) => compact.clear({ sessionID, tokens: long }))
           expect(yield* cleared).toBeNumber()
+        }),
+      { config: { compaction: { clear: true } } },
+    ),
+  )
+
+  it.live(
+    "with compaction.clear on, keeps the tool output of the newest reply, which the model has not seen yet",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const user = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          const reply = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: { output: 0, input: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: user.id,
+            time: { created: Date.now(), completed: Date.now() },
+            finish: "tool-calls",
+          } as SessionV1.Assistant)
+          for (const _ of [1, 2, 3, 4])
+            yield* ssn.updatePart({
+              id: PartID.ascending(),
+              messageID: reply.id,
+              sessionID: info.id,
+              type: "tool",
+              callID: crypto.randomUUID(),
+              tool: "read",
+              state: {
+                status: "completed",
+                input: {},
+                output: "x".repeat(60_000),
+                title: "done",
+                metadata: {},
+                time: { start: Date.now(), end: Date.now() },
+              },
+            })
+
+          expect(yield* compact.clear({ sessionID: info.id, tokens: long })).toBe(false)
         }),
       { config: { compaction: { clear: true } } },
     ),
@@ -1930,6 +2056,14 @@ describe("SessionNs.getUsage", () => {
     expect(
       SessionNs.getUsage({ model: unpriced, usage: used, metadata: { copilot: { totalNanoAiu: 4_000_000_000 } } }),
     ).toMatchObject({ cost: 0.04, unpriced: false })
+    // So does the amount OpenRouter reports billing for the step.
+    expect(
+      SessionNs.getUsage({ model: unpriced, usage: used, metadata: { openrouter: { usage: { cost: 0.0123 } } } }),
+    ).toMatchObject({ cost: 0.0123, unpriced: false })
+    // A model with a listed price keeps the catalog's rates.
+    expect(
+      SessionNs.getUsage({ model: free, usage: used, metadata: { openrouter: { usage: { cost: 0.0123 } } } }),
+    ).toMatchObject({ cost: 0, unpriced: false })
   })
 
   test("uses over-200k pricing when the catalog lists no exact tiers", () => {

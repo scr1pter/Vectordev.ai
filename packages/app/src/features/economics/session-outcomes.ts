@@ -46,13 +46,16 @@ export function outcomeFromSession(input: {
   messages: MessageEntry[]
   parts: Record<string, PartEntry[] | undefined>
 }): ModelOutcome | undefined {
-  const infos = input.messages.map((entry) => entry.info).filter((info): info is NonNullable<typeof info> => Boolean(info))
+  const infos = input.messages
+    .map((entry) => entry.info)
+    .filter((info): info is NonNullable<typeof info> => Boolean(info))
   const measured = measureUsage(infos)
   // No reported usage means nothing worth learning from — a session that never
   // reached a provider tells us nothing about that model.
   if (!measured?.provider || !measured.model) return undefined
 
-  const assistant = infos.filter((info) => info.role === "assistant")
+  // History a fork copied in keeps its original times, so it would stretch the latency back to the original session.
+  const assistant = infos.filter((info) => info.role === "assistant" && !(info as { forked?: boolean }).forked)
   const started = assistant[0]?.time?.created
   const finished = assistant[assistant.length - 1]?.time?.completed ?? assistant[assistant.length - 1]?.time?.created
   const latencyMs = typeof started === "number" && typeof finished === "number" ? Math.max(0, finished - started) : 0

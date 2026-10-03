@@ -131,6 +131,18 @@ describe("tool.grep", () => {
     }),
   )
 
+  it.instance("shows the matched text of a match far into a long line", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const line = `${"é prose ".repeat(150)}FOO_SETTING=1 ${"more prose ".repeat(100)}`
+      yield* Effect.promise(() => Bun.write(path.join(test.directory, "README.md"), line))
+      const grep = yield* (yield* GrepTool).init()
+      const result = yield* grep.execute({ pattern: "FOO_SETTING", path: test.directory }, ctx)
+      expect(result.output).toContain("FOO_SETTING=1")
+      expect(result.output).toContain("…")
+    }),
+  )
+
   it.instance("does not report an unknown total when results are truncated", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance

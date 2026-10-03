@@ -699,7 +699,7 @@ type MessageInfo = {
 }
 
 type AssistantError = NonNullable<AssistantMessage["error"]>
-type AssistantInfo = (UsageService.AssistantTokenCost & Pick<AssistantMessage, "error" | "parentID">) | undefined
+type AssistantInfo = (UsageService.AssistantTokenCost & Pick<AssistantMessage, "error" | "id">) | undefined
 
 function request<T>(fn: () => Promise<T | SdkResponse<T>>, service?: string) {
   return Effect.tryPromise({
@@ -835,8 +835,7 @@ const promptResponse = Effect.fn("ACP.promptResponse")(function* (
 ) {
   // The turn's usage covers every provider step it ran, not just the last one.
   const usage = info
-    ? ((messages && info.parentID ? UsageService.turnUsage(messages, info.parentID) : undefined) ??
-      UsageService.buildUsage(info))
+    ? ((messages ? UsageService.turnUsage(messages, info.id) : undefined) ?? UsageService.buildUsage(info))
     : undefined
   if (!info?.error) {
     return {

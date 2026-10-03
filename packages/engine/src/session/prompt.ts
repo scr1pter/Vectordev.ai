@@ -11,6 +11,8 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
+import { Question } from "@/question"
+import { ProviderTransform } from "@/provider/transform"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
 import type { JSONSchema7 } from "@ai-sdk/provider"
@@ -65,6 +67,8 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 const decodeMessageInfo = Schema.decodeUnknownExit(SessionV1.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
+// Sessions whose instruction files are kept between requests; an evicted session reads its files again.
+const MAX_INSTRUCTION_SNAPSHOTS = 256
 const SUPPORTED_MCP_RESOURCE_ATTACHMENT_MIMES = new Set([
   "application/pdf",
   "image/gif",
@@ -144,6 +148,7 @@ const layer = Layer.effect(
     const commands = yield* Command.Service
     const config = yield* Config.Service
     const permission = yield* Permission.Service
+    const question = yield* Question.Service
     const fsys = yield* FSUtil.Service
     const mcp = yield* MCP.Service
     const lsp = yield* LSP.Service
@@ -179,9 +184,16 @@ const layer = Layer.effect(
       cold: boolean,
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
-      if (snapshot && snapshot.key === key && !cold) return snapshot.instructions
+      // Re-inserting keeps the most recently used sessions at the end; the oldest go once there are too many.
+      instructionSnapshots.delete(sessionID)
+      if (snapshot && snapshot.key === key && !cold) {
+        instructionSnapshots.set(sessionID, snapshot)
+        return snapshot.instructions
+      }
       const instructions = yield* instruction.system()
       instructionSnapshots.set(sessionID, { key, instructions })
+      if (instructionSnapshots.size > MAX_INSTRUCTION_SNAPSHOTS)
+        instructionSnapshots.delete(instructionSnapshots.keys().next().value!)
       return instructions
     })
     const awaitTitles = Effect.fn("SessionPrompt.awaitTitles")(function* () {
@@ -203,6 +215,15 @@ const layer = Layer.effect(
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* Effect.logInfo("cancel", { "session.id": sessionID })
       yield* state.cancel(sessionID)
+      // A tool waiting on the user runs outside the stopped loop, so its request is answered here: rejecting it ends
+      // the wait, stops the tool from running if approved later, and tells every client to drop the prompt.
+      const asked = (yield* permission.list()).find((request) => request.sessionID === sessionID)
+      if (asked) yield* permission.reply({ requestID: asked.id, reply: "reject" }).pipe(Effect.ignore)
+      yield* Effect.forEach(
+        (yield* question.list()).filter((request) => request.sessionID === sessionID),
+        (request) => question.reject(request.id).pipe(Effect.ignore),
+        { discard: true },
+      )
     })
 
     const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
@@ -1393,8 +1414,8 @@ const layer = Layer.effect(
               : sessionInstructions(
                   sessionID,
                   `${msgs[0]?.info.id}|${model.providerID}/${model.id}`,
-                  // Anthropic's default cache lives 5 minutes; past that the prefix is written again regardless.
-                  Date.now() - (lastFinished?.time.completed ?? 0) > 5 * 60_000,
+                  // Past the provider's cache lifetime the prefix is written again regardless.
+                  Date.now() - (lastFinished?.time.completed ?? 0) > ProviderTransform.cacheLifetime(model),
                 ).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             MessageV2.toModelMessagesEffect(msgs, model),
@@ -1825,6 +1846,7 @@ export const node = LayerNode.make({
     Command.node,
     Config.node,
     Permission.node,
+    Question.node,
     FSUtil.node,
     MCP.node,
     LSP.node,

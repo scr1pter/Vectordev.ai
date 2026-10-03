@@ -72,6 +72,19 @@ describe("Truncate", () => {
       }),
     )
 
+    it.live("a single line longer than the budget still shows its start, or its end from the tail", () =>
+      Effect.gen(function* () {
+        const svc = yield* Truncate.Service
+        const line = `start ${"é".repeat(5_000)} end`
+        const head = yield* svc.output(line, { maxBytes: 101 })
+        expect(head.content.startsWith("start éé")).toBe(true)
+        expect(head.content).not.toContain("\uFFFD")
+        const tail = yield* svc.output(line, { maxBytes: 101, direction: "tail" })
+        expect(tail.content.endsWith("éé end")).toBe(true)
+        expect(tail.content).not.toContain("\uFFFD")
+      }),
+    )
+
     it.live("truncates from head by default", () =>
       Effect.gen(function* () {
         const svc = yield* Truncate.Service

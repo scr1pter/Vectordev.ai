@@ -96,9 +96,12 @@ export const withPricing = (model: Model, cost: ModelV2.Info["cost"]) => {
   return model
 }
 
-// The smallest context size past which the model's listed price rises, if it has one.
+// The smallest long-context tier, at 200K or beyond, past which the model's listed price rises. Some catalogs price
+// input in bands from 32K up; those bands do not say where to compact.
 export const contextTier = (model: Model) => {
-  const sizes = (pricing.get(model) ?? []).flatMap((item) => (item.tier?.type === "context" ? [item.tier.size] : []))
+  const sizes = (pricing.get(model) ?? []).flatMap((item) =>
+    item.tier?.type === "context" && item.tier.size >= 200_000 ? [item.tier.size] : [],
+  )
   return sizes.length ? Math.min(...sizes) : undefined
 }
 

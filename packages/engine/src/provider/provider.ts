@@ -1141,6 +1141,26 @@ export const use = serviceUse(Service)
 // The cost of a model whose provider lists no price.
 const UNPRICED: Model["cost"] = { input: 0, output: 0, cache: { read: 0, write: 0 }, unpriced: true }
 
+// A mode that lists its own price replaces the base rates, and is priced even when its base model lists none. When
+// it lists no long-context tiers of its own, the base model's follow at the mode's markup: priority pricing is a
+// multiple of the standard rates, and the base tiers alone would price a long fast step below a short one.
+function modeCost(base: Model["cost"], mode: Model["cost"]): Model["cost"] {
+  if (base.unpriced) return mode
+  const scale = (rate: number, from: number, to: number) => (from > 0 ? (rate * to) / from : rate)
+  const scaled = <T extends Pick<Model["cost"], "input" | "output" | "cache">>(item: T): T => ({
+    ...item,
+    input: scale(item.input, base.input, mode.input),
+    output: scale(item.output, base.output, mode.output),
+    cache: {
+      read: scale(item.cache.read, base.cache.read, mode.cache.read),
+      write: scale(item.cache.write, base.cache.write, mode.cache.write),
+    },
+  })
+  const tiers = mode.tiers ?? base.tiers?.map(scaled)
+  const over200K = mode.experimentalOver200K ?? (base.experimentalOver200K && scaled(base.experimentalOver200K))
+  return { ...mode, ...(tiers ? { tiers } : {}), ...(over200K ? { experimentalOver200K: over200K } : {}) }
+}
+
 function cost(c: ModelCatalog.Model["cost"]): Model["cost"] {
   if (!c) return { ...UNPRICED }
   const result: Model["cost"] = {
@@ -1238,8 +1258,7 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
         ...base,
         id: ModelV2.ID.make(id),
         name: `${model.name} ${mode[0].toUpperCase()}${mode.slice(1)}`,
-        // A mode that lists its own price is priced even when its base model lists none.
-        cost: opts.cost ? (base.cost.unpriced ? cost(opts.cost) : mergeDeep(base.cost, cost(opts.cost))) : base.cost,
+        cost: opts.cost ? modeCost(base.cost, cost(opts.cost)) : base.cost,
         options: opts.provider?.body
           ? Object.fromEntries(
               Object.entries(opts.provider.body).map(([k, v]) => [

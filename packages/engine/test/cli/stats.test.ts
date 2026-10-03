@@ -80,4 +80,19 @@ describe("vector stats", () => {
       yield* session.remove(info.id)
     }),
   )
+
+  it.instance("a window leaves out a session that was only renamed inside it", () =>
+    Effect.gen(function* () {
+      const session = yield* Session.Service
+      const before = yield* aggregateSessionStats(7)
+      const info = yield* session.create({ title: "old work" })
+      yield* step(info.id, Date.now() - 60 * 24 * 60 * 60 * 1000, 2)
+      yield* session.setTitle({ sessionID: info.id, title: "renamed today" })
+
+      const after = yield* aggregateSessionStats(7)
+      expect(after.totalSessions).toBe(before.totalSessions)
+      expect(after.totalCost).toBeCloseTo(before.totalCost)
+      yield* session.remove(info.id)
+    }),
+  )
 })

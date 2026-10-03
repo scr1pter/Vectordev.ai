@@ -553,6 +553,35 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("stopping a session answers the permission request its tool is waiting on", () =>
+  Effect.gen(function* () {
+    const prompt = yield* SessionPrompt.Service
+    const permission = yield* Permission.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const waiting = yield* permission
+      .ask({
+        sessionID: chat.id,
+        permission: "webfetch",
+        patterns: ["https://example.com"],
+        metadata: {},
+        always: ["*"],
+        ruleset: [],
+      })
+      .pipe(Effect.exit, Effect.forkChild)
+    yield* pollWithTimeout(
+      Effect.map(permission.list(), (list) => (list.length > 0 ? true : undefined)),
+      "the request was never asked",
+      "2 seconds",
+    )
+
+    yield* prompt.cancel(chat.id)
+
+    expect(Exit.isFailure(yield* Fiber.join(waiting))).toBe(true)
+    expect(yield* permission.list()).toHaveLength(0)
+  }),
+)
+
 it.instance("an autocomplete request carries only the current request, its own prompt and no tools", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

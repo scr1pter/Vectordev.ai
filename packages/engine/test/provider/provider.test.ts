@@ -1480,10 +1480,11 @@ test("mode cost preserves over-200k pricing from base model", () => {
   expect(model.cost.cache.read).toEqual(0.5)
   expect(model.cost.cache.write).toEqual(0)
   expect(model.options["serviceTier"]).toEqual("priority")
+  // The base long-context rates at the fast mode's markup (2x here), so a long fast step never prices below a short one.
   expect(model.cost.experimentalOver200K).toEqual({
-    input: 5,
-    output: 22.5,
-    cache: { read: 0.5, write: 0 },
+    input: 10,
+    output: 45,
+    cache: { read: 1, write: 0 },
   })
 })
 

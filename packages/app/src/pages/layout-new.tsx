@@ -2780,6 +2780,9 @@ export default function NewLayout(props: ParentProps) {
   // validated parallel runs left it with too few samples to ever recommend
   // anything, which is why the feature looked dead.
   const recordedSessionOutcomes = new Set<string>()
+  // Sessions whose idle had no usage to record yet. A provider that never reports usage would otherwise have the
+  // whole history fetched again on every turn, so each session gets a few tries.
+  const outcomeAttempts = new Map<string, number>()
   const stopSessionOutcomes = serverSDK().event.listen((event) => {
     if (event.details.type !== "session.idle") return
     const sessionID = sessionIDFromEvent(event.details)
@@ -2800,6 +2803,9 @@ export default function NewLayout(props: ParentProps) {
         setOnboardingFlag("taskCompleted")
       }
       if (outcomeRecorded) return
+      // A subagent's session is part of its parent's task, not a task of its own whose model choice to learn from.
+      const session = await client.session.get({ sessionID }).catch(() => undefined)
+      if (session?.data?.parentID) return
       const parts: Record<string, unknown[]> = {}
       for (const entry of history.data) {
         const id = (entry.info as { id?: string } | undefined)?.id
@@ -2813,7 +2819,9 @@ export default function NewLayout(props: ParentProps) {
       })
       // A first turn that failed or was stopped before any usage has nothing to record yet, so a later idle tries again.
       if (!outcome) {
-        recordedSessionOutcomes.delete(sessionID)
+        const attempts = (outcomeAttempts.get(sessionID) ?? 0) + 1
+        outcomeAttempts.set(sessionID, attempts)
+        if (attempts < 3) recordedSessionOutcomes.delete(sessionID)
         return
       }
       await recordOutcome(outcome)

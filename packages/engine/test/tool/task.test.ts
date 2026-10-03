@@ -148,6 +148,35 @@ it.instance(
 )
 
 it.instance(
+  "explore stays on a budget parent whose provider's small model costs more",
+  () =>
+    Effect.gen(function* () {
+      const parent = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("budget") }
+      const seeded = yield* seed("Explore budget", parent)
+      const def = yield* (yield* TaskTool).init()
+      const prompts: SessionPrompt.PromptInput[] = []
+      yield* def.execute(
+        { description: "find handlers", prompt: "Find the HTTP handlers.", subagent_type: "explore" },
+        taskContext({
+          sessionID: seeded.chat.id,
+          messageID: seeded.assistant.id,
+          promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+        }),
+      )
+      expect(prompts[0].model).toEqual(parent)
+    }),
+  {
+    config: {
+      small_model: "lmstudio/tiny",
+      provider: pricedProvider({
+        budget: { cost: { input: 0.1, output: 0.3 } },
+        tiny: { cost: { input: 0.75, output: 3.75 } },
+      }),
+    },
+  },
+)
+
+it.instance(
   "explore without a small model stays on the parent model at medium effort",
   () =>
     Effect.gen(function* () {
@@ -226,7 +255,8 @@ const seed = Effect.fn("TaskToolTest.seed")(function* (title = "Pinned", model =
     role: "user",
     sessionID: chat.id,
     agent: "build",
-    model,
+    // The turn runs at xhigh, as its reply below records.
+    model: { ...model, variant: "xhigh" },
     time: { created: Date.now() },
   })
   const assistant: SessionV1.Assistant = {
@@ -1002,6 +1032,33 @@ describe("tool.task", () => {
         expect(Exit.isFailure(exit)).toBe(true)
         if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("cannot leave the repository")
       }
+    }),
+  )
+
+  it.instance("a follow-up to a running foreground task is told to wait, not that it will be notified", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const busy = taskContext({
+        sessionID: chat.id,
+        messageID: assistant.id,
+        promptOps: { ...stubOps(), prompt: () => Effect.never },
+      })
+      yield* def
+        .execute({ description: "inspect", prompt: "Inspect.", subagent_type: "general" }, busy)
+        .pipe(Effect.forkChild)
+      const child = yield* pollWithTimeout(
+        Effect.map(jobs.list(), (list) => list.find((job) => job.metadata?.parentSessionId === chat.id)?.id),
+        "the task never started",
+        "2 seconds",
+      )
+
+      const exit = yield* Effect.exit(
+        def.execute({ description: "inspect", prompt: "Also this.", subagent_type: "general", task_id: child }, busy),
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("still running")
     }),
   )
 

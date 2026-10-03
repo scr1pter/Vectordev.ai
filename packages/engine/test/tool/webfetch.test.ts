@@ -5,13 +5,14 @@ import { Effect, Layer } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "@/tool/truncate"
+import { Config } from "@/config/config"
 import { WebFetchTool } from "../../src/tool/webfetch"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { Tool } from "@/tool/tool"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node]), [
+  LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node, Config.node]), [
     [httpClient, FetchHttpClient.layer as Layer.Layer<HttpClient.HttpClient>],
   ]),
 )
@@ -154,8 +155,9 @@ describe("tool.webfetch", () => {
       (url) =>
         Effect.gen(function* () {
           const result = yield* exec({ url: new URL("/guide", url).toString(), format: "markdown" })
+          // Relative links resolve against the page; in-page anchors keep only their text; forms keep their content.
           expect(result.output).toBe(
-            "# Guide\n\nSee [the docs](https://example.com/docs), local page and top.\n\n[image: Request flow]",
+            `# Guide\n\nSee [the docs](https://example.com/docs), [local page](${new URL("/local", url).href}) and top.\n\n[image: Request flow]\n\nSubscribe`,
           )
           const metadata: { truncated?: boolean } = result.metadata
           expect(metadata.truncated).toBe(false)

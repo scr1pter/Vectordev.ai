@@ -3,6 +3,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Parser } from "htmlparser2"
 import { Tool } from "./tool"
 import { Truncate } from "./truncate"
+import { Config } from "@/config/config"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import TurndownService from "turndown"
@@ -31,6 +32,7 @@ export const WebFetchTool = Tool.define(
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
     const truncate = yield* Truncate.Service
+    const config = yield* Config.Service
 
     return {
       description: DESCRIPTION,
@@ -116,8 +118,9 @@ export const WebFetchTool = Tool.define(
           if (params.format === "html" || !contentType.includes("text/html"))
             return { output: content, title, metadata: {} }
           const page = yield* truncate.output(
-            params.format === "markdown" ? convertHTMLToMarkdown(content) : extractTextFromHTML(content),
-            { maxBytes: MAX_PAGE_BYTES },
+            params.format === "markdown" ? convertHTMLToMarkdown(content, params.url) : extractTextFromHTML(content),
+            // A configured tool_output.max_bytes still decides, as it does for shell.
+            { maxBytes: (yield* config.get()).tool_output?.max_bytes ?? MAX_PAGE_BYTES },
           )
           return {
             output: page.content,
@@ -153,7 +156,7 @@ function extractTextFromHTML(html: string) {
   return text.trim()
 }
 
-function convertHTMLToMarkdown(html: string): string {
+function convertHTMLToMarkdown(html: string, base: string): string {
   const turndownService = new TurndownService({
     headingStyle: "atx",
     hr: "---",
@@ -161,7 +164,8 @@ function convertHTMLToMarkdown(html: string): string {
     codeBlockStyle: "fenced",
     emDelimiter: "*",
   })
-  // Page chrome and markup that has no text worth reading costs tokens on every fetch.
+  // Page chrome and markup that has no text worth reading costs tokens on every fetch. Forms and buttons stay: some
+  // frameworks wrap the whole page in a form, and accordions put their questions in buttons.
   turndownService.remove([
     "script",
     "style",
@@ -171,9 +175,10 @@ function convertHTMLToMarkdown(html: string): string {
     "footer",
     "aside",
     "noscript",
-    "form",
-    "button",
     "iframe",
+    "input",
+    "select",
+    "textarea",
   ])
   turndownService.remove((node) => node.nodeName.toLowerCase() === "svg")
   turndownService.addRule("image", {
@@ -183,10 +188,16 @@ function convertHTMLToMarkdown(html: string): string {
       return alt ? `[image: ${alt}]` : ""
     },
   })
-  // Relative and in-page links cannot be fetched as written, so only absolute links keep their target.
+  // Links are resolved against the page, so the model can fetch the target; in-page and script links keep only text.
   turndownService.addRule("link", {
-    filter: (node) => node.nodeName === "A" && !/^https?:\/\//i.test(node.getAttribute("href") ?? ""),
-    replacement: (content) => content,
+    filter: "a",
+    replacement: (content, node) => {
+      const href = (node as HTMLElement).getAttribute("href")?.trim()
+      const target = href && !href.startsWith("#") && URL.canParse(href, base) ? new URL(href, base) : undefined
+      return target && (target.protocol === "http:" || target.protocol === "https:")
+        ? `[${content}](${target.href})`
+        : content
+    },
   })
   return turndownService.turndown(html)
 }

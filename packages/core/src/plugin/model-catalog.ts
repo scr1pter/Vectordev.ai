@@ -57,8 +57,21 @@ function cost(input: ModelCatalog.Model["cost"]): ModelV2Info["cost"] {
 function mergeCost(base: ModelV2Info["cost"], override: ModelCatalog.Model["cost"] | undefined) {
   if (!override) return base
   const next = cost(override)
-  const [baseDefault, ...baseTiers] = base
+  const [baseDefault, ...unscaledTiers] = base
   const [nextDefault, ...nextTiers] = next
+  // Base tiers the mode does not list follow at the mode's markup: priority pricing is a multiple of the standard
+  // rates, and the base tiers alone would price a long fast step below a short one.
+  const scale = (rate: number, from: number | undefined, to: number | undefined) =>
+    from && to !== undefined ? (rate * to) / from : rate
+  const baseTiers = unscaledTiers.map((item) => ({
+    ...item,
+    input: scale(item.input, baseDefault?.input, nextDefault?.input),
+    output: scale(item.output, baseDefault?.output, nextDefault?.output),
+    cache: {
+      read: scale(item.cache.read, baseDefault?.cache.read, nextDefault?.cache.read),
+      write: scale(item.cache.write, baseDefault?.cache.write, nextDefault?.cache.write),
+    },
+  }))
   const tierKey = (item: ModelV2Info["cost"][number]) => `${item.tier?.type ?? "base"}:${item.tier?.size ?? 0}`
   const merge = (left: ModelV2Info["cost"][number], right: ModelV2Info["cost"][number]) => ({
     ...left,

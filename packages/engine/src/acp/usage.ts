@@ -14,10 +14,11 @@ export type AssistantTokenCost = Pick<VectorAssistantMessage, "cost" | "tokens" 
 
 export type AssistantMessage = AssistantTokenCost &
   Pick<VectorAssistantMessage, "role"> &
-  Partial<Pick<VectorAssistantMessage, "providerID" | "modelID" | "parentID">>
+  Partial<Pick<VectorAssistantMessage, "providerID" | "modelID" | "parentID" | "id">>
 
 export type SessionMessage = {
-  readonly info: { readonly role: Message["role"] } | AssistantMessage
+  readonly info: { readonly role: Message["role"]; readonly id?: string } | AssistantMessage
+  readonly parts?: ReadonlyArray<{ readonly type: string; readonly synthetic?: boolean }>
 }
 
 export type MessagesInput = {
@@ -112,11 +113,22 @@ export function contextTokens(message: AssistantTokenCost) {
   return message.tokens.input + message.tokens.cache.read + message.tokens.cache.write
 }
 
-// Every provider step answering one user message is a separate assistant message, so a turn's usage is their sum.
-export function turnUsage(messages: readonly SessionMessage[], parentID: string): Usage | undefined {
+// Every provider step of a prompt is a separate assistant message, so a turn's usage is their sum: every reply from
+// the prompt's own user message to the final one. An auto-compaction mid-turn adds a compaction marker and a synthetic
+// "continue" message that later steps answer, so the turn starts at the last user message someone actually wrote.
+export function turnUsage(messages: readonly SessionMessage[], finalID: string): Usage | undefined {
+  const end = messages.findIndex((message) => message.info.id === finalID)
+  if (end < 0) return undefined
+  const start = messages
+    .slice(0, end)
+    .findLastIndex(
+      (message) =>
+        message.info.role === "user" &&
+        (message.parts ?? []).some((part) => part.type !== "compaction" && part.synthetic !== true),
+    )
   const steps = messages
+    .slice(start + 1, end + 1)
     .filter((message): message is { readonly info: AssistantMessage } => message.info.role === "assistant")
-    .filter((message) => message.info.parentID === parentID)
   if (!steps.length) return undefined
   return buildUsage({
     cost: steps.reduce((sum, step) => sum + step.info.cost, 0),

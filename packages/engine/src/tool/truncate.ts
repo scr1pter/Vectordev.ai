@@ -98,6 +98,11 @@ const layer = Layer.effect(
           const size = Buffer.byteLength(lines[i], "utf-8") + (i > 0 ? 1 : 0)
           if (bytes + size > maxBytes) {
             hitBytes = true
+            // A single line longer than the whole budget, such as minified HTML or a JSON blob, still shows its start.
+            if (out.length === 0) {
+              out.push(slice(lines[i], maxBytes, "start"))
+              bytes += Buffer.byteLength(out[0], "utf-8")
+            }
             break
           }
           out.push(lines[i])
@@ -108,6 +113,10 @@ const layer = Layer.effect(
           const size = Buffer.byteLength(lines[i], "utf-8") + (out.length > 0 ? 1 : 0)
           if (bytes + size > maxBytes) {
             hitBytes = true
+            if (out.length === 0) {
+              out.unshift(slice(lines[i], maxBytes, "end"))
+              bytes += Buffer.byteLength(out[0], "utf-8")
+            }
             break
           }
           out.unshift(lines[i])
@@ -145,5 +154,19 @@ const layer = Layer.effect(
 )
 
 export const node = LayerNode.make({ service: Service, layer: layer, deps: [FSUtil.node] })
+
+// At most `bytes` bytes from one end of a line, cut on a character boundary.
+function slice(line: string, bytes: number, from: "start" | "end") {
+  const buffer = Buffer.from(line, "utf-8")
+  return from === "start"
+    ? buffer
+        .subarray(0, bytes)
+        .toString("utf-8")
+        .replace(/\uFFFD$/, "")
+    : buffer
+        .subarray(buffer.length - bytes)
+        .toString("utf-8")
+        .replace(/^\uFFFD/, "")
+}
 
 export * as Truncate from "./truncate"

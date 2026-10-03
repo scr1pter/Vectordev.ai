@@ -5,7 +5,7 @@
 // persist.ts uses) so unrelated projects never collide or leak into each
 // other's history.
 import { checksum } from "@vectordevai/core/util/encode"
-import { createResource, createSignal } from "solid-js"
+import { createEffect, createSignal } from "solid-js"
 import type { ModelOutcome, TaskCategory } from "./economics-types"
 import type { MeasuredUsage } from "./token-usage"
 
@@ -92,12 +92,18 @@ export async function listOutcomes(projectId: string): Promise<ModelOutcome[]> {
   return readOutcomes(projectId)
 }
 
-// A project's outcome history that stays current as new outcomes are recorded.
+// A project's outcome history that stays current as new outcomes are recorded. A signal rather than a resource:
+// outcomes are recorded on every session's first idle, and reading a resource while it refetches would suspend the
+// page around the reader.
 export function createOutcomes(projectId: () => string) {
-  const [outcomes] = createResource(
-    () => ({ projectId: projectId(), version: version() }),
-    (source) => listOutcomes(source.projectId),
-  )
+  const [outcomes, setOutcomes] = createSignal<ModelOutcome[]>([])
+  createEffect(() => {
+    const id = projectId()
+    version()
+    void listOutcomes(id).then((list) => {
+      if (projectId() === id) setOutcomes(list)
+    })
+  })
   return outcomes
 }
 

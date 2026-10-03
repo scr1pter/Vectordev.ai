@@ -79,13 +79,17 @@ export const GrepTool = Tool.define(
             const absolute = path.resolve(cwd, item.entry.path)
             const relative = path.relative(ins.directory, absolute)
             // ripgrep keeps each line's newline, which printed a blank line after every match; a minified or generated
-            // line can run to thousands of characters, so a match shows its first 500.
+            // line can run to thousands of characters, so a match shows the 500 around what it matched.
             const text = item.text.replace(/\r?\n$/, "")
+            // Submatch offsets count bytes, the window counts characters.
+            const at = Buffer.from(text, "utf-8")
+              .subarray(0, item.submatches[0]?.start ?? 0)
+              .toString("utf-8").length
             return {
               // Relative to the working directory, which read, edit and write resolve against, when it is inside it.
               path: relative.startsWith("..") || path.isAbsolute(relative) ? absolute : relative,
               line: item.line,
-              text: text.length > 500 ? `${text.slice(0, 500)}…` : text,
+              text: excerpt(text, at),
             }
           })
 
@@ -119,3 +123,10 @@ export const GrepTool = Tool.define(
     }
   }),
 )
+
+// 500 characters of a long line around position `at`, marked where the line goes on.
+function excerpt(text: string, at: number) {
+  if (text.length <= 500) return text
+  const start = Math.max(0, Math.min(at - 200, text.length - 500))
+  return `${start > 0 ? "…" : ""}${text.slice(start, start + 500)}${start + 500 < text.length ? "…" : ""}`
+}

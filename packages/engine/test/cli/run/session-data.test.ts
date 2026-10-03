@@ -123,6 +123,9 @@ describe("run session data", () => {
     // A step's message is updated again as it settles, which must not count it twice.
     expect(usage(third.data, assistant("msg-3", { cost: 0.04 })).usage).toBe("2 · $1.14")
     expect(usage(third.data, assistant("msg-4", { cost: 0, unpriced: true })).usage).toBe("2 · $1.14 + unpriced")
+    // A new step streams before it reports usage; the last context reading stays on screen meanwhile.
+    const empty = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+    expect(usage(third.data, assistant("msg-5", { cost: 0, tokens: empty })).usage).toBe("2 · $1.14 + unpriced")
   })
 
   test("buffers delayed assistant text until the role is known", () => {

@@ -16,6 +16,8 @@ const DEFAULT_BUFFER = 20_000
 // conversation, so a step at 900K costs several times one at 200K.
 const DEFAULT_MAX_CONTEXT = 200_000
 const LARGE_WINDOW = 500_000
+// A ceiling under this would leave little more room than the fixed system prompt and tools take.
+const MIN_MAX_CONTEXT = 64_000
 const DEFAULT_KEEP_TOKENS = 8_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const SUMMARY_OUTPUT_TOKENS = 4_096
@@ -255,7 +257,7 @@ export const make = (dependencies: Dependencies) => {
     const ceiling =
       config.maxContext === 0
         ? undefined
-        : (config.maxContext ??
+        : ((config.maxContext === undefined ? undefined : Math.max(config.maxContext, MIN_MAX_CONTEXT)) ??
           SessionRunnerModel.contextTier(input.model) ??
           (context >= LARGE_WINDOW ? DEFAULT_MAX_CONTEXT : undefined))
     const threshold = ceiling === undefined ? window : Math.min(window, ceiling - Math.min(output, config.buffer))

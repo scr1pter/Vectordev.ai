@@ -62,6 +62,8 @@ type Metadata = {
   display?: Display
   // Identifies the file's state and the lines read, so an identical read later in the conversation can point back.
   fingerprint?: string
+  // This result points back to an earlier read instead of holding the content.
+  pointer?: boolean
 }
 
 export const ReadTool = Tool.define<
@@ -342,7 +344,16 @@ export const ReadTool = Tool.define<
       // The same lines of an unchanged file are already in the conversation, so point back to them rather than send
       // the file again. Only a visible result counts: ctx.messages starts after the last compaction summary, and a
       // pruned result no longer holds the content.
+      // An errored reply is dropped from the request, as toModelMessages drops it, unless it was aborted with content,
+      // and an earlier pointer holds no content of its own.
       const earlier = ctx.messages
+        .filter(
+          (message) =>
+            message.info.role !== "assistant" ||
+            !message.info.error ||
+            (SessionV1.AbortedError.isInstance(message.info.error) &&
+              message.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")),
+        )
         .flatMap((message) => message.parts)
         .findLast(
           (part): part is SessionV1.ToolPart =>
@@ -350,6 +361,7 @@ export const ReadTool = Tool.define<
             part.tool === "read" &&
             part.state.status === "completed" &&
             !part.state.time.compacted &&
+            part.state.metadata?.pointer !== true &&
             part.state.metadata?.fingerprint === fingerprint,
         )
       if (earlier?.state.status === "completed" && loaded.length === 0) {
@@ -364,6 +376,7 @@ export const ReadTool = Tool.define<
             loaded: [],
             display,
             fingerprint,
+            pointer: true,
           },
         }
       }

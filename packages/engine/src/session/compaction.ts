@@ -33,7 +33,8 @@ const CLEAR_TRIGGER = 60_000
 const CLEAR_PROTECT = 20_000
 const CLEAR_MINIMUM = 40_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
-const PRUNE_PROTECTED_TOOLS = ["skill"]
+// Outputs that cannot be fetched again: a skill's instructions, the user's answers and a subagent's report.
+const PRUNE_PROTECTED_TOOLS = ["skill", "question", "task"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
@@ -262,9 +263,7 @@ const layer = Layer.effect(
       const model = yield* provider
         .getModel(last.providerID, last.modelID)
         .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
-      // Explicit cache breakpoints live 5 minutes; providers that cache on their own may keep a prefix for up to an hour.
-      const ttl = model && ProviderTransform.usesCacheBreakpoints(model) ? 5 * 60_000 : 60 * 60_000
-      if (Date.now() - last.time.completed <= ttl) return
+      if (Date.now() - last.time.completed <= (model ? ProviderTransform.cacheLifetime(model) : 60 * 60_000)) return
       yield* Effect.logInfo("pruning")
 
       const found = clearable(msgs, { keepTurns: 2, protect: PRUNE_PROTECT })
@@ -288,7 +287,9 @@ const layer = Layer.effect(
         .messages({ sessionID: input.sessionID })
         .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
       if (!msgs) return false
-      const found = clearable(msgs, { keepTurns: 0, protect: CLEAR_PROTECT })
+      // The newest reply's tool results go to the model for the first time in the request about to be built.
+      const unseen = msgs.findLast((msg) => msg.info.role === "assistant")?.info.id
+      const found = clearable(msgs, { keepTurns: 0, protect: CLEAR_PROTECT, skip: unseen })
       if (found.tokens < CLEAR_MINIMUM) return false
       yield* markCleared(found.parts)
       return true
@@ -591,7 +592,7 @@ export const node = LayerNode.make({
 
 // Walks back from the newest message, skipping the newest `keepTurns` user turns and the newest `protect` tokens of
 // tool output, and collects the older completed tool outputs that are still in the history.
-function clearable(msgs: SessionV1.WithParts[], input: { keepTurns: number; protect: number }) {
+function clearable(msgs: SessionV1.WithParts[], input: { keepTurns: number; protect: number; skip?: string }) {
   const parts: SessionV1.ToolPart[] = []
   let total = 0
   let tokens = 0
@@ -601,6 +602,7 @@ function clearable(msgs: SessionV1.WithParts[], input: { keepTurns: number; prot
     if (msg.info.role === "user") turns++
     if (turns < input.keepTurns) continue
     if (msg.info.role === "assistant" && msg.info.summary) break loop
+    if (msg.info.id === input.skip) continue
     for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
       const part = msg.parts[partIndex]
       if (part.type !== "tool") continue

@@ -3,7 +3,8 @@ import { effectCmd } from "../effect-cmd"
 import { Session } from "@/session/session"
 import { NotFoundError } from "@/storage/storage"
 import { Database } from "@vectordevai/core/database/database"
-import { SessionTable } from "@vectordevai/core/session/sql"
+import { SessionMessageTable, SessionTable } from "@vectordevai/core/session/sql"
+import { and, eq, gte } from "drizzle-orm"
 import { Project } from "@/project/project"
 import { InstanceRef } from "@/effect/instance-ref"
 
@@ -91,6 +92,7 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
   currentProject?: Project.Info,
 ) {
   const svc = yield* Session.Service
+  const { db } = yield* Database.Service
   const sessions = yield* getAllSessions()
   const MS_IN_DAY = 24 * 60 * 60 * 1000
 
@@ -173,7 +175,30 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
           (message) =>
             message.info.time.created >= cutoffTime && !(message.info.role === "assistant" && message.info.forked),
         )
-        const steps = messages.flatMap((message) => (message.info.role === "assistant" ? [message.info] : []))
+        const v1Steps = messages.flatMap((message) =>
+          message.info.role === "assistant" ? [{ cost: message.info.cost, tokens: message.info.tokens }] : [],
+        )
+        // A V2-engine session keeps its replies and compaction summaries in the session message table instead.
+        const v2Steps =
+          cutoffTime > 0 && all.length === 0
+            ? (yield* db
+                .select()
+                .from(SessionMessageTable)
+                .where(
+                  and(
+                    eq(SessionMessageTable.session_id, session.id),
+                    gte(SessionMessageTable.time_created, cutoffTime),
+                  ),
+                )
+                .all()
+                .pipe(Effect.orDie)).flatMap((row) => {
+                const data = row.data as { cost?: number; tokens?: (typeof v1Steps)[number]["tokens"] }
+                return (row.type === "assistant" || row.type === "compaction") && data.tokens
+                  ? [{ cost: data.cost ?? 0, tokens: data.tokens }]
+                  : []
+              })
+            : []
+        const steps = [...v1Steps, ...v2Steps]
 
         const sessionCost =
           cutoffTime > 0 ? steps.reduce((sum, step) => sum + (step.cost || 0), 0) : (session.cost ?? 0)
@@ -229,7 +254,9 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
         }
 
         return {
-          messageCount: messages.length,
+          // Updates such as a share or a rename also bump a session, so a window counts only sessions with messages in it.
+          active: cutoffTime === 0 || messages.length > 0 || v2Steps.length > 0,
+          messageCount: messages.length + v2Steps.length,
           sessionCost,
           sessionTokens,
           sessionTotalTokens:
@@ -247,7 +274,9 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
     { concurrency: 20 },
   )
 
-  for (const result of results) {
+  const active = results.filter((result) => result.active)
+  stats.totalSessions = active.length
+  for (const result of active) {
     earliestTime = Math.min(earliestTime, result.earliestTime)
     latestTime = Math.max(latestTime, result.latestTime)
     sessionTotalTokens.push(result.sessionTotalTokens)
@@ -295,7 +324,7 @@ export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* 
     stats.totalTokens.reasoning +
     stats.totalTokens.cache.read +
     stats.totalTokens.cache.write
-  stats.tokensPerSession = filteredSessions.length > 0 ? totalTokens / filteredSessions.length : 0
+  stats.tokensPerSession = active.length > 0 ? totalTokens / active.length : 0
   sessionTotalTokens.sort((a, b) => a - b)
   const mid = Math.floor(sessionTotalTokens.length / 2)
   stats.medianTokensPerSession =

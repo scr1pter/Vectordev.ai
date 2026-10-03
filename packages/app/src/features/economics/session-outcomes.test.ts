@@ -38,6 +38,38 @@ describe("outcomeFromSession", () => {
     expect(outcome.latencyMs).toBe(5_000)
   })
 
+  test("measures latency from this session's own replies, not history a fork copied in", () => {
+    const outcome = session({
+      messages: [
+        { info: { id: "m0", role: "user" } },
+        {
+          info: {
+            id: "old",
+            role: "assistant",
+            providerID: "anthropic",
+            modelID: "claude-sonnet-5",
+            cost: 0,
+            forked: true,
+            tokens: usage,
+            time: { created: 1_000, completed: 2_000 },
+          },
+        },
+        {
+          info: {
+            id: "m1",
+            role: "assistant",
+            providerID: "anthropic",
+            modelID: "claude-sonnet-5",
+            cost: 0.02,
+            tokens: usage,
+            time: { created: 3_600_000, completed: 3_660_000 },
+          },
+        },
+      ],
+    })!
+    expect(outcome.latencyMs).toBe(60_000)
+  })
+
   test("is idempotent per session so repeated idle events record once", () => {
     expect(session()!.id).toBe(session()!.id)
     expect(session()!.id).toContain("s1")

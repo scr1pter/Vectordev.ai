@@ -314,11 +314,16 @@ describe("tool.read env file permissions", () => {
 
 describe("tool.read repeated reads", () => {
   // A conversation holding one earlier read result, as the session would pass it on the next step.
-  const after = (result: { output: string; metadata: unknown }, compacted?: number) => ({
+  const after = (result: { output: string; metadata: unknown }, compacted?: number, error?: unknown) => ({
     ...ctx,
     messages: [
       {
-        info: { id: MessageID.make("msg_earlier"), sessionID: ctx.sessionID, role: "assistant" },
+        info: {
+          id: MessageID.make("msg_earlier"),
+          sessionID: ctx.sessionID,
+          role: "assistant",
+          ...(error ? { error } : {}),
+        },
         parts: [
           {
             id: "prt_earlier",
@@ -357,6 +362,22 @@ describe("tool.read repeated reads", () => {
       expect((yield* run({ filePath: filepath }, after(first, 3))).output).toContain("second line")
       yield* put(filepath, "first line\nchanged line\n")
       expect((yield* run({ filePath: filepath }, after(first))).output).toContain("changed line")
+    }),
+  )
+
+  it.instance("never points back to a pointer or to a read the model never saw", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "notes.txt")
+      yield* put(filepath, "first line\nsecond line\n")
+      const first = yield* run({ filePath: filepath })
+      const pointer = yield* run({ filePath: filepath }, after(first))
+      expect(pointer.output).toContain("File unchanged")
+      // Once the full read is gone (pruned or summarized away), a later read must carry the content again.
+      expect((yield* run({ filePath: filepath }, after(pointer))).output).toContain("second line")
+      // A reply that failed is dropped from the request, so its read does not count either.
+      const failed = after(first, undefined, { name: "UnknownError", data: { message: "connection reset" } })
+      expect((yield* run({ filePath: filepath }, failed)).output).toContain("second line")
     }),
   )
 })

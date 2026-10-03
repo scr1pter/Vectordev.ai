@@ -441,6 +441,12 @@ function mapProviderOptions(
 
 // Whether requests to this model carry explicit prompt-cache breakpoints (Anthropic-style cache_control). Only then is
 // it worth sending the system prompt as separate blocks; providers that cache prefixes on their own get one block.
+// How long a provider keeps a cached prompt prefix. Explicit cache breakpoints live 5 minutes; providers that cache
+// prefixes on their own may keep one for up to an hour, so their prefix is treated as warm that long.
+export function cacheLifetime(model: Provider.Model) {
+  return usesCacheBreakpoints(model) ? 5 * 60_000 : 60 * 60_000
+}
+
 export function usesCacheBreakpoints(model: Provider.Model) {
   return (
     (model.providerID === "anthropic" ||

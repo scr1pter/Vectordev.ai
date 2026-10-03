@@ -121,10 +121,11 @@ describe("ModelCatalogPlugin", () => {
       expect(fast?.cost).toEqual([
         { input: 5, output: 30, cache: { read: 0.5, write: 0 } },
         // context_over_200k is models.dev's 200K stand-in for the exact tier above, so it adds no tier of its own.
+        // The base tier follows at the fast mode's 2x markup, so a long fast step never prices below a short one.
         {
           tier: { type: "context", size: 272_000 },
-          input: 3,
-          output: 18,
+          input: 6,
+          output: 36,
           cache: { read: 0.25, write: 0 },
         },
       ])

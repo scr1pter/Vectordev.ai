@@ -10,6 +10,11 @@ const COMPACTION_BUFFER = 20_000
 // re-sends the whole conversation, so a step at 900K costs several times one at 200K.
 export const DEFAULT_MAX_CONTEXT = 200_000
 const LARGE_WINDOW = 500_000
+// Some catalogs price input in bands from 32K up; only the long-context tiers, at 200K and beyond, set where to
+// compact. Below that, compaction would follow almost every step.
+const LONG_CONTEXT_TIER = 200_000
+// A ceiling under this would leave little more room than the fixed system prompt and tools take.
+const MIN_MAX_CONTEXT = 64_000
 
 export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outputTokenMax?: number }) {
   const context = input.model.limit.context
@@ -31,16 +36,18 @@ export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outpu
 // without a configured ceiling keeps its own window, as it did before the ceiling existed.
 function maxContext(setting: number | undefined, model: Provider.Model, reserved: number | undefined) {
   if (setting === 0) return undefined
-  if (setting !== undefined) return setting
+  if (setting !== undefined) return Math.max(setting, MIN_MAX_CONTEXT)
   if (reserved !== undefined) return undefined
   return priceTier(model) ?? (model.limit.context >= LARGE_WINDOW ? DEFAULT_MAX_CONTEXT : undefined)
 }
 
+// models.dev keeps context_over_200k as a 200K stand-in for older readers next to the exact tiers, so the stand-in
+// counts only for a model without tiers, as pricing treats it.
 function priceTier(model: Provider.Model) {
-  const sizes = [
-    ...(model.cost.tiers ?? []).map((item) => item.tier.size),
-    ...(model.cost.experimentalOver200K ? [200_000] : []),
-  ]
+  const tiers = (model.cost.tiers ?? []).map((item) => item.tier.size)
+  const sizes = (tiers.length ? tiers : model.cost.experimentalOver200K ? [200_000] : []).filter(
+    (size) => size >= LONG_CONTEXT_TIER,
+  )
   return sizes.length ? Math.min(...sizes) : undefined
 }
 

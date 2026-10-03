@@ -88,6 +88,8 @@ export type SessionData = {
   echo: Map<string, Set<string>>
   // Each provider step is its own assistant message, so the run's spend is the sum over them.
   spent: Map<string, { cost: number; unpriced: boolean }>
+  // The last context reading; a step that has not reported usage yet keeps showing it.
+  context?: string
 }
 
 export type SessionDataInput = {
@@ -142,24 +144,15 @@ function formatSpend(spent: SessionData["spent"]): string | undefined {
   return cost > 0 ? `${money.format(cost)} + unpriced` : "cost unknown"
 }
 
-function formatUsage(
-  tokens: Tokens | undefined,
-  limit: number | undefined,
-  spend: string | undefined,
-): string | undefined {
+function formatContext(tokens: Tokens | undefined, limit: number | undefined): string | undefined {
   const total =
     (tokens?.input ?? 0) +
     (tokens?.output ?? 0) +
     (tokens?.reasoning ?? 0) +
     (tokens?.cache?.read ?? 0) +
     (tokens?.cache?.write ?? 0)
-
-  if (total <= 0) return spend
-
-  const text =
-    limit && limit > 0 ? `${Locale.number(total)} (${Math.round((total / limit) * 100)}%)` : Locale.number(total)
-
-  return spend ? `${text} · ${spend}` : text
+  if (total <= 0) return undefined
+  return limit && limit > 0 ? `${Locale.number(total)} (${Math.round((total / limit) * 100)}%)` : Locale.number(total)
 }
 
 export function formatError(error: {
@@ -847,11 +840,8 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
 
     if (typeof info.id === "string" && typeof info.cost === "number")
       data.spent.set(info.id, { cost: info.cost, unpriced: info.unpriced === true })
-    const usage = formatUsage(
-      info.tokens,
-      input.limits[modelKey(info.providerID, info.modelID)],
-      formatSpend(data.spent),
-    )
+    data.context = formatContext(info.tokens, input.limits[modelKey(info.providerID, info.modelID)]) ?? data.context
+    const usage = [data.context, formatSpend(data.spent)].filter(Boolean).join(" · ")
     if (usage) {
       next = {
         ...next,

@@ -189,13 +189,30 @@ describe("acp usage", () => {
     ).toBe(23_020)
   })
 
-  test("a turn's usage sums every provider step that answered its user message", () => {
-    const step = (parentID: string, input: number) =>
-      assistant({ cost: 0.1, parentID, tokens: { input, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } })
-    expect(UsageService.turnUsage([step("msg_a", 999), step("msg_b", 30_000), step("msg_b", 31_000)], "msg_b")).toEqual(
-      { inputTokens: 61_000, outputTokens: 20, totalTokens: 61_020 },
-    )
-    expect(UsageService.turnUsage([step("msg_a", 1)], "msg_missing")).toBeUndefined()
+  test("a turn's usage sums every provider step since the prompt, across a mid-turn compaction", () => {
+    const step = (id: string, input: number) =>
+      assistant({ id, cost: 0.1, tokens: { input, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } })
+    const asked = (id: string, parts: UsageService.SessionMessage["parts"]) => ({
+      info: { role: "user" as const, id },
+      parts,
+    })
+    const messages = [
+      asked("u0", [{ type: "text" }]),
+      step("a0", 999),
+      asked("u1", [{ type: "text" }]),
+      step("a1", 30_000),
+      // Auto-compaction mid-turn: a marker, the summary, then a synthetic "continue" the later steps answer.
+      asked("c1", [{ type: "compaction" }]),
+      step("s1", 5_000),
+      asked("k1", [{ type: "text", synthetic: true }]),
+      step("a2", 1_000),
+    ]
+    expect(UsageService.turnUsage(messages, "a2")).toEqual({
+      inputTokens: 36_000,
+      outputTokens: 30,
+      totalTokens: 36_030,
+    })
+    expect(UsageService.turnUsage(messages, "missing")).toBeUndefined()
   })
 
   test("calculates total session cost from assistant messages", () => {
