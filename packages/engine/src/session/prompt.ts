@@ -166,20 +166,22 @@ const layer = Layer.effect(
         return { scope: yield* Scope.Scope, titles: new Set<Fiber.Fiber<void>>() }
       }),
     )
-    // Instruction files (AGENTS.md, .vector/BRAIN.md, config instructions) as a session first read them. They sit in the
+    // Instruction files (AGENTS.md, .vector/BRAIN.md, config instructions) as a session last read them. They sit in the
     // system prompt ahead of the whole conversation, so re-reading them every step meant one edit, often the agent's own
-    // memory update, re-wrote the entire cached context at the cache-write price. They are read again once compaction
-    // gives the session a new history start, which re-writes that context anyway; an edit the agent makes itself is
-    // already in its context. Keyed by session, so concurrent sessions keep their own snapshot.
-    const instructionSnapshots = new Map<SessionID, { start: MessageID | undefined; instructions: string[] }>()
+    // memory update, re-wrote the entire cached context at the cache-write price. They are read again only when that
+    // context is re-written anyway: after compaction gives the session a new history start, on another model, or once
+    // the provider's cache has expired. An edit the agent makes itself is already in its context. Keyed by session, so
+    // concurrent sessions keep their own snapshot.
+    const instructionSnapshots = new Map<SessionID, { key: string; instructions: string[] }>()
     const sessionInstructions = Effect.fn("SessionPrompt.sessionInstructions")(function* (
       sessionID: SessionID,
-      start: MessageID | undefined,
+      key: string,
+      cold: boolean,
     ) {
       const snapshot = instructionSnapshots.get(sessionID)
-      if (snapshot && snapshot.start === start) return snapshot.instructions
+      if (snapshot && snapshot.key === key && !cold) return snapshot.instructions
       const instructions = yield* instruction.system()
-      instructionSnapshots.set(sessionID, { start, instructions })
+      instructionSnapshots.set(sessionID, { key, instructions })
       return instructions
     })
     const awaitTitles = Effect.fn("SessionPrompt.awaitTitles")(function* () {
@@ -1366,7 +1368,14 @@ const layer = Layer.effect(
                     }),
                   ),
                 ),
-            quick ? Effect.succeed([]) : sessionInstructions(sessionID, msgs[0]?.info.id).pipe(Effect.orDie),
+            quick
+              ? Effect.succeed([])
+              : sessionInstructions(
+                  sessionID,
+                  `${msgs[0]?.info.id}|${model.providerID}/${model.id}`,
+                  // Anthropic's default cache lives 5 minutes; past that the prefix is written again regardless.
+                  Date.now() - (lastFinished?.time.completed ?? 0) > 5 * 60_000,
+                ).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             MessageV2.toModelMessagesEffect(msgs, model),
           ])

@@ -646,23 +646,60 @@ const firstRequestBody = Effect.fn("test.firstRequestBody")(function* (input: {
 })
 
 it.instance(
-  "loop sends the stable system prompt as its own block, ahead of the directory and date",
+  "loop puts the stable system prompt ahead of the directory and date, as its own block where the provider caches by breakpoint",
   () =>
     Effect.gen(function* () {
-      const body = JSON.parse(yield* firstRequestBody({})) as { messages: { role: string; content: unknown }[] }
-      const system = body.messages
-        .filter((message) => message.role === "system")
-        .map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content)))
-      expect(system).toHaveLength(2)
-      // Nothing in the first block depends on the session, so the provider cache can reuse it across sessions.
-      expect(system[0]).toContain("You are Vector")
-      expect(system[0]).toContain("<subagent_policy>")
-      expect(system[0]).not.toContain("Working directory")
-      expect(system[0]).not.toContain("Today's date")
-      expect(system[1]).toContain("Working directory")
-      expect(system[1]).toContain("Today's date")
+      const claude = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("claude-test") }
+      const { llm } = yield* useServerConfig((url) => {
+        const base = providerCfg(url)
+        return {
+          ...base,
+          provider: {
+            ...base.provider,
+            lmstudio: {
+              ...base.provider.lmstudio,
+              models: {
+                ...base.provider.lmstudio.models,
+                "claude-test": {
+                  ...base.provider.lmstudio.models["test-model"],
+                  id: "claude-test",
+                  name: "Claude Test",
+                },
+              },
+            },
+          },
+        }
+      })
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const system = (body: unknown) =>
+        (body as { messages: { role: string; content: unknown }[] }).messages
+          .filter((message) => message.role === "system")
+          .map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content)))
+      const run = (model: typeof claude) =>
+        Effect.gen(function* () {
+          const chat = yield* sessions.create({ title: "Pinned" })
+          yield* llm.text("ok")
+          yield* prompt.prompt({ sessionID: chat.id, agent: "build", model, parts: [{ type: "text", text: "hello" }] })
+        })
+
+      yield* run(ref)
+      yield* run(claude)
+      const [plain, cached] = (yield* llm.hits).map((hit) => system(hit.body))
+
+      // A provider that caches prefixes on its own gets one block, with the stable parts first.
+      expect(plain).toHaveLength(1)
+      expect(plain[0].indexOf("<subagent_policy>")).toBeLessThan(plain[0].indexOf("Working directory"))
+      // A provider that caches by breakpoint gets the stable parts as a block of their own, so it is reused across
+      // sessions, directories and days.
+      expect(cached).toHaveLength(2)
+      expect(cached[0]).toContain("You are Vector")
+      expect(cached[0]).toContain("<subagent_policy>")
+      expect(cached[0]).not.toContain("Working directory")
+      expect(cached[0]).not.toContain("Today's date")
+      expect(cached[1]).toContain("Working directory")
     }),
-  15_000,
+  30_000,
 )
 
 it.instance(

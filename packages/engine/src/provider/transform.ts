@@ -439,10 +439,10 @@ function mapProviderOptions(
   })
 }
 
-export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>) {
-  msgs = unsupportedParts(msgs, model)
-  msgs = normalizeMessages(msgs, model, options)
-  if (
+// Whether requests to this model carry explicit prompt-cache breakpoints (Anthropic-style cache_control). Only then is
+// it worth sending the system prompt as separate blocks; providers that cache prefixes on their own get one block.
+export function usesCacheBreakpoints(model: Provider.Model) {
+  return (
     (model.providerID === "anthropic" ||
       model.providerID === "google-vertex-anthropic" ||
       model.api.id.includes("anthropic") ||
@@ -452,7 +452,18 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
       model.api.npm === "@ai-sdk/anthropic" ||
       model.api.npm === "@ai-sdk/alibaba") &&
     model.api.npm !== "@ai-sdk/gateway"
-  ) {
+  )
+}
+
+export function message(
+  msgs: ModelMessage[],
+  model: Provider.Model,
+  options: Record<string, unknown>,
+  cache = true,
+) {
+  msgs = unsupportedParts(msgs, model)
+  msgs = normalizeMessages(msgs, model, options)
+  if (cache && usesCacheBreakpoints(model)) {
     msgs = applyCaching(msgs, model)
   }
 

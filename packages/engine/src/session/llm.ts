@@ -49,6 +49,9 @@ export type StreamInput = {
   tools: Record<string, Tool>
   retries?: number
   toolChoice?: "auto" | "required" | "none"
+  // false for a request whose prefix is never sent again, such as a compaction summary: cache breakpoints would only
+  // make the provider bill its whole input at the cache-write premium.
+  cache?: boolean
 }
 
 export type StreamRequest = StreamInput & {
@@ -351,6 +354,7 @@ const live: Layer.Layer<
                       args.params.prompt,
                       input.model,
                       prepared.messageTransformOptions,
+                      input.cache !== false,
                     )
                   }
                   return args.params

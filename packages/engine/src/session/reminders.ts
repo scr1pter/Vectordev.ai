@@ -24,27 +24,29 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   if (!userMessage) return input.messages
 
   if (!flags.experimentalPlanMode) {
-    if (input.agent.name === "plan") {
-      userMessage.parts.push({
+    // Each user message gets the reminder for its own agent, worked out from the history before it, so every earlier
+    // message renders the same on every request. Attaching it only to the latest one changed the previous message on
+    // each turn and invalidated the provider's prompt cache from there on.
+    input.messages.forEach((message, index) => {
+      if (message.info.role !== "user") return
+      const agent = message === userMessage ? input.agent.name : message.info.agent
+      const previous = input.messages.slice(0, index).findLast((msg) => msg.info.role === "assistant")
+      const text =
+        agent === "plan"
+          ? PROMPT_PLAN
+          : agent === "build" && previous?.info.role === "assistant" && previous.info.agent === "plan"
+            ? BUILD_SWITCH
+            : undefined
+      if (!text) return
+      message.parts.push({
         id: PartID.ascending(),
-        messageID: userMessage.info.id,
-        sessionID: userMessage.info.sessionID,
+        messageID: message.info.id,
+        sessionID: message.info.sessionID,
         type: "text",
-        text: PROMPT_PLAN,
+        text,
         synthetic: true,
       })
-    }
-    const wasPlan = input.messages.some((msg) => msg.info.role === "assistant" && msg.info.agent === "plan")
-    if (wasPlan && input.agent.name === "build") {
-      userMessage.parts.push({
-        id: PartID.ascending(),
-        messageID: userMessage.info.id,
-        sessionID: userMessage.info.sessionID,
-        type: "text",
-        text: BUILD_SWITCH,
-        synthetic: true,
-      })
-    }
+    })
     return input.messages
   }
 

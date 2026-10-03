@@ -2824,6 +2824,21 @@ describe("ProviderTransform.message - cache control on gateway", () => {
     expect(result[0].providerOptions).toBeUndefined()
   })
 
+  test("a request whose prefix is never read again gets no cache breakpoints", () => {
+    const model = createModel({
+      providerID: "anthropic",
+      api: { id: "claude-sonnet-4", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+    })
+    const msgs = [
+      { role: "system", content: "Summarize the conversation" },
+      { role: "user", content: "Hello" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}, false) as any[]
+
+    expect(result.every((message) => message.providerOptions === undefined)).toBe(true)
+  })
+
   test("non-gateway anthropic keeps existing cache control behavior", () => {
     const model = createModel({
       providerID: "anthropic",

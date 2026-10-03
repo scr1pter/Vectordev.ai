@@ -396,6 +396,8 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         tools: {},
         system: [],
+        // The summary replaces this history, so nothing reads its prefix back from the cache.
+        cache: false,
         messages: [
           ...modelMessages,
           {

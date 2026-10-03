@@ -60,9 +60,11 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     ...(input.stableSystem ?? []),
   ]
   const rest = [...input.system, ...(input.user.system ? [input.user.system] : [])]
-  // With stable parts, the prompt and those parts form the first block and everything per-session the second, so a new
-  // session, directory or date only re-writes the small second block; otherwise it stays one block as before.
-  const system = (input.stableSystem ? [prompt, rest] : [[...prompt, ...rest]])
+  // With stable parts on a model that takes cache breakpoints, the prompt and those parts form the first block and
+  // everything per-session the second, so a new session, directory or date only re-writes the small second block.
+  // Elsewhere it stays one block as before: those providers cache the prefix without markers.
+  const split = input.stableSystem && ProviderTransform.usesCacheBreakpoints(input.model)
+  const system = (split ? [prompt, rest] : [[...prompt, ...rest]])
     .map((block) => block.filter((x) => x).join("\n"))
     .filter((block) => block)
 
