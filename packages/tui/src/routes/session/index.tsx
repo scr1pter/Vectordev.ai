@@ -198,13 +198,21 @@ export function Session() {
         )
       : [],
   )
+  // Every session under this one at any depth. Requests are answered only from the root view, so a nested
+  // subagent's request has to show there too, or the whole run waits on a prompt no view renders.
+  const tree = createMemo(() => {
+    const ids = [route.sessionID]
+    for (const id of ids)
+      ids.push(...sync.data.session.filter((x) => x.parentID === id && !ids.includes(x.id)).map((x) => x.id))
+    return ids
+  })
   const permissions = createMemo(() => {
     if (session()?.parentID) return []
-    return children().flatMap((x) => sync.data.permission[x.id] ?? [])
+    return tree().flatMap((id) => sync.data.permission[id] ?? [])
   })
   const questions = createMemo(() => {
     if (session()?.parentID) return []
-    return children().flatMap((x) => sync.data.question[x.id] ?? [])
+    return tree().flatMap((id) => sync.data.question[id] ?? [])
   })
   const visible = createMemo(() => !session()?.parentID && permissions().length === 0 && questions().length === 0)
   const disabled = createMemo(() => permissions().length > 0 || questions().length > 0)
@@ -2161,12 +2169,21 @@ function Task(props: ToolProps) {
   )
 
   const status = createMemo(() => sync.data.session_status[sessionID() ?? ""])
+  // The subagent's own outcome. The tool call completes even when the subagent failed or was stopped, so the part's
+  // status alone would show those as done.
+  const lifecycle = createMemo(() => stringValue(props.metadata.status))
   const isRunning = createMemo(() => {
     const value = status()
     return (
       props.part.state.status === "running" ||
-      (props.metadata.background === true && value !== undefined && value.type !== "idle")
+      (props.metadata.background === true &&
+        (lifecycle() === "queued" || (value !== undefined && value.type !== "idle")))
     )
+  })
+  const outcome = createMemo(() => {
+    if (isRunning()) return
+    const value = lifecycle()
+    if (value === "error" || value === "cancelled") return value
   })
   const retry = createMemo(() => {
     const value = status()
@@ -2204,7 +2221,10 @@ function Task(props: ToolProps) {
     }
 
     if (!isRunning() && props.part.state.status === "completed") {
-      content.push(`↳ ${formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`)
+      const error = stringValue(props.metadata.error)
+      content.push(
+        `↳ ${formatSubagentOutcome(outcome(), error && Locale.truncate(error, 80)) ?? formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`,
+      )
     }
 
     return content.join("\n")
@@ -2212,9 +2232,17 @@ function Task(props: ToolProps) {
 
   return (
     <InlineTool
-      icon={props.part.state.status === "completed" ? "✓" : "│"}
+      icon={
+        outcome() === "error"
+          ? "✗"
+          : outcome() === "cancelled"
+            ? "■"
+            : props.part.state.status === "completed"
+              ? "✓"
+              : "│"
+      }
       separate={true}
-      color={retry() ? theme.error : undefined}
+      color={retry() || outcome() === "error" ? theme.error : undefined}
       spinner={isRunning()}
       complete={stringValue(props.input.description)}
       pending="Delegating..."
@@ -2242,6 +2270,11 @@ export function formatSubagentTitle(agent: string, description: string, backgrou
 
 export function formatSubagentRetry(attempt: number, message: string) {
   return `Retrying (attempt ${attempt}) · ${message}`
+}
+
+export function formatSubagentOutcome(outcome: "error" | "cancelled" | undefined, error: string | undefined) {
+  if (outcome === "cancelled") return "Stopped"
+  if (outcome === "error") return error ? `Failed · ${error}` : "Failed"
 }
 
 export function formatCompletedSubagentDetail(toolcalls: number, duration: string) {

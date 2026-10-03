@@ -4,6 +4,7 @@ import type { BoxRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { testRender, type JSX } from "@opentui/solid"
 import {
   formatCompletedSubagentDetail,
+  formatSubagentOutcome,
   formatSubagentRetry,
   formatSubagentTitle,
   formatSubagentToolcalls,
@@ -278,6 +279,13 @@ describe("TUI inline tool wrapping", () => {
     expect(formatCompletedSubagentDetail(1, "501ms")).toBe("1 toolcall · 501ms")
     expect(formatCompletedSubagentDetail(2, "501ms")).toBe("2 toolcalls · 501ms")
     expect(formatSubagentToolcalls(0)).toBe("0 toolcalls")
+  })
+
+  test("a subagent that failed or was stopped says so instead of reading as done", () => {
+    expect(formatSubagentOutcome("error", "rate limited")).toBe("Failed · rate limited")
+    expect(formatSubagentOutcome("error", undefined)).toBe("Failed")
+    expect(formatSubagentOutcome("cancelled", undefined)).toBe("Stopped")
+    expect(formatSubagentOutcome(undefined, undefined)).toBeUndefined()
   })
 
   test("keeps background state attached to the subagent identity", () => {
