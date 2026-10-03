@@ -7,6 +7,7 @@ import { APICallError } from "ai"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect"
 import * as Stream from "effect/Stream"
 import { Config } from "@/config/config"
+import { Agent } from "@/agent/agent"
 import { LLM } from "../../src/session/llm"
 import { SessionCompaction } from "../../src/session/compaction"
 import { Token } from "@/util/token"
@@ -225,6 +226,7 @@ function cfg(compaction?: ConfigV1.Info["compaction"]) {
 const defaultProvider = wide()
 const compactionTestNode = LayerNode.group([
   SessionCompaction.node,
+  Agent.node,
   SessionNs.node,
   SessionProjector.node,
   Database.node,
@@ -1260,6 +1262,9 @@ describe("session.compaction.process", () => {
           const session = yield* ssn.create({})
           const msg = yield* createUserMessage(session.id, "hello")
           const msgs = yield* ssn.messages({ sessionID: session.id })
+          // Finish config and skill discovery before measuring the compaction interruption boundary.
+          const agents = yield* Agent.Service
+          yield* agents.get("compaction")
           const fiber = yield* SessionCompaction.use
             .process({
               parentID: msg.id,
