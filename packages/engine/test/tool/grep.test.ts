@@ -165,8 +165,11 @@ describe("tool.grep", () => {
         ctx,
       )
       expect(result.metadata.matches).toBe(1)
-      expect(result.output).toContain(file)
+      // Paths inside the working directory are shown relative to it, and a match carries no trailing blank line.
+      expect(result.output).toContain("test.txt:")
+      expect(result.output).not.toContain(file)
       expect(result.output).toContain("Line 2: line2")
+      expect(result.output).not.toContain("line2\n\n")
     }),
   )
 

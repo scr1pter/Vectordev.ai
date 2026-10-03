@@ -75,11 +75,19 @@ export const GrepTool = Tool.define(
           if (result.length === 0) return empty
 
           const truncated = result.length > limit
-          const final = result.slice(0, limit).map((item) => ({
-            path: path.resolve(cwd, item.entry.path),
-            line: item.line,
-            text: item.text,
-          }))
+          const final = result.slice(0, limit).map((item) => {
+            const absolute = path.resolve(cwd, item.entry.path)
+            const relative = path.relative(ins.directory, absolute)
+            // ripgrep keeps each line's newline, which printed a blank line after every match; a minified or generated
+            // line can run to thousands of characters, so a match shows its first 500.
+            const text = item.text.replace(/\r?\n$/, "")
+            return {
+              // Relative to the working directory, which read, edit and write resolve against, when it is inside it.
+              path: relative.startsWith("..") || path.isAbsolute(relative) ? absolute : relative,
+              line: item.line,
+              text: text.length > 500 ? `${text.slice(0, 500)}…` : text,
+            }
+          })
 
           const total = final.length
           const output = [`Found ${total} matches${truncated ? " (more matches available)" : ""}`]

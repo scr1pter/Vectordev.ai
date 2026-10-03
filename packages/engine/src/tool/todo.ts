@@ -35,7 +35,8 @@ export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Servi
 
           return {
             title: `${params.todos.filter((x) => x.status !== "completed").length} todos`,
-            output: JSON.stringify(params.todos, null, 2),
+            // The model wrote the list itself; echoing it back cost ~200 tokens on every update.
+            output: `Todo list updated: ${params.todos.filter((x) => x.status !== "completed" && x.status !== "cancelled").length} open, ${params.todos.filter((x) => x.status === "completed").length} completed.`,
             metadata: {
               todos: params.todos,
             },

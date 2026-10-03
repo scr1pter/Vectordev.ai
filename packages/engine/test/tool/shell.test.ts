@@ -1307,6 +1307,23 @@ describe("tool.shell truncation", () => {
     ),
   )
 
+  it.live("keeps the start and the end of long output within a 30KB budget", () =>
+    runIn(
+      projectRoot,
+      Effect.gen(function* () {
+        // 12,000 numbered lines is about 64KB: past the 30KB shell budget, under the generic line cap.
+        const result = yield* run({ command: fill("lines", 12_000) })
+        mustTruncate(result)
+        const lines = result.output.split("\n")
+        // A build prints the failing step early and the summary late, so both ends survive.
+        expect(lines).toContain("1")
+        expect(lines).toContain("12000")
+        expect(result.output).toMatch(/\.\.\.\d+ bytes omitted\.\.\./)
+        expect(Buffer.byteLength(result.output, "utf-8")).toBeLessThan(31_000 + 500)
+      }),
+    ),
+  )
+
   it.live("truncates output exceeding byte limit", () =>
     runIn(
       projectRoot,

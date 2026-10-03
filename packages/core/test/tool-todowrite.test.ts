@@ -92,11 +92,13 @@ describe("TodoWriteTool", () => {
       ]
 
       expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([TodoWriteTool.name])
+      // The model wrote the list, so it gets a one-line acknowledgement; the UI reads the structured todos.
+      const acknowledged = "Todo list updated: 1 open, 0 completed."
       expect(yield* settleTool(registry, call(todoList))).toEqual({
-        result: { type: "text", value: JSON.stringify(todoList, null, 2) },
+        result: { type: "text", value: acknowledged },
         output: {
           structured: { todos: todoList },
-          content: [{ type: "text", text: JSON.stringify(todoList, null, 2) }],
+          content: [{ type: "text", text: acknowledged }],
         },
       })
       expect(assertions).toMatchObject([{ sessionID, action: "todowrite", resources: ["*"], save: ["*"] }])

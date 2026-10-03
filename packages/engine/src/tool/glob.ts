@@ -56,7 +56,14 @@ export const GlobTool = Tool.define(
           const output = []
           if (shown.length === 0) output.push("No files found")
           if (shown.length > 0) {
-            output.push(...shown.map((file) => path.resolve(search, file.path)))
+            output.push(
+              ...shown.map((file) => {
+                const absolute = path.resolve(search, file.path)
+                const relative = path.relative(ins.directory, absolute)
+                // Relative to the working directory when inside it: a third of the tokens of absolute paths.
+                return relative.startsWith("..") || path.isAbsolute(relative) ? absolute : relative
+              }),
+            )
             if (truncated) {
               output.push("")
               output.push(

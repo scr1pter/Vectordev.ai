@@ -138,4 +138,46 @@ describe("tool.webfetch", () => {
         }),
     ),
   )
+  it.instance("converts html to lean markdown without page chrome", () =>
+    withFetch(
+      () =>
+        new Response(
+          [
+            "<html><body><nav><a href='/home'>Home</a></nav>",
+            "<h1>Guide</h1>",
+            "<p>See <a href='https://example.com/docs'>the docs</a>, <a href='/local'>local page</a> and <a href='#top'>top</a>.</p>",
+            "<img src='/diagram.png' alt='Request flow'><img src='/spacer.gif'><svg><text>icon</text></svg>",
+            "<form><button>Subscribe</button></form><footer>Copyright</footer></body></html>",
+          ].join(""),
+          { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+        ),
+      (url) =>
+        Effect.gen(function* () {
+          const result = yield* exec({ url: new URL("/guide", url).toString(), format: "markdown" })
+          expect(result.output).toBe(
+            "# Guide\n\nSee [the docs](https://example.com/docs), local page and top.\n\n[image: Request flow]",
+          )
+          const metadata: { truncated?: boolean } = result.metadata
+          expect(metadata.truncated).toBe(false)
+        }),
+    ),
+  )
+
+  it.instance("caps converted pages at 20KB and saves the full page", () =>
+    withFetch(
+      () =>
+        new Response(`<html><body>${"<p>paragraph of documentation text</p>".repeat(2_000)}</body></html>`, {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      (url) =>
+        Effect.gen(function* () {
+          const result = yield* exec({ url: new URL("/long", url).toString(), format: "markdown" })
+          const metadata: { truncated?: boolean; outputPath?: string } = result.metadata
+          expect(metadata.truncated).toBe(true)
+          expect(metadata.outputPath).toBeString()
+          expect(Buffer.byteLength(result.output)).toBeLessThan(21 * 1024)
+        }),
+    ),
+  )
 })

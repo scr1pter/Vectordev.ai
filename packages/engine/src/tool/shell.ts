@@ -246,6 +246,47 @@ function preview(text: string) {
   return "...\n\n" + text.slice(-MAX_METADATA_LENGTH)
 }
 
+// What a command's output costs the model: unless tool_output.max_bytes is configured, a shell result keeps 30KB, close
+// to what Claude Code sends, rather than the 50KB generic cap. Builds and test runs print the cause of a failure at
+// the start and the summary at the end, so both ends are kept.
+const SHELL_OUTPUT_BYTES = 30_000
+
+function shellBudget(cfg: { tool_output?: { max_bytes?: number } }, limits: { maxLines: number; maxBytes: number }) {
+  return {
+    maxLines: limits.maxLines,
+    maxBytes: cfg.tool_output?.max_bytes ?? Math.min(limits.maxBytes, SHELL_OUTPUT_BYTES),
+  }
+}
+
+// The first 40% of the budget from the start of the output and the rest from its end, with what was left out between.
+function headAndTail(input: {
+  head: string
+  rest: string
+  total: number
+  cut: boolean
+  maxLines: number
+  maxBytes: number
+}) {
+  if (!input.cut && input.rest.split("\n").length <= input.maxLines && input.total <= input.maxBytes)
+    return { text: input.rest, cut: false }
+  const start = head(input.head, Math.floor(input.maxLines * 0.4), Math.floor(input.maxBytes * 0.4))
+  const end = tail(input.rest, Math.ceil(input.maxLines * 0.6), Math.ceil(input.maxBytes * 0.6)).text
+  const omitted = Math.max(0, input.total - Buffer.byteLength(start, "utf-8") - Buffer.byteLength(end, "utf-8"))
+  return { text: `${start}\n\n...${omitted} bytes omitted...\n\n${end}`, cut: true }
+}
+
+function head(text: string, maxLines: number, maxBytes: number) {
+  const out: string[] = []
+  let bytes = 0
+  for (const line of text.split("\n")) {
+    const size = Buffer.byteLength(line, "utf-8") + (out.length > 0 ? 1 : 0)
+    if (out.length >= maxLines || bytes + size > maxBytes) break
+    out.push(line)
+    bytes += size
+  }
+  return out.join("\n")
+}
+
 function tail(text: string, maxLines: number, maxBytes: number) {
   const lines = text.split("\n")
   if (lines.length <= maxLines && Buffer.byteLength(text, "utf-8") <= maxBytes) {
@@ -507,8 +548,11 @@ export const ShellTool = Tool.define(
       },
       ctx: Tool.Context,
     ) {
-      const limits = yield* trunc.limits()
+      const limits = shellBudget(yield* config.get(), yield* trunc.limits())
       const keep = limits.maxBytes * 2
+      // The start of the output, kept for the head of a long result; the ring buffer below keeps only the end.
+      let start = ""
+      let total = 0
       let full = ""
       let last = ""
       const list: Chunk[] = []
@@ -560,6 +604,8 @@ export const ShellTool = Tool.define(
           yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
               const size = Buffer.byteLength(chunk, "utf-8")
+              if (total < limits.maxBytes) start += chunk
+              total += size
               list.push({ text: chunk, size })
               used += size
               while (used > keep && list.length > 1) {
@@ -644,7 +690,7 @@ export const ShellTool = Tool.define(
       // --quiet`, a build that logs to a file — reads as a clean run.
       if (code !== null && code !== 0) meta.push(`Command exited with code ${code}`)
       const raw = list.map((item) => item.text).join("")
-      const end = tail(raw, limits.maxLines, limits.maxBytes)
+      const end = headAndTail({ head: start, rest: raw, total, cut, ...limits })
       if (end.cut) cut = true
       if (!file && end.cut) {
         file = yield* trunc.write(raw)
@@ -677,7 +723,7 @@ export const ShellTool = Tool.define(
         const cfg = yield* config.get()
         const shell = Shell.acceptable(cfg.shell)
         const name = Shell.name(shell)
-        const limits = yield* trunc.limits()
+        const limits = shellBudget(cfg, yield* trunc.limits())
         const prompt = ShellPrompt.render(name, process.platform, limits, defaultTimeoutMs)
         yield* Effect.logInfo("shell tool using shell", { shell })
 

@@ -192,7 +192,7 @@ describe("Truncate", () => {
       }),
     )
 
-    it.live("suggests Task tool when agent has task permission", () =>
+    it.live("points at Grep and ranged Read, not a subagent, even when the agent may launch one", () =>
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
@@ -201,7 +201,8 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("Grep")
-        expect(result.content).toContain("Task tool")
+        // A subagent starts from an empty context, so it costs far more than searching the saved file.
+        expect(result.content).not.toContain("Task tool")
       }),
     )
 

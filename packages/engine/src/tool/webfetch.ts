@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Parser } from "htmlparser2"
 import { Tool } from "./tool"
+import { Truncate } from "./truncate"
 import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import TurndownService from "turndown"
@@ -11,6 +12,8 @@ import { isImageAttachment } from "@/util/media"
 const MAX_RESPONSE_SIZE = 5 * 1024 * 1024 // 5MB
 const DEFAULT_TIMEOUT = 30 * 1000 // 30 seconds
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
+// A converted page is read once and rarely needed whole; the rest stays in the saved file for Grep/Read.
+const MAX_PAGE_BYTES = 20 * 1024
 
 export const Parameters = Schema.Struct({
   url: Schema.String.annotate({ description: "The URL to fetch content from" }),
@@ -27,6 +30,7 @@ export const WebFetchTool = Tool.define(
   "webfetch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
+    const truncate = yield* Truncate.Service
 
     return {
       description: DESCRIPTION,
@@ -109,30 +113,16 @@ export const WebFetchTool = Tool.define(
 
           const content = new TextDecoder().decode(body)
 
-          // Handle content based on requested format and actual content type
-          switch (params.format) {
-            case "markdown":
-              if (contentType.includes("text/html")) {
-                const markdown = convertHTMLToMarkdown(content)
-                return {
-                  output: markdown,
-                  title,
-                  metadata: {},
-                }
-              }
-              return { output: content, title, metadata: {} }
-
-            case "text":
-              if (contentType.includes("text/html")) {
-                return { output: extractTextFromHTML(content), title, metadata: {} }
-              }
-              return { output: content, title, metadata: {} }
-
-            case "html":
-              return { output: content, title, metadata: {} }
-
-            default:
-              return { output: content, title, metadata: {} }
+          if (params.format === "html" || !contentType.includes("text/html"))
+            return { output: content, title, metadata: {} }
+          const page = yield* truncate.output(
+            params.format === "markdown" ? convertHTMLToMarkdown(content) : extractTextFromHTML(content),
+            { maxBytes: MAX_PAGE_BYTES },
+          )
+          return {
+            output: page.content,
+            title,
+            metadata: { truncated: page.truncated, ...(page.truncated && { outputPath: page.outputPath }) },
           }
         }).pipe(Effect.orDie),
     }
@@ -171,6 +161,32 @@ function convertHTMLToMarkdown(html: string): string {
     codeBlockStyle: "fenced",
     emDelimiter: "*",
   })
-  turndownService.remove(["script", "style", "meta", "link"])
+  // Page chrome and markup that has no text worth reading costs tokens on every fetch.
+  turndownService.remove([
+    "script",
+    "style",
+    "meta",
+    "link",
+    "nav",
+    "footer",
+    "aside",
+    "noscript",
+    "form",
+    "button",
+    "iframe",
+  ])
+  turndownService.remove((node) => node.nodeName.toLowerCase() === "svg")
+  turndownService.addRule("image", {
+    filter: "img",
+    replacement: (_content, node) => {
+      const alt = (node as HTMLElement).getAttribute("alt")?.trim()
+      return alt ? `[image: ${alt}]` : ""
+    },
+  })
+  // Relative and in-page links cannot be fetched as written, so only absolute links keep their target.
+  turndownService.addRule("link", {
+    filter: (node) => node.nodeName === "A" && !/^https?:\/\//i.test(node.getAttribute("href") ?? ""),
+    replacement: (content) => content,
+  })
   return turndownService.turndown(html)
 }

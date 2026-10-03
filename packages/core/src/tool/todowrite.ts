@@ -20,7 +20,9 @@ export const Output = Schema.Struct({
 })
 export type Output = typeof Output.Type
 
-export const toModelOutput = (output: Output) => JSON.stringify(output.todos, null, 2)
+// The model wrote the list itself; echoing it back cost ~200 tokens on every update.
+export const toModelOutput = (output: Output) =>
+  `Todo list updated: ${output.todos.filter((todo) => todo.status !== "completed" && todo.status !== "cancelled").length} open, ${output.todos.filter((todo) => todo.status === "completed").length} completed.`
 
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {

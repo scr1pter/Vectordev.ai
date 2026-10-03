@@ -101,8 +101,10 @@ describe("tool.glob", () => {
         ctx,
       )
       expect(result.metadata.count).toBe(1)
-      expect(result.output).toContain(path.join(test.directory, "a.ts"))
-      expect(result.output).not.toContain(path.join(test.directory, "b.txt"))
+      // Relative to the working directory, which read, edit and write resolve against.
+      expect(result.output.split("\n")).toContain("a.ts")
+      expect(result.output).not.toContain(test.directory)
+      expect(result.output).not.toContain("b.txt")
     }),
   )
 
