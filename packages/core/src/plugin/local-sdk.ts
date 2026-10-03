@@ -100,7 +100,14 @@ function resolve(specifier: string, parent: string) {
 function resolveImport(specifier: string, parent: string | URL) {
   // Bun's package resolver needs a native parent path for Windows drives and percent-escaped URLs.
   const source = typeof parent === "string" ? parent : parent.href
-  return import.meta.resolve(specifier, source.startsWith("file:") ? fileURLToPath(source) : source)
+  const file = source.startsWith("file:") ? fileURLToPath(source) : source
+  // import.meta.resolve can return a nonexistent .js path for a real .ts module. The graph scanner
+  // must use the loader's filesystem resolution before reading local source, including computed imports.
+  if (specifier.startsWith(".") || path.isAbsolute(specifier) || specifier.startsWith("file:"))
+    return pathToFileURL(
+      Bun.resolveSync(specifier.startsWith("file:") ? fileURLToPath(specifier) : specifier, path.dirname(file)),
+    ).href
+  return import.meta.resolve(specifier, file)
 }
 
 async function installRuntime() {

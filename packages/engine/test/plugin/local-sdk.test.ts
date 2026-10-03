@@ -17,6 +17,56 @@ async function load(file: string, source: "file" | "npm" = "file") {
 }
 
 describe("local plugin SDK resolution", () => {
+  test("follows Bun's JavaScript-to-TypeScript resolution before scanning local source", async () => {
+    await using tmp = await tmpdir()
+    const file = path.join(tmp.path, "plain.ts")
+    await Bun.write(path.join(tmp.path, "helper.ts"), 'export const value = "resolved TypeScript"')
+    await Bun.write(file, 'export { value } from "./helper.js"')
+    const result = await load(file)
+    if (!result.ok) throw result.error
+    expect(result.value.mod.value).toBe("resolved TypeScript")
+    expect(await Bun.file(path.join(tmp.path, "helper.js")).exists()).toBe(false)
+  })
+  test("preserves actual local resolution for static, dynamic, absolute and file-URL compatibility imports", async () => {
+    await using tmp = await tmpdir()
+    const directory = path.join(tmp.path, "source space # percent%")
+    const file = path.join(directory, "plugin.ts")
+    await Bun.write(
+      path.join(directory, "helper.ts"),
+      'export { tool } from "@fixture-extension/plugin"; export const value = "resolved source"',
+    )
+    await Bun.write(path.join(directory, "preferred.ts"), 'export const value = "must not override JavaScript"')
+    await Bun.write(path.join(directory, "preferred.js"), 'export const value = "existing JavaScript"')
+    await Bun.write(
+      file,
+      `export { tool, value } from "./helper.js"
+export { value as preferred } from "./preferred.js"
+export { basename } from "node:path"
+export const literal = (await import("./helper.js")).value
+const dependency = "./helper.js"
+export const computed = (await import(dependency)).value
+export const fromURL = (await import(new URL("./helper.js", import.meta.url).href)).value
+const absolute = ${JSON.stringify(path.join(directory, "helper.js"))}
+export const fromAbsolute = (await import(absolute)).value
+export const resolved = import.meta.resolve("./helper.js")
+export const builtin = import.meta.resolve("node:path")`,
+    )
+    const result = await load(file)
+    if (!result.ok) throw result.error
+    expect(result.value.mod).toMatchObject({
+      value: "resolved source",
+      preferred: "existing JavaScript",
+      literal: "resolved source",
+      computed: "resolved source",
+      fromURL: "resolved source",
+      fromAbsolute: "resolved source",
+      resolved: pathToFileURL(path.join(directory, "helper.ts")).href,
+      builtin: "node:path",
+    })
+    expect(typeof result.value.mod.tool).toBe("function")
+    expect(result.value.mod.basename).toBe(path.basename)
+    expect(await Bun.file(path.join(directory, "helper.js")).exists()).toBe(false)
+  })
   test("loads a real custom tool from an absent scoped SDK without editing its source", async () => {
     await using tmp = await tmpdir()
     const file = path.join(tmp.path, "tool.ts")
