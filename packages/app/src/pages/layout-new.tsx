@@ -2816,6 +2816,7 @@ export default function NewLayout(props: ParentProps) {
         projectId: directory,
         messages: history.data as never,
         parts: parts as never,
+        subagents: session?.data,
       })
       // A first turn that failed or was stopped before any usage has nothing to record yet, so a later idle tries again.
       if (!outcome) {

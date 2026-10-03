@@ -637,6 +637,81 @@ describe("SessionProjector", () => {
     }).pipe(Effect.provide(sessionsLayer)),
   )
 
+  it.effect("rolls a subagent's step usage up to every session above it", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      const childID = SessionV2.ID.make("ses_projector_child")
+      const grandchildID = SessionV2.ID.make("ses_projector_grandchild")
+      yield* db
+        .insert(SessionTable)
+        .values(
+          [
+            { id: sessionID, parent_id: undefined },
+            { id: childID, parent_id: sessionID },
+            { id: grandchildID, parent_id: childID },
+          ].map((row) => ({
+            ...row,
+            project_id: Project.ID.global,
+            slug: row.id,
+            directory: "/project",
+            title: row.id,
+            version: "test",
+          })),
+        )
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      const tokens = { input: 10, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }
+      const step = (session: SessionV2.ID, assistantMessageID: SessionMessage.ID, cost: number, unpriced?: true) =>
+        Effect.gen(function* () {
+          yield* events.publish(SessionEvent.Step.Started, {
+            sessionID: session,
+            timestamp: created,
+            assistantMessageID,
+            agent: "build",
+            model,
+          })
+          yield* events.publish(SessionEvent.Step.Ended, {
+            sessionID: session,
+            timestamp: DateTime.makeUnsafe(1),
+            assistantMessageID,
+            finish: "stop",
+            cost,
+            ...(unpriced ? { unpriced } : {}),
+            tokens,
+          })
+        })
+      const deep = SessionMessage.ID.make("msg_grandchild_step")
+      yield* step(grandchildID, deep, 1.25)
+      yield* step(childID, SessionMessage.ID.make("msg_child_step"), 0, true)
+      yield* step(sessionID, SessionMessage.ID.make("msg_root_step"), 0.5)
+
+      expect(yield* sessions.get(sessionID)).toMatchObject({ cost: 0.5, subagentCost: 1.25, subagentUnpricedSteps: 1 })
+      expect(yield* sessions.get(childID)).toMatchObject({ cost: 0, unpricedSteps: 1, subagentCost: 1.25 })
+      const grandchild = yield* sessions.get(grandchildID)
+      expect(grandchild.cost).toBe(1.25)
+      expect(grandchild.subagentCost).toBeUndefined()
+
+      // A settlement that replaces an earlier one moves the ancestors' totals by the difference.
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID: grandchildID,
+        timestamp: DateTime.makeUnsafe(2),
+        assistantMessageID: deep,
+        finish: "stop",
+        cost: 2,
+        tokens,
+      })
+      expect(yield* sessions.get(sessionID)).toMatchObject({ cost: 0.5, subagentCost: 2, subagentUnpricedSteps: 1 })
+      expect(yield* sessions.get(childID)).toMatchObject({ subagentCost: 2 })
+    }).pipe(Effect.provide(sessionsLayer)),
+  )
+
   it.effect("does not revive a stale incomplete assistant projection", () =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service

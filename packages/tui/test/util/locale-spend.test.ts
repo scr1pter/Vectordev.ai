@@ -14,4 +14,12 @@ describe("Locale.spend", () => {
   test("a session with some unpriced steps shows its cost as a lower bound", () => {
     expect(Locale.spend(0.42, 1)).toBe("$0.42 + unpriced")
   })
+
+  test("a session's spend includes what its subagents spent", () => {
+    expect(Locale.sessionSpend({ cost: 0.6, subagentCost: 2.4, subagentUnpricedSteps: 1 })).toEqual({
+      cost: 3,
+      unpriced: 1,
+    })
+    expect(Locale.sessionSpend(undefined)).toEqual({ cost: 0, unpriced: 0 })
+  })
 })

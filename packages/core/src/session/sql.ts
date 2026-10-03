@@ -45,6 +45,10 @@ export const SessionTable = sqliteTable(
     cost: real().notNull().default(0),
     // Steps on a model with no listed price, which cost leaves out. Kept by the same step accounting as cost.
     unpriced_steps: integer().notNull().default(0),
+    // What the subagent sessions below this one spent, kept by the same step accounting, so a session's total covers
+    // the work it delegated.
+    subagent_cost: real().notNull().default(0),
+    subagent_unpriced_steps: integer().notNull().default(0),
     tokens_input: integer().notNull().default(0),
     tokens_output: integer().notNull().default(0),
     tokens_reasoning: integer().notNull().default(0),

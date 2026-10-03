@@ -226,6 +226,8 @@ const layer = Layer.effect(
             version: row.version,
             cost: row.cost,
             unpricedSteps: row.unpriced_steps || undefined,
+            subagentCost: row.subagent_cost || undefined,
+            subagentUnpricedSteps: row.subagent_unpriced_steps || undefined,
             tokens: {
               input: row.tokens_input,
               output: row.tokens_output,

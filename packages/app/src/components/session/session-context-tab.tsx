@@ -12,7 +12,7 @@ import { categorizeTask } from "@/features/economics/task-categorizer"
 import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
 import { rankModelsForCategory } from "./session-model-economics"
 import { createSessionContextFormatter } from "./session-context-format"
-import { formatSessionCost } from "@/utils/session-cost"
+import { formatSessionCost, sessionSpend } from "@/utils/session-cost"
 
 const emptyMessages: Message[] = []
 
@@ -129,12 +129,24 @@ export function SessionContextTab() {
     {
       label: "Total cost",
       value: formatSessionCost({
-        cost: info()?.cost,
-        unpricedSteps: info()?.unpricedSteps,
+        ...sessionSpend(info()),
         format: (value) => usd().format(value),
         t: language.t,
       }),
     },
+    ...(info()?.subagentCost || info()?.subagentUnpricedSteps
+      ? [
+          {
+            label: "Of which subagents",
+            value: formatSessionCost({
+              cost: info()?.subagentCost,
+              unpricedSteps: info()?.subagentUnpricedSteps,
+              format: (value) => usd().format(value),
+              t: language.t,
+            }),
+          },
+        ]
+      : []),
     {
       label: "Session created",
       value: formatter().time(info()?.time.created),

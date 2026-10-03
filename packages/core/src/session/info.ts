@@ -28,6 +28,8 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
       : undefined,
     cost: row.cost,
     unpricedSteps: row.unpriced_steps || undefined,
+    subagentCost: row.subagent_cost || undefined,
+    subagentUnpricedSteps: row.subagent_unpriced_steps || undefined,
     tokens: {
       input: row.tokens_input,
       output: row.tokens_output,

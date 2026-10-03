@@ -45,6 +45,8 @@ export function outcomeFromSession(input: {
   projectId: string
   messages: MessageEntry[]
   parts: Record<string, PartEntry[] | undefined>
+  // The session's rollup of what its subagents spent; their steps are in their own sessions, not in these messages.
+  subagents?: { subagentCost?: number; subagentUnpricedSteps?: number }
 }): ModelOutcome | undefined {
   const infos = input.messages
     .map((entry) => entry.info)
@@ -59,6 +61,11 @@ export function outcomeFromSession(input: {
   const started = assistant[0]?.time?.created
   const finished = assistant[assistant.length - 1]?.time?.completed ?? assistant[assistant.length - 1]?.time?.created
   const latencyMs = typeof started === "number" && typeof finished === "number" ? Math.max(0, finished - started) : 0
+  // A model that delegates most of the work must not rank as cheap, so the task's cost includes its subagents.
+  const costUsd =
+    measured.costUsd === undefined || input.subagents?.subagentUnpricedSteps
+      ? undefined
+      : measured.costUsd + (input.subagents?.subagentCost ?? 0)
 
   return {
     // The session id keeps this idempotent: recordOutcome dedupes on id, so a
@@ -73,7 +80,7 @@ export function outcomeFromSession(input: {
     latencyMs,
     changedFiles: changedFileCount(input.parts),
     usage: measured.usage,
-    costUsd: measured.costUsd,
-    ...(measured.costUsd !== undefined ? { costPriced: true } : {}),
+    costUsd,
+    ...(costUsd !== undefined ? { costPriced: true } : {}),
   }
 }

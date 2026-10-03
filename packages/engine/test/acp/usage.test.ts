@@ -221,6 +221,11 @@ describe("acp usage", () => {
     expect(
       UsageService.totalSessionCost([assistant({ cost: 1.25 }), assistant({ cost: 0, unpriced: true })]),
     ).toBeUndefined()
+    // Subagents' spend lives on the session, not in its messages.
+    expect(UsageService.totalSessionCost([assistant({ cost: 1.25 })], { subagentCost: 2.5 })).toBe(3.75)
+    expect(
+      UsageService.totalSessionCost([assistant({ cost: 1.25 })], { subagentCost: 2.5, subagentUnpricedSteps: 1 }),
+    ).toBeUndefined()
   })
 
   it.effect("loads context limits from providers and caches by directory/provider/model", () => {

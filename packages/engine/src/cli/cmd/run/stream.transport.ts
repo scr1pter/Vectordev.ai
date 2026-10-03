@@ -901,6 +901,7 @@ function createLayer(input: StreamInput) {
             sessionID: input.sessionID,
             thinking: input.thinking,
             limits: input.limits(),
+            subagent: (sessionID) => state.subagent.tabs.has(sessionID),
           })
           state.data = next.data
           const visible = next.commits.at(-1)

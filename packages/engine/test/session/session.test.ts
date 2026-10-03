@@ -348,6 +348,56 @@ describe("unpriced steps", () => {
   )
 })
 
+describe("subagent spend", () => {
+  it.instance("a parent session carries what its subagents spent, apart from its own cost", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const parent = yield* session.create({ title: "parent" })
+      const child = yield* session.create({ parentID: parent.id, title: "child" })
+      const spend = (sessionID: SessionID, cost: number) =>
+        Effect.gen(function* () {
+          const messageID = MessageID.ascending()
+          yield* session.updateMessage({
+            id: messageID,
+            role: "assistant",
+            parentID: MessageID.ascending(),
+            sessionID,
+            mode: "build",
+            agent: "build",
+            cost,
+            path: { cwd: "/tmp", root: "/tmp" },
+            tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+            modelID: "test",
+            providerID: "anthropic",
+            time: { created: Date.now() },
+          } as unknown as SessionV1.Info)
+          const part = {
+            id: PartID.ascending(),
+            messageID,
+            sessionID,
+            type: "step-finish" as const,
+            reason: "stop",
+            cost,
+            tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+          }
+          yield* session.updatePart(part)
+          return { messageID, partID: part.id }
+        })
+      yield* spend(parent.id, 0.6)
+      const delegated = yield* spend(child.id, 2.4)
+
+      expect(yield* session.get(parent.id)).toMatchObject({ cost: 0.6, subagentCost: 2.4 })
+      expect((yield* session.get(child.id)).subagentCost).toBeUndefined()
+
+      // Removing the child's step takes it back out of the parent's rollup too.
+      yield* session.removePart({ sessionID: child.id, messageID: delegated.messageID, partID: delegated.partID })
+      expect((yield* session.get(parent.id)).subagentCost).toBeUndefined()
+      yield* session.remove(child.id)
+      yield* session.remove(parent.id)
+    }),
+  )
+})
+
 describe("Session", () => {
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {

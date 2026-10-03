@@ -4,7 +4,7 @@ import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { getSessionTokenTotal } from "@/components/session/session-context-metrics"
-import { formatSessionCost } from "@/utils/session-cost"
+import { formatSessionCost, sessionSpend } from "@/utils/session-cost"
 
 /**
  * Live BYOK cost readout for the active session. This is real spend — it reads
@@ -18,8 +18,9 @@ export function SessionCostReadout() {
   const { params } = useSessionLayout()
 
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
-  const cost = createMemo(() => info()?.cost ?? 0)
-  const unpriced = createMemo(() => info()?.unpricedSteps ?? 0)
+  // The task's spend, so a session that delegated most of its work does not read as cheap.
+  const cost = createMemo(() => sessionSpend(info()).cost)
+  const unpriced = createMemo(() => sessionSpend(info()).unpricedSteps)
   const tokens = createMemo(() => getSessionTokenTotal(info()?.tokens) ?? 0)
 
   const usd = createMemo(
@@ -41,6 +42,17 @@ export function SessionCostReadout() {
     }),
   )
 
+  const subagents = createMemo(() =>
+    info()?.subagentCost || info()?.subagentUnpricedSteps
+      ? formatSessionCost({
+          cost: info()?.subagentCost,
+          unpricedSteps: info()?.subagentUnpricedSteps,
+          format: (value) => usd().format(value),
+          t: language.t,
+        })
+      : undefined,
+  )
+
   const compactTokens = createMemo(() => {
     const value = tokens()
     if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
@@ -59,6 +71,14 @@ export function SessionCostReadout() {
               <span class="text-v2-text-text-muted">Session cost</span>
               <span class="text-v2-text-text-base">{spend()}</span>
             </div>
+            <Show when={subagents()}>
+              {(value) => (
+                <div class="flex items-center justify-between gap-4">
+                  <span class="text-v2-text-text-muted">Of which subagents</span>
+                  <span class="text-v2-text-text-base">{value()}</span>
+                </div>
+              )}
+            </Show>
             <div class="flex items-center justify-between gap-4">
               <span class="text-v2-text-text-muted">Tokens</span>
               <span class="text-v2-text-text-base">{tokens().toLocaleString(language.intl())}</span>

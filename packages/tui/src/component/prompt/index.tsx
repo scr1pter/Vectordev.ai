@@ -264,11 +264,10 @@ export function Prompt(props: PromptProps) {
 
     const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
-    const cost = session?.cost ?? 0
-    const unpriced = session?.unpricedSteps ?? 0
+    const spend = Locale.sessionSpend(session)
     return {
       context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
-      cost: cost > 0 || unpriced > 0 ? Locale.spend(cost, unpriced) : undefined,
+      cost: spend.cost > 0 || spend.unpriced > 0 ? Locale.spend(spend.cost, spend.unpriced) : undefined,
     }
   })
 

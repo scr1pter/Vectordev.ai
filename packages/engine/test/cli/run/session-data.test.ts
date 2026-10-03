@@ -128,6 +128,28 @@ describe("run session data", () => {
     expect(usage(third.data, assistant("msg-5", { cost: 0, tokens: empty })).usage).toBe("2 · $1.14 + unpriced")
   })
 
+  test("the footer's spend includes the run's subagents but not unrelated sessions", () => {
+    const child = (id: string, sessionID: string, cost: number) => {
+      const event = assistant(id, { cost })
+      return { ...event, properties: { ...event.properties, sessionID } }
+    }
+    const step = (data: ReturnType<typeof createSessionData>, event: unknown) =>
+      reduceSessionData({
+        data,
+        event: event as Event,
+        sessionID: "session-1",
+        thinking: true,
+        limits: {},
+        subagent: (sessionID) => sessionID === "child-1",
+      })
+    const own = step(createSessionData(), assistant("msg-1", { cost: 0.5 }))
+    const delegated = step(own.data, child("child-msg-1", "child-1", 2))
+    expect(delegated.footer?.patch?.usage).toBe("2 · $2.50")
+    const unrelated = step(delegated.data, child("other-msg-1", "other", 7))
+    expect(unrelated.footer).toBeUndefined()
+    expect(step(unrelated.data, assistant("msg-2", { cost: 0.1 })).footer?.patch?.usage).toBe("2 · $2.60")
+  })
+
   test("buffers delayed assistant text until the role is known", () => {
     let data = createSessionData()
     data = reduce(data, delta("msg-1", "txt-1", "hello")).data

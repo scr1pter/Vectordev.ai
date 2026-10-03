@@ -203,6 +203,8 @@ export type Session = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2335,6 +2337,8 @@ export type GlobalSession = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2847,6 +2851,8 @@ export type Session1 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2901,6 +2907,8 @@ export type Session2 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2968,6 +2976,8 @@ export type Session3 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3034,6 +3044,8 @@ export type Session4 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3088,6 +3100,8 @@ export type Session5 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3146,6 +3160,8 @@ export type Session6 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3248,6 +3264,8 @@ export type Session7 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3302,6 +3320,8 @@ export type Session8 = {
   }
   cost?: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -5026,6 +5046,8 @@ export type SessionV2Info = {
   model?: ModelRef
   cost: number
   unpricedSteps?: number
+  subagentCost?: number
+  subagentUnpricedSteps?: number
   tokens: {
     input: number
     output: number

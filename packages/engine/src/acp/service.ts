@@ -641,7 +641,11 @@ function makeUsageService(sdk: VectorClient) {
       modelID: ModelV2.ID.make(message.modelID),
     })
     if (!size) return messages
-    const cost = UsageService.totalSessionCost(messages)
+    const session = yield* request(
+      () => sdk.session.get({ sessionID: params.sessionID, directory: params.directory }, { throwOnError: true }),
+      "session",
+    ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+    const cost = UsageService.totalSessionCost(messages, session)
 
     yield* Effect.promise(() =>
       params.connection

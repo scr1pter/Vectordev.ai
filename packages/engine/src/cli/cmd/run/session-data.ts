@@ -98,6 +98,8 @@ export type SessionDataInput = {
   sessionID: string
   thinking: boolean
   limits: Record<string, number>
+  // Whether a session is one of this run's subagents, whose steps the run's spend includes.
+  subagent?: (sessionID: string) => boolean
 }
 
 export type SessionDataOutput = {
@@ -819,7 +821,11 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
 
   if (event.type === "message.updated") {
     if (event.properties.sessionID !== input.sessionID) {
-      return out(data, commits)
+      const info = event.properties.info
+      if (info.role !== "assistant" || !input.subagent?.(event.properties.sessionID)) return out(data, commits)
+      data.spent.set(info.id, { cost: info.cost, unpriced: info.unpriced === true })
+      const usage = [data.context, formatSpend(data.spent)].filter(Boolean).join(" · ")
+      return out(data, commits, usage ? patch({ usage }) : undefined)
     }
 
     const info = event.properties.info

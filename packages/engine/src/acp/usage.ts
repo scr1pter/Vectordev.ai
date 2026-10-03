@@ -145,12 +145,16 @@ export function turnUsage(messages: readonly SessionMessage[], finalID: string):
 }
 
 // Undefined when a response ran on a model with no listed price: the rest of the session is not what it cost.
-export function totalSessionCost(messages: readonly SessionMessage[]): number | undefined {
+// Subagents keep their messages in their own sessions, so what they spent comes from the session's rollup.
+export function totalSessionCost(
+  messages: readonly SessionMessage[],
+  subagents?: { readonly subagentCost?: number; readonly subagentUnpricedSteps?: number },
+): number | undefined {
   const assistant = messages.filter(
     (message): message is { readonly info: AssistantMessage } => message.info.role === "assistant",
   )
-  if (assistant.some((message) => message.info.unpriced)) return undefined
-  return assistant.reduce((sum, message) => sum + message.info.cost, 0)
+  if (assistant.some((message) => message.info.unpriced) || subagents?.subagentUnpricedSteps) return undefined
+  return assistant.reduce((sum, message) => sum + message.info.cost, 0) + (subagents?.subagentCost ?? 0)
 }
 
 export function findContextLimit(

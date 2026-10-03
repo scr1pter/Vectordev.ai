@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "00ec68cf-acec-41d2-8afb-6a1ba7797ab6",
+  "id": "eec8da65-21d6-4970-a945-f0b60619e075",
   "prevIds": [
-    "cb28912b-456a-4d76-8d21-3753b7298455"
+    "00ec68cf-acec-41d2-8afb-6a1ba7797ab6"
   ],
   "ddl": [
     {
@@ -1417,6 +1417,26 @@
       "default": "0",
       "generated": null,
       "name": "unpriced_steps",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "real",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "subagent_cost",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "subagent_unpriced_steps",
       "entityType": "columns",
       "table": "session"
     },

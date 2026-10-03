@@ -38,6 +38,14 @@ describe("outcomeFromSession", () => {
     expect(outcome.latencyMs).toBe(5_000)
   })
 
+  test("counts what the session's subagents spent as part of its cost", () => {
+    expect(session({ subagents: { subagentCost: 0.5 } })!.costUsd).toBeCloseTo(0.52, 10)
+    // A subagent step with no listed price leaves the task's cost unknown, not short.
+    const unpriced = session({ subagents: { subagentCost: 0.5, subagentUnpricedSteps: 1 } })!
+    expect(unpriced.costUsd).toBeUndefined()
+    expect(unpriced.costPriced).toBeUndefined()
+  })
+
   test("measures latency from this session's own replies, not history a fork copied in", () => {
     const outcome = session({
       messages: [

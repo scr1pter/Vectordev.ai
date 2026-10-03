@@ -88,6 +88,18 @@ export function spend(cost: number | undefined, unpricedSteps: number | undefine
   return `${usd.format(cost)} + unpriced`
 }
 
+// What a session's work cost: its own steps plus everything its subagents spent, which the backend keeps apart.
+export function sessionSpend(
+  session:
+    | { cost?: number; unpricedSteps?: number; subagentCost?: number; subagentUnpricedSteps?: number }
+    | undefined,
+) {
+  return {
+    cost: (session?.cost ?? 0) + (session?.subagentCost ?? 0),
+    unpriced: (session?.unpricedSteps ?? 0) + (session?.subagentUnpricedSteps ?? 0),
+  }
+}
+
 export function pluralize(count: number, singular: string, plural: string): string {
   const template = count === 1 ? singular : plural
   return template.replace("{}", count.toString())

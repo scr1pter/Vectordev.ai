@@ -99,6 +99,8 @@ export function fromRow(row: SessionRow): Info {
     summary,
     cost: row.cost,
     unpricedSteps: row.unpriced_steps || undefined,
+    subagentCost: row.subagent_cost || undefined,
+    subagentUnpricedSteps: row.subagent_unpriced_steps || undefined,
     tokens: {
       input: row.tokens_input,
       output: row.tokens_output,
@@ -143,6 +145,8 @@ export function toRow(info: Info) {
     metadata: info.metadata,
     cost: info.cost ?? 0,
     unpriced_steps: info.unpricedSteps ?? 0,
+    subagent_cost: info.subagentCost ?? 0,
+    subagent_unpriced_steps: info.subagentUnpricedSteps ?? 0,
     tokens_input: (info.tokens ?? EmptyTokens).input,
     tokens_output: (info.tokens ?? EmptyTokens).output,
     tokens_reasoning: (info.tokens ?? EmptyTokens).reasoning,
@@ -239,6 +243,9 @@ export const Info = Schema.Struct({
   cost: optional(Schema.Finite),
   // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
   unpricedSteps: optional(NonNegativeInt),
+  // What the subagent sessions below this one spent, which cost leaves out, and how many of their steps were unpriced.
+  subagentCost: optional(Schema.Finite),
+  subagentUnpricedSteps: optional(NonNegativeInt),
   tokens: optional(Tokens),
   share: optional(Share),
   title: Schema.String,

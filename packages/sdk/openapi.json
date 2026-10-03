@@ -17729,6 +17729,13 @@
             "type": "integer",
             "minimum": 0
           },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -24363,6 +24370,13 @@
             "type": "integer",
             "minimum": 0
           },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -25921,6 +25935,13 @@
             "type": "integer",
             "minimum": 0
           },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -26091,6 +26112,13 @@
             "type": "number"
           },
           "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
           },
@@ -26300,6 +26328,13 @@
             "type": "number"
           },
           "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
           },
@@ -26522,6 +26557,13 @@
             "type": "integer",
             "minimum": 0
           },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -26692,6 +26734,13 @@
             "type": "number"
           },
           "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
           },
@@ -26876,6 +26925,13 @@
             "type": "number"
           },
           "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
           },
@@ -27197,6 +27253,13 @@
             "type": "integer",
             "minimum": 0
           },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -27367,6 +27430,13 @@
             "type": "number"
           },
           "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
           },
@@ -32650,6 +32720,12 @@
             "type": "number"
           },
           "unpricedSteps": {
+            "type": "number"
+          },
+          "subagentCost": {
+            "type": "number"
+          },
+          "subagentUnpricedSteps": {
             "type": "number"
           },
           "tokens": {

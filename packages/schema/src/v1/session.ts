@@ -572,6 +572,9 @@ export const SessionInfo = Schema.Struct({
   cost: optional(Schema.Finite),
   // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
   unpricedSteps: optional(NonNegativeInt),
+  // What the subagent sessions below this one spent, which cost leaves out, and how many of their steps were unpriced.
+  subagentCost: optional(Schema.Finite),
+  subagentUnpricedSteps: optional(NonNegativeInt),
   tokens: optional(SessionTokens),
   share: optional(SessionShare),
   title: Schema.String,

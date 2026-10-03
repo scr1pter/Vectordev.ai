@@ -26,6 +26,9 @@ export const Info = Schema.Struct({
   cost: Schema.Finite,
   // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
   unpricedSteps: Schema.Finite.pipe(optional),
+  // What the subagent sessions below this one spent, which cost leaves out, and how many of their steps were unpriced.
+  subagentCost: Schema.Finite.pipe(optional),
+  subagentUnpricedSteps: Schema.Finite.pipe(optional),
   tokens: Schema.Struct({
     input: Schema.Finite,
     output: Schema.Finite,

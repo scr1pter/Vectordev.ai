@@ -227,6 +227,8 @@ export type SessionsImportArchiveOutput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly cost: number
     readonly unpricedSteps?: number
+    readonly subagentCost?: number
+    readonly subagentUnpricedSteps?: number
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -437,6 +439,8 @@ export type SessionsListOutput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly cost: number
     readonly unpricedSteps?: number
+    readonly subagentCost?: number
+    readonly subagentUnpricedSteps?: number
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -508,6 +512,8 @@ export type SessionsCreateOutput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly cost: number
     readonly unpricedSteps?: number
+    readonly subagentCost?: number
+    readonly subagentUnpricedSteps?: number
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -555,6 +561,8 @@ export type SessionsGetOutput = {
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
     readonly cost: number
     readonly unpricedSteps?: number
+    readonly subagentCost?: number
+    readonly subagentUnpricedSteps?: number
     readonly tokens: {
       readonly input: number
       readonly output: number

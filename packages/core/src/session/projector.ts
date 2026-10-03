@@ -82,6 +82,8 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     metadata: info.metadata,
     cost: info.cost ?? 0,
     unpriced_steps: info.unpricedSteps ?? 0,
+    subagent_cost: info.subagentCost ?? 0,
+    subagent_unpriced_steps: info.subagentUnpricedSteps ?? 0,
     tokens_input: (info.tokens ?? { input: 0 }).input,
     tokens_output: (info.tokens ?? { output: 0 }).output,
     tokens_reasoning: (info.tokens ?? { reasoning: 0 }).reasoning,
@@ -114,21 +116,37 @@ function applyUsage(
   value: Usage,
   sign = 1,
 ) {
-  return db
-    .update(SessionTable)
-    .set({
-      cost: sql`${SessionTable.cost} + ${value.cost * sign}`,
-      unpriced_steps: sql`${SessionTable.unpriced_steps} + ${(value.unpriced ? 1 : 0) * sign}`,
-      tokens_input: sql`${SessionTable.tokens_input} + ${value.tokens.input * sign}`,
-      tokens_output: sql`${SessionTable.tokens_output} + ${value.tokens.output * sign}`,
-      tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${value.tokens.reasoning * sign}`,
-      tokens_cache_read: sql`${SessionTable.tokens_cache_read} + ${value.tokens.cache.read * sign}`,
-      tokens_cache_write: sql`${SessionTable.tokens_cache_write} + ${value.tokens.cache.write * sign}`,
-      time_updated: sql`${SessionTable.time_updated}`,
-    })
-    .where(eq(SessionTable.id, sessionID))
-    .run()
-    .pipe(Effect.orDie)
+  return Effect.gen(function* () {
+    yield* db
+      .update(SessionTable)
+      .set({
+        cost: sql`${SessionTable.cost} + ${value.cost * sign}`,
+        unpriced_steps: sql`${SessionTable.unpriced_steps} + ${(value.unpriced ? 1 : 0) * sign}`,
+        tokens_input: sql`${SessionTable.tokens_input} + ${value.tokens.input * sign}`,
+        tokens_output: sql`${SessionTable.tokens_output} + ${value.tokens.output * sign}`,
+        tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${value.tokens.reasoning * sign}`,
+        tokens_cache_read: sql`${SessionTable.tokens_cache_read} + ${value.tokens.cache.read * sign}`,
+        tokens_cache_write: sql`${SessionTable.tokens_cache_write} + ${value.tokens.cache.write * sign}`,
+        time_updated: sql`${SessionTable.time_updated}`,
+      })
+      .where(eq(SessionTable.id, sessionID))
+      .run()
+      .pipe(Effect.orDie)
+    // A subagent's spend also counts towards every session above it, so a parent's total covers what it delegated.
+    // UNION rather than UNION ALL stops the walk if a parent chain ever loops.
+    yield* db
+      .update(SessionTable)
+      .set({
+        subagent_cost: sql`${SessionTable.subagent_cost} + ${value.cost * sign}`,
+        subagent_unpriced_steps: sql`${SessionTable.subagent_unpriced_steps} + ${(value.unpriced ? 1 : 0) * sign}`,
+        time_updated: sql`${SessionTable.time_updated}`,
+      })
+      .where(
+        sql`${SessionTable.id} IN (WITH RECURSIVE ancestor(id) AS (SELECT parent_id FROM session WHERE id = ${sessionID} UNION SELECT session.parent_id FROM session JOIN ancestor ON session.id = ancestor.id) SELECT id FROM ancestor WHERE id IS NOT NULL)`,
+      )
+      .run()
+      .pipe(Effect.orDie)
+  })
 }
 
 function run(db: DatabaseService, event: SessionEvent.Event) {
@@ -277,6 +295,8 @@ const layer = Layer.effectDiscard(
       const {
         cost: _,
         unpriced_steps: _unpriced,
+        subagent_cost: _subagentCost,
+        subagent_unpriced_steps: _subagentUnpriced,
         tokens_input: __,
         tokens_output: ___,
         tokens_reasoning: ____,
