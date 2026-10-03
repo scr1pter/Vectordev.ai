@@ -25,13 +25,30 @@ Native validation at `1c7187dba6a14267c329224ba44c6c1c228c286f` has passed both
 ordinary unit jobs, Linux's generated-client and full HTTP API gates, both browser
 jobs, all four Windows Engine shards, all four typecheck jobs, the website build,
 free-model and public-sharing integrations, and the real Windows installer. The
-complete general test workflow passed at the saved 02:04:39 UTC checkpoint. The
-separate focused Windows environment diagnostic failed under strict Turbo while passing
-with its inherited environment. Its Security and WSMan imports completed before
-the command-discovery boundary stalled. Follow-up one-variable runner cache
-controls are prepared; they do not yet prove a fix or authorize broad environment
-passthrough. Subsequent shell-output and stream-compatibility repairs require their
-own final source checks. This is not full release acceptance.
+complete general test workflow passed at the saved 02:04:39 UTC checkpoint.
+
+At `a6759ced78edc13d7cb538c5ab1066de2b3b723c`, the
+[controlled Windows comparison](https://github.com/scr1pter/Vectordev.ai/actions/runs/37088744819/job/111104341047)
+identified the missing `PSModuleAnalysisCachePath` environment variable as the
+cause of the focused command-discovery failure: strict Turbo failed in 15,674.88 ms,
+while restoring only that variable passed all three cases, with the nested case
+finishing in 1,161.65 ms. The same nested case under loose Turbo passed in
+1,173.27 ms, but removing only that variable made it fail in
+15,567.39 ms. Restoring only `LOCALAPPDATA` still failed. All eight native Engine
+identity and ownership cases passed with 52 assertions; the real Windows installer
+also passed. These controls retain the original commands, assertions and deadlines.
+
+The fix preserves the runner's existing cache setting only for the Core
+test task and removes the experimental comparisons. It does not change production
+runtime environment handling, broaden Turbo's general environment policy or relax
+any deadline. The permanent configuration still requires final native acceptance.
+The current full local Core suite passed 1,575 tests with one Windows-only skip
+and 5,973 assertions. The full Engine run recorded 3,814 passes and three sandbox
+failures because its isolated HOME was inside the deliberately writable temporary
+directory. The unchanged sandbox file passed all 23 tests and 202 assertions with
+a fresh credential-free HOME outside temporary paths; a full Engine rerun with
+that corrected test precondition is pending. The current native general workflow
+also remains in progress. This is not full release acceptance.
 
 The publishing machine's ordinary `npm whoami` check now succeeds after the owner
 logged in. Earlier `E401` records below are historical. The public catalog fork

@@ -16,7 +16,7 @@
     "@vectordevai/core#test": {
       "dependsOn": ["^build"],
       "outputs": [],
-      "passThroughEnv": ["COMSPEC", "PATHEXT"]
+      "passThroughEnv": ["COMSPEC", "PATHEXT", "PSModuleAnalysisCachePath"]
     },
     "@vectordevai/app#test": {
       "dependsOn": ["^build"],
