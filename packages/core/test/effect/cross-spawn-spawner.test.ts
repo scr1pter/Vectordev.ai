@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import fs from "node:fs/promises"
+import { spawn } from "node:child_process"
 import os from "node:os"
 import path from "node:path"
 import { Effect, Exit, Stream } from "effect"
@@ -14,6 +15,33 @@ const fx = testEffect(live)
 
 function js(code: string, opts?: ChildProcess.CommandOptions) {
   return ChildProcess.make("node", ["-e", code], opts)
+}
+
+function stdoutEofCommand(pid: string) {
+  const close =
+    process.platform === "win32"
+      ? `const native = require("bun:ffi").dlopen("kernel32.dll", {
+  GetStdHandle: { args: ["u32"], returns: "u64" },
+  CloseHandle: { args: ["u64"], returns: "i32" },
+});
+const stdout = native.symbols.GetStdHandle(0xfffffff5);
+if (stdout === 0n || stdout === 0xffffffffffffffffn) throw new Error("No stdout handle");
+if (native.symbols.CloseHandle(stdout) === 0) throw new Error("CloseHandle(stdout) failed");`
+      : "fs.closeSync(1);"
+  // Node's Windows libuv deliberately ignores fs.closeSync on fd 0-2. Close the
+  // actual standard handle without opening a wrapper that duplicates it.
+  // https://github.com/nodejs/node/blob/v24.21.0/deps/uv/src/win/fs.c#L649-L675
+  const code = `const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(pid)}, String(process.pid));
+fs.writeSync(1, "stdout-closed\\n");
+${close}
+fs.writeSync(2, "stderr-open\\n");
+setInterval(() => {}, 1000);`
+  return ChildProcess.make(
+    process.platform === "win32" ? process.execPath : "node",
+    process.platform === "win32" ? ["--no-env-file", "-e", code] : ["-e", code],
+    { forceKillAfter: "100 millis" },
+  )
 }
 
 function decodeByteStream(stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>) {
@@ -62,6 +90,82 @@ async function gone(pid: number, timeout = 5_000) {
 describe("cross-spawn spawner", () => {
   describe("basic spawning", () => {
     fx.live(
+      "fixture produces stdout EOF while the same child and stderr remain open",
+      Effect.promise(async () => {
+        await using tmp = await tmpdir()
+        const command = stdoutEofCommand(path.join(tmp.path, "pid"))
+        const child = spawn(command.command, command.args, {
+          stdio: [
+            "ignore",
+            process.platform === "win32" ? "overlapped" : "pipe",
+            process.platform === "win32" ? "overlapped" : "pipe",
+          ],
+          windowsHide: true,
+        })
+        const state = {
+          stdout: "",
+          stderr: "",
+          stdoutEnded: false,
+          stderrEnded: false,
+          exited: false,
+        }
+        const closed = new Promise<void>((resolve) => child.once("close", () => resolve()))
+        const ready = Promise.withResolvers<void>()
+        const check = () => {
+          if (state.stdoutEnded && state.stderr === "stderr-open\n") ready.resolve()
+        }
+        child.once("error", ready.reject)
+        child.once("exit", () => {
+          state.exited = true
+        })
+        child.stdout!.on("data", (chunk) => {
+          state.stdout += chunk.toString()
+        })
+        child.stdout!.once("end", () => {
+          state.stdoutEnded = true
+          check()
+        })
+        child.stderr!.on("data", (chunk) => {
+          state.stderr += chunk.toString()
+          check()
+        })
+        child.stderr!.once("end", () => {
+          state.stderrEnded = true
+        })
+        const timer = setTimeout(
+          () => ready.reject(new Error(`Native stdout EOF fixture did not close: ${JSON.stringify(state)}`)),
+          5_000,
+        )
+        try {
+          await ready.promise
+          expect(state.stdout).toBe("stdout-closed\n")
+          expect(state.stderr).toBe("stderr-open\n")
+          expect(state.stdoutEnded).toBe(true)
+          expect(state.stderrEnded).toBe(false)
+          expect(state.exited).toBe(false)
+          expect(child.exitCode).toBeNull()
+          expect(Number(await Bun.file(path.join(tmp.path, "pid")).text())).toBe(child.pid!)
+          expect(alive(child.pid!)).toBe(true)
+        } finally {
+          clearTimeout(timer)
+          child.kill("SIGKILL")
+          const cleanup = Promise.withResolvers<never>()
+          const deadline = setTimeout(
+            () => cleanup.reject(new Error("Native stdout EOF fixture child did not close after kill")),
+            2_000,
+          )
+          try {
+            await Promise.race([closed, cleanup.promise])
+          } finally {
+            clearTimeout(deadline)
+          }
+        }
+        expect(await gone(child.pid!)).toBe(true)
+      }),
+      10_000,
+    )
+
+    fx.live(
       "collection helpers finish at stdout EOF and reap a child with stderr still open",
       Effect.gen(function* () {
         const tmp = yield* Effect.acquireRelease(
@@ -70,14 +174,7 @@ describe("cross-spawn spawner", () => {
         )
         const pid = path.join(tmp.path, "pid")
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-        const output = yield* spawner
-          .string(
-            js(
-              `const fs = require("node:fs"); fs.writeFileSync(${JSON.stringify(pid)}, String(process.pid)); fs.writeSync(1, "stdout-closed\\n"); fs.closeSync(1); setInterval(() => {}, 1000)`,
-              { forceKillAfter: "100 millis" },
-            ),
-          )
-          .pipe(Effect.timeout("5 seconds"))
+        const output = yield* spawner.string(stdoutEofCommand(pid)).pipe(Effect.timeout("5 seconds"))
         expect(output).toBe("stdout-closed\n")
         const child = Number(yield* Effect.promise(() => Bun.file(pid).text()))
         expect(yield* Effect.promise(() => gone(child))).toBe(true)

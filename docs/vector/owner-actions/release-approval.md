@@ -38,17 +38,43 @@ finishing in 1,161.65 ms. The same nested case under loose Turbo passed in
 identity and ownership cases passed with 52 assertions; the real Windows installer
 also passed. These controls retain the original commands, assertions and deadlines.
 
-The fix preserves the runner's existing cache setting only for the Core
-test task and removes the experimental comparisons. It does not change production
-runtime environment handling, broaden Turbo's general environment policy or relax
-any deadline. The permanent configuration still requires final native acceptance.
-The current full local Core suite passed 1,575 tests with one Windows-only skip
-and 5,973 assertions. The full Engine run recorded 3,814 passes and three sandbox
-failures because its isolated HOME was inside the deliberately writable temporary
-directory. The unchanged sandbox file passed all 23 tests and 202 assertions with
-a fresh credential-free HOME outside temporary paths; a full Engine rerun with
-that corrected test precondition is pending. The current native general workflow
-also remains in progress. This is not full release acceptance.
+The fix preserves the runner's existing cache setting only for the Core test task
+and removes the experimental comparisons. At `9383a0260d048e5c13c1691798400ff16e0af194`,
+both direct and strict-Turbo native runs passed all three cases with 14 assertions
+each. The eight native Engine identity/ownership cases and real Windows installer
+also passed. This changes no production environment handling or deadline.
+
+The completed general workflow at that source passed Linux unit tests, generated
+client and full HTTP API gates, both browser jobs, and Windows Engine shards 1–2.
+All typecheck, website, free-model and public-sharing workflows passed. Windows
+unit tests finished with 1,564 Core passes, 13 skips and one failure: the new
+stdout-EOF fixture. The exact Node version on Windows deliberately ignores
+`fs.closeSync(1)`, so the fixture never closed stdout. A replacement fixture closes
+its own native Windows handle and independently checks stdout EOF while the same
+child and stderr remain alive. Its full Core test file passed 33 tests and 49
+assertions locally; Core typechecking passed. Native acceptance is still pending.
+
+Windows Engine shard 3 recorded two CLI subprocess timeouts before their
+substantive assertions. Its timeout path discards partial collected output, so an
+empty reported stdout is not evidence that the child emitted nothing. Shard 4
+recorded one held-shell readiness failure before PowerShell wrote its first
+command marker; the later held-shell case passed. Matched native diagnostics are
+prepared with isolated runtime checkouts and unchanged deadlines. The diagnostic
+harness passed Engine typechecking, both CLI cases (17 assertions), both held-shell
+cases (17 assertions), and eight stream-transparency assertions locally. These
+failures have not been attributed to a runtime regression.
+
+The full local Core suite before the fixture correction passed 1,575 tests with
+one Windows-only skip and 5,973 assertions. The first full Engine run recorded
+3,814 passes and three sandbox failures because its isolated HOME was inside the
+deliberately writable temporary directory. The unchanged sandbox file then passed
+all 23 tests and 202 assertions with a fresh credential-free HOME outside temporary
+paths. The subsequent `9383a026` full run was stopped after 1,519.55 seconds under
+severe host contention, with four recorded timeouts and no final suite summary.
+All four cases subsequently passed on both the candidate and clean main with
+their original deadlines, isolated source resolution and stable observed timers.
+The interrupted full run remains incomplete and failed; focused passes do not
+relabel it as successful. Full release acceptance is not claimed.
 
 The publishing machine's ordinary `npm whoami` check now succeeds after the owner
 logged in. Earlier `E401` records below are historical. The public catalog fork

@@ -6,6 +6,8 @@ on:
       - packages/web/public/install*
       - packages/core/src/util/windows-powershell.ts
       - packages/core/test/util/windows-powershell.test.ts
+      - packages/core/test/effect/cross-spawn-spawner.test.ts
+      - packages/core/src/cross-spawn-spawner.ts
       - packages/engine/src/installation/**
       - packages/engine/script/verify-windows-installer.ts
       - packages/engine/test/installation/**
@@ -30,6 +32,11 @@ jobs:
         env:
           GITHUB_ACTIONS: "false"
         run: bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=strict --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts
+      - name: Verify real stdout EOF and collection cleanup
+        if: success() || failure()
+        working-directory: packages/core
+        shell: pwsh
+        run: bun --no-env-file test test/effect/cross-spawn-spawner.test.ts -t "stdout EOF"
       - name: Verify native installer identity and ownership
         if: success() || failure()
         working-directory: packages/engine
