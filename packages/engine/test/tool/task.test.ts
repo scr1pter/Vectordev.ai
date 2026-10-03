@@ -932,6 +932,36 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("a background result gets the cap a tool result gets", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const jobs = yield* BackgroundJob.Service
+      const report = Array.from({ length: 6_000 }, (_, index) => `line ${index} of a long report`).join("\n")
+      const notes: string[] = []
+      const result = yield* def.execute(
+        { description: "survey the code", prompt: "Survey the code.", subagent_type: "general", background: true },
+        taskContext({
+          sessionID: chat.id,
+          messageID: assistant.id,
+          promptOps: stubOps({
+            text: report,
+            onPrompt: (input) => {
+              if (input.sessionID !== chat.id) return
+              notes.push(...input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])))
+            },
+          }),
+        }),
+      )
+      yield* jobs.wait({ id: result.metadata.sessionId })
+      for (let attempt = 0; attempt < 100 && notes.length === 0; attempt++) yield* Effect.sleep("10 millis")
+      expect(notes).toHaveLength(1)
+      // The tool output cap is 50KB or 2000 lines; the report is about 170KB.
+      expect(notes[0].length).toBeLessThan(60_000)
+      expect(notes[0]).toContain("line 0 of a long report")
+    }),
+  )
+
   background.instance("allows sequential ownership when the active owner is a declared dependency", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()

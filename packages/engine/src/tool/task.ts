@@ -17,6 +17,7 @@ import {
   type SubagentRecord,
 } from "../agent/subagent-kind"
 import { SubagentLifecycle } from "./subagent-lifecycle"
+import { Truncate } from "./truncate"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
 import { Effect, Exit, Option, Schema, Scope, Semaphore } from "effect"
@@ -196,6 +197,7 @@ export const TaskTool = Tool.define(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const provider = yield* Provider.Service
+    const truncate = yield* Truncate.Service
     // Ownership claimed by task calls that have not registered their job yet. Sibling calls
     // in one message run concurrently, so the job list alone cannot see each other's paths.
     const claims = new Set<{
@@ -686,6 +688,10 @@ export const TaskTool = Tool.define(
               ),
             )
         const currentParent = yield* unreverted(1_000)
+        // The note stays in the parent's history and is sent again on every later request, so it gets the cap a tool
+        // result gets, with the rest saved where the parent can read it.
+        const parentAgent = yield* agent.get(currentParent.agent ?? ctx.agent)
+        const capped = yield* truncate.output(text, {}, parentAgent)
         const launch = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
           Effect.provideService(Database.Service, database),
           Effect.option,
@@ -728,7 +734,7 @@ export const TaskTool = Tool.define(
                       : state === "error"
                         ? `Background task failed: ${title}`
                         : `Background task cancelled: ${title}`,
-                  text,
+                  text: capped.content,
                 }),
               },
             ],
