@@ -58,6 +58,37 @@ jobs:
         env:
           GITHUB_ACTIONS: "false"
         run: bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=loose --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts
+      - name: Compare loose Turbo without the runner module cache only
+        if: success() || failure()
+        working-directory: packages/core
+        shell: bash
+        env:
+          GITHUB_ACTIONS: "false"
+        run: env -u PSModuleAnalysisCachePath bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=loose --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts
+      - name: Compare strict Turbo with the runner module cache restored only
+        if: success() || failure()
+        working-directory: packages/core
+        shell: bash
+        env:
+          GITHUB_ACTIONS: "false"
+        run: |
+          if [[ -z "${PSModuleAnalysisCachePath+x}" ]]; then
+            echo "PSModuleAnalysisCachePath must exist in the runner environment for this comparison" >&2
+            exit 1
+          fi
+          backup="$(mktemp)"
+          cp ../../turbo.json "$backup"
+          trap 'cp "$backup" ../../turbo.json; rm -f "$backup"' EXIT
+          bun --no-env-file -e '
+            const file = Bun.file("../../turbo.json")
+            const config = await file.json()
+            const task = config.tasks["@vectordevai/core#test"]
+            if (!Array.isArray(task.passThroughEnv) || task.passThroughEnv.includes("PSModuleAnalysisCachePath"))
+              throw new Error("Expected the unchanged strict Core environment before this comparison")
+            task.passThroughEnv = [...task.passThroughEnv, "PSModuleAnalysisCachePath"]
+            await Bun.write(file, JSON.stringify(config, null, 2) + "\n")
+          '
+          bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=strict --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts
       - name: Compare strict Turbo with LOCALAPPDATA restored only
         if: success() || failure()
         working-directory: packages/core
