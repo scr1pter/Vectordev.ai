@@ -7,6 +7,7 @@ const text = catalogBody(JSON.stringify({ openai: { id: "openai", name: "OpenAI"
 for (const kind of ["valid", "missing", "html", "changed", "stale"] as const) {
   test(`public mirror smoke test validates both aliases and the release bytes: ${kind}`, async () => {
     const requests: string[] = []
+    const pending: Promise<Response>[] = []
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -21,7 +22,11 @@ for (const kind of ["valid", "missing", "html", "changed", "stale"] as const) {
     })
     try {
       const result = verifyCatalogMirror(
-        (url, init) => fetch(new URL(new URL(String(url)).pathname, server.url), init),
+        (url, init) => {
+          const response = fetch(new URL(new URL(String(url)).pathname, server.url), init)
+          pending.push(response)
+          return response
+        },
         kind === "stale" ? "different snapshot" : text,
       )
       if (kind === "valid") expect(await result).toEqual({ urls: 2, providers: 1 })
@@ -35,8 +40,11 @@ for (const kind of ["valid", "missing", "html", "changed", "stale"] as const) {
                 ? "canonical"
                 : "reviewed release snapshot",
         )
+      // Promise.all rejects as soon as one alias fails; wait for both actual requests before checking coverage.
+      await Promise.allSettled(pending)
       expect(requests.sort()).toEqual(["/models", "/models/api.json"])
     } finally {
+      await Promise.allSettled(pending)
       await server.stop(true)
     }
   })

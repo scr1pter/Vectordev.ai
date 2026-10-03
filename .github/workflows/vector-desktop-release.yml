@@ -216,6 +216,11 @@ jobs:
           VECTOR_CATALOG_FORK_REVISION: ${{ vars.VECTOR_CATALOG_FORK_REVISION }}
         run: |
           set -euo pipefail
+          if { [ -n "$VECTOR_CATALOG_FORK_REPOSITORY" ] && [ -z "$VECTOR_CATALOG_FORK_REVISION" ]; } || \
+             { [ -z "$VECTOR_CATALOG_FORK_REPOSITORY" ] && [ -n "$VECTOR_CATALOG_FORK_REVISION" ]; }; then
+            echo "Set both catalog fork variables or leave both unset for the committed release snapshot."
+            exit 1
+          fi
           mkdir -p release-catalog
           # A new workflow run for a partially published release must reuse its immutable mirror.
           status=$(curl --silent --show-error --retry 3 --output release-catalog/mirror.json \
@@ -226,11 +231,17 @@ jobs:
               export VECTOR_RELEASE_CATALOG_PATH="$PWD/release-catalog/mirror.json"
               export VECTOR_RELEASE_CATALOG_SHA256="$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)"
               ;;
-            404) ;;
+            404)
+              if [ -z "$VECTOR_CATALOG_FORK_REPOSITORY" ]; then
+                bun packages/engine/script/committed-catalog.ts release-catalog/api.json
+                export VECTOR_RELEASE_CATALOG_PATH="$PWD/release-catalog/api.json"
+                export VECTOR_RELEASE_CATALOG_SHA256="$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)"
+              fi
+              ;;
             *) echo "Catalog mirror returned HTTP $status; refusing to replace an unknown release snapshot"; exit 1 ;;
           esac
           export VECTOR_CATALOG_FILE="$PWD/release-catalog/api.json"
-          if [ "$status" = "404" ]; then
+          if [ "$status" = "404" ] && [ -n "$VECTOR_CATALOG_FORK_REPOSITORY" ]; then
             bun packages/engine/script/generate.ts --fresh-catalog
           else
             bun packages/engine/script/generate.ts

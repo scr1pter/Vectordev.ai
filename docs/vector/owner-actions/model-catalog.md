@@ -12,6 +12,8 @@ The owner approved creation of the public [Vector catalog fork](https://github.c
 
 The existing standalone CLI workflow now has a `catalog` phase. It checks the reviewed application source, fork revision, origin and expected digest before using the existing protected Blob secret, publishes only the immutable per-version catalog, and verifies the returned bytes. It does not build archives, advance a channel or change the shared mirror. Dispatch it from the exact reviewed candidate commit using the same catalog digest that subsequent builds use.
 
+The desktop workflow also supports an explicit committed-snapshot fallback when **both** Actions fork variables are unset and the immutable per-version mirror returns 404. It reads `packages/web/public/models/api.json` from the exact application `HEAD` Git blob, verifies that the bytes already form a prepared catalog, and records that application commit, path and digest alongside the artifact. Modified or untracked working-copy data is never used. A partial fork configuration fails; configured fork preparation remains pinned to its reviewed commit. Existing artifacts and immutable mirrors retain precedence. The same digest, bundled-SDK, provider-icon and public-mirror checks apply, and no external data-service fallback is added. The CLI's fresh catalog publication still requires the reviewed fork.
+
 ## Earlier interim mirror
 
 The separate local desktop 1.99.91 build used a stale bundled catalog that stopped at gpt-5.5, and `https://vectordev.ai/models/api.json` returned 404, so signed-in ChatGPT users could not see gpt-6-astra, gpt-6-sol, gpt-6.1-sol or the gpt-5.6 family. Before the reviewed fork existed, an interim snapshot restored runtime discovery:
@@ -26,7 +28,7 @@ Installed apps fetch the mirror at launch and every 60 minutes, so a refreshed f
 
 The interim mirror was verified in production on 2 October 2026 from source `c901d471f4fc32091bd98882b0a25af1316090c0`: both `/models` and `/models/api.json` returned HTTP 200 and the same canonical, committed snapshot with 219 providers. This verifies the runtime mirror only. It does not establish an owner-fork revision or publish an immutable 1.99.99 release catalog.
 
-The fork, reviewed export and artwork are now prepared. Immutable release-catalog publication and matching application builds still need verification. Provider-specific artwork is preferred; missing artwork uses a neutral server icon drawn for Vector, never another provider's logo. No account, key or purchase was needed to create the fork. A missing fork remains a release error; the tools never fall back to the original live data service.
+The fork, reviewed export and artwork are now prepared. Immutable release-catalog publication and matching application builds still need verification. Provider-specific artwork is preferred; missing artwork uses a neutral server icon drawn for Vector, never another provider's logo. No account, key or purchase was needed to create the fork. Fresh fork preparation fails if its configured checkout is missing; the desktop-only committed-snapshot case above does not relax that rule. The tools never fall back to the original live data service.
 
 ## Create and review the data repository
 
@@ -60,7 +62,7 @@ export VECTOR_RELEASE_CATALOG_PATH="$VECTOR_CATALOG_FILE"
 export VECTOR_RELEASE_CATALOG_SHA256="$(bun -e 'console.log(new Bun.CryptoHasher("sha256").update(await Bun.file(process.env.VECTOR_RELEASE_CATALOG_PATH).text()).digest("hex"))')"
 ```
 
-These build inputs are separate from runtime `VECTOR_MODELS_PATH` and `VECTOR_MODELS_URL`. A release retry reuses its exact prepared artifact or immutable per-version mirror; it never silently regenerates it from a moving branch. Set repository Actions variables `VECTOR_CATALOG_FORK_REPOSITORY` and `VECTOR_CATALOG_FORK_REVISION` to the same reviewed values before the next new release. The workflow checks that exact commit out under its ignored temporary directory.
+These build inputs are separate from runtime `VECTOR_MODELS_PATH` and `VECTOR_MODELS_URL`. A release retry reuses its exact prepared artifact or immutable per-version mirror; it never silently regenerates it from a moving branch. For fork preparation, set repository Actions variables `VECTOR_CATALOG_FORK_REPOSITORY` and `VECTOR_CATALOG_FORK_REVISION` to the same reviewed values before the next new release. The workflow checks that exact commit out under its ignored temporary directory. Leaving both variables unset selects the desktop-only committed-snapshot fallback described above when no immutable mirror exists; setting only one fails.
 
 ## Publish and verify the mirror
 
