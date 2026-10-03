@@ -62,6 +62,16 @@ describe("session usage", () => {
     })
   })
 
+  test("counts responses on a model with no listed price, which the lifetime cost leaves out", () => {
+    const now = Date.now()
+    const result = summarizeUsage([
+      assistant(now, 600, 0.06, 1_000),
+      { ...assistant(now + 1, 300, 0, 1_000), unpriced: true },
+    ])
+    expect(result.lifetimeCost).toBe(0.06)
+    expect(result.unpricedResponses).toBe(1)
+  })
+
   test("ranks model and effort preferences by token share", () => {
     const now = Date.now()
     const result = summarizeUsage([

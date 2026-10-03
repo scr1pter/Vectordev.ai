@@ -1128,11 +1128,12 @@ export function summarizeUsage(messages: ReadonlyArray<typeof SessionV1.Info.Typ
       tokens: usageTokens(message),
     }))
   const longest = durations.reduce((a, b) => (b.ms > a.ms ? b : a), { ms: 0, tokens: 0 })
+  const unpricedResponses = assistant.filter((message) => message.unpriced).length
 
   return {
     lifetimeTokens,
     lifetimeCost: activity.reduce((total, day) => total + day.cost, 0),
-    unpricedResponses: assistant.filter((message) => message.unpriced).length,
+    ...(unpricedResponses ? { unpricedResponses } : {}),
     inputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.input)), 0),
     outputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.output)), 0),
     reasoningTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.reasoning)), 0),
