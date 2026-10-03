@@ -1220,6 +1220,8 @@ describe("SessionRunnerLLM", () => {
       expect(userTexts(requests[1])).toHaveLength(1)
       expect(userTexts(requests[1])[0]).toContain("<summary>\n## Goal\n- Preserve the task\n</summary>")
       expect(userTexts(requests[1])[0]).toContain(`[User]: ${"Recent exact request ".repeat(180)}`)
+      // The request is folded into the checkpoint, which says to act on it rather than treat it as history.
+      expect(userTexts(requests[1])[0]).toContain("it is the user's current request: act on it now")
 
       const context = yield* (yield* SessionStore.Service).context(sessionID)
       expect(context.map((message) => message.type)).toEqual(["compaction", "assistant"])
@@ -1272,11 +1274,45 @@ describe("SessionRunnerLLM", () => {
         fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
       ]
       // About 225K tokens: far inside the 1M window, past the 200K default ceiling.
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "word ".repeat(180_000) }), resume: false })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: `START ${"word ".repeat(180_000)}END` }),
+        resume: false,
+      })
       yield* session.resume(sessionID)
 
       expect(userTexts(requests[0])[0]).toContain("## Goal")
+      // The prompt is cut where the kept turns begin: its start is summarized once and its end only kept verbatim.
+      expect(userTexts(requests[0])[0].split("START").length - 1).toBe(1)
+      expect(userTexts(requests[0])[0]).not.toContain("END")
+      // Nothing ever reads the summary request back, so it writes nothing to the prompt cache.
+      expect(requests[0].cache).toBe("none")
       expect((yield* (yield* SessionStore.Service).context(sessionID))[0]).toMatchObject({ type: "compaction" })
+    }),
+  )
+
+  it.effect("does not compact before every step when a model's output limit fills its window", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-first", ["Earlier answer"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Earlier question" }), resume: false })
+      yield* session.resume(sessionID)
+
+      currentModel = Model.make({
+        id: "full-output",
+        provider: "fake",
+        route: OpenAIChat.route.with({ limits: { context: 262_144, output: 262_144 } }),
+      })
+      requests.length = 0
+      response = fragmentFixture("text", "text-final", ["Done"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "word ".repeat(12_000) }), resume: false })
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0].generation?.maxTokens).toBe(32_000)
+      // Each step ends on a cache breakpoint, so the next step of a tool loop reads it back.
+      expect(requests[0].cache).toEqual({ tools: true, system: true, messages: { tail: 2 } })
     }),
   )
 
@@ -1285,7 +1321,11 @@ describe("SessionRunnerLLM", () => {
       yield* setup
       const session = yield* SessionV2.Service
       response = fragmentFixture("text", "text-first", ["Earlier answer"]).completeEvents
-      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Earlier question ".repeat(180) }), resume: false })
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Earlier question ".repeat(180) }),
+        resume: false,
+      })
       yield* session.resume(sessionID)
 
       currentModel = SessionRunnerModel.withPricing(compactModel, [

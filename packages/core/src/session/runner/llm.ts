@@ -89,6 +89,9 @@ import { llmClient } from "../../effect/app-node-platform"
  * explicit loop starts the next provider turn after local settlement. Configured agent step limits bound the loop.
  */
 
+// The most output a step asks for, as the V1 engine's OUTPUT_TOKEN_MAX.
+const MAX_OUTPUT_TOKENS = 32_000
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -197,9 +200,17 @@ const layer = Layer.effect(
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
       const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
+      const output = model.route.defaults.limits?.output
       const request = LLM.request({
         model,
         providerOptions: { openai: { promptCacheKey } },
+        // As in the V1 engine, a step asks for at most 32K tokens of output. Reserving a catalog limit that equals the
+        // context window would leave no room for input, and compaction would run before every step.
+        ...(output ? { generation: { maxTokens: Math.min(output, MAX_OUTPUT_TOKENS) } } : {}),
+        // Breakpoints on the tools, the system prompt and the conversation's tail, so each step of a tool loop reads
+        // the steps before it from the cache. A breakpoint only on the user's prompt re-sends every tool call and
+        // result after it at the full input price on every step.
+        cache: { tools: true, system: true, messages: { tail: 2 } },
         system: [agent.info?.system, system.baseline]
           .filter((part): part is string => part !== undefined && part.length > 0)
           .map(SystemPart.make),

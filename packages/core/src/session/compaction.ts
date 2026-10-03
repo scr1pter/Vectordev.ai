@@ -153,25 +153,28 @@ const select = (
   if (conversation.length === 0) return
   let total = 0
   let split = conversation.length
-  let splitPrefix = ""
-  let splitSuffix = ""
   for (let index = conversation.length - 1; index >= 0; index--) {
     const next = total + Token.estimate(conversation[index])
     if (next > tokens) {
+      // The message the keep budget ends inside is cut there: its start is summarized and its end kept verbatim.
       const remaining = Math.max(0, tokens - total) * 4
-      if (remaining > 0) {
-        splitPrefix = conversation[index].slice(0, -remaining)
-        splitSuffix = conversation[index].slice(-remaining)
-        split = index + 1
-      }
+      if (remaining > 0)
+        return {
+          head: [...conversation.slice(0, index), conversation[index].slice(0, -remaining)]
+            .filter(Boolean)
+            .join("\n\n"),
+          recent: [conversation[index].slice(-remaining), ...conversation.slice(index + 1)]
+            .filter(Boolean)
+            .join("\n\n"),
+        }
       break
     }
     total = next
     split = index
   }
   return {
-    head: [...conversation.slice(0, split), splitPrefix].filter(Boolean).join("\n\n"),
-    recent: [splitSuffix, ...conversation.slice(split)].filter(Boolean).join("\n\n"),
+    head: conversation.slice(0, split).join("\n\n"),
+    recent: conversation.slice(split).join("\n\n"),
   }
 }
 
@@ -220,6 +223,8 @@ export const make = (dependencies: Dependencies) => {
           messages: [Message.user(summaryPrompt)],
           tools: [],
           generation: { maxTokens: summaryOutput },
+          // The summary replaces this history, so nothing would read a cache write of it back.
+          cache: "none",
         }),
       )
       .pipe(
