@@ -24,6 +24,7 @@ import { Effect, Exit, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@vectordevai/core/database/database"
+import { Provider } from "@/provider/provider"
 import path from "path"
 
 export interface TaskPromptOps {
@@ -195,6 +196,7 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const provider = yield* Provider.Service
     // Ownership claimed by task calls that have not registered their job yet. Sibling calls
     // in one message run concurrently, so the job list alone cannot see each other's paths.
     const claims = new Set<{ parentSessionID: SessionID; taskID?: string; title: string; paths: string[] }>()
@@ -407,17 +409,35 @@ export const TaskTool = Tool.define(
       const variant = msg.info.variant
 
       // Keep the parent's free route even if its model became unavailable after the tool call.
-      const inherit =
-        !next.model ||
-        (["vector", "openrouter"].includes(msg.info.providerID) && msg.info.modelID.toLowerCase().endsWith(":free"))
-      const model =
-        !inherit && next.model
+      const freeRoute =
+        ["vector", "openrouter"].includes(msg.info.providerID) && msg.info.modelID.toLowerCase().endsWith(":free")
+      const inherit = !next.model || freeRoute
+      // Explore only searches and reads, so without a model of its own it runs on the provider's small model, as
+      // Claude Code runs Explore on Haiku. getSmallModel keeps a free parent on its own model.
+      const small =
+        next.name === "explore" && !next.model && !freeRoute
+          ? yield* provider.getSmallModel(msg.info.providerID, msg.info.modelID)
+          : undefined
+      const cheap = small?.capabilities.toolcall && small.id !== msg.info.modelID ? small : undefined
+      const model = cheap
+        ? { modelID: cheap.id, providerID: cheap.providerID }
+        : !inherit && next.model
           ? next.model
           : {
               modelID: msg.info.modelID,
               providerID: msg.info.providerID,
             }
-      const childVariant = inherit ? variant : undefined
+      // The small model runs at its default effort. Explore on the parent's model stops at medium effort,
+      // since a search gains little from the high reasoning budget a parent may run at.
+      const highEffort =
+        next.name === "explore" && !cheap && inherit && ["high", "xhigh", "max"].includes(variant ?? "")
+      const medium = highEffort
+        ? yield* provider.getModel(model.providerID, model.modelID).pipe(
+            Effect.map((info) => (info.variants?.medium ? "medium" : undefined)),
+            Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)),
+          )
+        : undefined
+      const childVariant = cheap ? undefined : inherit ? (medium ?? variant) : undefined
       // An agent with its own model runs with its own variant, so the record names that one.
       const recordedVariant = childVariant ?? (!inherit ? next.variant : undefined)
       const modelRef = { ...model, ...(recordedVariant ? { variant: recordedVariant } : {}) }

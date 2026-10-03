@@ -121,7 +121,7 @@ function specialistFocus(permitted?: readonly string[]) {
 // description alone, so a request does not carry them twice.
 const SUBAGENT_ORCHESTRATION = [
   "The task tool's description has the rules for sizing, owned_paths, depends_on, success_criteria and writing a brief.",
-  "Subagents inherit the current provider and model unless an agent is explicitly configured with another model.",
+  "Subagents inherit the current provider and model unless an agent is explicitly configured with another model; explore runs on the provider's small model when one is available.",
 ]
 const SUBAGENT_TEAMMATES = [
   "Task-tool sibling subagents are separate child sessions; they are not automatically members of a Parallel Workspace team. Require send_teammate_message only when a workspace team is actually configured.",

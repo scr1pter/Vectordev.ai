@@ -19,6 +19,7 @@ import { SessionStatus } from "@/session/status"
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
+import { Provider } from "@/provider/provider"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { disposeAllInstances } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
@@ -51,6 +52,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Database.node,
       RuntimeFlags.node,
       Ripgrep.node,
+      Provider.node,
     ]),
     [[RuntimeFlags.node, RuntimeFlags.layer(flags)]],
   )
@@ -89,6 +91,97 @@ for (const id of ["acme/coder:free", "acme/coder:FREE"])
       },
     },
   )
+
+const pricedProvider = (models: Record<string, Record<string, unknown>>) => ({
+  lmstudio: {
+    name: "Test",
+    id: "lmstudio",
+    env: [],
+    npm: "@ai-sdk/openai-compatible",
+    options: { apiKey: "test-key", baseURL: "http://localhost:1/v1" },
+    models: Object.fromEntries(
+      Object.entries(models).map(([id, extra]) => [
+        id,
+        {
+          id,
+          name: id,
+          attachment: false,
+          reasoning: true,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100000, output: 10000 },
+          cost: { input: 3, output: 15 },
+          ...extra,
+        },
+      ]),
+    ),
+  },
+})
+
+it.instance(
+  "explore runs on the provider's small model at its default effort",
+  () =>
+    Effect.gen(function* () {
+      const parent = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("big") }
+      const seeded = yield* seed("Explore small", parent)
+      const def = yield* (yield* TaskTool).init()
+      const prompts: SessionPrompt.PromptInput[] = []
+      const result = yield* def.execute(
+        { description: "find handlers", prompt: "Find the HTTP handlers.", subagent_type: "explore" },
+        taskContext({
+          sessionID: seeded.chat.id,
+          messageID: seeded.assistant.id,
+          promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+        }),
+      )
+      expect(prompts[0].model).toEqual({ providerID: parent.providerID, modelID: ModelV2.ID.make("tiny") })
+      expect(prompts[0].variant).toBeUndefined()
+      expect(result.metadata.model).toEqual({ providerID: parent.providerID, modelID: ModelV2.ID.make("tiny") })
+    }),
+  {
+    config: {
+      small_model: "lmstudio/tiny",
+      provider: pricedProvider({ big: {}, tiny: { cost: { input: 0.1, output: 0.4 } } }),
+    },
+  },
+)
+
+it.instance(
+  "explore without a small model stays on the parent model at medium effort",
+  () =>
+    Effect.gen(function* () {
+      const parent = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("big") }
+      const seeded = yield* seed("Explore capped", parent)
+      const def = yield* (yield* TaskTool).init()
+      const prompts: SessionPrompt.PromptInput[] = []
+      yield* def.execute(
+        { description: "find handlers", prompt: "Find the HTTP handlers.", subagent_type: "explore" },
+        taskContext({
+          sessionID: seeded.chat.id,
+          messageID: seeded.assistant.id,
+          promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+        }),
+      )
+      yield* def.execute(
+        { description: "write the fix", prompt: "Fix the HTTP handlers.", subagent_type: "general" },
+        taskContext({
+          sessionID: seeded.chat.id,
+          messageID: seeded.assistant.id,
+          promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+        }),
+      )
+      expect(prompts.map((input) => [input.agent, input.model, input.variant])).toEqual([
+        ["explore", parent, "medium"],
+        ["general", parent, "xhigh"],
+      ])
+    }),
+  {
+    config: {
+      provider: pricedProvider({ big: { variants: { medium: {}, xhigh: {} } } }),
+    },
+  },
+)
 
 function defer<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void

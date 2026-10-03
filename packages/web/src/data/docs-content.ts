@@ -33,7 +33,7 @@ export const crew = [
     summary: "Finds code fast",
     hue: 25,
     readOnly: true,
-    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works. Never edits.",
+    role: "Finds files by pattern, searches code for keywords, and answers questions about how the codebase works. Runs on your provider's small model when one is available. Never edits.",
   },
   {
     label: "judge",
