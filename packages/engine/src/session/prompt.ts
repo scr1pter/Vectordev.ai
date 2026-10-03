@@ -166,6 +166,22 @@ const layer = Layer.effect(
         return { scope: yield* Scope.Scope, titles: new Set<Fiber.Fiber<void>>() }
       }),
     )
+    // Instruction files (AGENTS.md, .vector/BRAIN.md, config instructions) as a session first read them. They sit in the
+    // system prompt ahead of the whole conversation, so re-reading them every step meant one edit, often the agent's own
+    // memory update, re-wrote the entire cached context at the cache-write price. They are read again once compaction
+    // gives the session a new history start, which re-writes that context anyway; an edit the agent makes itself is
+    // already in its context. Keyed by session, so concurrent sessions keep their own snapshot.
+    const instructionSnapshots = new Map<SessionID, { start: MessageID | undefined; instructions: string[] }>()
+    const sessionInstructions = Effect.fn("SessionPrompt.sessionInstructions")(function* (
+      sessionID: SessionID,
+      start: MessageID | undefined,
+    ) {
+      const snapshot = instructionSnapshots.get(sessionID)
+      if (snapshot && snapshot.start === start) return snapshot.instructions
+      const instructions = yield* instruction.system()
+      instructionSnapshots.set(sessionID, { start, instructions })
+      return instructions
+    })
     const awaitTitles = Effect.fn("SessionPrompt.awaitTitles")(function* () {
       if (!(yield* InstanceState.has(backgroundTasks))) return
       const pending = [...(yield* InstanceState.get(backgroundTasks)).titles]
@@ -1336,17 +1352,21 @@ const layer = Layer.effect(
                   // subagent's own session is told not to start general Subagents of its own.
                   Effect.flatMap((list) =>
                     sys.environment(model, {
-                      subagents: SystemPrompt.subagentAvailability({
-                        agents: list,
-                        permission: agent.permission,
-                        session: session.permission,
-                        agent: agent.name,
-                        nested: session.parentID !== undefined,
-                      }),
+                      subagents: {
+                        ...SystemPrompt.subagentAvailability({
+                          agents: list,
+                          permission: agent.permission,
+                          session: session.permission,
+                          agent: agent.name,
+                          nested: session.parentID !== undefined,
+                        }),
+                        teammates: "send_teammate_message" in tools,
+                      },
+                      tools: Object.keys(tools),
                     }),
                   ),
                 ),
-            quick ? Effect.succeed([]) : instruction.system().pipe(Effect.orDie),
+            quick ? Effect.succeed([]) : sessionInstructions(sessionID, msgs[0]?.info.id).pipe(Effect.orDie),
             quick ? Effect.succeed(undefined) : sys.mcp(agent, session.permission),
             MessageV2.toModelMessagesEffect(msgs, model),
           ])

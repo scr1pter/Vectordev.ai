@@ -38,6 +38,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
+import { InstanceRef } from "../../src/effect/instance-ref"
 import { SessionRevert } from "../../src/session/revert"
 import { SessionRunState } from "../../src/session/run-state"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
@@ -552,6 +553,45 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("a session reads its instruction files once, so an edit mid-session keeps the cached system prompt", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const instance = yield* InstanceRef
+    if (!instance) return yield* Effect.die("no instance")
+    const rules = path.join(instance.directory, "AGENTS.md")
+    yield* Effect.promise(() => Bun.write(rules, "# First rules"))
+    const turn = (sessionID: SessionID, text: string) =>
+      Effect.gen(function* () {
+        yield* prompt.prompt({ sessionID, agent: "build", noReply: true, parts: [{ type: "text", text }] })
+        yield* llm.text("ok")
+        yield* prompt.loop({ sessionID })
+      })
+
+    const chat = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* turn(chat.id, "hello")
+    // Like the agent updating .vector/BRAIN.md: the file changes between requests of one session.
+    yield* Effect.promise(() => Bun.write(rules, "# Second rules"))
+    yield* turn(chat.id, "again")
+    const fresh = yield* sessions.create({
+      title: "Fresh",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    yield* turn(fresh.id, "hello")
+
+    const bodies = (yield* llm.hits).map((hit) => JSON.stringify(hit.body))
+    expect(bodies).toHaveLength(3)
+    expect(bodies[1]).toContain("# First rules")
+    expect(bodies[1]).not.toContain("# Second rules")
+    // A new session reads the files as they are now.
+    expect(bodies[2]).toContain("# Second rules")
+  }),
+)
+
 withMcpInstructions.instance(
   "loop includes MCP instructions in model system context",
   () =>
@@ -626,16 +666,20 @@ it.instance(
 )
 
 it.instance(
-  "loop tells the model to launch general Subagents on big tasks by default",
+  "loop tells the model to do the work itself and delegate only what is cheaper split up",
   () =>
     Effect.gen(function* () {
       const body = yield* firstRequestBody({})
-      expect(body).toContain("you MUST launch general Subagents with the task tool (omit subagent_type)")
-      expect(body).toContain("three or more files that fall into two or more independent parts")
-      expect(body).toContain("Do small tasks yourself")
-      expect(body).toContain("the default when you omit subagent_type")
+      expect(body).toContain("Do the work yourself by default, multi-file changes included")
+      expect(body).toContain("Launch a general Subagent (omit subagent_type) only when that costs less")
+      expect(body).not.toContain("MUST launch general Subagents")
       expect(body).not.toContain("General Subagents are turned off")
       expect(body).not.toContain("You are a Subagent working on a brief")
+      // No team is configured here, so neither the teammate tool nor its guidance is sent.
+      expect(body).not.toContain("send_teammate_message")
+      // The browser and cloud tools are not offered outside the desktop, so their policies are left out too.
+      expect(body).not.toContain("<browser_engineering_policy>")
+      expect(body).not.toContain("<vector_cloud_policy>")
     }),
   15_000,
 )

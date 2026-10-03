@@ -52,6 +52,8 @@ export type SubagentAvailability = {
   agent?: string
   /** The specialists this agent may launch. When set, the policy names only these. */
   permitted?: readonly string[]
+  /** A Parallel Workspace team is configured, so send_teammate_message is offered and its guidance applies. */
+  teammates?: boolean
 }
 
 export const ALL_SUBAGENTS: SubagentAvailability = { general: true, specialists: true }
@@ -115,13 +117,11 @@ function specialistFocus(permitted?: readonly string[]) {
   if (listed.length === 0) return ""
   return `: ${listed.map(([name, focus]) => `${name} for ${focus}`).join("; ")}`
 }
-const SUBAGENT_BACKGROUND =
-  "Task calls in one message run concurrently even in the foreground, so use background mode only when you can continue useful work without waiting."
+// Sizing, ownership (owned_paths, depends_on, success_criteria) and briefing rules live in the task tool's
+// description alone, so a request does not carry them twice.
 const SUBAGENT_ORCHESTRATION = [
-  "Treat orchestration as a dependency graph rather than a swarm: assign repository-relative owned_paths, list observable success_criteria, and pass depends_on task IDs when downstream work requires an upstream result.",
-  "Never give active sibling agents overlapping path ownership. Vector enforces declared overlaps, but you remain responsible for assigning clear boundaries and integrating cross-cutting changes in the parent session.",
+  "The task tool's description has the rules for sizing, owned_paths, depends_on, success_criteria and writing a brief.",
   "Subagents inherit the current provider and model unless an agent is explicitly configured with another model.",
-  "Write each brief so it stands alone, because a subagent sees none of your conversation: give it a complete objective, the relevant files and constraints, whether to edit or only research, the expected output, and verification instructions. Tell subagents that edit code never to revert changes they did not make. Do not duplicate delegated work.",
 ]
 const SUBAGENT_TEAMMATES = [
   "Task-tool sibling subagents are separate child sessions; they are not automatically members of a Parallel Workspace team. Require send_teammate_message only when a workspace team is actually configured.",
@@ -149,16 +149,14 @@ function subagentPolicyLines(input: SubagentAvailability): string[] {
   if (input.general)
     return [
       SUBAGENT_INTRO,
-      "There are two kinds. A Subagent (general, the default when you omit subagent_type) is a general-purpose worker for any self-contained sub-task. Subagent specialists have a fixed focus and their own permissions.",
-      "Size the task before you start: count the files you will create or change, and the parts of the work that do not depend on each other (separate modules, packages, features or questions). The task is big when it touches three or more files that fall into two or more independent parts, or when it needs broad research across the codebase as well as changes. The counts decide, not the size of each file: several quick files in independent modules still make a big task.",
-      "For a big task you MUST launch general Subagents with the task tool (omit subagent_type) before you write those files yourself: one per independent part, all in ONE message so they run in parallel, each with non-overlapping owned_paths. Keep integration and final verification yourself. Launching them is part of doing the task the user asked for, so do not wait to be asked. In a big task, also use Subagents for broad research and multi-file investigation so raw search output stays out of your context.",
-      "A task is small when it is a single-file change, a quick fix, one lookup, or a short answer or explanation, or when its two or three files are closely coupled parts of one unit (for example a type, its serializer and its test). Do small tasks yourself and do not launch a general Subagent for them.",
-      SUBAGENT_BACKGROUND,
+      // Every Subagent starts from an empty context and pays for its own prompt and reading, so delegation is for
+      // work that is cheaper split up, not the default for multi-file changes.
+      "Do the work yourself by default, multi-file changes included. Launch a general Subagent (omit subagent_type) only when that costs less than doing the work yourself: for an independent part that is itself substantial, roughly five or more files or a long check-and-repair loop, and can proceed alongside your own work, or for broad research whose raw output would flood your context. Each Subagent starts with an empty context and reads everything again, so splitting small parts across Subagents costs more than doing them.",
       input.specialists
-        ? `When part of the work clearly matches a Subagent specialist, choose the narrowest one${focus}. Otherwise, for the independent parts of a big task, use the Subagent (general for other self-contained implementation or research).`
-        : "No Subagent specialists are available to you, so use the Subagent (general for other self-contained implementation or research) for the independent parts of a big task.",
+        ? `When part of the work clearly matches a Subagent specialist, choose the narrowest one${focus}.`
+        : "No Subagent specialists are available to you.",
       ...SUBAGENT_ORCHESTRATION,
-      ...SUBAGENT_TEAMMATES,
+      ...(input.teammates ? SUBAGENT_TEAMMATES : []),
       SUBAGENT_OWNERSHIP,
     ]
   if (input.specialists)
@@ -166,16 +164,15 @@ function subagentPolicyLines(input: SubagentAvailability): string[] {
       SUBAGENT_INTRO,
       `${generalOffLine(input)} Every task call must set subagent_type to a Subagent specialist from the task tool's list; never request general.`,
       "Do the work that no specialist covers yourself, big tasks included, and keep integration and final verification yourself.",
-      SUBAGENT_BACKGROUND,
       `Use a Subagent specialist only when part of the work clearly matches its focus, and choose the narrowest one in the task tool's list${focus}. Otherwise do that part yourself.`,
       ...SUBAGENT_ORCHESTRATION,
-      ...SUBAGENT_TEAMMATES,
+      ...(input.teammates ? SUBAGENT_TEAMMATES : []),
       SUBAGENT_OWNERSHIP,
     ]
   // Child sessions and read-only specialists cannot delegate, but teammate guidance still applies to them.
   return [
     "No subagents are available in this session; do the work yourself and do not call the task tool.",
-    ...SUBAGENT_TEAMMATES,
+    ...(input.teammates ? SUBAGENT_TEAMMATES : []),
   ]
 }
 
@@ -209,6 +206,8 @@ export const LOCAL_MEMORY_POLICY = [
 export type EnvironmentOptions = {
   /** What the current agent may launch through the task tool; selects the subagent policy. Defaults to everything. */
   subagents?: SubagentAvailability
+  /** The tool ids offered this step. A policy for a tool that is not offered is left out, so it costs no tokens. */
+  tools?: readonly string[]
 }
 
 export interface Interface {
@@ -272,6 +271,8 @@ const layer = Layer.effect(
                 "</available_references>",
               ].join("\n"),
         ].filter((part): part is string => part !== undefined)
+        // Without a tools list every policy is sent, as for callers that do not know what is offered.
+        const offered = (id: string) => options?.tools === undefined || options.tools.includes(id)
         const stable = [
           [
             `You are Vector, an AI coding workspace for planning, editing, reviewing, and running software projects.`,
@@ -280,23 +281,25 @@ const layer = Layer.effect(
           ].join("\n"),
           subagentPolicy(options?.subagents ?? ALL_SUBAGENTS),
           COMPLETION_POLICY,
-          [
-            "<browser_engineering_policy>",
-            "When the browser tool is available, it controls the same task-specific browser the user sees in Vector.",
-            "For user-facing web changes, start or discover the local preview, open it in the browser, inspect DOM and console/network/runtime evidence, exercise the affected flow, repair failures, and retest before declaring the task complete.",
-            "Prefer evidence from the running application over assumptions from source code alone.",
-            "External websites require approval. Never enter credentials, one-time codes, card data, make purchases, send messages, or perform destructive remote actions; pause for the user at those boundaries.",
-            "</browser_engineering_policy>",
-          ].join("\n"),
-          [
-            "<vector_cloud_policy>",
-            "Vector Cloud is the default backend and publishing surface when the vector_cloud tool is available.",
-            "For authentication, user accounts, databases, persistence, environment-backed features, or backend setup, inspect Vector Cloud database readiness before implementation and prepare the connected project database when available.",
-            "If the project has no connected database, clearly recommend Vector Cloud > Database and explain that setup is required; never invent credentials.",
-            "When the user asks to publish or deploy without naming a provider, publish through Vector Cloud, report its validation checks, and return the final URL.",
-            "Use a directly named provider such as Vercel, Netlify, or Supabase only when the user explicitly requests that provider.",
-            "</vector_cloud_policy>",
-          ].join("\n"),
+          offered("browser") &&
+            [
+              "<browser_engineering_policy>",
+              "When the browser tool is available, it controls the same task-specific browser the user sees in Vector.",
+              "For user-facing web changes, start or discover the local preview, open it in the browser, inspect DOM and console/network/runtime evidence, exercise the affected flow, repair failures, and retest before declaring the task complete.",
+              "Prefer evidence from the running application over assumptions from source code alone.",
+              "External websites require approval. Never enter credentials, one-time codes, card data, make purchases, send messages, or perform destructive remote actions; pause for the user at those boundaries.",
+              "</browser_engineering_policy>",
+            ].join("\n"),
+          offered("vector_cloud") &&
+            [
+              "<vector_cloud_policy>",
+              "Vector Cloud is the default backend and publishing surface when the vector_cloud tool is available.",
+              "For authentication, user accounts, databases, persistence, environment-backed features, or backend setup, inspect Vector Cloud database readiness before implementation and prepare the connected project database when available.",
+              "If the project has no connected database, clearly recommend Vector Cloud > Database and explain that setup is required; never invent credentials.",
+              "When the user asks to publish or deploy without naming a provider, publish through Vector Cloud, report its validation checks, and return the final URL.",
+              "Use a directly named provider such as Vercel, Netlify, or Supabase only when the user explicitly requests that provider.",
+              "</vector_cloud_policy>",
+            ].join("\n"),
           [
             "<process_safety_policy>",
             "Never stop, kill, or replace a process unless you started it during the current task or the user explicitly approved stopping that specific process.",
@@ -313,7 +316,7 @@ const layer = Layer.effect(
             "Do not rewrite memory merely to narrate routine work.",
             "</vector_project_memory>",
           ].join("\n"),
-        ]
+        ].filter((part): part is string => typeof part === "string")
         return { stable, session }
       }),
 

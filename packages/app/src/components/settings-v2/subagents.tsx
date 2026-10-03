@@ -34,7 +34,7 @@ const SUBAGENT_FACTS = [
   {
     title: "When Vector uses them",
     description:
-      "For big tasks: three or more files split across parts that do not depend on each other, or broad research as well as changes. A one-file change, a quick fix, a short question, or two or three closely linked files it does itself.",
+      "When splitting the work costs less than doing it: a substantial independent part, roughly five or more files or a long check-and-repair loop, or broad research that would flood the main agent's context. Each Subagent starts fresh and re-reads what it needs, so ordinary multi-file changes the main agent does itself.",
   },
   {
     title: "Where they work",

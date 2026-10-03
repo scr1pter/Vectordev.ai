@@ -95,50 +95,38 @@ describe("session.system", () => {
     Effect.sync(() => {
       expect(SUBAGENT_POLICY).toContain("real child agents")
       expect(SUBAGENT_POLICY).toContain("explore for read-only discovery")
-      expect(SUBAGENT_POLICY).toContain("general for other self-contained implementation")
       expect(SUBAGENT_POLICY).toContain("review for code review")
       expect(SUBAGENT_POLICY).toContain("judge for independent rubric-based completion evaluation")
       expect(SUBAGENT_POLICY).toContain("security for security analysis")
       expect(SUBAGENT_POLICY).toContain("debug for reproducing and repairing failures")
       expect(SUBAGENT_POLICY).toContain("test for focused test design and execution")
-      expect(SUBAGENT_POLICY).toContain("background mode")
-      expect(SUBAGENT_POLICY).toContain("owned_paths")
-      expect(SUBAGENT_POLICY).toContain("depends_on")
+      // Sizing, ownership and briefing rules live in the task tool's description, not a second time here.
+      expect(SUBAGENT_POLICY).toContain("The task tool's description has the rules")
       expect(SUBAGENT_POLICY).toContain("inherit the current provider and model")
-      expect(SUBAGENT_POLICY).toContain("separate child sessions")
-      expect(SUBAGENT_POLICY).toContain("stop that coordination attempt")
-      expect(SUBAGENT_POLICY).toContain("Do not search outside the workspace")
-      expect(SUBAGENT_POLICY).toContain("report the unavailable exchange to the parent")
+      // Teammate guidance only goes out where a Parallel Workspace team is configured.
+      expect(SUBAGENT_POLICY).not.toContain("separate child sessions")
+      expect(subagentPolicy({ ...ALL_SUBAGENTS, teammates: true })).toContain("stop that coordination attempt")
     }),
   )
 
-  it.effect("general variant: a countable big-task trigger, and small tasks stay with the main agent", () =>
+  it.effect("general variant: the main agent does the work and delegates only what is cheaper split up", () =>
     Effect.sync(() => {
       const policy = subagentPolicy({ general: true, specialists: true })
       expect(policy).toBe(SUBAGENT_POLICY)
       expect(subagentPolicy()).toBe(SUBAGENT_POLICY)
       expect(subagentPolicy(ALL_SUBAGENTS)).toBe(SUBAGENT_POLICY)
-      expect(policy).toContain("Size the task before you start: count the files")
-      expect(policy).toContain("three or more files that fall into two or more independent parts")
-      expect(policy).toContain("The counts decide, not the size of each file")
-      expect(policy).not.toContain("handful of steps")
-      expect(policy).toContain("needs broad research across the codebase as well as changes")
-      expect(policy).toContain("you MUST launch general Subagents with the task tool (omit subagent_type)")
-      expect(policy).toContain("before you write those files yourself")
-      expect(policy).toContain("one per independent part")
-      expect(policy).toContain("all in ONE message")
-      expect(policy).toContain("non-overlapping owned_paths")
-      expect(policy).toContain("Keep integration and final verification yourself")
-      expect(policy).toContain("do not wait to be asked")
-      expect(policy).toContain("In a big task, also use Subagents for broad research")
-      expect(policy).toContain("single-file change")
-      expect(policy).toContain("closely coupled parts of one unit")
-      expect(policy).toContain("Do small tasks yourself and do not launch a general Subagent")
-      expect(policy).toContain("the default when you omit subagent_type")
+      expect(policy).toContain("Do the work yourself by default, multi-file changes included")
+      expect(policy).toContain("only when that costs less than doing the work yourself")
+      expect(policy).toContain("roughly five or more files or a long check-and-repair loop")
+      expect(policy).toContain("broad research whose raw output would flood your context")
+      expect(policy).toContain("Each Subagent starts with an empty context")
+      expect(policy).toContain("omit subagent_type")
       expect(policy).toContain("explore for read-only discovery")
-      expect(policy).toContain("Otherwise, for the independent parts of a big task, use the Subagent")
-      expect(policy).toContain("general for other self-contained implementation")
-      expect(policy).not.toContain("almost every time")
+      expect(policy).toContain("Keep ownership of the user's request")
+      // Delegation is no longer mandatory, and the sizing rules are not repeated from the task tool.
+      expect(policy).not.toContain("MUST launch")
+      expect(policy).not.toContain("do not wait to be asked")
+      expect(policy).not.toContain("three or more files that fall into two or more independent parts")
       expect(policy).not.toContain("turned off")
     }),
   )
@@ -166,21 +154,15 @@ describe("session.system", () => {
           "security for security analysis",
           "debug for reproducing and repairing failures",
           "test for focused test design and execution",
-          "background mode",
-          "owned_paths",
-          "depends_on",
+          "The task tool's description has the rules",
           "inherit the current provider and model",
-          "separate child sessions",
-          "stop that coordination attempt",
-          "Do not search outside the workspace",
-          "report the unavailable exchange to the parent",
           "Keep ownership of the user's request",
         ])
           expect(policy).toContain(kept)
         expect(policy).not.toContain("omit")
         expect(policy).not.toContain("general for other self-contained")
         expect(policy).not.toContain("MUST launch general Subagents")
-        expect(policy).not.toContain("Otherwise, for the independent parts of a big task")
+        expect(policy).not.toContain("Do the work yourself by default")
       }
       // A permission denial is not blamed on the Settings switch, and the switch is not blamed on the agent.
       expect(subagentPolicy({ general: false, specialists: true, reason: "denied", agent: "plan" })).not.toContain(
@@ -215,18 +197,19 @@ describe("session.system", () => {
       // General with no specialist at all.
       const lone = subagentPolicy({ general: true, specialists: false, permitted: [] })
       expect(lone).toContain("No Subagent specialists are available to you")
-      expect(lone).toContain("you MUST launch general Subagents")
+      expect(lone).toContain("Do the work yourself by default")
       expect(lone).not.toContain("explore for read-only discovery")
     }),
   )
 
-  it.effect("no-subagent variant keeps only the teammate guidance", () =>
+  it.effect("no-subagent variant keeps only the teammate guidance, when there is a team", () =>
     Effect.sync(() => {
-      const policy = subagentPolicy({ general: false, specialists: false })
+      const policy = subagentPolicy({ general: false, specialists: false, teammates: true })
       expect(policy).toContain("No subagents are available in this session")
       expect(policy).toContain("do not call the task tool")
       expect(policy).toContain("stop that coordination attempt")
       expect(policy).toContain("report the unavailable exchange to the parent")
+      expect(subagentPolicy({ general: false, specialists: false })).not.toContain("stop that coordination attempt")
       expect(policy).not.toContain("Subagent specialist")
       expect(policy).not.toContain("deploy general Subagents")
       expect(policy).not.toContain("omit")

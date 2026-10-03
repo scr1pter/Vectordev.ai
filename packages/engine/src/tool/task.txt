@@ -4,9 +4,9 @@ Two kinds of subagent run through this tool:
 - Subagent: subagent_type "general", available only when general is in the list below; there, omitting subagent_type also gives you one. A general-purpose worker for any self-contained sub-task: broad research, multi-file search, implementation, refactors, or running and repairing checks.
 - Subagent specialists: every other type in the list below. Each has a fixed focus and its own permissions. Choose one only when part of the work clearly matches its description, and use it proactively when its description says to.
 
-When general is in the list, size the task before you start: count the files you will create or change, and the parts of the work that do not depend on each other. The task is big when it touches three or more files that fall into two or more independent parts, or when it needs broad research across the codebase as well as changes. The counts decide, not the size of each file: several quick files in independent modules still make a big task. For a big task you MUST launch general Subagents before you write those files yourself, without waiting to be asked:
-- one per independent part (separate modules, packages, features or questions), all in ONE message, each with non-overlapping owned_paths;
-- one for research that needs wide searching or reading that would flood your context;
+When general is in the list, do the work yourself by default, multi-file changes included. Each Subagent starts with an empty context and reads everything again, so a general Subagent is worth it only when it costs less than doing the work yourself:
+- an independent part that is itself substantial, roughly five or more files or a long check-and-repair loop, and can proceed alongside your own work: launch one per such part, all in ONE message, each with non-overlapping owned_paths;
+- broad research whose raw search output or reading would flood your context;
 then keep integration and final verification yourself.
 
 When general is not in the list, or you are yourself a Subagent working on a brief, do not request general. Always set subagent_type to a listed specialist, use one only when part of the work clearly matches its focus, and do the rest yourself, big tasks included.
@@ -19,7 +19,7 @@ Do not launch a general Subagent for a small task; do it yourself:
 - anything that needs back-and-forth with the user.
 
 Usage notes:
-1. Launch in parallel. Put every independent task call in ONE message: they run at the same time and their results come back together. Vector sets no limit, so launch as many as the work genuinely splits into. When that is more than a few, tell the user how many you launched, because each one spends on their provider keys.
+1. Launch in parallel. Put every independent task call in ONE message: they run at the same time and their results come back together. Prefer fewer, larger parts: every subagent pays for its own prompt and reading on the user's provider keys. When you launch more than a few, tell the user how many.
 2. Write a brief that stands alone. A subagent sees none of your conversation, so brief it as you would a capable engineer who is new to the task: the goal and why it matters, the relevant files and constraints, what you already know or have ruled out, whether to change code or only research, how to verify, and exactly what its final message must contain. Tell a subagent that edits code to stay inside its owned_paths and never revert changes it did not make.
 3. description is the 3-5 word title the user sees on the subagent's card. Make each one specific and distinct from its siblings.
 4. For parallel implementation, give each subagent non-overlapping owned_paths and concrete success_criteria. Use depends_on with earlier task IDs when one subagent's work must finish before another starts. Vector rejects overlapping ownership among active sibling subagents instead of letting them overwrite each other.
@@ -30,13 +30,13 @@ Usage notes:
 <example>
 user: Remove every place we log user emails.
 assistant: [general is in the list and the work spans three packages, so it sends ONE message with three task calls and no subagent_type: "Strip email logs: api" with owned_paths packages/api, "Strip email logs: worker" with owned_paths packages/worker, and "Strip email logs: web" with owned_paths packages/web. Each brief names the logger calls to look for, says to redact the email rather than delete the log line, and asks for the files changed plus the test command it ran and its result.]
-<commentary>A big task that splits into three independent packages, so three Subagents launched together with non-overlapping ownership.</commentary>
+<commentary>Each package has many call sites to find and change, so each part is substantial on its own: three Subagents launched together with non-overlapping ownership.</commentary>
 </example>
 
 <example>
 user: Add slugify, formatMoney and retry helpers in src/utils, each with its own test file, and document them in the README.
-assistant: [general is in the list. The request needs six new files in three independent modules plus a README section, so it is big. Before writing any of them it sends ONE message with three task calls and no subagent_type: "Add slugify helper" owning src/utils/slugify.ts and test/slugify.test.ts, "Add formatMoney helper" owning src/utils/money.ts and test/money.test.ts, and "Add retry helper" owning src/utils/retry.ts and test/retry.test.ts. Each brief gives the function signature, the edge cases to cover and the test command to run. When all three report back, it writes the README section from their results and runs the whole test suite itself.]
-<commentary>Each file is quick on its own, but three independent modules with tests make a big task: one Subagent per module, launched together. The README depends on all three, so it waits for their results and stays with you, along with final verification.</commentary>
+assistant: [writes the three helpers, their tests and the README section itself, then runs the test suite, with no subagent]
+<commentary>Six files, but each part is small and quick to write. Three Subagents would each re-read the project before writing one helper, which costs more than writing them directly.</commentary>
 </example>
 
 <example>

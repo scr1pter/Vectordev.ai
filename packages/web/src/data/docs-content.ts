@@ -104,7 +104,7 @@ export const subagentKinds = [
   ],
   [
     "When Vector uses them",
-    "Vector's agent decides on its own. For a big task, one that touches three or more files split across parts that do not depend on each other, or needs broad research as well as changes, it starts one subagent per independent part and launches them together so they run at the same time, while it keeps the integration and the final checks. A small task, such as a single-file change, a quick fix, one lookup, a short answer, or two or three closely linked files, it does itself, without a subagent. It calls a specialist when part of the task fits that specialist's focus. You do not have to ask for either.",
+    "Vector's agent decides on its own, and it delegates only when splitting the work costs less than doing it. An independent part that is substantial on its own, roughly five or more files or a long check-and-repair loop, or broad research that would flood its context, goes to a subagent, and several such parts are launched together so they run at the same time while the agent keeps the integration and the final checks. Each subagent starts with a fresh context and re-reads what it needs, so ordinary multi-file changes, fixes, lookups and answers it does itself. It calls a specialist when part of the task fits that specialist's focus. You do not have to ask for either.",
   ],
   [
     "How many",

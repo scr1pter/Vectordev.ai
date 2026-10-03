@@ -12,7 +12,7 @@ import { ReadTool } from "./read"
 import { TaskTool } from "./task"
 import { Database } from "@vectordevai/core/database/database"
 import { TodoWriteTool } from "./todo"
-import { TeammateMessageTool } from "./teammate"
+import { TEAM_MARKER_RELATIVE_PATH, TeammateMessageTool } from "./teammate"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
@@ -223,6 +223,9 @@ const layer = Layer.effect(
 
         yield* config.get()
         const questionEnabled = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
+        // A Parallel Workspace writes its team marker while it is provisioned, before any session runs there, so
+        // a directory without one never has teammates and the tool would only cost tokens on every request.
+        const team = yield* Effect.promise(() => Bun.file(path.join(ctx.directory, TEAM_MARKER_RELATIVE_PATH)).exists())
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
@@ -260,7 +263,7 @@ const layer = Layer.effect(
             tool.task,
             tool.fetch,
             tool.todo,
-            tool.teammate,
+            ...(team ? [tool.teammate] : []),
             tool.search,
             tool.skill,
             tool.patch,
