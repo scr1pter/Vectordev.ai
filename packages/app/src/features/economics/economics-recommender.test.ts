@@ -55,6 +55,28 @@ describe("recommendModel", () => {
     expect(result?.sampleSize).toBe(3)
   })
 
+  test("a model whose checks all failed never outranks one that was never checked", () => {
+    const failing = Array.from({ length: 3 }, () =>
+      outcome({
+        provider: "acme",
+        model: "always-fails",
+        hadChecks: true,
+        checksPassed: false,
+        costUsd: 5,
+        costPriced: true,
+      }),
+    )
+    const unchecked = Array.from({ length: 20 }, () =>
+      outcome({ provider: "acme", model: "unchecked", costUsd: 0.01, costPriced: true }),
+    )
+    expect(recommendModel([...failing, ...unchecked], "frontend", 3)?.model).toBe("unchecked")
+    // Passing checks still lifts a model above one with no check data, whatever it costs.
+    const passing = Array.from({ length: 3 }, () =>
+      outcome({ provider: "acme", model: "passes", hadChecks: true, checksPassed: true, costUsd: 5, costPriced: true }),
+    )
+    expect(recommendModel([...passing, ...unchecked], "frontend", 3)?.model).toBe("passes")
+  })
+
   test("falls back to latency when check pass rate is tied or absent", () => {
     const outcomes: ModelOutcome[] = [
       outcome({ provider: "anthropic", model: "claude-sonnet-5", hadChecks: true, checksPassed: true }),

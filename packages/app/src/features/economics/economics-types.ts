@@ -78,6 +78,15 @@ export function knownCostUsd(outcome: Pick<ModelOutcome, "costUsd" | "costPriced
   return cost
 }
 
+// How strongly a model's checked runs back it, for ranking. With no checked runs it sits at an even 0.5, so a model
+// that was never checked does not rank below one that failed every check; checked runs pull the score toward their
+// pass rate, more firmly the more of them there are. Unlike a raw rate that is undefined without checks, this orders
+// every model consistently, which a sort comparator needs.
+export function checkPassScore(outcomes: readonly Pick<ModelOutcome, "hadChecks" | "checksPassed">[]) {
+  const checked = outcomes.filter((outcome) => outcome.hadChecks && outcome.checksPassed !== undefined)
+  return (checked.filter((outcome) => outcome.checksPassed === true).length + 1) / (checked.length + 2)
+}
+
 // A recommendation is only ever produced from real ModelOutcome history.
 // `checkPassRate`, `medianCostUsd`, and `medianTokens` are omitted rather than
 // zeroed when there is no data, so an unmeasured model never reads as free or

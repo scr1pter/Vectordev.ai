@@ -2811,7 +2811,12 @@ export default function NewLayout(props: ParentProps) {
         messages: history.data as never,
         parts: parts as never,
       })
-      if (outcome) await recordOutcome(outcome)
+      // A first turn that failed or was stopped before any usage has nothing to record yet, so a later idle tries again.
+      if (!outcome) {
+        recordedSessionOutcomes.delete(sessionID)
+        return
+      }
+      await recordOutcome(outcome)
     })()
   })
   onCleanup(stopSessionOutcomes)

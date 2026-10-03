@@ -77,7 +77,7 @@ import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { detectParallelIntent } from "@/features/delegation/delegation"
-import { listOutcomes } from "@/features/economics/economics-repository"
+import { createOutcomes } from "@/features/economics/economics-repository"
 import { recommendModel } from "@/features/economics/economics-recommender"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 
@@ -558,10 +558,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // from real parallel-workspace outcomes. Honest cold start — recommendModel
   // returns undefined until there is enough evidence.
   const taskCategory = createMemo(() => categorizeTask(delegationPromptText()))
-  const [economicsOutcomes] = createResource(
-    () => sdk().directory,
-    (directory) => listOutcomes(directory),
-  )
+  const economicsOutcomes = createOutcomes(() => sdk().directory)
   const modelRecommendation = createMemo(() => recommendModel(economicsOutcomes() ?? [], taskCategory()))
   const [recommendationDismissedFor, setRecommendationDismissedFor] = createSignal("")
   const recommendationDiffersFromCurrent = createMemo(() => {

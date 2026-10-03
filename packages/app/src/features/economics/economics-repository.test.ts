@@ -56,6 +56,11 @@ describe("economics-repository", () => {
     expect(outcomes[0]?.model).toBe("claude-sonnet-5")
   })
 
+  test("outcomes recorded at the same time are all kept", async () => {
+    await Promise.all(["w1", "w2", "w3"].map((id) => recordOutcome(makeOutcome({ id, projectId: "/repo/concurrent" }))))
+    expect((await listOutcomes("/repo/concurrent")).map((outcome) => outcome.id).sort()).toEqual(["w1", "w2", "w3"])
+  })
+
   test("keeps separate projects isolated", async () => {
     await recordOutcome(makeOutcome({ id: "a1", projectId: "/repo/a" }))
     await recordOutcome(makeOutcome({ id: "b1", projectId: "/repo/b" }))

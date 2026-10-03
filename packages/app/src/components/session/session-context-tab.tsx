@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, on, onCleanup, For, Show } from "solid-js"
+import { createEffect, createMemo, on, onCleanup, For, Show } from "solid-js"
 import type { Message } from "@vectordevai/sdk/v2/client"
 import { ScrollView } from "@vectordevai/ui/scroll-view"
 import { useLanguage } from "@/context/language"
@@ -7,7 +7,7 @@ import { useSDK } from "@/context/sdk"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
-import { listOutcomes } from "@/features/economics/economics-repository"
+import { createOutcomes } from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
 import { rankModelsForCategory } from "./session-model-economics"
@@ -42,6 +42,14 @@ export function SessionContextTab() {
         currency: "USD",
       }),
   )
+  // Per-run prices of cheap models are often below a cent, where two decimals would read as free.
+  const price = (value: number) =>
+    new Intl.NumberFormat(language.intl(), {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
+      maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
+    }).format(value)
   const ctx = createMemo(() => getSessionContext(messages(), [...providers.all().values()]))
   const tokens = createMemo(() => info()?.tokens)
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
@@ -57,10 +65,7 @@ export function SessionContextTab() {
 
   // Model economics: rank the models Vector has verified for this task's
   // category, learned from real parallel-workspace outcomes.
-  const [economicsOutcomes] = createResource(
-    () => sdk().directory,
-    (directory) => listOutcomes(directory),
-  )
+  const economicsOutcomes = createOutcomes(() => sdk().directory)
   const taskCategory = createMemo(() => categorizeTask(info()?.title ?? ""))
   const modelEconomics = createMemo(() =>
     rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), ctx()?.tokens ?? 0, providers.all()),
@@ -303,11 +308,11 @@ export function SessionContextTab() {
                       <span>checks {formatPercent(row.checkPassRate)}</span>
                       <span>median {formatLatency(row.medianLatencyMs)}</span>
                       <Show when={row.medianCostUsd !== undefined}>
-                        <span>median {usd().format(row.medianCostUsd ?? 0)}/run</span>
+                        <span>median {price(row.medianCostUsd ?? 0)}/run</span>
                       </Show>
                       <span>
                         {row.projectedCostUsd !== undefined
-                          ? `~${usd().format(row.projectedCostUsd)} next turn`
+                          ? `~${price(row.projectedCostUsd)} next turn`
                           : "rate unknown"}
                       </span>
                     </div>

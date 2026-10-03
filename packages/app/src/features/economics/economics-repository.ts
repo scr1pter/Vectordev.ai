@@ -5,6 +5,7 @@
 // persist.ts uses) so unrelated projects never collide or leak into each
 // other's history.
 import { checksum } from "@vectordevai/core/util/encode"
+import { createResource, createSignal } from "solid-js"
 import type { ModelOutcome, TaskCategory } from "./economics-types"
 import type { MeasuredUsage } from "./token-usage"
 
@@ -62,16 +63,42 @@ async function writeOutcomes(projectId: string, outcomes: ModelOutcome[]): Promi
   globalThis.localStorage?.setItem(localStorageKey(projectId), value)
 }
 
-export async function recordOutcome(outcome: ModelOutcome): Promise<void> {
+// Recording reads, appends to and writes back a project's whole list, so records for one project run one at a time;
+// two at once would each write a list without the other's outcome.
+const queues = new Map<string, Promise<void>>()
+// Bumped after each new outcome is written, so views showing a project's history read it again.
+const [version, setVersion] = createSignal(0)
+
+export function recordOutcome(outcome: ModelOutcome): Promise<void> {
+  const key = projectKey(outcome.projectId)
+  const next = (queues.get(key) ?? Promise.resolve()).then(() => appendOutcome(outcome))
+  queues.set(
+    key,
+    next.catch(() => undefined),
+  )
+  return next
+}
+
+async function appendOutcome(outcome: ModelOutcome) {
   const existing = await readOutcomes(outcome.projectId)
   // Idempotent: outcomes carry the source workspace record's id, and callers
   // re-run over the full workspace list, so skip anything already recorded.
   if (existing.some((o) => o.id === outcome.id)) return
   await writeOutcomes(outcome.projectId, [...existing, outcome])
+  setVersion((value) => value + 1)
 }
 
 export async function listOutcomes(projectId: string): Promise<ModelOutcome[]> {
   return readOutcomes(projectId)
+}
+
+// A project's outcome history that stays current as new outcomes are recorded.
+export function createOutcomes(projectId: () => string) {
+  const [outcomes] = createResource(
+    () => ({ projectId: projectId(), version: version() }),
+    (source) => listOutcomes(source.projectId),
+  )
+  return outcomes
 }
 
 // The real evidence record parallel workspaces produce is the renderer-side

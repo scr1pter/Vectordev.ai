@@ -1,4 +1,5 @@
 import {
+  checkPassScore,
   knownCostUsd,
   totalTokens,
   type ModelOutcome,
@@ -95,12 +96,13 @@ export function recommendModel(
     .map((group) => ({
       group,
       checkPassRate: checkPassRateOf(group.outcomes),
+      checkPassScore: checkPassScore(group.outcomes),
       medianLatencyMs: median(group.outcomes.map((o) => o.latencyMs)),
       medianCostUsd: medianCostOf(group.outcomes),
       medianTokens: medianTokensOf(group.outcomes),
     }))
     .sort((a, b) => {
-      const passDiff = (b.checkPassRate ?? -1) - (a.checkPassRate ?? -1)
+      const passDiff = b.checkPassScore - a.checkPassScore
       if (passDiff !== 0) return passDiff
       // Cheaper wins once correctness ties. Unknown spend sorts last rather
       // than first, so an unmeasured model never masquerades as free. Both

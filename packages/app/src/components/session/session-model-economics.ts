@@ -1,4 +1,4 @@
-import { knownCostUsd, type ModelOutcome } from "@/features/economics/economics-types"
+import { checkPassScore, knownCostUsd, type ModelOutcome } from "@/features/economics/economics-types"
 import { projectCost, ratesFor, type ModelCostSource } from "@/features/economics/model-pricing"
 
 function medianOf(values: number[]): number {
@@ -46,13 +46,14 @@ export function rankModelsForCategory(
         model: list[0].model,
         sampleSize: list.length,
         checkPassRate,
+        checkPassScore: checkPassScore(list),
         medianLatencyMs: medianOf(list.map((outcome) => outcome.latencyMs)),
         medianCostUsd: measured.length ? medianOf(measured) : undefined,
         projectedCostUsd: projectCost(ratesFor(providers, list[0].provider, list[0].model), promptTokens)?.totalCost,
       }
     })
     .sort((a, b) => {
-      const passDiff = (b.checkPassRate ?? -1) - (a.checkPassRate ?? -1)
+      const passDiff = b.checkPassScore - a.checkPassScore
       if (passDiff !== 0) return passDiff
       const aCost = a.medianCostUsd ?? Infinity
       const bCost = b.medianCostUsd ?? Infinity
