@@ -431,29 +431,36 @@ const layer = Layer.effect(
             return
 
           case "step-finish": {
-            const completedSnapshot = yield* snapshot.track()
-            yield* Effect.forEach(Object.keys(ctx.reasoningMap), finishReasoning)
             const usage = Session.getUsage({
               model: ctx.model,
               usage: value.usage ?? new Usage({}),
               metadata: value.providerMetadata,
             })
-            ctx.assistantMessage.finish = value.reason
-            ctx.assistantMessage.cost += usage.cost
-            if (usage.unpriced) ctx.assistantMessage.unpriced = true
-            ctx.assistantMessage.tokens = usage.tokens
-            yield* session.updatePart({
+            const stepFinish: SessionV1.StepFinishPart = {
               id: PartID.ascending(),
               reason: value.reason,
-              snapshot: completedSnapshot,
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.assistantMessage.sessionID,
               type: "step-finish",
               tokens: usage.tokens,
               cost: usage.cost,
               ...(usage.unpriced ? { unpriced: true } : {}),
-            })
-            yield* session.updateMessage(ctx.assistantMessage)
+            }
+            // The provider has billed this step, so its usage is recorded whole before the snapshot, which can wait
+            // on the worktree's snapshot lock long enough for a cancel to land.
+            yield* Effect.uninterruptible(
+              Effect.gen(function* () {
+                ctx.assistantMessage.finish = value.reason
+                ctx.assistantMessage.cost += usage.cost
+                if (usage.unpriced) ctx.assistantMessage.unpriced = true
+                ctx.assistantMessage.tokens = usage.tokens
+                yield* session.updatePart(stepFinish)
+                yield* session.updateMessage(ctx.assistantMessage)
+              }),
+            )
+            const completedSnapshot = yield* snapshot.track()
+            yield* Effect.forEach(Object.keys(ctx.reasoningMap), finishReasoning)
+            if (completedSnapshot) yield* session.updatePart({ ...stepFinish, snapshot: completedSnapshot })
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
               if (patch.files.length) {

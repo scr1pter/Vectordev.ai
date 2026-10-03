@@ -745,6 +745,8 @@ export const RunCommand = effectCmd({
         // created, and replies issued from inside the loop must use that client.
         async function loop(client: VectorClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
           const toggles = new Map<string, boolean>()
+          // A step-finish part is written again once its snapshot lands; its usage was already in the first write.
+          const finishedSteps = new Set<string>()
           let error: string | undefined
 
           for await (const event of events.stream) {
@@ -791,6 +793,8 @@ export const RunCommand = effectCmd({
               }
 
               if (part.type === "step-finish") {
+                if (finishedSteps.has(part.id)) continue
+                finishedSteps.add(part.id)
                 if (emit("step_finish", { part })) continue
               }
 

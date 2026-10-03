@@ -18342,6 +18342,9 @@
           },
           "finish": {
             "type": "string"
+          },
+          "forked": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -21055,6 +21058,41 @@
                       },
                       "recent": {
                         "type": "string"
+                      },
+                      "cost": {
+                        "type": "number"
+                      },
+                      "unpriced": {
+                        "type": "boolean"
+                      },
+                      "tokens": {
+                        "type": "object",
+                        "properties": {
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "reasoning": {
+                            "type": "number"
+                          },
+                          "cache": {
+                            "type": "object",
+                            "properties": {
+                              "read": {
+                                "type": "number"
+                              },
+                              "write": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["read", "write"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["input", "output", "reasoning", "cache"],
+                        "additionalProperties": false
                       }
                     },
                     "required": ["timestamp", "sessionID", "messageID", "reason", "text", "recent"],
@@ -29367,6 +29405,41 @@
           "recent": {
             "type": "string"
           },
+          "cost": {
+            "type": "number"
+          },
+          "unpriced": {
+            "type": "boolean"
+          },
+          "tokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
+          },
           "id": {
             "type": "string",
             "pattern": "^msg_"
@@ -31764,6 +31837,41 @@
                   },
                   "recent": {
                     "type": "string"
+                  },
+                  "cost": {
+                    "type": "number"
+                  },
+                  "unpriced": {
+                    "type": "boolean"
+                  },
+                  "tokens": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "type": "number"
+                      },
+                      "output": {
+                        "type": "number"
+                      },
+                      "reasoning": {
+                        "type": "number"
+                      },
+                      "cache": {
+                        "type": "object",
+                        "properties": {
+                          "read": {
+                            "type": "number"
+                          },
+                          "write": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["read", "write"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["input", "output", "reasoning", "cache"],
+                    "additionalProperties": false
                   }
                 },
                 "required": ["timestamp", "sessionID", "messageID", "reason", "text", "recent"],
@@ -34238,6 +34346,41 @@
               },
               "recent": {
                 "type": "string"
+              },
+              "cost": {
+                "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
+              },
+              "tokens": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "reasoning": {
+                    "type": "number"
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "number"
+                      },
+                      "write": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["read", "write"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["input", "output", "reasoning", "cache"],
+                "additionalProperties": false
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "reason", "text", "recent"],
@@ -40193,6 +40336,41 @@
               },
               "recent": {
                 "type": "string"
+              },
+              "cost": {
+                "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
+              },
+              "tokens": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "reasoning": {
+                    "type": "number"
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "number"
+                      },
+                      "write": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["read", "write"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["input", "output", "reasoning", "cache"],
+                "additionalProperties": false
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "reason", "text", "recent"],

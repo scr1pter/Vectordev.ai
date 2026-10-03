@@ -393,6 +393,9 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             reason: event.data.reason,
             summary: event.data.text,
             recent: event.data.recent,
+            ...(event.data.cost === undefined ? {} : { cost: event.data.cost }),
+            ...(event.data.unpriced ? { unpriced: true } : {}),
+            ...(event.data.tokens === undefined ? {} : { tokens: event.data.tokens }),
             time: { created: event.data.timestamp },
           }),
         )

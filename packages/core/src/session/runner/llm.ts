@@ -292,28 +292,10 @@ const layer = Layer.effect(
             )
           }
           if (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) yield* FiberSet.clear(toolFibers)
-          const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
-          if (settled._tag === "Failure" && isQuestionRejected(settled.cause)) {
-            yield* FiberSet.clear(toolFibers)
-            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
-            return yield* Effect.interrupt
-          }
-          if (
-            (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) ||
-            (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
-          ) {
-            yield* FiberSet.clear(toolFibers)
-            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
-            if (publisher.hasActiveAssistant())
-              yield* withPublication(publisher.failAssistant("Provider turn interrupted"))
-          }
-          if (settled._tag === "Failure" && !Cause.hasInterrupts(settled.cause)) {
-            const failure = Cause.squash(settled.cause)
-            const message = failure instanceof Error ? failure.message : String(failure)
-            yield* withPublication(publisher.failUnsettledTools(`Tool execution failed: ${message}`))
-          }
-          const stepSettlement = publisher.stepSettlement()
-          if (stepSettlement && !llmFailure && !publisher.hasProviderError()) {
+          // The provider bills a step once it reports usage, so every way out of the turn records it.
+          const settleStep = Effect.gen(function* () {
+            const stepSettlement = publisher.stepSettlement()
+            if (!stepSettlement || llmFailure || publisher.hasProviderError()) return
             const endSnapshot = yield* snapshots.capture()
             const files =
               startSnapshot && endSnapshot
@@ -340,7 +322,29 @@ const layer = Layer.effect(
                 files,
               }),
             )
+          })
+          const settled = yield* restore(awaitToolFibers(toolFibers)).pipe(Effect.exit)
+          if (settled._tag === "Failure" && isQuestionRejected(settled.cause)) {
+            yield* FiberSet.clear(toolFibers)
+            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            yield* settleStep
+            return yield* Effect.interrupt
           }
+          if (
+            (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) ||
+            (settled._tag === "Failure" && Cause.hasInterrupts(settled.cause))
+          ) {
+            yield* FiberSet.clear(toolFibers)
+            yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
+            if (publisher.hasActiveAssistant())
+              yield* withPublication(publisher.failAssistant("Provider turn interrupted"))
+          }
+          if (settled._tag === "Failure" && !Cause.hasInterrupts(settled.cause)) {
+            const failure = Cause.squash(settled.cause)
+            const message = failure instanceof Error ? failure.message : String(failure)
+            yield* withPublication(publisher.failUnsettledTools(`Tool execution failed: ${message}`))
+          }
+          yield* settleStep
           if (publisher.hasProviderError())
             yield* withPublication(publisher.failUnsettledTools("Tool execution interrupted"))
           if (stream._tag === "Success" && !publisher.hasProviderError())

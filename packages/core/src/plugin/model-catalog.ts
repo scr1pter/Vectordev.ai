@@ -12,6 +12,8 @@ function released(date: string) {
 }
 
 function cost(input: ModelCatalog.Model["cost"]): ModelV2Info["cost"] {
+  // No listed price stays unlisted: zero rates here would make every step on the model read as measured free spend.
+  if (!input) return []
   const base = {
     input: input?.input ?? 0,
     output: input?.output ?? 0,

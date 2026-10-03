@@ -15,6 +15,8 @@ export type UsageBearingMessage = {
   cost?: number
   // A step of this message ran on a model with no listed price, so its cost leaves that step out.
   unpriced?: boolean
+  // Copied in by a fork; the original session already measured it.
+  forked?: boolean
   tokens?: {
     input?: number
     output?: number
@@ -50,7 +52,7 @@ function usageOf(message: UsageBearingMessage): TokenUsage {
 // a fabricated zero. The provider/model reported is the one from the most
 // recent assistant message, since a session can switch models mid-run.
 export function measureUsage(messages: readonly UsageBearingMessage[]): MeasuredUsage | undefined {
-  const assistant = messages.filter((message) => message.role === "assistant")
+  const assistant = messages.filter((message) => message.role === "assistant" && !message.forked)
   if (!assistant.length) return undefined
 
   const measured = assistant.filter((message) => {

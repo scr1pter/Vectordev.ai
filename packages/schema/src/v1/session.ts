@@ -496,6 +496,9 @@ export const Assistant = Schema.Struct({
   structured: Schema.optional(Schema.Any),
   variant: Schema.optional(Schema.String),
   finish: Schema.optional(Schema.String),
+  // Copied into this session by a fork. Its spend was counted in the original session, so it carries no cost and
+  // usage totals skip it; its tokens stay so the context in use is still shown.
+  forked: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "AssistantMessage" })
 export type Assistant = Omit<Types.DeepMutable<Schema.Schema.Type<typeof Assistant>>, "error"> & {
   error?: AssistantError

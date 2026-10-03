@@ -910,6 +910,14 @@ export type SessionsContextOutput = {
         readonly reason: "auto" | "manual"
         readonly summary: string
         readonly recent: string
+        readonly cost?: number
+        readonly unpriced?: boolean
+        readonly tokens?: {
+          readonly input: number
+          readonly output: number
+          readonly reasoning: number
+          readonly cache: { readonly read: number; readonly write: number }
+        }
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
@@ -1108,6 +1116,14 @@ export type SessionsHistoryOutput = {
                 readonly reason: "auto" | "manual"
                 readonly summary: string
                 readonly recent: string
+                readonly cost?: number
+                readonly unpriced?: boolean
+                readonly tokens?: {
+                  readonly input: number
+                  readonly output: number
+                  readonly reasoning: number
+                  readonly cache: { readonly read: number; readonly write: number }
+                }
                 readonly id: string
                 readonly metadata?: { readonly [x: string]: JsonValue }
                 readonly time: { readonly created: number }
@@ -1556,6 +1572,14 @@ export type SessionsHistoryOutput = {
           readonly reason: "auto" | "manual"
           readonly text: string
           readonly recent: string
+          readonly cost?: number
+          readonly unpriced?: boolean
+          readonly tokens?: {
+            readonly input: number
+            readonly output: number
+            readonly reasoning: number
+            readonly cache: { readonly read: number; readonly write: number }
+          }
         }
       }
     | {
@@ -1791,6 +1815,14 @@ export type SessionsEventsOutput =
               readonly reason: "auto" | "manual"
               readonly summary: string
               readonly recent: string
+              readonly cost?: number
+              readonly unpriced?: boolean
+              readonly tokens?: {
+                readonly input: number
+                readonly output: number
+                readonly reasoning: number
+                readonly cache: { readonly read: number; readonly write: number }
+              }
               readonly id: string
               readonly metadata?: { readonly [x: string]: unknown }
               readonly time: { readonly created: number }
@@ -2239,6 +2271,14 @@ export type SessionsEventsOutput =
         readonly reason: "auto" | "manual"
         readonly text: string
         readonly recent: string
+        readonly cost?: number
+        readonly unpriced?: boolean
+        readonly tokens?: {
+          readonly input: number
+          readonly output: number
+          readonly reasoning: number
+          readonly cache: { readonly read: number; readonly write: number }
+        }
       }
     }
   | {
@@ -2447,6 +2487,14 @@ export type SessionsMessageOutput = {
         readonly reason: "auto" | "manual"
         readonly summary: string
         readonly recent: string
+        readonly cost?: number
+        readonly unpriced?: boolean
+        readonly tokens?: {
+          readonly input: number
+          readonly output: number
+          readonly reasoning: number
+          readonly cache: { readonly read: number; readonly write: number }
+        }
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }
@@ -2628,6 +2676,14 @@ export type MessagesListOutput = {
         readonly reason: "auto" | "manual"
         readonly summary: string
         readonly recent: string
+        readonly cost?: number
+        readonly unpriced?: boolean
+        readonly tokens?: {
+          readonly input: number
+          readonly output: number
+          readonly reasoning: number
+          readonly cache: { readonly read: number; readonly write: number }
+        }
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
         readonly time: { readonly created: number }

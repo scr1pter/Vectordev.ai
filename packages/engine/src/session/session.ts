@@ -809,8 +809,11 @@ const layer: Layer.Layer<
         idMap.set(msg.info.id, newID)
 
         const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
+        // Copied history was paid for in the original session, so the copy carries no spend of its own.
+        const info: SessionV1.Info =
+          msg.info.role === "assistant" ? { ...msg.info, cost: 0, unpriced: undefined, forked: true } : msg.info
         const cloned = yield* updateMessage({
-          ...msg.info,
+          ...info,
           sessionID: session.id,
           id: newID,
           ...(parentID && { parentID }),
@@ -818,7 +821,14 @@ const layer: Layer.Layer<
 
         for (const part of msg.parts) {
           const p: SessionV1.Part = {
-            ...part,
+            ...(part.type === "step-finish"
+              ? {
+                  ...part,
+                  cost: 0,
+                  unpriced: undefined,
+                  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                }
+              : part),
             id: PartID.ascending(),
             messageID: cloned.id,
             sessionID: session.id,
@@ -1055,7 +1065,7 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
 })
 
 export function summarizeUsage(messages: ReadonlyArray<typeof SessionV1.Info.Type>): UsageSummary {
-  const assistant = messages.filter((message) => message.role === "assistant")
+  const assistant = messages.filter((message) => message.role === "assistant").filter((message) => !message.forked)
   const days = assistant.reduce((result, message) => {
     const tokens = usageTokens(message)
     const date = localDateKey(message.time.created)

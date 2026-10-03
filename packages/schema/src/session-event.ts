@@ -436,6 +436,10 @@ export namespace Compaction {
       reason: Started.data.fields.reason,
       text: Schema.String,
       recent: Schema.String,
+      // What the summary request cost; the provider bills it like any step.
+      cost: Schema.Finite.pipe(optional),
+      unpriced: Step.Ended.data.fields.unpriced,
+      tokens: Step.Ended.data.fields.tokens.pipe(optional),
     },
   })
   export type Ended = typeof Ended.Type

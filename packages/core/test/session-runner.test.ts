@@ -245,7 +245,7 @@ const execution = Layer.effect(
       drain: (sessionID, force) => sessionRunner.run({ sessionID, force }),
     })
     return SessionExecution.Service.of({
-    resumeFreeModels: () => Effect.die("Free-model retry is outside this fixture"),
+      resumeFreeModels: () => Effect.die("Free-model retry is outside this fixture"),
       active: coordinator.active,
       resume: coordinator.run,
       wake: coordinator.wake,
@@ -1250,6 +1250,48 @@ describe("SessionRunnerLLM", () => {
         type: "compaction",
         summary: "## Goal\n- Preserve the updated task",
       })
+    }),
+  )
+
+  it.effect("counts what the compaction summary cost in the session totals", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-first", ["Earlier answer"]).completeEvents
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Earlier question ".repeat(180) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      currentModel = SessionRunnerModel.withPricing(compactModel, [
+        { input: 2, output: 10, cache: { read: 0, write: 0 } },
+      ])
+      requests.length = 0
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "text-summary" }),
+          LLMEvent.textDelta({ id: "text-summary", text: "## Goal\n- Preserve the task" }),
+          LLMEvent.textEnd({ id: "text-summary" }),
+          LLMEvent.stepFinish({ index: 0, reason: "stop", usage: { inputTokens: 100_000, outputTokens: 1_000 } }),
+          LLMEvent.finish({ reason: "stop" }),
+        ],
+        fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
+      ]
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Recent exact request ".repeat(180) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      const context = yield* (yield* SessionStore.Service).context(sessionID)
+      expect(context[0]).toMatchObject({ type: "compaction", cost: 0.21, tokens: { input: 100_000, output: 1_000 } })
+      // 100K input and 1K output at $2 and $10 per million tokens; the follow-up turn reported no usage.
+      expect((yield* session.get(sessionID)).cost).toBeCloseTo(0.21)
     }),
   )
 
@@ -2732,6 +2774,10 @@ describe("SessionRunnerLLM", () => {
             questions.ask({ sessionID: context.sessionID, questions: [] }).pipe(Effect.as({}), Effect.orDie),
         }),
       })
+      currentModel = SessionRunnerModel.withPricing(
+        Model.make({ id: "priced-model", provider: "fake", route: OpenAIChat.route }),
+        [{ input: 2, output: 10, cache: { read: 0, write: 0 } }],
+      )
       yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Ask then stop" }), resume: false })
 
       requests.length = 0
@@ -2739,7 +2785,11 @@ describe("SessionRunnerLLM", () => {
         [
           LLMEvent.stepStart({ index: 0 }),
           LLMEvent.toolCall({ id: "call-question", name: "question", input: {} }),
-          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.stepFinish({
+            index: 0,
+            reason: "tool-calls",
+            usage: { inputTokens: 40_000, outputTokens: 1_000 },
+          }),
           LLMEvent.finish({ reason: "tool-calls" }),
         ],
         [],
@@ -2770,6 +2820,8 @@ describe("SessionRunnerLLM", () => {
           ],
         },
       ])
+      // The provider billed the step before the user dismissed the question.
+      expect((yield* session.get(sessionID)).cost).toBeCloseTo(0.09)
     }),
   )
 

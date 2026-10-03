@@ -202,6 +202,10 @@ export const Compaction = Schema.Struct({
   reason: Schema.Literals(["auto", "manual"]),
   summary: Schema.String,
   recent: Schema.String,
+  // What the summary request cost, so session totals can count it and a revert past it can take it back out.
+  cost: Assistant.fields.cost,
+  unpriced: Assistant.fields.unpriced,
+  tokens: Assistant.fields.tokens,
   ...Base,
 }).annotate({ identifier: "Session.Message.Compaction" })
 

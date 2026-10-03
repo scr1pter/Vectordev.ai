@@ -25,6 +25,29 @@ describe("measureUsage", () => {
     expect(measured?.costUsd).toBeUndefined()
   })
 
+  test("leaves out history a fork copied in, which the original session already measured", () => {
+    const measured = measureUsage([
+      {
+        role: "assistant",
+        providerID: "local",
+        modelID: "m",
+        cost: 0,
+        forked: true,
+        tokens: { input: 9_000, output: 900, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      {
+        role: "assistant",
+        providerID: "local",
+        modelID: "m",
+        cost: 0.02,
+        tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    ])
+    expect(measured?.usage.input).toBe(1_000)
+    expect(measured?.costUsd).toBe(0.02)
+    expect(measured?.messageCount).toBe(1)
+  })
+
   test("sums real provider-reported usage and cost across assistant messages", () => {
     const measured = measureUsage([
       { role: "user" },

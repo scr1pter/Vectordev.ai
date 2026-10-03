@@ -250,6 +250,55 @@ describe("session cost totals", () => {
   )
 })
 
+describe("forked sessions", () => {
+  it.instance("a fork copies the history without counting its spend twice", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const info = yield* session.create({ title: "fork spend" })
+      const messageID = MessageID.ascending()
+      yield* session.updateMessage({
+        id: messageID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        sessionID: info.id,
+        mode: "build",
+        agent: "build",
+        cost: 0.5,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: "test",
+        providerID: "lmstudio",
+        time: { created: Date.now(), completed: Date.now() },
+        finish: "stop",
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: PartID.ascending(),
+        messageID,
+        sessionID: info.id,
+        type: "step-finish",
+        reason: "stop",
+        cost: 0.5,
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+      const before = yield* session.usage()
+
+      const fork = yield* session.fork({ sessionID: info.id })
+
+      const after = yield* session.usage()
+      expect(after.lifetimeCost).toBe(before.lifetimeCost)
+      expect(after.lifetimeTokens).toBe(before.lifetimeTokens)
+      expect(after.modelResponses).toBe(before.modelResponses)
+      expect((yield* session.get(fork.id)).cost).toBe(0)
+      expect((yield* session.get(info.id)).cost).toBe(0.5)
+      // The copy keeps its tokens so the forked session still shows how much context it carries.
+      const copied = (yield* session.messages({ sessionID: fork.id }))[0]?.info
+      expect(copied).toMatchObject({ role: "assistant", cost: 0, forked: true, tokens: { input: 100, output: 20 } })
+      yield* session.remove(fork.id)
+      yield* session.remove(info.id)
+    }),
+  )
+})
+
 describe("unpriced steps", () => {
   it.instance("a session counts steps that had no price and stops counting them when they are removed", () =>
     Effect.gen(function* () {

@@ -25,7 +25,8 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { SessionProjector } from "@vectordevai/core/session/projector"
-import { LLMEvent } from "@vectordevai/llm"
+import { LLMEvent, Usage } from "@vectordevai/llm"
+import { Snapshot } from "../../src/snapshot"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -225,6 +226,45 @@ const fragmentFailureLLM = Layer.succeed(
 )
 const fragmentFailureEnv = LayerNode.compile(root, [...replacements, [LLM.node, fragmentFailureLLM]])
 const itFragmentFailure = testEffect(fragmentFailureEnv)
+
+// The step-start snapshot returns at once; the one taken after the step waits until the run is interrupted.
+const stalledSnapshot = () => {
+  let calls = 0
+  return Layer.succeed(
+    Snapshot.Service,
+    Snapshot.Service.of({
+      init: () => Effect.void,
+      cleanup: () => Effect.void,
+      track: () => Effect.suspend(() => (++calls === 1 ? Effect.succeed("start") : Effect.never)),
+      patch: () => Effect.succeed({ hash: "start", files: [] }),
+      restore: () => Effect.void,
+      revert: () => Effect.void,
+      diff: () => Effect.succeed(""),
+      diffFull: () => Effect.succeed([]),
+    }),
+  )
+}
+const billedLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: () =>
+      Stream.make(
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.textStart({ id: "text-1" }),
+        LLMEvent.textDelta({ id: "text-1", text: "done" }),
+        LLMEvent.textEnd({ id: "text-1" }),
+        LLMEvent.stepFinish({
+          index: 0,
+          reason: "stop",
+          usage: new Usage({ inputTokens: 100_000, outputTokens: 1_000, totalTokens: 101_000 }),
+        }),
+        LLMEvent.finish({ reason: "stop" }),
+      ),
+  }),
+)
+const itStalledSnapshot = testEffect(
+  LayerNode.compile(root, [...replacements, [LLM.node, billedLLM], [Snapshot.node, stalledSnapshot()]]),
+)
 
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
@@ -1064,4 +1104,66 @@ itFragmentFailure.live("session.processor effect tests retain partial legacy par
       }),
     { config: cfg },
   ),
+)
+
+itStalledSnapshot.live(
+  "session.processor effect tests keep a billed step's cost when cancelled during its snapshot",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "billed step")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+          const run = yield* handle
+            .process({
+              user: {
+                id: parent.id,
+                sessionID: chat.id,
+                role: "user",
+                time: parent.time,
+                agent: parent.agent,
+                model: { providerID: ref.providerID, modelID: ref.modelID },
+              } satisfies SessionV1.User,
+              sessionID: chat.id,
+              model: mdl,
+              agent: agent(),
+              system: [],
+              messages: [{ role: "user", content: "billed step" }],
+              tools: {},
+            })
+            .pipe(Effect.forkChild)
+          yield* waitFor(
+            session.messages({ sessionID: chat.id }).pipe(
+              Effect.map((messages) =>
+                messages.flatMap((message) => message.parts).find((part) => part.type === "step-finish"),
+              ),
+              Effect.orDie,
+            ),
+            "the step was never recorded",
+          )
+          yield* Fiber.interrupt(run)
+
+          // 100K input and 1K output at $3 and $15 per million tokens.
+          const saved = yield* MessageV2.get({ sessionID: chat.id, messageID: msg.id })
+          expect(saved.info.role === "assistant" && saved.info.cost).toBeCloseTo(0.315)
+          expect((yield* session.get(chat.id)).cost).toBeCloseTo(0.315)
+        }),
+      {
+        config: {
+          provider: {
+            lmstudio: {
+              ...cfg.provider.lmstudio,
+              models: {
+                "test-model": { ...cfg.provider.lmstudio.models["test-model"], cost: { input: 3, output: 15 } },
+              },
+            },
+          },
+        },
+      },
+    ),
 )

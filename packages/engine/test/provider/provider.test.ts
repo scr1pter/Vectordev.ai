@@ -1487,6 +1487,32 @@ test("mode cost preserves over-200k pricing from base model", () => {
   })
 })
 
+test("a catalog mode with its own price is priced even when its base model lists none", () => {
+  const models = Provider.fromModelCatalogProvider({
+    id: "snowflake-cortex",
+    name: "Snowflake Cortex",
+    npm: "@ai-sdk/openai-compatible",
+    env: [],
+    models: {
+      "claude-opus-4-7": {
+        id: "claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        limit: { context: 200_000, output: 32_000 },
+        experimental: {
+          modes: { fast: { cost: { input: 30, output: 150, cache_read: 3, cache_write: 37.5 } } },
+        },
+      },
+    },
+  } as unknown as ModelCatalog.Provider).models
+
+  expect(models["claude-opus-4-7"].cost.unpriced).toBe(true)
+  expect(models["claude-opus-4-7-fast"].cost).toEqual({
+    input: 30,
+    output: 150,
+    cache: { read: 3, write: 37.5 },
+  })
+})
+
 test("catalog modes the bundled SDKs cannot send are not offered as models", () => {
   const modes = {
     fast: { provider: { body: { service_tier: "priority" } } },

@@ -76,6 +76,18 @@ describe("ModelCatalogPlugin", () => {
                     },
                   },
                 },
+                // Lists no price of its own; only its fast mode does.
+                mystery: {
+                  id: "mystery",
+                  name: "Mystery",
+                  release_date: "2026-01-01",
+                  attachment: false,
+                  reasoning: false,
+                  temperature: true,
+                  tool_call: true,
+                  limit: { context: 128_000, output: 8_000 },
+                  experimental: { modes: { fast: { cost: { input: 1, output: 4 } } } },
+                },
               },
             },
           } satisfies Record<string, ModelCatalog.Provider>),
@@ -115,6 +127,11 @@ describe("ModelCatalogPlugin", () => {
           output: 18,
           cache: { read: 0.25, write: 0 },
         },
+      ])
+      // A model with no listed price must not read as free.
+      expect((yield* catalog.model.get(providerID, ModelV2.ID.make("mystery")))?.cost).toEqual([])
+      expect((yield* catalog.model.get(providerID, ModelV2.ID.make("mystery-fast")))?.cost).toEqual([
+        { input: 1, output: 4, cache: { read: 0, write: 0 } },
       ])
     }),
   )

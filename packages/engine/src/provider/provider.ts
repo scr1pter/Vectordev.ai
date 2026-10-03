@@ -1238,7 +1238,8 @@ export function fromModelCatalogProvider(provider: ModelCatalog.Provider): Info 
         ...base,
         id: ModelV2.ID.make(id),
         name: `${model.name} ${mode[0].toUpperCase()}${mode.slice(1)}`,
-        cost: opts.cost ? mergeDeep(base.cost, cost(opts.cost)) : base.cost,
+        // A mode that lists its own price is priced even when its base model lists none.
+        cost: opts.cost ? (base.cost.unpriced ? cost(opts.cost) : mergeDeep(base.cost, cost(opts.cost))) : base.cost,
         options: opts.provider?.body
           ? Object.fromEntries(
               Object.entries(opts.provider.body).map(([k, v]) => [

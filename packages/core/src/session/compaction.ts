@@ -1,6 +1,6 @@
 export * as SessionCompaction from "./compaction"
 
-import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@vectordevai/llm"
+import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model, type Usage } from "@vectordevai/llm"
 import { DateTime, Effect, Stream } from "effect"
 import type { Config } from "../config"
 import type { EventV2 } from "../event"
@@ -8,6 +8,8 @@ import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { Token } from "../util/token"
+import { SessionRunnerModel } from "./runner/model"
+import { tokens as stepTokens } from "./runner/publish-llm-event"
 
 const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 8_000
@@ -197,6 +199,7 @@ export const make = (dependencies: Dependencies) => {
 
     const chunks: string[] = []
     let failed = false
+    let usage: Usage | undefined
     const summarized = yield* dependencies.llm
       .stream(
         LLM.request({
@@ -210,6 +213,7 @@ export const make = (dependencies: Dependencies) => {
         Stream.runForEach((event) => {
           if (LLMEvent.is.providerError(event)) failed = true
           if (LLMEvent.is.textDelta(event)) chunks.push(event.text)
+          if (LLMEvent.is.stepFinish(event)) usage = event.usage
           return Effect.void
         }),
         Effect.as(true),
@@ -217,6 +221,9 @@ export const make = (dependencies: Dependencies) => {
       )
     const summary = chunks.join("")
     if (!summarized || failed || !summary.trim()) return false
+    const tokens = stepTokens(usage)
+    const cost = SessionRunnerModel.calculateCost(input.model, tokens, usage?.providerMetadata)
+    const used = tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
     yield* dependencies.events.publish(SessionEvent.Compaction.Ended, {
       sessionID: input.sessionID,
       messageID,
@@ -224,6 +231,10 @@ export const make = (dependencies: Dependencies) => {
       reason: "auto",
       text: summary,
       recent: selected.recent,
+      // As with a step, an unknown price is recorded as 0 and marked unpriced rather than read as free.
+      cost: cost ?? 0,
+      ...(cost === undefined && used > 0 ? { unpriced: true } : {}),
+      tokens,
     })
     return true
   })

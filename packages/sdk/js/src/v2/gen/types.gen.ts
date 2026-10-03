@@ -406,6 +406,7 @@ export type AssistantMessage = {
   structured?: unknown
   variant?: string
   finish?: string
+  forked?: boolean
 }
 
 export type Message = UserMessage | AssistantMessage
@@ -1243,6 +1244,17 @@ export type GlobalEvent = {
           reason: "auto" | "manual"
           text: string
           recent: string
+          cost?: number
+          unpriced?: boolean
+          tokens?: {
+            input: number
+            output: number
+            reasoning: number
+            cache: {
+              read: number
+              write: number
+            }
+          }
         }
       }
     | {
@@ -3992,6 +4004,17 @@ export type SessionMessageCompaction = {
   reason: "auto" | "manual"
   summary: string
   recent: string
+  cost?: number
+  unpriced?: boolean
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   id: string
   metadata?: {
     [key: string]: unknown
@@ -4747,6 +4770,17 @@ export type SyncEventSessionNextCompactionEnded = {
       reason: "auto" | "manual"
       text: string
       recent: string
+      cost?: number
+      unpriced?: boolean
+      tokens?: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      }
     }
   }
 }
@@ -5583,6 +5617,17 @@ export type SessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    cost?: number
+    unpriced?: boolean
+    tokens?: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
   }
 }
 
@@ -7557,6 +7602,17 @@ export type EventSessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    cost?: number
+    unpriced?: boolean
+    tokens?: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
   }
 }
 

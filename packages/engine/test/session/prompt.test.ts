@@ -1179,7 +1179,8 @@ it.instance("glob tool keeps instance context during prompt runs", () =>
       )
     if (!tool) return
 
-    expect(tool.state.output).toContain(file)
+    // Glob lists paths relative to the session's directory, so the bare name shows it searched there.
+    expect(tool.state.output).toContain(path.relative(dir, file))
     expect(tool.state.output).not.toContain("No context found for instance")
     expect(result.parts.some((part) => part.type === "text" && part.text === "done")).toBe(true)
   }),

@@ -387,6 +387,41 @@ it.effect("full native archives preserve completed structured tools and settle p
   }),
 )
 
+it.effect("a native import counts its assistant usage in the session totals", () =>
+  Effect.gen(function* () {
+    const archives = yield* SessionArchive.Service
+    const original = yield* archives.export(yield* setup)
+    if (!("engine" in original)) return yield* Effect.die("Expected a native archive")
+    const priced = {
+      ...original,
+      messages: original.messages.map((message) =>
+        message.type !== "assistant"
+          ? message
+          : {
+              ...message,
+              cost: 1.2,
+              tokens: { input: 1_000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+            },
+      ),
+    }
+    const assistants = priced.messages.filter((message) => message.type === "assistant").length
+    const imported = yield* archives.import({
+      archive: Schema.encodeSync(SessionArchive.Native)(priced),
+      location: { directory: AbsolutePath.make("/tmp") },
+    })
+    const { db } = yield* Database.Service
+    const row = yield* db
+      .select()
+      .from(SessionTable)
+      .where(eq(SessionTable.id, imported.sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    expect(assistants).toBeGreaterThan(0)
+    expect(row?.cost).toBeCloseTo(1.2 * assistants)
+    expect(row?.tokens_input).toBe(1_000 * assistants)
+  }),
+)
+
 it.effect("lost create acknowledgement retains the original snapshot then reconciles consented updates", () =>
   Effect.gen(function* () {
     const session = yield* setup

@@ -48,10 +48,15 @@ function usage(part: (typeof SessionV1.Event.PartUpdated.Type)["data"]["part"] |
   }
 }
 
-function assistantUsage(row: typeof SessionMessageTable.$inferSelect | undefined): Usage | undefined {
-  if (!row || row.type !== "assistant") return undefined
-  const message = decodeMessage({ ...row.data, id: row.id, type: row.type })
-  if (message.type !== "assistant" || message.cost === undefined || message.tokens === undefined) return undefined
+function rowUsage(row: typeof SessionMessageTable.$inferSelect | undefined): Usage | undefined {
+  if (!row || (row.type !== "assistant" && row.type !== "compaction")) return undefined
+  return messageUsage(decodeMessage({ ...row.data, id: row.id, type: row.type }))
+}
+
+// Assistant steps and compaction summaries are the messages that carry provider usage.
+function messageUsage(message: SessionMessage.Message): Usage | undefined {
+  if (message.type !== "assistant" && message.type !== "compaction") return undefined
+  if (message.cost === undefined || message.tokens === undefined) return undefined
   return { cost: message.cost, unpriced: message.unpriced === true, tokens: message.tokens }
 }
 
@@ -229,7 +234,14 @@ const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
     const { db } = yield* Database.Service
-    yield* events.project(SessionEvent.MessageImported, (event) => insertMessage(db, event, event.data.message))
+    yield* events.project(SessionEvent.MessageImported, (event) =>
+      Effect.gen(function* () {
+        yield* insertMessage(db, event, event.data.message)
+        // Revert and removal subtract a row's usage, so importing one adds it, as a replayed V1 archive does.
+        const usage = messageUsage(event.data.message)
+        if (usage) yield* applyUsage(db, event.data.sessionID, usage)
+      }),
+    )
     yield* events.project(SessionEvent.ShareChanged, (event) =>
       db
         .update(SessionTable)
@@ -436,7 +448,7 @@ const layer = Layer.effectDiscard(
           yield* run(db, event)
           return
         }
-        const previous = assistantUsage(row)
+        const previous = rowUsage(row)
         yield* run(db, event)
         if (previous) yield* applyUsage(db, event.data.sessionID, previous, -1)
         yield* applyUsage(db, event.data.sessionID, event.data)
@@ -455,7 +467,17 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.Reasoning.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Reasoning.Ended, (event) => run(db, event))
     // yield* events.project(SessionEvent.Retried, (event) => run(db, event))
-    yield* events.project(SessionEvent.Compaction.Ended, (event) => run(db, event))
+    yield* events.project(SessionEvent.Compaction.Ended, (event) =>
+      Effect.gen(function* () {
+        yield* run(db, event)
+        if (event.data.cost === undefined || event.data.tokens === undefined) return
+        yield* applyUsage(db, event.data.sessionID, {
+          cost: event.data.cost,
+          unpriced: event.data.unpriced === true,
+          tokens: event.data.tokens,
+        })
+      }),
+    )
     yield* events.project(SessionEvent.RevertEvent.Staged, (event) =>
       db
         .update(SessionTable)
@@ -500,7 +522,7 @@ const layer = Layer.effectDiscard(
         yield* Effect.forEach(
           removed,
           (row) => {
-            const value = assistantUsage(row)
+            const value = rowUsage(row)
             return value ? applyUsage(db, event.data.sessionID, value, -1) : Effect.void
           },
           { discard: true },
