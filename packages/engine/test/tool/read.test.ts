@@ -312,6 +312,55 @@ describe("tool.read env file permissions", () => {
   }
 })
 
+describe("tool.read repeated reads", () => {
+  // A conversation holding one earlier read result, as the session would pass it on the next step.
+  const after = (result: { output: string; metadata: unknown }, compacted?: number) => ({
+    ...ctx,
+    messages: [
+      {
+        info: { id: MessageID.make("msg_earlier"), sessionID: ctx.sessionID, role: "assistant" },
+        parts: [
+          {
+            id: "prt_earlier",
+            sessionID: ctx.sessionID,
+            messageID: MessageID.make("msg_earlier"),
+            type: "tool",
+            tool: "read",
+            callID: "call_earlier",
+            state: {
+              status: "completed",
+              input: {},
+              output: result.output,
+              title: "",
+              metadata: result.metadata,
+              time: { start: 1, end: 2, ...(compacted ? { compacted } : {}) },
+            },
+          },
+        ],
+      },
+    ] as unknown as Tool.Context["messages"],
+  })
+
+  it.instance("points back to an earlier read of the same lines of an unchanged file", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "notes.txt")
+      yield* put(filepath, "first line\nsecond line\n")
+      const first = yield* run({ filePath: filepath })
+      expect(first.output).toContain("second line")
+
+      const again = yield* run({ filePath: filepath }, after(first))
+      expect(again.output).toContain("File unchanged since your earlier read")
+      expect(again.output).not.toContain("second line")
+      // Other lines, a pruned earlier result or a changed file are read in full.
+      expect((yield* run({ filePath: filepath, offset: 2 }, after(first))).output).toContain("second line")
+      expect((yield* run({ filePath: filepath }, after(first, 3))).output).toContain("second line")
+      yield* put(filepath, "first line\nchanged line\n")
+      expect((yield* run({ filePath: filepath }, after(first))).output).toContain("changed line")
+    }),
+  )
+})
+
 describe("tool.read truncation", () => {
   it.instance("truncates large file by bytes and sets truncated metadata", () =>
     Effect.gen(function* () {

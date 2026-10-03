@@ -81,7 +81,7 @@ function createModel(opts: {
       input: { text: true, image: false, audio: false, video: false },
       output: { text: true, image: false, audio: false, video: false },
     },
-    api: { npm: opts.npm ?? "@ai-sdk/anthropic" },
+    api: { id: "test-model", npm: opts.npm ?? "@ai-sdk/anthropic" },
     options: {},
   } as Provider.Model
 }
@@ -547,6 +547,49 @@ describe("session.compaction.isOverflow", () => {
       },
     ),
   )
+
+  it.live(
+    "a configured reserve moves compaction earlier for a model with no input limit",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const model = createModel({ context: 200_000, output: 32_000 })
+          const tokens = { input: 110_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+          expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
+        }),
+      { config: { compaction: { reserved: 100_000 } } },
+    ),
+  )
+
+  it.live(
+    "compacts before a long-context price tier rather than paying the higher rate on every token",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const model = createModel({
+          context: 1_000_000,
+          output: 32_000,
+          cost: {
+            input: 2.5,
+            output: 15,
+            cache: { read: 0.25, write: 0 },
+            tiers: [
+              { tier: { type: "context", size: 272_000 }, input: 5, output: 22.5, cache: { read: 0.5, write: 0 } },
+            ],
+          },
+        })
+        const below = { input: 240_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        const near = { input: 255_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(yield* compact.isOverflow({ tokens: below, model })).toBe(false)
+        expect(yield* compact.isOverflow({ tokens: near, model })).toBe(true)
+        // A model without a price tier keeps its whole window.
+        expect(
+          yield* compact.isOverflow({ tokens: near, model: createModel({ context: 1_000_000, output: 32_000 }) }),
+        ).toBe(false)
+      }),
+    ),
+  )
 })
 
 describe("session.compaction.create", () => {
@@ -610,100 +653,115 @@ describe("session.compaction.create", () => {
 })
 
 describe("session.compaction.prune", () => {
+  // One large tool output two user turns back, from a reply that finished `idle` milliseconds ago.
+  const prunedAfter = (dir: string, idle: number) =>
+    Effect.gen(function* () {
+      const compact = yield* SessionCompaction.Service
+      const ssn = yield* SessionNs.Service
+      const info = yield* ssn.create({})
+      const a = yield* ssn.updateMessage({
+        id: MessageID.ascending(),
+        role: "user",
+        sessionID: info.id,
+        agent: "build",
+        model: ref,
+        time: { created: Date.now() },
+      })
+      yield* ssn.updatePart({
+        id: PartID.ascending(),
+        messageID: a.id,
+        sessionID: info.id,
+        type: "text",
+        text: "first",
+      })
+      const b: SessionV1.Assistant = {
+        id: MessageID.ascending(),
+        role: "assistant",
+        sessionID: info.id,
+        mode: "build",
+        agent: "build",
+        path: { cwd: dir, root: dir },
+        cost: 0,
+        tokens: {
+          output: 0,
+          input: 0,
+          reasoning: 0,
+          cache: { read: 0, write: 0 },
+        },
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        parentID: a.id,
+        time: { created: Date.now() - idle, completed: Date.now() - idle },
+        finish: "end_turn",
+      }
+      yield* ssn.updateMessage(b)
+      yield* ssn.updatePart({
+        id: PartID.ascending(),
+        messageID: b.id,
+        sessionID: info.id,
+        type: "tool",
+        callID: crypto.randomUUID(),
+        tool: "bash",
+        state: {
+          status: "completed",
+          input: {},
+          output: "x".repeat(200_000),
+          title: "done",
+          metadata: {},
+          time: { start: Date.now(), end: Date.now() },
+        },
+      })
+      for (const text of ["second", "third"]) {
+        const msg = yield* ssn.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: info.id,
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() },
+        })
+        yield* ssn.updatePart({
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: info.id,
+          type: "text",
+          text,
+        })
+      }
+
+      yield* compact.prune({ sessionID: info.id })
+
+      const msgs = yield* ssn.messages({ sessionID: info.id })
+      const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+      return part?.type === "tool" && part.state.status === "completed" ? part.state.time.compacted : undefined
+    })
+
   it.live(
-    "compacts old completed tool output",
+    "clears old completed tool output once the prompt cache has expired",
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        expect(yield* prunedAfter(dir, 2 * 60 * 60_000)).toBeNumber()
+      }),
+    ),
+  )
+
+  it.live(
+    "keeps old tool output while the prompt cache is warm, since clearing it would write the history again",
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        expect(yield* prunedAfter(dir, 60_000)).toBeUndefined()
+      }),
+    ),
+  )
+
+  it.live(
+    "keeps old tool output when pruning is turned off",
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
-          const compact = yield* SessionCompaction.Service
-          const ssn = yield* SessionNs.Service
-          const info = yield* ssn.create({})
-          const a = yield* ssn.updateMessage({
-            id: MessageID.ascending(),
-            role: "user",
-            sessionID: info.id,
-            agent: "build",
-            model: ref,
-            time: { created: Date.now() },
-          })
-          yield* ssn.updatePart({
-            id: PartID.ascending(),
-            messageID: a.id,
-            sessionID: info.id,
-            type: "text",
-            text: "first",
-          })
-          const b: SessionV1.Assistant = {
-            id: MessageID.ascending(),
-            role: "assistant",
-            sessionID: info.id,
-            mode: "build",
-            agent: "build",
-            path: { cwd: dir, root: dir },
-            cost: 0,
-            tokens: {
-              output: 0,
-              input: 0,
-              reasoning: 0,
-              cache: { read: 0, write: 0 },
-            },
-            modelID: ref.modelID,
-            providerID: ref.providerID,
-            parentID: a.id,
-            time: { created: Date.now() },
-            finish: "end_turn",
-          }
-          yield* ssn.updateMessage(b)
-          yield* ssn.updatePart({
-            id: PartID.ascending(),
-            messageID: b.id,
-            sessionID: info.id,
-            type: "tool",
-            callID: crypto.randomUUID(),
-            tool: "bash",
-            state: {
-              status: "completed",
-              input: {},
-              output: "x".repeat(200_000),
-              title: "done",
-              metadata: {},
-              time: { start: Date.now(), end: Date.now() },
-            },
-          })
-          for (const text of ["second", "third"]) {
-            const msg = yield* ssn.updateMessage({
-              id: MessageID.ascending(),
-              role: "user",
-              sessionID: info.id,
-              agent: "build",
-              model: ref,
-              time: { created: Date.now() },
-            })
-            yield* ssn.updatePart({
-              id: PartID.ascending(),
-              messageID: msg.id,
-              sessionID: info.id,
-              type: "text",
-              text,
-            })
-          }
-
-          yield* compact.prune({ sessionID: info.id })
-
-          const msgs = yield* ssn.messages({ sessionID: info.id })
-          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
-          expect(part?.type).toBe("tool")
-          expect(part?.state.status).toBe("completed")
-          if (part?.type === "tool" && part.state.status === "completed") {
-            expect(part.state.time.compacted).toBeNumber()
-          }
+          expect(yield* prunedAfter(dir, 2 * 60 * 60_000)).toBeUndefined()
         }),
-
-      {
-        config: {
-          compaction: { prune: true },
-        },
-      },
+      { config: { compaction: { prune: false } } },
     ),
   )
 

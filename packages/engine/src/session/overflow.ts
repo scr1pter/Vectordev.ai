@@ -11,12 +11,25 @@ export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outpu
   const context = input.model.limit.context
   if (context === 0) return 0
 
-  const reserved =
-    input.cfg.compaction?.reserved ??
-    Math.min(COMPACTION_BUFFER, ProviderTransform.maxOutputTokens(input.model, input.outputTokenMax))
-  return input.model.limit.input
-    ? Math.max(0, input.model.limit.input - reserved)
-    : Math.max(0, context - ProviderTransform.maxOutputTokens(input.model, input.outputTokenMax))
+  const output = ProviderTransform.maxOutputTokens(input.model, input.outputTokenMax)
+  const configured = input.cfg.compaction?.reserved
+  const buffer = Math.min(COMPACTION_BUFFER, output)
+  // Without an input limit the window keeps room for a full reply; a larger configured reserve only compacts earlier.
+  const window = input.model.limit.input
+    ? Math.max(0, input.model.limit.input - (configured ?? buffer))
+    : Math.max(0, context - Math.max(output, configured ?? 0))
+  // Past a long-context price tier every token of a request is billed at the higher rate, so compact before crossing
+  // it, unless a configured reserve says where to compact.
+  const tier = configured === undefined ? priceTier(input.model) : undefined
+  return tier !== undefined && tier - buffer < window ? Math.max(0, tier - buffer) : window
+}
+
+function priceTier(model: Provider.Model) {
+  const sizes = [
+    ...(model.cost.tiers ?? []).map((item) => item.tier.size),
+    ...(model.cost.experimentalOver200K ? [200_000] : []),
+  ]
+  return sizes.length ? Math.min(...sizes) : undefined
 }
 
 export function isOverflow(input: {

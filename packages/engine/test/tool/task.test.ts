@@ -183,6 +183,33 @@ it.instance(
   },
 )
 
+it.instance(
+  "a variant configured for an agent without its own model applies on the model it inherits",
+  () =>
+    Effect.gen(function* () {
+      const parent = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make("big") }
+      const seeded = yield* seed("Configured variant", parent)
+      const def = yield* (yield* TaskTool).init()
+      const prompts: SessionPrompt.PromptInput[] = []
+      yield* def.execute(
+        { description: "find handlers", prompt: "Find the HTTP handlers.", subagent_type: "explore" },
+        taskContext({
+          sessionID: seeded.chat.id,
+          messageID: seeded.assistant.id,
+          promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+        }),
+      )
+      expect(prompts[0].model).toEqual(parent)
+      expect(prompts[0].variant).toBe("low")
+    }),
+  {
+    config: {
+      agent: { explore: { variant: "low" } },
+      provider: pricedProvider({ big: { variants: { low: {}, medium: {}, xhigh: {} } } }),
+    },
+  },
+)
+
 function defer<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
   const promise = new Promise<T>((done) => {

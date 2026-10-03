@@ -553,6 +553,34 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("an autocomplete request carries only the current request, its own prompt and no tools", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Autocomplete", agent: "autocomplete" })
+    yield* llm.text("first()")
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "autocomplete",
+      model: ref,
+      parts: [{ type: "text", text: "complete one" }],
+    })
+    yield* llm.text("second()")
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "autocomplete",
+      model: ref,
+      parts: [{ type: "text", text: "complete two" }],
+    })
+    const body = JSON.stringify((yield* llm.hits).at(-1)?.body)
+    expect(body).toContain("complete two")
+    expect(body).not.toContain("complete one")
+    expect(body).toContain("Vector Tab")
+    expect((yield* llm.hits).at(-1)?.body.tools).toBeUndefined()
+  }),
+)
+
 it.instance("title generation sends only what the user typed", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

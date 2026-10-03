@@ -55,8 +55,7 @@ export const Info = Schema.Struct({
   }),
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPluginV1.Spec))),
   share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
-    description:
-      "Public session sharing is unavailable in Vector; this setting is ignored.",
+    description: "Public session sharing is unavailable in Vector; this setting is ignored.",
   }),
   autoshare: Schema.optional(Schema.Boolean).annotate({
     description: "@deprecated Public session sharing is unavailable in Vector; this setting is ignored.",
@@ -149,7 +148,8 @@ export const Info = Schema.Struct({
         description: "Enable automatic compaction when context is full (default: true)",
       }),
       prune: Schema.optional(Schema.Boolean).annotate({
-        description: "Enable pruning of old tool outputs (default: false)",
+        description:
+          "Clear old tool outputs when a prompt arrives after the provider's prompt cache has expired, when the history is re-sent at full price anyway (default: true)",
       }),
       tail_turns: Schema.optional(NonNegativeInt).annotate({
         description:

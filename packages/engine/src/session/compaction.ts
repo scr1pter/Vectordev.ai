@@ -5,6 +5,7 @@ import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { Session } from "./session"
 import { SessionID, MessageID, PartID } from "./schema"
 import { Provider } from "@/provider/provider"
+import { ProviderTransform } from "@/provider/transform"
 import { MessageV2 } from "./message-v2"
 import { Token } from "@/util/token"
 import { SessionProcessor } from "./processor"
@@ -240,16 +241,26 @@ const layer = Layer.effect(
     })
 
     // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
-    // calls, then erases output of older tool calls to free context space
+    // calls, then erases output of older tool calls to free context space.
+    // Clearing changes the history, so the provider writes it to its cache again. That costs nothing extra only once
+    // the cache has expired, when the whole history is re-sent at the cache-write price anyway, so it runs only then.
     const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID }) {
       const cfg = yield* config.get()
-      if (!cfg.compaction?.prune) return
-      yield* Effect.logInfo("pruning")
+      if (cfg.compaction?.prune === false) return
 
       const msgs = yield* session
         .messages({ sessionID: input.sessionID })
         .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
       if (!msgs) return
+      const last = msgs.findLast((msg) => msg.info.role === "assistant" && msg.info.time.completed)?.info
+      if (last?.role !== "assistant" || !last.time.completed) return
+      const model = yield* provider
+        .getModel(last.providerID, last.modelID)
+        .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)))
+      // Explicit cache breakpoints live 5 minutes; providers that cache on their own may keep a prefix for up to an hour.
+      const ttl = model && ProviderTransform.usesCacheBreakpoints(model) ? 5 * 60_000 : 60 * 60_000
+      if (Date.now() - last.time.completed <= ttl) return
+      yield* Effect.logInfo("pruning")
 
       let total = 0
       let pruned = 0

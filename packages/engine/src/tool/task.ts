@@ -429,15 +429,18 @@ export const TaskTool = Tool.define(
             }
       // The small model runs at its default effort. Explore on the parent's model stops at medium effort,
       // since a search gains little from the high reasoning budget a parent may run at.
+      // A variant configured for an agent without a model of its own applies on whichever model it runs; a pinned
+      // model's variant belongs to that model and is applied when the agent's session starts.
+      const configured = next.model ? undefined : next.variant
       const highEffort =
-        next.name === "explore" && !cheap && inherit && ["high", "xhigh", "max"].includes(variant ?? "")
+        next.name === "explore" && !configured && !cheap && inherit && ["high", "xhigh", "max"].includes(variant ?? "")
       const medium = highEffort
         ? yield* provider.getModel(model.providerID, model.modelID).pipe(
             Effect.map((info) => (info.variants?.medium ? "medium" : undefined)),
             Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)),
           )
         : undefined
-      const childVariant = cheap ? undefined : inherit ? (medium ?? variant) : undefined
+      const childVariant = !inherit && !cheap ? undefined : (configured ?? (cheap ? undefined : (medium ?? variant)))
       // An agent with its own model runs with its own variant, so the record names that one.
       const recordedVariant = childVariant ?? (!inherit ? next.variant : undefined)
       const modelRef = { ...model, ...(recordedVariant ? { variant: recordedVariant } : {}) }

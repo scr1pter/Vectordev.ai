@@ -1165,6 +1165,8 @@ const layer = Layer.effect(
       let structured: unknown
       let step = 0
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      // Before the first request, so a prompt arriving after the cache expired sends the cleared history.
+      if (!resumed) yield* compaction.prune({ sessionID }).pipe(Effect.ignore)
 
       while (true) {
         yield* status.set(sessionID, { type: "busy" })
@@ -1351,7 +1353,7 @@ const layer = Layer.effect(
 
           yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-          const quick = agent.name === "quick"
+          const quick = agent.name === "quick" || agent.name === "autocomplete"
           const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
             quick ? Effect.succeed(undefined) : sys.skills(agent),
             quick
@@ -1464,8 +1466,6 @@ const layer = Layer.effect(
         continue
       }
 
-      const background = yield* InstanceState.get(backgroundTasks)
-      yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(background.scope))
       return yield* lastAssistant(sessionID)
     })
 

@@ -2466,7 +2466,7 @@ export function CodespaceWorkbench(props: {
   onCleanup(recycleCompletionSession)
 
   const completionSessionFor = async (model: { providerID: string; modelID: string }) => {
-    const key = `${sdk().directory}:${model.providerID}:${model.modelID}:${activeAgentName()}`
+    const key = `${sdk().directory}:${model.providerID}:${model.modelID}`
     if (completionSessionId && completionSessionKey === key && completionTurns < AUTOCOMPLETE_SESSION_TURNS) {
       return completionSessionId
     }
@@ -2476,8 +2476,8 @@ export function CodespaceWorkbench(props: {
       .client.session.create({
         directory: sdk().directory,
         title: `${INTERNAL_SESSION_TITLE_PREFIX}Autocomplete`,
-        agent: activeAgentName(),
-        model: { providerID: model.providerID, id: model.modelID, variant: activeVariant() },
+        agent: "autocomplete",
+        model: { providerID: model.providerID, id: model.modelID },
         metadata: { source: "vector-codespace", engine: "vector-compatible", hidden: true },
       })
       .catch(() => undefined)
@@ -2494,7 +2494,6 @@ export function CodespaceWorkbench(props: {
     const cacheKey = [
       model.providerID,
       model.modelID,
-      activeVariant() ?? "",
       context.path,
       context.language,
       context.prefix.slice(-2_000),
@@ -2509,13 +2508,11 @@ export function CodespaceWorkbench(props: {
       .client.session.prompt({
         sessionID,
         directory: sdk().directory,
-        agent: activeAgentName(),
+        // The autocomplete agent sends only this request with its own short prompt and no tools, at the model's
+        // default effort: ghost text gains nothing from the conversation, project context or a thinking budget.
+        agent: "autocomplete",
         model,
-        variant: activeVariant(),
         executionMode: "normal",
-        system:
-          "You are Vector Tab, an inline code completion engine. Continue the code exactly at the cursor. Return only the code to insert: no explanation, no markdown, and no repeated surrounding code. Prefer the smallest useful completion, from the rest of the current line up to one short coherent block.",
-        tools: { bash: false, edit: false, patch: false, write: false, read: false, glob: false, grep: false },
         parts: [
           {
             type: "text",

@@ -14,7 +14,8 @@ const COPY_NAME_AGENT: Agent.Info = {
   permission: [],
   options: {},
   native: true,
-  prompt: "",
+  // An empty prompt would fall back to the full coding-agent system prompt.
+  prompt: "Reply with only a 2-3 word name for the task. No punctuation or explanation.",
 }
 
 export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projectCopyName", (handlers) =>
@@ -48,7 +49,12 @@ export const projectCopyHandlers = HttpApiBuilder.group(InstanceHttpApi, "projec
           model,
           sessionID,
           retries: 2,
-          messages: [{ role: "user", content: `Generate a short 2-3 word name that describes this task:\n${text}` }],
+          messages: [
+            {
+              role: "user",
+              content: `Generate a short 2-3 word name that describes this task:\n${text.slice(0, 1000)}`,
+            },
+          ],
         })
         .pipe(
           Stream.filter(LLMEvent.is.textDelta),

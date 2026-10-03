@@ -247,6 +247,18 @@ const layer = Layer.effect(
             native: true,
             hidden: true,
           },
+          // Editor ghost text. It runs on the quick lane: the last request only, no tools, no project context.
+          autocomplete: {
+            name: "autocomplete",
+            description: "Inline code completion for the editor.",
+            prompt:
+              "You are Vector Tab, an inline code completion engine. Continue the code exactly at the cursor. Return only the code to insert: no explanation, no markdown, and no repeated surrounding code. Prefer the smallest useful completion, from the rest of the current line up to one short coherent block.",
+            options: {},
+            permission: Permission.merge(defaults, user, Permission.fromConfig({ "*": "deny" })),
+            mode: "primary",
+            native: true,
+            hidden: true,
+          },
           general: {
             name: "general",
             description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,

@@ -8,6 +8,7 @@ import DESCRIPTION from "./read.txt"
 import { InstanceState } from "@/effect/instance-state"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { Instruction } from "../session/instruction"
+import { SessionV1 } from "@vectordevai/core/v1/session"
 import { isPdfAttachment, sniffAttachmentMime } from "@/util/media"
 
 const DEFAULT_READ_LIMIT = 2000
@@ -59,6 +60,8 @@ type Metadata = {
   truncated: boolean
   loaded: string[]
   display?: Display
+  // Identifies the file's state and the lines read, so an identical read later in the conversation can point back.
+  fingerprint?: string
 }
 
 export const ReadTool = Tool.define<
@@ -328,6 +331,43 @@ export const ReadTool = Tool.define<
         return yield* Effect.fail(new Error(`Cannot read binary file: ${filepath}`))
       }
 
+      const fingerprint = [
+        filepath,
+        params.offset || 1,
+        params.limit ?? DEFAULT_READ_LIMIT,
+        Option.getOrUndefined(stat.mtime)?.getTime(),
+        Number(stat.size),
+        Bun.hash(sample).toString(16),
+      ].join("|")
+      // The same lines of an unchanged file are already in the conversation, so point back to them rather than send
+      // the file again. Only a visible result counts: ctx.messages starts after the last compaction summary, and a
+      // pruned result no longer holds the content.
+      const earlier = ctx.messages
+        .flatMap((message) => message.parts)
+        .findLast(
+          (part): part is SessionV1.ToolPart =>
+            part.type === "tool" &&
+            part.tool === "read" &&
+            part.state.status === "completed" &&
+            !part.state.time.compacted &&
+            part.state.metadata?.fingerprint === fingerprint,
+        )
+      if (earlier?.state.status === "completed" && loaded.length === 0) {
+        const display = earlier.state.metadata?.display as Display | undefined
+        const range = display?.type === "file" ? ` (lines ${display.lineStart}-${display.lineEnd})` : ""
+        return {
+          title,
+          output: `File unchanged since your earlier read of ${filepath}${range} in this conversation; that result is still current, so refer to it instead of reading again. Read with a different offset or limit for other lines.`,
+          metadata: {
+            preview: String(earlier.state.metadata?.preview ?? ""),
+            truncated: false,
+            loaded: [],
+            display,
+            fingerprint,
+          },
+        }
+      }
+
       const file = yield* lines(filepath, { limit: params.limit ?? DEFAULT_READ_LIMIT, offset: params.offset || 1 })
       if (file.count < file.offset && !(file.count === 0 && file.offset === 1)) {
         return yield* Effect.fail(
@@ -372,6 +412,7 @@ export const ReadTool = Tool.define<
             totalLines: file.count,
             truncated,
           },
+          fingerprint,
         },
       }
     })
