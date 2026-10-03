@@ -253,7 +253,7 @@ if (${scenario.mode === "early-failure"}) while (true) await Bun.sleep(10)
           const metadataError = new Error("metadata update failed")
           const completed: string[] = []
           const killed: number[] = []
-          const running: Effect.Effect<boolean>[] = []
+          const running: ChildProcessSpawner.ChildProcessHandle["isRunning"][] = []
           const outcome = yield* runIn(
             tmp,
             run(

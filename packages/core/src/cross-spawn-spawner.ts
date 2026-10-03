@@ -97,6 +97,31 @@ const toPlatformError = (
 
 type ExitSignal = Deferred.Deferred<readonly [code: number | null, signal: NodeJS.Signals | null]>
 
+function captureOutput(proc: NodeChildProcess.ChildProcess) {
+  const captures = [proc.stdout, proc.stderr].map((stream) => {
+    if (!stream) return
+    const tap = new PassThrough()
+    // Preserve an error emitted before the lazy Effect reader subscribes. The reader
+    // checks errored below; this listener prevents an unhandled native stream error.
+    tap.on("error", () => {})
+    stream.on("error", (error) => tap.destroy(toError(error)))
+    stream.pipe(tap)
+    return {
+      tap,
+      dispose() {
+        stream.unpipe(tap)
+        tap.destroy()
+        stream.destroy()
+      },
+    }
+  })
+  return {
+    stdout: captures[0]?.tap,
+    stderr: captures[1]?.tap,
+    dispose: () => captures.forEach((capture) => capture?.dispose()),
+  }
+}
+
 export const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -242,22 +267,22 @@ export const make = Effect.gen(function* () {
 
   const setupOutput = (
     command: ChildProcess.StandardCommand,
-    proc: NodeChildProcess.ChildProcess,
+    captured: ReturnType<typeof captureOutput>,
     out: ChildProcess.StdoutConfig,
     err: ChildProcess.StderrConfig,
   ) => {
-    let stdout = proc.stdout
-      ? NodeStream.fromReadable({
-          evaluate: () => proc.stdout!,
-          onError: (cause) => toPlatformError("fromReadable(stdout)", toError(cause), command),
+    const from = (stream: PassThrough | undefined, name: string) =>
+      Stream.suspend(() => {
+        if (!stream) return Stream.empty
+        if (stream.errored)
+          return Stream.fail(toPlatformError(`fromReadable(${name})`, toError(stream.errored), command))
+        return NodeStream.fromReadable({
+          evaluate: () => stream,
+          onError: (cause) => toPlatformError(`fromReadable(${name})`, toError(cause), command),
         })
-      : Stream.empty
-    let stderr = proc.stderr
-      ? NodeStream.fromReadable({
-          evaluate: () => proc.stderr!,
-          onError: (cause) => toPlatformError("fromReadable(stderr)", toError(cause), command),
-        })
-      : Stream.empty
+      })
+    let stdout = from(captured.stdout, "stdout")
+    let stderr = from(captured.stderr, "stderr")
 
     if (Sink.isSink(out.stream)) stdout = Stream.transduce(stdout, out.stream)
     if (Sink.isSink(err.stream)) stderr = Stream.transduce(stderr, err.stream)
@@ -266,12 +291,19 @@ export const make = Effect.gen(function* () {
   }
 
   const spawn = (command: ChildProcess.StandardCommand, opts: NodeChildProcess.SpawnOptions) =>
-    Effect.callback<readonly [NodeChildProcess.ChildProcess, ExitSignal], PlatformError.PlatformError>((resume) => {
+    Effect.callback<
+      readonly [NodeChildProcess.ChildProcess, ExitSignal, ReturnType<typeof captureOutput>],
+      PlatformError.PlatformError
+    >((resume) => {
       const signal = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
       const proc = launch(command.command, command.args, opts)
+      // Bun resumes stdio at native exit, before a delayed Effect reader can attach.
+      // Pipe immediately into bounded streams; retain backpressure until consumed.
+      const captured = captureOutput(proc)
       let end = false
       let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
       proc.on("error", (err) => {
+        captured.dispose()
         resume(Effect.fail(toPlatformError("spawn", err, command)))
       })
       proc.on("exit", (...args) => {
@@ -283,10 +315,11 @@ export const make = Effect.gen(function* () {
         Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
       })
       proc.on("spawn", () => {
-        resume(Effect.succeed([proc, signal]))
+        resume(Effect.succeed([proc, signal, captured]))
       })
       return Effect.sync(() => {
         proc.kill("SIGTERM")
+        captured.dispose()
       })
     })
 
@@ -371,7 +404,7 @@ export const make = Effect.gen(function* () {
           const extra = fds(command.options)
           const dir = yield* cwd(command.options)
 
-          const [proc, signal] = yield* Effect.acquireRelease(
+          const [proc, signal, captured] = yield* Effect.acquireRelease(
             spawn(command, {
               cwd: dir,
               env: env(command.options),
@@ -380,7 +413,10 @@ export const make = Effect.gen(function* () {
               shell: command.options.shell,
               windowsHide: process.platform === "win32",
             }),
-            Effect.fnUntraced(function* ([proc, signal]) {
+            Effect.fnUntraced(function* ([proc, signal, captured]) {
+              // A caller may never consume the pipes. Release their backpressure before
+              // waiting for native close, which also waits for stdio to close.
+              yield* Effect.sync(captured.dispose)
               const done = yield* Deferred.isDone(signal)
               const kill = timeout(proc, command, command.options)
               if (done) {
@@ -404,7 +440,7 @@ export const make = Effect.gen(function* () {
           )
 
           const fd = yield* setupFds(command, proc, extra)
-          const out = setupOutput(command, proc, sout, serr)
+          const out = setupOutput(command, captured, sout, serr)
           let ref = true
           return makeHandle({
             pid: ProcessId(proc.pid!),
@@ -495,7 +531,23 @@ export const make = Effect.gen(function* () {
     },
   )
 
-  return makeSpawner(spawnCommand)
+  const helpers = makeSpawner((command) =>
+    spawnCommand(command).pipe(
+      Effect.map((handle) =>
+        makeHandle({
+          ...handle,
+          // Drain ignored stderr, but preserve completion at stdout EOF. includeStderr
+          // continues to select the unchanged combined stream.
+          stdout: Stream.merge(handle.stdout, Stream.drain(handle.stderr), { haltStrategy: "left" }),
+          exitCode: Effect.all([handle.exitCode, Stream.runDrain(handle.all)], { concurrency: 2 }).pipe(
+            Effect.map((result) => result[0]),
+          ),
+        }),
+      ),
+    ),
+  )
+  // Direct handles retain normal backpressure and caller-controlled stream consumption.
+  return { ...helpers, spawn: spawnCommand }
 })
 
 const layer: Layer.Layer<ChildProcessSpawner, never, FileSystem.FileSystem | Path.Path> = Layer.effect(
