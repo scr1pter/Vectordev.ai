@@ -110,3 +110,13 @@ test("storage decoding rejects wrong versions, channels, origins, paths and over
     ),
   ).toEqual(fixture)
 })
+
+test("storage decoding accepts the mixed-case store host that @vercel/blob builds from a token", async () => {
+  expect(
+    await readCliManifest(
+      new Response(JSON.stringify(fixture)).body!,
+      `https://FixTure.public.blob.vercel-storage.com/${CliRelease.manifestPath("1.2.3")}`,
+      "1.2.3",
+    ),
+  ).toEqual(fixture)
+})
