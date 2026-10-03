@@ -387,6 +387,14 @@
     {
       "source": "/models",
       "destination": "/models/api.json"
+    },
+    {
+      "source": "/api/billing/config",
+      "destination": "/api/legacy-desktop-access"
+    },
+    {
+      "source": "/api/billing/status",
+      "destination": "/api/legacy-desktop-access"
     }
   ],
   "crons": [
