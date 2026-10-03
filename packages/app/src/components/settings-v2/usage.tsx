@@ -215,8 +215,14 @@ export const SettingsUsageV2: Component = () => {
                     <div class="settings-usage-streak-label">
                       <span class="settings-usage-streak-flame" aria-hidden="true">
                         <svg viewBox="0 0 20 20">
-                          <path d="M11.7 2.4c.5 2.7-.8 3.7-2 5.1-.8.9-1.5 1.9-1.3 3.5-1.1-.7-1.7-1.9-1.6-3.3C4.9 9.2 4 11 4.2 13c.3 3 2.7 5 5.8 5s5.7-2.2 5.8-5.5c.1-3.4-2-6.8-4.1-10.1Z" fill="currentColor" />
-                          <path d="M10.5 10.3c.2 1.3-.6 1.8-1.1 2.5-.4.5-.6 1.1-.4 1.9-.7-.4-1.1-1.1-1.1-1.9-.8.7-1.1 1.6-1 2.5.2 1.6 1.5 2.6 3.1 2.6 1.8 0 3.2-1.2 3.2-3 0-1.7-1.2-3.4-2.7-4.6Z" fill="rgba(255,255,255,.68)" />
+                          <path
+                            d="M11.7 2.4c.5 2.7-.8 3.7-2 5.1-.8.9-1.5 1.9-1.3 3.5-1.1-.7-1.7-1.9-1.6-3.3C4.9 9.2 4 11 4.2 13c.3 3 2.7 5 5.8 5s5.7-2.2 5.8-5.5c.1-3.4-2-6.8-4.1-10.1Z"
+                            fill="currentColor"
+                          />
+                          <path
+                            d="M10.5 10.3c.2 1.3-.6 1.8-1.1 2.5-.4.5-.6 1.1-.4 1.9-.7-.4-1.1-1.1-1.1-1.9-.8.7-1.1 1.6-1 2.5.2 1.6 1.5 2.6 3.1 2.6 1.8 0 3.2-1.2 3.2-3 0-1.7-1.2-3.4-2.7-4.6Z"
+                            fill="rgba(255,255,255,.68)"
+                          />
                         </svg>
                       </span>
                       <p>My daily streak</p>
@@ -236,7 +242,9 @@ export const SettingsUsageV2: Component = () => {
                     <strong>
                       {usage.longestStreak} day{usage.longestStreak === 1 ? "" : "s"}
                     </strong>
-                    <small>{usage.activeDays} active day{usage.activeDays === 1 ? "" : "s"} recorded</small>
+                    <small>
+                      {usage.activeDays} active day{usage.activeDays === 1 ? "" : "s"} recorded
+                    </small>
                   </div>
                 </div>
                 <div class="settings-usage-streak-week" aria-label="Activity during the past seven days">

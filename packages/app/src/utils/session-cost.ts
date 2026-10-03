@@ -14,9 +14,7 @@ export function formatSessionCost(input: {
 
 // What a task cost: the session's own steps plus everything its subagents spent, which the backend keeps apart.
 export function sessionSpend(
-  info:
-    | { cost?: number; unpricedSteps?: number; subagentCost?: number; subagentUnpricedSteps?: number }
-    | undefined,
+  info: { cost?: number; unpricedSteps?: number; subagentCost?: number; subagentUnpricedSteps?: number } | undefined,
 ) {
   return {
     cost: (info?.cost ?? 0) + (info?.subagentCost ?? 0),

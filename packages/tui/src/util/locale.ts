@@ -90,9 +90,7 @@ export function spend(cost: number | undefined, unpricedSteps: number | undefine
 
 // What a session's work cost: its own steps plus everything its subagents spent, which the backend keeps apart.
 export function sessionSpend(
-  session:
-    | { cost?: number; unpricedSteps?: number; subagentCost?: number; subagentUnpricedSteps?: number }
-    | undefined,
+  session: { cost?: number; unpricedSteps?: number; subagentCost?: number; subagentUnpricedSteps?: number } | undefined,
 ) {
   return {
     cost: (session?.cost ?? 0) + (session?.subagentCost ?? 0),
