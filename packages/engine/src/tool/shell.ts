@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect"
+import { Effect, Exit, Fiber, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
 import * as Tool from "./tool"
@@ -557,7 +557,7 @@ export const ShellTool = Tool.define(
             yield* cmd(input.shell, input.command, input.cwd, input.env, input.workspaceRoot, ctx),
           )
 
-          yield* Effect.forkScoped(
+          const output = yield* Effect.forkScoped(
             Stream.runForEach(Stream.decodeText(handle.all), (chunk) => {
               const size = Buffer.byteLength(chunk, "utf-8")
               list.push({ text: chunk, size })
@@ -614,21 +614,29 @@ export const ShellTool = Tool.define(
           const timeout = Effect.sleep(`${input.timeout + 100} millis`)
 
           const exit = yield* Effect.raceAll([
-            handle.exitCode.pipe(Effect.map((code) => ({ kind: "exit" as const, code }))),
+            // Process close can precede the output consumer's final metadata write.
+            // Keep draining inside the race so abort and timeout still bound it.
+            Effect.all([handle.exitCode, Fiber.join(output)], { concurrency: 2 }).pipe(
+              Effect.map((result) => result[0]),
+              // raceAll selects the first success; preserve output failures too.
+              Effect.exit,
+              Effect.map((result) => ({ kind: "exit" as const, result })),
+            ),
             abort.pipe(Effect.map(() => ({ kind: "abort" as const, code: null }))),
             timeout.pipe(Effect.map(() => ({ kind: "timeout" as const, code: null }))),
           ])
 
           if (exit.kind === "abort") {
             aborted = true
-            yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
           }
           if (exit.kind === "timeout") {
             expired = true
+          }
+          if ((exit.kind !== "exit" || Exit.isFailure(exit.result)) && (yield* handle.isRunning)) {
             yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
           }
 
-          return exit.kind === "exit" ? exit.code : null
+          return exit.kind === "exit" ? yield* exit.result : null
         }),
       ).pipe(Effect.orDie)
 

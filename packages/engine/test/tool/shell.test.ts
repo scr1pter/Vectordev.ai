@@ -1,7 +1,8 @@
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import type * as Scope from "effect/Scope"
 import os from "os"
 import path from "path"
@@ -217,6 +218,120 @@ describe("tool.shell", () => {
       )
     }),
   )
+
+  for (const scenario of [
+    { mode: "exit", name: "drains final output after process exit while a metadata update is pending" },
+    { mode: "abort", name: "aborts a pending metadata update after process exit without killing the closed process" },
+    {
+      mode: "timeout",
+      name: "times out a pending metadata update after process exit without killing the closed process",
+    },
+    { mode: "failure", name: "preserves a metadata failure after process exit instead of reporting a timeout" },
+    { mode: "early-failure", name: "fails and reaps a running process when its metadata consumer fails" },
+  ] as const) {
+    it.live(
+      scenario.name,
+      () =>
+        Effect.gen(function* () {
+          const tmp = yield* tmpdirScoped({
+            init: (directory) =>
+              Effect.promise(() =>
+                Bun.write(
+                  path.join(directory, "drain-child.ts"),
+                  `if (${scenario.mode === "early-failure"}) process.on("SIGTERM", () => { void Bun.write(".term-received", "received") })
+await Bun.write(".child-pid", String(process.pid))
+process.stdout.write("first chunk\\n")
+while (!(await Bun.file(".metadata-ready").exists())) await Bun.sleep(5)
+process.stderr.write("final chunk\\n")
+if (${scenario.mode === "early-failure"}) while (true) await Bun.sleep(10)
+`,
+                ),
+              ).pipe(Effect.asVoid),
+          })
+          const closed = yield* Deferred.make<void>()
+          const controller = new AbortController()
+          const metadataError = new Error("metadata update failed")
+          const completed: string[] = []
+          const killed: number[] = []
+          const running: Effect.Effect<boolean>[] = []
+          const outcome = yield* runIn(
+            tmp,
+            run(
+              {
+                command: `${scenario.mode === "early-failure" && process.platform !== "win32" ? "exec " : PS.has(sh()) ? "& " : ""}${bin} --no-env-file ./drain-child.ts`,
+                timeout: 5_000,
+              },
+              {
+                ...ctx,
+                abort: controller.signal,
+                metadata: (input) => {
+                  const output = (input.metadata as { output?: string })?.output
+                  if (!output?.includes("first chunk") || output.includes("final chunk")) return Effect.void
+                  return Effect.gen(function* () {
+                    yield* Effect.promise(() => Bun.write(path.join(tmp, ".metadata-ready"), "ready"))
+                    if (scenario.mode === "early-failure") return yield* Effect.die(metadataError)
+                    yield* Deferred.await(closed)
+                    if (scenario.mode === "failure") return yield* Effect.die(metadataError)
+                    if (scenario.mode === "abort") controller.abort()
+                    if (scenario.mode !== "exit") return yield* Effect.never
+                    // Simulate an output update still writing after the real process has closed.
+                    yield* Effect.sleep("100 millis")
+                    completed.push(output)
+                  })
+                },
+              },
+            ).pipe(
+              Effect.updateService(ChildProcessSpawner.ChildProcessSpawner, (real) =>
+                ChildProcessSpawner.make((command) =>
+                  real.spawn(command).pipe(
+                    Effect.map((handle) => {
+                      running.push(handle.isRunning)
+                      return ChildProcessSpawner.makeHandle({
+                        ...handle,
+                        exitCode: handle.exitCode.pipe(Effect.tap(() => Deferred.succeed(closed, undefined))),
+                        kill: (options) => {
+                          killed.push(handle.pid)
+                          return handle.kill(options)
+                        },
+                      })
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          ).pipe(Effect.exit)
+          expect(yield* Deferred.isDone(closed)).toBe(scenario.mode !== "early-failure")
+          expect(running).toHaveLength(1)
+          expect(yield* running[0]).toBe(false)
+          expect(killed).toHaveLength(scenario.mode === "early-failure" ? 1 : 0)
+          if (scenario.mode === "early-failure" && process.platform !== "win32") {
+            expect(Number(yield* Effect.promise(() => Bun.file(path.join(tmp, ".child-pid")).text()))).toBe(killed[0])
+            expect(yield* Effect.promise(() => Bun.file(path.join(tmp, ".term-received")).exists())).toBe(true)
+          }
+          if (scenario.mode === "failure" || scenario.mode === "early-failure") {
+            expect(Exit.isFailure(outcome)).toBe(true)
+            if (Exit.isFailure(outcome)) expect(Cause.squash(outcome.cause)).toBe(metadataError)
+            return
+          }
+          const result = yield* outcome
+          expect(result.output).toContain("first chunk")
+          if (scenario.mode === "exit") {
+            expect(result.metadata.exit).toBe(0)
+            expect(result.output).toContain("final chunk")
+            expect(completed).toHaveLength(1)
+            return
+          }
+          expect(result.metadata.exit).toBeNull()
+          expect(result.output).toContain(
+            scenario.mode === "abort"
+              ? "User aborted the command"
+              : "shell tool terminated command after exceeding timeout 5000 ms",
+          )
+          expect(completed).toHaveLength(0)
+        }),
+      15_000,
+    )
+  }
 
   it.live("does not expose Vector's internal vault and bridge secrets to commands", () =>
     Effect.acquireUseRelease(
