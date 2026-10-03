@@ -41,7 +41,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   model: Provider.Model
   session: Session.Info
   processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
-  bypassAgentCheck: boolean
+  // Agents the user invoked by name this turn; launching one of them skips the task permission prompt.
+  invokedAgents: readonly string[]
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
 }) {
@@ -58,7 +59,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     abort: options.abortSignal!,
     messageID: input.processor.message.id,
     callID: options.toolCallId,
-    extra: { model: input.model, bypassAgentCheck: input.bypassAgentCheck, promptOps: input.promptOps },
+    extra: { model: input.model, invokedAgents: input.invokedAgents, promptOps: input.promptOps },
     agent: input.agent.name,
     messages: input.messages,
     metadata: (val) =>

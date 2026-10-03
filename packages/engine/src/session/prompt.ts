@@ -392,7 +392,7 @@ const layer = Layer.effect(
           sessionID,
           abort: taskAbort.signal,
           callID: part.callID,
-          extra: { bypassAgentCheck: true, promptOps },
+          extra: { invokedAgents: [task.agent], promptOps },
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
@@ -1316,7 +1316,7 @@ const layer = Layer.effect(
 
         const outcome: "break" | "continue" = yield* Effect.gen(function* () {
           const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-          const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
+          const invokedAgents = lastUserMsg?.parts.flatMap((p) => (p.type === "agent" ? [p.name] : [])) ?? []
           const promptOps = yield* ops()
 
           const tools = yield* SessionTools.resolve({
@@ -1324,7 +1324,7 @@ const layer = Layer.effect(
             session,
             model,
             processor: handle,
-            bypassAgentCheck,
+            invokedAgents,
             messages: msgs,
             promptOps,
           }).pipe(

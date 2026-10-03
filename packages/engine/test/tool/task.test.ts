@@ -1005,6 +1005,53 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("paths handed to a running task by an update stay reserved against siblings", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const busy = taskContext({
+        sessionID: chat.id,
+        messageID: assistant.id,
+        promptOps: { ...stubOps(), prompt: () => Effect.never },
+      })
+      const started = yield* def.execute(
+        {
+          description: "edit auth module",
+          prompt: "Refactor the authentication module.",
+          subagent_type: "general",
+          owned_paths: ["src/auth"],
+          background: true,
+        },
+        busy,
+      )
+      yield* def.execute(
+        {
+          description: "edit auth module",
+          prompt: "Also move the API handlers.",
+          subagent_type: "general",
+          task_id: started.metadata.sessionId,
+          owned_paths: ["src/api"],
+        },
+        busy,
+      )
+
+      const exit = yield* Effect.exit(
+        def.execute(
+          {
+            description: "edit routes",
+            prompt: "Update the routes.",
+            subagent_type: "general",
+            owned_paths: ["src/api/routes.ts"],
+            background: true,
+          },
+          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() }),
+        ),
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("ownership overlaps")
+    }),
+  )
+
   background.instance("rejects overlapping ownership across active sibling subagents", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
@@ -1128,9 +1175,11 @@ describe("tool.task", () => {
         )
 
       yield* exec()
-      yield* exec({ bypassAgentCheck: true })
+      yield* exec({ invokedAgents: ["general"] })
+      // Naming another agent does not waive the prompt for this one.
+      yield* exec({ invokedAgents: ["explore"] })
 
-      expect(calls).toHaveLength(1)
+      expect(calls).toHaveLength(2)
       expect(calls[0]).toEqual({
         permission: "task",
         patterns: ["general"],
@@ -1733,6 +1782,144 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("stopping the parent stops a task_id follow-up run, not just its job", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const runState = yield* SessionRunState.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const first = yield* Deferred.make<void>()
+      const secondStarted = yield* Deferred.make<void>()
+      const secondInterrupted = yield* Deferred.make<void>()
+      let runs = 0
+      const promptOps: TaskPromptOps = {
+        cancel: (sessionID) => runState.cancel(sessionID),
+        resolvePromptParts: (template) => Effect.succeed([{ type: "text" as const, text: template }]),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) return Effect.succeed(reply(input, "noted"))
+          runs++
+          // The child's loop runs in the run-state scope, as the real prompt loop does.
+          const work =
+            runs === 1
+              ? Deferred.await(first).pipe(Effect.as(reply(input, "first")))
+              : Deferred.succeed(secondStarted, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(secondInterrupted, undefined)),
+                  Effect.as(reply(input, "second")),
+                )
+          return runState.ensureRunning(input.sessionID, Effect.succeed(reply(input, "stopped")), work)
+        },
+      }
+      const started = yield* def.execute(
+        { description: "inspect", prompt: "Inspect.", subagent_type: "general", background: true },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+      )
+      const child = SessionID.make(started.metadata.sessionId)
+      yield* def.execute(
+        { description: "inspect", prompt: "Inspect more.", subagent_type: "general", task_id: child },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+      )
+      yield* Deferred.succeed(first, undefined)
+      yield* awaitWithTimeout(Deferred.await(secondStarted), "the follow-up run never started", "2 seconds")
+
+      yield* runState.cancel(chat.id)
+
+      expect((yield* jobs.get(child))?.status).toBe("cancelled")
+      yield* awaitWithTimeout(Deferred.await(secondInterrupted), "the follow-up run kept going", "2 seconds")
+    }),
+  )
+
+  background.instance("a failed background task reports what it found and keeps the parent's model", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const notes: SessionPrompt.PromptInput[] = []
+      const failing: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) {
+            notes.push(input)
+            return Effect.succeed(reply(input, "noted"))
+          }
+          return sessions
+            .updateMessage({
+              id: MessageID.ascending(),
+              role: "assistant",
+              parentID: MessageID.ascending(),
+              sessionID: input.sessionID,
+              mode: "general",
+              agent: "general",
+              cost: 0,
+              path: { cwd: "/tmp", root: "/tmp" },
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              modelID: ref.modelID,
+              providerID: ref.providerID,
+              time: { created: Date.now() },
+              error: { name: "UnknownError", data: { message: "rate limited" } },
+            } as SessionV1.Assistant)
+            .pipe(Effect.as(reply(input, "partial notes")))
+        },
+      }
+      const started = yield* def.execute(
+        { description: "survey", prompt: "Survey the handlers.", subagent_type: "general", background: true },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: failing }),
+      )
+      yield* jobs.wait({ id: started.metadata.sessionId })
+      yield* pollWithTimeout(
+        Effect.sync(() => (notes.length > 0 ? true : undefined)),
+        "the parent never heard about the failure",
+        "2 seconds",
+      )
+
+      const text = JSON.stringify(notes[0]?.parts)
+      expect(text).toContain("rate limited")
+      expect(text).toContain("partial notes")
+      // Without a model the note would switch the parent to its agent's configured model.
+      expect(notes[0]?.model).toEqual(ref)
+    }),
+  )
+
+  background.instance("a background result waits out a pending revert instead of committing it", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const release = yield* Deferred.make<void>()
+      const notes: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) {
+            notes.push(input)
+            return Effect.succeed(reply(input, "noted"))
+          }
+          return Deferred.await(release).pipe(Effect.as(reply(input, "found it")))
+        },
+      }
+      const started = yield* def.execute(
+        { description: "survey", prompt: "Survey the handlers.", subagent_type: "general", background: true },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+      )
+      yield* sessions.setRevert({ sessionID: chat.id, revert: { messageID: assistant.id }, summary: undefined })
+      yield* Deferred.succeed(release, undefined)
+      yield* jobs.wait({ id: started.metadata.sessionId })
+      yield* Effect.sleep("1500 millis")
+      expect(notes).toHaveLength(0)
+      expect((yield* sessions.get(chat.id)).revert).toBeDefined()
+
+      yield* sessions.clearRevert(chat.id)
+      yield* pollWithTimeout(
+        Effect.sync(() => (notes.length > 0 ? true : undefined)),
+        "the note never arrived after the revert was undone",
+        "3 seconds",
+      )
+      expect(JSON.stringify(notes[0]?.parts)).toContain("found it")
+    }),
+  )
+
   it.instance("cancelling a child run cancels its own pre-runner task job", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
@@ -1780,6 +1967,60 @@ describe("tool.task", () => {
 
       expect((yield* jobs.get(child.id))?.status).toBe("cancelled")
       expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
+    }),
+  )
+
+  it.instance("cancelling a parent reaches a background grandchild whose subagent already finished", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const runState = yield* SessionRunState.Service
+      const sessions = yield* Session.Service
+      const { chat } = yield* seed()
+      const child = yield* sessions.create({ parentID: chat.id, title: "child" })
+      const grandchild = yield* sessions.create({ parentID: child.id, title: "grandchild" })
+
+      yield* jobs.start({
+        id: child.id,
+        type: "task",
+        metadata: { parentSessionId: chat.id, sessionId: child.id },
+        run: Effect.succeed("launched a background task"),
+      })
+      yield* jobs.wait({ id: child.id })
+      yield* jobs.start({
+        id: grandchild.id,
+        type: "task",
+        metadata: { parentSessionId: child.id, sessionId: grandchild.id },
+        run: Effect.never,
+      })
+
+      yield* runState.cancel(chat.id)
+
+      expect((yield* jobs.get(child.id))?.status).toBe("completed")
+      expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
+    }),
+  )
+
+  it.instance("an @name in a brief never invokes an agent inside the child", () =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      let seen: SessionPrompt.PromptInput | undefined
+      yield* def.execute(
+        { description: "judge", prompt: "Check @explore find where tokens expire.", subagent_type: "general" },
+        taskContext({
+          sessionID: chat.id,
+          messageID: assistant.id,
+          promptOps: {
+            ...stubOps({ onPrompt: (input) => (seen = input) }),
+            resolvePromptParts: (template) =>
+              Effect.succeed([
+                { type: "text" as const, text: template },
+                { type: "agent" as const, name: "explore" },
+              ]),
+          },
+        }),
+      )
+      expect(seen?.parts.map((part) => part.type)).toEqual(["text"])
     }),
   )
 

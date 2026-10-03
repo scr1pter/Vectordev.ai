@@ -747,6 +747,17 @@ export const RunCommand = effectCmd({
           const toggles = new Map<string, boolean>()
           // A step-finish part is written again once its snapshot lands; its usage was already in the first write.
           const finishedSteps = new Set<string>()
+          // Subagents run in child sessions, and a request left unanswered there blocks the whole run, so the run
+          // answers requests from any session that descends from its own.
+          const tree = new Set([sessionID])
+          const inRun = async (id: string | undefined, depth = 0): Promise<boolean> => {
+            if (!id || depth > 4) return false
+            if (tree.has(id)) return true
+            const parent = (await client.session.get({ sessionID: id }).catch(() => undefined))?.data?.parentID
+            if (!(await inRun(parent, depth + 1))) return false
+            tree.add(id)
+            return true
+          }
           let error: string | undefined
 
           for await (const event of events.stream) {
@@ -850,7 +861,7 @@ export const RunCommand = effectCmd({
 
             if (event.type === "permission.asked") {
               const permission = event.properties
-              if (permission.sessionID !== sessionID) continue
+              if (!(await inRun(permission.sessionID))) continue
 
               if (auto) {
                 await client.permission.reply({

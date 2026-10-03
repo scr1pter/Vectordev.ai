@@ -694,6 +694,44 @@ it.instance(
   { git: true },
 )
 
+it.instance(
+  "ask - a request whose asker stops waiting is withdrawn for clients",
+  () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2Bridge.Service
+      const replied = yield* Deferred.make<unknown>()
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Replied.type) Deferred.doneUnsafe(replied, Effect.succeed(event.data))
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
+
+      const fiber = yield* ask({
+        sessionID: SessionID.make("session_test"),
+        permission: "webfetch",
+        patterns: ["https://example.com"],
+        metadata: {},
+        always: ["*"],
+        tool: { messageID: MessageID.make("msg_test"), callID: "call_test" },
+        ruleset: [],
+      }).pipe(Effect.forkScoped)
+      expect(yield* waitForPending(1)).toHaveLength(1)
+
+      yield* Fiber.interrupt(fiber)
+
+      expect(
+        yield* Deferred.await(replied).pipe(
+          Effect.timeoutOrElse({
+            duration: "1 second",
+            orElse: () => Effect.fail(new Error("the withdrawn request was never announced")),
+          }),
+        ),
+      ).toMatchObject({ sessionID: SessionID.make("session_test"), reply: "reject" })
+      expect(yield* waitForPending(0)).toHaveLength(0)
+    }),
+  { git: true },
+)
+
 // reply tests
 
 it.instance(

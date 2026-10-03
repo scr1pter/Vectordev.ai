@@ -20,7 +20,7 @@ import {
 import { SubagentLifecycle } from "./subagent-lifecycle"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
-import { Effect, Exit, Schema, Scope, Semaphore } from "effect"
+import { Effect, Exit, Option, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@vectordevai/core/database/database"
@@ -220,13 +220,15 @@ export const TaskTool = Tool.define(
       ctx: Tool.Context,
     ) {
       const cfg = yield* config.get()
-      const runInBackground = params.background === true
-      if (runInBackground && !flags.experimentalBackgroundSubagents) {
+      if (params.background === true && !flags.experimentalBackgroundSubagents) {
         return yield* Effect.fail(
           new Error("Background subagents require VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true"),
         )
       }
       const parent = yield* sessions.get(ctx.sessionID)
+      // A subagent's background task would report back after the subagent's own run has ended, starting a turn no one
+      // reads, so inside a subagent it runs in the foreground and its result stays in that run.
+      const runInBackground = params.background === true && !parent.parentID
       const session = params.task_id
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
@@ -359,7 +361,9 @@ export const TaskTool = Tool.define(
       // A disabled general (agent.general.disable) is missing from the agent list altogether, so
       // fail before any permission prompt whether it was omitted, named, aliased or resumed.
       const generalOff = subagentType === GENERAL_SUBAGENT && !known.has(GENERAL_SUBAGENT)
-      if (generalOff || (!requested && !ctx.extra?.bypassAgentCheck)) {
+      // Naming one agent lets the user launch that agent without a prompt, not every subagent this turn.
+      const invoked = Array.isArray(ctx.extra?.invokedAgents) && ctx.extra.invokedAgents.includes(subagentType)
+      if (generalOff || (!requested && !invoked)) {
         // An omitted type means the general Subagent only where the caller may launch it.
         const caller = yield* agent.get(ctx.agent)
         const denied = (name: string) =>
@@ -384,7 +388,7 @@ export const TaskTool = Tool.define(
         }
       }
 
-      if (!ctx.extra?.bypassAgentCheck) {
+      if (!invoked) {
         yield* ctx.ask({
           permission: id,
           patterns: [subagentType],
@@ -466,10 +470,10 @@ export const TaskTool = Tool.define(
         subagent: next,
       })
       const childToolDenies = [
-        ...(next.permission.some((rule) => rule.permission === "todowrite")
+        ...(next.permission.some((rule) => rule.permission === "todowrite" && rule.action !== "deny")
           ? []
           : [{ permission: "todowrite" as const, pattern: "*" as const, action: "deny" as const }]),
-        ...(next.permission.some((rule) => rule.permission === id)
+        ...(next.permission.some((rule) => rule.permission === id && rule.action !== "deny")
           ? []
           : [{ permission: id, pattern: "*" as const, action: "deny" as const }]),
         ...(cfg.experimental?.primary_tools?.map((permission) => ({
@@ -582,7 +586,10 @@ export const TaskTool = Tool.define(
           if (failed) return yield* Effect.fail(new Error(failed))
         }
         if (dependencies.length > 0) yield* transition({ status: "running" })
-        const parts = yield* ops.resolvePromptParts(assignmentPrompt(params, ownedPaths))
+        // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child.
+        const parts = (yield* ops.resolvePromptParts(assignmentPrompt(params, ownedPaths))).filter(
+          (part) => part.type !== "agent",
+        )
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,
@@ -603,12 +610,43 @@ export const TaskTool = Tool.define(
         state: SubagentLifecycle.FinalStatus,
         text: string,
       ) {
-        const currentParent = yield* sessions.get(ctx.sessionID)
+        // Any prompt commits a pending revert, deleting the reverted messages and the redo, so a note never does: it
+        // waits until the user resolves the revert, and is dropped when that removed the call that launched the task.
+        const unreverted = (): Effect.Effect<Session.Info, Session.NotFound> =>
+          sessions
+            .get(ctx.sessionID)
+            .pipe(
+              Effect.flatMap((current) =>
+                current.revert ? Effect.sleep("1 second").pipe(Effect.andThen(unreverted)) : Effect.succeed(current),
+              ),
+            )
+        const currentParent = yield* unreverted()
+        const launch = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
+          Effect.provideService(Database.Service, database),
+          Effect.option,
+        )
+        if (Option.isNone(launch)) return
+        // Carry the parent's current turn settings: without a model the note would switch the parent to its agent's
+        // configured model, and a note landing mid-run would drop the turn's fast mode or structured output.
+        const latest = yield* sessions
+          .findMessage(ctx.sessionID, (message) => message.info.role === "user")
+          .pipe(
+            Effect.map((found) =>
+              Option.isSome(found) && found.value.info.role === "user" ? found.value.info : undefined,
+            ),
+          )
         yield* ops
           .prompt({
             sessionID: ctx.sessionID,
             agent: currentParent.agent ?? ctx.agent,
-            variant,
+            ...(latest
+              ? {
+                  model: { providerID: latest.model.providerID, modelID: latest.model.modelID },
+                  variant: latest.model.variant ?? variant,
+                  ...(latest.executionMode ? { executionMode: latest.executionMode } : {}),
+                  ...(latest.format ? { format: latest.format } : {}),
+                }
+              : { variant }),
             // A stopped subagent is recorded for the parent's next turn without
             // starting one, so stopping work never makes the agent carry on alone.
             ...(state === "cancelled" ? { noReply: true } : {}),
@@ -643,7 +681,9 @@ export const TaskTool = Tool.define(
               // The settled outcome, not the job's status: a job that returned
               // normally can still have failed or been stopped inside the child.
               if (outcome.status === "completed") return yield* inject("completed", info.output ?? "")
-              if (outcome.status === "error") return yield* inject("error", outcome.error ?? info.error ?? "")
+              // Whatever the child wrote before it failed is kept, as the foreground path keeps it.
+              if (outcome.status === "error")
+                return yield* inject("error", [outcome.error ?? info.error, info.output].filter(Boolean).join("\n\n"))
               return yield* inject("cancelled", BACKGROUND_CANCELLED)
             }),
           ),
@@ -654,6 +694,19 @@ export const TaskTool = Tool.define(
 
       // This call adds to a run that is still working; its card settles when that run does.
       const joined = Effect.fn("TaskTool.joined")(function* () {
+        // The job still lists only the paths it started with, so paths this update hands the running task stay
+        // reserved against sibling launches until that run settles.
+        if (ownedPaths.length > 0) {
+          const claim = { parentSessionID: ctx.sessionID, taskID: nextSession.id, title, paths: ownedPaths }
+          claims.add(claim)
+          yield* background
+            .wait({ id: nextSession.id })
+            .pipe(
+              Effect.ensuring(Effect.sync(() => claims.delete(claim))),
+              Effect.ignore,
+              Effect.forkIn(scope, { startImmediately: true }),
+            )
+        }
         yield* background.wait({ id: nextSession.id }).pipe(
           Effect.flatMap((waited) =>
             waited.info && waited.info.status !== "running"
@@ -686,7 +739,10 @@ export const TaskTool = Tool.define(
           }),
         }
       })
-      const extendRun = () => background.extend({ id: nextSession.id, run: runTask() })
+      // The child's loop runs in its own scope, so interrupting the job's fiber alone would leave it calling the
+      // provider after a stop; every run, first or added, stops the child when interrupted.
+      const guardedRun = () => runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id)))
+      const extendRun = () => background.extend({ id: nextSession.id, run: guardedRun() })
       if (yield* extendRun()) return yield* joined()
 
       // A resumed child starts a new run: point its record at this call.
@@ -715,16 +771,27 @@ export const TaskTool = Tool.define(
           SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
           notify(nextSession.id),
         ]),
-        run: runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id))),
+        run: guardedRun(),
       })
       // start hands back the running job when a concurrent call resuming the same task_id got there first. Join that
       // run instead of dropping this call's prompt, so only the call that started it reports its result.
       if (info.metadata?.startedAt !== startedAt || info.metadata?.callID !== ctx.callID) {
+        // This call rewrote the child's record before losing the race, so point it back at the call that owns the run.
+        if (session)
+          yield* SubagentLifecycle.update(sessions, nextSession.id, {
+            ...(typeof info.metadata?.callID === "string" ? { callID: info.metadata.callID } : {}),
+            ...(typeof info.metadata?.startedAt === "number" ? { startedAt: info.metadata.startedAt } : {}),
+            background: info.metadata?.background === true,
+          })
         if (yield* extendRun()) return yield* joined()
         return yield* Effect.fail(
           new Error(`Task ${nextSession.id} was resumed by another call that has already finished; resume it again.`),
         )
       }
+
+      // A stop that landed while this call was still setting up came before the job existed, so neither the parent's
+      // sweep of its jobs nor the abort listener below saw it.
+      if (ctx.abort.aborted) yield* background.cancel(info.id)
 
       function backgroundResult() {
         return {
@@ -758,6 +825,8 @@ export const TaskTool = Tool.define(
       return yield* Effect.acquireUseRelease(
         Effect.sync(() => {
           ctx.abort.addEventListener("abort", onAbort)
+          // An abort event fires once; one that already happened is not delivered to a listener added now.
+          if (ctx.abort.aborted) onAbort()
         }),
         () =>
           Effect.gen(function* () {

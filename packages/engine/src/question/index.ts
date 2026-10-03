@@ -103,11 +103,16 @@ const layer = Layer.effect(
       pending.set(id, { info, deferred })
       yield* events.publish(Event.Asked, info)
 
-      return yield* Effect.ensuring(
-        Deferred.await(deferred),
-        Effect.sync(() => {
-          pending.delete(id)
-        }),
+      return yield* Deferred.await(deferred).pipe(
+        // A question whose asker stopped waiting is withdrawn, so clients stop showing it.
+        Effect.onInterrupt(() =>
+          pending.has(id) ? events.publish(Event.Rejected, { sessionID: info.sessionID, requestID: id }) : Effect.void,
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            pending.delete(id)
+          }),
+        ),
       )
     })
 

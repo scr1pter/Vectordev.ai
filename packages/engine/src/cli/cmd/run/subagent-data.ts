@@ -293,6 +293,12 @@ function metadata(part: ToolPart, key: string) {
 }
 
 function taskStatus(part: ToolPart): FooterSubagentTab["status"] {
+  // The subagent's lifecycle, not the tool call's: a background launch returns at once while the subagent runs, and a
+  // subagent that failed or was stopped still returns its result normally.
+  const lifecycle = metadata(part, "status")
+  if (lifecycle === "queued" || lifecycle === "running") return "running"
+  if (lifecycle === "completed" || lifecycle === "error" || lifecycle === "cancelled") return lifecycle
+
   if (part.state.status === "completed") {
     return "completed"
   }

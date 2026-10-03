@@ -15,8 +15,9 @@ export function deriveSubagentSessionPermission(input: {
   parentSessionPermission: PermissionV1.Ruleset
   subagent: Agent.Info
 }): PermissionV1.Ruleset {
-  const canTask = input.subagent.permission.some((rule) => rule.permission === "task")
-  const canTodo = input.subagent.permission.some((rule) => rule.permission === "todowrite")
+  // Only a rule that grants the tool counts: a rule denying one specialist still leaves the rest denied by default.
+  const canTask = input.subagent.permission.some((rule) => rule.permission === "task" && rule.action !== "deny")
+  const canTodo = input.subagent.permission.some((rule) => rule.permission === "todowrite" && rule.action !== "deny")
   return [
     ...input.parentSessionPermission.filter(
       (rule) => rule.permission === "external_directory" || rule.action === "deny",

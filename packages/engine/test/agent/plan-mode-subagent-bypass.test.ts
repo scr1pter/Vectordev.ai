@@ -158,3 +158,19 @@ it.effect("subagent inherits parent session deny rules as hard runtime ceilings"
     expect(Permission.evaluate("bash", "git status", effective).action).toBe("deny")
   }),
 )
+
+it.instance("a rule that only denies one specialist leaves task denied to the subagent by default", () =>
+  Effect.gen(function* () {
+    const derived = deriveSubagentSessionPermission({
+      parentSessionPermission: [],
+      subagent: testAgent({ name: "worker", mode: "subagent", permission: { task: { zebra: "deny" } } }),
+    })
+    expect(Permission.evaluate("task", "general", derived).action).toBe("deny")
+    // A rule that grants task does let the subagent launch its own.
+    const granted = deriveSubagentSessionPermission({
+      parentSessionPermission: [],
+      subagent: testAgent({ name: "worker", mode: "subagent", permission: { task: { explore: "allow" } } }),
+    })
+    expect(granted.some((rule) => rule.permission === "task")).toBe(false)
+  }),
+)

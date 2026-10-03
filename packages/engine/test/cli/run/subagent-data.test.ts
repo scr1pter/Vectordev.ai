@@ -262,6 +262,28 @@ describe("run subagent data", () => {
     expect(snapshot.questions.map((item) => item.id)).toEqual(["question-1"])
   })
 
+  test("a task tab follows the subagent's lifecycle, not the tool call's", () => {
+    const tab = (status: string) => {
+      const message = taskMessage("child-1")
+      const part = message.parts[0]
+      if (part?.type === "tool" && part.state.status === "completed")
+        part.state.metadata = { ...part.state.metadata, status }
+      const data = createSubagentData()
+      bootstrapSubagentData({
+        data,
+        messages: [message],
+        children: [{ id: "child-1" }],
+        permissions: [],
+        questions: [],
+      })
+      return snapshotSubagentData(data).tabs[0]?.status
+    }
+    // A background launch returns at once while its subagent works; a failed or stopped one still returns normally.
+    expect(tab("running")).toBe("running")
+    expect(tab("error")).toBe("error")
+    expect(tab("cancelled")).toBe("cancelled")
+  })
+
   test("marks interrupted task tabs as cancelled during bootstrap", () => {
     const data = createSubagentData()
 

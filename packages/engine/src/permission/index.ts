@@ -101,11 +101,19 @@ const layer = Layer.effect(
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
       pending.set(id, { info, deferred })
       yield* events.publish(Event.Asked, info)
-      return yield* Effect.ensuring(
-        Deferred.await(deferred),
-        Effect.sync(() => {
-          pending.delete(id)
-        }),
+      return yield* Deferred.await(deferred).pipe(
+        // A request whose asker stopped waiting, such as a stopped subagent, is withdrawn the way a rejection is
+        // announced, so clients stop showing a prompt that can no longer be answered.
+        Effect.onInterrupt(() =>
+          pending.has(id)
+            ? events.publish(Event.Replied, { sessionID: info.sessionID, requestID: id, reply: "reject" })
+            : Effect.void,
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            pending.delete(id)
+          }),
+        ),
       )
     })
 

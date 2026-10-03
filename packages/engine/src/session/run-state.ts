@@ -129,33 +129,27 @@ const cancelBackgroundJobs = Effect.fn("SessionRunState.cancelBackgroundJobs")(f
   sessionID: SessionID,
 ) {
   const jobs = yield* background.list()
-  const pending = new Set<string>([sessionID])
-  const cancelled = new Set<string>()
-  const matches = (job: BackgroundJob.Info) => {
-    if (job.status !== "running") return false
-    if (cancelled.has(job.id)) return false
-    if (pending.has(job.id)) return true
-    if (typeof job.metadata?.sessionId === "string" && pending.has(job.metadata.sessionId)) return true
-    return typeof job.metadata?.parentSessionId === "string" && pending.has(job.metadata.parentSessionId)
+  // A subagent that already finished can still have a background task of its own running, so the walk follows
+  // finished jobs to their descendants and cancels only what is still running.
+  const family = new Set<string>([sessionID])
+  const linked = (job: BackgroundJob.Info) =>
+    family.has(job.id) ||
+    (typeof job.metadata?.sessionId === "string" && family.has(job.metadata.sessionId)) ||
+    (typeof job.metadata?.parentSessionId === "string" && family.has(job.metadata.parentSessionId))
+  const grow = (): void => {
+    const before = family.size
+    jobs.filter(linked).forEach((job) => {
+      family.add(job.id)
+      if (typeof job.metadata?.sessionId === "string") family.add(job.metadata.sessionId)
+    })
+    if (family.size > before) grow()
   }
-  let batch = jobs.filter(matches)
-  while (batch.length > 0) {
-    yield* Effect.forEach(
-      batch,
-      (job) =>
-        background.cancel(job.id).pipe(
-          Effect.tap(() =>
-            Effect.sync(() => {
-              cancelled.add(job.id)
-              pending.add(job.id)
-              if (typeof job.metadata?.sessionId === "string") pending.add(job.metadata.sessionId)
-            }),
-          ),
-        ),
-      { concurrency: "unbounded", discard: true },
-    )
-    batch = jobs.filter(matches)
-  }
+  grow()
+  yield* Effect.forEach(
+    jobs.filter((job) => job.status === "running" && linked(job)),
+    (job) => background.cancel(job.id),
+    { concurrency: "unbounded", discard: true },
+  )
 })
 
 function busyError(sessionID: SessionID) {
