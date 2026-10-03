@@ -9,6 +9,7 @@ import { MessageV2 } from "./message-v2"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
+import { BackgroundJob } from "@/background/job"
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -41,6 +42,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const summary = yield* SessionSummary.Service
     const state = yield* SessionRunState.Service
+    const background = yield* BackgroundJob.Service
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
@@ -123,18 +125,40 @@ const layer = Layer.effect(
         }
         remove.push(msg)
       }
+      const partID = session.revert.partID
+      const idx = target && partID ? target.parts.findIndex((part) => part.id === partID) : -1
+      const removeParts = target && idx >= 0 ? target.parts.slice(idx) : []
+      // A background task launched by a call the commit removes would keep spending and editing on top of the undo,
+      // and its result has nowhere to go. While the revert was pending it ran on, so a redo still got its result.
+      const removed = new Set<string>(remove.map((msg) => msg.info.id))
+      const calls = new Set(removeParts.flatMap((part) => (part.type === "tool" ? [part.callID] : [])))
+      const launched = (job: BackgroundJob.Info) => {
+        const messageID = job.metadata?.parentMessageId
+        if (typeof messageID !== "string") return false
+        if (removed.has(messageID)) return true
+        return (
+          messageID === target?.info.id && typeof job.metadata?.callID === "string" && calls.has(job.metadata.callID)
+        )
+      }
+      const jobs = yield* background.list()
+      yield* Effect.forEach(
+        jobs.filter(
+          (job) =>
+            job.type === "task" &&
+            job.status === "running" &&
+            job.metadata?.parentSessionId === sessionID &&
+            launched(job),
+        ),
+        (job) => background.cancel(job.id),
+        { concurrency: "unbounded", discard: true },
+      )
       for (const msg of remove) {
         yield* sessions.removeMessage({ sessionID, messageID: msg.info.id })
       }
-      if (session.revert.partID && target) {
-        const partID = session.revert.partID
-        const idx = target.parts.findIndex((part) => part.id === partID)
-        if (idx >= 0) {
-          const removeParts = target.parts.slice(idx)
-          target.parts = target.parts.slice(0, idx)
-          for (const part of removeParts) {
-            yield* sessions.removePart({ sessionID, messageID: target.info.id, partID: part.id })
-          }
+      if (target && removeParts.length > 0) {
+        target.parts = target.parts.slice(0, idx)
+        for (const part of removeParts) {
+          yield* sessions.removePart({ sessionID, messageID: target.info.id, partID: part.id })
         }
       }
       yield* sessions.clearRevert(sessionID)
@@ -147,7 +171,15 @@ const layer = Layer.effect(
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Session.node, Snapshot.node, Storage.node, EventV2Bridge.node, SessionSummary.node, SessionRunState.node],
+  deps: [
+    Session.node,
+    Snapshot.node,
+    Storage.node,
+    EventV2Bridge.node,
+    SessionSummary.node,
+    SessionRunState.node,
+    BackgroundJob.node,
+  ],
 })
 
 export * as SessionRevert from "./revert"

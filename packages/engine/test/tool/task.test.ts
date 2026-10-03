@@ -14,6 +14,7 @@ import { Session } from "@/session/session"
 import type { SessionPrompt } from "../../src/session/prompt"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionRunState } from "@/session/run-state"
+import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
 
 import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
@@ -47,6 +48,7 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
       Session.node,
       SessionProjector.node,
       SessionRunState.node,
+      SessionRevert.node,
       SessionStatus.node,
       Truncate.node,
       ToolRegistry.node,
@@ -2017,6 +2019,31 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("committing a revert stops the background task the reverted turn launched", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const jobs = yield* BackgroundJob.Service
+      const revert = yield* SessionRevert.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) => (input.sessionID === chat.id ? Effect.succeed(reply(input, "noted")) : Effect.never),
+      }
+      const started = yield* def.execute(
+        { description: "survey", prompt: "Survey the handlers.", subagent_type: "general", background: true },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+      )
+      yield* sessions.setRevert({ sessionID: chat.id, revert: { messageID: assistant.id }, summary: undefined })
+      // A pending revert can still be undone, so the task runs on.
+      expect((yield* jobs.get(started.metadata.sessionId))?.status).toBe("running")
+
+      yield* revert.cleanup(yield* sessions.get(chat.id))
+
+      expect((yield* jobs.get(started.metadata.sessionId))?.status).toBe("cancelled")
+    }),
+  )
+
   it.instance("cancelling a child run cancels its own pre-runner task job", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
@@ -2474,6 +2501,47 @@ describe("tool.task", () => {
       expect(text).toContain('state="cancelled"')
       expect(text).toContain("Background task cancelled: long survey")
       expect((yield* sessions.get(result.metadata.sessionId)).metadata?.subagent?.status).toBe("cancelled")
+    }),
+  )
+
+  background.instance("stopping a background subagent stops what depends on it without starting a parent turn", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const notes: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) => {
+          if (input.sessionID !== chat.id) return Effect.never
+          notes.push(input)
+          return Effect.succeed(reply(input, "noted"))
+        },
+      }
+      const launch = (prompt: string, depends?: string) =>
+        def.execute(
+          {
+            description: "survey",
+            prompt,
+            subagent_type: "general",
+            background: true,
+            ...(depends ? { depends_on: [depends] } : {}),
+          },
+          taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+        )
+      const first = yield* launch("Survey the handlers.")
+      const next = yield* launch("Fix what the survey finds.", first.metadata.sessionId)
+
+      yield* jobs.cancel(first.metadata.sessionId)
+      yield* jobs.wait({ id: next.metadata.sessionId, timeout: 2_000 })
+      yield* pollWithTimeout(
+        Effect.sync(() => (notes.length >= 2 ? true : undefined)),
+        "both tasks should leave a note",
+        "3 seconds",
+      )
+
+      expect((yield* jobs.get(next.metadata.sessionId))?.status).toBe("cancelled")
+      expect(notes.map((note) => note.noReply)).toEqual([true, true])
     }),
   )
 

@@ -1424,11 +1424,14 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
         const all = await Promise.all(
           ids.map((sessionID) => runLocalEffect(sessionSvc.messages({ sessionID })).catch(() => [])),
         )
+        // The judge that ran last, by its latest message: one resumed with task_id can be older than another.
+        const lastActive = (kid: (typeof kids)[number]) =>
+          all[ids.indexOf(kid.id)]?.at(-1)?.info.time.created ?? kid.time.created
         const judgeSession = kids
           .filter((k) => k.agent === "judge")
-          .sort((a, b) => a.time.created - b.time.created)
+          .sort((a, b) => lastActive(a) - lastActive(b))
           .at(-1)
-        const judge = judgeSession ? judgeTextFromMessages(all[ids.indexOf(judgeSession.id)] ?? []) : undefined
+        const judge = judgeSession ? (judgeTextFromMessages(all[ids.indexOf(judgeSession.id)] ?? []) ?? "") : undefined
         return { messages: all.flat(), judge }
       }
 

@@ -210,16 +210,18 @@ export const TaskTool = Tool.define(
     const claimLock = Semaphore.makeUnsafe(1)
 
     const dependencyFailure = Effect.fn("TaskTool.dependencyFailure")(function* (job: BackgroundJob.Info) {
-      if (job.status === "error") return `Dependency ${job.id} failed${job.error ? `: ${job.error}` : "."}`
-      if (job.status === "cancelled") return `Dependency ${job.id} was cancelled.`
+      const cancelled = { cancelled: true, message: `Dependency ${job.id} was cancelled.` }
+      if (job.status === "error")
+        return { cancelled: false, message: `Dependency ${job.id} failed${job.error ? `: ${job.error}` : "."}` }
+      if (job.status === "cancelled") return cancelled
       if (job.status !== "completed") return undefined
       // A job that returned normally can still have failed or been stopped inside its child.
       const child = job.metadata?.sessionId
       if (typeof child !== "string") return undefined
       const failure = (yield* SubagentLifecycle.observe(sessions, SessionID.make(child)))?.failure
       if (!failure) return undefined
-      if (failure.status === "cancelled") return `Dependency ${job.id} was cancelled.`
-      return `Dependency ${job.id} failed${failure.error ? `: ${failure.error}` : "."}`
+      if (failure.status === "cancelled") return cancelled
+      return { cancelled: false, message: `Dependency ${job.id} failed${failure.error ? `: ${failure.error}` : "."}` }
     })
 
     const run = Effect.fn("TaskTool.execute")(function* (
@@ -261,7 +263,7 @@ export const TaskTool = Tool.define(
           )
         }
         const failed = yield* dependencyFailure(job)
-        if (failed) return yield* Effect.fail(new Error(failed))
+        if (failed) return yield* Effect.fail(new Error(failed.message))
         if (params.task_id && dependencyReaches(jobs, dependency, params.task_id)) {
           return yield* Effect.fail(new Error(`Dependency ${dependency} would create a task cycle.`))
         }
@@ -627,7 +629,10 @@ export const TaskTool = Tool.define(
             return yield* Effect.fail(new Error(`Dependency ${dependency} disappeared before this task could start.`))
           }
           const failed = yield* dependencyFailure(waited.info)
-          if (failed) return yield* Effect.fail(new Error(failed))
+          // Work that was stopped stops what waits on it too, the same quiet way: a failure would report back and
+          // start a parent turn after the user pressed Stop.
+          if (failed?.cancelled) return yield* Effect.interrupt
+          if (failed) return yield* Effect.fail(new Error(failed.message))
         }
         if (dependencies.length > 0) yield* transition({ status: "running" })
         // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child.

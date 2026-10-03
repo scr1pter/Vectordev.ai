@@ -160,18 +160,23 @@ export function collectChecks(messages: readonly SessionV1.WithParts[]): Evidenc
 }
 
 /**
- * Last text the assistant wrote in a (judge) session, or undefined. The
- * verdict block is the final thing the judge prompt asks for, so it is in the
- * last text part of the last assistant message.
+ * Last text the assistant wrote in a (judge) session's latest run, undefined
+ * when that run has no reply yet, or "" when it wrote no text or failed. The
+ * verdict block is the final thing the judge prompt asks for. A judge resumed
+ * with task_id starts a new run with a new brief, and the earlier run's
+ * verdict no longer applies.
  */
 export function judgeTextFromMessages(messages: readonly SessionV1.WithParts[]): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const { info, parts } = messages[i]
-    if (info.role !== "assistant") continue
-    const text = parts.findLast((p) => p.type === "text")
-    if (text && text.text.trim()) return text.text
-  }
-  return undefined
+  const replies = messages
+    .slice(messages.findLastIndex((message) => message.info.role === "user") + 1)
+    .filter((message) => message.info.role === "assistant")
+  const last = replies.at(-1)
+  if (!last) return undefined
+  if (last.info.role === "assistant" && last.info.error) return ""
+  const text = replies
+    .flatMap((message) => message.parts)
+    .findLast((part): part is SessionV1.TextPart => part.type === "text" && part.text.trim().length > 0)
+  return text?.text ?? ""
 }
 
 export function buildEvidenceBody(input: EvidenceInput): string {

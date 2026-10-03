@@ -224,6 +224,17 @@ describe("judge verdict", () => {
     expect(judgeTextFromMessages(messages)).toBe(report)
     expect(judgeTextFromMessages([withParts(user())])).toBeUndefined()
   })
+
+  test("only the judge's latest run gives the verdict", () => {
+    const earlier = [withParts(user()), withParts(assistant(), [text(report)])]
+    // A resumed judge that failed before writing anything has no verdict, not the earlier run's.
+    const failed = { ...assistant(), error: { name: "APIError", data: { message: "overloaded", isRetryable: false } } }
+    expect(judgeTextFromMessages([...earlier, withParts(user()), withParts(failed as SessionV1.Assistant)])).toBe("")
+    expect(
+      judgeTextFromMessages([...earlier, withParts(user()), withParts(assistant(), [bash("bun test", "ok")])]),
+    ).toBe("")
+    expect(judgeTextFromMessages([...earlier, withParts(user())])).toBeUndefined()
+  })
 })
 
 describe("buildEvidenceBody", () => {
