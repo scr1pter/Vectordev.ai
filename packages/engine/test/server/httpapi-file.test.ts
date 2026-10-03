@@ -60,19 +60,32 @@ describe("file HttpApi", () => {
       request(FilePaths.findText, tmp.path, { pattern: "needle" }),
       request(FilePaths.findSymbol, tmp.path, { query: "hello" }),
     ])
+
+    expect(text.status).toBe(200)
+    expect(await text.json()).toContainEqual(expect.objectContaining({ line_number: 1 }))
+
+    const state = { lastBody: undefined as unknown }
     const files = await Effect.runPromise(
       pollWithTimeout(
         Effect.promise(async () => {
           const response = await request(FilePaths.findFile, tmp.path, { query: "hello", type: "file" })
+          expect(response.status).toBe(200)
           const body = await response.json()
+          state.lastBody = body
+          expect(Array.isArray(body)).toBe(true)
           return body.includes("hello.txt") ? { response, body } : undefined
         }),
         "file search index was not ready",
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new Error(
+              `file search index was not ready: directory=${tmp.path}; lastBody=${JSON.stringify(state.lastBody)?.slice(0, 1_024) ?? "unavailable"}`,
+              { cause },
+            ),
+        ),
       ),
     )
-
-    expect(text.status).toBe(200)
-    expect(await text.json()).toContainEqual(expect.objectContaining({ line_number: 1 }))
 
     expect(files.response.status).toBe(200)
     expect(files.body).toContain("hello.txt")
