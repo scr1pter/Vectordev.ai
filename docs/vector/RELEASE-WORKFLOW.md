@@ -46,9 +46,7 @@ set the public plugin artifact version.
    CLI release is complete. Only then create the desktop release tag and run the
    desktop workflow. Its prepare job rejects absent or mismatched dependencies.
 5. Confirm all platform installers, manifests and update channels before marking
-   the release available. Unsigned releases also advance the update feeds (owner decision,
-   2 October 2026), so installed copies are offered them through Check for Updates; the
-   app verifies publisher signatures only for signed builds.
+   the release available. Unsigned downloads must not advance signed update feeds.
 
 Container preparation uses the same verified musl archives and commit. Publishing
 additionally requires the owner-controlled namespace and explicit enablement; see

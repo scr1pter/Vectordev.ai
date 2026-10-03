@@ -43,8 +43,8 @@ export function updaterPresentation(state: UpdaterState | undefined, currentVers
   }
   if (state.status === "up-to-date") {
     return {
-      title: "Vector is up to date",
-      description: `Vector ${version} is the latest release.`,
+      title: "Automatic updates are current",
+      description: `No newer automatic update is available for Vector ${version}. Check Latest installers for manual-download releases.`,
       action: "Check again",
     }
   }

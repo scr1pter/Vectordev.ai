@@ -20,10 +20,11 @@ describe("updater presentation", () => {
     )
   })
 
-  test("says the installed version is the latest when the feed has nothing newer", () => {
-    expect(updaterPresentation({ status: "up-to-date" }, "1.99.99")).toEqual({
-      title: "Vector is up to date",
-      description: "Vector 1.99.99 is the latest release.",
+  test("does not confuse the automatic update feed with manual-download releases", () => {
+    expect(updaterPresentation({ status: "up-to-date" }, "1.99.1")).toEqual({
+      title: "Automatic updates are current",
+      description:
+        "No newer automatic update is available for Vector 1.99.1. Check Latest installers for manual-download releases.",
       action: "Check again",
     })
   })

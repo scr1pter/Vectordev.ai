@@ -29,7 +29,7 @@ vector
 
 Published builds and their notes are at [vectordev.ai/releases](https://vectordev.ai/releases).
 
-**Release status.** This branch prepares **1.999.99** for desktop and CLI. Public downloads are still desktop **1.99.8** and CLI **1.99.7**; the guarded personal OpenRouter free-model setup described below is coming in the new build. Model access and Vector's desktop subscription are separate. See the [release notes](https://vectordev.ai/releases#release-1-999-99) for what is prepared and what remains unavailable.
+**Release status.** This branch prepares **1.99.99** for desktop and CLI. Public downloads are still desktop **1.99.8** and CLI **1.99.7**; the guarded personal OpenRouter free-model setup described below is coming in the new build. Vector is free; model access follows the provider you connect. See the [release notes](https://vectordev.ai/releases#release-1-99-99) for what is prepared and what remains unavailable.
 
 ## Features
 
@@ -65,7 +65,7 @@ Published builds and their notes are at [vectordev.ai/releases](https://vectorde
 
 ### Cloud and GitHub
 
-**Cloud work in the loop.** Connect your own Vercel, Netlify or Supabase account, link a project, manage its environment, apply repository migrations and publish from the task. The upcoming 1.999.99 build uses a single linked hosting destination automatically and asks when several are available. It protects environment drafts when you switch projects, writes local `.env` files privately, and keeps OAuth client secrets on the hosted broker. Provider sign-in requires Vector's OAuth registrations; manual token connections remain available where supported. Hosting, databases and domains follow your provider's plan and are separate from free model access. See [Cloud setup](docs/vector/CLOUD-OAUTH.md).
+**Cloud work in the loop.** Connect your own Vercel, Netlify or Supabase account, link a project, manage its environment, apply repository migrations and publish from the task. The upcoming 1.99.99 build uses a single linked hosting destination automatically and asks when several are available. It protects environment drafts when you switch projects, writes local `.env` files privately, and keeps OAuth client secrets on the hosted broker. Provider sign-in requires Vector's OAuth registrations; manual token connections remain available where supported. Hosting, databases and domains follow your provider's plan and are separate from free model access. See [Cloud setup](docs/vector/CLOUD-OAUTH.md).
 
 **Task in, pull request out.** Comment `/vector fix the flaky auth test` on a GitHub issue and Vector opens a branch and a pull request. Tasks and reviews use `/vector`, `/vx`, `/vectorscope`, or `/vs`. Every PR carries its evidence: the files changed, the checks it ran with their exit codes and output, what the run cost, and the judge's verdict.
 
@@ -88,7 +88,7 @@ Run `vector` inside any repository to start the agent. `vector auth login` adds 
 
 In the candidate, GitHub workflows authenticate with `VECTOR_CLI_TOKEN`. Set `MODEL` to `provider/model` and pass its provider credential as a repository secret; the shared free service remains off, and a Vector account token alone does not provide model access. Guarded personal OpenRouter free models use the separately configured `OPENROUTER_API_KEY`. `GITHUB_TOKEN` remains the default GitHub credential; the prepared Vector App mode requires owner setup and explicit opt-in. See [GitHub setup](https://vectordev.ai/docs/vectorscope#github) and [Vectorscope](https://vectordev.ai/docs/vectorscope).
 
-Desktop releases are not yet code-signed. Installed copies update from inside the app with Check for Updates; a new install is a download from your account page, and macOS or Windows may show an unidentified-developer or unknown-publisher warning on first launch.
+Unsigned desktop releases require a manual download. They do not replace signed automatic-update feeds, and macOS or Windows may show an unidentified-developer or unknown-publisher warning.
 
 ## Configuration
 

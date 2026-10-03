@@ -2,7 +2,7 @@
 
 ## Current availability
 
-The Cloud completion changes described here are prepared for **1.999.99** and
+The Cloud completion changes described here are prepared for **1.99.99** and
 are not a published desktop release. Provider application registration, hosted
 configuration and a real browser-to-desktop consent check are separate release
 steps. No Vercel, Netlify or Supabase registration has been confirmed complete
