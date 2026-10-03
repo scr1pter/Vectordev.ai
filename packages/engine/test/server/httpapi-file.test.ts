@@ -61,16 +61,18 @@ describe("file HttpApi", () => {
       request(FilePaths.findSymbol, tmp.path, { query: "hello" }),
     ])
 
-    expect(text.status).toBe(200)
-    expect(await text.json()).toContainEqual(expect.objectContaining({ line_number: 1 }))
+    const textBody = await text.text()
+    expect(text.status, `text search body=${JSON.stringify(textBody.slice(0, 1_024))}`).toBe(200)
+    expect(JSON.parse(textBody)).toContainEqual(expect.objectContaining({ line_number: 1 }))
 
     const state = { lastBody: undefined as unknown }
     const files = await Effect.runPromise(
       pollWithTimeout(
         Effect.promise(async () => {
           const response = await request(FilePaths.findFile, tmp.path, { query: "hello", type: "file" })
-          expect(response.status).toBe(200)
-          const body = await response.json()
+          const responseBody = await response.text()
+          expect(response.status, `file search body=${JSON.stringify(responseBody.slice(0, 1_024))}`).toBe(200)
+          const body = JSON.parse(responseBody)
           state.lastBody = body
           expect(Array.isArray(body)).toBe(true)
           return body.includes("hello.txt") ? { response, body } : undefined
@@ -90,7 +92,8 @@ describe("file HttpApi", () => {
     expect(files.response.status).toBe(200)
     expect(files.body).toContain("hello.txt")
 
-    expect(symbols.status).toBe(200)
-    expect(await symbols.json()).toEqual([])
+    const symbolsBody = await symbols.text()
+    expect(symbols.status, `symbol search body=${JSON.stringify(symbolsBody.slice(0, 1_024))}`).toBe(200)
+    expect(JSON.parse(symbolsBody)).toEqual([])
   })
 })
