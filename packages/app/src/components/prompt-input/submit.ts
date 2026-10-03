@@ -1,4 +1,8 @@
-import { shouldUseCompletionJudge, VERIFIED_COMPLETION_POLICY } from "@/features/judge/verified-completion"
+import {
+  completionPolicy,
+  shouldUseCompletionJudge,
+  VERIFIED_COMPLETION_POLICY,
+} from "@/features/judge/verified-completion"
 import type { Message, Session } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { base64Encode } from "@vectordevai/core/util/encode"
@@ -219,16 +223,15 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
 
     // The file map is a starting point for a session. On a later message it would stay in the history and be sent
     // again on every request, while the agent already knows the code it has read.
-    const replied = (input.sync.data.message?.[input.draft.sessionID] ?? []).some(
-      (message) => message.role === "assistant",
-    )
+    const history = input.sync.data.message?.[input.draft.sessionID] ?? []
+    const replied = history.some((message) => message.role === "assistant")
     const preparation =
       difficulty === "trivial" || replied
         ? undefined
         : await globalThis.window?.api?.prepareAgentTask?.(input.draft.sessionDirectory, text).catch(() => undefined)
     const syntheticText = [
       ...(preparation?.instruction ? [preparation.instruction] : []),
-      ...(llmJudge ? [VERIFIED_COMPLETION_POLICY] : []),
+      ...(llmJudge ? [completionPolicy(history, (id) => input.sync.data.part?.[id])] : []),
     ]
     await input.client.session.promptAsync({
       sessionID: input.draft.sessionID,

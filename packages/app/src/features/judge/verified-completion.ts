@@ -17,6 +17,28 @@ export const VERIFIED_COMPLETION_POLICY = [
   "</vector_verified_completion>",
 ].join("\n")
 
+// Each user message stays in the history and is sent again on every request, so a prompt in a session that already
+// carries the policy gets this pointer instead of another copy.
+export const VERIFIED_COMPLETION_REMINDER =
+  "<vector_verified_completion>LLM-as-a-judge is still enabled: follow the verified-completion policy given earlier in this session.</vector_verified_completion>"
+
+// The full policy, unless a prompt since the last compaction already carries it. A compaction replaces the history
+// it covers, so the policy is given again after one.
+export function completionPolicy(
+  messages: readonly { id: string; role: string; summary?: unknown }[],
+  parts: (messageID: string) => readonly { type: string; text?: string }[] | undefined,
+) {
+  const start = messages.findLastIndex((message) => message.role === "assistant" && message.summary === true) + 1
+  const given = messages
+    .slice(start)
+    .some(
+      (message) =>
+        message.role === "user" &&
+        (parts(message.id) ?? []).some((part) => part.type === "text" && part.text === VERIFIED_COMPLETION_POLICY),
+    )
+  return given ? VERIFIED_COMPLETION_REMINDER : VERIFIED_COMPLETION_POLICY
+}
+
 // Two lanes can never satisfy the policy. `plan` produces no implementation to
 // verify, and `quick` — the greeting lane — is configured with `"*": "deny"` in
 // the engine's agent registry, so it has no task tool and cannot spawn the judge
