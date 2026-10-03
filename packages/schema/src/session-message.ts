@@ -181,6 +181,8 @@ export const Assistant = Schema.Struct({
   }).pipe(optional),
   finish: Schema.String.pipe(optional),
   cost: Schema.Finite.pipe(optional),
+  // The model lists no price, so cost is 0 because nothing could be charged, not because the step was free.
+  unpriced: Schema.Boolean.pipe(optional),
   tokens: Schema.Struct({
     input: Schema.Finite,
     output: Schema.Finite,

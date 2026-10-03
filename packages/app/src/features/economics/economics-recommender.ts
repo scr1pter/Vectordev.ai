@@ -1,4 +1,10 @@
-import { totalTokens, type ModelOutcome, type ModelRecommendation, type TaskCategory } from "./economics-types"
+import {
+  knownCostUsd,
+  totalTokens,
+  type ModelOutcome,
+  type ModelRecommendation,
+  type TaskCategory,
+} from "./economics-types"
 
 type Group = {
   provider: string
@@ -28,14 +34,7 @@ function checkPassRateOf(outcomes: ModelOutcome[]): number | undefined {
 // reported cost must not sort ahead of one that did just because its absent
 // cost reads as cheaper.
 function medianCostOf(outcomes: ModelOutcome[]): number | undefined {
-  // The session engine uses 0 as its compatibility fallback when a model has
-  // no finite catalog price. Treating that sentinel as measured free spend
-  // would make an unpriced model outrank one whose provider reported a real
-  // charge. This matches the context ledger, which also renders non-positive
-  // spend as unknown rather than free.
-  const costs = outcomes
-    .map((o) => o.costUsd)
-    .filter((cost): cost is number => typeof cost === "number" && Number.isFinite(cost) && cost > 0)
+  const costs = outcomes.map(knownCostUsd).filter((cost): cost is number => cost !== undefined)
   if (costs.length === 0) return undefined
   return median(costs)
 }

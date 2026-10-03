@@ -27,6 +27,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
         }
       : undefined,
     cost: row.cost,
+    unpricedSteps: row.unpriced_steps || undefined,
     tokens: {
       input: row.tokens_input,
       output: row.tokens_output,

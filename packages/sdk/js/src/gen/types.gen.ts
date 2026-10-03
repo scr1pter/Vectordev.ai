@@ -201,6 +201,7 @@ export type Session = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -391,6 +392,7 @@ export type AssistantMessage = {
   }
   summary?: boolean
   cost: number
+  unpriced?: boolean
   tokens: {
     total?: number
     input: number
@@ -593,6 +595,7 @@ export type StepFinishPart = {
   reason: string
   snapshot?: string
   cost: number
+  unpriced?: boolean
   tokens: {
     total?: number
     input: number
@@ -1000,6 +1003,7 @@ export type GlobalEvent = {
           assistantMessageID: string
           finish: string
           cost: number
+          unpriced?: boolean
           tokens: {
             input: number
             output: number
@@ -2186,6 +2190,7 @@ export type Model = {
         write: number
       }
     }
+    unpriced?: boolean
   }
   limit: {
     context: number
@@ -2292,6 +2297,7 @@ export type GlobalSession = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2357,6 +2363,7 @@ export type SessionUsageDay = {
 export type SessionUsageSummary = {
   lifetimeTokens: number
   lifetimeCost: number
+  unpricedResponses?: number
   inputTokens: number
   outputTokens: number
   reasoningTokens: number
@@ -2802,6 +2809,7 @@ export type Session1 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2855,6 +2863,7 @@ export type Session2 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2921,6 +2930,7 @@ export type Session3 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -2986,6 +2996,7 @@ export type Session4 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3039,6 +3050,7 @@ export type Session5 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3096,6 +3108,7 @@ export type Session6 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3197,6 +3210,7 @@ export type Session7 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3250,6 +3264,7 @@ export type Session8 = {
     diffs?: Array<SnapshotFileDiff>
   }
   cost?: number
+  unpricedSteps?: number
   tokens?: {
     input: number
     output: number
@@ -3959,6 +3974,7 @@ export type SessionMessageAssistant = {
   }
   finish?: string
   cost?: number
+  unpriced?: boolean
   tokens?: {
     input: number
     output: number
@@ -4429,6 +4445,7 @@ export type SyncEventSessionNextStepEnded = {
       assistantMessageID: string
       finish: string
       cost: number
+      unpriced?: boolean
       tokens: {
         input: number
         output: number
@@ -4919,6 +4936,7 @@ export type SessionV2Info = {
   agent?: string
   model?: ModelRef
   cost: number
+  unpricedSteps?: number
   tokens: {
     input: number
     output: number
@@ -5218,6 +5236,7 @@ export type SessionNextStepEnded = {
     assistantMessageID: string
     finish: string
     cost: number
+    unpriced?: boolean
     tokens: {
       input: number
       output: number
@@ -7279,6 +7298,7 @@ export type EventSessionNextStepEnded = {
     assistantMessageID: string
     finish: string
     cost: number
+    unpriced?: boolean
     tokens: {
       input: number
       output: number

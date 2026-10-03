@@ -114,5 +114,6 @@ export function outcomesFromWorkspaceRecord(
     changedFiles: record.changedFilesCount,
     usage: measured?.usage,
     costUsd: measured?.costUsd,
+    ...(measured?.costUsd !== undefined ? { costPriced: true } : {}),
   }
 }

@@ -64,6 +64,18 @@ export type ModelOutcome = {
   changedFiles: number
   usage?: TokenUsage
   costUsd?: number
+  // Set when every response of the run had a listed price, so a costUsd of 0 is a free run. Outcomes recorded before
+  // Vector marked unpriced responses lack it, and their 0 cannot be told apart from an unknown price.
+  costPriced?: boolean
+}
+
+// What a run is known to have cost, for ranking: a 0 counts only when the run was fully priced, so a model with no
+// listed price never ranks as free next to one that reported real spend.
+export function knownCostUsd(outcome: Pick<ModelOutcome, "costUsd" | "costPriced">) {
+  const cost = outcome.costUsd
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) return undefined
+  if (cost === 0 && outcome.costPriced !== true) return undefined
+  return cost
 }
 
 // A recommendation is only ever produced from real ModelOutcome history.

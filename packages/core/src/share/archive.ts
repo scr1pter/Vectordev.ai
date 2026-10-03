@@ -225,6 +225,7 @@ const layer = Layer.effect(
             model: row.model ?? undefined,
             version: row.version,
             cost: row.cost,
+            unpricedSteps: row.unpriced_steps || undefined,
             tokens: {
               input: row.tokens_input,
               output: row.tokens_output,

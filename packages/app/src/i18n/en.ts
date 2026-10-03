@@ -505,6 +505,9 @@ export const dict = {
   "context.usage.tokens": "Tokens",
   "context.usage.usage": "Usage",
   "context.usage.cost": "Cost",
+  "session.cost.unknown": "Cost unknown",
+  "session.cost.partial": "{{cost}} + unpriced",
+  "session.cost.unpricedNote": "Some steps ran on a model with no listed price, so they are not in this total.",
   "context.usage.clickToView": "Click to view context",
   "context.usage.view": "View context usage",
 

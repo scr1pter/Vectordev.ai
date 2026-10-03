@@ -35,6 +35,8 @@ export type MeasuredCost = {
   model?: string
   /** Assistant messages that reported usage. */
   turns: number
+  /** Of those, the ones that ran on a model with no listed price; costUsd leaves them out. */
+  unpriced: number
 }
 
 export type EvidenceInput = {
@@ -122,6 +124,7 @@ export function measureCost(messages: readonly SessionV1.WithParts[]): MeasuredC
     provider: last.providerID,
     model: last.modelID,
     turns: measured.length,
+    unpriced: measured.filter((message) => message.unpriced).length,
   }
 }
 
@@ -249,8 +252,10 @@ function formatChecks(checks: EvidenceCheck[], compact = false): string[] {
 
 function formatCost(cost: MeasuredCost | undefined): string {
   if (!cost) return "**Cost:** not measured"
+  const usd = `$${cost.costUsd.toFixed(cost.costUsd > 0 && cost.costUsd < 0.01 ? 4 : 2)}`
   const parts = [
-    `$${cost.costUsd.toFixed(cost.costUsd > 0 && cost.costUsd < 0.01 ? 4 : 2)}`,
+    // A turn on a model with no listed price adds nothing, so the cost is a lower bound, or unknown if that is all.
+    cost.unpriced === 0 ? usd : cost.costUsd > 0 ? `${usd} + ${cost.unpriced} unpriced` : "unknown (no listed price)",
     `${fmtTokens(cost.input)} in / ${fmtTokens(cost.output)} out`,
   ]
   if (cost.reasoning > 0) parts.push(`${fmtTokens(cost.reasoning)} reasoning`)

@@ -71,5 +71,6 @@ export function outcomeFromSession(input: {
     changedFiles: changedFileCount(input.parts),
     usage: measured.usage,
     costUsd: measured.costUsd,
+    ...(measured.costUsd !== undefined ? { costPriced: true } : {}),
   }
 }

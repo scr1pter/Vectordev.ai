@@ -17722,6 +17722,10 @@
           "cost": {
             "type": "number"
           },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -18296,6 +18300,9 @@
           },
           "cost": {
             "type": "number"
+          },
+          "unpriced": {
+            "type": "boolean"
           },
           "tokens": {
             "type": "object",
@@ -18905,6 +18912,9 @@
           },
           "cost": {
             "type": "number"
+          },
+          "unpriced": {
+            "type": "boolean"
           },
           "tokens": {
             "type": "object",
@@ -20207,6 +20217,9 @@
                       },
                       "cost": {
                         "type": "number"
+                      },
+                      "unpriced": {
+                        "type": "boolean"
                       },
                       "tokens": {
                         "type": "object",
@@ -23944,6 +23957,9 @@
                 },
                 "required": ["input", "output", "cache"],
                 "additionalProperties": false
+              },
+              "unpriced": {
+                "type": "boolean"
               }
             },
             "required": ["input", "output", "cache"],
@@ -24220,6 +24236,10 @@
           "cost": {
             "type": "number"
           },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -24425,6 +24445,10 @@
           },
           "lifetimeCost": {
             "type": "number"
+          },
+          "unpricedResponses": {
+            "type": "integer",
+            "minimum": 0
           },
           "inputTokens": {
             "type": "integer",
@@ -25770,6 +25794,10 @@
           "cost": {
             "type": "number"
           },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -25938,6 +25966,10 @@
           },
           "cost": {
             "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
           },
           "tokens": {
             "type": "object",
@@ -26143,6 +26175,10 @@
           },
           "cost": {
             "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
           },
           "tokens": {
             "type": "object",
@@ -26359,6 +26395,10 @@
           "cost": {
             "type": "number"
           },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -26527,6 +26567,10 @@
           },
           "cost": {
             "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
           },
           "tokens": {
             "type": "object",
@@ -26707,6 +26751,10 @@
           },
           "cost": {
             "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
           },
           "tokens": {
             "type": "object",
@@ -27022,6 +27070,10 @@
           "cost": {
             "type": "number"
           },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -27190,6 +27242,10 @@
           },
           "cost": {
             "type": "number"
+          },
+          "unpricedSteps": {
+            "type": "integer",
+            "minimum": 0
           },
           "tokens": {
             "type": "object",
@@ -29255,6 +29311,9 @@
           "cost": {
             "type": "number"
           },
+          "unpriced": {
+            "type": "boolean"
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -30705,6 +30764,9 @@
                   },
                   "cost": {
                     "type": "number"
+                  },
+                  "unpriced": {
+                    "type": "boolean"
                   },
                   "tokens": {
                     "type": "object",
@@ -32295,6 +32357,9 @@
           "cost": {
             "type": "number"
           },
+          "unpricedSteps": {
+            "type": "number"
+          },
           "tokens": {
             "type": "object",
             "properties": {
@@ -33166,6 +33231,9 @@
               },
               "cost": {
                 "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
               },
               "tokens": {
                 "type": "object",
@@ -39295,6 +39363,9 @@
               },
               "cost": {
                 "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
               },
               "tokens": {
                 "type": "object",

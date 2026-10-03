@@ -26,6 +26,8 @@ export class SessionAlreadyProjected extends Error {}
 
 type Usage = {
   cost: number
+  // The step ran on a model with no listed price; it counts towards the session's unpriced_steps.
+  unpriced?: boolean
   tokens: {
     input: number
     output: number
@@ -39,14 +41,18 @@ function usage(part: (typeof SessionV1.Event.PartUpdated.Type)["data"]["part"] |
   const value = part as Record<string, unknown>
   if (value.type !== "step-finish") return undefined
   if (!("cost" in value) || !("tokens" in value)) return undefined
-  return { cost: value.cost as Usage["cost"], tokens: value.tokens as Usage["tokens"] }
+  return {
+    cost: value.cost as Usage["cost"],
+    unpriced: value.unpriced === true,
+    tokens: value.tokens as Usage["tokens"],
+  }
 }
 
 function assistantUsage(row: typeof SessionMessageTable.$inferSelect | undefined): Usage | undefined {
   if (!row || row.type !== "assistant") return undefined
   const message = decodeMessage({ ...row.data, id: row.id, type: row.type })
   if (message.type !== "assistant" || message.cost === undefined || message.tokens === undefined) return undefined
-  return { cost: message.cost, tokens: message.tokens }
+  return { cost: message.cost, unpriced: message.unpriced === true, tokens: message.tokens }
 }
 
 function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInsert {
@@ -70,6 +76,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     summary_diffs: info.summary?.diffs ? [...info.summary.diffs] : undefined,
     metadata: info.metadata,
     cost: info.cost ?? 0,
+    unpriced_steps: info.unpricedSteps ?? 0,
     tokens_input: (info.tokens ?? { input: 0 }).input,
     tokens_output: (info.tokens ?? { output: 0 }).output,
     tokens_reasoning: (info.tokens ?? { reasoning: 0 }).reasoning,
@@ -106,6 +113,7 @@ function applyUsage(
     .update(SessionTable)
     .set({
       cost: sql`${SessionTable.cost} + ${value.cost * sign}`,
+      unpriced_steps: sql`${SessionTable.unpriced_steps} + ${(value.unpriced ? 1 : 0) * sign}`,
       tokens_input: sql`${SessionTable.tokens_input} + ${value.tokens.input * sign}`,
       tokens_output: sql`${SessionTable.tokens_output} + ${value.tokens.output * sign}`,
       tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${value.tokens.reasoning * sign}`,
@@ -256,6 +264,7 @@ const layer = Layer.effectDiscard(
       // generated or a subagent's record is updated.
       const {
         cost: _,
+        unpriced_steps: _unpriced,
         tokens_input: __,
         tokens_output: ___,
         tokens_reasoning: ____,

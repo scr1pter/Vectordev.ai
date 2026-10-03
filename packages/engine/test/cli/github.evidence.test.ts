@@ -16,7 +16,13 @@ import { SessionID, MessageID, PartID } from "../../src/session/schema"
 const sessionID = SessionID.make("ses_test")
 
 function assistant(
-  opts: { cost?: number; tokens?: Partial<SessionV1.Assistant["tokens"]>; providerID?: string; modelID?: string } = {},
+  opts: {
+    cost?: number
+    unpriced?: boolean
+    tokens?: Partial<SessionV1.Assistant["tokens"]>
+    providerID?: string
+    modelID?: string
+  } = {},
 ): SessionV1.Assistant {
   return {
     id: MessageID.ascending(),
@@ -30,6 +36,7 @@ function assistant(
     agent: "build",
     path: { cwd: "/", root: "/" },
     cost: opts.cost ?? 0,
+    ...(opts.unpriced ? { unpriced: true } : {}),
     tokens: {
       input: 0,
       output: 0,
@@ -150,7 +157,16 @@ describe("measureCost", () => {
       provider: "anthropic",
       model: "claude-sonnet-4",
       turns: 2,
+      unpriced: 0,
     })
+  })
+
+  test("counts turns on a model with no listed price, which the cost leaves out", () => {
+    const cost = measureCost([
+      withParts(assistant({ cost: 0.02, tokens: { input: 1000, output: 200 } })),
+      withParts(assistant({ cost: 0, unpriced: true, tokens: { input: 500, output: 100 } })),
+    ])
+    expect(cost).toMatchObject({ costUsd: 0.02, turns: 2, unpriced: 1 })
   })
 })
 

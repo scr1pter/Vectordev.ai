@@ -149,6 +149,8 @@ function build(key: string, remote: SelectableItem, url: string, prev?: Model): 
         // `/models` exposes cached-input reads only; per-request billing accounts for cache writes.
         write: 0,
       },
+      // Without listed prices a step is priced only when its response reports nano-AIU.
+      ...(prices ? {} : { unpriced: true }),
     },
     options: prev?.options ?? {},
     headers: prev?.headers ?? {},

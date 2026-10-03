@@ -78,6 +78,16 @@ export function truncateMiddle(str: string, maxLength: number = 35): string {
   return str.slice(0, keepStart) + ellipsis + str.slice(-keepEnd)
 }
 
+const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+
+// A session's recorded cost, said honestly. A step on a model that lists no price adds nothing to the cost, so a total
+// with such steps is only a lower bound, and one made of nothing else is unknown rather than $0.00.
+export function spend(cost: number | undefined, unpricedSteps: number | undefined) {
+  if (!unpricedSteps) return usd.format(cost ?? 0)
+  if (!cost) return "cost unknown"
+  return `${usd.format(cost)} + unpriced`
+}
+
 export function pluralize(count: number, singular: string, plural: string): string {
   const template = count === 1 ? singular : plural
   return template.replace("{}", count.toString())

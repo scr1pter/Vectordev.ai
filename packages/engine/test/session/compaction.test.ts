@@ -1749,6 +1749,26 @@ describe("SessionNs.getUsage", () => {
     expect(result.cost).toBe(0.625 + 0.015)
   })
 
+  test("marks a step unpriced when the model lists no price, so its 0 is not read as free", () => {
+    const unpriced = createModel({
+      context: 100_000,
+      output: 32_000,
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 }, unpriced: true },
+    })
+    const free = createModel({ context: 100_000, output: 32_000 })
+    const used = usage({ inputTokens: 1_000, outputTokens: 100, totalTokens: 1_100 })
+
+    expect(SessionNs.getUsage({ model: unpriced, usage: used })).toMatchObject({ cost: 0, unpriced: true })
+    // An explicit zero price is a free model, not an unknown one.
+    expect(SessionNs.getUsage({ model: free, usage: used })).toMatchObject({ cost: 0, unpriced: false })
+    // A step that used no tokens owes nothing whatever the price.
+    expect(SessionNs.getUsage({ model: unpriced, usage: usage({}) }).unpriced).toBe(false)
+    // Copilot's billed nano-AIU prices the step even without listed rates.
+    expect(
+      SessionNs.getUsage({ model: unpriced, usage: used, metadata: { copilot: { totalNanoAiu: 4_000_000_000 } } }),
+    ).toMatchObject({ cost: 0.04, unpriced: false })
+  })
+
   test("uses over-200k pricing when the catalog lists no exact tiers", () => {
     const model = createModel({
       context: 1_000_000,

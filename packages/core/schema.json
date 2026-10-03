@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "cb28912b-456a-4d76-8d21-3753b7298455",
+  "id": "00ec68cf-acec-41d2-8afb-6a1ba7797ab6",
   "prevIds": [
-    "fb9096dc-58e2-4391-93f4-203b9953d28a"
+    "cb28912b-456a-4d76-8d21-3753b7298455"
   ],
   "ddl": [
     {
@@ -1407,6 +1407,16 @@
       "default": "0",
       "generated": null,
       "name": "cost",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "unpriced_steps",
       "entityType": "columns",
       "table": "session"
     },

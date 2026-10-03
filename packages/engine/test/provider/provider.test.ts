@@ -449,7 +449,7 @@ it.instance(
 )
 
 it.instance(
-  "model cost defaults to zero when not specified",
+  "a configured model with no cost has zero rates marked unpriced, not free",
   Effect.gen(function* () {
     const providers = yield* list
     const model = providers[ProviderV2.ID.make("lmstudio")].models["test-model"]
@@ -457,6 +457,7 @@ it.instance(
     expect(model.cost.output).toBe(0)
     expect(model.cost.cache.read).toBe(0)
     expect(model.cost.cache.write).toBe(0)
+    expect(model.cost.unpriced).toBe(true)
   }),
   {
     config: {
@@ -951,6 +952,49 @@ it.instance(
           env: ["SINGLE_ENV_KEY"],
           models: { "model-1": { name: "Model 1", tool_call: true, limit: { context: 8000, output: 2000 } } },
           options: { baseURL: "https://api.example.com/v1" },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "a config entry without a cost keeps the catalog's long-context tiers",
+  Effect.gen(function* () {
+    yield* set("OPENAI_API_KEY", "test-api-key")
+    const providers = yield* list
+    const model = providers[ProviderV2.ID.openai].models["gpt-5.4"]
+    // Customizing options must not drop the 272K tier and price long prompts at the base rate.
+    expect(model.cost.input).toBe(2.5)
+    expect(model.cost.tiers?.map((item) => item.tier.size)).toEqual([272_000])
+    expect(model.cost.unpriced).toBeUndefined()
+  }),
+  {
+    config: {
+      provider: {
+        openai: { models: { "gpt-5.4": { options: { store: false } } } },
+      },
+    },
+  },
+)
+
+it.instance(
+  "a config entry's own over-200k rate prices its long contexts",
+  Effect.gen(function* () {
+    yield* set("ANTHROPIC_API_KEY", "test-api-key")
+    const providers = yield* list
+    const model = providers[ProviderV2.ID.anthropic].models["claude-sonnet-4-20250514"]
+    expect(model.cost.experimentalOver200K).toEqual({ input: 6, output: 22.5, cache: { read: 0.6, write: 0 } })
+  }),
+  {
+    config: {
+      provider: {
+        anthropic: {
+          models: {
+            "claude-sonnet-4-20250514": {
+              cost: { input: 3, output: 15, context_over_200k: { input: 6, output: 22.5, cache_read: 0.6 } },
+            },
+          },
         },
       },
     },

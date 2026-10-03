@@ -43,6 +43,8 @@ export const SessionTable = sqliteTable(
     summary_diffs: text({ mode: "json" }).$type<Snapshot.LegacyFileDiff[]>(),
     metadata: text({ mode: "json" }).$type<Record<string, unknown>>(),
     cost: real().notNull().default(0),
+    // Steps on a model with no listed price, which cost leaves out. Kept by the same step accounting as cost.
+    unpriced_steps: integer().notNull().default(0),
     tokens_input: integer().notNull().default(0),
     tokens_output: integer().notNull().default(0),
     tokens_reasoning: integer().notNull().default(0),

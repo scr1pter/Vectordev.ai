@@ -13,6 +13,8 @@ export type UsageBearingMessage = {
   providerID?: string
   modelID?: string
   cost?: number
+  // A step of this message ran on a model with no listed price, so its cost leaves that step out.
+  unpriced?: boolean
   tokens?: {
     input?: number
     output?: number
@@ -23,7 +25,8 @@ export type UsageBearingMessage = {
 
 export type MeasuredUsage = {
   usage: TokenUsage
-  costUsd: number
+  // Absent when any message ran unpriced: what the rest cost is not what the run cost.
+  costUsd?: number
   provider?: string
   model?: string
   messageCount: number
@@ -59,7 +62,9 @@ export function measureUsage(messages: readonly UsageBearingMessage[]): Measured
   const last = measured[measured.length - 1]
   return {
     usage: measured.map(usageOf).reduce(addUsage, emptyUsage),
-    costUsd: measured.reduce((total, message) => total + finite(message.cost), 0),
+    costUsd: measured.some((message) => message.unpriced)
+      ? undefined
+      : measured.reduce((total, message) => total + finite(message.cost), 0),
     provider: last?.providerID,
     model: last?.modelID,
     messageCount: measured.length,

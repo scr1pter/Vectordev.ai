@@ -388,6 +388,7 @@ const replaySessionProjection = (id: SessionV2.ID) =>
       .update(SessionTable)
       .set({
         cost: 0,
+        unpriced_steps: 0,
         tokens_input: 0,
         tokens_output: 0,
         tokens_reasoning: 0,
@@ -707,6 +708,33 @@ describe("SessionRunnerLLM", () => {
           cache: { read: 200_000, write: 100_000 },
         },
       })
+    }),
+  )
+
+  it.effect("marks a turn on a model with no listed price as unpriced, through replay", () =>
+    Effect.gen(function* () {
+      yield* setup
+      // A model that never passed through withPricing has no catalog price.
+      currentModel = Model.make({ id: "unpriced-model", provider: "fake", route: OpenAIChat.route })
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Measure this turn" }), resume: false })
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.stepFinish({ index: 0, reason: "stop", usage: { inputTokens: 1_000, outputTokens: 100 } }),
+        LLMEvent.finish({ reason: "stop" }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user" },
+        { type: "assistant", cost: 0, unpriced: true },
+      ])
+      expect(yield* session.get(sessionID)).toMatchObject({ cost: 0, unpricedSteps: 1 })
+
+      yield* replaySessionProjection(sessionID)
+
+      expect(yield* session.get(sessionID)).toMatchObject({ cost: 0, unpricedSteps: 1 })
     }),
   )
 

@@ -43,5 +43,6 @@ export const migrations = (
     import("./migration/20260925200604_public_session_sharing"),
     import("./migration/20260925200805_public_session_create_retry"),
     import("./migration/20260925201455_public_session_pending_updates"),
+    import("./migration/20261003000011_session_unpriced_steps"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

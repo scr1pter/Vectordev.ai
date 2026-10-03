@@ -2,6 +2,8 @@ import type { SessionUsageSummary } from "@vectordevai/sdk/v2"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { Component, For, Match, Show, Switch, createMemo, createResource, createSignal } from "solid-js"
 import { useServerSDK } from "@/context/server-sdk"
+import { useLanguage } from "@/context/language"
+import { formatSessionCost } from "@/utils/session-cost"
 import { formatServerError } from "@/utils/server-errors"
 import { normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
 import "./settings-v2.css"
@@ -115,6 +117,7 @@ const intensity = (tokens: number, peak: number) => {
 
 export const SettingsUsageV2: Component = () => {
   const sdk = useServerSDK()
+  const language = useLanguage()
   const [view, setView] = createSignal<UsageView>("daily")
   // Immediate custom hover tooltip (the native `title` only appears after a ~1s delay
   // and can't be styled). Positioned with viewport coordinates from the square's rect.
@@ -186,7 +189,14 @@ export const SettingsUsageV2: Component = () => {
                   <span>Longest streak</span>
                 </div>
                 <div>
-                  <strong>{money.format(usage.lifetimeCost)}</strong>
+                  <strong>
+                    {formatSessionCost({
+                      cost: usage.lifetimeCost,
+                      unpricedSteps: usage.unpricedResponses,
+                      format: (value) => money.format(value),
+                      t: language.t,
+                    })}
+                  </strong>
                   <span>Recorded cost</span>
                 </div>
                 <div>

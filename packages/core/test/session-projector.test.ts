@@ -572,6 +572,71 @@ describe("SessionProjector", () => {
     }).pipe(Effect.provide(sessionsLayer)),
   )
 
+  it.effect("counts an unpriced V2 settlement and uncounts it when a priced one replaces it", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "test",
+          directory: "/project",
+          title: "test",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      const assistantMessageID = SessionMessage.ID.make("msg_assistant_unpriced")
+      const tokens = { input: 10, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID,
+        timestamp: created,
+        assistantMessageID,
+        agent: "build",
+        model,
+      })
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID,
+        timestamp: DateTime.makeUnsafe(1),
+        assistantMessageID,
+        finish: "stop",
+        cost: 0,
+        unpriced: true,
+        tokens,
+      })
+
+      expect(yield* sessions.get(sessionID)).toMatchObject({ cost: 0, unpricedSteps: 1 })
+      const row = yield* db
+        .select()
+        .from(SessionMessageTable)
+        .where(eq(SessionMessageTable.id, assistantMessageID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.data).toMatchObject({ unpriced: true })
+
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID,
+        timestamp: DateTime.makeUnsafe(2),
+        assistantMessageID,
+        finish: "stop",
+        cost: 0.5,
+        tokens,
+      })
+
+      const replaced = yield* sessions.get(sessionID)
+      expect(replaced.cost).toBe(0.5)
+      expect(replaced.unpricedSteps).toBeUndefined()
+    }).pipe(Effect.provide(sessionsLayer)),
+  )
+
   it.effect("does not revive a stale incomplete assistant projection", () =>
     Effect.gen(function* () {
       const { db } = yield* Database.Service

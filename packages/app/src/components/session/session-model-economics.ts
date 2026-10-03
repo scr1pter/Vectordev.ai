@@ -1,4 +1,4 @@
-import type { ModelOutcome } from "@/features/economics/economics-types"
+import { knownCostUsd, type ModelOutcome } from "@/features/economics/economics-types"
 import { projectCost, ratesFor, type ModelCostSource } from "@/features/economics/model-pricing"
 
 function medianOf(values: number[]): number {
@@ -38,15 +38,9 @@ export function rankModelsForCategory(
       const checkPassRate = checked.length
         ? checked.filter((outcome) => outcome.checksPassed === true).length / checked.length
         : undefined
-      // Absent rather than zero: a run whose provider reported no spend must
-      // not read as free next to one that reported real spend. The engine
-      // reports 0 both for a genuinely free model and for one missing from the
-      // rate catalog, and those are indistinguishable here — so a zero is
-      // dropped and the row falls back to "cost unknown" rather than claiming
-      // a paid model is free.
-      const measured = list
-        .map((outcome) => outcome.costUsd)
-        .filter((cost): cost is number => typeof cost === "number" && cost > 0)
+      // Absent rather than zero: a run with no listed price must not read as free next to one that reported real
+      // spend, so only fully priced runs count, free ones included.
+      const measured = list.map(knownCostUsd).filter((cost): cost is number => cost !== undefined)
       return {
         provider: list[0].provider,
         model: list[0].model,

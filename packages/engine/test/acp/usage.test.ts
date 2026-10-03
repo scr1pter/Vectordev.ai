@@ -174,6 +174,10 @@ describe("acp usage", () => {
 
   test("calculates total session cost from assistant messages", () => {
     expect(UsageService.totalSessionCost([assistant({ cost: 1.25 }), user(), assistant({ cost: 2.5 })])).toBe(3.75)
+    // A response with no listed price makes the total unknown, so it is left out of the update rather than sent short.
+    expect(
+      UsageService.totalSessionCost([assistant({ cost: 1.25 }), assistant({ cost: 0, unpriced: true })]),
+    ).toBeUndefined()
   })
 
   it.effect("loads context limits from providers and caches by directory/provider/model", () => {

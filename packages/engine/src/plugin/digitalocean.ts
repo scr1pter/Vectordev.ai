@@ -16,7 +16,8 @@ function routerModel(router: { name: string }, providerID: string): Model {
     status: "active",
     headers: {},
     options: {},
-    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    // Routers bill whichever model they pick, so no single price applies.
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 }, unpriced: true },
     limit: { context: 128_000, output: 8_192 },
     capabilities: {
       temperature: true,

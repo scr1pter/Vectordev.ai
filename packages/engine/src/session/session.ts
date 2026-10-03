@@ -98,6 +98,7 @@ export function fromRow(row: SessionRow): Info {
     version: row.version,
     summary,
     cost: row.cost,
+    unpricedSteps: row.unpriced_steps || undefined,
     tokens: {
       input: row.tokens_input,
       output: row.tokens_output,
@@ -141,6 +142,7 @@ export function toRow(info: Info) {
     summary_diffs: info.summary?.diffs,
     metadata: info.metadata,
     cost: info.cost ?? 0,
+    unpriced_steps: info.unpricedSteps ?? 0,
     tokens_input: (info.tokens ?? EmptyTokens).input,
     tokens_output: (info.tokens ?? EmptyTokens).output,
     tokens_reasoning: (info.tokens ?? EmptyTokens).reasoning,
@@ -235,6 +237,8 @@ export const Info = Schema.Struct({
   parentID: optional(SessionID),
   summary: optional(Summary),
   cost: optional(Schema.Finite),
+  // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
+  unpricedSteps: optional(NonNegativeInt),
   tokens: optional(Tokens),
   share: optional(Share),
   title: Schema.String,
@@ -290,6 +294,8 @@ export type UsageEffort = Types.DeepMutable<Schema.Schema.Type<typeof UsageEffor
 export const UsageSummary = Schema.Struct({
   lifetimeTokens: NonNegativeInt,
   lifetimeCost: Schema.Finite,
+  // Responses that ran on a model with no listed price; lifetimeCost leaves them out.
+  unpricedResponses: optional(NonNegativeInt),
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
   reasoningTokens: NonNegativeInt,
@@ -442,22 +448,28 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
       ? input.model.cost.experimentalOver200K
       : input.model.cost)
   const totalNanoAiu = input.metadata?.["copilot"]?.["totalNanoAiu"]
+  const billed = typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0
   return {
-    cost:
-      typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0
-        ? // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
-          new Decimal(totalNanoAiu).div(100_000_000_000).toNumber()
-        : safe(
-            new Decimal(0)
-              .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
-              .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
-              // TODO: extend the catalog pricing model, for now:
-              // charge reasoning tokens at the same rate as output tokens
-              .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
-              .toNumber(),
-          ),
+    // The model lists no price and the provider reported no charge, so the cost below is 0 for want of a price.
+    // A step that used no tokens owes nothing either way.
+    unpriced:
+      !billed &&
+      input.model.cost?.unpriced === true &&
+      tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write > 0,
+    cost: billed
+      ? // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
+        new Decimal(totalNanoAiu).div(100_000_000_000).toNumber()
+      : safe(
+          new Decimal(0)
+            .add(new Decimal(tokens.input).mul(costInfo?.input ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.output).mul(costInfo?.output ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.cache.read).mul(costInfo?.cache?.read ?? 0).div(1_000_000))
+            .add(new Decimal(tokens.cache.write).mul(costInfo?.cache?.write ?? 0).div(1_000_000))
+            // TODO: extend the catalog pricing model, for now:
+            // charge reasoning tokens at the same rate as output tokens
+            .add(new Decimal(tokens.reasoning).mul(costInfo?.output ?? 0).div(1_000_000))
+            .toNumber(),
+        ),
     tokens,
   }
 }
@@ -1120,6 +1132,7 @@ export function summarizeUsage(messages: ReadonlyArray<typeof SessionV1.Info.Typ
   return {
     lifetimeTokens,
     lifetimeCost: activity.reduce((total, day) => total + day.cost, 0),
+    unpricedResponses: assistant.filter((message) => message.unpriced).length,
     inputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.input)), 0),
     outputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.output)), 0),
     reasoningTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.reasoning)), 0),

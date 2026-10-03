@@ -321,18 +321,21 @@ const layer = Layer.effect(
                     .files({ from: startSnapshot, to: endSnapshot })
                     .pipe(Effect.catch(() => Effect.succeed(undefined)))
                 : undefined
+            const tokens = stepSettlement.tokens
+            const cost = SessionRunnerModel.calculateCost(model, tokens, stepSettlement.providerMetadata)
+            // A step that used no tokens owes nothing whatever the model charges.
+            const used = tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
             yield* withPublication(
               events.publish(SessionEvent.Step.Ended, {
                 sessionID: session.id,
                 timestamp: yield* DateTime.now,
                 assistantMessageID: yield* publisher.startAssistant(),
                 finish: stepSettlement.finish,
-                // The durable V2 event currently requires a finite number. Preserve unknown pricing
-                // until this boundary, then use the narrow compatibility fallback rather than
-                // treating an absent catalog entry as a measured free model internally.
-                cost:
-                  SessionRunnerModel.calculateCost(model, stepSettlement.tokens, stepSettlement.providerMetadata) ?? 0,
-                tokens: stepSettlement.tokens,
+                // The durable event keeps a finite cost, so an unknown price is recorded as 0 and marked unpriced:
+                // readers then tell it apart from a free model instead of counting it as measured free spend.
+                cost: cost ?? 0,
+                ...(cost === undefined && used > 0 ? { unpriced: true } : {}),
+                tokens,
                 snapshot: endSnapshot,
                 files,
               }),

@@ -250,6 +250,55 @@ describe("session cost totals", () => {
   )
 })
 
+describe("unpriced steps", () => {
+  it.instance("a session counts steps that had no price and stops counting them when they are removed", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const info = yield* session.create({ title: "unpriced steps" })
+      const messageID = MessageID.ascending()
+      yield* session.updateMessage({
+        id: messageID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        sessionID: info.id,
+        mode: "build",
+        agent: "build",
+        cost: 0.25,
+        unpriced: true,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: "test",
+        providerID: "lmstudio",
+        time: { created: Date.now() },
+      } as unknown as SessionV1.Info)
+      const step = (cost: number, unpriced: boolean) => ({
+        id: PartID.ascending(),
+        messageID,
+        sessionID: info.id,
+        type: "step-finish" as const,
+        reason: "tool-calls",
+        cost,
+        ...(unpriced ? { unpriced: true } : {}),
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+      const priced = step(0.25, false)
+      const unknown = step(0, true)
+      yield* session.updatePart(priced)
+      yield* session.updatePart(unknown)
+
+      const counted = yield* session.get(info.id)
+      expect(counted.cost).toBe(0.25)
+      expect(counted.unpricedSteps).toBe(1)
+
+      yield* session.removePart({ sessionID: info.id, messageID, partID: unknown.id })
+      const after = yield* session.get(info.id)
+      expect(after.cost).toBe(0.25)
+      expect(after.unpricedSteps).toBeUndefined()
+      yield* session.remove(info.id)
+    }),
+  )
+})
+
 describe("Session", () => {
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {

@@ -213,6 +213,9 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           draft.time.completed = event.data.timestamp
           draft.finish = event.data.finish
           draft.cost = event.data.cost
+          // A later settlement replaces the earlier one, marker included.
+          if (event.data.unpriced) draft.unpriced = true
+          else delete draft.unpriced
           draft.tokens = event.data.tokens
           if (event.data.snapshot || event.data.files)
             draft.snapshot = {

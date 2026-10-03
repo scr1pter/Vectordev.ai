@@ -10,7 +10,7 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { Provider } from "@/provider/provider"
 import { Context, Effect, Layer, SynchronizedRef } from "effect"
 
-export type AssistantTokenCost = Pick<VectorAssistantMessage, "cost" | "tokens">
+export type AssistantTokenCost = Pick<VectorAssistantMessage, "cost" | "tokens" | "unpriced">
 
 export type AssistantMessage = AssistantTokenCost &
   Pick<VectorAssistantMessage, "role"> &
@@ -47,7 +47,7 @@ export type UsageConnection = Pick<AgentSideConnection, "sessionUpdate">
 export interface Interface {
   readonly buildUsage: (message: AssistantTokenCost) => Usage
   readonly latestAssistantMessage: (messages: readonly SessionMessage[]) => AssistantMessage | undefined
-  readonly totalSessionCost: (messages: readonly SessionMessage[]) => number
+  readonly totalSessionCost: (messages: readonly SessionMessage[]) => number | undefined
   readonly contextLimit: (input: {
     readonly directory: string
     readonly providerID: ProviderV2.ID
@@ -104,10 +104,13 @@ export function latestAssistantMessage(messages: readonly SessionMessage[]): Ass
     .at(-1)?.info
 }
 
-export function totalSessionCost(messages: readonly SessionMessage[]): number {
-  return messages
-    .filter((message): message is { readonly info: AssistantMessage } => message.info.role === "assistant")
-    .reduce((sum, message) => sum + message.info.cost, 0)
+// Undefined when a response ran on a model with no listed price: the rest of the session is not what it cost.
+export function totalSessionCost(messages: readonly SessionMessage[]): number | undefined {
+  const assistant = messages.filter(
+    (message): message is { readonly info: AssistantMessage } => message.info.role === "assistant",
+  )
+  if (assistant.some((message) => message.info.unpriced)) return undefined
+  return assistant.reduce((sum, message) => sum + message.info.cost, 0)
 }
 
 export function findContextLimit(
@@ -200,6 +203,7 @@ const layer = Layer.effect(
         modelID: ModelV2.ID.make(message.modelID),
       })
       if (!size) return
+      const cost = totalSessionCost(messages)
 
       yield* Effect.promise(() =>
         input.connection
@@ -209,7 +213,7 @@ const layer = Layer.effect(
               sessionUpdate: "usage_update",
               used: message.tokens.input + message.tokens.cache.read,
               size,
-              cost: { amount: totalSessionCost(messages), currency: "USD" },
+              cost: cost === undefined ? undefined : { amount: cost, currency: "USD" },
             },
           })
           .catch(() => {}),

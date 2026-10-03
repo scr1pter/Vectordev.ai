@@ -24,6 +24,8 @@ export const Info = Schema.Struct({
   agent: Agent.ID.pipe(optional),
   model: Model.Ref.pipe(optional),
   cost: Schema.Finite,
+  // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
+  unpricedSteps: Schema.Finite.pipe(optional),
   tokens: Schema.Struct({
     input: Schema.Finite,
     output: Schema.Finite,

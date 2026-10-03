@@ -148,6 +148,19 @@ describe("recommendModel cost ranking", () => {
     expect(result?.medianCostUsd).toBe(9.99)
   })
 
+  test("a fully priced free run ranks as free; a run with no listed price stays unknown", () => {
+    const free = [0, 1, 2].map(() =>
+      outcome({ provider: "openrouter", model: "free:free", costUsd: 0, costPriced: true, usage, latencyMs: 1_000 }),
+    )
+    const unpriced = [0, 1, 2].map(() =>
+      outcome({ provider: "local", model: "unpriced", costUsd: undefined, usage, latencyMs: 500 }),
+    )
+    const paid = runs("y", "priced", 0.5)
+    const result = recommendModel([...free, ...unpriced, ...paid], "frontend", 3)
+    expect(result?.model).toBe("free:free")
+    expect(result?.medianCostUsd).toBe(0)
+  })
+
   test("omits cost fields entirely when no run reported usage", () => {
     const result = recommendModel(
       [0, 1, 2].map(() => outcome({ provider: "x", model: "m" })),

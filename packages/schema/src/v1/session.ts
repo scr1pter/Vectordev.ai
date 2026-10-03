@@ -251,6 +251,8 @@ export const StepFinishPart = Schema.Struct({
   reason: Schema.String,
   snapshot: Schema.optional(Schema.String),
   cost: Schema.Finite,
+  // The model lists no price, so cost is 0 because nothing could be charged, not because the step was free.
+  unpriced: Schema.optional(Schema.Boolean),
   tokens: Schema.Struct({
     total: Schema.optional(Schema.Finite),
     input: Schema.Finite,
@@ -479,6 +481,8 @@ export const Assistant = Schema.Struct({
   }),
   summary: Schema.optional(Schema.Boolean),
   cost: Schema.Finite,
+  // At least one step of this message ran on a model that lists no price; cost leaves those steps out.
+  unpriced: Schema.optional(Schema.Boolean),
   tokens: Schema.Struct({
     total: Schema.optional(Schema.Finite),
     input: Schema.Finite,
@@ -563,6 +567,8 @@ export const SessionInfo = Schema.Struct({
   parentID: optional(SessionID),
   summary: optional(SessionSummary),
   cost: optional(Schema.Finite),
+  // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
+  unpricedSteps: optional(NonNegativeInt),
   tokens: optional(SessionTokens),
   share: optional(SessionShare),
   title: Schema.String,

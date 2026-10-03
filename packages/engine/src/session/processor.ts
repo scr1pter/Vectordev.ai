@@ -440,6 +440,7 @@ const layer = Layer.effect(
             })
             ctx.assistantMessage.finish = value.reason
             ctx.assistantMessage.cost += usage.cost
+            if (usage.unpriced) ctx.assistantMessage.unpriced = true
             ctx.assistantMessage.tokens = usage.tokens
             yield* session.updatePart({
               id: PartID.ascending(),
@@ -450,6 +451,7 @@ const layer = Layer.effect(
               type: "step-finish",
               tokens: usage.tokens,
               cost: usage.cost,
+              ...(usage.unpriced ? { unpriced: true } : {}),
             })
             yield* session.updateMessage(ctx.assistantMessage)
             if (ctx.snapshot) {

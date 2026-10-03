@@ -672,7 +672,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
                   status: "active",
                   headers: {},
                   options: { workflowRef: m.ref },
-                  cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+                  cost: { ...UNPRICED },
                   limit: { context: m.context, output: m.output },
                   capabilities: {
                     temperature: false,
@@ -945,6 +945,8 @@ const ProviderCost = Schema.Struct({
       cache: ProviderCacheCost,
     }),
   ),
+  // No price is listed for the model: the zero rates mean unknown, not free, and its steps are recorded as unpriced.
+  unpriced: optional(Schema.Boolean),
 })
 
 const ProviderLimit = Schema.Struct({
@@ -1136,7 +1138,11 @@ export class Service extends Context.Service<Service, Interface>()("@vector/Prov
 
 export const use = serviceUse(Service)
 
+// The cost of a model whose provider lists no price.
+const UNPRICED: Model["cost"] = { input: 0, output: 0, cache: { read: 0, write: 0 }, unpriced: true }
+
 function cost(c: ModelCatalog.Model["cost"]): Model["cost"] {
+  if (!c) return { ...UNPRICED }
   const result: Model["cost"] = {
     input: c?.input ?? 0,
     output: c?.output ?? 0,
@@ -1520,14 +1526,30 @@ const layer = Layer.effect(
                     ? { field: "reasoning_content" }
                     : false),
               },
-              cost: {
-                input: model?.cost?.input ?? existingModel?.cost?.input ?? 0,
-                output: model?.cost?.output ?? existingModel?.cost?.output ?? 0,
-                cache: {
-                  read: model?.cost?.cache_read ?? existingModel?.cost?.cache.read ?? 0,
-                  write: model?.cost?.cache_write ?? existingModel?.cost?.cache.write ?? 0,
-                },
-              },
+              // A config entry without a cost keeps the catalog's pricing whole, long-context tiers included; one
+              // with a cost prices the model itself, and its context_over_200k is the long-context rate.
+              cost: model.cost
+                ? {
+                    input: model.cost.input,
+                    output: model.cost.output,
+                    cache: {
+                      read: model.cost.cache_read ?? existingModel?.cost?.cache.read ?? 0,
+                      write: model.cost.cache_write ?? existingModel?.cost?.cache.write ?? 0,
+                    },
+                    ...(model.cost.context_over_200k
+                      ? {
+                          experimentalOver200K: {
+                            input: model.cost.context_over_200k.input,
+                            output: model.cost.context_over_200k.output,
+                            cache: {
+                              read: model.cost.context_over_200k.cache_read ?? 0,
+                              write: model.cost.context_over_200k.cache_write ?? 0,
+                            },
+                          },
+                        }
+                      : {}),
+                  }
+                : (existingModel?.cost ?? { ...UNPRICED }),
               options: mergeDeep(existingModel?.options ?? {}, model.options ?? {}),
               limit: {
                 context: model.limit?.context ?? existingModel?.limit?.context ?? 0,

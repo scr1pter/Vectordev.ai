@@ -3,6 +3,28 @@ import { measureUsage } from "./token-usage"
 import { addUsage, emptyUsage, totalTokens } from "./economics-types"
 
 describe("measureUsage", () => {
+  test("a run with an unpriced response has no cost, since the rest of it is not what the run cost", () => {
+    const measured = measureUsage([
+      {
+        role: "assistant",
+        providerID: "local",
+        modelID: "m",
+        cost: 0.01,
+        tokens: { input: 1_000, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      {
+        role: "assistant",
+        providerID: "local",
+        modelID: "m",
+        cost: 0,
+        unpriced: true,
+        tokens: { input: 500, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+    ])
+    expect(measured?.usage.input).toBe(1_500)
+    expect(measured?.costUsd).toBeUndefined()
+  })
+
   test("sums real provider-reported usage and cost across assistant messages", () => {
     const measured = measureUsage([
       { role: "user" },

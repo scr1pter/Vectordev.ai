@@ -14,6 +14,7 @@ import { useSDK } from "@/context/sdk"
 import { getSessionContext, getSessionTokenTotal } from "@/components/session/session-context-metrics"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
+import { formatSessionCost } from "@/utils/session-cost"
 
 interface SessionContextUsageProps {
   variant?: "button" | "indicator"
@@ -70,9 +71,14 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
 
   const context = createMemo(() => getSessionContext(messages(), [...providers.all().values()]))
   const tokens = createMemo(() => info()?.tokens)
-  const cost = createMemo(() => {
-    return usd().format(info()?.cost ?? 0)
-  })
+  const cost = createMemo(() =>
+    formatSessionCost({
+      cost: info()?.cost,
+      unpricedSteps: info()?.unpricedSteps,
+      format: (value) => usd().format(value),
+      t: language.t,
+    }),
+  )
   const contextVisible = createMemo(() => view().reviewPanel.opened() && tabState.activeTab() === "context")
   const hasOtherTabs = createMemo(() =>
     tabs()

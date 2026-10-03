@@ -32,6 +32,8 @@ describe("outcomeFromSession", () => {
     expect(outcome.provider).toBe("anthropic")
     expect(outcome.model).toBe("claude-sonnet-5")
     expect(outcome.costUsd).toBeCloseTo(0.02, 10)
+    // Every response had a price, so even a 0 here would mean free rather than unknown.
+    expect(outcome.costPriced).toBe(true)
     expect(outcome.usage?.input).toBe(1_000)
     expect(outcome.latencyMs).toBe(5_000)
   })

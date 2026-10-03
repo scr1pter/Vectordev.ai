@@ -641,6 +641,7 @@ function makeUsageService(sdk: VectorClient) {
       modelID: ModelV2.ID.make(message.modelID),
     })
     if (!size) return
+    const cost = UsageService.totalSessionCost(messages)
 
     yield* Effect.promise(() =>
       params.connection
@@ -650,7 +651,7 @@ function makeUsageService(sdk: VectorClient) {
             sessionUpdate: "usage_update",
             used: message.tokens.input + message.tokens.cache.read,
             size,
-            cost: { amount: UsageService.totalSessionCost(messages), currency: "USD" },
+            cost: cost === undefined ? undefined : { amount: cost, currency: "USD" },
           },
         })
         .catch(() => {}),
