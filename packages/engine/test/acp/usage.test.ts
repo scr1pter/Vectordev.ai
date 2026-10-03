@@ -172,6 +172,32 @@ describe("acp usage", () => {
     ).toMatchObject({ cost: 2 })
   })
 
+  test("measures the context from the last response that reported usage", () => {
+    const cancelled = assistant({
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    expect(UsageService.latestAssistantMessage([assistant({ cost: 1 }), user(), cancelled])).toMatchObject({ cost: 1 })
+  })
+
+  test("counts cache reads and writes in the context in use", () => {
+    expect(
+      UsageService.contextTokens({
+        cost: 0,
+        tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 5_000, write: 18_000 } },
+      }),
+    ).toBe(23_020)
+  })
+
+  test("a turn's usage sums every provider step that answered its user message", () => {
+    const step = (parentID: string, input: number) =>
+      assistant({ cost: 0.1, parentID, tokens: { input, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } })
+    expect(UsageService.turnUsage([step("msg_a", 999), step("msg_b", 30_000), step("msg_b", 31_000)], "msg_b")).toEqual(
+      { inputTokens: 61_000, outputTokens: 20, totalTokens: 61_020 },
+    )
+    expect(UsageService.turnUsage([step("msg_a", 1)], "msg_missing")).toBeUndefined()
+  })
+
   test("calculates total session cost from assistant messages", () => {
     expect(UsageService.totalSessionCost([assistant({ cost: 1.25 }), user(), assistant({ cost: 2.5 })])).toBe(3.75)
     // A response with no listed price makes the total unknown, so it is left out of the update rather than sent short.

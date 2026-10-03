@@ -86,6 +86,8 @@ export type SessionData = {
   visible: Map<string, string>
   end: Set<string>
   echo: Map<string, Set<string>>
+  // Each provider step is its own assistant message, so the run's spend is the sum over them.
+  spent: Map<string, { cost: number; unpriced: boolean }>
 }
 
 export type SessionDataInput = {
@@ -124,6 +126,7 @@ export function createSessionData(
     visible: new Map(),
     end: new Set(),
     echo: new Map(),
+    spent: new Map(),
   }
 }
 
@@ -131,10 +134,18 @@ function modelKey(provider: string, model: string): string {
   return `${provider}/${model}`
 }
 
+// A step on a model with no listed price adds nothing to the cost, so a total with such steps is only a lower bound.
+function formatSpend(spent: SessionData["spent"]): string | undefined {
+  const steps = [...spent.values()]
+  const cost = steps.reduce((sum, step) => sum + step.cost, 0)
+  if (!steps.some((step) => step.unpriced)) return cost > 0 ? money.format(cost) : undefined
+  return cost > 0 ? `${money.format(cost)} + unpriced` : "cost unknown"
+}
+
 function formatUsage(
   tokens: Tokens | undefined,
   limit: number | undefined,
-  cost: number | undefined,
+  spend: string | undefined,
 ): string | undefined {
   const total =
     (tokens?.input ?? 0) +
@@ -143,21 +154,12 @@ function formatUsage(
     (tokens?.cache?.read ?? 0) +
     (tokens?.cache?.write ?? 0)
 
-  if (total <= 0) {
-    if (typeof cost === "number" && cost > 0) {
-      return money.format(cost)
-    }
-    return undefined
-  }
+  if (total <= 0) return spend
 
   const text =
     limit && limit > 0 ? `${Locale.number(total)} (${Math.round((total / limit) * 100)}%)` : Locale.number(total)
 
-  if (typeof cost === "number" && cost > 0) {
-    return `${text} · ${money.format(cost)}`
-  }
-
-  return text
+  return spend ? `${text} · ${spend}` : text
 }
 
 export function formatError(error: {
@@ -843,10 +845,12 @@ export function reduceSessionData(input: SessionDataInput): SessionDataOutput {
       next = { status: "assistant responding" }
     }
 
+    if (typeof info.id === "string" && typeof info.cost === "number")
+      data.spent.set(info.id, { cost: info.cost, unpriced: info.unpriced === true })
     const usage = formatUsage(
       info.tokens,
       input.limits[modelKey(info.providerID, info.modelID)],
-      typeof info.cost === "number" ? info.cost : undefined,
+      formatSpend(data.spent),
     )
     if (usage) {
       next = {

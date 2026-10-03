@@ -520,8 +520,8 @@ export function make(input: {
             ),
           "session",
         )
-        yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
-        return yield* promptResponse(response.info, params.messageId)
+        const messages = yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
+        return yield* promptResponse(response.info, params.messageId, messages)
       }
 
       const known = snapshot.availableCommands.find((item) => item.name === command.name)
@@ -542,8 +542,8 @@ export function make(input: {
             ),
           "session",
         )
-        yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
-        return yield* promptResponse(response.info, params.messageId)
+        const messages = yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
+        return yield* promptResponse(response.info, params.messageId, messages)
       }
 
       if (command.name === "compact") {
@@ -563,7 +563,7 @@ export function make(input: {
       }
 
       yield* sendUsageUpdate(input.usage, input.sdk, input.connection, current.id, current.cwd)
-      return yield* promptResponse(undefined, params.messageId)
+      return yield* promptResponse(undefined, params.messageId, undefined)
     }),
     cancel,
   }
@@ -633,14 +633,14 @@ function makeUsageService(sdk: VectorClient) {
     if (!messages) return
 
     const message = UsageService.latestAssistantMessage(messages)
-    if (!message?.providerID || !message.modelID) return
+    if (!message?.providerID || !message.modelID) return messages
 
     const size = yield* contextLimit({
       directory: params.directory,
       providerID: ProviderV2.ID.make(message.providerID),
       modelID: ModelV2.ID.make(message.modelID),
     })
-    if (!size) return
+    if (!size) return messages
     const cost = UsageService.totalSessionCost(messages)
 
     yield* Effect.promise(() =>
@@ -649,13 +649,14 @@ function makeUsageService(sdk: VectorClient) {
           sessionId: params.sessionID,
           update: {
             sessionUpdate: "usage_update",
-            used: message.tokens.input + message.tokens.cache.read,
+            used: UsageService.contextTokens(message),
             size,
             cost: cost === undefined ? undefined : { amount: cost, currency: "USD" },
           },
         })
         .catch(() => {}),
     )
+    return messages
   })
 
   return UsageService.Service.of({
@@ -698,7 +699,7 @@ type MessageInfo = {
 }
 
 type AssistantError = NonNullable<AssistantMessage["error"]>
-type AssistantInfo = (UsageService.AssistantTokenCost & Pick<AssistantMessage, "error">) | undefined
+type AssistantInfo = (UsageService.AssistantTokenCost & Pick<AssistantMessage, "error" | "parentID">) | undefined
 
 function request<T>(fn: () => Promise<T | SdkResponse<T>>, service?: string) {
   return Effect.tryPromise({
@@ -830,18 +831,24 @@ function detectSlashCommand(parts: ReturnType<typeof promptContentToParts>) {
 const promptResponse = Effect.fn("ACP.promptResponse")(function* (
   info: AssistantInfo,
   messageId: string | null | undefined,
+  messages: readonly UsageService.SessionMessage[] | undefined,
 ) {
+  // The turn's usage covers every provider step it ran, not just the last one.
+  const usage = info
+    ? ((messages && info.parentID ? UsageService.turnUsage(messages, info.parentID) : undefined) ??
+      UsageService.buildUsage(info))
+    : undefined
   if (!info?.error) {
     return {
       stopReason: "end_turn" as const,
-      ...(info ? { usage: UsageService.buildUsage(info) } : {}),
+      ...(usage ? { usage } : {}),
       ...(messageId ? { userMessageId: messageId } : {}),
       _meta: {},
     }
   }
 
   const base = {
-    usage: UsageService.buildUsage(info),
+    usage: usage ?? UsageService.buildUsage(info),
     ...(messageId ? { userMessageId: messageId } : {}),
     _meta: {},
   }
@@ -890,7 +897,7 @@ function sendUsageUpdate(
   sessionID: string,
   directory: string,
 ) {
-  if (!connection) return Effect.void
+  if (!connection) return Effect.succeed(undefined)
   return (usage ?? makeUsageService(sdk)).sendUpdate({
     connection,
     sessionID,

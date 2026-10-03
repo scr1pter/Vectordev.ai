@@ -85,7 +85,7 @@ const getAllSessions = Effect.fnUntraced(function* () {
   return (yield* db.select().from(SessionTable).all().pipe(Effect.orDie)).map((row) => Session.fromRow(row))
 })
 
-const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* (
+export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* (
   days?: number,
   projectFilter?: string,
   currentProject?: Project.Info,
@@ -164,12 +164,31 @@ const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* (
     filteredSessions,
     (session) =>
       Effect.gen(function* () {
-        const messages = yield* svc
+        const all = yield* svc
           .messages({ sessionID: session.id })
           .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed([])))
+        // A session updated inside the window may have started long before it, so a window counts only the messages
+        // created inside it. History a fork copied in was counted in the session it came from.
+        const messages = all.filter(
+          (message) =>
+            message.info.time.created >= cutoffTime && !(message.info.role === "assistant" && message.info.forked),
+        )
+        const steps = messages.flatMap((message) => (message.info.role === "assistant" ? [message.info] : []))
 
-        const sessionCost = session.cost ?? 0
-        const sessionTokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        const sessionCost =
+          cutoffTime > 0 ? steps.reduce((sum, step) => sum + (step.cost || 0), 0) : (session.cost ?? 0)
+        const sessionTokens =
+          cutoffTime > 0
+            ? {
+                input: steps.reduce((sum, step) => sum + (step.tokens.input || 0), 0),
+                output: steps.reduce((sum, step) => sum + (step.tokens.output || 0), 0),
+                reasoning: steps.reduce((sum, step) => sum + (step.tokens.reasoning || 0), 0),
+                cache: {
+                  read: steps.reduce((sum, step) => sum + (step.tokens.cache?.read || 0), 0),
+                  write: steps.reduce((sum, step) => sum + (step.tokens.cache?.write || 0), 0),
+                },
+              }
+            : (session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } })
         let sessionToolUsage: Record<string, number> = {}
         let sessionModelUsage: Record<
           string,

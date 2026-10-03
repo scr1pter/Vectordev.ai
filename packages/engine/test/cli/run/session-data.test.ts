@@ -111,6 +111,20 @@ function tool(input: { id: string; messageID: string; tool: string; state: Recor
 }
 
 describe("run session data", () => {
+  test("the footer shows what the run has spent across its steps, not just the latest step", () => {
+    const usage = (data: ReturnType<typeof createSessionData>, event: unknown) => {
+      const out = reduce(data, event)
+      return { data: out.data, usage: out.footer?.patch?.usage }
+    }
+    const first = usage(createSessionData(), assistant("msg-1", { cost: 0.5 }))
+    const second = usage(first.data, assistant("msg-2", { cost: 0.6 }))
+    const third = usage(second.data, assistant("msg-3", { cost: 0.04 }))
+    expect([first.usage, second.usage, third.usage]).toEqual(["2 · $0.50", "2 · $1.10", "2 · $1.14"])
+    // A step's message is updated again as it settles, which must not count it twice.
+    expect(usage(third.data, assistant("msg-3", { cost: 0.04 })).usage).toBe("2 · $1.14")
+    expect(usage(third.data, assistant("msg-4", { cost: 0, unpriced: true })).usage).toBe("2 · $1.14 + unpriced")
+  })
+
   test("buffers delayed assistant text until the role is known", () => {
     let data = createSessionData()
     data = reduce(data, delta("msg-1", "txt-1", "hello")).data

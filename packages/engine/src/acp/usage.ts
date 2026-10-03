@@ -14,7 +14,7 @@ export type AssistantTokenCost = Pick<VectorAssistantMessage, "cost" | "tokens" 
 
 export type AssistantMessage = AssistantTokenCost &
   Pick<VectorAssistantMessage, "role"> &
-  Partial<Pick<VectorAssistantMessage, "providerID" | "modelID">>
+  Partial<Pick<VectorAssistantMessage, "providerID" | "modelID" | "parentID">>
 
 export type SessionMessage = {
   readonly info: { readonly role: Message["role"] } | AssistantMessage
@@ -53,11 +53,12 @@ export interface Interface {
     readonly providerID: ProviderV2.ID
     readonly modelID: ModelV2.ID
   }) => Effect.Effect<number | undefined>
+  /** Sends the session's usage_update and returns the messages it read, or undefined when it could not read them. */
   readonly sendUpdate: (input: {
     readonly connection: UsageConnection
     readonly sessionID: string
     readonly directory: string
-  }) => Effect.Effect<void>
+  }) => Effect.Effect<readonly SessionMessage[] | undefined>
 }
 
 export class MessageLoader extends Context.Service<MessageLoader, MessageLoaderInterface>()(
@@ -98,10 +99,37 @@ export function buildUsage(message: AssistantTokenCost): Usage {
   }
 }
 
+// The last response that reported usage. A cancelled or failed step reports none, and reading its zeros would
+// show an empty context window while the conversation still fills it.
 export function latestAssistantMessage(messages: readonly SessionMessage[]): AssistantMessage | undefined {
   return messages
     .filter((message): message is { readonly info: AssistantMessage } => message.info.role === "assistant")
-    .at(-1)?.info
+    .findLast((message) => message.info.tokens.output > 0)?.info
+}
+
+// Everything the prompt occupies: tokens.input leaves out cache reads and the prefix written to the cache this step.
+export function contextTokens(message: AssistantTokenCost) {
+  return message.tokens.input + message.tokens.cache.read + message.tokens.cache.write
+}
+
+// Every provider step answering one user message is a separate assistant message, so a turn's usage is their sum.
+export function turnUsage(messages: readonly SessionMessage[], parentID: string): Usage | undefined {
+  const steps = messages
+    .filter((message): message is { readonly info: AssistantMessage } => message.info.role === "assistant")
+    .filter((message) => message.info.parentID === parentID)
+  if (!steps.length) return undefined
+  return buildUsage({
+    cost: steps.reduce((sum, step) => sum + step.info.cost, 0),
+    tokens: {
+      input: steps.reduce((sum, step) => sum + step.info.tokens.input, 0),
+      output: steps.reduce((sum, step) => sum + step.info.tokens.output, 0),
+      reasoning: steps.reduce((sum, step) => sum + step.info.tokens.reasoning, 0),
+      cache: {
+        read: steps.reduce((sum, step) => sum + step.info.tokens.cache.read, 0),
+        write: steps.reduce((sum, step) => sum + step.info.tokens.cache.write, 0),
+      },
+    },
+  })
 }
 
 // Undefined when a response ran on a model with no listed price: the rest of the session is not what it cost.
@@ -194,15 +222,14 @@ const layer = Layer.effect(
       if (!messages) return
 
       const message = latestAssistantMessage(messages)
-      if (!message) return
-      if (!message.providerID || !message.modelID) return
+      if (!message?.providerID || !message.modelID) return messages
 
       const size = yield* contextLimit({
         directory: input.directory,
         providerID: ProviderV2.ID.make(message.providerID),
         modelID: ModelV2.ID.make(message.modelID),
       })
-      if (!size) return
+      if (!size) return messages
       const cost = totalSessionCost(messages)
 
       yield* Effect.promise(() =>
@@ -211,13 +238,14 @@ const layer = Layer.effect(
             sessionId: input.sessionID,
             update: {
               sessionUpdate: "usage_update",
-              used: message.tokens.input + message.tokens.cache.read,
+              used: contextTokens(message),
               size,
               cost: cost === undefined ? undefined : { amount: cost, currency: "USD" },
             },
           })
           .catch(() => {}),
       )
+      return messages
     })
 
     return Service.of({
