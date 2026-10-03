@@ -46,20 +46,21 @@ Set `VECTOR_EVAL_ENGINE` to point at a specific build.
 
 ## The task set
 
-Eight tasks. Each one builds its own fixture repository, and each declares its
+Nine tasks. Each one builds its own fixture repository, and each declares its
 objective check and the exact files it expects to be edited before any agent
 sees it, so the pass bar cannot drift to fit a result.
 
-| Id                               | Category     | What it measures                                                                                                                                |
-| -------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bugfix-overdue-invoices`        | bug-fix      | A failing test exposes an off-by-one boundary bug. Can the agent read a red suite and fix the source?                                           |
-| `feature-retry-schedule`         | feature      | A provided test specifies a `retrySchedule` export that does not exist yet. Can the agent implement to a spec it has to read?                   |
-| `refactor-rename-symbol`         | refactor     | Rename an exported symbol across four files with no behaviour change and no compatibility alias left behind.                                    |
-| `discipline-single-file-fix`     | bug-fix      | A one-line fix in a repository seeded with a typo'd README, a stale doc, and a `TODO`-laden module. The prompt says to change exactly one file. |
-| `test-writing-parse-duration`    | test-writing | Write tests for an untested function. Scored by whether the tests actually catch four seeded defects, not by whether they are green.            |
-| `bugfix-idempotent-webhooks`     | bug-fix      | Make a billing projection safe under duplicate and out-of-order webhook delivery without dropping valid credit grants.                          |
-| `security-path-containment`      | bug-fix      | Close a sibling-prefix traversal bug while preserving valid root and nested paths.                                                              |
-| `bugfix-concurrent-reservations` | bug-fix      | Prevent two concurrent model requests from reserving more than one shared allowance.                                                            |
+| Id                               | Category     | What it measures                                                                                                                                                         |
+| -------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `bugfix-overdue-invoices`        | bug-fix      | A failing test exposes an off-by-one boundary bug. Can the agent read a red suite and fix the source?                                                                    |
+| `feature-retry-schedule`         | feature      | A provided test specifies a `retrySchedule` export that does not exist yet. Can the agent implement to a spec it has to read?                                            |
+| `refactor-rename-symbol`         | refactor     | Rename an exported symbol across four files with no behaviour change and no compatibility alias left behind.                                                             |
+| `discipline-single-file-fix`     | bug-fix      | A one-line fix in a repository seeded with a typo'd README, a stale doc, and a `TODO`-laden module. The prompt says to change exactly one file.                          |
+| `test-writing-parse-duration`    | test-writing | Write tests for an untested function. Scored by whether the tests actually catch four seeded defects, not by whether they are green.                                     |
+| `bugfix-idempotent-webhooks`     | bug-fix      | Make a billing projection safe under duplicate and out-of-order webhook delivery without dropping valid credit grants.                                                   |
+| `security-path-containment`      | bug-fix      | Close a sibling-prefix traversal bug while preserving valid root and nested paths.                                                                                       |
+| `bugfix-concurrent-reservations` | bug-fix      | Prevent two concurrent model requests from reserving more than one shared allowance.                                                                                     |
+| `refactor-structured-logging`    | refactor     | Move twelve modules in three packages onto a shared structured logger. Spans enough files that an agent may split it among subagents, so it shows what delegation costs. |
 
 Every task nominates **protected files** — usually the tests that define
 success. Changing one invalidates the run outright, because deleting the test is
@@ -188,15 +189,16 @@ Be honest about the ceiling here. This harness does **not** measure:
   a bad first attempt are all invisible.
 - **Code quality.** A passing check is a passing check. The scoring cannot tell
   elegant from ugly, and diff surface is a proxy for discipline, not for taste.
-- **Tool-use breadth.** No task exercises the web, MCP servers, images,
-  subagents, LSP, or long-context retrieval.
+- **Tool-use breadth.** No task exercises the web, MCP servers, images, LSP,
+  or long-context retrieval. Only `refactor-structured-logging` is big enough
+  to invite subagents, and whether an agent delegates is its own choice.
 - **Vector's product surface.** This measures the agent, not the desktop app,
   the cloud backend, or the editor.
 - **Broad statistical significance.** `--repeat` exposes run-to-run variance,
   but a handful of local runs is still not a publishable population and does
   not control for provider or model changes.
 
-Eight tasks that run honestly are worth more than fifty that are hand-waved, but
+Nine tasks that run honestly are worth more than fifty that are hand-waved, but
 this set is still a smoke test for agent quality, not a benchmark of real-repository work.
 
 ## Reading results responsibly

@@ -664,6 +664,91 @@ test("a refund makes the released allowance available again", async () => {
   },
 ]
 
+// Twelve modules in three packages, each logging with console.log, to move onto a shared structured logger: work
+// that spans enough files for an agent to consider splitting it among subagents, so the eval shows what that costs.
+const LOGGING_MODULES = [
+  { pkg: "billing", file: "invoices", fn: "createInvoice", message: "invoice created", field: "invoiceId" },
+  { pkg: "billing", file: "refunds", fn: "issueRefund", message: "refund issued", field: "refundId" },
+  { pkg: "billing", file: "plans", fn: "changePlan", message: "plan changed", field: "planId" },
+  { pkg: "billing", file: "coupons", fn: "applyCoupon", message: "coupon applied", field: "couponCode" },
+  { pkg: "accounts", file: "signup", fn: "registerAccount", message: "account registered", field: "accountId" },
+  { pkg: "accounts", file: "login", fn: "recordLogin", message: "login recorded", field: "sessionId" },
+  { pkg: "accounts", file: "roles", fn: "grantRole", message: "role granted", field: "roleName" },
+  { pkg: "accounts", file: "closure", fn: "closeAccount", message: "account closed", field: "accountId" },
+  { pkg: "notify", file: "email", fn: "queueEmail", message: "email queued", field: "templateId" },
+  { pkg: "notify", file: "sms", fn: "queueSms", message: "sms queued", field: "phoneHash" },
+  { pkg: "notify", file: "push", fn: "queuePush", message: "push queued", field: "deviceId" },
+  { pkg: "notify", file: "digest", fn: "scheduleDigest", message: "digest scheduled", field: "digestDay" },
+]
+
+TASKS.push({
+  id: "refactor-structured-logging",
+  category: "refactor",
+  title: "Move twelve modules in three packages onto a shared structured logger",
+  timeoutMs: DEFAULT_TIMEOUT_MS * 2,
+  prompt: [
+    "Every module under packages/billing/src, packages/accounts/src and packages/notify/src logs with console.log.",
+    "Switch all of them to the shared structured logger in packages/shared/src/log.ts:",
+    "`log(scope, message, fields)`, where scope is the package name, message is the text after the `[scope]` prefix,",
+    'and fields is an object keyed by the logged variable\'s name, e.g. `log("billing", "invoice created", { invoiceId })`.',
+    "",
+    "Constraints:",
+    "- No console.log may remain in those packages, and behaviour must not change: `bun test` must pass.",
+    "- Do not edit anything under test/ or packages/shared/.",
+  ].join("\n"),
+  files: {
+    "package.json": PACKAGE_JSON("eval-structured-logging"),
+    ".gitignore": GITIGNORE,
+    "tsconfig.json": TSCONFIG,
+    "packages/shared/src/log.ts": `export const entries: string[] = []
+
+export function log(scope: string, message: string, fields: Record<string, unknown> = {}) {
+  entries.push(\`\${scope}: \${message} \${JSON.stringify(fields)}\`)
+}
+`,
+    ...Object.fromEntries(
+      LOGGING_MODULES.map((item) => [
+        `packages/${item.pkg}/src/${item.file}.ts`,
+        `export function ${item.fn}(${item.field}: string) {
+  console.log("[${item.pkg}] ${item.message}", ${item.field})
+  return { ${item.field}, ok: true as const }
+}
+`,
+      ]),
+    ),
+    "test/logging.test.ts": `import { test, expect, spyOn } from "bun:test"
+import { entries } from "../packages/shared/src/log"
+${LOGGING_MODULES.map((item) => `import { ${item.fn} } from "../packages/${item.pkg}/src/${item.file}"`).join("\n")}
+
+const calls = [${LOGGING_MODULES.map((item) => `\n  () => ${item.fn}("${item.field}-1")`).join(",")},
+]
+
+test("every event goes through the shared logger with its fields", () => {
+  const consoleLog = spyOn(console, "log")
+  entries.length = 0
+  calls.forEach((call) => call())
+  expect(consoleLog).not.toHaveBeenCalled()
+  expect(entries).toEqual([${LOGGING_MODULES.map((item) => `\n    '${item.pkg}: ${item.message} {"${item.field}":"${item.field}-1"}'`).join(",")},
+  ])
+  consoleLog.mockRestore()
+})
+
+test("behaviour is unchanged", () => {
+${LOGGING_MODULES.map((item) => `  expect(${item.fn}("x")).toEqual({ ${item.field}: "x", ok: true })`).join("\n")}
+})
+`,
+  },
+  check: { command: "bun", args: ["test"] },
+  expectedFiles: ["packages/billing/src/", "packages/accounts/src/", "packages/notify/src/"],
+  protectedFiles: ["test/logging.test.ts", "packages/shared/src/log.ts"],
+  assertions: LOGGING_MODULES.map((item) => ({
+    path: `packages/${item.pkg}/src/${item.file}.ts`,
+    includes: [`log("${item.pkg}"`],
+    excludes: ["console.log"],
+  })),
+  mutations: [],
+})
+
 export function taskById(id: string) {
   return TASKS.find((task) => task.id === id)
 }
