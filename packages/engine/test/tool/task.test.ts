@@ -216,6 +216,37 @@ it.instance(
 )
 
 it.instance(
+  "explore on a parent model with no medium effort runs at the lowest effort it has, or none",
+  () =>
+    Effect.gen(function* () {
+      const prompts: SessionPrompt.PromptInput[] = []
+      for (const modelID of ["budget", "lean"]) {
+        const parent = { providerID: ProviderV2.ID.make("lmstudio"), modelID: ModelV2.ID.make(modelID) }
+        const seeded = yield* seed("Explore uncapped", parent)
+        const def = yield* (yield* TaskTool).init()
+        yield* def.execute(
+          { description: "find handlers", prompt: "Find the HTTP handlers.", subagent_type: "explore" },
+          taskContext({
+            sessionID: seeded.chat.id,
+            messageID: seeded.assistant.id,
+            promptOps: stubOps({ onPrompt: (input) => prompts.push(input) }),
+          }),
+        )
+      }
+      expect(prompts.map((input) => input.variant)).toEqual([undefined, "low"])
+    }),
+  {
+    config: {
+      provider: pricedProvider({
+        // Budget-style thinking models offer only high and max.
+        budget: { variants: { low: { disabled: true }, medium: { disabled: true }, high: {}, max: {}, xhigh: {} } },
+        lean: { variants: { low: {}, medium: { disabled: true }, xhigh: {} } },
+      }),
+    },
+  },
+)
+
+it.instance(
   "a variant configured for an agent without its own model applies on the model it inherits",
   () =>
     Effect.gen(function* () {

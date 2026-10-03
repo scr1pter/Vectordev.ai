@@ -167,7 +167,7 @@ export const Plugin = define({
 
       draft.update(AgentV2.ID.make("explore"), (item) => {
         item.description =
-          'Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.'
+          'Fast read-only agent for broad codebase searches across several areas or naming conventions, whose raw output would flood your context (eg. "how do API endpoints work?"). For one pattern, symbol or known file, use Glob, Grep or Read yourself. Say how thorough to be: "quick", "medium" or "very thorough".'
         item.system = PROMPT_EXPLORE
         item.mode = "subagent"
         item.permissions.push(

@@ -2,7 +2,7 @@ Launch a subagent: an autonomous child agent that takes one sub-task, works thro
 
 Two kinds of subagent run through this tool:
 - Subagent: subagent_type "general", available only when general is in the list below; there, omitting subagent_type also gives you one. A general-purpose worker for any self-contained sub-task: broad research, multi-file search, implementation, refactors, or running and repairing checks.
-- Subagent specialists: every other type in the list below. Each has a fixed focus and its own permissions. Choose one only when part of the work clearly matches its description, and use it proactively when its description says to.
+- Subagent specialists: every other type in the list below. Each has a fixed focus and its own permissions. Choose one only when a substantial part of the work clearly matches its description.
 
 When general is in the list, do the work yourself by default, multi-file changes included. Each Subagent starts with an empty context and reads everything again, so a general Subagent is worth it only when it costs less than doing the work yourself:
 - an independent part that is itself substantial, roughly five or more files or a long check-and-repair loop, and can proceed alongside your own work: launch one per such part, all in ONE message, each with non-overlapping owned_paths;
@@ -11,7 +11,7 @@ then keep integration and final verification yourself.
 
 When general is not in the list, or you are yourself a Subagent working on a brief, do not request general. Always set subagent_type to a listed specialist, use one only when part of the work clearly matches its focus, and do the rest yourself, big tasks included.
 
-Do not launch a general Subagent for a small task; do it yourself:
+Do not launch any subagent, general or specialist, for a small task; do it yourself:
 - a single-file change or a quick fix, including a single-file edit that is faster to make than to describe;
 - two or three closely coupled files that are parts of one unit, for example a type, its serializer and its test;
 - one lookup: reading a file whose path you know, or finding one symbol or definition (use Read, Glob or Grep instead);

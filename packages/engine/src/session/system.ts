@@ -153,7 +153,7 @@ function subagentPolicyLines(input: SubagentAvailability): string[] {
       // work that is cheaper split up, not the default for multi-file changes.
       "Do the work yourself by default, multi-file changes included. Launch a general Subagent (omit subagent_type) only when that costs less than doing the work yourself: for an independent part that is itself substantial, roughly five or more files or a long check-and-repair loop, and can proceed alongside your own work, or for broad research whose raw output would flood your context. Each Subagent starts with an empty context and reads everything again, so splitting small parts across Subagents costs more than doing them.",
       input.specialists
-        ? `When part of the work clearly matches a Subagent specialist, choose the narrowest one${focus}.`
+        ? `When a substantial part of the work clearly matches a Subagent specialist, choose the narrowest one${focus}. The same size rule applies: small fixes, single-file changes and lookups you do yourself.`
         : "No Subagent specialists are available to you.",
       ...SUBAGENT_ORCHESTRATION,
       ...(input.teammates ? SUBAGENT_TEAMMATES : []),
@@ -164,7 +164,7 @@ function subagentPolicyLines(input: SubagentAvailability): string[] {
       SUBAGENT_INTRO,
       `${generalOffLine(input)} Every task call must set subagent_type to a Subagent specialist from the task tool's list; never request general.`,
       "Do the work that no specialist covers yourself, big tasks included, and keep integration and final verification yourself.",
-      `Use a Subagent specialist only when part of the work clearly matches its focus, and choose the narrowest one in the task tool's list${focus}. Otherwise do that part yourself.`,
+      `Use a Subagent specialist only when a substantial part of the work clearly matches its focus, and choose the narrowest one in the task tool's list${focus}. Otherwise do that part yourself, as you do small fixes, single-file changes and lookups.`,
       ...SUBAGENT_ORCHESTRATION,
       ...(input.teammates ? SUBAGENT_TEAMMATES : []),
       SUBAGENT_OWNERSHIP,

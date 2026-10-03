@@ -146,7 +146,7 @@ describe("session.system", () => {
         expect(policy).toContain("Every task call must set subagent_type to a Subagent specialist")
         expect(policy).toContain("never request general")
         expect(policy).toContain("Do the work that no specialist covers yourself, big tasks included")
-        expect(policy).toContain("clearly matches its focus")
+        expect(policy).toContain("substantial part of the work clearly matches its focus")
         for (const kept of [
           "real child agents",
           "explore for read-only discovery",
@@ -183,7 +183,7 @@ describe("session.system", () => {
         permitted: ["explore", "review", "security"],
       })
       expect(plan).toContain(
-        "task tool's list: explore for read-only discovery; review for code review; security for security analysis. Otherwise do that part yourself.",
+        "task tool's list: explore for read-only discovery; review for code review; security for security analysis. Otherwise do that part yourself, as you do small fixes",
       )
       for (const denied of ["judge for", "debug for", "test for", "performance for", "migration for"])
         expect(plan).not.toContain(denied)
@@ -194,7 +194,7 @@ describe("session.system", () => {
         reason: "disabled",
         permitted: ["docs-writer"],
       })
-      expect(custom).toContain("choose the narrowest one in the task tool's list. Otherwise do that part yourself.")
+      expect(custom).toContain("choose the narrowest one in the task tool's list. Otherwise do that part yourself, as you do small fixes")
       // General with no specialist at all.
       const lone = subagentPolicy({ general: true, specialists: false, permitted: [] })
       expect(lone).toContain("No Subagent specialists are available to you")

@@ -476,13 +476,16 @@ export const TaskTool = Tool.define(
       const configured = next.model ? undefined : next.variant
       const highEffort =
         next.name === "explore" && !configured && !cheap && inherit && ["high", "xhigh", "max"].includes(variant ?? "")
-      const medium = highEffort
+      // A model with no medium effort runs at the lowest it has, or with none: budget-style thinking models offer
+      // only high and max, and falling back to the parent's would keep the very budget this cap exists to drop.
+      const capped = highEffort
         ? yield* provider.getModel(model.providerID, model.modelID).pipe(
-            Effect.map((info) => (info.variants?.medium ? "medium" : undefined)),
+            Effect.map((info) => ["medium", "low", "minimal"].find((item) => info.variants?.[item])),
             Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(undefined)),
           )
         : undefined
-      const childVariant = !inherit && !cheap ? undefined : (configured ?? (cheap ? undefined : (medium ?? variant)))
+      const childVariant =
+        !inherit && !cheap ? undefined : (configured ?? (cheap ? undefined : highEffort ? capped : variant))
       // An agent with its own model runs with its own variant, so the record names that one.
       const recordedVariant = childVariant ?? (!inherit ? next.variant : undefined)
       const modelRef = { ...model, ...(recordedVariant ? { variant: recordedVariant } : {}) }
