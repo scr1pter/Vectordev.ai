@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Deferred, Effect, Fiber, Layer } from "effect"
@@ -6,7 +6,7 @@ import { InstanceRef } from "../../src/effect/instance-ref"
 import { registerDisposer } from "../../src/effect/instance-registry"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
-import { tmpdirScoped } from "../fixture/fixture"
+import { tmpdir, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 let bootstrapRun: Effect.Effect<void> = Effect.void
@@ -39,6 +39,38 @@ const registerDisposerScoped = (disposer: (directory: string) => Promise<void>) 
   )
 
 describe("InstanceStore", () => {
+  test.each(["load", "reload-bootstrap", "reload-wait", "reload-dispose"])(
+    "service scope closes with pending %s and publishes interruption to every waiter",
+    async (mode) => {
+      await using dir = await tmpdir()
+      // A stuck uninterruptible finalizer cannot be bounded by Effect.timeout; isolate the real layer.
+      const child = Bun.spawn(
+        [process.execPath, "--no-env-file", "run", `${import.meta.dir}/fixtures/instance-scope.ts`, mode, dir.path],
+        { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+      )
+      const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000)
+      try {
+        const [code, stdout, stderr] = await Promise.all([
+          child.exited,
+          new Response(child.stdout).text(),
+          new Response(child.stderr).text(),
+        ])
+        expect(stdout).toContain("pending worker reached")
+        expect({ code, stderr }).toEqual({ code: 0, stderr: "" })
+        expect(JSON.parse(stdout.trim().split("\n").at(-1)!)).toEqual({
+          closed: true,
+          interrupted: mode === "reload-wait" ? [true, true] : [true],
+          attempts: mode === "reload-bootstrap" ? 2 : 1,
+        })
+      } finally {
+        clearTimeout(timeout)
+        child.kill()
+        await child.exited
+      }
+    },
+    20_000,
+  )
+
   it.live("loads instance context", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
