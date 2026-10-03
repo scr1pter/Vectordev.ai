@@ -85,6 +85,37 @@ const SCENARIOS: Scenario[] = [
     ],
   },
   {
+    id: "delegate-general",
+    title: "Hand the whole fix to a general subagent, then check its work",
+    task: "bugfix-overdue-invoices",
+    turns: (dir) => [
+      {
+        tool: "task",
+        input: {
+          description: "fix the failing boundary",
+          prompt: "Make `bun test` pass in this repository without editing test/. Report the change and the test run.",
+          subagent_type: "general",
+        },
+      },
+      // The general subagent's own steps.
+      { tool: "bash", input: { command: "bun test", description: "Run the test suite" } },
+      { tool: "read", input: { filePath: join(dir, "src/invoice.ts") } },
+      {
+        tool: "edit",
+        input: {
+          filePath: join(dir, "src/invoice.ts"),
+          oldString: "invoice.dueOn <= today",
+          newString: "invoice.dueOn < today",
+        },
+      },
+      { tool: "bash", input: { command: "bun test", description: "Run the test suite again" } },
+      { text: "Changed `<=` to `<` in src/invoice.ts line 5; `bun test` passes (3 tests)." },
+      // Back in the parent.
+      { tool: "bash", input: { command: "bun test", description: "Verify the subagent's fix" } },
+      { text: "Fixed the boundary in src/invoice.ts; the suite passes." },
+    ],
+  },
+  {
     id: "long-loop",
     title: "A 12-step investigation: how the prompt cache holds up as a tool loop grows",
     task: "discipline-single-file-fix",

@@ -968,6 +968,14 @@ const layer = Layer.effect(
                     type: "text",
                     synthetic: true,
                     text: result.output,
+                    // Lets a later Read of the same unchanged lines point back here instead of sending the file again.
+                    ...(typeof result.metadata.fingerprint === "string"
+                      ? {
+                          metadata: {
+                            read: { fingerprint: result.metadata.fingerprint, display: result.metadata.display },
+                          },
+                        }
+                      : {}),
                   })
                   if (result.attachments?.length) {
                     pieces.push(
@@ -1412,6 +1420,7 @@ const layer = Layer.effect(
                         teammates: offered.includes("send_teammate_message"),
                       },
                       tools: offered,
+                      nested: session.parentID !== undefined,
                     }),
                   ),
                 ),

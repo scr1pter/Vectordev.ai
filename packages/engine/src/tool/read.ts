@@ -355,23 +355,30 @@ export const ReadTool = Tool.define<
               message.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")),
         )
         .flatMap((message) => message.parts)
-        .findLast(
-          (part): part is SessionV1.ToolPart =>
+        .flatMap((part) => {
+          if (
             part.type === "tool" &&
             part.tool === "read" &&
             part.state.status === "completed" &&
             !part.state.time.compacted &&
             part.state.metadata?.pointer !== true &&
-            part.state.metadata?.fingerprint === fingerprint,
-        )
-      if (earlier?.state.status === "completed" && loaded.length === 0) {
-        const display = earlier.state.metadata?.display as Display | undefined
+            part.state.metadata?.fingerprint === fingerprint
+          )
+            return [{ display: part.state.metadata?.display, preview: part.state.metadata?.preview }]
+          // A file attached with @path was read into the message when it was sent, which counts as an earlier read.
+          const attached = part.type === "text" && part.synthetic ? part.metadata?.read : undefined
+          if (attached?.fingerprint === fingerprint) return [{ display: attached.display, preview: undefined }]
+          return []
+        })
+        .at(-1)
+      if (earlier && loaded.length === 0) {
+        const display = earlier.display as Display | undefined
         const range = display?.type === "file" ? ` (lines ${display.lineStart}-${display.lineEnd})` : ""
         return {
           title,
           output: `File unchanged since your earlier read of ${filepath}${range} in this conversation; that result is still current, so refer to it instead of reading again. Read with a different offset or limit for other lines.`,
           metadata: {
-            preview: String(earlier.state.metadata?.preview ?? ""),
+            preview: String(earlier.preview ?? ""),
             truncated: false,
             loaded: [],
             display,

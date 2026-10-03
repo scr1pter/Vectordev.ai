@@ -208,6 +208,8 @@ export type EnvironmentOptions = {
   subagents?: SubagentAvailability
   /** The tool ids offered this step. A policy for a tool that is not offered is left out, so it costs no tokens. */
   tools?: readonly string[]
+  /** This is a subagent's own session: it reports to its parent, never to the user. */
+  nested?: boolean
 }
 
 export interface Interface {
@@ -276,12 +278,19 @@ const layer = Layer.effect(
         // Read-only agents such as explore and review cannot change the project or stop processes, so the
         // implementation loop and process-safety rules are not theirs to follow.
         const changes = ["edit", "write", "apply_patch"].some(offered)
+        // A subagent never talks to the user and leaves memory to the main agent, so the identity answer and the
+        // memory policies are not sent to it.
+        const nested = options?.nested === true
         const stable = [
           [
             `You are Vector, an AI coding workspace for planning, editing, reviewing, and running software projects.`,
-            `If the user asks what you are, answer as Vector. Do not describe yourself as a CLI tool unless the user is explicitly asking about internal compatibility layers.`,
+            nested
+              ? undefined
+              : `If the user asks what you are, answer as Vector. Do not describe yourself as a CLI tool unless the user is explicitly asking about internal compatibility layers.`,
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
-          ].join("\n"),
+          ]
+            .filter((line) => line !== undefined)
+            .join("\n"),
           subagentPolicy(options?.subagents ?? ALL_SUBAGENTS),
           changes && COMPLETION_POLICY,
           offered("browser") &&
@@ -311,15 +320,17 @@ const layer = Layer.effect(
               "Treat broad kill commands, PID discovery pipelines followed by kill, and process-name termination as destructive host actions requiring explicit user approval.",
               "</process_safety_policy>",
             ].join("\n"),
-          LOCAL_MEMORY_POLICY,
-          [
-            "<vector_project_memory>",
-            "When .vector/BRAIN.md is present, treat it as durable project memory.",
-            "Keep it concise and update it only for stable architecture decisions, accepted conventions, important user corrections, and recurring failure lessons.",
-            "Never store API keys, passwords, tokens, private user data, transient logs, or a verbatim conversation transcript in project memory.",
-            "Do not rewrite memory merely to narrate routine work.",
-            "</vector_project_memory>",
-          ].join("\n"),
+          !nested && LOCAL_MEMORY_POLICY,
+          !nested &&
+            changes &&
+            [
+              "<vector_project_memory>",
+              "When .vector/BRAIN.md is present, treat it as durable project memory.",
+              "Keep it concise and update it only for stable architecture decisions, accepted conventions, important user corrections, and recurring failure lessons.",
+              "Never store API keys, passwords, tokens, private user data, transient logs, or a verbatim conversation transcript in project memory.",
+              "Do not rewrite memory merely to narrate routine work.",
+              "</vector_project_memory>",
+            ].join("\n"),
         ].filter((part): part is string => typeof part === "string")
         return { stable, session }
       }),

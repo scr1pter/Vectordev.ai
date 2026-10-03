@@ -365,6 +365,38 @@ describe("tool.read repeated reads", () => {
     }),
   )
 
+  it.instance("points back to a file attached with @path when it is read again", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const filepath = path.join(test.directory, "notes.txt")
+      yield* put(filepath, "first line\nsecond line\n")
+      // The session reads an attached file into the user's message as a synthetic text part.
+      const attached = yield* run({ filePath: filepath })
+      const message = {
+        ...ctx,
+        messages: [
+          {
+            info: { id: MessageID.make("msg_attached"), sessionID: ctx.sessionID, role: "user" },
+            parts: [
+              {
+                id: "prt_attached",
+                sessionID: ctx.sessionID,
+                messageID: MessageID.make("msg_attached"),
+                type: "text",
+                synthetic: true,
+                text: attached.output,
+                metadata: { read: { fingerprint: attached.metadata.fingerprint, display: attached.metadata.display } },
+              },
+            ],
+          },
+        ] as unknown as Tool.Context["messages"],
+      }
+      const again = yield* run({ filePath: filepath }, message)
+      expect(again.output).toContain("File unchanged since your earlier read")
+      expect(again.output).not.toContain("second line")
+    }),
+  )
+
   it.instance("never points back to a pointer or to a read the model never saw", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance

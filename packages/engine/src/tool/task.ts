@@ -1,6 +1,5 @@
 import * as Tool from "./tool"
 import DESCRIPTION from "./task.txt"
-import PROMPT_GENERAL from "../agent/prompt/general.txt"
 import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { BackgroundJob } from "@/background/job"
@@ -648,8 +647,6 @@ export const TaskTool = Tool.define(
           },
           variant: childVariant,
           agent: next.name,
-          // general has no prompt of its own in agent.ts yet, so the Subagent prompt rides on the user message.
-          ...(next.name === GENERAL_SUBAGENT && !next.prompt ? { system: PROMPT_GENERAL } : {}),
           parts,
         })
         return result.parts.findLast((item) => item.type === "text")?.text ?? ""

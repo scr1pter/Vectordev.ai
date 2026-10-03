@@ -13,6 +13,7 @@ import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_DEBUG from "./prompt/debug.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
+import PROMPT_GENERAL from "./prompt/general.txt"
 import PROMPT_JUDGE from "./prompt/judge.txt"
 import PROMPT_MIGRATION from "./prompt/migration.txt"
 import PROMPT_PERFORMANCE from "./prompt/performance.txt"
@@ -261,7 +262,7 @@ const layer = Layer.effect(
           },
           general: {
             name: "general",
-            description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
+            description: `General-purpose agent for researching complex questions and executing multi-step tasks.`,
             permission: Permission.merge(
               defaults,
               Permission.fromConfig({
@@ -269,6 +270,9 @@ const layer = Layer.effect(
               }),
               user,
             ),
+            // Its own prompt replaces the main agent's provider prompt, as for every specialist: that prompt's
+            // TodoWrite, task-tool and user-facing guidance is for tools and a user this agent does not have.
+            prompt: PROMPT_GENERAL,
             options: {},
             mode: "subagent",
             native: true,

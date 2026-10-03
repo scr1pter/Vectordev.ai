@@ -592,6 +592,39 @@ it.instance(
 )
 
 it.instance(
+  "ask - a denial names the call and what is allowed, not every rule",
+  () =>
+    Effect.gen(function* () {
+      const allowlist = ["git diff*", "git status*", "bun test*"].map((pattern) => ({
+        permission: "bash",
+        pattern,
+        action: "allow" as const,
+      }))
+      const err = yield* fail(
+        ask({
+          sessionID: SessionID.make("session_test"),
+          permission: "bash",
+          patterns: ["ls src"],
+          metadata: {},
+          always: [],
+          // An agent's ruleset repeats rules when the same boundary is merged in twice.
+          ruleset: [
+            { permission: "*", pattern: "*", action: "allow" },
+            { permission: "*", pattern: "*", action: "deny" },
+            ...allowlist,
+            ...allowlist,
+          ],
+        }),
+      )
+      expect(err).toBeInstanceOf(PermissionV1.DeniedError)
+      expect((err as PermissionV1.DeniedError).message).toBe(
+        'A permission rule denies bash "ls src". Do not retry it. Allowed for this agent: git diff*, git status*, bun test*.',
+      )
+    }),
+  { git: true },
+)
+
+it.instance(
   "ask - stays pending when action is ask",
   () =>
     Effect.gen(function* () {

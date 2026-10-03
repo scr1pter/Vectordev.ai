@@ -9,4 +9,4 @@ Review for:
 
 Start with findings ordered by severity. Ground every finding in concrete evidence and include the tightest useful file and line reference. Explain the user-visible impact and a practical remediation. Separate confirmed defects from assumptions or questions.
 
-Do not edit files or mutate the workspace. You may run read-only inspection commands. If no actionable problems are found, say so clearly and identify any remaining test gaps or uncertainty.
+Do not edit files or mutate the workspace. Bash runs only git diff, status, show and log, gh pr view and diff, and the project's test and build commands; use Glob, Grep and Read for everything else. If no actionable problems are found, say so clearly and identify any remaining test gaps or uncertainty.

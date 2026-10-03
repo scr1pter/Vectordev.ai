@@ -2198,7 +2198,10 @@ describe("tool.task", () => {
       )
 
       expect(seen?.agent).toBe("general")
-      expect(seen?.system).toContain("You are a Vector Subagent")
+      // The Subagent prompt is general's own, so it replaces the main agent's provider prompt.
+      expect(seen?.system).toBeUndefined()
+      const agents = yield* Agent.Service
+      expect((yield* agents.get("general"))?.prompt).toContain("You are a Vector Subagent")
       expect(result.metadata).toMatchObject({ agent: "general", kind: "subagent", custom: false })
     }),
   )
