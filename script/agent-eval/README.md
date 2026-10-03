@@ -104,6 +104,30 @@ Scoring lives in `score.ts` and is pure — no disk, no processes — so a recor
 run can be re-scored with different weights without spending another model call.
 `score.test.ts` covers it.
 
+## What a run cost
+
+Every run also records what it spent, read from the runtime's own JSON event
+stream by `meter.ts` (pure, like `score.ts`, and covered by `meter.test.ts`):
+cost in USD, provider requests, and tokens split into uncached input, cache
+reads, cache writes, output, and the reasoning part of output.
+
+The runtimes report these differently, so `meter.ts` converts them to one
+shape before anything is compared: Codex counts cached input inside
+`input_tokens`, Vector keeps reasoning out of `output`, and Claude Code's
+`usage` covers only its main model while `modelUsage` also covers subagents on
+a smaller model. Vector's JSON output includes its subagents' steps, marked
+`subagent: true`, so a run's cost is the whole task's cost.
+
+The report shows `COST`, `TOKENS`, `CACHED` (the share of input read from the
+prompt cache, the measure of how well a runtime reuses its prompt) and `REQ`
+per task, and the cost per pass for each runtime. A cost per pass includes the
+attempts that failed, since they were billed too, and is left out unless every
+measured task reported its cost. Codex reports no price, so its cost is shown
+as unknown, never as zero.
+
+Compare cost only between runs on the same model: a cheaper model is not a
+more efficient agent.
+
 ## Unavailable is not zero
 
 The rule this harness must never break: **a runtime that cannot be measured is

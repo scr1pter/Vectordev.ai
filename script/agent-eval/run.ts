@@ -3,6 +3,7 @@ import { spawn } from "node:child_process"
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
+import { cacheReadShare, meterLine, totalTokens, type Meter } from "./meter"
 import { aggregate, scoreTask, type FileDiff, type RuntimeId, type TaskRun, type TaskScore } from "./score"
 import { TASKS, scoringSpec, taskById, type EvalTask } from "./tasks"
 
@@ -282,8 +283,9 @@ async function runTask(input: {
     protectedViolations,
     assertionFailures,
     mutationsCaught,
-    costUsd: agent.meter.cost,
+    costUsd: agent.meter.costUsd,
     tokens: agent.meter.tokens,
+    requests: agent.meter.requests,
   }
   const score = scoreTask(spec, run)
   process.stderr.write(
@@ -463,8 +465,6 @@ function countMutationsCaught(task: EvalTask, dir: string) {
   }, Promise.resolve(0))
 }
 
-type Meter = { cost?: number; tokens?: number }
-
 type CaptureResult = { exitCode: number; output: string; meter: Meter; timedOut: boolean }
 
 function capture(input: { command: string; args: string[]; cwd: string; timeoutMs: number }) {
@@ -490,7 +490,7 @@ function capture(input: { command: string; args: string[]; cwd: string; timeoutM
           if (!line.trim()) return
           lines.push(line)
           if (lines.length > 4_000) lines.shift()
-          meter = applyMeter(meter, line)
+          meter = meterLine(meter, line)
         })
     }
     child.stdout.on("data", consume)
@@ -521,58 +521,6 @@ function capture(input: { command: string; args: string[]; cwd: string; timeoutM
     child.once("error", (error) => finish(127, error.message))
     child.once("close", (code) => finish(timedOut ? 124 : (code ?? 1)))
   })
-}
-
-function applyMeter(meter: Meter, line: string): Meter {
-  if (!line.startsWith("{")) return meter
-  const event = parseJsonLine(line)
-  if (!event) return meter
-  // Vector emits one step_finish per provider turn carrying that turn's cost
-  // and tokens, so these accumulate across the run.
-  if (event.type === "step_finish") {
-    const part = asRecord(event.part)
-    const tokens = asRecord(part?.tokens)
-    const input = numberOrZero(tokens?.input) + numberOrZero(tokens?.output)
-    return {
-      cost: (meter.cost ?? 0) + numberOrZero(part?.cost),
-      tokens: (meter.tokens ?? 0) + input,
-    }
-  }
-  // claude-code and cursor emit a single terminal result carrying the run
-  // total, and codex reports a cumulative usage object; last value wins.
-  const usage = asRecord(event.usage) ?? asRecord(asRecord(event.info)?.total_token_usage)
-  const total =
-    numberOrUndefined(event.total_cost_usd) ?? numberOrUndefined(event.cost_usd) ?? numberOrUndefined(event.cost)
-  const totalTokens =
-    numberOrUndefined(usage?.total_tokens) ??
-    (usage ? numberOrZero(usage.input_tokens) + numberOrZero(usage.output_tokens) || undefined : undefined)
-  return {
-    cost: total ?? meter.cost,
-    tokens: totalTokens ?? meter.tokens,
-  }
-}
-
-// Mirrors the defensive line parsing in external-agents.ts: agent stdout is a
-// mixed stream and a malformed line must never take the run down.
-function parseJsonLine(line: string) {
-  try {
-    const value = JSON.parse(line)
-    return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function asRecord(value: unknown) {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined
-}
-
-function numberOrUndefined(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined
-}
-
-function numberOrZero(value: unknown) {
-  return numberOrUndefined(value) ?? 0
 }
 
 // Quote the offending text rather than asserting "authentication problem", so a
@@ -646,7 +594,7 @@ function resolveTasks(spec: string | undefined) {
 function renderReport(results: RuntimeReport[]) {
   const perRuntime = results.map((entry) => {
     const rows = [
-      ["TASK", "CATEGORY", "OUTCOME", "SCORE", "FILES", "OUT", "MUT", "WALL", "COST"],
+      ["TASK", "CATEGORY", "OUTCOME", "SCORE", "FILES", "OUT", "MUT", "WALL", "COST", "TOKENS", "CACHED", "REQ"],
       ...entry.tasks.map((report) => {
         const measured = report.score.outcome === "pass" || report.score.outcome === "fail"
         const seeded = taskById(report.score.taskId)?.mutations.length ?? 0
@@ -660,6 +608,9 @@ function renderReport(results: RuntimeReport[]) {
           report.run.status === "ran" && seeded > 0 ? `${report.run.mutationsCaught}/${seeded}` : "—",
           report.score.wallMs === undefined ? "—" : `${(report.score.wallMs / 1000).toFixed(1)}s`,
           report.score.costUsd === undefined ? "—" : `$${report.score.costUsd.toFixed(4)}`,
+          report.score.tokens === undefined ? "—" : compact(totalTokens(report.score.tokens)),
+          percent(report.score.tokens && cacheReadShare(report.score.tokens)),
+          report.score.requests === undefined ? "—" : String(report.score.requests),
         ]
       }),
     ]
@@ -667,7 +618,16 @@ function renderReport(results: RuntimeReport[]) {
     const headline =
       summary.measured === 0
         ? `no tasks measured (${summary.unavailable} unavailable, ${summary.errored} harness errors)`
-        : `${summary.passed}/${summary.measured} passed · mean score ${summary.meanScore} · ${summary.unavailable} unavailable · ${summary.errored} harness errors`
+        : [
+            `${summary.passed}/${summary.measured} passed`,
+            `mean score ${summary.meanScore}`,
+            ...(summary.totalCostUsd === undefined ? [] : [`$${summary.totalCostUsd.toFixed(4)} total`]),
+            ...(summary.costPerPass === undefined ? [] : [`$${summary.costPerPass.toFixed(4)} per pass`]),
+            ...(summary.totalTokens === undefined ? [] : [`${compact(summary.totalTokens)} tokens`]),
+            ...(summary.cacheReadShare === undefined ? [] : [`${percent(summary.cacheReadShare)} of input cached`]),
+            `${summary.unavailable} unavailable`,
+            `${summary.errored} harness errors`,
+          ].join(" · ")
     const notes = entry.tasks
       .filter((report) => report.score.outcome !== "pass")
       .map(
@@ -698,10 +658,15 @@ function renderReport(results: RuntimeReport[]) {
         const measured = found.filter((report) => report.score.outcome === "pass" || report.score.outcome === "fail")
         if (measured.length === 0 && found.some((report) => report.score.outcome === "error")) return "harness error"
         if (measured.length === 0) return "unavailable"
-        if (found.length === 1) return `${measured[0].score.outcome} ${measured[0].score.score}`
+        const costs = measured.map((report) => report.score.costUsd)
+        const cost = costs.every((value) => value !== undefined)
+          ? ` · $${(costs.reduce((total, value) => total + value, 0) / costs.length).toFixed(4)}`
+          : ""
+        const only = found.length === 1 ? measured[0] : undefined
+        if (only) return `${only.score.outcome} ${only.score.score}${cost}`
         const passed = measured.filter((report) => report.score.outcome === "pass").length
         const mean = measured.reduce((total, report) => total + report.score.score, 0) / measured.length
-        return `${passed}/${measured.length} · ${mean.toFixed(1)}`
+        return `${passed}/${measured.length} · ${mean.toFixed(1)}${cost}`
       }),
     ]),
   ])
@@ -721,6 +686,16 @@ function explain(report: TaskReport) {
     return `passed but touched ${report.score.outOfScopeFiles.join(", ")}`
   }
   return `passed with a discipline or mutation penalty (score ${report.score.score})`
+}
+
+function compact(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
+  return String(value)
+}
+
+function percent(value: number | undefined) {
+  return value === undefined ? "—" : `${Math.round(value * 100)}%`
 }
 
 function formatTable(rows: string[][]) {

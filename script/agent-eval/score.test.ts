@@ -199,21 +199,26 @@ test("a runtime that could not be measured at all reports undefined, never zero"
 })
 
 test("wall time, cost and tokens sum over measured tasks only", () => {
+  const tokens = (input: number, cacheRead: number) => ({ input, cacheRead, cacheWrite: 0, output: 100, reasoning: 0 })
   const scores = [
-    scoreTask(spec, ran({ wallMs: 4_000, costUsd: 0.02, tokens: 1_200 })),
-    scoreTask(spec, ran({ wallMs: 6_000, costUsd: 0.03, tokens: 800, checkExitCode: 1 })),
+    scoreTask(spec, ran({ wallMs: 4_000, costUsd: 0.02, tokens: tokens(100, 1_000) })),
+    scoreTask(spec, ran({ wallMs: 6_000, costUsd: 0.03, tokens: tokens(500, 400), checkExitCode: 1 })),
     scoreTask(spec, { taskId: "demo", runtime: "vector", status: "unavailable", detail: "no cli" }),
   ]
   const summary = aggregate("vector", scores)
   expect(summary.totalWallMs).toBe(10_000)
   expect(summary.totalCostUsd).toBe(0.05)
-  expect(summary.totalTokens).toBe(2_000)
+  expect(summary.totalTokens).toBe(2_200)
+  expect(summary.cacheReadShare).toBe(0.7)
+  // One pass carries the cost of the failed attempt too.
+  expect(summary.costPerPass).toBe(0.05)
 })
 
 test("cost and tokens stay undefined when the runtime never reported them", () => {
   const summary = aggregate("vector", [scoreTask(spec, ran())])
   expect(summary.totalCostUsd).toBeUndefined()
   expect(summary.totalTokens).toBeUndefined()
+  expect(summary.costPerPass).toBeUndefined()
 })
 
 test("the real task set scores against its own declared expectations", () => {

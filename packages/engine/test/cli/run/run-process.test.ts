@@ -235,6 +235,29 @@ describe("vector run (non-interactive subprocess)", () => {
   )
 
   cliIt.concurrent(
+    "--format json reports a subagent's steps so the run's spend is complete",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        yield* llm.tool("task", { description: "inspect", prompt: "Look around.", subagent_type: "general" })
+        yield* llm.text("the child found it")
+        yield* llm.text("done")
+
+        const result = yield* vector.run("delegate a look", {
+          format: "json",
+          extraArgs: ["--dangerously-skip-permissions"],
+        })
+
+        expect(result.exitCode, result.stdout).toBe(0)
+        const steps = vector.parseJsonEvents(result.stdout).filter((event) => event.type === "step_finish")
+        const delegated = steps.filter((event) => event.subagent === true)
+        expect(delegated).toHaveLength(1)
+        expect((delegated[0]?.part as { sessionID?: string } | undefined)?.sessionID).not.toBe(delegated[0]?.sessionID)
+        expect(steps.filter((event) => event.subagent !== true)).toHaveLength(2)
+      }),
+    60_000,
+  )
+
+  cliIt.concurrent(
     "--format json records partial output for an unknown stream finish",
     ({ llm, vector }) =>
       Effect.gen(function* () {

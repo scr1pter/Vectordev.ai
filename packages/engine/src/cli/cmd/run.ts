@@ -776,7 +776,20 @@ export const RunCommand = effectCmd({
 
             if (event.type === "message.part.updated") {
               const part = event.properties.part
-              if (part.sessionID !== sessionID) continue
+              if (part.sessionID !== sessionID) {
+                // A subagent's steps bill this run too. JSON output reports them, marked as a subagent's, so a
+                // consumer that totals step_finish records gets what the run spent.
+                if (
+                  part.type === "step-finish" &&
+                  args.format === "json" &&
+                  !finishedSteps.has(part.id) &&
+                  (await inRun(part.sessionID))
+                ) {
+                  finishedSteps.add(part.id)
+                  emit("step_finish", { part, subagent: true })
+                }
+                continue
+              }
 
               if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
                 if (emit("tool_use", { part })) continue
