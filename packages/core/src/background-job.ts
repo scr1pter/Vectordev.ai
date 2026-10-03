@@ -177,12 +177,11 @@ export const make = Effect.gen(function* () {
     sequence: number,
     run: Effect.Effect<string, unknown>,
   ) {
+    // onExit, not a match on the result: closing the job's scope from outside, as disposing the instance does,
+    // interrupts this fiber, and only a finalizer still settles the job, completes its waiters and records it cancelled.
     return yield* run.pipe(
-      Effect.matchCauseEffect({
-        onSuccess: (output) => settle(id, token, sequence, Exit.succeed(output)),
-        onFailure: (cause) => settle(id, token, sequence, Exit.failCause(cause)),
-      }),
-      Effect.asVoid,
+      Effect.onExit((exit) => settle(id, token, sequence, exit)),
+      Effect.ignore,
       Effect.forkIn(scope, { startImmediately: true }),
     )
   })

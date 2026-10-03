@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { BackgroundJob } from "@vectordevai/core/background-job"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Deferred, Effect, Exit, Scope } from "effect"
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { it } from "./lib/effect"
 
 const jobsLayer = LayerNode.compile(BackgroundJob.node)
@@ -29,6 +29,19 @@ describe("BackgroundJob", () => {
         info: { status: "completed", output: "done" },
       })
     }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("settles a running job as cancelled when its service shuts down", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const jobs = Context.get(yield* Layer.buildWithScope(jobsLayer, scope), BackgroundJob.Service)
+      const job = yield* jobs.start({ type: "test", run: Effect.never })
+      const waiter = yield* jobs.wait({ id: job.id }).pipe(Effect.forkChild({ startImmediately: true }))
+
+      yield* Scope.close(scope, Exit.void)
+      const settled = yield* Fiber.join(waiter).pipe(Effect.timeout("1 second"))
+      expect(settled.info).toMatchObject({ id: job.id, status: "cancelled" })
+    }),
   )
 
   it.live("publishes jobs before starting immediately settling work", () =>
@@ -125,7 +138,7 @@ describe("BackgroundJob", () => {
     }).pipe(Effect.provide(jobsLayer)),
   )
 
-  it.live("interrupts live work without promising settlement after the owning process-local scope closes", () =>
+  it.live("interrupts live work and settles it as cancelled when the owning process-local scope closes", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
       const interrupted = yield* Deferred.make<void>()
@@ -138,8 +151,8 @@ describe("BackgroundJob", () => {
       yield* Scope.close(scope, Exit.void)
 
       yield* Deferred.await(interrupted).pipe(Effect.timeout("1 second"))
-      // The abandoned in-memory registry is not a durable observation channel.
-      expect((yield* jobs.get(job.id))?.status).toBe("running")
+      // Waiters, such as the task that reports a background subagent, are told the job was stopped.
+      expect((yield* jobs.get(job.id))?.status).toBe("cancelled")
     }),
   )
 })
