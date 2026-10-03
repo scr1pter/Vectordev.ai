@@ -51,6 +51,13 @@ jobs:
         env:
           GITHUB_ACTIONS: "false"
         run: bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=strict --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts
+      - name: Compare the same Turbo process with the inherited environment
+        if: success() || failure()
+        working-directory: packages/core
+        shell: bash
+        env:
+          GITHUB_ACTIONS: "false"
+        run: bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=loose --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts
       - name: Compare strict Turbo with LOCALAPPDATA restored only
         if: success() || failure()
         working-directory: packages/core
@@ -72,6 +79,27 @@ jobs:
             if (!Array.isArray(task.passThroughEnv) || task.passThroughEnv.includes("LOCALAPPDATA"))
               throw new Error("Expected the unchanged strict Core environment before this comparison")
             task.passThroughEnv = [...task.passThroughEnv, "LOCALAPPDATA"]
+            await Bun.write(file, JSON.stringify(config, null, 2) + "\n")
+          '
+          bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=strict --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts
+      - name: Locate the native module import boundary under strict Turbo
+        if: success() || failure()
+        working-directory: packages/core
+        shell: bash
+        env:
+          GITHUB_ACTIONS: "false"
+          VECTOR_WINDOWS_POWERSHELL_IMPORT_PROBE: "1"
+        run: |
+          backup="$(mktemp)"
+          cp ../../turbo.json "$backup"
+          trap 'cp "$backup" ../../turbo.json; rm -f "$backup"' EXIT
+          bun --no-env-file -e '
+            const file = Bun.file("../../turbo.json")
+            const config = await file.json()
+            const task = config.tasks["@vectordevai/core#test"]
+            if (!Array.isArray(task.passThroughEnv) || task.passThroughEnv.includes("VECTOR_WINDOWS_POWERSHELL_IMPORT_PROBE"))
+              throw new Error("Expected the unchanged strict Core environment before this comparison")
+            task.passThroughEnv = [...task.passThroughEnv, "VECTOR_WINDOWS_POWERSHELL_IMPORT_PROBE"]
             await Bun.write(file, JSON.stringify(config, null, 2) + "\n")
           '
           bun --no-env-file ../../node_modules/turbo/bin/turbo run test --filter=@vectordevai/core --only --env-mode=strict --cache=local:w --log-order=stream -- test/util/windows-powershell.test.ts

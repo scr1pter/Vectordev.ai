@@ -85,7 +85,7 @@ test.skipIf(process.platform !== "win32")(
       assert.ok(process.env.PSModulePath, "pwsh must pass its module paths through Bun")
       const powershell = ${JSON.stringify(path.join(process.env.SYSTEMROOT!, "System32/WindowsPowerShell/v1.0/powershell.exe"))}
       const environment = WindowsPowerShell.environment(powershell)
-      const presence = (env) => Object.fromEntries(["USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "SYSTEMROOT", "PSModulePath"].map(name => [name, Object.entries(env).some(([key, value]) => key.toUpperCase() === name.toUpperCase() && value !== undefined)]))
+      const presence = (env) => Object.fromEntries(["USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "SYSTEMROOT", "SYSTEMDRIVE", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "CommonProgramFiles", "CommonProgramFiles(x86)", "CommonProgramW6432", "PROGRAMDATA", "ALLUSERSPROFILE", "PUBLIC", "USERNAME", "USERDOMAIN", "COMPUTERNAME", "OS", "PROCESSOR_ARCHITECTURE", "PSModulePath", "PSModuleAnalysisCachePath", "PSExecutionPolicyPreference"].map(name => [name, Object.entries(env).some(([key, value]) => key.toUpperCase() === name.toUpperCase() && value !== undefined)]))
       await checkpoint("environment-presence", { inherited: presence(process.env), native: presence(environment) })
       const child = Bun.spawn([powershell, "-NoProfile", "-NonInteractive", "-Command", ${JSON.stringify(
         `$ErrorActionPreference = 'Stop'
@@ -93,6 +93,16 @@ function Write-FixtureCheckpoint([string] $phase) {
   [IO.File]::AppendAllText(${quote(nativeDiagnostic)}, ([DateTime]::UtcNow.ToString('o') + ' ' + $phase + [Environment]::NewLine))
 }
 Write-FixtureCheckpoint 'native-script-started'
+${
+  process.env.VECTOR_WINDOWS_POWERSHELL_IMPORT_PROBE === "1"
+    ? `Write-FixtureCheckpoint 'security-import-started'
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
+Write-FixtureCheckpoint 'security-import-finished'
+Write-FixtureCheckpoint 'wsman-import-started'
+Import-Module Microsoft.WSMan.Management -ErrorAction Stop
+Write-FixtureCheckpoint 'wsman-import-finished'`
+    : ""
+}
 $certificateProvider = (Get-PSDrive Cert).Provider.Name
 Write-FixtureCheckpoint 'certificate-provider-loaded'
 $archiveCommand = (Get-Command Expand-Archive -ErrorAction Stop).Name
@@ -218,6 +228,12 @@ try {
           .catch(() => "not written")
         for (const line of checkpoints.split(/\r?\n/).filter((line) => line.includes('"phase":"environment-presence"')))
           console.info(`[windows-powershell] ${line}`)
+        if (process.env.VECTOR_WINDOWS_POWERSHELL_IMPORT_PROBE === "1")
+          console.info(
+            `[windows-powershell-module-probe] ${await Bun.file(nativeDiagnostic)
+              .text()
+              .catch(() => "not written")}`,
+          )
         const details = JSON.stringify({
           pwsh,
           stderr,
