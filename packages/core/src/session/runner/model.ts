@@ -96,6 +96,12 @@ export const withPricing = (model: Model, cost: ModelV2.Info["cost"]) => {
   return model
 }
 
+// The smallest context size past which the model's listed price rises, if it has one.
+export const contextTier = (model: Model) => {
+  const sizes = (pricing.get(model) ?? []).flatMap((item) => (item.tier?.type === "context" ? [item.tier.size] : []))
+  return sizes.length ? Math.min(...sizes) : undefined
+}
+
 export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderMetadata) => {
   const totalNanoAiu = metadata?.copilot?.totalNanoAiu
   if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)

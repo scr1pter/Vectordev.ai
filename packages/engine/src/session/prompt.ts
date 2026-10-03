@@ -1263,6 +1263,16 @@ const layer = Layer.effect(
           continue
         }
 
+        // Opt-in through compaction.clear: drop old tool output inside a long run before the next request.
+        if (
+          lastFinished &&
+          !lastFinished.summary &&
+          (yield* compaction.clear({ sessionID, tokens: lastFinished.tokens }))
+        )
+          msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+            Effect.provideService(Database.Service, database),
+          )
+
         const agent = yield* agents.get(lastUser.agent)
         if (!agent) {
           const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)

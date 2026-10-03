@@ -584,10 +584,39 @@ describe("session.compaction.isOverflow", () => {
         expect(yield* compact.isOverflow({ tokens: below, model })).toBe(false)
         expect(yield* compact.isOverflow({ tokens: near, model })).toBe(true)
         // A model without a price tier keeps its whole window.
-        expect(
-          yield* compact.isOverflow({ tokens: near, model: createModel({ context: 1_000_000, output: 32_000 }) }),
-        ).toBe(false)
+        // A 1M-class model without a tier compacts at 200K by default rather than re-sending up to its whole window.
+        const wide = createModel({ context: 1_000_000, output: 32_000 })
+        expect(yield* compact.isOverflow({ tokens: { ...near, input: 175_000 }, model: wide })).toBe(false)
+        expect(yield* compact.isOverflow({ tokens: { ...near, input: 185_000 }, model: wide })).toBe(true)
       }),
+    ),
+  )
+
+  it.live(
+    "a configured max_context of 0 keeps the model's whole window",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const tokens = { input: 600_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+          const model = createModel({ context: 1_000_000, output: 32_000 })
+          expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
+        }),
+      { config: { compaction: { max_context: 0 } } },
+    ),
+  )
+
+  it.live(
+    "a configured max_context applies to any model",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const tokens = { input: 90_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+          const model = createModel({ context: 200_000, output: 32_000 })
+          expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
+        }),
+      { config: { compaction: { max_context: 100_000 } } },
     ),
   )
 })
@@ -654,7 +683,14 @@ describe("session.compaction.create", () => {
 
 describe("session.compaction.prune", () => {
   // One large tool output two user turns back, from a reply that finished `idle` milliseconds ago.
-  const prunedAfter = (dir: string, idle: number) =>
+  const prunedAfter = (
+    dir: string,
+    idle: number,
+    act: (compact: SessionCompaction.Interface, sessionID: SessionID) => Effect.Effect<unknown> = (
+      compact,
+      sessionID,
+    ) => compact.prune({ sessionID }),
+  ) =>
     Effect.gen(function* () {
       const compact = yield* SessionCompaction.Service
       const ssn = yield* SessionNs.Service
@@ -729,7 +765,7 @@ describe("session.compaction.prune", () => {
         })
       }
 
-      yield* compact.prune({ sessionID: info.id })
+      yield* act(compact, info.id)
 
       const msgs = yield* ssn.messages({ sessionID: info.id })
       const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
@@ -750,6 +786,30 @@ describe("session.compaction.prune", () => {
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
         expect(yield* prunedAfter(dir, 60_000)).toBeUndefined()
+      }),
+    ),
+  )
+
+  const long = { total: 70_000, input: 70_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+
+  it.live(
+    "with compaction.clear on, clears old tool output inside a long run",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const cleared = prunedAfter(dir, 0, (compact, sessionID) => compact.clear({ sessionID, tokens: long }))
+          expect(yield* cleared).toBeNumber()
+        }),
+      { config: { compaction: { clear: true } } },
+    ),
+  )
+
+  it.live(
+    "leaves a long run's tool output alone unless compaction.clear is on",
+    provideTmpdirInstance((dir) =>
+      Effect.gen(function* () {
+        const cleared = prunedAfter(dir, 0, (compact, sessionID) => compact.clear({ sessionID, tokens: long }))
+        expect(yield* cleared).toBeUndefined()
       }),
     ),
   )

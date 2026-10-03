@@ -6,6 +6,10 @@ import { ProviderTransform } from "@/provider/transform"
 import type { MessageV2 } from "./message-v2"
 
 const COMPACTION_BUFFER = 20_000
+// Where sessions compact by default on 1M-class models, as Claude Code compacts within a 200K window. Every request
+// re-sends the whole conversation, so a step at 900K costs several times one at 200K.
+export const DEFAULT_MAX_CONTEXT = 200_000
+const LARGE_WINDOW = 500_000
 
 export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outputTokenMax?: number }) {
   const context = input.model.limit.context
@@ -18,10 +22,18 @@ export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outpu
   const window = input.model.limit.input
     ? Math.max(0, input.model.limit.input - (configured ?? buffer))
     : Math.max(0, context - Math.max(output, configured ?? 0))
-  // Past a long-context price tier every token of a request is billed at the higher rate, so compact before crossing
-  // it, unless a configured reserve says where to compact.
-  const tier = configured === undefined ? priceTier(input.model) : undefined
-  return tier !== undefined && tier - buffer < window ? Math.max(0, tier - buffer) : window
+  const ceiling = maxContext(input.cfg.compaction?.max_context, input.model, configured)
+  return ceiling !== undefined && ceiling - buffer < window ? Math.max(0, ceiling - buffer) : window
+}
+
+// Past a long-context price tier every token of a request is billed at the higher rate, so by default sessions
+// compact before crossing it, and 1M-class models without a tier compact at DEFAULT_MAX_CONTEXT. A configured reserve
+// without a configured ceiling keeps its own window, as it did before the ceiling existed.
+function maxContext(setting: number | undefined, model: Provider.Model, reserved: number | undefined) {
+  if (setting === 0) return undefined
+  if (setting !== undefined) return setting
+  if (reserved !== undefined) return undefined
+  return priceTier(model) ?? (model.limit.context >= LARGE_WINDOW ? DEFAULT_MAX_CONTEXT : undefined)
 }
 
 function priceTier(model: Provider.Model) {

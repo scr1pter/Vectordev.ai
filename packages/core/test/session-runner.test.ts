@@ -1253,6 +1253,33 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("compacts a 1M-class model at 200K instead of re-sending up to its whole window", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-first", ["Earlier answer"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Earlier question" }), resume: false })
+      yield* session.resume(sessionID)
+
+      currentModel = Model.make({
+        id: "wide",
+        provider: "fake",
+        route: OpenAIChat.route.with({ limits: { context: 1_000_000, output: 1_000 } }),
+      })
+      requests.length = 0
+      responses = [
+        fragmentFixture("text", "text-summary", ["## Goal\n- Preserve the task"]).completeEvents,
+        fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
+      ]
+      // About 225K tokens: far inside the 1M window, past the 200K default ceiling.
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "word ".repeat(180_000) }), resume: false })
+      yield* session.resume(sessionID)
+
+      expect(userTexts(requests[0])[0]).toContain("## Goal")
+      expect((yield* (yield* SessionStore.Service).context(sessionID))[0]).toMatchObject({ type: "compaction" })
+    }),
+  )
+
   it.effect("counts what the compaction summary cost in the session totals", () =>
     Effect.gen(function* () {
       yield* setup

@@ -12,6 +12,10 @@ import { SessionRunnerModel } from "./runner/model"
 import { tokens as stepTokens } from "./runner/publish-llm-event"
 
 const DEFAULT_BUFFER = 20_000
+// Where sessions compact by default on 1M-class models, as in the V1 engine: every request re-sends the whole
+// conversation, so a step at 900K costs several times one at 200K.
+const DEFAULT_MAX_CONTEXT = 200_000
+const LARGE_WINDOW = 500_000
 const DEFAULT_KEEP_TOKENS = 8_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const SUMMARY_OUTPUT_TOKENS = 4_096
@@ -61,6 +65,7 @@ type Settings = {
   readonly auto: boolean
   readonly buffer: number
   readonly tokens: number
+  readonly maxContext?: number
 }
 
 type Dependencies = {
@@ -127,6 +132,7 @@ const settings = (documents: readonly Config.Entry[]) => {
       auto: current.auto ?? result.auto,
       buffer: current.buffer ?? result.buffer,
       tokens: current.keep?.tokens ?? result.tokens,
+      maxContext: current.max_context ?? result.maxContext,
     }),
     { auto: true, buffer: DEFAULT_BUFFER, tokens: DEFAULT_KEEP_TOKENS },
   )
@@ -243,9 +249,19 @@ export const make = (dependencies: Dependencies) => {
     const context = input.model.route.defaults.limits?.context
     if (context === undefined || context <= 0) return false
     const output = input.request.generation?.maxTokens ?? input.model.route.defaults.limits?.output ?? 0
+    const window = context - Math.max(output, config.buffer)
+    // Past a long-context price tier every token costs more, and 1M-class windows get a default ceiling; a configured
+    // max_context replaces both, and 0 keeps the whole window.
+    const ceiling =
+      config.maxContext === 0
+        ? undefined
+        : (config.maxContext ??
+          SessionRunnerModel.contextTier(input.model) ??
+          (context >= LARGE_WINDOW ? DEFAULT_MAX_CONTEXT : undefined))
+    const threshold = ceiling === undefined ? window : Math.min(window, ceiling - Math.min(output, config.buffer))
     if (
       estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools }) <=
-      context - Math.max(output, config.buffer)
+      threshold
     )
       return false
     return yield* compactAfterOverflow(input)

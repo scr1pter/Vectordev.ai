@@ -12,4 +12,6 @@ export class Info extends Schema.Class<Info>("ConfigV2.Compaction")({
   prune: Schema.Boolean.pipe(Schema.optional),
   keep: Keep.pipe(Schema.optional),
   buffer: NonNegativeInt.pipe(Schema.optional),
+  // Compact at this many tokens even when the window is larger; 0 uses the whole window.
+  max_context: NonNegativeInt.pipe(Schema.optional),
 }) {}

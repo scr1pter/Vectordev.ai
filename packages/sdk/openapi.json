@@ -23696,6 +23696,13 @@
               "reserved": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "max_context": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "clear": {
+                "type": "boolean"
               }
             },
             "additionalProperties": false

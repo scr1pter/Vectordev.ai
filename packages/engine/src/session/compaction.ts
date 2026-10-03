@@ -29,6 +29,9 @@ export const Event = SessionCompactionEvent
 
 export const PRUNE_MINIMUM = 20_000
 export const PRUNE_PROTECT = 40_000
+const CLEAR_TRIGGER = 60_000
+const CLEAR_PROTECT = 20_000
+const CLEAR_MINIMUM = 40_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
@@ -135,6 +138,8 @@ export interface Interface {
     model: Provider.Model
   }) => Effect.Effect<boolean>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
+  /** With compaction.clear on, clears old tool output inside a long run; true when it cleared some. */
+  readonly clear: (input: { sessionID: SessionID; tokens: SessionV1.Assistant["tokens"] }) => Effect.Effect<boolean>
   readonly process: (input: {
     parentID: MessageID
     messages: SessionV1.WithParts[]
@@ -262,40 +267,41 @@ const layer = Layer.effect(
       if (Date.now() - last.time.completed <= ttl) return
       yield* Effect.logInfo("pruning")
 
-      let total = 0
-      let pruned = 0
-      const toPrune: SessionV1.ToolPart[] = []
-      let turns = 0
+      const found = clearable(msgs, { keepTurns: 2, protect: PRUNE_PROTECT })
+      yield* Effect.logInfo("found", { pruned: found.tokens })
+      if (found.tokens > PRUNE_MINIMUM) yield* markCleared(found.parts)
+    })
 
-      loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
-        const msg = msgs[msgIndex]
-        if (msg.info.role === "user") turns++
-        if (turns < 2) continue
-        if (msg.info.role === "assistant" && msg.info.summary) break loop
-        for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
-          const part = msg.parts[partIndex]
-          if (part.type !== "tool") continue
-          if (part.state.status !== "completed") continue
-          if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
-          if (part.state.time.compacted) break loop
-          const estimate = Token.estimate(part.state.output)
-          total += estimate
-          if (total <= PRUNE_PROTECT) continue
-          pruned += estimate
-          toPrune.push(part)
+    // Inside a long run the history only grows until compaction. Clearing rewrites the cached history after the first
+    // cleared output, so it waits until enough can go to pay for that rewrite.
+    const clear = Effect.fn("SessionCompaction.clear")(function* (input: {
+      sessionID: SessionID
+      tokens: SessionV1.Assistant["tokens"]
+    }) {
+      const cfg = yield* config.get()
+      if (cfg.compaction?.clear !== true) return false
+      const used =
+        input.tokens.total ||
+        input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
+      if (used < CLEAR_TRIGGER) return false
+      const msgs = yield* session
+        .messages({ sessionID: input.sessionID })
+        .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
+      if (!msgs) return false
+      const found = clearable(msgs, { keepTurns: 0, protect: CLEAR_PROTECT })
+      if (found.tokens < CLEAR_MINIMUM) return false
+      yield* markCleared(found.parts)
+      return true
+    })
+
+    const markCleared = Effect.fn("SessionCompaction.markCleared")(function* (parts: SessionV1.ToolPart[]) {
+      for (const part of parts) {
+        if (part.state.status === "completed") {
+          part.state.time.compacted = Date.now()
+          yield* session.updatePart(part)
         }
       }
-
-      yield* Effect.logInfo("found", { pruned, total })
-      if (pruned > PRUNE_MINIMUM) {
-        for (const part of toPrune) {
-          if (part.state.status === "completed") {
-            part.state.time.compacted = Date.now()
-            yield* session.updatePart(part)
-          }
-        }
-        yield* Effect.logInfo("pruned", { count: toPrune.length })
-      }
+      yield* Effect.logInfo("pruned", { count: parts.length })
     })
 
     const processCompaction = Effect.fn("SessionCompaction.process")(function* (input: {
@@ -561,6 +567,7 @@ const layer = Layer.effect(
     return Service.of({
       isOverflow,
       prune,
+      clear,
       process: processCompaction,
       create,
     })
@@ -581,5 +588,33 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
   ],
 })
+
+// Walks back from the newest message, skipping the newest `keepTurns` user turns and the newest `protect` tokens of
+// tool output, and collects the older completed tool outputs that are still in the history.
+function clearable(msgs: SessionV1.WithParts[], input: { keepTurns: number; protect: number }) {
+  const parts: SessionV1.ToolPart[] = []
+  let total = 0
+  let tokens = 0
+  let turns = 0
+  loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
+    const msg = msgs[msgIndex]
+    if (msg.info.role === "user") turns++
+    if (turns < input.keepTurns) continue
+    if (msg.info.role === "assistant" && msg.info.summary) break loop
+    for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
+      const part = msg.parts[partIndex]
+      if (part.type !== "tool") continue
+      if (part.state.status !== "completed") continue
+      if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+      if (part.state.time.compacted) break loop
+      const estimate = Token.estimate(part.state.output)
+      total += estimate
+      if (total <= input.protect) continue
+      tokens += estimate
+      parts.push(part)
+    }
+  }
+  return { parts, tokens }
+}
 
 export * as SessionCompaction from "./compaction"

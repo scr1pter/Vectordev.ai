@@ -161,6 +161,14 @@ export const Info = Schema.Struct({
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer for compaction. Leaves enough window to avoid overflow during compaction.",
       }),
+      max_context: Schema.optional(NonNegativeInt).annotate({
+        description:
+          "Compact once the conversation reaches this many tokens, even when the model's window is larger. Every request re-sends the whole conversation, so a smaller context costs less per step. Defaults to just below a model's long-context price tier, and to 200000 for models with a window of 500000 or more and no tier; 0 uses the model's whole window.",
+      }),
+      clear: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "During a long run, clear old tool outputs once the context passes 60000 tokens and at least 40000 tokens of older output can go (default: false)",
+      }),
     }),
   ),
   experimental: Schema.optional(

@@ -2111,6 +2111,8 @@ export type Config = {
     tail_turns?: number
     preserve_recent_tokens?: number
     reserved?: number
+    max_context?: number
+    clear?: boolean
   }
   experimental?: {
     disable_paste_summary?: boolean
