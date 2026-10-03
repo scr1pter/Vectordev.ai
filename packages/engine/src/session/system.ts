@@ -308,8 +308,8 @@ const layer = Layer.effect(
               "Vector Cloud is the default backend and publishing surface when the vector_cloud tool is available.",
               "For authentication, user accounts, databases, persistence, environment-backed features, or backend setup, inspect Vector Cloud database readiness before implementation and prepare the connected project database when available.",
               "If the project has no connected database, clearly recommend Vector Cloud > Database and explain that setup is required; never invent credentials.",
-              "When the user asks to publish or deploy without naming a provider, publish through Vector Cloud, report its validation checks, and return the final URL.",
-              "Use a directly named provider such as Vercel, Netlify, or Supabase only when the user explicitly requests that provider.",
+              "When the user asks to publish or deploy without naming a provider, call vector_cloud with target omitted so it uses the project's single configured destination; if it reports multiple destinations, ask the user to choose. Report its validation checks and return the final URL.",
+              "When the user names a publishing provider, pass that target explicitly and never switch providers after a failure without the user's instruction.",
               "</vector_cloud_policy>",
             ].join("\n"),
           changes &&

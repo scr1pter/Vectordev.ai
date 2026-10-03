@@ -33,7 +33,9 @@
  * and third-party code may carry the name: both are unrelated words that happen to contain it.
  */
 import path from "node:path"
+import { createReadStream } from "node:fs"
 import { lstat, readdir } from "node:fs/promises"
+import { Readable } from "node:stream"
 
 const root = path.resolve(import.meta.dir, "..")
 // Bytes of surrounding text kept around each match: longer than any notice line.
@@ -333,23 +335,32 @@ async function scanZip(file: string, rules: Rules, report: AuditReport, chunkSiz
   const trailer = Buffer.from(await archive.slice(Math.max(0, archive.size - 65_557)).arrayBuffer())
   const end = trailer.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]))
   if (end === -1) throw new Error(`${file} is not a zip archive`)
-  const listing = archive.slice(
-    trailer.readUInt32LE(end + 16),
-    trailer.readUInt32LE(end + 16) + trailer.readUInt32LE(end + 12),
-  )
-  const directory = Buffer.from(await listing.arrayBuffer())
-  await scan(listing.stream(), `${file} (central directory)`, rules, report, chunkSize)
+  const offset = trailer.readUInt32LE(end + 16)
+  const directory = Buffer.from(await archive.slice(offset, offset + trailer.readUInt32LE(end + 12)).arrayBuffer())
+  await scan(new Blob([directory]).stream(), `${file} (central directory)`, rules, report, chunkSize)
   for (let at = 0; at + 46 <= directory.length && directory.readUInt32LE(at) === 0x02014b50; ) {
     const method = directory.readUInt16LE(at + 10)
     const compressed = directory.readUInt32LE(at + 20)
+    const uncompressed = directory.readUInt32LE(at + 24)
     const nameLength = directory.readUInt16LE(at + 28)
     const local = directory.readUInt32LE(at + 42)
     const entry = directory.subarray(at + 46, at + 46 + nameLength).toString("utf8")
     at += 46 + nameLength + directory.readUInt16LE(at + 30) + directory.readUInt16LE(at + 32)
     if (method !== 0 && method !== 8) throw new Error(`${file}: ${entry} uses unsupported zip method ${method}`)
     const header = Buffer.from(await archive.slice(local, local + 30).arrayBuffer())
+    if (header.length !== 30 || header.readUInt32LE(0) !== 0x04034b50)
+      throw new Error(`${file}: ${entry} has an invalid local header`)
     const start = local + 30 + header.readUInt16LE(26) + header.readUInt16LE(28)
-    const raw = archive.slice(start, start + compressed).stream()
+    if (start > offset || compressed > offset - start) throw new Error(`${file}: ${entry} has an invalid payload range`)
+    if (compressed === 0) {
+      if (method !== 0 || uncompressed !== 0) throw new Error(`${file}: ${entry} has an invalid empty payload`)
+      continue
+    }
+    // Bun 1.3.14 file-slice streams can spin after their last byte, even for nonempty ranges.
+    // Keep payloads bounded and streaming, using an inclusive Node range with a finite EOF.
+    const raw = Readable.toWeb(
+      createReadStream(file, { start, end: start + compressed - 1 }),
+    ) as unknown as ReadableStream<Uint8Array<ArrayBuffer>>
     await scan(
       method === 8 ? raw.pipeThrough(new DecompressionStream("deflate-raw")) : raw,
       `${file}:${entry}`,

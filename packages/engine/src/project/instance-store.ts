@@ -69,12 +69,16 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
         return true
       })
 
-    const completeLoad = (directory: string, input: LoadInput, entry: Entry) =>
-      Effect.gen(function* () {
-        const exit = yield* Effect.exit(boot({ ...input, directory }))
-        if (Exit.isFailure(exit)) yield* removeEntry(directory, entry)
-        yield* Deferred.done(entry.deferred, exit).pipe(Effect.asVoid)
-      })
+    const completeLoad = (directory: string, entry: Entry, work: Effect.Effect<InstanceContext>) =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          // Scope shutdown interrupts workers before disposing entries. Always publish their exit
+          // so disposal and concurrent callers cannot wait forever on an abandoned Deferred.
+          const exit = yield* Effect.exit(restore(work))
+          if (Exit.isFailure(exit)) yield* removeEntry(directory, entry)
+          yield* Deferred.done(entry.deferred, exit).pipe(Effect.asVoid)
+        }),
+      )
 
     const emitDisposed = (input: { directory: string; project?: string }) =>
       Effect.sync(() =>
@@ -114,10 +118,14 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
 
           const entry: Entry = { deferred: Deferred.makeUnsafe<InstanceContext>() }
           cache.set(directory, entry)
-          yield* Effect.gen(function* () {
-            yield* Effect.logInfo("creating instance", { directory: directory })
-            yield* completeLoad(directory, input, entry)
-          }).pipe(Effect.forkIn(scope, { startImmediately: true }))
+          yield* completeLoad(
+            directory,
+            entry,
+            Effect.gen(function* () {
+              yield* Effect.logInfo("creating instance", { directory })
+              return yield* boot({ ...input, directory })
+            }),
+          ).pipe(Effect.forkIn(scope, { startImmediately: true }))
           return yield* restore(Deferred.await(entry.deferred))
         }),
       ).pipe(Effect.withSpan("InstanceStore.load"))
@@ -130,15 +138,19 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
           const previous = cache.get(directory)
           const entry: Entry = { deferred: Deferred.makeUnsafe<InstanceContext>() }
           cache.set(directory, entry)
-          yield* Effect.gen(function* () {
-            yield* Effect.logInfo("reloading instance", { directory: directory })
-            if (previous) {
-              yield* Deferred.await(previous.deferred).pipe(Effect.ignore)
-              yield* Effect.promise(() => runDisposers(directory))
-              yield* emitDisposed({ directory, project: input.project?.id })
-            }
-            yield* completeLoad(directory, input, entry)
-          }).pipe(Effect.forkIn(scope, { startImmediately: true }))
+          yield* completeLoad(
+            directory,
+            entry,
+            Effect.gen(function* () {
+              yield* Effect.logInfo("reloading instance", { directory })
+              if (previous) {
+                yield* Deferred.await(previous.deferred).pipe(Effect.ignore)
+                yield* Effect.promise(() => runDisposers(directory))
+                yield* emitDisposed({ directory, project: input.project?.id })
+              }
+              return yield* boot({ ...input, directory })
+            }),
+          ).pipe(Effect.forkIn(scope, { startImmediately: true }))
           return yield* restore(Deferred.await(entry.deferred))
         }),
       ).pipe(Effect.withSpan("InstanceStore.reload"))

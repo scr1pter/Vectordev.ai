@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
-import { macPackagePaths, packageRequest } from "./package-desktop"
+import { macPackagePaths, packageEnvironment, packageRequest } from "./package-desktop"
 
 describe("desktop package request", () => {
   test("routes every package script through the release safeguard", async () => {
@@ -9,12 +11,53 @@ describe("desktop package request", () => {
     if (!manifest || typeof manifest !== "object" || !("scripts" in manifest)) throw new Error("Missing scripts")
     expect(manifest.scripts).toEqual(
       expect.objectContaining({
-        package: "bun ./scripts/package-desktop.ts",
-        "package:mac": "bun ./scripts/package-desktop.ts --target=mac",
-        "package:win": "bun ./scripts/package-desktop.ts --target=win",
-        "package:linux": "bun ./scripts/package-desktop.ts --target=linux",
+        prebuild: "bun --no-env-file ./scripts/prebuild.ts",
+        build: "bun --no-env-file ./scripts/build-desktop.ts && bun --no-env-file ./scripts/verify-runtime.ts",
+        package: "bun --no-env-file ./scripts/package-desktop.ts",
+        "package:mac": "bun --no-env-file ./scripts/package-desktop.ts --target=mac",
+        "package:win": "bun --no-env-file ./scripts/package-desktop.ts --target=win",
+        "package:linux": "bun --no-env-file ./scripts/package-desktop.ts --target=linux",
       }),
     )
+  })
+
+  test("unsigned build children receive no signing or Sentry credentials and do not load dotenv", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "vector-package-env-"))
+    const environment = {
+      CSC_LINK: "fixture-certificate",
+      csc_key_password: "fixture-password",
+      WIN_CSC_LINK: "fixture-windows-certificate",
+      APPLE_ID: "fixture@example.test",
+      SENTRY_AUTH_TOKEN: "fixture-token",
+      VECTOR_SIGN_MAC: "true",
+      VECTOR_NOTARIZE: "true",
+      VECTOR_SIGN_DMG: "true",
+      GITHUB_SHA: "a".repeat(40),
+    }
+    try {
+      await Bun.write(path.join(directory, ".env.local"), "VECTOR_FIXTURE_DOTENV=must-not-load\n")
+      const child = Bun.spawnSync(
+        [
+          process.execPath,
+          "--no-env-file",
+          "-e",
+          "console.log(JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(?:CSC_|WIN_CSC_|APPLE_|SENTRY_|VECTOR_|GITHUB_SHA)/i.test(name)))))",
+        ],
+        { cwd: directory, env: packageEnvironment(environment, true), stdout: "pipe", stderr: "pipe" },
+      )
+      expect(child.exitCode, child.stderr.toString()).toBe(0)
+      expect(JSON.parse(child.stdout.toString())).toEqual({
+        GITHUB_SHA: environment.GITHUB_SHA,
+        VECTOR_SIGN_MAC: "false",
+        VECTOR_NOTARIZE: "false",
+        VECTOR_SIGN_DMG: "false",
+        CSC_IDENTITY_AUTO_DISCOVERY: "false",
+      })
+      expect(packageEnvironment(environment, false)).toEqual(environment)
+      expect(environment.CSC_LINK).toBe("fixture-certificate")
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("requires an explicit release channel", () => {

@@ -65,6 +65,38 @@ test("an unknown catalog waits briefly for a silent network, then answers withou
   expect(await client.catalog()).toEqual(enabled)
 })
 
+for (const response of ["silent", "immediate"]) {
+  test(`catalog deadline settles and releases its timer in a fresh process with ${response} responses`, async () => {
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "--eval",
+        `import { FreeModels } from ${JSON.stringify(new URL("../src/free-models.ts", import.meta.url).href)};
+const client = FreeModels.createClient({
+  wait: ${response === "silent" ? 20 : 60_000},
+  request: ${response === "silent" ? "() => new Promise(() => {})" : `async () => Response.json(${JSON.stringify(off)})`},
+});
+console.log(JSON.stringify(await client.catalog()));`,
+      ],
+      { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+    )
+    const timeout = setTimeout(() => child.kill(), 10_000)
+    try {
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect(code, stderr).toBe(0)
+      expect(stdout.trim()).toBe(JSON.stringify(off))
+    } finally {
+      clearTimeout(timeout)
+      child.kill()
+      await child.exited
+    }
+  }, 15_000)
+}
+
 test("an expired catalog last seen ON is served stale while a slow refresh continues", async () => {
   const real = { enabled: true, updatedAt: 456, models: [{ ...FREE_MODEL_FALLBACKS[0], id: "acme/real:free" }] }
   const clock = { now: 0 }

@@ -3,9 +3,7 @@ import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
 import { getDatabase, redactCloudLog } from "./cloud-console"
-import { getSupabaseServiceSnapshot } from "./cloud-connections"
-import { decryptCloudCredential } from "./cloud-credential-vault"
-import { getStore } from "./store"
+import { getSupabaseManagementToken } from "./cloud-connections"
 
 // Schema belongs in the repository, not in a dashboard the agent cannot reach:
 // "add likes to posts" should be a migration file plus this action, not a trip
@@ -63,8 +61,6 @@ const CREATE_TRACKING_TABLE = `create table if not exists ${TRACKING_TABLE} (
 const SELECT_APPLIED = `select name from ${TRACKING_TABLE} order by name;`
 const MIGRATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.sql$/
 const MAX_MIGRATION_CHARS = 1_000_000
-const CONNECTION_STORE = "cloud-provider-connections"
-const CONNECTION_KEY = "records"
 
 function stringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined
@@ -202,27 +198,6 @@ export function supabaseSqlRunner(projectRef: string, token: string, request: Cl
   }
 }
 
-// cloud-connections keeps its token accessor module-private, so the management
-// token is read back from the record it writes, through the same vault. It is
-// used for one request and never logged, stored or returned.
-async function supabaseManagementToken(projectPath: string, taskId: string | undefined): Promise<string | undefined> {
-  const record = () => {
-    const raw = getStore(CONNECTION_STORE).get(CONNECTION_KEY)
-    if (!Array.isArray(raw)) return undefined
-    return raw.find((item) => item && typeof item === "object" && Reflect.get(item, "provider") === "supabase")
-  }
-  const current = record()
-  if (!current) return undefined
-  const expiresAt = stringField(current, "expiresAt")
-  // An OAuth token that is about to expire is refreshed by cloud-connections
-  // itself; asking it for the service snapshot is the exported way to make that
-  // happen before a long migration run starts.
-  const stale = expiresAt ? Date.parse(expiresAt) <= Date.now() + 60_000 : false
-  const refreshed = stale ? await getSupabaseServiceSnapshot(projectPath, taskId).then(record, () => current) : current
-  const accessToken = stringField(refreshed, "accessToken")
-  return accessToken ? decryptCloudCredential(accessToken) : undefined
-}
-
 export async function applyCloudMigrations(
   input: CloudMigrationsInput,
   request: CloudFetch = fetch,
@@ -246,7 +221,7 @@ export async function applyCloudMigrations(
       nextStep: "Ask the user to open Vector Cloud > Database and connect a Supabase project.",
     }
   }
-  const token = await supabaseManagementToken(input.projectPath, input.taskId).catch(() => undefined)
+  const token = await getSupabaseManagementToken(request).catch(() => undefined)
   if (!token) {
     return {
       ok: false,

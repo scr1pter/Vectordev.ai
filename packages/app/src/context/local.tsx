@@ -1,5 +1,6 @@
 import { unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
+import { retainFreeModelSelection } from "@vectordevai/schema/free-model"
 import { useLanguage } from "./language"
 import { showToast } from "@/utils/toast"
 import { takeProviderNotice } from "@/utils/provider-notices"
@@ -226,20 +227,21 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           return
         }
 
+        const retained = retainFreeModelSelection(currentSelection())
+        const prev = scope()
+        const next = {
+          agent: item.name,
+          model: retained ?? item.model ?? prev?.model,
+          variant: retained ? (model.variant.current() ?? prev?.variant) : (item.variant ?? prev?.variant),
+        } satisfies State
         batch(() => {
           setStore("current", item.name)
           setStore("last", {
             type: "agent",
             agent: item.name,
-            model: item.model,
-            variant: item.variant ?? null,
+            model: next.model,
+            variant: next.variant ?? null,
           })
-          const prev = scope()
-          const next = {
-            agent: item.name,
-            model: item.model ?? prev?.model,
-            variant: item.variant ?? prev?.variant,
-          } satisfies State
           const session = id()
           if (session) {
             setSaved("session", session, next)
@@ -264,12 +266,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       },
     }
 
-    const current = () => {
-      const item = firstModel(
+    const currentSelection = () =>
+      firstModel(
         () => scope()?.model,
         () => agent.current()?.model,
         fallback,
       )
+    const current = () => {
+      const item = currentSelection()
       if (!item) return
       const selected = models.find(item)
       if (selected?.freeModel?.source !== "shared") return selected

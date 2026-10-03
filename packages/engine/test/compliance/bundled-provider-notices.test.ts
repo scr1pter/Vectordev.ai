@@ -33,7 +33,13 @@ async function fixture() {
     .digest("hex")
   await Bun.write(
     path.join(directory, "bun.lock"),
-    JSON.stringify({ packages: { provider: ["provider@1.0.0", "", {}, integrity] } }),
+    JSON.stringify({
+      workspaces: Object.fromEntries(["engine", "app", "desktop", "tui", "ui"].map((name) => [`packages/${name}`, {}])),
+      packages: {
+        provider: ["provider@1.0.0", "", {}, integrity],
+        embedded: ["embedded@2.0.0", "", {}, integrity],
+      },
+    }),
   )
   for (const workspace of ["engine", "app", "desktop", "tui", "ui"])
     await Bun.write(
@@ -134,6 +140,11 @@ test("known embedded providers require an inventory even if its file or entry wa
     JSON.stringify({ name, version: "0.3.0", license: "MIT" }),
   )
   await Bun.write(path.join(item.directory, "node_modules", name, "LICENSE"), "Provider MIT license")
+  const lock = await Bun.file(path.join(item.directory, "bun.lock")).json()
+  await Bun.write(
+    path.join(item.directory, "bun.lock"),
+    JSON.stringify({ ...lock, packages: { ...lock.packages, [name]: [`${name}@0.3.0`, "", {}, integrity] } }),
+  )
   await Bun.write(item.inventory, "{}")
   await expect(dependencyNotices(item.directory)).rejects.toThrow("Missing bundled provider notices")
   await rm(item.inventory)

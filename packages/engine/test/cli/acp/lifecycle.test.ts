@@ -15,11 +15,23 @@ describe("vector acp lifecycle subprocess", () => {
     "stdin EOF exits cleanly",
     ({ vector }) =>
       Effect.gen(function* () {
-        const acp = yield* vector.acp()
+        const started = Date.now()
+        const acp = yield* vector.acp({ env: { VECTOR_ACP_PROFILE: "1" } })
         acp.close()
 
-        const code = yield* Effect.promise(() => acp.exited).pipe(Effect.timeout(Duration.seconds(5)))
-        expect(code).toBe(0)
+        yield* Effect.gen(function* () {
+          const code = yield* Effect.promise(() => acp.exited).pipe(Effect.timeout(Duration.seconds(5)))
+          expect(code).toBe(0)
+        }).pipe(
+          Effect.tapCause(() =>
+            Effect.sync(() => {
+              console.error(
+                "[acp immediate EOF]",
+                JSON.stringify({ elapsedMs: Date.now() - started, stderr: acp.stderr().slice(-4_000) }),
+              )
+            }),
+          ),
+        )
       }),
     60_000,
   )

@@ -116,10 +116,8 @@ describe("tool.assertExternalDirectory", () => {
           yield* Effect.promise(() => Bun.write(path.join(outerTmp, "outside.txt"), "x"))
 
           const target = path.join(outerTmp, "outside.txt")
-          const alt = target
-            .replace(/^[A-Za-z]:/, "")
-            .replaceAll("\\", "/")
-            .toLowerCase()
+          // A rooted path without its drive can point at another volume when cwd and Temp differ.
+          const alt = target.replaceAll("\\", "/").toLowerCase()
 
           yield* assertExternalDirectoryEffect(ctx, alt)
 

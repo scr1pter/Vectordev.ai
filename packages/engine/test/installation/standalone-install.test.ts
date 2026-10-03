@@ -6,16 +6,53 @@ import path from "node:path"
 
 const installer = path.resolve(import.meta.dir, "../../../web/public/install")
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+const shell = Bun.which("sh")
+if (!shell) throw new Error("Missing test prerequisite sh")
+
+async function shellPath(value: string) {
+  if (process.platform !== "win32") return value
+  const child = Bun.spawn([shell!, "-c", 'PATH=/usr/bin:/bin cygpath -u -- "$1"', "fixture", value], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const output = await new Response(child.stdout).text()
+  expect(await child.exited, await new Response(child.stderr).text()).toBe(0)
+  return output.trim()
+}
+
+async function shellCommand(name: string) {
+  if (process.platform !== "win32") {
+    const command = Bun.which(name)
+    if (!command) throw new Error(`Missing test prerequisite ${name}`)
+    return command
+  }
+  // Use Git Bash's POSIX tools, not similarly named Windows system executables.
+  const child = Bun.spawn([shell!, "-c", 'PATH=/usr/bin:/bin command -v "$1"', "fixture", name], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const output = await new Response(child.stdout).text()
+  expect(await child.exited, `Missing test prerequisite ${name}: ${await new Response(child.stderr).text()}`).toBe(0)
+  return output.trim()
+}
 
 async function fixture() {
   const directory = await mkdtemp(path.join(os.tmpdir(), "vector installer '"))
+  const posix = await shellPath(directory)
   const tools = path.join(directory, "tools")
   const files = path.join(directory, "files")
   const destination = path.join(directory, "install with spaces")
   await mkdir(tools)
   await mkdir(files)
+  const script = async (name: string, body: string) => {
+    await rm(path.join(tools, name), { force: true })
+    await Bun.write(path.join(tools, name), `#!/bin/sh\nset -eu\n${body}\n`)
+    await chmod(path.join(tools, name), 0o755)
+  }
   for (const command of [
     "tar",
+    // GNU tar invokes gzip through PATH; keep it available in the no-Node fixture.
+    "gzip",
     "awk",
     "cut",
     "sort",
@@ -30,17 +67,16 @@ async function fixture() {
     "chmod",
     "rm",
     "rmdir",
-    "shasum",
+    // Git Bash ships GNU sha256sum; macOS provides the installer's shasum fallback.
+    process.platform === "win32" ? "sha256sum" : "shasum",
     "find",
   ]) {
-    const actual = Bun.which(command)
-    if (!actual) throw new Error(`Missing test prerequisite ${command}`)
+    const actual = await shellCommand(command)
+    if (process.platform === "win32") {
+      await script(command, `exec ${quote(actual)} "$@"`)
+      continue
+    }
     await symlink(actual, path.join(tools, command))
-  }
-  const script = async (name: string, body: string) => {
-    await rm(path.join(tools, name), { force: true })
-    await Bun.write(path.join(tools, name), `#!/bin/sh\nset -eu\n${body}\n`)
-    await chmod(path.join(tools, name), 0o755)
   }
   await script(
     "uname",
@@ -54,8 +90,8 @@ async function fixture() {
 while [ "$#" -gt 0 ]; do
  case "$1" in --output) output=$2; shift 2 ;; https://*) url=$1; shift ;; *) shift ;; esac
 done
-printf '%s\\n' "$url" >> ${quote(path.join(directory, "requests"))}
-case "$url" in *'/api/cli-release?'*) cp ${quote(path.join(directory, "release.tsv"))} "$output" ;; *) cp ${quote(path.join(directory, "archive.tar.gz"))} "$output" ;; esac
+printf '%s\\n' "$url" >> ${quote(path.posix.join(posix, "requests"))}
+case "$url" in *'/api/cli-release?'*) cp ${quote(path.posix.join(posix, "release.tsv"))} "$output" ;; *) cp ${quote(path.posix.join(posix, "archive.tar.gz"))} "$output" ;; esac
 printf '%s' "\${TEST_HTTP_STATUS:-200}"`,
   )
   const version = "1.99.42"
@@ -67,10 +103,12 @@ printf '%s' "\${TEST_HTTP_STATUS:-200}"`,
     names = ["vector", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],
     target = "linux-x64-baseline",
   ) => {
-    const process = Bun.spawn(
-      [Bun.which("tar")!, "-czf", path.join(directory, "archive.tar.gz"), "-C", files, ...names],
-      { stdout: "pipe", stderr: "pipe" },
-    )
+    // GNU tar treats a Windows drive prefix in the archive name as a remote host.
+    const process = Bun.spawn([Bun.which("tar")!, "-czf", "archive.tar.gz", "-C", "files", ...names], {
+      cwd: directory,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     expect(await process.exited, await new Response(process.stderr).text()).toBe(0)
     const bytes = await Bun.file(path.join(directory, "archive.tar.gz")).bytes()
     await Bun.write(
@@ -87,11 +125,14 @@ printf '%s' "\${TEST_HTTP_STATUS:-200}"`,
     archive,
     script,
     async run(args: string[] = [], env: Record<string, string> = {}) {
-      const process = Bun.spawn(["/bin/sh", installer, "--install-dir", destination, ...args], {
-        env: { PATH: tools, HOME: directory, ...env },
-        stdout: "pipe",
-        stderr: "pipe",
-      })
+      const process = Bun.spawn(
+        [shell!, await shellPath(installer), "--install-dir", await shellPath(destination), ...args],
+        {
+          env: { PATH: path.posix.join(posix, "tools"), HOME: posix, ...env },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      )
       return {
         code: await process.exited,
         output: await new Response(process.stdout).text(),
@@ -206,7 +247,7 @@ for (const boundary of ["binary", "metadata"]) {
     const previous = await Bun.file(path.join(install.destination, "vector")).text()
     await Bun.write(path.join(install.files, "vector"), `${previous}# Updated bytes\n`)
     await install.archive()
-    const actual = Bun.which("mv")!
+    const actual = await shellCommand("mv")
     await install.script(
       "mv",
       `${quote(actual)} "$@"\nfor argument in "$@"; do\n case "$argument" in *${boundary === "binary" ? "/extracted/vector" : "/new-metadata"}) kill -TERM "$PPID" ;; esac\ndone`,
@@ -223,7 +264,7 @@ test("POSIX installer retains recovery backups when rollback itself fails", asyn
   const previous = await Bun.file(path.join(install.destination, "vector")).text()
   await Bun.write(path.join(install.files, "vector"), `${previous}# Updated bytes\n`)
   await install.archive()
-  const actual = Bun.which("mv")!
+  const actual = await shellCommand("mv")
   await install.script(
     "mv",
     `for argument in "$@"; do case "$argument" in */old-binary) exit 1 ;; esac; done\n${quote(actual)} "$@"\nfor argument in "$@"; do case "$argument" in */extracted/vector) kill -TERM "$PPID" ;; esac; done`,

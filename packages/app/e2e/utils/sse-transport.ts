@@ -38,7 +38,7 @@ export type SseTransport<T> = {
   close(): Promise<void>
   disconnect(message?: string): Promise<void>
   error(message?: string): Promise<void>
-  connections(): Promise<SseConnectionRecord[]>
+  connections(options?: { path?: SseConnectionRecord["path"] }): Promise<SseConnectionRecord[]>
   acknowledgements(): Promise<SseDeliveryAcknowledgement[]>
 }
 
@@ -46,7 +46,7 @@ type BrowserCommand<T> =
   | { type: "send"; deliveries: { payload: T; options?: SseEventOptions }[]; burst: boolean; cuts?: number[] }
   | { type: "raw"; bytes: number[]; cuts?: number[]; marker?: string }
   | { type: "end"; mode: "close" | "disconnect" | "error"; message?: string }
-  | { type: "connections" }
+  | { type: "connections"; path?: SseConnectionRecord["path"] }
   | { type: "acknowledgements" }
 
 type BrowserTransport = Window & {
@@ -57,11 +57,11 @@ type BrowserTransport = Window & {
 
 export async function installSseTransport<T>(
   page: Page,
-  options: { server: string; retry?: number },
+  options: { server: string; path: SseConnectionRecord["path"]; retry?: number },
 ): Promise<SseTransport<T>> {
   const server = new URL(options.server).origin
   await page.addInitScript(
-    ({ server, retry }) => {
+    ({ server, path, retry }) => {
       type Connection = SseConnectionRecord & { controller: ReadableStreamDefaultController<Uint8Array> }
       type ProbeWindow = Window & {
         __visualStabilityProbe?: { startedAt: number; markers: { at: number; label: string }[] }
@@ -73,7 +73,10 @@ export async function installSseTransport<T>(
       let nextConnectionID = 0
       let nextDeliveryID = 0
 
-      const current = () => connections.findLast((connection) => connection.endedAt === undefined)
+      // Presence has its own directory stream. Timeline injections and reconnects
+      // must target the selected endpoint, regardless of which stream opened last.
+      const current = () =>
+        connections.findLast((connection) => connection.path === path && connection.endedAt === undefined)
       const chunks = (bytes: Uint8Array, cuts?: readonly number[]) => {
         const boundaries = [...new Set(cuts ?? [])]
           .filter((cut) => Number.isInteger(cut) && cut > 0 && cut < bytes.byteLength)
@@ -129,7 +132,9 @@ export async function installSseTransport<T>(
 
       const command = (input: BrowserCommand<unknown>) => {
         if (input.type === "connections")
-          return connections.map(({ controller: _controller, ...connection }) => connection)
+          return connections
+            .filter((connection) => connection.path === (input.path ?? path))
+            .map(({ controller: _controller, ...connection }) => connection)
         if (input.type === "acknowledgements") return acknowledgements
         if (input.type === "end") return end(input.mode, input.message)
         const connection = current()
@@ -206,7 +211,7 @@ export async function installSseTransport<T>(
       }
       Object.defineProperty(window, "fetch", { configurable: true, writable: true, value: fetch })
     },
-    { server, retry: options.retry },
+    { server, path: options.path, retry: options.retry },
   )
 
   const command = <Result>(input: BrowserCommand<T>) =>
@@ -250,7 +255,9 @@ export async function installSseTransport<T>(
         type: "send",
         deliveries: [
           {
-            payload: { directory: "global", payload: { type: "server.heartbeat", properties: {} } } as T,
+            payload: (options.path === "/global/event"
+              ? { directory: "global", payload: { type: "server.heartbeat", properties: {} } }
+              : { type: "server.heartbeat", properties: {} }) as T,
             options: eventOptions,
           },
         ],
@@ -274,8 +281,8 @@ export async function installSseTransport<T>(
     error(message) {
       return command({ type: "end", mode: "error", message })
     },
-    connections() {
-      return command({ type: "connections" })
+    connections(input = {}) {
+      return command({ type: "connections", path: input.path })
     },
     acknowledgements() {
       return command({ type: "acknowledgements" })

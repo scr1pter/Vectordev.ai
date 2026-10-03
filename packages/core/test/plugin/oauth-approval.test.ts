@@ -66,7 +66,12 @@ test("exact package content, entry, client and provider require separate explici
   expect(providerUsable("github-copilot", { options: { vectorOAuthPlugin: "f".repeat(64) } })).toBe(false)
   writeOAuthApproval(approval)
   expect(readOAuthApprovals()).toEqual([approval])
-  expect(statSync(approvalFile()).mode & 0o777).toBe(0o600)
+  expect(statSync(approvalFile()).isFile()).toBe(true)
+  // Windows mode bits do not describe ACL privacy; the reader enforces POSIX ownership only on POSIX.
+  if (process.platform !== "win32") {
+    expect(statSync(approvalFile()).mode & 0o777).toBe(0o600)
+    expect(statSync(approvalFile()).uid).toBe(process.getuid!())
+  }
   expect(providerEnabled("github-copilot")).toBe(false)
   releases.push(activateOAuthApproval(approval))
   expect(providerEnabled("github-copilot")).toBe(true)
@@ -154,23 +159,42 @@ test("enforces declared issuer, client, API origins and immediate revocation", (
   revokeOAuthApproval(approval.id)
   expect(() => requirePluginDestination(approval, "https://inference.example/v1/chat")).toThrow("revoked")
 })
-test("refuses symlinked plugin content, replaced manifests and non-private approval stores", () => {
+test("refuses symlinked content and malformed approval stores, enforcing POSIX privacy where supported", () => {
   const value = fixture()
   const approval = value.approval()
   symlinkSync(value.entry, path.join(value.root, "linked.js"))
-  expect(() => value.approval()).toThrow("symlinks")
-  rmSync(path.join(value.root, "linked.js"))
+  try {
+    expect(() => value.approval()).toThrow("symlinks")
+  } finally {
+    rmSync(path.join(value.root, "linked.js"))
+  }
   writeOAuthApproval(approval)
   const text = readFileSync(approvalFile(), "utf8")
-  chmodSync(approvalFile(), 0o644)
-  expect(readOAuthApprovals()).toEqual([])
-  chmodSync(approvalFile(), 0o600)
+  if (process.platform !== "win32") {
+    chmodSync(approvalFile(), 0o644)
+    expect(readOAuthApprovals()).toEqual([])
+    chmodSync(approvalFile(), 0o600)
+  }
   expect(readOAuthApprovals()).toHaveLength(1)
+  for (const invalid of [
+    { version: 2, approvals: [approval] },
+    { version: 1, approvals: [{ ...approval, id: "f".repeat(64) }] },
+    { version: 1, approvals: [{ ...approval, plugin: "@example/unapproved-owner" }] },
+  ]) {
+    writeFileSync(approvalFile(), JSON.stringify(invalid))
+    expect(readOAuthApprovals()).toEqual([])
+  }
+  writeFileSync(approvalFile(), text)
+  expect(readOAuthApprovals()).toEqual([approval])
   rmSync(approvalFile())
   const target = path.join(value.root, "approvals.json")
   writeFileSync(target, text, { mode: 0o600 })
   symlinkSync(target, approvalFile())
-  expect(readOAuthApprovals()).toEqual([])
-  expect(() => writeOAuthApproval(value.approval())).toThrow("non-regular")
-  rmSync(approvalFile())
+  try {
+    expect(readOAuthApprovals()).toEqual([])
+    expect(() => writeOAuthApproval(value.approval())).toThrow("non-regular")
+    expect(readFileSync(target, "utf8")).toBe(text)
+  } finally {
+    rmSync(approvalFile())
+  }
 })

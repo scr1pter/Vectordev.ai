@@ -6,8 +6,11 @@
 // sends them to the page that subject now lives on.
 import DocsPage from "../../layouts/DocsPage.astro"
 import { docsMoved, docsNav, docsOrder } from "../../data/docs-nav"
+import { publishedDesktopVersion, release199 } from "../../data/vector-releases"
 
 export const prerender = true
+
+const nextRelease = release199.at(-1)
 
 const start = [
   ["install", "Install Vector", "macOS, Windows or Linux, and the CLI in any terminal."],
@@ -24,6 +27,23 @@ const start = [
   <p class="dx-lede">
     Vector is an engineering workspace with an agent of its own: an editor, a terminal, a browser and a code reviewer
     around one agent that works in the repository already on your disk. These pages cover every part of it.
+  </p>
+
+  <h2>Release notes</h2>
+  <p>
+    The current desktop download is <strong>{publishedDesktopVersion}</strong>.
+    {
+      nextRelease && nextRelease.version !== publishedDesktopVersion && (
+        <>
+          {" "}Prepared for the next release:{" "}
+          <a href={`/releases#release-${nextRelease.version.replaceAll(".", "-")}`}>
+            {nextRelease.version} — {nextRelease.title}
+          </a>
+          . These changes are not included in the current download yet.
+        </>
+      )
+    }
+    {" "}<a href="/releases">Read the full version history and availability notes.</a>
   </p>
 
   <h2>Get going</h2>

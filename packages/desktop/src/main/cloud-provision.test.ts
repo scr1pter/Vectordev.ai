@@ -158,6 +158,75 @@ describe("project name derivation", () => {
 })
 
 describe("createCloudDatabase", () => {
+  test("renews expired OAuth credentials before provisioning without a linked database", async () => {
+    seed("cloud-provider-connections", "records", [
+      {
+        provider: "supabase",
+        accessToken: encryptCloudCredential("expired-fixture-token"),
+        refreshToken: encryptCloudCredential("fixture-refresh-token"),
+        expiresAt: "2000-01-01T00:00:00.000Z",
+        connectedAt: "2000-01-01T00:00:00.000Z",
+      },
+    ])
+    const api = supabaseApi()
+    const requests: string[] = []
+    const request = async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      requests.push(url.pathname)
+      if (url.pathname === "/api/cloud/oauth/refresh") {
+        expect(JSON.parse(String(init?.body))).toEqual({ provider: "supabase", refreshToken: "fixture-refresh-token" })
+        return Response.json({
+          accessToken: "renewed-fixture-token",
+          refreshToken: "rotated-fixture-token",
+          expiresIn: 3600,
+        })
+      }
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer renewed-fixture-token")
+      return api.request(input, init)
+    }
+    const report = await createCloudDatabase({ projectPath: project }, { request, ...noWait })
+    expect(report.ok).toBe(true)
+    expect(requests[0]).toBe("/api/cloud/oauth/refresh")
+    expect(api.creates()).toBe(1)
+    const records = store.get("cloud-provider-connections")!.get("records") as {
+      accessToken: string
+      refreshToken: string
+    }[]
+    expect(decryptCloudCredential(records[0].accessToken)).toBe("renewed-fixture-token")
+    expect(decryptCloudCredential(records[0].refreshToken)).toBe("rotated-fixture-token")
+    expect(JSON.stringify(report)).not.toContain("fixture-token")
+    expect(await readFile(join(project, ".env"), "utf8")).not.toContain("fixture-token")
+  })
+
+  test("failed renewal cannot leak a refresh token or continue into project creation", async () => {
+    const records = [
+      {
+        provider: "supabase",
+        accessToken: encryptCloudCredential("expired-fixture-token"),
+        refreshToken: encryptCloudCredential("private-fixture-refresh"),
+        expiresAt: "2000-01-01T00:00:00.000Z",
+        connectedAt: "2000-01-01T00:00:00.000Z",
+      },
+    ]
+    seed("cloud-provider-connections", "records", records)
+    const paths: string[] = []
+    const report = await createCloudDatabase(
+      { projectPath: project },
+      {
+        request: async (input) => {
+          paths.push(new URL(String(input)).pathname)
+          return Response.json({ error: "private-fixture-refresh is rejected" }, { status: 401 })
+        },
+        ...noWait,
+      },
+    )
+    expect(report.ok).toBe(false)
+    expect(report.error).toContain("Reconnect Supabase")
+    expect(JSON.stringify(report)).not.toContain("private-fixture-refresh")
+    expect(paths).toEqual(["/api/cloud/oauth/refresh"])
+    expect(store.get("cloud-provider-connections")!.get("records")).toEqual(records)
+  })
+
   test("creates the project, waits for it, and leaves a hand-linked project's state behind", async () => {
     seedConnection()
     const api = supabaseApi({
@@ -389,7 +458,8 @@ describe("createCloudDatabase", () => {
 
     expect(report.ok).toBe(false)
     expect(report.error).toContain("maximum number of active free projects")
-    expect(report.nextStep).toContain("upgrade its plan")
+    expect(report.nextStep).toContain("Link an existing project")
+    expect(report.nextStep).toContain("Do not upgrade a plan or retry in another organization automatically")
     expect(getDatabase(project)).toBeNull()
   })
 
@@ -438,4 +508,72 @@ describe("createCloudDatabase", () => {
     // The stale record is dropped, so the next run creates a fresh project.
     expect(store.get("cloud-database-credentials")?.get(cloudProjectScopeKey(project))).toBeUndefined()
   })
+})
+
+test("OAuth broker refresh refuses a redirect without forwarding credentials or provisioning", async () => {
+  seed("cloud-provider-connections", "records", [
+    {
+      provider: "supabase",
+      accessToken: encryptCloudCredential("expired-fixture-token"),
+      refreshToken: encryptCloudCredential("fixture-refresh-token"),
+      expiresAt: "2000-01-01T00:00:00.000Z",
+      connectedAt: "2000-01-01T00:00:00.000Z",
+    },
+  ])
+  const requests: string[] = []
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url)
+      requests.push(url.pathname)
+      if (url.pathname === "/redirect") return Response.redirect(new URL("/credential-sink", url).toString(), 307)
+      return Response.json({ accessToken: "redirected-token", expiresIn: 3600 })
+    },
+  })
+  const api = supabaseApi()
+  try {
+    const report = await createCloudDatabase(
+      { projectPath: project },
+      {
+        ...noWait,
+        request(input, init) {
+          if (new URL(String(input)).pathname === "/api/cloud/oauth/refresh") {
+            return fetch(new URL("/redirect", server.url), init)
+          }
+          return api.request(input, init)
+        },
+      },
+    )
+    expect(report.ok).toBe(false)
+    expect(requests).toEqual(["/redirect"])
+    expect(api.calls).toEqual([])
+    expect(JSON.stringify(report)).not.toContain("fixture-refresh-token")
+  } finally {
+    await server.stop(true)
+  }
+})
+
+test("desktop readiness advertises its versioned encrypted relay to the actual broker request", async () => {
+  const { listCloudProviderConnections } = await import("./cloud-connections")
+  const requests: string[] = []
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url)
+      requests.push(url.pathname + url.search)
+      return Response.json({ ok: true, providers: [] })
+    },
+  })
+  const previous = process.env.VECTOR_OAUTH_BROKER_URL
+  process.env.VECTOR_OAUTH_BROKER_URL = new URL("/api/cloud/oauth", server.url).toString()
+  try {
+    await listCloudProviderConnections()
+    expect(requests).toEqual(["/api/cloud/oauth/status?relay=v1"])
+  } finally {
+    if (previous === undefined) delete process.env.VECTOR_OAUTH_BROKER_URL
+    else process.env.VECTOR_OAUTH_BROKER_URL = previous
+    await server.stop(true)
+  }
 })

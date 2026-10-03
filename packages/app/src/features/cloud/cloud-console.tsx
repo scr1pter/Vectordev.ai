@@ -14,7 +14,6 @@ import {
   type CloudDeployment,
   type CloudDomain,
   type CloudDomainProvider,
-  type CloudEnvVar,
   type CloudDatabaseConnection,
   type CloudProviderConnection,
   type CloudProviderId,
@@ -26,6 +25,7 @@ import {
   type PublishTargetId,
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
+import { createCloudEnvironment } from "./cloud-environment"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -357,7 +357,8 @@ export function CloudConsole(props: {
   const [deployments, setDeployments] = createSignal<CloudDeployment[]>([])
   const [agentWorkspaces, setAgentWorkspaces] = createSignal<CloudAgentWorkspace[]>([])
   const [domains, setDomains] = createSignal<CloudDomain[]>([])
-  const [envVars, setEnvVars] = createSignal<CloudEnvVar[]>([])
+  const environment = createCloudEnvironment({ api: () => api, notice: setNotice })
+  const envVars = () => environment.state.variables
   const [database, setDatabase] = createSignal<CloudDatabaseConnection>(null)
   const [connections, setConnections] = createSignal<CloudProviderConnection[]>([])
   const [providerResources, setProviderResources] = createSignal<
@@ -392,13 +393,9 @@ export function CloudConsole(props: {
 
   const [domainDraft, setDomainDraft] = createSignal("")
   const [domainProvider, setDomainProvider] = createSignal<Exclude<CloudDomainProvider, "vector-cloud">>("vercel")
-  const [envKey, setEnvKey] = createSignal("")
-  const [envValue, setEnvValue] = createSignal("")
-  const [syncingProvider, setSyncingProvider] = createSignal<"vercel" | "netlify" | "">("")
   const [verifyingId, setVerifyingId] = createSignal("")
   const [confirmId, setConfirmId] = createSignal("")
   const [copiedId, setCopiedId] = createSignal("")
-  const [revealedEnvKey, setRevealedEnvKey] = createSignal("")
   const [expandedLogId, setExpandedLogId] = createSignal("")
   const [checkingId, setCheckingId] = createSignal("")
   const [checkingAll, setCheckingAll] = createSignal(false)
@@ -436,12 +433,12 @@ export function CloudConsole(props: {
     if (!api) return
     const projectPath = props.projectPath
     const taskId = props.taskId
-    const isCurrent = () => props.projectPath === projectPath && props.taskId === taskId
-    const [nextDeployments, nextDomains, nextEnv, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] =
+    const scope = environment.scope()
+    const isCurrent = () => environment.isCurrent(scope)
+    const [nextDeployments, nextDomains, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] =
       await Promise.all([
         api.deployments.list(projectPath, taskId).catch(() => []),
         projectPath ? api.domains.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
-        projectPath ? api.env.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
         projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
         projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
         projectPath && workspaceApi
@@ -449,11 +446,11 @@ export function CloudConsole(props: {
           : Promise.resolve([]),
         api.connections.list().catch(() => []),
         projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
+        environment.refresh(),
       ])
     if (!isCurrent()) return
     setDeployments(nextDeployments)
     setDomains(nextDomains)
-    setEnvVars(nextEnv)
     setDatabase(nextDatabase)
     setBuildSettings(nextBuild)
     setAgentWorkspaces(nextWorkspaces)
@@ -493,8 +490,11 @@ export function CloudConsole(props: {
 
   createEffect(() => {
     // Reload task-scoped data when the active task or project changes.
-    props.projectPath
-    props.taskId
+    environment.changeScope(props.projectPath, props.taskId)
+    setNotice(undefined)
+    setDatabase(null)
+    setProviderLinks([])
+    setProviderSelections({})
     setSupabaseServices(undefined)
     setSupabaseServicesLoaded(false)
     if (api) void refreshAll()
@@ -839,57 +839,9 @@ export function CloudConsole(props: {
     }
   }
 
-  // --- Environment ---------------------------------------------------------
-  const addEnv = async () => {
-    if (!api || !props.projectPath || !envKey().trim()) return
-    try {
-      setEnvVars(await api.env.set(props.projectPath, props.taskId, envKey().trim(), envValue()))
-      setEnvKey("")
-      setEnvValue("")
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Invalid variable name." })
-    }
-  }
-  const removeEnv = async (key: string) => {
-    if (!api || !props.projectPath) return
-    try {
-      setEnvVars(await api.env.remove(props.projectPath, props.taskId, key))
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        text: error instanceof Error ? error.message : "Could not remove variable — try again.",
-      })
-    }
-  }
-  const applyEnv = async () => {
-    if (!api || !props.projectPath) return
-    try {
-      const result = await api.env.apply(props.projectPath, props.taskId)
-      const count = envVars().length
-      setNotice({
-        tone: "success",
-        text: `Wrote ${count} ${count === 1 ? "variable" : "variables"} to ${result.written} in your project.`,
-      })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not write .env." })
-    }
-  }
-
-  const syncEnvironment = async (provider: "vercel" | "netlify") => {
-    if (!api || !props.projectPath) return
-    setSyncingProvider(provider)
-    try {
-      const result = await api.providers.syncEnvironment(props.projectPath, props.taskId, provider)
-      setNotice({ tone: "success", text: result.detail })
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        text: error instanceof Error ? error.message : `Could not sync variables to ${providerLabel(provider)}.`,
-      })
-    } finally {
-      setSyncingProvider("")
-    }
-  }
+  createEffect(() => {
+    if (section() !== "environment") environment.hide()
+  })
 
   // --- Provider connections ------------------------------------------------
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
@@ -1002,12 +954,11 @@ export function CloudConsole(props: {
     setManualTokenError("")
     try {
       const connection = await api.connections.connectWithToken(provider, token)
+      // The saved credential no longer belongs in the renderer draft.
+      cancelManualToken()
       setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
       const resources = await api.providers.resources(provider).catch(() => [])
       setProviderResources((current) => ({ ...current, [provider]: resources }))
-      // The renderer forgets the secret immediately. The bridge returns only
-      // account metadata after encrypting the token in Vector's local vault.
-      cancelManualToken()
       setNotice({
         tone: "success",
         text: `${providerLabel(provider)} connected${connection.account ? ` as ${connection.account}` : ""}.`,
@@ -1082,11 +1033,14 @@ export function CloudConsole(props: {
     if (!api || !props.projectPath) return
     const projectRef = providerSelections().supabase
     if (!projectRef) return
+    const scope = environment.scope()
     setProviderBusy("supabase")
     try {
-      const connection = await api.database.connectProject(props.projectPath, props.taskId, projectRef)
+      const connection = await api.database.connectProject(scope.projectPath, scope.taskId, projectRef)
+      if (!environment.isCurrent(scope)) return
       setDatabase(connection)
-      setEnvVars(await api.env.list(props.projectPath, props.taskId))
+      await environment.refresh()
+      if (!environment.isCurrent(scope)) return
       setSupabaseServices(undefined)
       setSupabaseServicesLoaded(false)
       setNotice({
@@ -1094,6 +1048,7 @@ export function CloudConsole(props: {
         text: `${connection?.projectName ?? "Supabase"} connected. Vector configured the project locally without asking you to copy API keys.`,
       })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not connect the database." })
     } finally {
       setProviderBusy("")
@@ -1101,11 +1056,14 @@ export function CloudConsole(props: {
   }
   const disconnectDb = async () => {
     if (!api || !props.projectPath) return
+    const scope = environment.scope()
     try {
-      await api.database.disconnect(props.projectPath, props.taskId)
+      await api.database.disconnect(scope.projectPath, scope.taskId)
+      if (!environment.isCurrent(scope)) return
       setDatabase(null)
       setNotice({ tone: "info", text: "Supabase disconnected. Your .env keys were left in place." })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not disconnect — try again." })
     }
   }
@@ -1350,8 +1308,8 @@ export function CloudConsole(props: {
                             >
                               <p class="cloud-token-guide">
                                 Create a token in <strong>{tokenGuide().location}</strong>. {tokenGuide().instruction}
-                                Vector validates it, encrypts it in the local credential vault, and never shows it
-                                again after saving.
+                                Vector validates it, encrypts it in the local credential vault, and never shows it again
+                                after saving.
                               </p>
                               <button
                                 class="cloud-token-link"
@@ -1377,7 +1335,9 @@ export function CloudConsole(props: {
                                 />
                               </label>
                               <Show when={manualTokenError()}>
-                                <p class="cloud-token-error" role="alert">{manualTokenError()}</p>
+                                <p class="cloud-token-error" role="alert">
+                                  {manualTokenError()}
+                                </p>
                               </Show>
                               <div class="cloud-token-actions">
                                 <button
@@ -2340,26 +2300,35 @@ export function CloudConsole(props: {
                     class="mt-3 flex flex-wrap gap-2"
                     onSubmit={(event) => {
                       event.preventDefault()
-                      void addEnv()
+                      void environment.save()
                     }}
                   >
                     <input
                       class="cloud-input w-[220px] font-mono"
-                      value={envKey()}
-                      onInput={(event) => setEnvKey(event.currentTarget.value.toUpperCase())}
+                      value={environment.state.key}
+                      onInput={(event) => environment.setKey(event.currentTarget.value)}
                       placeholder="API_KEY"
+                      aria-label="Variable name"
+                      autocomplete="off"
+                      spellcheck={false}
+                      disabled={Boolean(environment.state.busy)}
                     />
                     <input
                       class="cloud-input flex-1"
-                      value={envValue()}
-                      onInput={(event) => setEnvValue(event.currentTarget.value)}
+                      value={environment.state.value}
+                      onInput={(event) => environment.setValue(event.currentTarget.value)}
                       placeholder="value"
+                      aria-label="Variable value"
+                      type="password"
+                      autocomplete="off"
+                      spellcheck={false}
+                      disabled={Boolean(environment.state.busy)}
                     />
                     <button
                       class="cloud-button"
                       data-variant="primary"
                       type="submit"
-                      disabled={!api || !envKey().trim()}
+                      disabled={!api || !environment.state.key.trim() || Boolean(environment.state.busy)}
                     >
                       Add
                     </button>
@@ -2373,8 +2342,8 @@ export function CloudConsole(props: {
                     <button
                       class="cloud-button"
                       type="button"
-                      disabled={!api || !envVars().length}
-                      onClick={() => void applyEnv()}
+                      disabled={!api || !environment.state.loaded || Boolean(environment.state.busy)}
+                      onClick={() => void environment.apply()}
                     >
                       Write to .env
                     </button>
@@ -2384,10 +2353,12 @@ export function CloudConsole(props: {
                           class="cloud-button"
                           data-variant="primary"
                           type="button"
-                          disabled={!api || !envVars().length || Boolean(syncingProvider())}
-                          onClick={() => void syncEnvironment(link.provider)}
+                          disabled={!api || !envVars().length || Boolean(environment.state.busy)}
+                          onClick={() => void environment.sync(link.provider)}
                         >
-                          {syncingProvider() === link.provider ? "Syncing…" : `Sync to ${providerLabel(link.provider)}`}
+                          {environment.state.busy === link.provider
+                            ? "Syncing…"
+                            : `Sync to ${providerLabel(link.provider)}`}
                         </button>
                       )}
                     </For>
@@ -2402,7 +2373,7 @@ export function CloudConsole(props: {
                           {sectionIcon("environment")}
                         </svg>
                         <strong>No variables yet</strong>
-                        <p>Add one above. Nothing is written until you click "Write to .env".</p>
+                        <p>Add one above, or write the empty list to .env to clear Vector’s managed variables.</p>
                       </div>
                     }
                   >
@@ -2411,22 +2382,18 @@ export function CloudConsole(props: {
                         <code class="min-w-0 flex-1 truncate text-[12.5px] text-white/80">
                           <span class="text-[color:var(--cc-purple)]">{variable.key}</span>=
                           <span class="text-white/45">
-                            {revealedEnvKey() === variable.key ? variable.value || '""' : "••••••••••••"}
+                            {environment.state.revealedKey === variable.key ? variable.value || '""' : "••••••••••••"}
                           </span>
                         </code>
-                        <button
-                          class="cloud-button"
-                          type="button"
-                          onClick={() => setRevealedEnvKey((current) => (current === variable.key ? "" : variable.key))}
-                        >
-                          {revealedEnvKey() === variable.key ? "Hide" : "Reveal"}
+                        <button class="cloud-button" type="button" onClick={() => environment.reveal(variable.key)}>
+                          {environment.state.revealedKey === variable.key ? "Hide" : "Reveal"}
                         </button>
                         <button
                           class="cloud-button"
                           data-variant="danger"
                           type="button"
-                          disabled={!api}
-                          onClick={() => void removeEnv(variable.key)}
+                          disabled={!api || Boolean(environment.state.busy)}
+                          onClick={() => void environment.remove(variable.key)}
                         >
                           Remove
                         </button>
@@ -2473,18 +2440,21 @@ export function CloudConsole(props: {
                         fallback={
                           <>
                             <p class="cloud-muted mt-1 text-[12px]">
-                              Authorize Vector through Supabase. Your password never enters Vector.
+                              Connect your Supabase account in Connections using hosted sign-in or an available personal
+                              access token.
                             </p>
                             <button
                               class="cloud-button mt-3"
                               data-variant="primary"
                               type="button"
-                              disabled={
-                                !api || !providerConnection("supabase")?.configured || providerBusy() === "supabase"
-                              }
-                              onClick={() => void connectProvider("supabase")}
+                              disabled={!api}
+                              onClick={() => {
+                                setSection("connections")
+                                if (cloudProviderConnectionMode(providerConnection("supabase")) === "token")
+                                  openManualToken("supabase")
+                              }}
                             >
-                              {providerBusy() === "supabase" ? "Waiting for sign-in…" : "Connect Supabase"}
+                              Set up Supabase connection
                             </button>
                           </>
                         }

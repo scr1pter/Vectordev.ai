@@ -91,8 +91,13 @@ test("allows only an explicit unsigned production package to skip platform verif
   if (previous.publisherName === undefined) delete process.env.VECTOR_WINDOWS_PUBLISHER_NAME
   else process.env.VECTOR_WINDOWS_PUBLISHER_NAME = previous.publisherName
 
-  expect(config.mac?.identity).toBe("-")
+  expect(config.mac?.identity).toBeNull()
   expect(config.mac?.notarize).toBe(false)
+  expect(config.mac?.hardenedRuntime).toBe(true)
+  expect(typeof config.afterPack).toBe("function")
+  expect(config.electronFuses?.resetAdHocDarwinSignature).toBe(true)
+  expect(config.electronFuses?.onlyLoadAppFromAsar).toBe(true)
+  expect(config.electronFuses?.enableEmbeddedAsarIntegrityValidation).toBe(true)
   expect(config.win?.signExecutable).toBe(false)
   expect(config.win?.verifyUpdateCodeSignature).toBe(false)
   expect(config.win?.signtoolOptions).toBeUndefined()

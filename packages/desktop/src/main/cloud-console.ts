@@ -1,13 +1,14 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomUUID, createHash } from "node:crypto"
 import { resolveCname } from "node:dns/promises"
-import { chmodSync } from "node:fs"
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
+import { chmodSync, constants } from "node:fs"
+import { lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 
 import { getStore } from "./store"
 import { transitionReleaseRecords } from "./cloud-release-state"
 import { redactText } from "./security-redaction"
+import { isSupabasePublicKey } from "./cloud-public-key"
 
 // The Vector Cloud console is the desktop-side brain behind the full-page
 // dashboard: it tracks real deployments, writes env vars into the project's
@@ -728,19 +729,53 @@ export async function applyEnv(projectPath: string, taskId?: string): Promise<{ 
   if (!stats?.isDirectory()) {
     throw new Error("Open a project folder before applying environment variables.")
   }
-  const vars = readProject(projectPath).env
+  const project = readProject(projectPath)
+  const vars = project.env
   for (const item of vars) {
     if (/[\r\n]/.test(item.value)) {
       throw new Error(`The value for "${item.key}" contains a line break, which cannot be written to .env.`)
     }
   }
+  const manifest = await readFile(join(projectPath, "package.json"), "utf8")
+    .then(parsePackageManifest)
+    .catch(() => undefined)
+  const vite =
+    project.build?.framework === "Vite" || Boolean(manifest?.dependencies.vite || manifest?.devDependencies.vite)
   const envPath = join(projectPath, ".env")
-  const existing = await readFile(envPath, "utf8").catch(() => "")
+  const existingFile = await lstat(envPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error
+  })
+  if (existingFile && !existingFile.isFile()) {
+    throw new Error("The project's .env must be a regular file, not a symbolic link or directory.")
+  }
+  const existing = await open(envPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+    .then(async (file) => {
+      try {
+        return await file.readFile("utf8")
+      } finally {
+        await file.close()
+      }
+    })
+    .catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error
+      return ""
+    })
   const markerIndex = existing.indexOf(ENV_MARKER)
   const preamble = (markerIndex >= 0 ? existing.slice(0, markerIndex) : existing).replace(/\s+$/, "")
-  const managed = [ENV_MARKER, ...vars.map((item) => `${item.key}=${formatEnvValue(item.value)}`)].join("\n")
+  const managed = [
+    ENV_MARKER,
+    ...vars.map((item) => `${item.key}=${vite ? formatViteEnvValue(item.value) : formatEnvValue(item.value)}`),
+  ].join("\n")
   const output = preamble ? `${preamble}\n\n${managed}\n` : `${managed}\n`
-  await writeFile(envPath, output, "utf8")
+  // Replace the directory entry rather than following a link swapped in after
+  // the read. A fresh private file also tightens older permissive .env files.
+  const temporary = join(projectPath, `.env.vector-${randomUUID()}`)
+  try {
+    await writeFile(temporary, output, { encoding: "utf8", flag: "wx", mode: 0o600 })
+    await rename(temporary, envPath)
+  } finally {
+    await rm(temporary, { force: true })
+  }
   return { written: ".env" }
 }
 
@@ -748,6 +783,21 @@ function formatEnvValue(value: string) {
   if (value === "") return '""'
   if (!/[\s#'"\\]/.test(value)) return value
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+}
+
+function formatViteEnvValue(value: string) {
+  // Vite's dotenv-expand treats dollars as references even inside quotes.
+  // Preserve backslashes verbatim; double quotes would also decode \n and \r.
+  // Other projects retain their existing parser-specific representation.
+  const quote = ["'", "`", '"'].find(
+    (candidate) => !value.includes(candidate) && (candidate !== '"' || !/\\[nr]/.test(value)),
+  )
+  if (!quote) {
+    throw new Error(
+      "A variable contains a combination of quotes that cannot be written literally for Vite. Set it directly in the hosting provider environment instead.",
+    )
+  }
+  return `${quote}${value.replace(/\$/g, "\\$")}${quote}`
 }
 
 // ---- Custom domains -------------------------------------------------------
@@ -934,7 +984,11 @@ export async function connectDatabase(
     throw new Error("Enter your Supabase project URL, e.g. https://your-project.supabase.co")
   }
   const anonKey = (input.anonKey ?? "").trim()
-  if (!anonKey) throw new Error("Enter your Supabase anon (public) key.")
+  if (!isSupabasePublicKey(anonKey)) {
+    throw new Error(
+      "Enter a Supabase publishable key or an anon public key. Secret and service-role keys cannot be used in browser code.",
+    )
+  }
 
   const connection: CloudDatabaseConnection = {
     provider: "supabase",
@@ -950,6 +1004,8 @@ export async function connectDatabase(
   // applyEnv writes them to .env alongside everything else.
   setEnv(projectPath, taskId, "SUPABASE_URL", url)
   setEnv(projectPath, taskId, "SUPABASE_ANON_KEY", anonKey)
+  setEnv(projectPath, taskId, "VITE_SUPABASE_URL", url)
+  setEnv(projectPath, taskId, "VITE_SUPABASE_ANON_KEY", anonKey)
 
   const data = readProject(projectPath)
   writeProject(projectPath, { ...data, database: connection })

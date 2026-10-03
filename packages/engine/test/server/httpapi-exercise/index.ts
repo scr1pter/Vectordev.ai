@@ -33,9 +33,11 @@ import {
 import { color, printHeader, printResults } from "./report"
 import { coverageResult, parseOptions, routeKey, routeKeys, selectedScenarios } from "./routing"
 import { runScenario } from "./runner"
-import { disposeApps } from "./backend"
+import { call, disposeApps } from "./backend"
 import { runtime } from "./runtime"
 import { type Scenario } from "./types"
+import { workspaceScenarios } from "./workspace-scenarios"
+import { sessionScenarios } from "./session-scenarios"
 
 function cursor(input: Record<string, unknown>) {
   return Buffer.from(JSON.stringify(input)).toString("base64url")
@@ -58,6 +60,56 @@ function locationData(validate: (value: any) => void) {
 }
 
 const scenarios: Scenario[] = [
+  ...workspaceScenarios,
+  ...sessionScenarios,
+  http.protected
+    .get("/experimental/session/usage", "experimental.session.usage")
+    .preserveDatabase()
+    .withLlm()
+    .seeded((ctx) =>
+      Effect.gen(function* () {
+        const session = yield* ctx.session({ title: "Usage fixture" })
+        yield* ctx.llmText("Local usage response", { usage: { input: 12, output: 7 } })
+        const prompt = http.protected
+          .post("/session/{sessionID}/message", "usage.fixture.prompt")
+          .at(() => ({
+            path: route("/session/{sessionID}/message", { sessionID: session.id }),
+            headers: ctx.headers(),
+            body: {
+              agent: "build",
+              model: { providerID: "lmstudio", modelID: "test-model" },
+              parts: [{ type: "text", text: "Record local usage" }],
+            },
+          }))
+          .json(200, (body) => {
+            object(body)
+            object(body.info)
+            check(body.info.role === "assistant", "usage fixture should persist an assistant response")
+          })
+        const result = yield* call(prompt, { ...ctx, state: undefined })
+        yield* prompt.expect(ctx, undefined, result)
+        yield* ctx.llmWait(1)
+        return { session, messages: yield* ctx.messages(session.id) }
+      }),
+    )
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        object(body)
+        check(body.modelResponses === 1, "usage should count the persisted assistant response")
+        check(body.conversations === 1 && body.completedChats === 1, "usage should count the completed conversation")
+        check(body.lifetimeCost === 0, "local fixture usage should have no inference cost")
+        check(body.lifetimeTokens === 19, "usage should count the local response's reported tokens")
+        check(body.inputTokens === 12 && body.outputTokens === 7, "usage should preserve input and output counts")
+        array(body.favoriteModels)
+        check(body.favoriteModels.length === 1, "usage should identify the single local model")
+        object(body.favoriteModels[0])
+        check(body.favoriteModels[0].modelID === "test-model", "usage should identify the model used for the response")
+        check(
+          stable(yield* ctx.messages(ctx.state.session.id)) === stable(ctx.state.messages),
+          "reading usage must not mutate the transcript",
+        )
+      }),
+    ),
   http.protected
     .get("/global/health", "global.health")
     .global()
@@ -329,7 +381,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({ path: `/file/content?${new URLSearchParams({ path: "hello.txt" })}`, headers: ctx.headers() }))
     .json(200, (body) => {
       object(body)
-      check(body.content === "hello", `content should match seeded file: ${JSON.stringify(body)}`)
+      check(body.content === "hello\n", `content should match seeded file exactly: ${JSON.stringify(body)}`)
     }),
   http.protected
     .get("/file/content", "file.read.missing")
@@ -370,6 +422,50 @@ const scenarios: Scenario[] = [
       "status",
     ),
   http.protected.get("/mcp", "mcp.status").json(),
+  http.protected
+    .delete("/mcp/{name}", "mcp.remove")
+    .mutating()
+    .seeded((ctx) =>
+      Effect.gen(function* () {
+        const add = http.protected
+          .post("/mcp", "mcp.remove.fixture")
+          .at(() => ({
+            path: "/mcp",
+            headers: ctx.headers(),
+            body: { name: "httpapi-remove", config: { type: "local", command: ["bun", "--version"], enabled: false } },
+          }))
+          .json(200, (body) => {
+            object(body)
+            object(body["httpapi-remove"])
+            check(body["httpapi-remove"].status === "disabled", "MCP removal fixture must not spawn a process")
+          })
+        const result = yield* call(add, { ...ctx, state: undefined })
+        yield* add.expect(ctx, undefined, result)
+        check(ctx.directory !== undefined, "MCP removal needs an isolated project")
+        return { directory: ctx.directory }
+      }),
+    )
+    .at((ctx) => ({ path: route("/mcp/{name}", { name: "httpapi-remove" }), headers: ctx.headers() }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        object(body)
+        check(body.success === true, "MCP removal should report success")
+        const config = yield* Effect.promise(() =>
+          Bun.file(path.join(ctx.state.directory, ".vector", "vector.local.json")).json(),
+        )
+        object(config)
+        check(
+          config.mcp === undefined || (isRecord(config.mcp) && config.mcp["httpapi-remove"] === undefined),
+          "MCP removal should delete the durable configuration",
+        )
+        const status = http.protected.get("/mcp", "mcp.remove.readback").json(200, (body) => {
+          object(body)
+          check(body["httpapi-remove"] === undefined, "removed MCP integration must disappear from runtime status")
+        })
+        const result = yield* call(status, ctx)
+        yield* status.expect(ctx, undefined, result)
+      }),
+    ),
   http.protected
     .post("/mcp", "mcp.add")
     .mutating()
@@ -624,6 +720,23 @@ const scenarios: Scenario[] = [
     .json(200, (body) => {
       check(body === true, "log route should return true")
     }),
+  ...[true, false].map((exists) =>
+    http.protected
+      .get("/auth/{providerID}", `auth.exists.${exists ? "present" : "missing"}`)
+      .global()
+      .seeded(() =>
+        Effect.promise(() =>
+          Bun.write(
+            path.join(exerciseDataDirectory, "auth.json"),
+            JSON.stringify(exists ? { lmstudio: { type: "api", key: "isolated-test-key" } } : {}),
+          ),
+        ),
+      )
+      .at(() => ({ path: route("/auth/{providerID}", { providerID: "lmstudio" }) }))
+      .json(200, (body) => {
+        check(body === exists, "auth presence should report only whether the isolated credential exists")
+      }),
+  ),
   http.protected
     .put("/auth/{providerID}", "auth.set")
     .global()
@@ -636,7 +749,7 @@ const scenarios: Scenario[] = [
         check(body === true, "auth set should return true")
         const auth = yield* Effect.promise(() => Bun.file(path.join(exerciseDataDirectory, "auth.json")).json())
         object(auth)
-        check(isRecord(auth.test) && auth.test.key === "test-key", "auth set should write isolated auth file")
+        check(isRecord(auth.lmstudio) && auth.lmstudio.key === "test-key", "auth set should write isolated auth file")
       }),
     ),
   http.protected
@@ -646,7 +759,7 @@ const scenarios: Scenario[] = [
       Effect.promise(() =>
         Bun.write(
           path.join(exerciseDataDirectory, "auth.json"),
-          JSON.stringify({ test: { type: "api", key: "remove-me" } }),
+          JSON.stringify({ lmstudio: { type: "api", key: "remove-me" } }),
         ),
       ),
     )
@@ -656,7 +769,7 @@ const scenarios: Scenario[] = [
         check(body === true, "auth remove should return true")
         const auth = yield* Effect.promise(() => Bun.file(path.join(exerciseDataDirectory, "auth.json")).json())
         object(auth)
-        check(auth.test === undefined, "auth remove should delete provider from isolated auth file")
+        check(auth.lmstudio === undefined, "auth remove should delete provider from isolated auth file")
       }),
     ),
   http.protected.get("/api/health", "v2.health.get").json(200, (body) => {
@@ -1665,17 +1778,32 @@ const scenarios: Scenario[] = [
     }))
     .json(404, object, "status"),
   http.protected
-    .post("/session/{sessionID}/share", "session.share")
+    .post("/session/{sessionID}/share", "session.share.disabledConsent")
+    .inProject({ git: true, config: { share: "disabled" } })
     .mutating()
     .seeded((ctx) => ctx.session({ title: "Share session" }))
-    .at((ctx) => ({ path: route("/session/{sessionID}/share", { sessionID: ctx.state.id }), headers: ctx.headers() }))
-    .json(
-      200,
-      (body, ctx) => {
+    .at((ctx) => ({
+      path: route("/session/{sessionID}/share", { sessionID: ctx.state.id }),
+      headers: ctx.headers(),
+      body: { consent: { version: 1, public: true, updates: false }, expiresAt: Date.now() + 60_000 },
+    }))
+    .jsonEffect(400, (body, ctx) =>
+      Effect.gen(function* () {
         object(body)
-        check(body.id === ctx.state.id, "share should return the session")
-      },
-      "status",
+        check(
+          body._tag === "InvalidRequestError" && body.kind === "SharingUnavailable",
+          "disabled sharing must reject even a valid publish payload",
+        )
+        const session = http.protected
+          .get("/session/{sessionID}", "session.share.readback")
+          .at(() => ({ path: route("/session/{sessionID}", { sessionID: ctx.state.id }), headers: ctx.headers() }))
+          .json(200, (body) => {
+            object(body)
+            check(body.share === undefined, "disabled sharing must leave the session private")
+          })
+        const result = yield* call(session, ctx)
+        yield* session.expect(ctx, undefined, result)
+      }),
     ),
   http.protected
     .delete("/session/{sessionID}/share", "session.unshare")
@@ -1756,6 +1884,7 @@ const scenarios: Scenario[] = [
 ]
 
 const llmScenarios = new Set([
+  "experimental.session.usage",
   "session.init",
   "session.prompt",
   "session.prompt_async",

@@ -15,8 +15,11 @@ export async function readCliManifest(stream: ReadableStream<Uint8Array>, url: s
       if (size > CliRelease.MAX_MANIFEST_BYTES) throw new Error("Oversized manifest")
       chunks.push(part.value)
     }
+    // @vercel/blob builds this URL from the token's mixed-case store ID, while URL parsing lowercases the
+    // host, so compare the parsed form.
     const location = new URL(url)
-    if (url !== `${location.origin}/${CliRelease.manifestPath(version)}`) throw new Error("Unexpected manifest path")
+    if (location.href !== `${location.origin}/${CliRelease.manifestPath(version)}`)
+      throw new Error("Unexpected manifest path")
     const manifest = CliRelease.decode(
       Schema.decodeUnknownSync(Schema.UnknownFromJsonString)(Buffer.concat(chunks).toString("utf8")),
       location.origin,

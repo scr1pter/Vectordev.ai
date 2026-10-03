@@ -15,6 +15,7 @@ import { InstallationChannel, InstallationVersion } from "@vectordevai/core/inst
 import { InstallationEvent } from "@vectordevai/schema/installation-event"
 import type { InstallationOwnership } from "./ownership"
 import type { Standalone } from "./standalone"
+import { WindowsPowerShell } from "@vectordevai/core/util/windows-powershell"
 
 export type Method = InstallationOwnership.Method
 export type UpgradeResult = Standalone.Result
@@ -89,8 +90,8 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
         const result = yield* appProcess.run(
           ChildProcess.make(cmd[0], cmd.slice(1), {
             cwd: opts?.cwd,
-            env: opts?.env,
-            extendEnv: true,
+            env: WindowsPowerShell.environment(cmd[0], { ...process.env, ...opts?.env }),
+            extendEnv: false,
           }),
         )
         return {

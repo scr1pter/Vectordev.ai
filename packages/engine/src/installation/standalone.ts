@@ -4,6 +4,7 @@ import { lstat, mkdir, readFile, readdir, realpath, rm, rmdir, writeFile } from 
 import path from "node:path"
 import { Schema } from "effect"
 import { CliRelease } from "@vectordevai/schema/cli-release"
+import { WindowsPowerShell } from "@vectordevai/core/util/windows-powershell"
 
 export type Receipt = {
   directory: string
@@ -117,20 +118,14 @@ export async function upgrade(value: Receipt, version: string, run: Run): Promis
     ])
     if (identity.code !== 0 || !/^\d{18}$/.test(identity.stdout.trim()))
       throw new Error("Could not identify the running Vector process for safe replacement.")
-    await launch(script, [
-      "-Version",
-      version,
-      "-InstallDir",
-      value.directory,
-      "-BinaryName",
-      value.binary,
-      "-WaitForProcessId",
-      String(process.pid),
-      "-WaitForStartTicks",
-      identity.stdout.trim(),
-      "-OperationId",
-      operation,
-    ]).catch(async (error: unknown) => {
+    await launch(script, {
+      Version: version,
+      InstallDir: value.directory,
+      BinaryName: value.binary,
+      WaitForProcessId: String(process.pid),
+      WaitForStartTicks: identity.stdout.trim(),
+      OperationId: operation,
+    }).catch(async (error: unknown) => {
       await rm(directory, { recursive: true, force: true })
       throw error
     })
@@ -212,17 +207,49 @@ export async function uninstall(value: Receipt, run: Run): Promise<Result> {
   return await prepared(value.directory, operation)
 }
 
-async function launch(script: string, args: string[] = []) {
+async function launch(script: string, parameters: Record<string, string> = {}) {
+  const literal = (value: string) =>
+    `([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(value, "utf8").toString("base64")}')))`
+  const command = Buffer.from(
+    `$ErrorActionPreference = 'Stop'; $parameters = @{${Object.entries(parameters)
+      .map(([key, value]) => `${literal(key)} = ${literal(value)}`)
+      .join("; ")}}; & ${literal(script)} @parameters`,
+    "utf16le",
+  ).toString("base64")
+  // A detached, hidden Windows PowerShell can exit before running its script. START gives
+  // the worker its own minimized console; CMD receives no dynamic paths or parameter values.
   const child = spawn(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, ...args],
-    { detached: true, stdio: "ignore", windowsHide: true },
+    "cmd.exe",
+    [
+      "/d",
+      "/s",
+      "/c",
+      "start",
+      "",
+      "/min",
+      "powershell.exe",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand",
+      command,
+    ],
+    {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: WindowsPowerShell.environment("powershell.exe"),
+      timeout: 10_000,
+    },
   )
   await new Promise<void>((resolve, reject) => {
     child.once("error", reject)
-    child.once("spawn", resolve)
+    child.once("exit", (code, signal) => {
+      if (code === 0) return resolve()
+      reject(new Error(`Could not launch the deferred operation (exit ${code}, signal ${signal ?? "none"}).`))
+    })
   })
-  child.unref()
 }
 
 async function prepared(directory: string, operation: string): Promise<Result> {

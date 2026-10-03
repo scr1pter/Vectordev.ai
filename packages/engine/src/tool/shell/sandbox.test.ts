@@ -68,13 +68,14 @@ test("profile grants writes to the workspace and keeps the default deny", () => 
 })
 
 test("profile denies reads of secret paths after the broad read allowance", () => {
+  const fixtureHome = "/Users/vector-fixture"
   const profile = seatbeltProfile({
     writable: ["/work"],
-    denyRead: [`${home}/.ssh`, `${home}/.aws`, `${home}/.config/gh`, "/Library/Keychains"],
+    denyRead: [`${fixtureHome}/.ssh`, `${fixtureHome}/.aws`, `${fixtureHome}/.config/gh`, "/Library/Keychains"],
     allowNetwork: true,
   })
-  expect(profile).toContain(`(subpath "${home}/.ssh")`)
-  expect(profile).toContain(`(subpath "${home}/.aws")`)
+  expect(profile).toContain(`(subpath "${fixtureHome}/.ssh")`)
+  expect(profile).toContain(`(subpath "${fixtureHome}/.aws")`)
   expect(profile).toContain('(subpath "/Library/Keychains")')
   // SBPL is last-match-wins, so a denial emitted before (allow file-read*) would
   // be silently overridden and the whole protection would be decorative.

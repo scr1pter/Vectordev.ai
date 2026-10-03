@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer"
-import { createHmac, timingSafeEqual } from "node:crypto"
+import { createHmac, createPublicKey, timingSafeEqual } from "node:crypto"
 
 export type CloudOAuthProvider = "vercel" | "netlify" | "supabase"
 
@@ -33,6 +33,8 @@ type OAuthTokenPayload = {
   teamId?: string
 }
 
+type OAuthFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+
 const PROVIDERS = new Set<CloudOAuthProvider>(["vercel", "netlify", "supabase"])
 
 export function isCloudOAuthProvider(value: unknown): value is CloudOAuthProvider {
@@ -59,11 +61,7 @@ export function publicOAuthOrigin(requestUrl: string, env: CloudOAuthEnvironment
   return new URL(requestUrl).origin
 }
 
-export function oauthCallbackUrl(
-  provider: CloudOAuthProvider,
-  requestUrl: string,
-  env: CloudOAuthEnvironment,
-): string {
+export function oauthCallbackUrl(provider: CloudOAuthProvider, requestUrl: string, env: CloudOAuthEnvironment): string {
   return `${publicOAuthOrigin(requestUrl, env)}/api/cloud/oauth/callback-${provider}`
 }
 
@@ -74,7 +72,7 @@ export function oauthProviderConfig(
 ): CloudOAuthProviderConfig {
   const callbackUrl = oauthCallbackUrl(provider, requestUrl, env)
   const missing: string[] = []
-  if (!envValue(env, "VECTOR_OAUTH_STATE_SECRET")) {
+  if (envValue(env, "VECTOR_OAUTH_STATE_SECRET").length < 32) {
     missing.push("VECTOR_OAUTH_STATE_SECRET")
   }
   if (provider === "vercel") {
@@ -112,11 +110,7 @@ function oauthStateSecret(env: CloudOAuthEnvironment): string {
   return secret
 }
 
-export function signOAuthState(
-  provider: CloudOAuthProvider,
-  clientState: string,
-  env: CloudOAuthEnvironment,
-): string {
+export function signOAuthState(provider: CloudOAuthProvider, clientState: string, env: CloudOAuthEnvironment): string {
   const state = clientState.trim()
   if (!state || state.length > 3200) throw new Error("A valid OAuth state value is required.")
   const expiresAt = Date.now() + 10 * 60_000
@@ -141,9 +135,7 @@ export function verifyOAuthState(
   }
   const supplied = Buffer.from(signedState.slice(signatureSplit + 1), "base64url")
   const expected = Buffer.from(
-    createHmac("sha256", oauthStateSecret(env))
-      .update(`${provider}\n${clientState}\n${expiresAt}`)
-      .digest("base64url"),
+    createHmac("sha256", oauthStateSecret(env)).update(`${provider}\n${clientState}\n${expiresAt}`).digest("base64url"),
     "base64url",
   )
   return supplied.length === expected.length && timingSafeEqual(supplied, expected)
@@ -158,6 +150,7 @@ export function createOAuthAuthorizeUrl(
   if (!config.configured) {
     throw new Error(`${input.provider} OAuth is not configured. Missing ${config.missing.join(", ")}.`)
   }
+  if (input.provider !== "supabase") requireOAuthRelayState(input.state)
   const state = signOAuthState(input.provider, input.state, env)
 
   if (input.provider === "vercel") {
@@ -168,13 +161,12 @@ export function createOAuthAuthorizeUrl(
   }
 
   if (input.provider === "supabase") {
-    const challenge = input.codeChallenge?.trim()
-    if (!challenge) throw new Error("Supabase OAuth requires a PKCE code challenge.")
+    const challenge = input.codeChallenge
+    if (!challenge || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
+      throw new Error("Supabase OAuth requires a valid S256 PKCE code challenge.")
+    }
     const authorizeUrl = new URL("https://api.supabase.com/v1/oauth/authorize")
-    authorizeUrl.searchParams.set(
-      "client_id",
-      envValue(env, "VECTOR_SUPABASE_CLIENT_ID", "SUPABASE_OAUTH_CLIENT_ID"),
-    )
+    authorizeUrl.searchParams.set("client_id", envValue(env, "VECTOR_SUPABASE_CLIENT_ID", "SUPABASE_OAUTH_CLIENT_ID"))
     authorizeUrl.searchParams.set("redirect_uri", config.callbackUrl)
     authorizeUrl.searchParams.set("response_type", "code")
     authorizeUrl.searchParams.set("state", state)
@@ -184,14 +176,32 @@ export function createOAuthAuthorizeUrl(
   }
 
   const authorizeUrl = new URL("https://app.netlify.com/authorize")
-  authorizeUrl.searchParams.set(
-    "client_id",
-    envValue(env, "VECTOR_NETLIFY_CLIENT_ID", "NETLIFY_OAUTH_CLIENT_ID"),
-  )
+  authorizeUrl.searchParams.set("client_id", envValue(env, "VECTOR_NETLIFY_CLIENT_ID", "NETLIFY_OAUTH_CLIENT_ID"))
   authorizeUrl.searchParams.set("response_type", "token")
   authorizeUrl.searchParams.set("redirect_uri", config.callbackUrl)
   authorizeUrl.searchParams.set("state", state)
   return { authorizeUrl: authorizeUrl.toString(), callbackUrl: config.callbackUrl, state }
+}
+
+function requireOAuthRelayState(state: string): void {
+  const parts = state.split(".")
+  if (parts.length !== 3 || parts[1] !== "v1" || !/^[A-Za-z0-9_-]{43}$/.test(parts[0] ?? "") || state.length > 3200) {
+    throw new Error("A secure desktop OAuth relay key is required. Update Vector and start again.")
+  }
+  const encoded = parts[2] ?? ""
+  if (!/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error("The OAuth relay key is invalid.")
+  const jwk: unknown = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"))
+  if (!jwk || typeof jwk !== "object" || Reflect.get(jwk, "kty") !== "RSA" || Reflect.has(jwk, "d")) {
+    throw new Error("The OAuth relay key must be a public RSA key.")
+  }
+  const n = Reflect.get(jwk, "n")
+  const e = Reflect.get(jwk, "e")
+  if (typeof n !== "string" || typeof e !== "string" || n.length > 684 || e.length > 8) {
+    throw new Error("The OAuth relay key is invalid.")
+  }
+  const key = createPublicKey({ key: { kty: "RSA", n, e }, format: "jwk" })
+  const bits = key.asymmetricKeyDetails?.modulusLength ?? 0
+  if (bits < 2048 || bits > 4096) throw new Error("The OAuth relay key must use 2048 to 4096 bits.")
 }
 
 function stringField(value: unknown, key: string): string | undefined {
@@ -220,7 +230,7 @@ export async function exchangeOAuthCode(
   input: ExchangeOAuthInput,
   requestUrl: string,
   env: CloudOAuthEnvironment,
-  fetcher: typeof fetch = fetch,
+  fetcher: OAuthFetch = fetch,
 ): Promise<OAuthTokenPayload> {
   const code = input.code.trim()
   if (!code) throw new Error("The provider did not return an authorization code.")
@@ -241,6 +251,7 @@ export async function exchangeOAuthCode(
     })
     const response = await fetcher("https://api.vercel.com/v2/oauth/access_token", {
       method: "POST",
+      redirect: "error",
       headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
       body,
       signal: AbortSignal.timeout(20_000),
@@ -256,8 +267,10 @@ export async function exchangeOAuthCode(
     }
   }
 
-  const verifier = input.codeVerifier?.trim()
-  if (!verifier) throw new Error("The Supabase PKCE verifier is missing. Start the connection again.")
+  const verifier = input.codeVerifier
+  if (!verifier || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) {
+    throw new Error("The Supabase PKCE verifier is invalid. Start the connection again.")
+  }
   const clientId = envValue(env, "VECTOR_SUPABASE_CLIENT_ID", "SUPABASE_OAUTH_CLIENT_ID")
   const clientSecret = envValue(env, "VECTOR_SUPABASE_CLIENT_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET")
   const body = new URLSearchParams({
@@ -268,6 +281,7 @@ export async function exchangeOAuthCode(
   })
   const response = await fetcher("https://api.supabase.com/v1/oauth/token", {
     method: "POST",
+    redirect: "error",
     headers: {
       accept: "application/json",
       "content-type": "application/x-www-form-urlencoded",
@@ -292,7 +306,7 @@ export async function refreshSupabaseOAuthToken(
   refreshToken: string,
   requestUrl: string,
   env: CloudOAuthEnvironment,
-  fetcher: typeof fetch = fetch,
+  fetcher: OAuthFetch = fetch,
 ): Promise<OAuthTokenPayload> {
   const config = oauthProviderConfig("supabase", requestUrl, env)
   if (!config.configured) {
@@ -302,6 +316,7 @@ export async function refreshSupabaseOAuthToken(
   const clientSecret = envValue(env, "VECTOR_SUPABASE_CLIENT_SECRET", "SUPABASE_OAUTH_CLIENT_SECRET")
   const response = await fetcher("https://api.supabase.com/v1/oauth/token", {
     method: "POST",
+    redirect: "error",
     headers: {
       accept: "application/json",
       "content-type": "application/x-www-form-urlencoded",
@@ -326,7 +341,7 @@ export async function revokeSupabaseOAuthToken(
   refreshToken: string,
   requestUrl: string,
   env: CloudOAuthEnvironment,
-  fetcher: typeof fetch = fetch,
+  fetcher: OAuthFetch = fetch,
 ): Promise<void> {
   const token = refreshToken.trim()
   if (!token) return
@@ -336,6 +351,7 @@ export async function revokeSupabaseOAuthToken(
   }
   const response = await fetcher("https://api.supabase.com/v1/oauth/revoke", {
     method: "POST",
+    redirect: "error",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({
       client_id: envValue(env, "VECTOR_SUPABASE_CLIENT_ID", "SUPABASE_OAUTH_CLIENT_ID"),
@@ -391,7 +407,7 @@ function callbackPage(body: string, script: string): Response {
 
 function deepLinkPage(deepLink: string, provider: string, failed?: string): Response {
   const safeLink = JSON.stringify(deepLink)
-  const title = failed ? "Connection was not completed" : `${provider} is connected`
+  const title = failed ? "Connection was not completed" : `Finish connecting ${provider}`
   const copy = failed
     ? htmlEscape(failed)
     : "Vector is finishing the secure connection. You can close this tab after the desktop app opens."
@@ -403,10 +419,51 @@ function deepLinkPage(deepLink: string, provider: string, failed?: string): Resp
 
 export function createOAuthCallbackResponse(provider: CloudOAuthProvider, requestUrl: string): Response {
   const url = new URL(requestUrl)
-  if (provider === "netlify") {
+  if (provider !== "supabase") {
+    const label = provider === "vercel" ? "Vercel" : "Netlify"
+    // Vercel has no PKCE for integration codes. Encrypt the result in the
+    // browser so an intercepted custom-scheme URL cannot redeem the code.
     return callbackPage(
-      '<h1>Finishing Netlify connection</h1><p>Vector is securely transferring authorization back to the desktop app.</p><a id="return" href="#">Return to Vector</a>',
-      `(async()=>{const out=new URL("vector://cloud/oauth");out.searchParams.set("provider","netlify");try{const values=new URLSearchParams(location.hash.replace(/^#/,""));const token=values.get("access_token");const state=values.get("state")||"";const error=values.get("error_description")||values.get("error");if(error)throw new Error(error);if(!token||!state)throw new Error("Netlify did not return authorization.");const signedAt=state.indexOf("~");const clientState=signedAt<0?state:state.slice(0,signedAt);const split=clientState.indexOf(".");if(split<1)throw new Error("The secure return state is invalid.");const encoded=clientState.slice(split+1).replace(/-/g,"+").replace(/_/g,"/");const padded=encoded+"=".repeat((4-encoded.length%4)%4);const jwk=JSON.parse(atob(padded));const key=await crypto.subtle.importKey("jwk",jwk,{name:"RSA-OAEP",hash:"SHA-256"},false,["encrypt"]);const encrypted=await crypto.subtle.encrypt({name:"RSA-OAEP"},key,new TextEncoder().encode(token));const bytes=new Uint8Array(encrypted);let raw="";for(const byte of bytes)raw+=String.fromCharCode(byte);out.searchParams.set("state",state);out.searchParams.set("encrypted",btoa(raw).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/,""));location.hash="";}catch(error){out.searchParams.set("error",error instanceof Error?error.message:String(error));}const link=out.toString();document.getElementById("return").setAttribute("href",link);setTimeout(()=>{location.href=link},80)})()`,
+      `<h1 id="status">Finish connecting ${label}</h1><p id="detail">Vector is securely transferring authorization back to the desktop app.</p><a id="return" href="#">Return to Vector</a>`,
+      `(async()=>{
+        const provider=${JSON.stringify(provider)};
+        const out=new URL("vector://cloud/oauth");
+        out.searchParams.set("provider",provider);
+        const values=new URLSearchParams(provider==="netlify"?(location.hash.slice(1)||location.search):location.search);
+        const state=values.get("state")||"";
+        if(state)out.searchParams.set("state",state);
+        if(provider==="netlify")location.hash="";
+        try{
+          const error=values.get("error_description")||values.get("error");
+          if(error)throw new Error(error);
+          const authorization=values.get(provider==="netlify"?"access_token":"code");
+          if(!authorization||!state)throw new Error("The provider did not return complete authorization.");
+          if(new TextEncoder().encode(authorization).length>16384)throw new Error("The provider authorization is too large.");
+          const signedAt=state.indexOf("~");
+          const clientState=signedAt<0?state:state.slice(0,signedAt);
+          const parts=clientState.split(".");
+          if(parts.length!==3||parts[1]!=="v1")throw new Error("The secure return state is invalid. Update Vector and start again.");
+          const encoded=parts[2].replace(/-/g,"+").replace(/_/g,"/");
+          const jwk=JSON.parse(atob(encoded+"=".repeat((4-encoded.length%4)%4)));
+          const key=await crypto.subtle.importKey("jwk",jwk,{name:"RSA-OAEP",hash:"SHA-256"},false,["encrypt"]);
+          const secret=crypto.getRandomValues(new Uint8Array(32));
+          const iv=crypto.getRandomValues(new Uint8Array(12));
+          const wrapped=await crypto.subtle.encrypt({name:"RSA-OAEP"},key,secret);
+          const payloadKey=await crypto.subtle.importKey("raw",secret,{name:"AES-GCM"},false,["encrypt"]);
+          const encrypted=await crypto.subtle.encrypt({name:"AES-GCM",iv,additionalData:new TextEncoder().encode(provider+"\\n"+state)},payloadKey,new TextEncoder().encode(authorization));
+          const encode=(value)=>btoa(String.fromCharCode(...new Uint8Array(value))).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/, "");
+          out.searchParams.set("encrypted",["v1",encode(wrapped),encode(iv),encode(encrypted)].join("."));
+          for(const name of ["teamId","configurationId"]){const value=values.get(name);if(value)out.searchParams.set(name,value);}
+        }catch(error){
+          const message=error instanceof Error?error.message:String(error);
+          out.searchParams.set("error",message);
+          document.getElementById("status").textContent="Connection was not completed";
+          document.getElementById("detail").textContent=message;
+        }
+        const link=out.toString();
+        document.getElementById("return").setAttribute("href",link);
+        setTimeout(()=>{location.href=link},80);
+      })()`,
     )
   }
 
@@ -425,7 +482,7 @@ export function createOAuthCallbackResponse(provider: CloudOAuthProvider, reques
   if (!error && (!state || !code)) {
     deepLink.searchParams.set("error", `${provider} did not return a complete authorization response.`)
   }
-  return deepLinkPage(deepLink.toString(), provider === "vercel" ? "Vercel" : "Supabase", error || undefined)
+  return deepLinkPage(deepLink.toString(), "Supabase", deepLink.searchParams.get("error") || undefined)
 }
 
 export function jsonResponse(status: number, body: Record<string, unknown>): Response {

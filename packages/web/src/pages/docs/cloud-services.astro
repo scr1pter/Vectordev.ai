@@ -5,27 +5,69 @@ export const prerender = true
 ---
 
 <DocsPage id="cloud-services">
+  <p>
+    Cloud Services connects the repositories you work on to your own Vercel, Netlify and Supabase accounts. AWS views
+    use a profile you already configured for the AWS CLI. Resources remain in those accounts, with their own billing,
+    quotas and terms. Free model inference does not make hosting or database operations free.
+  </p>
+  <p class="note">
+    The connection, environment and publishing improvements below are prepared for the upcoming 1.99.99 desktop
+    release. Public downloads remain desktop 1.99.8 and CLI 1.99.7. Hosted provider sign-in is not enabled yet;
+    use the manual token option in Connections where your desktop version supports it.
+  </p>
 
-          <p>
-            Deployments, domains with real DNS checks, environment variables, databases and logs, run through the
-            Vercel, Netlify, Supabase and AWS accounts that already belong to you. Cloud work is part of the task, not a
-            panel you operate afterwards.
-          </p>
-          <p>
-            The agent drives it through one permission-gated tool: it checks which providers are connected, detects the
-            project's build settings, prepares a Supabase-backed database or authentication, syncs environment values to
-            the linked host, publishes, and lists recent deployments. Every action that creates, changes, or spends asks
-            you first.
-          </p>
-          <ul class="feature-list">
-            <li><strong>A publish that is checked</strong><span>Publishing ends with a real browser load of the deployed URL, and the agent reports the page it found and the console errors it saw rather than assuming the deploy worked.</span></li>
-            <li><strong>Failures come with logs</strong><span>The agent reads recent deployment logs from the host, so a broken deploy is diagnosed from the actual build or runtime error.</span></li>
-            <li><strong>A database it can create</strong><span>The agent creates a real Supabase project on your own account, asks which organization when there are several, and writes the keys and client into your repository.</span></li>
-            <li><strong>Migrations it can apply</strong><span>The <code>.sql</code> migrations in your repository can be applied to the linked database, with a record of which ones already ran, so running again is safe.</span></li>
-            <li><strong>Your own accounts</strong><span>Vercel, Netlify, and Supabase work once you authorize them, and AWS reads a profile you already configured for the AWS CLI. The resources stay in your accounts; Vector does not host your app and does not proxy your code.</span></li>
-          </ul>
-          <p class="note">
-            These cloud actions run in the Vector desktop app, where the provider connections live. The terminal CLI
-            runs the same agent, but tells it that this tool is unavailable there rather than half-performing the work.
-          </p>
+  <h2 id="connect-accounts">Connect an account and select a project</h2>
+  <p>
+    Open Cloud Services → Connections. When hosted sign-in is configured, finish approval in your browser. When it is
+    unavailable, supported desktop builds offer a personal access token from the provider's settings, validated and
+    encrypted on this device. Supabase setup from Database leads to the same connection flow. Vector verifies the
+    account before showing it as connected.
+  </p>
+  <p>
+    Link the existing Vercel or Netlify project that this repository should use, or choose its Supabase project in
+    Database. The upcoming desktop uses an encrypted temporary callback relay for Vercel and Netlify, and PKCE for
+    Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
+  </p>
+
+  <h2 id="project-environment">Manage project variables</h2>
+  <p>
+    Environment variable names keep the case you enter. Values are hidden by default, and drafts and revealed values
+    clear when you change project or task. Add or remove values in Vector, then choose Write to .env to update its
+    managed block. Applying an empty list clears that block after the final removal; your lines above the marker remain.
+    The file is replaced atomically, symbolic links are rejected, and POSIX systems use private file permissions.
+  </p>
+  <p>
+    For a detected or configured Vite project, Vector preserves literal dollar signs and backslashes through Vite's
+    environment parser. Enter literal values rather than expansion expressions. Multiline values and unsupported quote
+    combinations are rejected before the file changes; set those values directly in the provider's environment settings.
+    Other frameworks retain their existing serialization.
+  </p>
+  <p>
+    Sync to Vercel or Netlify sends the configured values to the linked host. Local .env changes and remote provider
+    values are separate: removing a local entry does not confirm remote deletion. Supabase setup adds public client
+    values, including the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY aliases used by the generated client. Secret,
+    service-role, management and user-session keys are rejected for that browser configuration.
+  </p>
+  <p>
+    A Vercel integration can manage the variables it owns. Pre-existing variables created outside that integration
+    may need to be managed directly in Vercel. You can still list projects and manage or apply local variables in Vector.
+  </p>
+
+  <h2 id="cloud-actions">Run cloud work from a task</h2>
+  <p>
+    The agent's cloud tool can inspect connections, detect build settings, prepare a linked database or authentication,
+    sync variables, publish and inspect recent deployments. Mutating actions pass through Vector's permission system.
+    When publishing without an explicit destination, one configured destination is selected; several require a choice,
+    and none returns setup guidance. A failed selected provider does not trigger a deployment to another one.
+  </p>
+  <ul class="feature-list">
+    <li><strong>Deployment checks and logs</strong><span>Publishing can run configured build, health and browser checks. Their results and provider logs show what was verified and what failed.</span></li>
+    <li><strong>Database setup</strong><span>Reuse a linked Supabase project, or explicitly approve creation in a chosen organization. Provider quotas and billing still apply. Vector does not automatically upgrade plans or move creation to another organization after a limit.</span></li>
+    <li><strong>Repository migrations</strong><span>Inspect a dry-run plan before applying .sql migrations to the linked database. Applied filenames are recorded and execution stops at the first failure.</span></li>
+    <li><strong>Account control</strong><span>Disconnect removes Vector's local credential. Supabase OAuth revocation is attempted; local removal alone does not prove provider consent was revoked.</span></li>
+  </ul>
+  <p class="note">
+    These actions run through the Vector desktop app, where provider connections live. The standalone terminal CLI
+    reports the desktop cloud tool as unavailable.
+  </p>
 </DocsPage>

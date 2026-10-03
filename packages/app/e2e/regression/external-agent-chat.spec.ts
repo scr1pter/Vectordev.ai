@@ -246,7 +246,7 @@ for (const runtime of runtimes) {
     await expect(composer.getByRole("button", { name: /send/i }).and(composer.locator(":enabled"))).toHaveCount(0)
     await prompt.press("Enter")
     await expect(prompt).toHaveValue("Keep this draft while the agent works.")
-    await workspace.getByRole("button", { name: /stop/i }).click()
+    await composer.getByRole("button", { name: `Stop ${runtime.label}`, exact: true }).click()
     await expect(prompt).toHaveValue("Keep this draft while the agent works.")
     await expect(composer.getByRole("button", { name: /send/i })).toBeEnabled()
     const calls = await page.evaluate(() => {

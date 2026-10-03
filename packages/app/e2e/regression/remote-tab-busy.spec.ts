@@ -54,7 +54,7 @@ function session(id: string, directory: string, title: string) {
 }
 
 async function mockServers(page: Page) {
-  await page.route("**/*", async (route) => {
+  await page.route(/^http:\/\/127\.0\.0\.1:(4096|4097)\//, async (route) => {
     const url = new URL(route.request().url())
     if (url.origin !== serverA && url.origin !== serverB) return route.fallback()
     const current = url.origin === serverA ? sessionA : sessionB

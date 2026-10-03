@@ -86,6 +86,19 @@ export function macPackagePaths(input: {
   return architectures.map((arch) => path.join("dist", arch === "x64" ? "mac" : `mac-${arch}`, `${name}.app`))
 }
 
+export function packageEnvironment(environment: Record<string, string | undefined>, unsigned: boolean) {
+  if (!unsigned) return { ...environment }
+  return {
+    ...Object.fromEntries(
+      Object.entries(environment).filter(([name]) => !/^(?:CSC_|WIN_CSC_|APPLE_|SENTRY_)/i.test(name)),
+    ),
+    VECTOR_SIGN_MAC: "false",
+    VECTOR_NOTARIZE: "false",
+    VECTOR_SIGN_DMG: "false",
+    CSC_IDENTITY_AUTO_DISCOVERY: "false",
+  }
+}
+
 if (import.meta.main) {
   const packageDir = path.dirname(import.meta.dir)
   const manifest: unknown = await Bun.file(path.join(packageDir, "package.json")).json()
@@ -102,8 +115,11 @@ if (import.meta.main) {
     "vectorRequiredCliVersion" in manifest ? manifest.vectorRequiredCliVersion : undefined,
     Bun.env.VECTOR_REQUIRED_CLI_VERSION,
   )
-  const environment = { ...process.env, ...request.environment, VECTOR_REQUIRED_CLI_VERSION: requiredVersion }
-  run([process.execPath, "run", "build"], packageDir, environment, "Desktop build failed")
+  const environment = packageEnvironment(
+    { ...process.env, ...request.environment, VECTOR_REQUIRED_CLI_VERSION: requiredVersion },
+    Bun.env.VECTOR_ALLOW_UNSIGNED_RELEASE === "true",
+  )
+  run([process.execPath, "run", "--no-env-file", "build"], packageDir, environment, "Desktop build failed")
 
   const identity = parseBuildIdentity(await Bun.file(path.join(packageDir, "out", BUILD_IDENTITY_FILE)).text())
   if (
@@ -130,7 +146,7 @@ if (import.meta.main) {
       hostArchitecture: process.arch,
     })) {
       run(
-        [process.execPath, "./scripts/verify-package.ts", appPath],
+        [process.execPath, "--no-env-file", "./scripts/verify-package.ts", appPath],
         packageDir,
         environment,
         "Packaged app verification failed",

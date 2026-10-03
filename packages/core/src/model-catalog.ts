@@ -184,14 +184,10 @@ const layer = Layer.effect(
       ).pipe(Effect.catch((error) => reportUnavailable(error).pipe(Effect.as({}))))
     }).pipe(Effect.withSpan("ModelCatalog.populate"), Effect.orDie)
 
-    // Uninterruptible so a caller stopped during the first load cannot leave the interruption cached for every
-    // later caller.
-    const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(
-      Effect.uninterruptible(populate),
-      Duration.infinity,
-    )
+    const [cachedGet, invalidate] = yield* Effect.cachedInvalidateWithTTL(populate, Duration.infinity)
 
-    const get = (): Effect.Effect<Record<string, Provider>> => cachedGet
+    // Mask cache publication too: protecting only the loader lets its pending interruption become the cached exit.
+    const get = (): Effect.Effect<Record<string, Provider>> => Effect.uninterruptible(cachedGet)
 
     const refresh = Effect.fn("ModelCatalog.refresh")(function* (force = false) {
       if (!source || Flag.VECTOR_MODELS_PATH || Flag.VECTOR_DISABLE_MODELS_FETCH) return

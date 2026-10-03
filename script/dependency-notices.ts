@@ -24,7 +24,9 @@ type Locked = [
 export async function dependencyNotices(root: string, refreshPlatforms = false) {
   const lock = Bun.JSON5.parse(await Bun.file(path.join(root, "bun.lock")).text()) as {
     packages: Record<string, Locked>
+    workspaces: Record<string, unknown>
     catalog?: Record<string, string>
+    overrides?: Record<string, string>
   }
   const inventoryFile = path.join(root, "licenses/dependencies/platform-notices.json")
   const inventory: Record<string, PlatformEntry> = await Bun.file(inventoryFile)
@@ -37,6 +39,9 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
   // These published SDKs embed dependency code outside the installer's graph.
   // Removing their inventory must not silently remove their embedded notices.
   const requiredBundles = new Set(["@jerome-benoit/sap-ai-provider", "merge-gateway-ai-sdk-provider"])
+  const workspaces = new Set(
+    await Promise.all(Object.keys(lock.workspaces).map((directory) => realpath(path.resolve(root, directory)))),
+  )
   const usedBundles = new Set<string>()
   const lockedPackages = new Map<string, Locked[]>()
   const lockedParents = new Map<string, string[]>()
@@ -51,7 +56,23 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
   const missing: string[] = []
   const overrides = new Set<string>()
 
-  async function resolvePackage(name: string, from: string) {
+  async function resolvePackage(name: string, from: string, identity = name) {
+    const entry = await Promise.resolve()
+      .then(() => Bun.resolveSync(name, from))
+      .catch(() => undefined)
+    if (entry && path.isAbsolute(entry)) {
+      const roots: string[] = []
+      for (const dir of ancestors(path.dirname(entry))) {
+        const manifest = Bun.file(path.join(dir, "package.json"))
+        if (!(await manifest.exists()) || (await manifest.json()).name !== identity) continue
+        roots.push(dir)
+        if ([name, identity].some((name) => dir.endsWith(path.sep + path.join("node_modules", name))))
+          return realpath(dir)
+      }
+      // Some packages repeat their manifest in build directories; notices live at the package root.
+      if (roots.length) return realpath(roots[roots.length - 1])
+    }
+    // Type-only packages and packages shadowed by Bun built-ins may have no file entry point.
     for (const dir of ancestors(from)) {
       const candidate = path.join(dir, "node_modules", name)
       if (await Bun.file(path.join(candidate, "package.json")).exists()) return realpath(candidate)
@@ -261,6 +282,7 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
       version?: string
       dependencies?: Record<string, string>
       optionalDependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
     },
     dir: string,
     extra: string[] = [],
@@ -272,14 +294,45 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
       ...extra,
     ])
     for (const name of [...runtime].sort()) {
-      const spec = pkg.dependencies?.[name] ?? pkg.optionalDependencies?.[name] ?? "*"
+      const spec =
+        lock.overrides?.[name] ??
+        pkg.dependencies?.[name] ??
+        pkg.optionalDependencies?.[name] ??
+        pkg.devDependencies?.[name] ??
+        "*"
+      const alias = spec.startsWith("npm:") ? spec.slice(4).match(/^(.+)@([^@]+)$/) : undefined
+      const identity = alias?.[1] ?? name
       const locked = platformLock(name, spec, pkg, !platform)
       if (locked) {
         await visitPlatform(locked, dir, refreshPlatforms ? await resolvePackage(name, dir) : undefined)
         continue
       }
-      const next = await resolvePackage(name, dir)
+      const next = await resolvePackage(name, dir, identity)
       if (!next) throw new Error(`Missing installed runtime dependency ${name} of ${pkg.name}`)
+      const actual = await Bun.file(path.join(next, "package.json")).json()
+      const range = alias?.[2] ?? (spec === "catalog:" ? lock.catalog?.[name] : spec)
+      const records = lockedPackages.get(identity) ?? []
+      const workspace = records.find((entry) => entry[0].startsWith(`${identity}@workspace:`))
+      // Bun records Git commit prefixes, not the package's manifest version, for pinned Git sources.
+      const git = range?.match(/^github:(.+)#([a-f0-9]{40})$/)
+      const matches = workspace
+        ? next === (await realpath(path.resolve(root, workspace[0].slice(`${identity}@workspace:`.length))))
+        : git
+          ? records.some((entry) => {
+              const commit = entry[0].slice(`${identity}@github:${git[1]}#`.length)
+              return (
+                entry[0].startsWith(`${identity}@github:${git[1]}#`) &&
+                /^[a-f0-9]{7,40}$/.test(commit) &&
+                git[2].startsWith(commit)
+              )
+            })
+          : !!range &&
+            Bun.semver.satisfies(actual.version, range) &&
+            records.some((entry) => entry[0] === `${actual.name}@${actual.version}`)
+      if (actual.name !== identity || !matches)
+        throw new Error(
+          `Installed runtime dependency ${name}@${spec} of ${pkg.name} does not match its locked identity/version: found ${actual.name}@${actual.version} at ${next}`,
+        )
       await visit(next)
     }
   }
@@ -288,7 +341,7 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
     if (visited.has(dir)) return
     visited.add(dir)
     const pkg = await Bun.file(path.join(dir, "package.json")).json()
-    const workspace = dir.startsWith(path.join(root, "packages") + path.sep)
+    const workspace = workspaces.has(dir)
     if (!workspace) {
       const locked = platformLock(pkg.name, pkg.version)
       if (locked) return visitPlatform(locked, dir, refreshPlatforms ? dir : undefined)
@@ -310,7 +363,8 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
     await dependencies(pkg, dir, [...extra])
   }
 
-  for (const name of ["engine", "app", "desktop", "tui", "ui"]) await visit(path.join(root, "packages", name))
+  for (const name of ["engine", "app", "desktop", "tui", "ui"])
+    await visit(await realpath(path.join(root, "packages", name)))
   const unused = (await readdir(path.join(root, "licenses/dependencies")).catch(() => [])).filter(
     (name) => name.endsWith(".txt") && !overrides.has(name),
   )

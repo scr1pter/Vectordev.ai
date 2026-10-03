@@ -53,6 +53,34 @@ async function audit(files: Record<string, Buffer>, chunkSize?: number) {
   return await auditArtifacts([dir.path], { chunkSize })
 }
 
+async function auditArchiveChild(file: string) {
+  // A native stream EOF loop can block Bun's event loop, so bound the real audit from its parent process.
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "--no-env-file",
+      "--eval",
+      `const { auditArtifacts } = await import(${JSON.stringify(new URL("../../../../script/artifact-audit.ts", import.meta.url).href)})
+console.log(JSON.stringify(await auditArtifacts([process.argv[1]])))`,
+      file,
+    ],
+    { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+  )
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 5_000)
+  try {
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ])
+    return { code, stdout, stderr }
+  } finally {
+    clearTimeout(timeout)
+    child.kill()
+    await child.exited
+  }
+}
+
 describe("release artifact audit", () => {
   test("allowlisted notices, Monaco method names and Bun's package table pass and are counted", async () => {
     expect(monaco).toBeString()
@@ -196,10 +224,11 @@ describe("release artifact audit", () => {
     await Bun.write(path.join(dir.path, "staging/vector"), binary(Buffer.from(`https://${name}.ai`)))
     await Bun.write(path.join(dir.path, "clean/vector"), binary())
     await Promise.all(["release", "clean-release"].map((item) => mkdir(path.join(dir.path, item))))
+    // Keep drive prefixes out of archive names: GNU tar interprets them as remote hosts.
     const tar = (source: string, archive: string) =>
-      Bun.spawn(["tar", "-czf", archive, "vector"], { cwd: path.join(dir.path, source) }).exited
-    expect(await tar("staging", path.join(dir.path, "release/vector-linux-x64.tar.gz"))).toBe(0)
-    expect(await tar("clean", path.join(dir.path, "clean-release/vector-linux-arm64.tar.gz"))).toBe(0)
+      Bun.spawn(["tar", "-czf", `../${archive}`, "vector"], { cwd: path.join(dir.path, source) }).exited
+    expect(await tar("staging", "release/vector-linux-x64.tar.gz")).toBe(0)
+    expect(await tar("clean", "clean-release/vector-linux-arm64.tar.gz")).toBe(0)
     const zip = async (source: string, archive: string) => {
       const writer = new ZipWriter(new BlobWriter("application/zip"), { level: 9 })
       await writer.add("vector.exe", new BlobReader(Bun.file(path.join(dir.path, source, "vector"))), {
@@ -222,6 +251,85 @@ describe("release artifact audit", () => {
       ["retired-host", "vector-windows-x64.zip:vector.exe"],
     ])
   })
+
+  test.each(["stored-empty", "deflated"] as const)(
+    "ZIP %s entries finish at their range boundary and retain the byte audit",
+    async (kind) => {
+      await using dir = await tmpdir()
+      const writer = new ZipWriter(new BlobWriter("application/zip"))
+      if (kind === "stored-empty") {
+        await writer.add(`${name}/`, undefined, { directory: true, useWebWorkers: false })
+        await writer.add("empty.txt", new BlobReader(new Blob([])), { level: 0, useWebWorkers: false })
+      }
+      await writer.add("payload.bin", new BlobReader(new Blob([binary(Buffer.from("Ov23li8tweQw6odWQebz"))])), {
+        level: kind === "deflated" ? 9 : 0,
+        useWebWorkers: false,
+      })
+      // Keep a file-backed archive: small ZIPs can be buffered entirely and hide ranged-stream EOF defects.
+      await writer.add("padding.bin", new BlobReader(new Blob([Buffer.alloc(8 * 1024 * 1024, 0xd1)])), {
+        level: 0,
+        useWebWorkers: false,
+      })
+      const archive = path.join(dir.path, "release.zip")
+      await Bun.write(archive, await writer.close())
+      const child = await auditArchiveChild(archive)
+      expect(child.code, child.stderr || "The ZIP audit did not finish before the child deadline").toBe(0)
+      const report = JSON.parse(child.stdout)
+      expect(report.files).toBe(1)
+      expect(report.bytes).toBeGreaterThan(8 * 1024 * 1024)
+      expect(report.allowed).toEqual({ license: 2, monaco: 2, bun: 1, node: 0, drizzle: 0 })
+      expect(report.violations.map((item: { kind: string; file: string }) => [item.kind, item.file])).toEqual([
+        ...(kind === "stored-empty" ? [["former-name", `${archive} (central directory)`]] : []),
+        ["credential", `${archive}:payload.bin`],
+      ])
+    },
+    15_000,
+  )
+
+  test("an empty ZIP central directory finishes without a file slice stream", async () => {
+    await using dir = await tmpdir()
+    const writer = new ZipWriter(new BlobWriter("application/zip"))
+    const archive = path.join(dir.path, "empty.zip")
+    await Bun.write(archive, await writer.close())
+    const child = await auditArchiveChild(archive)
+    expect(child.code, child.stderr).toBe(0)
+    expect(JSON.parse(child.stdout)).toMatchObject({ files: 1, bytes: 0, violations: [] })
+  }, 15_000)
+
+  test.each([
+    "nonempty-declaration",
+    "empty-deflate",
+    "truncated-range",
+    "empty-range",
+    "missing-local-header",
+  ] as const)(
+    "ZIP %s is rejected before an invalid payload stream",
+    async (kind) => {
+      await using dir = await tmpdir()
+      const writer = new ZipWriter(new BlobWriter("application/zip"))
+      await writer.add("empty.txt", new BlobReader(new Blob([])), { level: 0, useWebWorkers: false })
+      const bytes = Buffer.from(await (await writer.close()).arrayBuffer())
+      const directory = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]))
+      expect(directory).toBeGreaterThan(0)
+      if (kind === "nonempty-declaration") bytes.writeUInt32LE(1, directory + 24)
+      if (kind === "empty-deflate") bytes.writeUInt16LE(8, directory + 10)
+      if (kind === "truncated-range") bytes.writeUInt32LE(bytes.length, directory + 20)
+      if (kind === "empty-range") bytes.writeUInt16LE(0xffff, 26)
+      if (kind === "missing-local-header") bytes.writeUInt32LE(bytes.length, directory + 42)
+      const archive = path.join(dir.path, "invalid.zip")
+      await Bun.write(archive, bytes)
+      const child = await auditArchiveChild(archive)
+      expect(child.code).not.toBe(0)
+      expect(child.stderr).toContain(
+        kind === "missing-local-header"
+          ? "local header"
+          : kind === "truncated-range" || kind === "empty-range"
+            ? "payload range"
+            : "empty payload",
+      )
+    },
+    15_000,
+  )
 
   test("an empty or missing artifact path fails instead of passing silently", async () => {
     await using dir = await tmpdir()

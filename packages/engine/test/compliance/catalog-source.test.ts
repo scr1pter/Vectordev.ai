@@ -7,11 +7,12 @@ test("build, runtime and release catalog paths have no live dependency on the or
     "packages/core/src/model-catalog.ts",
     "packages/engine/script/release-catalog.ts",
     "packages/engine/script/generate.ts",
+    "packages/engine/script/committed-catalog.ts",
     "packages/cloud/src/upload-model-catalog.ts",
     ".github/workflows/vector-desktop-release.yml",
   ]
   for (const file of files) expect(await Bun.file(path.join(root, file)).text(), file).not.toMatch(/models\.dev/i)
-  const workflow = await Bun.file(path.join(root, files[4])).text()
+  const workflow = await Bun.file(path.join(root, ".github/workflows/vector-desktop-release.yml")).text()
   expect(workflow).toContain("VECTOR_CATALOG_FORK_REPOSITORY")
   expect(workflow).toContain("VECTOR_CATALOG_FORK_REVISION")
   expect(workflow).toContain("provider-catalog-icons.ts")
@@ -28,6 +29,8 @@ test("both public catalog aliases serve the committed catalog from vectordev.ai 
     destination: "/models/api.json",
   })
   const catalog = await Bun.file(path.join(root, "packages/web/public/models/api.json")).json()
-  expect(Object.keys(catalog.openai.models)).toEqual(expect.arrayContaining(["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"]))
+  expect(Object.keys(catalog.openai.models)).toEqual(
+    expect.arrayContaining(["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"]),
+  )
   expect(await Bun.file(path.join(root, "script/prune-vector-site.mjs")).text()).toContain('"models"')
 })

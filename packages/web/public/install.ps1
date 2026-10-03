@@ -52,7 +52,8 @@ function Write-OperationStatus([string]$state, [string]$message) {
   }
   $temporary = Join-Path $stage 'status.json'
   [IO.File]::WriteAllText($temporary, $json, $utf8)
-  [IO.File]::Replace($temporary, $statusPath, $null)
+  # PowerShell converts ordinary $null to an empty string for .NET string arguments.
+  [IO.File]::Replace($temporary, $statusPath, [System.Management.Automation.Language.NullString]::Value)
 }
 
 function Download-VectorFile([string]$url, [string]$output, [long]$limit) {
@@ -69,7 +70,12 @@ function Download-VectorFile([string]$url, [string]$output, [long]$limit) {
     try {
       $buffer = New-Object byte[] 65536
       [long]$total = 0
-      while (($count = $bodyStream.ReadAsync($buffer, 0, $buffer.Length, $cancellation.Token).GetAwaiter().GetResult()) -gt 0) {
+      while ($true) {
+        $read = $bodyStream.ReadAsync($buffer, 0, $buffer.Length, $cancellation.Token)
+        # .NET Framework's HTTP stream ignores cancellation after a read starts; bound the wait separately.
+        $read.Wait($cancellation.Token)
+        $count = $read.GetAwaiter().GetResult()
+        if ($count -eq 0) { break }
         $total += $count
         if ($total -gt $limit) { throw 'Download exceeds the expected size.' }
         $file.Write($buffer, 0, $count)
@@ -179,7 +185,7 @@ try {
     } catch { $rollbackFailed = $true }
     try {
       if ($replaced) {
-        if (Test-Path -LiteralPath $oldBinary) { [IO.File]::Replace($oldBinary, $destination, $null) } elseif (-not $hadOriginal) { [IO.File]::Delete($destination) }
+        if (Test-Path -LiteralPath $oldBinary) { [IO.File]::Replace($oldBinary, $destination, [System.Management.Automation.Language.NullString]::Value) } elseif (-not $hadOriginal) { [IO.File]::Delete($destination) }
       }
     } catch { $rollbackFailed = $true }
   }

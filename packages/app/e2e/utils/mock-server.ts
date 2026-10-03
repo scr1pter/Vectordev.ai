@@ -4,6 +4,9 @@ const emptyList = new Set(["/skill", "/command", "/lsp", "/formatter", "/vcs/sta
 const emptyObject = new Set(["/global/config", "/config", "/provider/auth", "/mcp"])
 
 export interface MockServerConfig {
+  baseURL?: string
+  serverPort?: string
+  onRequest?: (url: URL) => void
   provider: unknown
   directory: string
   project: unknown
@@ -12,7 +15,10 @@ export interface MockServerConfig {
   vcsDiff?: unknown[]
   messageDelay?: number
   onMessages?: (input: { sessionID: string; before?: string; phase: "start" | "end" }) => void
+  /** Global stream envelopes containing directory and payload. */
   events?: () => unknown[]
+  /** Connection-scoped directory events, such as unwrapped presence payloads. */
+  directoryEvents?: () => unknown[]
   eventRetry?: number
   todos?: (sessionID: string) => unknown[]
   permissions?: unknown[] | (() => unknown[])
@@ -40,17 +46,35 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
     "/vcs": { branch: "main", default_branch: "main" },
     "/session": config.sessions,
   }
-
-  await page.route("**/*", async (route) => {
+  const targetPort = config.serverPort ?? process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
+  const appURL = new URL(
+    config.baseURL ?? process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "3000"}`,
+  )
+  const paths = [
+    ...emptyList,
+    ...emptyObject,
+    ...Object.keys(staticRoutes),
+    "/global/event",
+    "/global/health",
+    "/event",
+    "/permission",
+    "/question",
+    "/session/status",
+    "/file",
+    "/file/content",
+  ]
+  // A serializable matcher lets Playwright bypass the test worker for Vite's asset graph.
+  // URL predicates and catchalls would dispatch hundreds of unnecessary route/fallback RPCs.
+  const pattern = new RegExp(
+    `${targetPort !== appURL.port ? `^https?://[^/]+:${targetPort}/|` : ""}^${appURL.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:${paths.join("|")}|/session/[^/?]+(?:/(?:children|diff|message|todo))?)(?:\\?|$)`,
+  )
+  await page.route(pattern, async (route) => {
     const url = new URL(route.request().url())
-    const targetPort = process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
-    const appPort = new URL(
-      process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "3000"}`,
-    ).port
-    if (url.port !== targetPort && url.port !== appPort) return route.fallback()
+    config.onRequest?.(url)
 
     const path = url.pathname
-    if (path === "/global/event" || path === "/event") return sse(route, config.events?.(), config.eventRetry)
+    if (path === "/global/event") return sse(route, config.events?.(), config.eventRetry)
+    if (path === "/event") return sse(route, config.directoryEvents?.(), config.eventRetry)
     if (path === "/global/health") return json(route, { healthy: true })
     if (path === "/permission")
       return json(route, typeof config.permissions === "function" ? config.permissions() : (config.permissions ?? []))
@@ -92,7 +116,7 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
       return json(route, pageData.items, { "x-next-cursor": cursor })
     }
 
-    if (url.port === targetPort && targetPort !== appPort) return json(route, {})
+    if (url.port === targetPort && targetPort !== appURL.port) return json(route, {})
     return route.fallback()
   })
 }

@@ -9,7 +9,8 @@ import {
   getDatabase,
   type CloudDatabaseConnection,
 } from "./cloud-console"
-import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
+import { getSupabaseManagementToken } from "./cloud-connections"
+import { encryptCloudCredential } from "./cloud-credential-vault"
 import { getStore } from "./store"
 
 // Vector could only ever link a Supabase project the user had already created,
@@ -66,8 +67,6 @@ export type CloudProvisionOptions = {
 }
 
 const API = "https://api.supabase.com/v1"
-const CONNECTION_STORE = "cloud-provider-connections"
-const CONNECTION_KEY = "records"
 const PROVISION_STORE = "cloud-database-credentials"
 const DEFAULT_REGION = "us-east-1"
 // Supabase takes a couple of minutes to bring a new project up; three and a bit
@@ -119,19 +118,6 @@ function responseArray(value: unknown): unknown[] {
   if (!value || typeof value !== "object") return []
   const data = Reflect.get(value, "data")
   return Array.isArray(data) ? data : []
-}
-
-// cloud-connections keeps its Supabase token accessor module-private, so the
-// management token is read back from the record it writes, through the same
-// vault. There is no linked project to refresh against yet — the refresh path
-// runs off a service snapshot that needs one — so an expired token is answered
-// by Supabase with a 401 and reported as "reconnect", never guessed at.
-function supabaseManagementToken(): string | undefined {
-  const raw = getStore(CONNECTION_STORE).get(CONNECTION_KEY)
-  if (!Array.isArray(raw)) return undefined
-  const record = raw.find((item) => item && typeof item === "object" && Reflect.get(item, "provider") === "supabase")
-  const accessToken = stringField(record, "accessToken")
-  return accessToken ? decryptCloudCredential(accessToken) : undefined
 }
 
 // The generated database password is a real credential for a database the user
@@ -363,7 +349,7 @@ async function provision(
     }
   }
 
-  const token = supabaseManagementToken()
+  const token = await getSupabaseManagementToken(request)
   if (!token) {
     return {
       ok: false,
@@ -538,7 +524,7 @@ export async function createCloudDatabase(
       ok: false,
       error: `Supabase would not create the project: ${message}`,
       nextStep: limited
-        ? "This is Supabase's own limit, not Vector's. Ask the user to free up or reuse a project in that organization, choose another organization, or upgrade its plan — then run create_database again. An existing project can be linked in Vector Cloud > Database instead."
+        ? "Supabase declined this request because of an account or plan limit. Link an existing project in Vector Cloud > Database, or wait until the provider confirms capacity is available. Do not upgrade a plan or retry in another organization automatically."
         : "Report this to the user as Supabase reported it, and offer to link an existing Supabase project in Vector Cloud > Database instead.",
     }
   }

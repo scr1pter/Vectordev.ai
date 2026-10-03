@@ -80,7 +80,7 @@ export async function prepare(entry: string) {
     const filename = JSON.stringify(file)
     const dirname = JSON.stringify(path.dirname(file))
     const prefix = `import ${runtime} from "vector:local-plugin-compat";
-const ${metadata} = { ...import.meta, url: ${origin}, filename: ${filename}, path: ${filename}, dirname: ${dirname}, dir: ${dirname}, resolve: (specifier, parent = ${origin}) => import.meta.resolve(specifier, parent), require: (specifier) => import.meta.require(import.meta.resolve(specifier, ${origin})) };\n`
+const ${metadata} = { ...import.meta, url: ${origin}, filename: ${filename}, path: ${filename}, dirname: ${dirname}, dir: ${dirname}, resolve: (specifier, parent = ${origin}) => ${runtime}.resolve(specifier, parent), require: (specifier) => import.meta.require(${runtime}.resolve(specifier, ${origin})) };\n`
     const output = files.get(file)!
     const temporary = `${output}.${crypto.randomUUID()}.tmp`
     await Bun.write(temporary, prefix + rewritten.replace(/^#![^\n]*\n/, ""))
@@ -91,10 +91,23 @@ const ${metadata} = { ...import.meta, url: ${origin}, filename: ${filename}, pat
 
 function resolve(specifier: string, parent: string) {
   try {
-    return import.meta.resolve(specifier, pathToFileURL(parent).href)
+    return resolveImport(specifier, parent)
   } catch {
     return undefined
   }
+}
+
+function resolveImport(specifier: string, parent: string | URL) {
+  // Bun's package resolver needs a native parent path for Windows drives and percent-escaped URLs.
+  const source = typeof parent === "string" ? parent : parent.href
+  const file = source.startsWith("file:") ? fileURLToPath(source) : source
+  // import.meta.resolve can return a nonexistent .js path for a real .ts module. The graph scanner
+  // must use the loader's filesystem resolution before reading local source, including computed imports.
+  if (specifier.startsWith(".") || path.isAbsolute(specifier) || specifier.startsWith("file:"))
+    return pathToFileURL(
+      Bun.resolveSync(specifier.startsWith("file:") ? fileURLToPath(specifier) : specifier, path.dirname(file)),
+    ).href
+  return import.meta.resolve(specifier, file)
 }
 
 async function installRuntime() {
@@ -102,7 +115,10 @@ async function installRuntime() {
   Bun.plugin({
     name: "vector-local-plugin-sdk",
     setup(build) {
-      build.module("vector:local-plugin-compat", () => ({ exports: { default: { load } }, loader: "object" }))
+      build.module("vector:local-plugin-compat", () => ({
+        exports: { default: { load, resolve: resolveImport } },
+        loader: "object",
+      }))
       build.module("vector:local-plugin-sdk", async () => ({
         exports: await import("@vectordevai/plugin"),
         loader: "object",
@@ -172,7 +188,7 @@ function moduleImports(source: string, file: string, parse: typeof import("@babe
 async function load(parent: string, specifier: string, options?: ImportCallOptions) {
   const target = (() => {
     try {
-      return import.meta.resolve(`${specifier}`, parent)
+      return resolveImport(`${specifier}`, parent)
     } catch (error) {
       if (/^@[^/]+\/plugin(?:\/tui)?$/.test(specifier))
         return specifier.endsWith("/tui") ? "vector:local-plugin-sdk/tui" : "vector:local-plugin-sdk"

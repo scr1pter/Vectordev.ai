@@ -67,7 +67,12 @@ jobs:
 
       - name: Run unit tests
         timeout-minutes: 20
-        run: GITHUB_ACTIONS=false bun turbo test
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            GITHUB_ACTIONS=false bun turbo test --filter='!@vectordevai/engine' --log-order=stream --continue=dependencies-successful
+          else
+            GITHUB_ACTIONS=false bun turbo test --log-order=stream --continue=dependencies-successful
+          fi
         env:
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
 
@@ -80,6 +85,47 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: packages/engine
         run: bun run test:httpapi
+
+  engine-windows:
+    name: engine (windows, shard ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "bot@vectordev.ai"
+          git config --global user.name "Vector"
+
+      - name: Build Engine test dependencies
+        timeout-minutes: 20
+        run: GITHUB_ACTIONS=false bun turbo run build --filter='@vectordevai/engine^...' --log-order=stream
+
+      - name: Run Engine shard
+        timeout-minutes: 20
+        working-directory: packages/engine
+        # Whole-file shards retain the configured preloads and per-test deadlines; print passes to locate any stall.
+        run: GITHUB_ACTIONS=false bun test --timeout 30000 --shard=${{ matrix.shard }}/4
+        env:
+          VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
 
   e2e:
     name: e2e (${{ matrix.settings.name }})
@@ -139,6 +185,8 @@ jobs:
         run: bun --cwd packages/app test:e2e:local
         env:
           CI: true
+          # Five browser workers stalled asset loading on both hosted platforms; keep test deadlines intact.
+          PLAYWRIGHT_WORKERS: "1"
         timeout-minutes: 30
 
       - name: Upload Playwright artifacts

@@ -216,6 +216,11 @@ jobs:
           VECTOR_CATALOG_FORK_REVISION: ${{ vars.VECTOR_CATALOG_FORK_REVISION }}
         run: |
           set -euo pipefail
+          if { [ -n "$VECTOR_CATALOG_FORK_REPOSITORY" ] && [ -z "$VECTOR_CATALOG_FORK_REVISION" ]; } || \
+             { [ -z "$VECTOR_CATALOG_FORK_REPOSITORY" ] && [ -n "$VECTOR_CATALOG_FORK_REVISION" ]; }; then
+            echo "Set both catalog fork variables or leave both unset for the committed release snapshot."
+            exit 1
+          fi
           mkdir -p release-catalog
           # A new workflow run for a partially published release must reuse its immutable mirror.
           status=$(curl --silent --show-error --retry 3 --output release-catalog/mirror.json \
@@ -226,11 +231,17 @@ jobs:
               export VECTOR_RELEASE_CATALOG_PATH="$PWD/release-catalog/mirror.json"
               export VECTOR_RELEASE_CATALOG_SHA256="$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)"
               ;;
-            404) ;;
+            404)
+              if [ -z "$VECTOR_CATALOG_FORK_REPOSITORY" ]; then
+                bun packages/engine/script/committed-catalog.ts release-catalog/api.json
+                export VECTOR_RELEASE_CATALOG_PATH="$PWD/release-catalog/api.json"
+                export VECTOR_RELEASE_CATALOG_SHA256="$(sha256sum "$VECTOR_RELEASE_CATALOG_PATH" | cut -d ' ' -f 1)"
+              fi
+              ;;
             *) echo "Catalog mirror returned HTTP $status; refusing to replace an unknown release snapshot"; exit 1 ;;
           esac
           export VECTOR_CATALOG_FILE="$PWD/release-catalog/api.json"
-          if [ "$status" = "404" ]; then
+          if [ "$status" = "404" ] && [ -n "$VECTOR_CATALOG_FORK_REPOSITORY" ]; then
             bun packages/engine/script/generate.ts --fresh-catalog
           else
             bun packages/engine/script/generate.ts
@@ -451,7 +462,7 @@ jobs:
             {
               echo "## Unsigned installer notice"
               echo
-              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. Your operating system may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
+              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. Installed copies receive it through Check for Updates; a new install may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
               echo
               cat release-notes.md
             } > "$unsigned_notes"
@@ -1421,32 +1432,6 @@ jobs:
           fi
           echo "Stable release order verified: current=$current_version candidate=$version"
 
-      - name: Preserve current automatic-update feeds for an unsigned release
-        if: env.RELEASE_UNSIGNED == 'true'
-        env:
-          RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
-        run: |
-          set -euo pipefail
-          output="$RUNNER_TEMP/vector-updater-before"
-          mkdir -p "$output"
-          feeds=(latest-mac.yml latest.yml latest-linux.yml latest-linux-arm64.yml)
-          for feed in "${feeds[@]}"; do
-            curl \
-              --fail \
-              --show-error \
-              --silent \
-              --location \
-              --retry 5 \
-              --retry-all-errors \
-              --connect-timeout 20 \
-              --max-time 120 \
-              --header "Cache-Control: no-cache" \
-              --header "Pragma: no-cache" \
-              "${RELEASE_ORIGIN%/}/releases/vector-updates/$feed?before=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-              --output "$output/$feed"
-            test -s "$output/$feed"
-          done
-
       - name: Verify production account gate before publishing
         env:
           API_ORIGIN: https://vectordev.ai
@@ -1507,8 +1492,9 @@ jobs:
           }
           channel=latest
           if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
+          # Owner decision (2 October 2026): unsigned releases also update the in-app update feed, so every
+          # installed copy is offered them through Check for Updates. Signed releases do the same.
           scope=full
-          if [ "$RELEASE_UNSIGNED" = "true" ]; then scope=downloads; fi
           VECTOR_RELEASE_VERSION="${TAG#v}" \
           VECTOR_RELEASE_CHANNEL="$channel" \
           VECTOR_RELEASE_PHASE=commit \
@@ -1593,17 +1579,6 @@ jobs:
               echo "Staged $feed does not advertise $version"
               exit 1
             }
-            if [ "$RELEASE_UNSIGNED" = "true" ]; then
-              curl "${curl_args[@]}" \
-                "$origin/$committed_prefix/$feed?$cache_buster" \
-                --output "$committed"
-              cmp --silent "$RUNNER_TEMP/vector-updater-before/$feed" "$committed" || {
-                echo "Unsigned release changed automatic-update feed $feed"
-                exit 1
-              }
-              echo "Verified automatic-update feed $feed was preserved"
-              continue
-            fi
             fetch_exact_copy \
               "$staged" \
               "$origin/$committed_prefix/$feed" \

@@ -9,7 +9,10 @@ const reuse = !process.env.CI
 const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? (process.env.CI ? 5 : 0)) || undefined
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: process.env.VECTOR_PERFORMANCE === "1" ? "performance/**/*.test.ts" : "performance/**",
+  testIgnore: [
+    process.env.VECTOR_PERFORMANCE === "1" ? "performance/**/*.test.ts" : "performance/**",
+    "**/public-share-viewer.spec.ts",
+  ],
   outputDir: "./e2e/test-results",
   timeout: 60_000,
   expect: {

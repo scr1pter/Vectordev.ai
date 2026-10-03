@@ -1,5 +1,6 @@
 import { providerNoticeTracker, unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
+import { retainFreeModelSelection } from "@vectordevai/schema/free-model"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { batch, createEffect, createMemo } from "solid-js"
@@ -121,7 +122,11 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               message: `Agent not found: ${name}`,
               duration: 3000,
             })
-          setAgentStore("current", name)
+          const retained = retainFreeModelSelection(model.selection())
+          batch(() => {
+            setAgentStore("current", name)
+            if (retained) model.set(retained)
+          })
         },
         move(direction: 1 | -1) {
           batch(() => {
@@ -131,7 +136,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             if (next < 0) next = agents().length - 1
             if (next >= agents().length) next = 0
             const value = agents()[next]
-            setAgentStore("current", value.name)
+            this.set(value.name)
           })
         },
         color(name: string) {
@@ -249,13 +254,16 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
       })
 
-      const currentModel = createMemo(() => {
+      const selection = createMemo(() => {
         const a = agent.current()
-        const selected = getFirstValidModel(
+        return getFirstValidModel(
           () => a && modelStore.model[a.name],
           () => a && a.model,
           fallbackModel,
         )
+      })
+      const currentModel = createMemo(() => {
+        const selected = selection()
         if (!selected || !isModelValid(selected)) return
         const provider = sync.data.provider.find((provider) => provider.id === selected.providerID)
         if (provider?.models[selected.modelID]?.freeModel?.source !== "shared") return selected
@@ -303,6 +311,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       })
 
       return {
+        selection,
         current: currentModel,
         get ready() {
           return modelStore.ready

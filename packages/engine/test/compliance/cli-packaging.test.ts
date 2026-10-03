@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test"
-import { chmod, mkdtemp, mkdir, rm, symlink } from "node:fs/promises"
+import { chmod, mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { catalogBody, catalogDigest } from "../../script/release-catalog"
 
 const root = path.resolve(import.meta.dir, "../../../..")
@@ -18,11 +19,16 @@ const formerName = realNotices
 
 async function fixture() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "vector-cli-packaging-"))
-  await symlink(
-    path.join(root, "packages/engine/node_modules"),
-    path.join(dir, "node_modules"),
-    process.platform === "win32" ? "junction" : "dir",
-  )
+  // Relocating the whole dependency directory breaks its relative workspace links on Windows.
+  for (const name of ["@vectordevai/schema", "effect"]) {
+    const destination = path.join(dir, "node_modules", name)
+    await mkdir(path.dirname(destination), { recursive: true })
+    await symlink(
+      await dependencyRoot(name, path.join(root, "packages/engine")),
+      destination,
+      process.platform === "win32" ? "junction" : "dir",
+    )
+  }
   const catalog = catalogBody(
     JSON.stringify({ openai: { id: "openai", name: "OpenAI", env: ["OPENAI_API_KEY"], models: {} } }),
   )
@@ -96,14 +102,58 @@ async function fixture() {
   }
 }
 
-async function run(command: string[], cwd: string, env: Record<string, string | undefined>) {
+async function dependencyRoot(name: string, from: string) {
+  // Follow the installed resolver layout first; export maps may not expose package.json.
+  let directory = path.dirname(Bun.resolveSync(name, from))
+  while (true) {
+    const manifest = Bun.file(path.join(directory, "package.json"))
+    if ((await manifest.exists()) && (await manifest.json()).name === name) return await realpath(directory)
+    const parent = path.dirname(directory)
+    if (parent === directory) throw new Error(`Could not locate the installed package root for ${name}`)
+    directory = parent
+  }
+}
+
+for (const layout of ["isolated", "hoisted"]) {
+  test(`packaging dependencies resolve the installed package root with ${layout} workspace links`, async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "vector-cli-dependency #%-"))
+    try {
+      const consumer = path.join(dir, "packages/engine")
+      const dependency = path.join(dir, "packages/schema")
+      const name = "@vector-fixture/schema"
+      await mkdir(consumer, { recursive: true })
+      await Bun.write(
+        path.join(dependency, "package.json"),
+        JSON.stringify({ name, type: "module", exports: { ".": "./src/index.ts", "./*": "./src/*.ts" } }),
+      )
+      await Bun.write(path.join(dependency, "src/index.ts"), 'export const identity = "installed workspace"\n')
+      const link = path.join(layout === "isolated" ? consumer : dir, "node_modules", name)
+      await mkdir(path.dirname(link), { recursive: true })
+      await symlink(dependency, link, process.platform === "win32" ? "junction" : "dir")
+      expect(await dependencyRoot(name, consumer)).toBe(await realpath(dependency))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+}
+
+async function run(command: string[], cwd: string, env: Record<string, string | undefined>, phase?: string) {
+  const started = performance.now()
+  if (phase) console.info(`[cli-packaging] ${phase}: started`)
   const proc = Bun.spawn(command, { cwd, env, stdout: "pipe", stderr: "pipe" })
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  return { stdout, stderr, code }
+  try {
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    if (phase)
+      console.info(`[cli-packaging] ${phase}: exited ${code} after ${Math.round(performance.now() - started)}ms`)
+    return { stdout, stderr, code }
+  } finally {
+    proc.kill()
+    await proc.exited
+  }
 }
 
 test("dry-run packages every target with notices and a working Vector launcher without registry access", async () => {
@@ -118,21 +168,55 @@ test("dry-run packages every target with notices and a working Vector launcher w
   })
   try {
     const cwd = path.join(tmp.dir, "packages/engine")
+    // Observe real npm startups; replacing npm would miss the Windows process-startup cost.
+    const npmInvocations = path.join(tmp.dir, "npm-invocations.jsonl")
+    const npmTrace = path.join(tmp.dir, "npm-trace.mjs")
+    await Bun.write(
+      npmTrace,
+      `import { appendFileSync } from "node:fs"
+if (process.argv[2] === "pack")
+  appendFileSync(${JSON.stringify(npmInvocations)}, JSON.stringify(process.argv.slice(2)) + "\\n")
+`,
+    )
     // Observe the real publisher's build boundary without compiling the application.
     await Bun.write(
       path.join(cwd, "script/build.ts"),
       'await Bun.write("build-env.json", JSON.stringify({ version: process.env.VECTOR_VERSION, targets: process.env.VECTOR_TARGETS, release: process.env.VECTOR_RELEASE, catalog: process.env.VECTOR_RELEASE_CATALOG_PATH, digest: process.env.VECTOR_RELEASE_CATALOG_SHA256 }))\n',
     )
-    const result = await run([process.execPath, "script/publish-vector.ts", "--dry-run"], cwd, {
-      ...tmp.env,
-      NPM_CONFIG_REGISTRY: registry.url.toString(),
-      VECTOR_VERSION: "stale-inherited-version",
-      VECTOR_TARGETS: "stale-inherited-target",
-      VECTOR_RELEASE: "true",
-      VECTOR_CLI_VERSION: version,
-    })
+    const result = await run(
+      [process.execPath, "script/publish-vector.ts", "--dry-run"],
+      cwd,
+      {
+        ...tmp.env,
+        NPM_CONFIG_REGISTRY: registry.url.toString(),
+        VECTOR_VERSION: "stale-inherited-version",
+        VECTOR_TARGETS: "stale-inherited-target",
+        VECTOR_RELEASE: "true",
+        VECTOR_CLI_VERSION: version,
+        NODE_OPTIONS: `--import=${pathToFileURL(npmTrace).href}`,
+      },
+      "publisher dry-run",
+    )
     expect(result.code, result.stderr).toBe(0)
     expect(requests).toEqual([])
+    const dryPacks = (await Bun.file(npmInvocations).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line)) as string[][]
+    expect(dryPacks).toHaveLength(1)
+    expect(dryPacks[0].slice(0, 3)).toEqual(["pack", "--dry-run", "--offline"])
+    expect(
+      (await Promise.all(dryPacks[0].slice(3).map((item) => realpath(path.resolve(cwd, item))))).toSorted(),
+    ).toEqual(
+      (
+        await Promise.all(
+          [
+            ...targets.map((target) => path.join(cwd, "dist", `vector-${target}`)),
+            path.join(cwd, "dist/vectordev-cli"),
+          ].map((item) => realpath(item)),
+        )
+      ).toSorted(),
+    )
     expect(await Bun.file(path.join(tmp.dir, "packages/plugin/publisher-args.json")).json()).toEqual(["--dry-run"])
     expect(await Bun.file(path.join(cwd, "build-env.json")).json()).toEqual({
       version,
@@ -142,16 +226,40 @@ test("dry-run packages every target with notices and a working Vector launcher w
       digest: tmp.env.VECTOR_RELEASE_CATALOG_SHA256,
     })
 
+    const packedDirectory = path.join(tmp.dir, "packed")
+    await mkdir(packedDirectory)
+    // npm accepts multiple local packages; keep every real tarball check without seven extra npm startups.
+    const packed = await run(
+      [
+        "npm",
+        "pack",
+        "--json",
+        "--offline",
+        "--pack-destination",
+        packedDirectory,
+        ...targets.map((target) => `./dist/vector-${target}`),
+        "./dist/vectordev-cli",
+      ],
+      cwd,
+      { ...tmp.env, NPM_CONFIG_REGISTRY: registry.url.toString() },
+      "pack all seven staged packages",
+    )
+    expect(packed.code, packed.stderr).toBe(0)
+    const packages = JSON.parse(packed.stdout) as { name: string; filename: string; files: { path: string }[] }[]
+    expect(packages.map((item) => item.name).toSorted()).toEqual(
+      [...targets.map((target) => `@vectordevai/cli-${target}`), "@vectordevai/cli"].toSorted(),
+    )
+
     for (const target of [...targets, "umbrella"]) {
       const folder = path.join(cwd, "dist", target === "umbrella" ? "vectordev-cli" : `vector-${target}`)
       const manifest = await Bun.file(path.join(folder, "package.json")).json()
       expect(manifest.version).toBe(version)
       expect(manifest.license).toBe("SEE LICENSE IN LICENSE")
       expect(manifest.name).toBe(target === "umbrella" ? "@vectordevai/cli" : `@vectordevai/cli-${target}`)
-      const packed = await run(["npm", "pack", "--json", "--offline"], folder, tmp.env)
-      expect(packed.code, packed.stderr).toBe(0)
-      const info = JSON.parse(packed.stdout)[0]
-      const files = info.files.map((file: { path: string }) => file.path)
+      const info = packages.find((item) => item.name === manifest.name)
+      if (!info) throw new Error(`npm did not pack ${manifest.name}`)
+      expect(await Bun.file(path.join(packedDirectory, info.filename)).exists()).toBe(true)
+      const files = info.files.map((file) => file.path)
       for (const notice of notices) expect(files).toContain(notice)
       expect(files.filter((name: string) => name.startsWith("bin/"))).toEqual([
         target === "umbrella" ? "bin/vector.cjs" : target.startsWith("windows") ? "bin/vector.exe" : "bin/vector",
@@ -180,9 +288,16 @@ test("dry-run packages every target with notices and a working Vector launcher w
       const destination = path.join(tmp.dir, "installed/node_modules", manifest.name)
       await mkdir(destination, { recursive: true })
       const unpacked = await run(
-        ["tar", "-xf", path.join(folder, info.filename), "--strip-components", "1", "-C", destination],
-        cwd,
+        [
+          "tar",
+          "-xf",
+          path.relative(destination, path.join(packedDirectory, info.filename)).split(path.sep).join("/"),
+          "--strip-components",
+          "1",
+        ],
+        destination,
         tmp.env,
+        `extract ${target}`,
       )
       expect(unpacked.code, unpacked.stderr).toBe(0)
       for (const notice of notices)
@@ -190,6 +305,7 @@ test("dry-run packages every target with notices and a working Vector launcher w
           await Bun.file(path.join(tmp.dir, notice)).text(),
         )
     }
+    expect(requests).toEqual([])
     // The fixture is a script; Windows requires a compiled PE executable for this final smoke check.
     if (process.platform === "win32") return
     const launched = await run(
@@ -201,6 +317,7 @@ test("dry-run packages every target with notices and a working Vector launcher w
       ],
       cwd,
       tmp.env,
+      "launch installed umbrella",
     )
     expect(launched.code, launched.stderr).toBe(0)
     expect(JSON.parse(launched.stdout)).toEqual({ args: ["argument with spaces", "--version"], vector: "1" })

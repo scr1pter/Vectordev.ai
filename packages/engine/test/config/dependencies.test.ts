@@ -20,8 +20,9 @@ async function loadOffline(entry: string, directory: string) {
   const child = Bun.spawn(
     [
       process.execPath,
+      "--no-env-file",
       "--eval",
-      `import { PluginLoader } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/plugin/loader.ts"))};
+      `import { PluginLoader } from ${JSON.stringify(pathToFileURL(path.resolve(import.meta.dir, "../../src/plugin/loader.ts")).href)};
        const loaded = await PluginLoader.load(${JSON.stringify({
          spec: entry,
          target: entry,
@@ -50,7 +51,7 @@ async function loadOffline(entry: string, directory: string) {
   )
   const output = await new Response(child.stdout).text()
   const error = await new Response(child.stderr).text()
-  expect(await child.exited).toBe(0)
+  expect(await child.exited, error || output).toBe(0)
   expect(error).toBe("")
   return JSON.parse(output)
 }
@@ -138,7 +139,7 @@ test("cached SDK imports work offline through a shared link and preserve a proje
   for (const file of [first, second]) {
     await Bun.write(file, 'import { tool } from "@vectordevai/plugin"; export default tool({ ready: true });\n')
     expect(await ConfigDependencies.link(pathToFileURL(file).href, cache)).toBe(true)
-    expect((await import(file)).default).toEqual({ ready: true })
+    expect((await import(pathToFileURL(file).href)).default).toEqual({ ready: true })
     expect(await fs.realpath(path.join(path.dirname(file), "node_modules", ConfigDependencies.packageName))).toBe(
       await fs.realpath(sdk),
     )
@@ -153,7 +154,7 @@ test("cached SDK imports work offline through a shared link and preserve a proje
   const file = path.join(tmp.path, "pinned", "plugins", "plugin.mjs")
   await Bun.write(file, 'import { tool } from "@vectordevai/plugin"; export default tool({});\n')
   expect(await ConfigDependencies.link(pathToFileURL(file).href, cache)).toBe(true)
-  expect((await import(file)).default).toEqual({ pinned: true })
+  expect((await import(pathToFileURL(file).href)).default).toEqual({ pinned: true })
   expect(await Bun.file(path.join(pinned, "index.js")).text()).toContain("pinned: true")
   expect(await fs.lstat(path.join(path.dirname(file), "node_modules")).catch(() => undefined)).toBeUndefined()
 })
@@ -185,7 +186,7 @@ test("an interrupted SDK install is not linked into a local plugin", async () =>
 
 test("an SDK-dependent plugin prefers a completed shared SDK over its bundled fallback after restart", async () => {
   await using tmp = await tmpdir()
-  const entry = path.join(tmp.path, "plugin.mjs")
+  const entry = path.join(tmp.path, "plugin space # percent%", "plugin.mjs")
   await Bun.write(entry, 'import { tool } from "@vectordevai/plugin"; export default tool({ source: "bundled" });\n')
   expect(await loadOffline(entry, tmp.path)).toEqual({ source: "bundled" })
   const cache = path.join(tmp.path, "cache", "vector")
@@ -197,7 +198,7 @@ test("an SDK-dependent plugin prefers a completed shared SDK over its bundled fa
   await Bun.write(path.join(sdk, "index.js"), 'export const tool = () => ({ source: "shared" });\n')
   await Bun.write(ConfigDependencies.readyFile(cache), ConfigDependencies.specifier)
   expect(await loadOffline(entry, tmp.path)).toEqual({ source: "shared" })
-  expect(await fs.realpath(path.join(tmp.path, "node_modules", ConfigDependencies.packageName))).toBe(
+  expect(await fs.realpath(path.join(path.dirname(entry), "node_modules", ConfigDependencies.packageName))).toBe(
     await fs.realpath(sdk),
   )
 })

@@ -180,7 +180,7 @@ function withContext<A, E>(
           worktree: (input) => run(modules.Worktree.Service.use((svc) => svc.create(input).pipe(Effect.orDie))),
           worktreeRemove: (directory) =>
             run(modules.Worktree.Service.use((svc) => svc.remove({ directory })).pipe(Effect.ignore)),
-          llmText: (value) => Effect.suspend(() => llm().text(value)),
+          llmText: (value, options) => Effect.suspend(() => llm().text(value, options)),
           llmWait: (count) => Effect.suspend(() => llm().wait(count)),
           tuiRequest: (request) => Effect.sync(() => modules.Tui.submitTuiRequest(request)),
         }

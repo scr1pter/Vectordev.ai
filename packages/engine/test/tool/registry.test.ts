@@ -3,6 +3,7 @@ import path from "path"
 import fs from "fs/promises"
 import { fileURLToPath, pathToFileURL } from "url"
 import { Effect, Layer, Result, Schema } from "effect"
+import { TestConsole } from "effect/testing"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { ToolRegistry } from "@/tool/registry"
 import { Tool } from "@/tool/tool"
@@ -89,7 +90,8 @@ describe("tool.registry", () => {
         }),
       )
       const registry = yield* ToolRegistry.Service
-      expect(yield* registry.ids()).toContain("cached-sdk")
+      const ids = yield* registry.ids()
+      expect(ids, JSON.stringify(yield* TestConsole.logLines)).toContain("cached-sdk")
       expect(
         yield* Effect.promise(() =>
           fs.realpath(path.join(path.dirname(file), "node_modules", ConfigDependencies.packageName)),
@@ -115,7 +117,7 @@ describe("tool.registry", () => {
       const ids = yield* registry.ids()
       expect(ids).toContain("read")
       expect(ids).toContain("independent")
-      expect(ids).toContain("bundled-sdk")
+      expect(ids, JSON.stringify(yield* TestConsole.logLines)).toContain("bundled-sdk")
       const loaded = (yield* registry.all()).find((tool) => tool.id === "bundled-sdk")
       if (!loaded) throw new Error("bundled SDK tool was not loaded")
       const agents = yield* Agent.Service
@@ -400,7 +402,8 @@ describe("tool.registry", () => {
 
         const registry = yield* ToolRegistry.Service
         const loaded = (yield* registry.all()).find((tool) => tool.id === "addition")
-        if (!loaded) throw new Error("custom addition tool was not loaded")
+        if (!loaded)
+          throw new Error(`custom addition tool was not loaded: ${JSON.stringify(yield* TestConsole.logLines)}`)
 
         expect(ToolJsonSchema.fromTool(loaded)).toMatchObject({
           properties: {
