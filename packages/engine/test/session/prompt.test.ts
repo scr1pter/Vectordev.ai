@@ -606,6 +606,26 @@ const firstRequestBody = Effect.fn("test.firstRequestBody")(function* (input: {
 })
 
 it.instance(
+  "loop sends the stable system prompt as its own block, ahead of the directory and date",
+  () =>
+    Effect.gen(function* () {
+      const body = JSON.parse(yield* firstRequestBody({})) as { messages: { role: string; content: unknown }[] }
+      const system = body.messages
+        .filter((message) => message.role === "system")
+        .map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content)))
+      expect(system).toHaveLength(2)
+      // Nothing in the first block depends on the session, so the provider cache can reuse it across sessions.
+      expect(system[0]).toContain("You are Vector")
+      expect(system[0]).toContain("<subagent_policy>")
+      expect(system[0]).not.toContain("Working directory")
+      expect(system[0]).not.toContain("Today's date")
+      expect(system[1]).toContain("Working directory")
+      expect(system[1]).toContain("Today's date")
+    }),
+  15_000,
+)
+
+it.instance(
   "loop tells the model to launch general Subagents on big tasks by default",
   () =>
     Effect.gen(function* () {

@@ -23,6 +23,7 @@ type PrepareInput = {
   readonly model: Provider.Model
   readonly agent: Agent.Info
   readonly permission?: PermissionV1.Ruleset
+  readonly stableSystem?: string[]
   readonly system: string[]
   readonly messages: ModelMessage[]
   readonly small?: boolean
@@ -54,15 +55,16 @@ const mergeOptions = (target: Record<string, any>, source: Record<string, any> |
 
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
-  const system = [
-    [
-      ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
-      ...input.system,
-      ...(input.user.system ? [input.user.system] : []),
-    ]
-      .filter((x) => x)
-      .join("\n"),
+  const prompt = [
+    ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+    ...(input.stableSystem ?? []),
   ]
+  const rest = [...input.system, ...(input.user.system ? [input.user.system] : [])]
+  // With stable parts, the prompt and those parts form the first block and everything per-session the second, so a new
+  // session, directory or date only re-writes the small second block; otherwise it stays one block as before.
+  const system = (input.stableSystem ? [prompt, rest] : [[...prompt, ...rest]])
+    .map((block) => block.filter((x) => x).join("\n"))
+    .filter((block) => block)
 
   const header = system[0]
   yield* input.plugin.trigger(

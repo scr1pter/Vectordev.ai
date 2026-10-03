@@ -1329,7 +1329,7 @@ const layer = Layer.effect(
           const [skills, env, instructions, mcpInstructions, modelMsgs] = yield* Effect.all([
             quick ? Effect.succeed(undefined) : sys.skills(agent),
             quick
-              ? Effect.succeed([])
+              ? Effect.succeed({ stable: [], session: [] })
               : agents.list().pipe(
                   // The subagent policy follows what this agent may launch here: a disabled general is
                   // missing from the list, Plan mode or a child session denies it by permission, and a
@@ -1351,7 +1351,7 @@ const layer = Layer.effect(
             MessageV2.toModelMessagesEffect(msgs, model),
           ])
           const system = [
-            ...env,
+            ...env.session,
             ...instructions,
             ...(mcpInstructions ? [mcpInstructions] : []),
             ...(skills ? [skills] : []),
@@ -1365,6 +1365,7 @@ const layer = Layer.effect(
             permission: session.permission,
             sessionID,
             parentSessionID: session.parentID,
+            stableSystem: env.stable,
             system,
             messages: [
               ...(quick ? modelMsgs.filter((message) => message.role === "user").slice(-1) : modelMsgs),

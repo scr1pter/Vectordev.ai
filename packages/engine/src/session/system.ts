@@ -212,7 +212,14 @@ export type EnvironmentOptions = {
 }
 
 export interface Interface {
-  readonly environment: (model: Provider.Model, options?: EnvironmentOptions) => Effect.Effect<string[]>
+  /**
+   * `stable` is the same for every session of an agent on a model, so it goes out ahead of `session` (directory, date,
+   * references) and the provider's prompt cache can reuse it across sessions and directories.
+   */
+  readonly environment: (
+    model: Provider.Model,
+    options?: EnvironmentOptions,
+  ) => Effect.Effect<{ stable: string[]; session: string[] }>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
 }
@@ -235,11 +242,8 @@ const layer = Layer.effect(
         const references = yield* Effect.gen(function* () {
           return (yield* (yield* Reference.Service).list()).filter((reference) => reference.description !== undefined)
         }).pipe(Effect.provide(locations.get(Location.Ref.make({ directory: AbsolutePath.make(ctx.directory) }))))
-        return [
+        const session = [
           [
-            `You are Vector, an AI coding workspace for planning, editing, reviewing, and running software projects.`,
-            `If the user asks what you are, answer as Vector. Do not describe yourself as a CLI tool unless the user is explicitly asking about internal compatibility layers.`,
-            `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
             `<env>`,
             `  Working directory: ${ctx.directory}`,
@@ -267,6 +271,13 @@ const layer = Layer.effect(
                   ]),
                 "</available_references>",
               ].join("\n"),
+        ].filter((part): part is string => part !== undefined)
+        const stable = [
+          [
+            `You are Vector, an AI coding workspace for planning, editing, reviewing, and running software projects.`,
+            `If the user asks what you are, answer as Vector. Do not describe yourself as a CLI tool unless the user is explicitly asking about internal compatibility layers.`,
+            `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
+          ].join("\n"),
           subagentPolicy(options?.subagents ?? ALL_SUBAGENTS),
           COMPLETION_POLICY,
           [
@@ -302,7 +313,8 @@ const layer = Layer.effect(
             "Do not rewrite memory merely to narrate routine work.",
             "</vector_project_memory>",
           ].join("\n"),
-        ].filter((part): part is string => part !== undefined)
+        ]
+        return { stable, session }
       }),
 
       skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {

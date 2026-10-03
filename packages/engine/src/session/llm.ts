@@ -40,6 +40,9 @@ export type StreamInput = {
   model: Provider.Model
   agent: Agent.Info
   permission?: PermissionV1.Ruleset
+  // System parts that are the same for every session of the agent on the model. They are sent with the provider prompt
+  // as a block of their own, ahead of `system`, so the provider's prompt cache can reuse that block across sessions.
+  stableSystem?: string[]
   system: string[]
   messages: ModelMessage[]
   small?: boolean
