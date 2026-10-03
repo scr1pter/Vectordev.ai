@@ -260,6 +260,61 @@ it.instance(
   },
 )
 
+it.instance(
+  "read-only specialists keep the user's denies and asks, and the default asks for secret files",
+  () =>
+    Effect.gen(function* () {
+      for (const name of ["explore", "review", "judge", "security"] as const) {
+        const agent = yield* load((svc) => svc.get(name))
+        const action = (permission: string, pattern: string) =>
+          Permission.evaluate(permission, pattern, agent!.permission).action
+        expect(action("webfetch", "https://example.com")).toBe("deny")
+        expect(action("read", "secrets/token.txt")).toBe("deny")
+        expect(action("read", "src/app.ts")).toBe("allow")
+        expect(action("read", ".env")).toBe("ask")
+        expect(action("read", "keys/server.pem")).toBe("ask")
+        expect(action("bash", "git status --short")).toBe("ask")
+        expect(action("bash", "bun test")).toBe("allow")
+        // An ask narrows a command the specialist may run; it never reopens one it may not.
+        expect(action("bash", "git push origin main")).toBe("deny")
+        expect(action("bash", "git difftool -y --extcmd=sh")).toBe("deny")
+        expect(action("bash", "git diff --output=src/app.ts")).toBe("deny")
+        expect(action("mcp_github_create_or_update_file", "*")).toBe("deny")
+      }
+    }),
+  {
+    config: {
+      permission: {
+        webfetch: "deny",
+        read: { "secrets/*": "deny" },
+        bash: { "git *": "ask", "rm *": "ask" },
+      },
+    },
+  },
+)
+
+it.instance(
+  "a repository config cannot hand a read-only specialist tools it does not have",
+  () =>
+    Effect.gen(function* () {
+      const review = yield* load((svc) => svc.get("review"))
+      const action = (permission: string, pattern = "*") =>
+        Permission.evaluate(permission, pattern, review!.permission).action
+      expect(action("vector_cloud_publish")).toBe("deny")
+      expect(action("mcp_github_create_or_update_file")).toBe("deny")
+      expect(action("external_directory", "/etc/*")).toBe("ask")
+      expect(action("websearch")).toBe("deny")
+      expect(action("grep")).toBe("allow")
+    }),
+  {
+    config: {
+      agent: {
+        review: { permission: { "*": "allow", websearch: "deny" } },
+      },
+    },
+  },
+)
+
 it.instance("compaction agent denies all permissions", () =>
   Effect.gen(function* () {
     const compaction = yield* load((svc) => svc.get("compaction"))

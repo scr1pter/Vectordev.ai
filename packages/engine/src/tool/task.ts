@@ -526,6 +526,19 @@ export const TaskTool = Tool.define(
         ctx.agent === "plan"
           ? ((yield* agent.get(ctx.agent))?.permission ?? []).filter((rule) => rule.permission === "edit")
           : []
+      // A subagent launched before Plan mode keeps the edits it was launched with, so Plan mode resuming it takes
+      // them away for good; a fresh task is the way to edit again.
+      const stored = session?.permission ?? []
+      if (
+        session &&
+        !inheritedEdits.every((rule) =>
+          stored.some((item) => item.permission === rule.permission && item.pattern === rule.pattern),
+        )
+      )
+        yield* sessions.setPermission({
+          sessionID: session.id,
+          permission: [...stored, ...inheritedEdits],
+        })
       const nextSession =
         session ??
         (yield* sessions.create({

@@ -50,7 +50,7 @@ export class Handler {
 
   private async process(event: PermissionEvent) {
     const permission = event.properties
-    const session = await Effect.runPromise(this.input.session.tryGet(permission.sessionID))
+    const session = await this.owner(permission.sessionID)
     if (!session) return
 
     if (!this.input.connection.requestPermission) {
@@ -60,7 +60,7 @@ export class Handler {
 
     const result = await this.input.connection
       .requestPermission({
-        sessionId: permission.sessionID,
+        sessionId: session.id,
         toolCall: await permissionToolCall({
           toolCallId: permission.tool?.callID ?? permission.id,
           toolName: permission.permission,
@@ -86,6 +86,19 @@ export class Handler {
     }
 
     await this.reply(permission.id, reply, session.cwd)
+  }
+
+  // A subagent's request names its own session, which the client never created. It is shown in the ACP session the
+  // subagent descends from; dropped, it would leave the subagent, and the turn waiting on it, blocked with no prompt.
+  private async owner(sessionID: string): Promise<ACPSession.Info | undefined> {
+    const known = await Effect.runPromise(this.input.session.tryGet(sessionID))
+    if (known) return known
+    const parentID = await this.input.sdk.session
+      .get({ sessionID })
+      .then((result) => result.data?.parentID)
+      .catch(() => undefined)
+    if (!parentID) return
+    return this.owner(parentID)
   }
 
   private async reply(requestID: string, reply: Reply, directory: string) {

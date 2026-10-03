@@ -376,6 +376,43 @@ describe("tool.shell permissions", () => {
     )
   }
 
+  each("asks for edit permission for the files a redirect writes", () =>
+    Effect.gen(function* () {
+      const outside = yield* tmpdirScoped()
+      yield* runIn(
+        projectRoot,
+        Effect.gen(function* () {
+          const err = new Error("stop before running")
+          const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
+          const target = path.join(outside, "notes.txt").replaceAll("\\", "/")
+          yield* fail(
+            { command: `git status > zz-redirect.txt 2>&1 >> "${target}"` },
+            {
+              ...ctx,
+              ask: (req) =>
+                Effect.sync(() => {
+                  requests.push(req)
+                  if (req.permission === "bash") throw err
+                }),
+            },
+          )
+          const edit = requests.find((r) => r.permission === "edit")
+          expect(edit?.patterns).toHaveLength(2)
+          expect(edit?.patterns.some((item) => item.replaceAll("\\", "/").endsWith("engine/zz-redirect.txt"))).toBe(
+            true,
+          )
+          expect(requests.find((r) => r.permission === "external_directory")?.patterns).toContain(
+            glob(path.join(outside, "*")),
+          )
+          // Descriptor merges and the null device write no file.
+          requests.length = 0
+          yield* fail({ command: "git status 2>&1 > /dev/null" }, capture(requests, err))
+          expect(requests.map((r) => r.permission)).toEqual(["bash"])
+        }),
+      )
+    }),
+  )
+
   each("asks for external_directory permission for wildcard external paths", () =>
     runIn(
       projectRoot,
@@ -1036,11 +1073,19 @@ describe("tool.shell permissions", () => {
         Effect.gen(function* () {
           const err = new Error("stop after permission")
           const requests: Array<Omit<PermissionV1.Request, "id" | "sessionID" | "tool">> = []
-          expect(yield* fail({ command: "echo test > output.txt" }, capture(requests, err))).toMatchObject({
+          const stopAtBash = {
+            ...ctx,
+            ask: (req: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">) =>
+              Effect.sync(() => {
+                requests.push(req)
+                if (req.permission === "bash") throw err
+              }),
+          }
+          expect(yield* fail({ command: "echo test > output.txt" }, stopAtBash)).toMatchObject({
             message: err.message,
           })
+          expect(requests.map((r) => r.permission)).toEqual(["edit", "bash"])
           const bashReq = requests.find((r) => r.permission === "bash")
-          expect(bashReq).toBeDefined()
           expect(bashReq!.patterns).toContain("echo test > output.txt")
         }),
       )

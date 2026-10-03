@@ -23,6 +23,7 @@ import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TEST from "./prompt/test.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { Permission } from "@/permission"
+import { Wildcard } from "@vectordevai/core/util/wildcard"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@vectordevai/core/global"
 import path from "path"
@@ -122,6 +123,24 @@ const layer = Layer.effect(
           ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
         } satisfies Record<string, "allow" | "ask" | "deny">
 
+        // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
+        const readDefaults = {
+          "*": "allow",
+          "*.env": "ask",
+          "*.env.*": "ask",
+          "*.env.example": "allow",
+          "*.key": "ask",
+          "*.pem": "ask",
+          ".aws/*": "ask",
+          "**/.aws/*": "ask",
+          ".docker/config.json": "ask",
+          "**/.docker/config.json": "ask",
+          ".kube/*": "ask",
+          "**/.kube/*": "ask",
+          ".ssh/*": "ask",
+          "**/.ssh/*": "ask",
+        } satisfies Record<string, "allow" | "ask" | "deny">
+
         const defaults = Permission.fromConfig({
           "*": "allow",
           doom_loop: "ask",
@@ -138,23 +157,7 @@ const layer = Layer.effect(
           question: "deny",
           plan_enter: "deny",
           plan_exit: "deny",
-          // mirrors github.com/github/gitignore Node.gitignore pattern for .env files
-          read: {
-            "*": "allow",
-            "*.env": "ask",
-            "*.env.*": "ask",
-            "*.env.example": "allow",
-            "*.key": "ask",
-            "*.pem": "ask",
-            ".aws/*": "ask",
-            "**/.aws/*": "ask",
-            ".docker/config.json": "ask",
-            "**/.docker/config.json": "ask",
-            ".kube/*": "ask",
-            "**/.kube/*": "ask",
-            ".ssh/*": "ask",
-            "**/.ssh/*": "ask",
-          },
+          read: readDefaults,
         })
 
         const user = Permission.fromConfig(cfg.permission ?? {})
@@ -181,13 +184,48 @@ const layer = Layer.effect(
           "cargo test*": "allow",
           "go test*": "allow",
         } as const
-        const readonlySpecialistBoundary = Permission.fromConfig({
-          edit: "deny",
-          write: "deny",
-          patch: "deny",
-          task: "deny",
-          bash: readonlyVerificationBash,
-        })
+        // Flags that make an allowed command write a chosen file or run another program. They come after every other
+        // rule, so no ask or allow can reopen them.
+        const readonlyBashDenies = {
+          "git difftool*": "deny",
+          "*--output*": "deny",
+          "*--ext-diff*": "deny",
+          "*--extcmd*": "deny",
+          "*--basetemp*": "deny",
+          "*--junit*": "deny",
+          "*outfile*": "deny",
+          "* -o*": "deny",
+          "go test*profile*": "deny",
+        } as const
+        // explore, review, judge and security may search, read, use their web tool, run the verification commands and
+        // be asked about external reads. User and repository rules can only narrow that: a deny applies anywhere, an
+        // ask or allow only within what the specialist already has. Otherwise a blanket allow after the user's rules
+        // would skip their denies and the default asks for secret files, and a checked-in config could hand a
+        // read-only child MCP tools or edits behind the parent's back.
+        const readonlySpecialists: Record<string, string[]> = {
+          explore: ["webfetch", "websearch"],
+          review: ["webfetch", "websearch"],
+          judge: ["browser"],
+          security: ["webfetch", "websearch"],
+        }
+        const verificationCommands = Object.entries(readonlyVerificationBash)
+          .filter((entry) => entry[1] === "allow")
+          .map((entry) => entry[0])
+        const readonlySpecialist = (name: string, rules: PermissionV1.Rule[]) => {
+          const tools = ["grep", "glob", "list", "read", ...readonlySpecialists[name]]
+          return Permission.merge(
+            defaults,
+            Permission.fromConfig({
+              "*": "deny",
+              ...Object.fromEntries(tools.map((tool) => [tool, "allow" as const])),
+              read: readDefaults,
+              bash: readonlyVerificationBash,
+              external_directory: readonlyExternalDirectory,
+            }),
+            rules.flatMap((rule) => narrow(rule, tools, verificationCommands)),
+            Permission.fromConfig({ bash: readonlyBashDenies }),
+          )
+        }
 
         const agents: Record<string, Info> = {
           build: {
@@ -279,21 +317,7 @@ const layer = Layer.effect(
           },
           explore: {
             name: "explore",
-            permission: Permission.merge(
-              defaults,
-              user,
-              Permission.fromConfig({
-                "*": "deny",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                bash: readonlyVerificationBash,
-                webfetch: "allow",
-                websearch: "allow",
-                read: "allow",
-                external_directory: readonlyExternalDirectory,
-              }),
-            ),
+            permission: readonlySpecialist("explore", user),
             description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
             prompt: PROMPT_EXPLORE,
             options: {},
@@ -302,21 +326,7 @@ const layer = Layer.effect(
           },
           review: {
             name: "review",
-            permission: Permission.merge(
-              defaults,
-              user,
-              Permission.fromConfig({
-                "*": "deny",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                bash: readonlyVerificationBash,
-                webfetch: "allow",
-                websearch: "allow",
-                read: "allow",
-                external_directory: readonlyExternalDirectory,
-              }),
-            ),
+            permission: readonlySpecialist("review", user),
             description:
               "Read-only senior code reviewer. Use this to inspect a diff or implementation for correctness, regressions, missing tests, maintainability, and security issues without changing files.",
             prompt: PROMPT_REVIEW,
@@ -326,20 +336,7 @@ const layer = Layer.effect(
           },
           judge: {
             name: "judge",
-            permission: Permission.merge(
-              defaults,
-              user,
-              Permission.fromConfig({
-                "*": "deny",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                bash: readonlyVerificationBash,
-                browser: "allow",
-                read: "allow",
-                external_directory: readonlyExternalDirectory,
-              }),
-            ),
+            permission: readonlySpecialist("judge", user),
             description:
               "Independent completion judge. Scores requirement coverage, correctness, regression safety, evidence, and security, then returns PASS, FAIL, or INCONCLUSIVE without editing files.",
             prompt: PROMPT_JUDGE,
@@ -381,21 +378,7 @@ const layer = Layer.effect(
           },
           security: {
             name: "security",
-            permission: Permission.merge(
-              defaults,
-              user,
-              Permission.fromConfig({
-                "*": "deny",
-                grep: "allow",
-                glob: "allow",
-                list: "allow",
-                bash: readonlyVerificationBash,
-                webfetch: "allow",
-                websearch: "allow",
-                read: "allow",
-                external_directory: readonlyExternalDirectory,
-              }),
-            ),
+            permission: readonlySpecialist("security", user),
             description:
               "Read-only application security reviewer for trust boundaries, authentication, authorization, secrets, injection risks, unsafe data flow, and dependency exposure.",
             prompt: PROMPT_SECURITY,
@@ -512,13 +495,14 @@ const layer = Layer.effect(
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
 
-        // Repository config may customize native agents, but a checked-in
-        // config must not turn a read-only specialist into a mutation-capable
-        // child behind the parent's back.
-        for (const name of ["explore", "review", "judge", "security"]) {
+        // Rebuilt after the config loop above, so a read-only specialist's own config rules are narrowed like the user's.
+        for (const name of Object.keys(readonlySpecialists)) {
           const item = agents[name]
           if (!item) continue
-          item.permission = Permission.merge(item.permission, readonlySpecialistBoundary)
+          item.permission = readonlySpecialist(name, [
+            ...user,
+            ...Permission.fromConfig(cfg.agent?.[name]?.permission ?? {}),
+          ])
         }
 
         // Ensure Truncate.GLOB is allowed unless explicitly configured
@@ -665,6 +649,30 @@ const layer = Layer.effect(
     })
   }),
 )
+
+// One user or config rule as it may apply to a read-only specialist that has `tools` and may run the `verification`
+// commands (each a literal prefix ending in `*`). A deny always applies. An allow or ask applies to the tools it
+// names, and an ask also narrows external reads and the verification commands it covers: `bash: ask` asks before
+// each of them, `git *: ask` before the git ones, `git diff --stat*: ask` before that one alone.
+function narrow(rule: PermissionV1.Rule, tools: string[], verification: string[]): PermissionV1.Rule[] {
+  if (rule.action === "deny") return [rule]
+  const named = tools
+    .filter((tool) => Wildcard.match(tool, rule.permission))
+    .map((tool) => ({ ...rule, permission: tool }))
+  if (rule.action !== "ask") return named
+  const external = Wildcard.match("external_directory", rule.permission)
+    ? [{ ...rule, permission: "external_directory" }]
+    : []
+  const bash = Wildcard.match("bash", rule.permission)
+    ? verification.flatMap((pattern) => {
+        const prefix = pattern.slice(0, -1)
+        if (Wildcard.match(prefix, rule.pattern)) return [{ ...rule, permission: "bash", pattern }]
+        if (rule.pattern.split(/[*?]/)[0].startsWith(prefix)) return [{ ...rule, permission: "bash" }]
+        return []
+      })
+    : []
+  return [...named, ...external, ...bash]
+}
 
 const locationServiceMapNode = LayerNode.make({
   service: LocationServiceMap.Service,

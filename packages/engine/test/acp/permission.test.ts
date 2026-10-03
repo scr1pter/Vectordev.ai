@@ -50,6 +50,8 @@ function createHarness(
   const replies: PermissionReplyParams[] = []
   const requests: RequestPermissionRequest[] = []
   const updates: SessionUpdateParams[] = []
+  // Subagent sessions the server knows and the client does not: child ID to parent ID.
+  const parents = new Map<string, string>()
   const session = makeSessionService()
   const sdk = {
     permission: {
@@ -60,6 +62,12 @@ function createHarness(
     },
     session: {
       message: () => Promise.resolve({ data: undefined }),
+      get: (params: { sessionID: string }) =>
+        Promise.resolve({
+          data: parents.has(params.sessionID)
+            ? { id: params.sessionID, parentID: parents.get(params.sessionID) }
+            : undefined,
+        }),
     },
   } as unknown as VectorClient
   const connection = {
@@ -74,7 +82,7 @@ function createHarness(
   } satisfies Pick<AgentSideConnection, "requestPermission" | "sessionUpdate">
   const subscription = new ACPEvent.Subscription({ sdk, connection, session })
 
-  return { connection, replies, requests, sdk, session, subscription, updates }
+  return { connection, parents, replies, requests, sdk, session, subscription, updates }
 }
 
 async function createSession(session: ACPSession.Interface, sessionId: string, cwd = "/workspace") {
@@ -181,6 +189,21 @@ describe("acp permissions", () => {
       ],
     })
     expect(harness.replies).toEqual([{ requestID: "perm_1", reply: "once", directory: "/workspace" }])
+  })
+
+  it("asks in the client's session for a subagent's request", async () => {
+    const harness = createHarness()
+    await createSession(harness.session, "ses_a", "/project")
+    harness.parents.set("ses_child", "ses_a")
+    harness.parents.set("ses_grandchild", "ses_child")
+
+    harness.subscription.handle(
+      permissionAsked("ses_grandchild", "perm_sub", { tool: { messageID: "msg_1", callID: "call_sub" } }),
+    )
+
+    await pollUntil(() => harness.replies.length === 1, "subagent permission was never replied")
+    expect(harness.requests[0]).toMatchObject({ sessionId: "ses_a", toolCall: { toolCallId: "call_sub" } })
+    expect(harness.replies).toEqual([{ requestID: "perm_sub", reply: "once", directory: "/project" }])
   })
 
   it("uses permission metadata for non-shell titles", async () => {

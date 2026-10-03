@@ -24,6 +24,7 @@ import { MessageID, PartID } from "../../session/schema"
 import { Provider } from "@/provider/provider"
 import { MessageV2 } from "../../session/message-v2"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { Permission } from "@/permission"
 import { EventV2 } from "@vectordevai/core/event"
 import { SessionPrompt } from "@/session/prompt"
 import { Git } from "@/git"
@@ -403,6 +404,7 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
   const sessionPrompt = yield* SessionPrompt.Service
   const providerSvc = yield* Provider.Service
   const events = yield* EventV2Bridge.Service
+  const permissions = yield* Permission.Service
   const shareSvc = args.share ? yield* PublicSessionShare.Service : undefined
   const resources: {
     auth?: GithubAuth
@@ -920,6 +922,33 @@ export const githubRun = Effect.fn("Cli.github.run")(function* (args: {
             UI.Style.TEXT_NORMAL + title,
           )
         }
+
+        // Nobody can answer a permission request in an Action, and one left waiting holds the job until it times
+        // out. Requests from the run's session and its subagents are refused, as `vector run` refuses them.
+        const tree = new Set([session.id])
+        const inRun = (id: SessionID, depth = 0): Effect.Effect<boolean> =>
+          Effect.gen(function* () {
+            if (tree.has(id)) return true
+            if (depth > 4) return false
+            const parentID = yield* sessionSvc.get(id).pipe(
+              Effect.map((item) => item.parentID),
+              Effect.catch(() => Effect.succeed(undefined)),
+            )
+            if (!parentID || !(yield* inRun(parentID, depth + 1))) return false
+            tree.add(id)
+            return true
+          })
+        await runLocalEffect(
+          events.listen((evt) => {
+            if (evt.type !== Permission.Event.Asked.type) return Effect.void
+            const request = evt.data as EventV2.Data<typeof Permission.Event.Asked>
+            return Effect.gen(function* () {
+              if (!(yield* inRun(request.sessionID))) return
+              console.log(`permission requested: ${request.permission} (${request.patterns.join(", ")}); rejecting`)
+              yield* permissions.reply({ requestID: request.id, reply: "reject" }).pipe(Effect.ignore)
+            })
+          }),
+        )
 
         let text = ""
         await runLocalEffect(

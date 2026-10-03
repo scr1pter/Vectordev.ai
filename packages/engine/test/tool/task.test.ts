@@ -2222,6 +2222,32 @@ describe("tool.task", () => {
         const rules = [...(helper?.permission ?? []), ...(child.permission ?? [])]
         expect(Permission.evaluate("edit", "src/app.ts", helper?.permission ?? []).action).toBe("allow")
         expect(Permission.evaluate("edit", "src/app.ts", rules).action).toBe("deny")
+
+        // A subagent launched before Plan mode loses its edits when Plan mode resumes it.
+        const build = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() })
+        const earlier = yield* def.execute(
+          { description: "tidy more", prompt: "Tidy the routes.", subagent_type: "helper" },
+          build,
+        )
+        const before = yield* sessions.get(SessionID.make(earlier.metadata.sessionId))
+        expect(
+          Permission.evaluate("edit", "src/app.ts", [...(helper?.permission ?? []), ...(before.permission ?? [])])
+            .action,
+        ).toBe("allow")
+        yield* def.execute(
+          {
+            description: "tidy more",
+            prompt: "Apply the edits.",
+            subagent_type: "helper",
+            task_id: earlier.metadata.sessionId,
+          },
+          plan,
+        )
+        const resumed = yield* sessions.get(SessionID.make(earlier.metadata.sessionId))
+        expect(
+          Permission.evaluate("edit", "src/app.ts", [...(helper?.permission ?? []), ...(resumed.permission ?? [])])
+            .action,
+        ).toBe("deny")
       }),
     { config: { agent: { helper: { mode: "subagent", description: "Tidies code." } } } },
   )

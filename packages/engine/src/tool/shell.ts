@@ -76,6 +76,7 @@ type Scan = {
   dirs: Set<string>
   patterns: Set<string>
   always: Set<string>
+  writes: Set<string>
 }
 
 type Chunk = {
@@ -146,6 +147,29 @@ function statements(node: Node) {
     .descendantsOfType(STATEMENTS)
     .filter((child): child is Node => Boolean(child))
     .filter((child) => !ASSIGNMENTS.has(child.type) || !OWNERS.has(child.parent?.type ?? ""))
+}
+
+// Output redirects that write a file. `>&` and `<&` only duplicate a descriptor unless their target is a file name.
+const WRITES = new Set([">", ">>", "&>", "&>>", ">|", ">&"])
+const DEVICES = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty", "$null", "nul"])
+
+// The files a statement's redirects write. A redirect target is never one of the command's arguments, so without
+// this `git status > src/index.ts` would be checked only as `git status`.
+function redirects(node: Node, ps: boolean) {
+  const targets = ps
+    ? node.descendantsOfType("redirected_file_name").flatMap((item) => (item ? [item.text.trim()] : []))
+    : node.descendantsOfType("file_redirect").flatMap((item) => {
+        const children = item?.children.filter((child): child is Node => Boolean(child)) ?? []
+        const index = children.findIndex((child) => WRITES.has(child.type))
+        if (index === -1) return []
+        const target = children
+          .slice(index + 1)
+          .map((child) => child.text)
+          .join("")
+        if (children[index].type === ">&" && /^(\d+|-)$/.test(target)) return []
+        return [target]
+      })
+  return targets.filter((target) => target && !DEVICES.has(target.toLowerCase()))
 }
 
 function unquote(text: string) {
@@ -344,6 +368,19 @@ const ask = Effect.fn("ShellTool.ask")(function* (ctx: Tool.Context, scan: Scan,
     })
   }
 
+  // The same permission the edit tool asks for, so an agent that may not edit files cannot write one through a redirect.
+  if (scan.writes.size > 0) {
+    yield* ctx.ask({
+      permission: "edit",
+      patterns: Array.from(scan.writes),
+      always: ["*"],
+      metadata: {
+        command: input.command,
+        files: Array.from(scan.writes),
+      },
+    })
+  }
+
   if (scan.patterns.size === 0) return
   yield* ctx.ask({
     permission: ShellID.ToolID,
@@ -490,6 +527,7 @@ export const ShellTool = Tool.define(
         dirs: new Set<string>(),
         patterns: new Set<string>(),
         always: new Set<string>(),
+        writes: new Set<string>(),
       }
       const shellKind = ShellID.toKind(Shell.name(shell))
 
@@ -512,6 +550,14 @@ export const ShellTool = Tool.define(
           scan.patterns.add(source(node))
           scan.always.add(BashArity.prefix(tokens).join(" ") + " *")
         }
+      }
+
+      // A target that cannot be resolved (`> "$OUT"`) is asked for as written, so a rule that denies edits denies it.
+      for (const target of redirects(root, ps)) {
+        const resolved = yield* argPath(target, cwd, ps, shell)
+        scan.writes.add(resolved ? path.relative(instance.worktree, resolved) : target)
+        if (!resolved || containsPath(resolved, instance)) continue
+        scan.dirs.add(path.dirname(resolved))
       }
 
       // PowerShell's grammar has none of these node types. "Always" approves
