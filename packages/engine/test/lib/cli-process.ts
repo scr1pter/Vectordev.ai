@@ -22,7 +22,7 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { AppProcess } from "@vectordevai/core/process"
-import { Deferred, Duration, Effect, Layer, Queue, Schedule, Scope, Sink, Stream } from "effect"
+import { Deferred, Duration, Effect, Layer, Queue, Schedule, Scope, Stream } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { ChildProcess } from "effect/unstable/process"
 import path from "node:path"
@@ -209,52 +209,16 @@ export function withCliFixture<A, E>(
     const spawn = Effect.fn("vector.spawn")(function* (args: string[], opts?: SpawnOpts) {
       const start = Date.now()
       const timeoutMs = opts?.timeoutMs ?? 30_000
-      const diagnostic = process.env.VECTOR_TEST_CLI_DIAGNOSTICS === "1"
-      const output = {
-        stdout: { tail: Buffer.alloc(0), bytes: 0, firstMs: undefined as number | undefined },
-        stderr: { tail: Buffer.alloc(0), bytes: 0, firstMs: undefined as number | undefined },
-      }
-      const callsBefore = diagnostic ? yield* llm.calls : undefined
-      const phaseFile = path.join(home, ".cli-probe-phase.txt")
-      const preload = path.join(home, ".cli-probe-preload.ts")
-      if (diagnostic) {
-        yield* Effect.promise(() => Bun.write(phaseFile, ""))
-        yield* Effect.promise(() =>
-          Bun.write(preload, `await Bun.write(${JSON.stringify(phaseFile)}, String(Date.now()))`),
-        )
-      }
-      const capture = (name: "stdout" | "stderr") =>
-        // CommandOutput requires no leftovers: emit each complete input batch immediately.
-        Sink.foldArray<Uint8Array, Uint8Array>(
-          () => new Uint8Array(),
-          () => false,
-          (_, chunks) => Effect.succeed(Buffer.concat(chunks)),
-        ).pipe(
-          Sink.map((bytes) => {
-            if (bytes.length) {
-              output[name].tail = Buffer.concat([output[name].tail, bytes]).subarray(-8192)
-              output[name].bytes += bytes.length
-              output[name].firstMs ??= Date.now() - start
-            }
-            return bytes
-          }),
-        )
       // stdin: "ignore" so the child doesn't see a piped stdin and block
       // on `Bun.stdin.text()` (see src/cli/cmd/run.ts — non-TTY stdin is
       // consumed as the prompt). The old Process.run wrapper defaulted to
       // ignore; ChildProcess.make defaults to pipe, so we set it explicitly.
-      const command = ChildProcess.make(
-        "bun",
-        ["run", ...(diagnostic ? ["--preload", preload] : []), "--conditions=browser", cliEntry, ...args],
-        {
-          cwd: home,
-          env: { ...env, ...opts?.env },
-          extendEnv: true,
-          stdin: "ignore",
-          stdout: diagnostic ? capture("stdout") : "pipe",
-          stderr: diagnostic ? capture("stderr") : "pipe",
-        },
-      )
+      const command = ChildProcess.make("bun", ["run", "--conditions=browser", cliEntry, ...args], {
+        cwd: home,
+        env: { ...env, ...opts?.env },
+        extendEnv: true,
+        stdin: "ignore",
+      })
       // Pass timeout to appProc.run rather than wrapping with
       // Effect.timeoutOrElse externally: AppProcess.run is itself scoped, so
       // its built-in timeout triggers the acquireRelease kill finalizer
@@ -282,33 +246,6 @@ export function withCliFixture<A, E>(
           }),
         ),
       )
-      if (diagnostic) {
-        const log = Bun.file(path.join(home, ".local/share/vector/log/vector.log"))
-        const logTail = yield* Effect.promise(async () =>
-          (await log.exists()) ? (await log.text()).slice(-12_000) : "",
-        ).pipe(Effect.orElseSucceed(() => "diagnostic log unavailable"))
-        console.error(
-          JSON.stringify({
-            fixture: "cli-process",
-            phase: "subprocess-finished",
-            childPreloadEnteredAt: yield* Effect.promise(() => Bun.file(phaseFile).text()).pipe(
-              Effect.orElseSucceed(() => ""),
-            ),
-            args,
-            timeoutMs,
-            durationMs: Date.now() - start,
-            exitCode: execution.result.exitCode,
-            timedOut: execution.timedOut,
-            callsBefore,
-            callsAfter: yield* llm.calls,
-            pendingReplies: yield* llm.pending,
-            stdout: { ...output.stdout, tail: output.stdout.tail.toString() },
-            stderr: { ...output.stderr, tail: output.stderr.tail.toString() },
-            logTail,
-            note: "Observed partial streams retained independently of AppProcessError; normal result/assertions unchanged",
-          }),
-        )
-      }
       return {
         exitCode: execution.result.exitCode,
         stdout: normalizeLines(execution.result.stdout.toString()),

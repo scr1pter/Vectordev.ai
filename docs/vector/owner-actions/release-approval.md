@@ -96,8 +96,25 @@ prove PowerShell was launched. Both cases and both CLI cases passed the focused
 comparison on the candidate and clean main with the original deadlines and
 verified import ownership. Main remains unchanged while test-only phase tracing
 and comparisons of the complete prompt file and the same 69-file preceding
-workload locate the full-suite delay. No deadline
-increase or unproved production workaround is part of this diagnostic step.
+workload investigate the full-suite delay. No deadline increase or unproved
+production workaround is part of this diagnostic step.
+
+The `ddee62fff6d03be2e63932ee4078c54d15f91b52` diagnostic runs did not reproduce
+the readiness failure. Both complete prompt-file runs passed 55 tests with 14
+skips and 233 assertions. The candidate's exact preceding workload passed 655
+tests with 26 skips and 2,344 assertions; main ran the identical 69-file order and
+passed both readiness cases but failed two unrelated baseline review/schema
+checks. No protected review file was changed. The ordinary Windows Engine shard
+4 also passed: 864 passes, 26 skips, zero failures and 2,933 assertions across
+890 tests and 82 files in 583.84 seconds. Both native launches returned promptly,
+and their children reported readiness within the original five-second window.
+
+Those successes do not identify the earlier timeout's cause. The temporary
+comparison workflow, file manifest, service tracing and optional CLI diagnostics
+are removed before final release validation. The normal fixtures, real child
+barrier, commands, assertions and original deadlines remain intact. After removing
+the probes, Engine typechecking and both held-shell tests passed locally with 17
+assertions. No production code changed during this diagnostic investigation.
 
 The publishing machine's ordinary `npm whoami` check now succeeds after the owner
 logged in. Earlier `E401` records below are historical. The public catalog fork
