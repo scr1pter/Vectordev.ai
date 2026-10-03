@@ -15,7 +15,8 @@
     },
     "@vectordevai/core#test": {
       "dependsOn": ["^build"],
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": ["COMSPEC", "PATHEXT"]
     },
     "@vectordevai/app#test": {
       "dependsOn": ["^build"],

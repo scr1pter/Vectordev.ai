@@ -56,6 +56,11 @@ test("other commands retain their module paths", () => {
 test.skipIf(process.platform !== "win32")(
   "pwsh to Bun to Windows PowerShell loads native certificate and installer commands",
   async () => {
+    // Turbo's strict environment must retain native command discovery before entering the PowerShell chain.
+    expect(process.env.PATHEXT?.toUpperCase().split(";"), "Core tests must preserve the host PATHEXT").toContain(".EXE")
+    const comspec = process.env.COMSPEC ?? process.env.ComSpec
+    expect(comspec, "Core tests must preserve the host ComSpec").toBeDefined()
+    expect(await Bun.file(comspec!).exists(), "The inherited ComSpec must identify the native command shell").toBe(true)
     const pwsh = Bun.which("pwsh.exe")
     if (!pwsh) throw new Error("The native module-path regression requires PowerShell 7")
     const root = await mkdtemp(path.join(os.tmpdir(), "vector powershell '"))
