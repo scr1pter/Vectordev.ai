@@ -974,6 +974,51 @@ describe("session.compaction.process", () => {
   )
 
   itCompaction.instance(
+    "summarizes a high-effort session at medium effort",
+    () => {
+      const stub = llm()
+      let variant: string | undefined
+      stub.push(reply("summary", (input) => (variant = input.user.model.variant)))
+      return Effect.gen(function* () {
+        const ssn = yield* SessionNs.Service
+        const session = yield* ssn.create({})
+        // The prompt loop hands compaction the last user message's model, variant included.
+        const model = { ...ref, variant: "xhigh" }
+        yield* ssn.updateMessage({
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: session.id,
+          agent: "build",
+          model,
+          time: { created: Date.now() },
+        })
+        yield* SessionCompaction.use.create({ sessionID: session.id, agent: "build", model, auto: false })
+
+        const msgs = yield* ssn.messages({ sessionID: session.id })
+        yield* SessionCompaction.use.process({
+          parentID: msgs.at(-1)!.info.id,
+          messages: msgs,
+          sessionID: session.id,
+          auto: false,
+        })
+
+        expect(variant).toBe("medium")
+      }).pipe(
+        withCompaction({
+          llm: stub.llmLayer,
+          provider: ProviderTest.fake({
+            model: {
+              ...createModel({ context: 100_000, output: 32_000 }),
+              variants: { low: {}, medium: {}, xhigh: {} },
+            },
+          }),
+        }),
+      )
+    },
+    { git: true },
+  )
+
+  itCompaction.instance(
     "falls back to full summary when even one recent turn exceeds preserve token budget",
     () => {
       const stub = llm()

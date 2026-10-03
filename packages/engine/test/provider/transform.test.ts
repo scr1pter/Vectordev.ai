@@ -4676,6 +4676,19 @@ test("ProviderTransform.smallOptions disables OpenRouter reasoning when the weak
   ).toEqual({ reasoning: { effort: "none" } })
 })
 
+test("ProviderTransform.smallOptions runs budget-thinking Anthropic models without thinking", () => {
+  const model = {
+    id: "anthropic/claude-haiku-4-5",
+    providerID: "anthropic",
+    api: { id: "claude-haiku-4-5", url: "https://api.anthropic.com", npm: "@ai-sdk/anthropic" },
+    capabilities: { reasoning: true },
+    limit: { output: 64_000 },
+  } as any
+  model.variants = ProviderTransform.variants(model)
+  expect(Object.keys(model.variants)[0]).toBe("high")
+  expect(ProviderTransform.smallOptions(model)).toEqual({})
+})
+
 describe("ProviderTransform.smallOptions - google thinking controls", () => {
   const createGoogleModel = (apiId: string) => {
     const model = {
@@ -4700,16 +4713,28 @@ describe("ProviderTransform.smallOptions - google thinking controls", () => {
       id: "gemini-3.1-flash-image-preview",
       options: { thinkingConfig: { includeThoughts: true, thinkingLevel: "minimal" } },
     },
-    { id: "gemini-3-pro-image-preview", options: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } } },
-    { id: "gemini-2.5-pro", options: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } } },
-    { id: "gemini-2.5-flash", options: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } } },
+    { id: "gemini-3-pro-image-preview", options: {} },
+    { id: "gemini-2.5-pro", options: {} },
+    { id: "gemini-2.5-flash", options: {} },
   ]) {
     test(`${testCase.id} returns supported small thinking options`, () => {
       expect(ProviderTransform.smallOptions(createGoogleModel(testCase.id))).toEqual(testCase.options)
     })
   }
 
-  test("uses the first configured variant when available", () => {
+  test("uses the first configured variant when it is a low effort", () => {
+    expect(
+      ProviderTransform.smallOptions({
+        ...createGoogleModel("gemini-2.5-pro"),
+        variants: {
+          low: { thinkingConfig: { includeThoughts: true, thinkingBudget: 1024 } },
+          high: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } },
+        },
+      }),
+    ).toEqual({ thinkingConfig: { includeThoughts: true, thinkingBudget: 1024 } })
+  })
+
+  test("skips budget-style variants that start at high", () => {
     expect(
       ProviderTransform.smallOptions({
         ...createGoogleModel("gemini-2.5-pro"),
@@ -4718,7 +4743,7 @@ describe("ProviderTransform.smallOptions - google thinking controls", () => {
           max: { thinkingConfig: { includeThoughts: true, thinkingBudget: 32768 } },
         },
       }),
-    ).toEqual({ thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } })
+    ).toEqual({})
   })
 
   test("does not synthesize thinking options when variants are empty", () => {

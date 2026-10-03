@@ -455,12 +455,7 @@ export function usesCacheBreakpoints(model: Provider.Model) {
   )
 }
 
-export function message(
-  msgs: ModelMessage[],
-  model: Provider.Model,
-  options: Record<string, unknown>,
-  cache = true,
-) {
+export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>, cache = true) {
   msgs = unsupportedParts(msgs, model)
   msgs = normalizeMessages(msgs, model, options)
   if (cache && usesCacheBreakpoints(model)) {
@@ -1243,7 +1238,10 @@ export function options(input: {
 }
 
 export function smallOptions(model: Provider.Model) {
-  const small = Object.values(model.variants ?? {})[0] ?? {}
+  // Effort-style variants list their weakest effort first. Budget-style ones start at "high", a 16K thinking
+  // budget that a title or summary does not need, so small calls run those models at their default instead.
+  const [name, weakest] = Object.entries(model.variants ?? {})[0] ?? []
+  const small = weakest && name !== "high" ? weakest : {}
   if (
     model.providerID === "openai" ||
     model.api.npm === "@ai-sdk/openai" ||

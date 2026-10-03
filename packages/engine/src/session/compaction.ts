@@ -334,6 +334,11 @@ const layer = Layer.effect(
         isFreeModel(primary) || !agent.model
           ? primary
           : yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
+      // A summary gains little from the high reasoning budget a session may run at, so compaction stops at medium.
+      const variant =
+        ["high", "xhigh", "max"].includes(userMessage.model.variant ?? "") && model.variants?.medium
+          ? "medium"
+          : userMessage.model.variant
       const cfg = yield* config.get()
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
       const prior = completedCompactions(history)
@@ -365,7 +370,7 @@ const layer = Layer.effect(
         sessionID: input.sessionID,
         mode: "compaction",
         agent: "compaction",
-        variant: userMessage.model.variant,
+        variant,
         summary: true,
         path: {
           cwd: ctx.directory,
@@ -391,7 +396,7 @@ const layer = Layer.effect(
         model,
       })
       const result = yield* processor.process({
-        user: userMessage,
+        user: { ...userMessage, model: { ...userMessage.model, variant } },
         agent,
         sessionID: input.sessionID,
         tools: {},

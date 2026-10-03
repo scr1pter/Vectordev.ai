@@ -553,6 +553,34 @@ it.instance("loop calls LLM and returns assistant message", () =>
   }),
 )
 
+it.instance("title generation sends only what the user typed", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+    yield* llm.text("done")
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: ref,
+      parts: [
+        { type: "text", text: "Fix the login redirect" },
+        { type: "text", text: "ATTACHED FILE CONTENTS", synthetic: true },
+      ],
+    })
+    const title = yield* pollWithTimeout(
+      Effect.map(llm.hits, (hits) =>
+        hits.map((hit) => JSON.stringify(hit.body)).find((body) => body.includes("Generate a title")),
+      ),
+      "timed out waiting for the title request",
+      "10 seconds",
+    )
+    expect(title).toContain("Fix the login redirect")
+    expect(title).not.toContain("ATTACHED FILE CONTENTS")
+  }),
+)
+
 it.instance("a session reads its instruction files once, so an edit mid-session keeps the cached system prompt", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)

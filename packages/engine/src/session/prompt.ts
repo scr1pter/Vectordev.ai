@@ -256,13 +256,21 @@ const layer = Layer.effect(
       if (idx === -1) return
       if (input.history.filter(real).length !== 1) return
 
-      const context = input.history.slice(0, idx + 1)
-      const firstUser = context[idx]
+      const firstUser = input.history[idx]
       if (!firstUser || firstUser.info.role !== "user") return
       const firstInfo = firstUser.info
-
-      const subtasks = firstUser.parts.filter((p): p is SessionV1.SubtaskPart => p.type === "subtask")
-      const onlySubtasks = subtasks.length > 0 && firstUser.parts.every((p) => p.type === "subtask")
+      // A title needs what the user typed, not attached file contents or earlier synthetic context.
+      const request = firstUser.parts
+        .flatMap((p) => {
+          if (p.type === "text" && !p.synthetic) return [p.text]
+          if (p.type === "subtask") return [p.prompt]
+          if (p.type === "file" && p.filename) return [p.filename]
+          return []
+        })
+        .join("\n")
+        .trim()
+        .slice(0, 1500)
+      if (!request) return
 
       const ag = yield* agents.get("title")
       if (!ag) return
@@ -272,9 +280,6 @@ const layer = Layer.effect(
         : ag.model
           ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
           : ((yield* provider.getSmallModel(input.providerID, input.modelID)) ?? primary)
-      const msgs = onlySubtasks
-        ? [{ role: "user" as const, content: subtasks.map((p) => p.prompt).join("\n") }]
-        : yield* MessageV2.toModelMessagesEffect(context, mdl)
       const text = yield* llm
         .stream({
           agent: ag,
@@ -285,7 +290,10 @@ const layer = Layer.effect(
           model: mdl,
           sessionID: input.session.id,
           retries: 2,
-          messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
+          messages: [
+            { role: "user", content: "Generate a title for this conversation:\n" },
+            { role: "user", content: request },
+          ],
         })
         .pipe(
           Stream.filter(LLMEvent.is.textDelta),
