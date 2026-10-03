@@ -6,6 +6,7 @@ import { AmazonBedrock } from "../src/providers"
 import * as AnthropicMessages from "../src/protocols/anthropic-messages"
 import * as Gemini from "../src/protocols/gemini"
 import * as OpenAIChat from "../src/protocols/openai-chat"
+import * as OpenAICompatibleChat from "../src/protocols/openai-compatible-chat"
 import { applyCachePolicy } from "../src/cache-policy"
 import { it } from "./lib/effect"
 
@@ -28,7 +29,56 @@ const geminiModel = Gemini.route
   })
   .model({ id: "gemini-2.5-flash" })
 
+const gatewayModel = (id: string) =>
+  OpenAICompatibleChat.route
+    .with({ endpoint: { baseURL: "https://gateway.test/v1/" }, auth: Auth.bearer("test") })
+    .model({ id, provider: "gateway" })
+
 describe("applyCachePolicy", () => {
+  it.effect("a gateway serving a Claude model gets cache_control markers on the system prompt and the tail", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: gatewayModel("anthropic/claude-sonnet-4.5"),
+          system: "Sys A",
+          messages: [
+            Message.user("first user"),
+            Message.assistant("assistant reply"),
+            Message.user("latest user message"),
+          ],
+          cache: { system: true, messages: { tail: 2 } },
+        }),
+      )
+
+      expect(prepared.body).toMatchObject({
+        messages: [
+          { role: "system", content: [{ type: "text", text: "Sys A", cache_control: { type: "ephemeral" } }] },
+          { role: "user", content: "first user" },
+          { role: "assistant", content: "assistant reply", cache_control: { type: "ephemeral" } },
+          {
+            role: "user",
+            content: [{ type: "text", text: "latest user message", cache_control: { type: "ephemeral" } }],
+          },
+        ],
+      })
+    }),
+  )
+
+  it.effect("a gateway serving a model that caches implicitly gets no markers", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model: gatewayModel("deepseek-chat"),
+          system: "Sys A",
+          prompt: "hi",
+          cache: { system: true, messages: { tail: 2 } },
+        }),
+      )
+
+      expect(JSON.stringify(prepared.body)).not.toContain("cache_control")
+    }),
+  )
+
   it.effect("undefined cache resolves to 'auto' (the recommended default)", () =>
     Effect.gen(function* () {
       const prepared = yield* LLMClient.prepare(

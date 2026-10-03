@@ -10,6 +10,7 @@ import {
   LLMError,
   FreeModelsLimitReason,
   Usage,
+  type CacheHint,
   type FinishReason,
   type JsonSchema,
   type LLMRequest,
@@ -25,6 +26,7 @@ import { OpenAIOptions } from "./utils/openai-options"
 import { Lifecycle } from "./utils/lifecycle"
 import { ToolSchemaProjection } from "./utils/tool-schema"
 import { ToolStream } from "./utils/tool-stream"
+import * as Cache from "./utils/cache"
 
 const ADAPTER = "openai-chat"
 const IMAGE_MIMES = new Set<string>(ProviderShared.IMAGE_MIMES)
@@ -59,8 +61,20 @@ const OpenAIChatAssistantToolCall = Schema.Struct({
 })
 type OpenAIChatAssistantToolCall = Schema.Schema.Type<typeof OpenAIChatAssistantToolCall>
 
+// The prompt-cache marker gateways such as OpenRouter pass through to Anthropic models, in the shape they accept.
+const OpenAIChatCacheControl = Schema.Struct({
+  type: Schema.Literal("ephemeral"),
+  ttl: Schema.optional(Schema.Literal("1h")),
+})
+
+const OpenAIChatTextContent = Schema.Struct({
+  type: Schema.Literal("text"),
+  text: Schema.String,
+  cache_control: Schema.optional(OpenAIChatCacheControl),
+})
+
 const OpenAIChatUserContent = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+  OpenAIChatTextContent,
   Schema.Struct({
     type: Schema.Literal("image_url"),
     image_url: Schema.Struct({ url: Schema.String }),
@@ -68,7 +82,10 @@ const OpenAIChatUserContent = Schema.Union([
 ])
 
 const OpenAIChatMessage = Schema.Union([
-  Schema.Struct({ role: Schema.Literal("system"), content: Schema.String }),
+  Schema.Struct({
+    role: Schema.Literal("system"),
+    content: Schema.Union([Schema.String, Schema.Array(OpenAIChatTextContent)]),
+  }),
   Schema.Struct({
     role: Schema.Literal("user"),
     content: Schema.Union([Schema.String, Schema.Array(OpenAIChatUserContent)]),
@@ -78,8 +95,14 @@ const OpenAIChatMessage = Schema.Union([
     content: Schema.NullOr(Schema.String),
     tool_calls: optionalArray(OpenAIChatAssistantToolCall),
     reasoning_content: Schema.optional(Schema.String),
+    cache_control: Schema.optional(OpenAIChatCacheControl),
   }),
-  Schema.Struct({ role: Schema.Literal("tool"), tool_call_id: Schema.String, content: Schema.String }),
+  Schema.Struct({
+    role: Schema.Literal("tool"),
+    tool_call_id: Schema.String,
+    content: Schema.String,
+    cache_control: Schema.optional(OpenAIChatCacheControl),
+  }),
 ]).pipe(Schema.toTaggedUnion("role"))
 type OpenAIChatMessage = Schema.Schema.Type<typeof OpenAIChatMessage>
 
@@ -173,6 +196,24 @@ interface ParserState {
 
 const invalid = ProviderShared.invalidRequest
 
+// Anthropic, behind any gateway, accepts at most four cache breakpoints per request.
+const CACHE_BREAKPOINT_CAP = 4
+
+// Cache hints reach this lowering only for gateway models that honor them (see cache-policy.ts). Each one becomes a
+// cache_control marker, in the places OpenRouter's own SDK puts them, until the breakpoint cap is used up.
+const cacheControl = (breakpoints: Cache.Breakpoints, hints: ReadonlyArray<CacheHint | undefined>) => {
+  const hint = hints.find((item) => item !== undefined)
+  if (!hint) return undefined
+  if (breakpoints.remaining <= 0) {
+    breakpoints.dropped += 1
+    return undefined
+  }
+  breakpoints.remaining -= 1
+  return Cache.ttlBucket(hint.ttlSeconds) === "1h"
+    ? { type: "ephemeral" as const, ttl: "1h" as const }
+    : { type: "ephemeral" as const }
+}
+
 // =============================================================================
 // Request Lowering
 // =============================================================================
@@ -213,11 +254,15 @@ const lowerMedia = Effect.fn("OpenAIChat.lowerMedia")(function* (part: MediaPart
 const openAICompatibleReasoningContent = (native: unknown) =>
   isRecord(native) && typeof native.reasoning_content === "string" ? native.reasoning_content : undefined
 
-const lowerUserMessage = Effect.fn("OpenAIChat.lowerUserMessage")(function* (message: OpenAIChatRequestMessage) {
+const lowerUserMessage = Effect.fn("OpenAIChat.lowerUserMessage")(function* (
+  message: OpenAIChatRequestMessage,
+  breakpoints: Cache.Breakpoints,
+) {
   const content: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
   for (const part of message.content) {
     if (part.type === "text") {
-      content.push({ type: "text", text: part.text })
+      const cache_control = cacheControl(breakpoints, [part.cache])
+      content.push(cache_control ? { type: "text", text: part.text, cache_control } : { type: "text", text: part.text })
       continue
     }
     if (part.type === "media") {
@@ -226,13 +271,14 @@ const lowerUserMessage = Effect.fn("OpenAIChat.lowerUserMessage")(function* (mes
     }
     return yield* ProviderShared.unsupportedContent("OpenAI Chat", "user", ["text", "media"])
   }
-  if (content.every((part) => part.type === "text"))
-    return { role: "user" as const, content: content.map((part) => part.text).join("") }
+  if (content.every((part) => part.type === "text" && !part.cache_control))
+    return { role: "user" as const, content: content.map((part) => (part.type === "text" ? part.text : "")).join("") }
   return { role: "user" as const, content }
 })
 
 const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(function* (
   message: OpenAIChatRequestMessage,
+  breakpoints: Cache.Breakpoints,
 ) {
   const content: TextPart[] = []
   const reasoning: ReasoningPart[] = []
@@ -253,6 +299,11 @@ const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(func
       continue
     }
   }
+  // A breakpoint can land on a message of only tool calls; the gateway takes it as a message-level marker.
+  const cache_control = cacheControl(
+    breakpoints,
+    message.content.map((part) => ("cache" in part ? (part.cache as CacheHint | undefined) : undefined)),
+  )
   return {
     role: "assistant" as const,
     content: content.length === 0 ? null : ProviderShared.joinText(content),
@@ -261,22 +312,28 @@ const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(func
       reasoning.length > 0
         ? reasoning.map((part) => part.text).join("")
         : openAICompatibleReasoningContent(message.native?.openaiCompatible),
+    ...(cache_control ? { cache_control } : {}),
   }
 })
 
-const lowerToolMessages = Effect.fn("OpenAIChat.lowerToolMessages")(function* (message: OpenAIChatRequestMessage) {
+const lowerToolMessages = Effect.fn("OpenAIChat.lowerToolMessages")(function* (
+  message: OpenAIChatRequestMessage,
+  breakpoints: Cache.Breakpoints,
+) {
   const messages: OpenAIChatMessage[] = []
   const images: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
   for (const part of message.content) {
     if (!ProviderShared.supportsContent(part, ["tool-result"]))
       return yield* ProviderShared.unsupportedContent("OpenAI Chat", "tool", ["tool-result"])
+    const cache_control = cacheControl(breakpoints, [part.cache])
+    const marker = cache_control ? { cache_control } : {}
     if (part.result.type !== "content") {
-      messages.push({ role: "tool", tool_call_id: part.id, content: ProviderShared.toolResultText(part) })
+      messages.push({ role: "tool", tool_call_id: part.id, content: ProviderShared.toolResultText(part), ...marker })
       continue
     }
     const content: ReadonlyArray<ToolContent> = part.result.value
     const text = content.filter((item) => item.type === "text").map((item) => item.text)
-    messages.push({ role: "tool", tool_call_id: part.id, content: text.join("\n") })
+    messages.push({ role: "tool", tool_call_id: part.id, content: text.join("\n"), ...marker })
     const files = content.filter((item) => item.type === "file")
     images.push(
       ...(yield* Effect.forEach(files, (item) =>
@@ -287,15 +344,30 @@ const lowerToolMessages = Effect.fn("OpenAIChat.lowerToolMessages")(function* (m
   return { messages, images }
 })
 
-const lowerMessage = Effect.fn("OpenAIChat.lowerMessage")(function* (message: OpenAIChatRequestMessage) {
-  if (message.role === "user") return [yield* lowerUserMessage(message)]
-  if (message.role === "assistant") return [yield* lowerAssistantMessage(message)]
-  return (yield* lowerToolMessages(message)).messages
+const lowerMessage = Effect.fn("OpenAIChat.lowerMessage")(function* (
+  message: OpenAIChatRequestMessage,
+  breakpoints: Cache.Breakpoints,
+) {
+  if (message.role === "user") return [yield* lowerUserMessage(message, breakpoints)]
+  if (message.role === "assistant") return [yield* lowerAssistantMessage(message, breakpoints)]
+  return (yield* lowerToolMessages(message, breakpoints)).messages
 })
 
 const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: LLMRequest) {
+  const breakpoints = Cache.newBreakpoints(CACHE_BREAKPOINT_CAP)
+  const systemCache = cacheControl(
+    breakpoints,
+    request.system.map((part) => part.cache),
+  )
+  const systemText = ProviderShared.joinText(request.system)
   const system: OpenAIChatMessage[] =
-    request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
+    request.system.length === 0
+      ? []
+      : [
+          systemCache
+            ? { role: "system", content: [{ type: "text", text: systemText, cache_control: systemCache }] }
+            : { role: "system", content: systemText },
+        ]
   const messages = [...system]
   const pendingImages: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
   const flushImages = () => {
@@ -321,13 +393,13 @@ const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: 
       continue
     }
     if (message.role === "tool") {
-      const lowered = yield* lowerToolMessages(message)
+      const lowered = yield* lowerToolMessages(message, breakpoints)
       messages.push(...lowered.messages)
       pendingImages.push(...lowered.images)
       continue
     }
     flushImages()
-    messages.push(...(yield* lowerMessage(message)))
+    messages.push(...(yield* lowerMessage(message, breakpoints)))
   }
   flushImages()
   return messages

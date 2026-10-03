@@ -41,6 +41,14 @@ const resolve = (policy: CachePolicy | undefined): CachePolicyObject => {
 // whole policy pass for these — emitting hints would be harmless but pointless.
 const RESPECTS_INLINE_HINTS = new Set(["anthropic-messages", "bedrock-converse"])
 
+// OpenAI-style gateways (OpenRouter, OpenAI-compatible proxies) pass cache_control through to Anthropic models,
+// which cache only at explicit breakpoints. Other models behind them cache implicitly and get no markers.
+const GATEWAY_ROUTES = new Set(["openrouter", "openai-compatible-chat"])
+
+const respectsInlineHints = (request: LLMRequest) =>
+  RESPECTS_INLINE_HINTS.has(request.model.route.id) ||
+  (GATEWAY_ROUTES.has(request.model.route.id) && /claude|anthropic/i.test(request.model.id))
+
 const makeHint = (ttlSeconds: number | undefined): CacheHint =>
   ttlSeconds !== undefined ? new CacheHint({ type: "ephemeral", ttlSeconds }) : new CacheHint({ type: "ephemeral" })
 
@@ -97,7 +105,7 @@ const markMessages = (
 }
 
 export const applyCachePolicy = (request: LLMRequest): LLMRequest => {
-  if (!RESPECTS_INLINE_HINTS.has(request.model.route.id)) return request
+  if (!respectsInlineHints(request)) return request
   const policy = resolve(request.cache)
   if (!policy.tools && !policy.system && !policy.messages) return request
 
