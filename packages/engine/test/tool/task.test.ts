@@ -20,6 +20,7 @@ import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { Provider } from "@/provider/provider"
+import { Permission } from "@/permission"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { disposeAllInstances } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
@@ -2079,6 +2080,39 @@ describe("tool.task", () => {
       )
       expect(seen?.parts.map((part) => part.type)).toEqual(["text"])
     }),
+  )
+
+  it.instance(
+    "Plan mode cannot hand edits to a primary agent or to a subagent that could edit",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const agents = yield* Agent.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        const plan = {
+          ...taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() }),
+          agent: "plan",
+        }
+
+        const primary = yield* Effect.exit(
+          def.execute({ description: "apply it", prompt: "Apply the plan.", subagent_type: "build" }, plan),
+        )
+        expect(Exit.isFailure(primary)).toBe(true)
+        if (Exit.isFailure(primary)) expect(Cause.pretty(primary.cause)).toContain("primary agent")
+
+        // A custom subagent may edit on its own, but not when Plan mode launches it.
+        const result = yield* def.execute(
+          { description: "tidy up", prompt: "Tidy the handlers.", subagent_type: "helper" },
+          plan,
+        )
+        const child = yield* sessions.get(SessionID.make(result.metadata.sessionId))
+        const helper = yield* agents.get("helper")
+        const rules = [...(helper?.permission ?? []), ...(child.permission ?? [])]
+        expect(Permission.evaluate("edit", "src/app.ts", helper?.permission ?? []).action).toBe("allow")
+        expect(Permission.evaluate("edit", "src/app.ts", rules).action).toBe("deny")
+      }),
+    { config: { agent: { helper: { mode: "subagent", description: "Tidies code." } } } },
   )
 
   it.instance("an omitted subagent_type launches the general Subagent with its prompt", () =>

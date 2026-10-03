@@ -49,6 +49,7 @@ export type Event =
   | EventSessionNextCompactionStarted
   | EventSessionNextCompactionDelta
   | EventSessionNextCompactionEnded
+  | EventSessionNextCompactionFailed
   | EventSessionNextRevertStaged
   | EventSessionNextRevertCleared
   | EventSessionNextRevertCommitted
@@ -1259,6 +1260,27 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.compaction.failed"
+        properties: {
+          timestamp: number
+          sessionID: string
+          messageID: string
+          reason: "auto" | "manual"
+          cost?: number
+          unpriced?: boolean
+          tokens?: {
+            input: number
+            output: number
+            reasoning: number
+            cache: {
+              read: number
+              write: number
+            }
+          }
+        }
+      }
+    | {
+        id: string
         type: "session.next.revert.staged"
         properties: {
           timestamp: number
@@ -1732,6 +1754,7 @@ export type GlobalEvent = {
     | SyncEventSessionNextRetried
     | SyncEventSessionNextCompactionStarted
     | SyncEventSessionNextCompactionEnded
+    | SyncEventSessionNextCompactionFailed
     | SyncEventSessionNextRevertStaged
     | SyncEventSessionNextRevertCleared
     | SyncEventSessionNextRevertCommitted
@@ -3469,6 +3492,7 @@ export type SessionDurableEvent =
   | SessionNextRetried
   | SessionNextCompactionStarted
   | SessionNextCompactionEnded
+  | SessionNextCompactionFailed
   | SessionNextRevertStaged
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
@@ -3604,6 +3628,7 @@ export type V2Event =
   | SessionNextCompactionStarted
   | SessionNextCompactionDelta
   | SessionNextCompactionEnded
+  | SessionNextCompactionFailed
   | SessionNextRevertStaged
   | SessionNextRevertCleared
   | SessionNextRevertCommitted
@@ -4787,6 +4812,34 @@ export type SyncEventSessionNextCompactionEnded = {
   }
 }
 
+export type SyncEventSessionNextCompactionFailed = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.compaction.failed.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      messageID: string
+      reason: "auto" | "manual"
+      cost?: number
+      unpriced?: boolean
+      tokens?: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      }
+    }
+  }
+}
+
 export type SyncEventSessionNextRevertStaged = {
   type: "sync"
   id: string
@@ -5619,6 +5672,37 @@ export type SessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    cost?: number
+    unpriced?: boolean
+    tokens?: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+  }
+}
+
+export type SessionNextCompactionFailed = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.compaction.failed"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    reason: "auto" | "manual"
     cost?: number
     unpriced?: boolean
     tokens?: {
@@ -7604,6 +7688,28 @@ export type EventSessionNextCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
+    cost?: number
+    unpriced?: boolean
+    tokens?: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+  }
+}
+
+export type EventSessionNextCompactionFailed = {
+  id: string
+  type: "session.next.compaction.failed"
+  properties: {
+    timestamp: number
+    sessionID: string
+    messageID: string
+    reason: "auto" | "manual"
     cost?: number
     unpriced?: boolean
     tokens?: {

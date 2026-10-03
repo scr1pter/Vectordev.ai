@@ -86,6 +86,8 @@ type Input = {
 }
 
 const estimate = (value: unknown) => Token.estimate(JSON.stringify(value))
+const requestSize = (request: LLMRequest) =>
+  estimate({ system: request.system, messages: request.messages, tools: request.tools })
 
 const truncate = (value: string) =>
   value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
@@ -184,6 +186,9 @@ export const buildPrompt = (input: { readonly previousSummary?: string; readonly
 
 export const make = (dependencies: Dependencies) => {
   const config = settings(dependencies.config)
+  // The request size at which a session's last summary attempt failed. Trying again on every turn would pay for a
+  // full-history request each time, so the next attempt waits until the history has grown past it.
+  const failures = new Map<SessionSchema.ID, number>()
   const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
     const context = input.model.route.defaults.limits?.context
     if (context === undefined || context <= 0) return false
@@ -228,10 +233,24 @@ export const make = (dependencies: Dependencies) => {
         Effect.catchTag("LLM.Error", () => Effect.succeed(false)),
       )
     const summary = chunks.join("")
-    if (!summarized || failed || !summary.trim()) return false
     const tokens = stepTokens(usage)
     const cost = SessionRunnerModel.calculateCost(input.model, tokens, usage?.providerMetadata)
     const used = tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
+    // The provider bills the request whether or not it produced a summary. As with a step, an unknown price is
+    // recorded as 0 and marked unpriced rather than read as free.
+    const spent = { cost: cost ?? 0, ...(cost === undefined && used > 0 ? { unpriced: true } : {}), tokens }
+    if (!summarized || failed || !summary.trim()) {
+      failures.set(input.sessionID, requestSize(input.request))
+      yield* dependencies.events.publish(SessionEvent.Compaction.Failed, {
+        sessionID: input.sessionID,
+        messageID,
+        timestamp: yield* DateTime.now,
+        reason: "auto",
+        ...(usage ? spent : {}),
+      })
+      return false
+    }
+    failures.delete(input.sessionID)
     yield* dependencies.events.publish(SessionEvent.Compaction.Ended, {
       sessionID: input.sessionID,
       messageID,
@@ -239,10 +258,7 @@ export const make = (dependencies: Dependencies) => {
       reason: "auto",
       text: summary,
       recent: selected.recent,
-      // As with a step, an unknown price is recorded as 0 and marked unpriced rather than read as free.
-      cost: cost ?? 0,
-      ...(cost === undefined && used > 0 ? { unpriced: true } : {}),
-      tokens,
+      ...spent,
     })
     return true
   })
@@ -261,11 +277,10 @@ export const make = (dependencies: Dependencies) => {
           SessionRunnerModel.contextTier(input.model) ??
           (context >= LARGE_WINDOW ? DEFAULT_MAX_CONTEXT : undefined))
     const threshold = ceiling === undefined ? window : Math.min(window, ceiling - Math.min(output, config.buffer))
-    if (
-      estimate({ system: input.request.system, messages: input.request.messages, tools: input.request.tools }) <=
-      threshold
-    )
-      return false
+    const size = requestSize(input.request)
+    if (size <= threshold) return false
+    const failedAt = failures.get(input.sessionID)
+    if (failedAt !== undefined && size < failedAt * 1.25) return false
     return yield* compactAfterOverflow(input)
   })
   return {

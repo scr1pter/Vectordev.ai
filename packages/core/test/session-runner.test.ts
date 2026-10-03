@@ -1280,6 +1280,45 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("records a summary request that returned nothing and does not retry it every turn", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* SessionV2.Service
+      response = fragmentFixture("text", "text-first", ["Earlier answer"]).completeEvents
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Earlier question ".repeat(180) }), resume: false })
+      yield* session.resume(sessionID)
+
+      currentModel = SessionRunnerModel.withPricing(compactModel, [
+        { input: 2, output: 10, cache: { read: 0, write: 0 } },
+      ])
+      requests.length = 0
+      responses = [
+        // A reasoning model can spend the whole summary budget thinking and return no text; it is billed all the same.
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.stepFinish({ index: 0, reason: "length", usage: { inputTokens: 100_000, outputTokens: 1_000 } }),
+          LLMEvent.finish({ reason: "length" }),
+        ],
+        fragmentFixture("text", "text-final", ["Continued"]).completeEvents,
+        fragmentFixture("text", "text-next", ["Next"]).completeEvents,
+      ]
+      yield* session.prompt({
+        sessionID,
+        prompt: Prompt.make({ text: "Recent exact request ".repeat(180) }),
+        resume: false,
+      })
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect((yield* session.get(sessionID)).cost).toBeCloseTo(0.21)
+
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "One more" }), resume: false })
+      yield* session.resume(sessionID)
+      // The next turn goes straight to the provider instead of paying for another full-history summary.
+      expect(requests).toHaveLength(3)
+      expect(userTexts(requests[2]).join("\n")).not.toContain("## Goal")
+    }),
+  )
+
   it.effect("counts what the compaction summary cost in the session totals", () =>
     Effect.gen(function* () {
       yield* setup

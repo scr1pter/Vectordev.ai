@@ -467,6 +467,17 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.Reasoning.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Reasoning.Ended, (event) => run(db, event))
     // yield* events.project(SessionEvent.Retried, (event) => run(db, event))
+    yield* events.project(SessionEvent.Compaction.Failed, (event) =>
+      Effect.gen(function* () {
+        yield* run(db, event)
+        if (event.data.cost === undefined || event.data.tokens === undefined) return
+        yield* applyUsage(db, event.data.sessionID, {
+          cost: event.data.cost,
+          unpriced: event.data.unpriced === true,
+          tokens: event.data.tokens,
+        })
+      }),
+    )
     yield* events.project(SessionEvent.Compaction.Ended, (event) =>
       Effect.gen(function* () {
         yield* run(db, event)

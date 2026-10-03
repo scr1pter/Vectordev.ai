@@ -17268,6 +17268,9 @@
             "$ref": "#/components/schemas/EventSessionNextCompactionEnded"
           },
           {
+            "$ref": "#/components/schemas/EventSessionNextCompactionFailed"
+          },
+          {
             "$ref": "#/components/schemas/EventSessionNextRevertStaged"
           },
           {
@@ -21111,6 +21114,78 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": ["session.next.compaction.failed"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "messageID": {
+                        "type": "string",
+                        "pattern": "^msg_"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "enum": ["auto", "manual"]
+                      },
+                      "cost": {
+                        "type": "number"
+                      },
+                      "unpriced": {
+                        "type": "boolean"
+                      },
+                      "tokens": {
+                        "type": "object",
+                        "properties": {
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "reasoning": {
+                            "type": "number"
+                          },
+                          "cache": {
+                            "type": "object",
+                            "properties": {
+                              "read": {
+                                "type": "number"
+                              },
+                              "write": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["read", "write"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["input", "output", "reasoning", "cache"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "messageID", "reason"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
                     "enum": ["session.next.revert.staged"]
                   },
                   "properties": {
@@ -22712,6 +22787,9 @@
               },
               {
                 "$ref": "#/components/schemas/SyncEventSessionNextCompactionEnded"
+              },
+              {
+                "$ref": "#/components/schemas/SyncEventSessionNextCompactionFailed"
               },
               {
                 "$ref": "#/components/schemas/SyncEventSessionNextRevertStaged"
@@ -27873,6 +27951,9 @@
             "$ref": "#/components/schemas/SessionNextCompactionEnded"
           },
           {
+            "$ref": "#/components/schemas/SessionNextCompactionFailed"
+          },
+          {
             "$ref": "#/components/schemas/SessionNextRevertStaged"
           },
           {
@@ -28275,6 +28356,9 @@
           },
           {
             "$ref": "#/components/schemas/SessionNextCompactionEnded"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextCompactionFailed"
           },
           {
             "$ref": "#/components/schemas/SessionNextRevertStaged"
@@ -31892,6 +31976,99 @@
         "required": ["type", "id", "syncEvent"],
         "additionalProperties": false
       },
+      "SyncEventSessionNextCompactionFailed": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["sync"]
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "syncEvent": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["session.next.compaction.failed.1"]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^evt_"
+              },
+              "seq": {
+                "type": "number"
+              },
+              "aggregateID": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "timestamp": {
+                    "type": "number"
+                  },
+                  "sessionID": {
+                    "type": "string",
+                    "pattern": "^ses"
+                  },
+                  "messageID": {
+                    "type": "string",
+                    "pattern": "^msg_"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": ["auto", "manual"]
+                  },
+                  "cost": {
+                    "type": "number"
+                  },
+                  "unpriced": {
+                    "type": "boolean"
+                  },
+                  "tokens": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "type": "number"
+                      },
+                      "output": {
+                        "type": "number"
+                      },
+                      "reasoning": {
+                        "type": "number"
+                      },
+                      "cache": {
+                        "type": "object",
+                        "properties": {
+                          "read": {
+                            "type": "number"
+                          },
+                          "write": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["read", "write"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["input", "output", "reasoning", "cache"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["timestamp", "sessionID", "messageID", "reason"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["type", "id", "seq", "aggregateID", "data"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["type", "id", "syncEvent"],
+        "additionalProperties": false
+      },
       "SyncEventSessionNextRevertStaged": {
         "type": "object",
         "properties": {
@@ -34391,6 +34568,100 @@
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "reason", "text", "recent"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
+        "additionalProperties": false
+      },
+      "SessionNextCompactionFailed": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.compaction.failed"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg_"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["auto", "manual"]
+              },
+              "cost": {
+                "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
+              },
+              "tokens": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "reasoning": {
+                    "type": "number"
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "number"
+                      },
+                      "write": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["read", "write"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["input", "output", "reasoning", "cache"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["timestamp", "sessionID", "messageID", "reason"],
             "additionalProperties": false
           }
         },
@@ -40381,6 +40652,78 @@
               }
             },
             "required": ["timestamp", "sessionID", "messageID", "reason", "text", "recent"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionNextCompactionFailed": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.compaction.failed"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "messageID": {
+                "type": "string",
+                "pattern": "^msg_"
+              },
+              "reason": {
+                "type": "string",
+                "enum": ["auto", "manual"]
+              },
+              "cost": {
+                "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
+              },
+              "tokens": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "reasoning": {
+                    "type": "number"
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "number"
+                      },
+                      "write": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["read", "write"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["input", "output", "reasoning", "cache"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["timestamp", "sessionID", "messageID", "reason"],
             "additionalProperties": false
           }
         },

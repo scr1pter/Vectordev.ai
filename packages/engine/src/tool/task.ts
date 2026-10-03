@@ -415,6 +415,15 @@ export const TaskTool = Tool.define(
       if (!next) {
         return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
       }
+      // A primary agent runs sessions of its own and is not in the task tool's list; only the user can hand it a
+      // subtask, by naming it in a command.
+      if (next.mode === "primary" && !invoked) {
+        return yield* Effect.fail(
+          new Error(
+            `${subagentType} is a primary agent, not a subagent; set subagent_type to one from the task tool's list.`,
+          ),
+        )
+      }
 
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
         Effect.provideService(Database.Service, database),
@@ -510,6 +519,12 @@ export const TaskTool = Tool.define(
           action: "deny" as const,
         })) ?? []),
       ]
+      // Plan mode promises no edits, so a subagent it launches takes on its edit rules, which come after the
+      // subagent's own. Elsewhere a read-only agent may deliberately hand edits to a subagent that can make them.
+      const inheritedEdits =
+        ctx.agent === "plan"
+          ? ((yield* agent.get(ctx.agent))?.permission ?? []).filter((rule) => rule.permission === "edit")
+          : []
       const nextSession =
         session ??
         (yield* sessions.create({
@@ -520,6 +535,7 @@ export const TaskTool = Tool.define(
           metadata: { [SubagentLifecycle.METADATA_KEY]: record },
           permission: [
             ...childPermission,
+            ...inheritedEdits,
             ...childToolDenies.filter(
               (deny) =>
                 !childPermission.some(
