@@ -7,17 +7,19 @@ on:
       - packages/engine/test/session/prompt.test.ts
       - packages/core/src/cross-spawn-spawner.ts
       - .github/workflows/vector-windows-runtime-probe.yml
+      - .github/fixtures/windows-prompt-prefix.txt
 permissions:
   contents: read
 jobs:
   native-comparison:
-    name: Native subprocess comparison (${{ matrix.source }})
+    name: Native subprocess comparison (${{ matrix.source }}, ${{ matrix.workload }})
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         source: [candidate, main]
+        workload: [prompt-file, shard-4-prefix]
     defaults:
       run:
         shell: bash
@@ -32,6 +34,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/vector-native-comparison"
           cp packages/engine/test/lib/cli-process.ts "$RUNNER_TEMP/vector-native-comparison/cli-process.ts"
           cp packages/engine/test/session/prompt.test.ts "$RUNNER_TEMP/vector-native-comparison/prompt.test.ts"
+          cp .github/fixtures/windows-prompt-prefix.txt "$RUNNER_TEMP/vector-native-comparison/prefix.txt"
       - name: Check out the exact runtime under test
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -92,24 +95,27 @@ jobs:
           console.log(JSON.stringify({ conditions: process.env.VECTOR_PROBE_IMPORT_CONDITIONS, bun: Bun.version, imports, presence }))
           TS
           done
-      - name: Exercise first and subsequent preferred-shell readiness
+      - name: Exercise shell readiness in the original workload
         working-directory: packages/engine
         env:
           VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
         run: |
           set -o pipefail
-          GITHUB_ACTIONS=false bun test --timeout 30000 test/session/prompt.test.ts -t 'loop waits while shell runs and starts after shell exits|shell completion resumes queued loop callers' 2>&1 | tee "$RUNNER_TEMP/vector-native-comparison/shell.log"
-      - name: Exercise CLI JSON and permission semantics with partial-output evidence
-        if: success() || failure()
-        working-directory: packages/engine
-        env:
-          VECTOR_TEST_CLI_DIAGNOSTICS: "1"
-          VECTOR_EXPERIMENTAL_DISABLE_FILEWATCHER: "true"
-        run: |
-          set -o pipefail
-          GITHUB_ACTIONS=false bun test --timeout 30000 test/cli/run/run-process.test.ts -t 'format json emits parseable line-delimited JSON|rejects requested permissions by default' 2>&1 | tee "$RUNNER_TEMP/vector-native-comparison/cli.log"
+          if [ "${{ matrix.workload }}" = shard-4-prefix ]; then
+            # Exact observed d0ef shard prefix, through prompt.test.ts, on both runtimes.
+            # Other test bodies stay native to each source; compare observed file order too.
+            files=()
+            while IFS= read -r file; do
+              file="${file%$'\r'}"
+              test -f "$file" || exit 1
+              files+=("./$file")
+            done < "$RUNNER_TEMP/vector-native-comparison/prefix.txt"
+            GITHUB_ACTIONS=false bun test --timeout 30000 "${files[@]}" 2>&1 | tee "$RUNNER_TEMP/vector-native-comparison/shell.log"
+          else
+            GITHUB_ACTIONS=false bun test --timeout 30000 test/session/prompt.test.ts 2>&1 | tee "$RUNNER_TEMP/vector-native-comparison/shell.log"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: native-subprocess-${{ matrix.source }}
+          name: native-subprocess-${{ matrix.source }}-${{ matrix.workload }}
           path: ${{ runner.temp }}/vector-native-comparison/

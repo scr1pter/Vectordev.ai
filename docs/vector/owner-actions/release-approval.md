@@ -52,7 +52,9 @@ stdout-EOF fixture. The exact Node version on Windows deliberately ignores
 `fs.closeSync(1)`, so the fixture never closed stdout. A replacement fixture closes
 its own native Windows handle and independently checks stdout EOF while the same
 child and stderr remain alive. Its full Core test file passed 33 tests and 49
-assertions locally; Core typechecking passed. Native acceptance is still pending.
+assertions locally; Core typechecking passed. Native acceptance subsequently
+passed at `d0ef7e5b2f2a479f5163e7caacdaf95835db87b4`: the raw stdout-EOF
+precondition and actual process helper passed both cases with 11 assertions.
 
 Windows Engine shard 3 recorded two CLI subprocess timeouts before their
 substantive assertions. Its timeout path discards partial collected output, so an
@@ -75,6 +77,27 @@ All four cases subsequently passed on both the candidate and clean main with
 their original deadlines, isolated source resolution and stable observed timers.
 The interrupted full run remains incomplete and failed; focused passes do not
 relabel it as successful. Full release acceptance is not claimed.
+
+At `d0ef7e5b2f2a479f5163e7caacdaf95835db87b4`, the complete local Engine suite
+passed with **3,817 passes, 23 skips, one todo, zero failures, 60 snapshots and
+12,838 assertions** in 652.86 seconds. It ran from a clean exact-source checkout
+with a fresh credential-free HOME outside temporary paths, unchanged deadlines
+and no observed timer stalls. The completed native checks passed Windows unit
+tests, Engine shards 1–3, both browser suites, all typecheck jobs, website,
+free-model and sharing integrations, native process/ownership checks and the real
+Windows installer. Linux unit tests, generated-client checks and the full HTTP API
+gates also passed. The two shard 4 cases were the general workflow's only failures.
+
+The same source's Windows Engine shard 4 failed both held-shell readiness cases:
+862 passes, 26 skips, two failures and 2,916 assertions. Both fibers remained
+pending with a running tool row but no first command marker. That row is persisted
+before configuration, plugin hooks and native spawning, so its presence does not
+prove PowerShell was launched. Both cases and both CLI cases passed the focused
+comparison on the candidate and clean main with the original deadlines and
+verified import ownership. Main remains unchanged while test-only phase tracing
+and comparisons of the complete prompt file and the same 69-file preceding
+workload locate the full-suite delay. No deadline
+increase or unproved production workaround is part of this diagnostic step.
 
 The publishing machine's ordinary `npm whoami` check now succeeds after the owner
 logged in. Earlier `E401` records below are historical. The public catalog fork

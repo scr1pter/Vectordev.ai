@@ -9,7 +9,8 @@ import { SessionProjector } from "@vectordevai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { expect } from "bun:test"
-import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream, Tracer } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import path from "path"
 import { fileURLToPath } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
@@ -212,6 +213,74 @@ const promptRoot = LayerNode.group([
   RuntimeFlags.node,
 ])
 
+function recordHeldShell(phase: string, detail: Record<string, string | number | boolean> = {}) {
+  console.error(JSON.stringify({ fixture: "held-shell", phase, at: Date.now(), ...detail }))
+}
+
+// Delegate the real implementation before SessionPrompt captures it. Providing a
+// service around heldShell alone would not observe its already-constructed dependency.
+const heldShellSpawner = {
+  ...CrossSpawnSpawner.node,
+  implementation: Layer.effect(
+    ChildProcessSpawner.ChildProcessSpawner,
+    CrossSpawnSpawner.make.pipe(
+      Effect.map((spawner) => ({
+        ...spawner,
+        spawn: (command: Parameters<typeof spawner.spawn>[0]) => {
+          if (command._tag !== "StandardCommand" || !command.args.some((arg) => arg.includes("held-shell.ts")))
+            return spawner.spawn(command)
+          return Effect.gen(function* () {
+            const keys = [
+              ...(command.options.extendEnv || !command.options.env ? Object.keys(process.env) : []),
+              ...Object.keys(command.options.env ?? {}),
+            ].map((key) => key.toUpperCase())
+            recordHeldShell("spawn-enter", {
+              executable: command.command,
+              ...Object.fromEntries(
+                [
+                  "PSModuleAnalysisCachePath",
+                  "PSModulePath",
+                  "LOCALAPPDATA",
+                  "APPDATA",
+                  "USERPROFILE",
+                  "COMSPEC",
+                  "PATHEXT",
+                  "HOME",
+                  "SystemRoot",
+                ].map((name) => [name, keys.includes(name.toUpperCase())]),
+              ),
+            })
+            const handle = yield* spawner.spawn(command).pipe(
+              Effect.onExit((exit) =>
+                Effect.sync(() => {
+                  if (Exit.isFailure(exit)) recordHeldShell("spawn-failed", { exit: exit._tag })
+                }),
+              ),
+            )
+            recordHeldShell("spawn-return", { executable: command.command, pid: handle.pid })
+            const first = { seen: false }
+            return ChildProcessSpawner.makeHandle({
+              ...handle,
+              all: handle.all.pipe(
+                Stream.tap((bytes) =>
+                  Effect.sync(() => {
+                    if (first.seen || !bytes.length) return
+                    first.seen = true
+                    recordHeldShell("first-output", { pid: handle.pid, bytes: bytes.length })
+                  }),
+                ),
+              ),
+              exitCode: handle.exitCode.pipe(
+                Effect.tap((code) => Effect.sync(() => recordHeldShell("process-close", { pid: handle.pid, code }))),
+              ),
+            })
+          })
+        },
+      })),
+    ),
+  ),
+}
+
 function makePrompt(input?: { mcpInstructions?: MCP.ServerInstructions[]; processor?: "blocking" }) {
   const replacements = [
     [SessionSummary.node, summary],
@@ -232,6 +301,7 @@ function makeHttp(input?: { mcpInstructions?: MCP.ServerInstructions[]; processo
     [LSP.node, lsp],
     [MCP.node, makeMcp(input?.mcpInstructions)],
     [RuntimeFlags.node, runtimeFlags],
+    [CrossSpawnSpawner.node, heldShellSpawner],
   ] as const
   if (input?.processor === "blocking") {
     return LayerNode.compile(root, [...replacements, [SessionProcessor.node, blockingProcessor]])
@@ -380,6 +450,8 @@ const heldShell = Effect.fn("test.heldShell")(function* (sessionID: SessionID) {
   const instance = yield* TestInstance
   const prompt = yield* SessionPrompt.Service
   const fs = yield* FSUtil.Service
+  const tracer = yield* Effect.tracer
+  const tracing = { active: true }
   const shell = Shell.preferred()
   const executable = process.execPath.replaceAll("\\", "/")
   const command = Shell.ps(shell)
@@ -387,10 +459,7 @@ const heldShell = Effect.fn("test.heldShell")(function* (sessionID: SessionID) {
     : Shell.name(shell) === "cmd"
       ? `echo started> .shell-started & "${executable}" ./held-shell.ts`
       : `: > .shell-started; '${executable.replaceAll("'", "'\\''")}' ./held-shell.ts`
-  const phase = (name: string) =>
-    Effect.sync(() => {
-      if (process.platform === "win32") console.error(JSON.stringify({ fixture: "held-shell", phase: name, shell }))
-    })
+  const phase = (name: string) => Effect.sync(() => recordHeldShell(name, { shell }))
   yield* writeText(
     path.join(instance.directory, "held-shell.ts"),
     `await Bun.write(".shell-ready", "ready")
@@ -405,7 +474,31 @@ console.log("shell-released")
       agent: "build",
       command,
     })
-    .pipe(Effect.forkChild)
+    .pipe(
+      Effect.withTracer(
+        Tracer.make({
+          ...tracer,
+          span(options) {
+            const span = tracer.span(options)
+            if (
+              !tracing.active ||
+              !/^(Config\.(get|state|loadInstanceState)|Plugin\.(trigger|state)|Agent\.get|Provider\.defaultModel)$/.test(
+                options.name,
+              )
+            )
+              return span
+            recordHeldShell("service-enter", { service: options.name, span: span.spanId })
+            const end = span.end.bind(span)
+            span.end = (time, exit) => {
+              recordHeldShell("service-exit", { service: options.name, span: span.spanId, exit: exit._tag })
+              end(time, exit)
+            }
+            return span
+          },
+        }),
+      ),
+      Effect.forkChild,
+    )
   yield* pollWithTimeout(
     Effect.gen(function* () {
       if (yield* fs.existsSafe(path.join(instance.directory, ".shell-ready"))) return true
@@ -432,6 +525,11 @@ console.log("shell-released")
             }),
           ),
         )
+      }),
+    ),
+    Effect.ensuring(
+      Effect.sync(() => {
+        tracing.active = false
       }),
     ),
   )
