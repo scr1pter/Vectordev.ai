@@ -381,6 +381,12 @@ const heldShell = Effect.fn("test.heldShell")(function* (sessionID: SessionID) {
   const prompt = yield* SessionPrompt.Service
   const fs = yield* FSUtil.Service
   const shell = Shell.preferred()
+  const executable = process.execPath.replaceAll("\\", "/")
+  const command = Shell.ps(shell)
+    ? `[IO.File]::WriteAllText('.shell-started', 'started'); & '${executable.replaceAll("'", "''")}' ./held-shell.ts`
+    : Shell.name(shell) === "cmd"
+      ? `echo started> .shell-started & "${executable}" ./held-shell.ts`
+      : `: > .shell-started; '${executable.replaceAll("'", "'\\''")}' ./held-shell.ts`
   const phase = (name: string) =>
     Effect.sync(() => {
       if (process.platform === "win32") console.error(JSON.stringify({ fixture: "held-shell", phase: name, shell }))
@@ -397,14 +403,37 @@ console.log("shell-released")
     .shell({
       sessionID,
       agent: "build",
-      command: `${Shell.ps(shell) ? "& " : ""}${JSON.stringify(process.execPath.replaceAll("\\", "/"))} ./held-shell.ts`,
+      command,
     })
     .pipe(Effect.forkChild)
   yield* pollWithTimeout(
-    fs
-      .existsSafe(path.join(instance.directory, ".shell-ready"))
-      .pipe(Effect.map((exists) => (exists ? true : undefined))),
+    Effect.gen(function* () {
+      if (yield* fs.existsSafe(path.join(instance.directory, ".shell-ready"))) return true
+      if (fiber.pollUnsafe()) return yield* Effect.fail(new Error("shell completed before publishing child readiness"))
+    }),
     `shell child did not publish readiness (${shell})`,
+  ).pipe(
+    Effect.catchCause((cause) =>
+      Effect.gen(function* () {
+        const exit = fiber.pollUnsafe()
+        const messages = yield* MessageV2.filterCompactedEffect(sessionID)
+        const part = messages.flatMap((message) => message.parts).findLast((part) => part.type === "tool")
+        return yield* Effect.fail(
+          new Error(
+            JSON.stringify({
+              phase: "child-readiness-failed",
+              shell,
+              command,
+              shellStarted: yield* fs.existsSafe(path.join(instance.directory, ".shell-started")),
+              fiber: exit ? (Exit.isSuccess(exit) ? "success" : "failure") : "pending",
+              fiberError: exit && Exit.isFailure(exit) ? Cause.pretty(exit.cause).slice(0, 2048) : undefined,
+              toolState: part ? JSON.stringify(part.state).slice(0, 2048) : undefined,
+              error: Cause.pretty(cause).slice(0, 2048),
+            }),
+          ),
+        )
+      }),
+    ),
   )
   yield* phase("child-ready")
   return {

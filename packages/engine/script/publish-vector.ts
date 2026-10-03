@@ -231,10 +231,6 @@ async function published(name: string) {
 }
 async function publish(pkgDir: string, name: string) {
   if (process.platform !== "win32") await $`chmod -R 755 .`.cwd(pkgDir)
-  if (dryRun) {
-    await $`npm pack --dry-run --offline`.cwd(pkgDir)
-    return
-  }
   if (await published(name)) {
     console.log(`already published ${name}@${version}`)
     return
@@ -248,6 +244,14 @@ async function publish(pkgDir: string, name: string) {
   console.log(`published ${name}@${version}`)
 }
 
-for (const suffix of targets) await publish(`dist/vector-${suffix}`, `${SCOPE}/cli-${suffix}`)
-await publish(out, UMBRELLA)
+if (dryRun) {
+  // npm supports multiple local packages; one startup still checks every package on Windows.
+  const folders = [...targets.map((suffix) => path.resolve(`dist/vector-${suffix}`)), path.resolve(out)]
+  if (process.platform !== "win32") await $`chmod -R 755 ${folders}`
+  await $`npm pack --dry-run --offline ${folders}`
+}
+if (!dryRun) {
+  for (const suffix of targets) await publish(`dist/vector-${suffix}`, `${SCOPE}/cli-${suffix}`)
+  await publish(out, UMBRELLA)
+}
 console.log(dryRun ? "dry run complete" : `\nInstall with: npm install -g ${UMBRELLA}@${version}`)

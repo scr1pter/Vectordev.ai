@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import { chmod, mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { catalogBody, catalogDigest } from "../../script/release-catalog"
 
 const root = path.resolve(import.meta.dir, "../../../..")
@@ -167,6 +168,16 @@ test("dry-run packages every target with notices and a working Vector launcher w
   })
   try {
     const cwd = path.join(tmp.dir, "packages/engine")
+    // Observe real npm startups; replacing npm would miss the Windows process-startup cost.
+    const npmInvocations = path.join(tmp.dir, "npm-invocations.jsonl")
+    const npmTrace = path.join(tmp.dir, "npm-trace.mjs")
+    await Bun.write(
+      npmTrace,
+      `import { appendFileSync } from "node:fs"
+if (process.argv[2] === "pack")
+  appendFileSync(${JSON.stringify(npmInvocations)}, JSON.stringify(process.argv.slice(2)) + "\\n")
+`,
+    )
     // Observe the real publisher's build boundary without compiling the application.
     await Bun.write(
       path.join(cwd, "script/build.ts"),
@@ -182,11 +193,30 @@ test("dry-run packages every target with notices and a working Vector launcher w
         VECTOR_TARGETS: "stale-inherited-target",
         VECTOR_RELEASE: "true",
         VECTOR_CLI_VERSION: version,
+        NODE_OPTIONS: `--import=${pathToFileURL(npmTrace).href}`,
       },
       "publisher dry-run",
     )
     expect(result.code, result.stderr).toBe(0)
     expect(requests).toEqual([])
+    const dryPacks = (await Bun.file(npmInvocations).text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line)) as string[][]
+    expect(dryPacks).toHaveLength(1)
+    expect(dryPacks[0].slice(0, 3)).toEqual(["pack", "--dry-run", "--offline"])
+    expect(
+      (await Promise.all(dryPacks[0].slice(3).map((item) => realpath(path.resolve(cwd, item))))).toSorted(),
+    ).toEqual(
+      (
+        await Promise.all(
+          [
+            ...targets.map((target) => path.join(cwd, "dist", `vector-${target}`)),
+            path.join(cwd, "dist/vectordev-cli"),
+          ].map((item) => realpath(item)),
+        )
+      ).toSorted(),
+    )
     expect(await Bun.file(path.join(tmp.dir, "packages/plugin/publisher-args.json")).json()).toEqual(["--dry-run"])
     expect(await Bun.file(path.join(cwd, "build-env.json")).json()).toEqual({
       version,
