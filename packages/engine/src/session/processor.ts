@@ -72,6 +72,8 @@ interface ProcessorContext extends Input {
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
   reasoningMap: Record<string, SessionV1.ReasoningPart>
+  // What the provider reported as it started the current step, until the step's own usage replaces it.
+  started: Usage | undefined
 }
 
 type StreamEvent = LLMEvent
@@ -111,6 +113,7 @@ const layer = Layer.effect(
         needsCompaction: false,
         currentText: undefined,
         reasoningMap: {},
+        started: undefined,
       }
       let aborted = false
 
@@ -450,6 +453,7 @@ const layer = Layer.effect(
             // on the worktree's snapshot lock long enough for a cancel to land.
             yield* Effect.uninterruptible(
               Effect.gen(function* () {
+                ctx.started = undefined
                 ctx.assistantMessage.finish = value.reason
                 ctx.assistantMessage.cost += usage.cost
                 if (usage.unpriced) ctx.assistantMessage.unpriced = true
@@ -543,7 +547,31 @@ const layer = Layer.effect(
         }
       })
 
+      // A step the provider started billing but that never finished, because it was stopped or failed mid-stream, gets
+      // no usage of its own, so it is recorded with what the provider reported as it started.
+      const settleStarted = Effect.fn("SessionProcessor.settleStarted")(function* (reason: string) {
+        const started = ctx.started
+        if (!started) return
+        ctx.started = undefined
+        const usage = Session.getUsage({ model: ctx.model, usage: started })
+        ctx.assistantMessage.cost += usage.cost
+        if (usage.unpriced) ctx.assistantMessage.unpriced = true
+        ctx.assistantMessage.tokens = usage.tokens
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          reason,
+          messageID: ctx.assistantMessage.id,
+          sessionID: ctx.assistantMessage.sessionID,
+          type: "step-finish",
+          tokens: usage.tokens,
+          cost: usage.cost,
+          ...(usage.unpriced ? { unpriced: true } : {}),
+        })
+        yield* session.updateMessage(ctx.assistantMessage)
+      })
+
       const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
+        yield* settleStarted("other")
         if (ctx.snapshot) {
           const patch = yield* snapshot.patch(ctx.snapshot)
           if (patch.files.length) {
@@ -644,7 +672,12 @@ const layer = Layer.effect(
             ctx.currentText = undefined
             ctx.reasoningMap = {}
             yield* status.set(ctx.sessionID, { type: "busy" })
-            const stream = llm.stream(streamInput)
+            const stream = llm.stream({
+              ...streamInput,
+              started: (usage) => {
+                ctx.started = Usage.from(usage)
+              },
+            })
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
@@ -652,6 +685,8 @@ const layer = Layer.effect(
               Stream.runDrain,
             )
           }).pipe(
+            // Settled before a retry starts the step again, since the provider billed the failed attempt too.
+            Effect.onError((cause) => settleStarted(Cause.hasInterruptsOnly(cause) ? "abort" : "error")),
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
                 aborted = true

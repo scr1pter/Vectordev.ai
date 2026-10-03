@@ -553,6 +553,30 @@ describe("session.llm.ai-sdk adapter", () => {
     if (events[1].type !== "step-finish") throw new Error("expected step-finish")
     expect(events[1].providerMetadata?.copilot).toBeUndefined()
   })
+
+  test("reads the input usage Anthropic reports as it starts a response", () => {
+    expect(
+      LLMAISDK.startedUsage({
+        type: "message_start",
+        message: {
+          usage: {
+            input_tokens: 5_000,
+            cache_creation_input_tokens: 175_000,
+            cache_read_input_tokens: 20_000,
+            output_tokens: 1,
+          },
+        },
+      }),
+    ).toEqual({
+      inputTokens: 200_000,
+      outputTokens: 1,
+      cacheReadInputTokens: 20_000,
+      cacheWriteInputTokens: 175_000,
+      totalTokens: 200_001,
+    })
+    expect(LLMAISDK.startedUsage({ type: "content_block_delta", delta: { text: "hi" } })).toBeUndefined()
+    expect(LLMAISDK.startedUsage(undefined)).toBeUndefined()
+  })
 })
 
 type Capture = {

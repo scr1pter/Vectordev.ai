@@ -262,6 +262,29 @@ const billedLLM = Layer.succeed(
       ),
   }),
 )
+// Reports Anthropic-style usage as the response starts, then either hangs until stopped or fails mid-stream.
+const unfinishedLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: (input) =>
+      Stream.suspend(() => {
+        input.started?.({
+          inputTokens: 180_000,
+          outputTokens: 1,
+          cacheWriteInputTokens: 175_000,
+          totalTokens: 180_001,
+        })
+        return Stream.make(
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "text-1" }),
+          LLMEvent.textDelta({ id: "text-1", text: "partial" }),
+        ).pipe(
+          Stream.concat(input.messages[0]?.content === "fail" ? Stream.fail(new Error("stream broke")) : Stream.never),
+        )
+      }),
+  }),
+)
+const itUnfinished = testEffect(LayerNode.compile(root, [...replacements, [LLM.node, unfinishedLLM]]))
 const itStalledSnapshot = testEffect(
   LayerNode.compile(root, [...replacements, [LLM.node, billedLLM], [Snapshot.node, stalledSnapshot()]]),
 )
@@ -1167,3 +1190,80 @@ itStalledSnapshot.live(
       },
     ),
 )
+
+for (const outcome of ["stopped", "fail"] as const) {
+  itUnfinished.live(
+    `session.processor effect tests record what a ${outcome === "fail" ? "failed" : "stopped"} step was billed as it started`,
+    () =>
+      provideTmpdirInstance(
+        (dir) =>
+          Effect.gen(function* () {
+            const database = yield* Database.Service
+            const { processors, session, provider } = yield* boot()
+            const chat = yield* session.create({})
+            const parent = yield* user(chat.id, outcome)
+            const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+            const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+            const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+            const run = yield* handle
+              .process({
+                user: {
+                  id: parent.id,
+                  sessionID: chat.id,
+                  role: "user",
+                  time: parent.time,
+                  agent: parent.agent,
+                  model: { providerID: ref.providerID, modelID: ref.modelID },
+                } satisfies SessionV1.User,
+                sessionID: chat.id,
+                model: mdl,
+                agent: agent(),
+                system: [],
+                messages: [{ role: "user", content: outcome }],
+                tools: {},
+              })
+              .pipe(Effect.forkChild)
+            if (outcome === "stopped") {
+              yield* waitFor(
+                MessageV2.parts(msg.id).pipe(
+                  Effect.map((parts) => parts.find((part) => part.type === "text")),
+                  Effect.provideService(Database.Service, database),
+                ),
+                "the step never streamed",
+              )
+              yield* Fiber.interrupt(run)
+              yield* Fiber.await(run)
+            }
+            if (outcome === "fail") yield* Fiber.join(run)
+
+            // 5K input and 175K cache write at $3 and $3.75 per million tokens, plus one output token at $15.
+            const expected = (5_000 * 3 + 175_000 * 3.75 + 15) / 1_000_000
+            const saved = yield* MessageV2.get({ sessionID: chat.id, messageID: msg.id })
+            const finished = saved.parts.filter((part) => part.type === "step-finish")
+            expect(finished).toHaveLength(1)
+            expect(finished[0]).toMatchObject({
+              reason: outcome === "fail" ? "error" : "abort",
+              tokens: { input: 5_000, cache: { write: 175_000 } },
+            })
+            expect(saved.info.role === "assistant" && saved.info.cost).toBeCloseTo(expected)
+            expect((yield* session.get(chat.id)).cost).toBeCloseTo(expected)
+          }),
+        {
+          config: {
+            provider: {
+              lmstudio: {
+                ...cfg.provider.lmstudio,
+                models: {
+                  "test-model": {
+                    ...cfg.provider.lmstudio.models["test-model"],
+                    cost: { input: 3, output: 15, cache_write: 3.75 },
+                  },
+                },
+              },
+            },
+          },
+        },
+      ),
+  )
+}

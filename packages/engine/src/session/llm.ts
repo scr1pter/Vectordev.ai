@@ -8,7 +8,7 @@ import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/pro
 import { Context, Effect, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
-import type { LLMEvent } from "@vectordevai/llm"
+import type { LLMEvent, UsageInput } from "@vectordevai/llm"
 import { LLMClient } from "@vectordevai/llm/route"
 import type { LLMClientService } from "@vectordevai/llm/route"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
@@ -52,6 +52,9 @@ export type StreamInput = {
   // false for a request whose prefix is never sent again, such as a compaction summary: cache breakpoints would only
   // make the provider bill its whole input at the cache-write premium.
   cache?: boolean
+  // Called with the usage a provider reports as it starts a response, before the step finishes. A step that is
+  // stopped or fails mid-stream reports nothing more, so this is what it was billed.
+  started?: (usage: UsageInput) => void
 }
 
 export type StreamRequest = StreamInput & {
@@ -311,8 +314,12 @@ const live: Layer.Layer<
               }),
             )
           },
-          // Copilot returns the authoritative billed amount only in provider-specific response fields.
-          includeRawChunks: input.model.providerID.includes("github-copilot"),
+          // Copilot returns the authoritative billed amount only in provider-specific response fields, and Anthropic
+          // reports a response's input usage in message_start, which the SDK holds back until the response finishes.
+          includeRawChunks:
+            input.model.providerID.includes("github-copilot") ||
+            input.model.api.npm === "@ai-sdk/anthropic" ||
+            input.model.api.npm === "@ai-sdk/google-vertex/anthropic",
           async experimental_repairToolCall(failed) {
             const lower = failed.toolCall.toolName.toLowerCase()
             if (lower !== failed.toolCall.toolName && prepared.tools[lower]) {
@@ -394,6 +401,12 @@ const live: Layer.Layer<
             return Stream.fromAsyncIterable(result.result.fullStream, (e) =>
               e instanceof Error ? e : new Error(String(e)),
             ).pipe(
+              Stream.tap((event) =>
+                Effect.sync(() => {
+                  const usage = event.type === "raw" ? LLMAISDK.startedUsage(event.rawValue) : undefined
+                  if (usage) input.started?.(usage)
+                }),
+              ),
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
             )

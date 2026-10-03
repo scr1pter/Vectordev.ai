@@ -41,6 +41,29 @@ function copilotTotalNanoAiu(value: unknown) {
   return total
 }
 
+// The usage Anthropic's message_start reports: the prompt and its cache read and write, which the provider bills once
+// it starts the response. A step that is stopped or fails mid-stream never gets its finish-step, so this is all the
+// usage it will report.
+export function startedUsage(value: unknown) {
+  if (!value || typeof value !== "object") return
+  const raw = value as { type?: unknown; message?: { usage?: Record<string, unknown> } }
+  const reported = raw.type === "message_start" ? raw.message?.usage : undefined
+  if (!reported || typeof reported !== "object") return
+  const count = (key: string) => {
+    const value = reported[key]
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
+  }
+  const input = count("input_tokens") + count("cache_read_input_tokens") + count("cache_creation_input_tokens")
+  return {
+    // As in AI SDK v6 usage, inputTokens includes the cached tokens.
+    inputTokens: input,
+    outputTokens: count("output_tokens"),
+    cacheReadInputTokens: count("cache_read_input_tokens"),
+    cacheWriteInputTokens: count("cache_creation_input_tokens"),
+    totalTokens: input + count("output_tokens"),
+  }
+}
+
 function usage(value: unknown) {
   if (!value || typeof value !== "object") return undefined
   const item = value as {
