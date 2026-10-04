@@ -938,12 +938,7 @@ export function NewHome() {
   )
 }
 
-function HomeAutomations(props: {
-  supported: boolean
-  records: AutomationRecord[]
-  error?: string
-  onOpen: () => void
-}) {
+function HomeAutomations(props: { supported: boolean; records: AutomationRecord[]; error?: string; onOpen: () => void }) {
   // Still on the schedule. A settled one-shot keeps its runAt in the past, so
   // counting it would pin the summary to "Due now" forever.
   const pending = createMemo(() =>
@@ -1026,7 +1021,9 @@ function HomeProjectRules(props: { onOpen: () => void }) {
         <span class="block [font-family:var(--vx-mono)] text-[9.5px] uppercase [font-weight:650] text-v2-text-text-faint">
           Project rules
         </span>
-        <strong class="mt-1 block text-[15px] [font-weight:620] text-v2-text-text-base">Your house, your rules</strong>
+        <strong class="mt-1 block text-[15px] [font-weight:620] text-v2-text-text-base">
+          Your house, your rules
+        </strong>
       </div>
       <button
         type="button"
