@@ -885,7 +885,7 @@ export function agentOutcome(runtime: CodingAgentRuntime, exitCode: number, outp
   }
 }
 
-function signalAgentProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
+export function signalAgentProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
   if (process.platform === "win32") {
     if (child.pid) execFile("taskkill", windowsTaskkillArguments(child.pid, signal === "SIGKILL"), () => undefined)
     return
@@ -903,7 +903,7 @@ export function windowsTaskkillArguments(pid: number, force: boolean) {
   return ["/pid", String(pid), "/T", ...(force ? ["/F"] : [])]
 }
 
-function stopAgentProcess(child: ChildProcessWithoutNullStreams, graceMs: number) {
+export function stopAgentProcess(child: ChildProcessWithoutNullStreams, graceMs: number) {
   // Windows has no POSIX process group. Force the full tree immediately so a
   // short-lived npm/cmd shim cannot exit and strand its model process before a
   // delayed `/T` reaches it.

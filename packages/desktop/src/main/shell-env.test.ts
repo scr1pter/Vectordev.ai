@@ -65,4 +65,17 @@ describe("shell env", () => {
     expect(directories).toContain(join("C:\\Users\\ada", "scoop", "shims"))
     expect(directories).toContain(join("C:\\ProgramData\\chocolatey", "bin"))
   })
+
+  test("Windows looks where Git for Windows installs git.exe", () => {
+    const directories = toolBinDirectories(
+      {
+        USERPROFILE: "C:\\Users\\ada",
+        LOCALAPPDATA: "C:\\Users\\ada\\AppData\\Local",
+        ProgramFiles: "C:\\Program Files",
+      },
+      "win32",
+    )
+    expect(directories).toContain(join("C:\\Program Files", "Git", "cmd"))
+    expect(directories).toContain(join("C:\\Users\\ada\\AppData\\Local", "Programs", "Git", "cmd"))
+  })
 })

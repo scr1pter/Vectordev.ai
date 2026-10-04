@@ -6,110 +6,25 @@ import { Spinner } from "@vectordevai/ui/spinner"
 import { TextField } from "@vectordevai/ui/text-field"
 import { IconButtonV2 } from "@vectordevai/ui/v2/icon-button-v2"
 import { TooltipV2 } from "@vectordevai/ui/v2/tooltip-v2"
-import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, onMount, type ComponentProps } from "solid-js"
+import { Match, Show, Switch, createMemo, createSignal, onMount, type ComponentProps } from "solid-js"
 
 import { usePlatform } from "@/context/platform"
 import { useSDK } from "@/context/sdk"
 import { showToast } from "@/utils/toast"
+import {
+  GithubDeviceSignIn,
+  GithubRepoOptions,
+  githubApi,
+  messageOf,
+  type GithubAuthStatus,
+  type GithubPublishResult,
+  type GithubRepo,
+  type GithubStatus,
+} from "./github-connect"
 
-type GithubStatus = {
-  ghInstalled: boolean
-  authenticated: boolean
-  login?: string
-  detail: string
-}
-
-type GithubPublishResult = {
-  ok: boolean
-  url?: string
-  error?: string
-  log: string
-}
-
-type GithubAuthStatus = {
-  configured: boolean
-  authenticated: boolean
-  login?: string
-  avatarUrl?: string
-}
-
-type GithubDeviceCode = {
-  userCode: string
-  verificationUri: string
-  expiresIn: number
-}
-
-type GithubRepo = {
-  owner: string
-  name: string
-  fullName: string
-  private: boolean
-  pushedAt?: string
-  defaultBranch?: string
-  htmlUrl: string
-}
-
-type GithubApi = {
-  detect(options?: { refresh?: boolean }): Promise<GithubStatus>
-  publish(input: {
-    projectPath: string
-    name?: string
-    private?: boolean
-    description?: string
-    commitMessage?: string
-  }): Promise<GithubPublishResult>
-  auth?: {
-    status(): Promise<GithubAuthStatus>
-    start(): Promise<GithubDeviceCode>
-    openVerification(): Promise<void>
-    complete(): Promise<{ ok: boolean; login?: string; error?: string }>
-    cancel(): Promise<void>
-    logout(): Promise<void>
-  }
-  repos?: {
-    list(): Promise<GithubRepo[]>
-    create(input: {
-      name: string
-      private: boolean
-      description?: string
-    }): Promise<{ owner: string; name: string; fullName: string; private: boolean; htmlUrl: string }>
-  }
-  pushOauth?(input: {
-    projectPath: string
-    repo?: { owner: string; name: string }
-    createNew?: { name: string; private: boolean; description?: string }
-    commitMessage?: string
-  }): Promise<GithubPublishResult>
-}
-
-type DialogMode = "checking" | "legacy" | "signed-out" | "device-code" | "picker"
+type DialogMode = "checking" | "legacy" | "signed-out" | "picker"
 
 type RepoSelection = { kind: "repo"; repo: GithubRepo } | { kind: "create" }
-
-function githubApi() {
-  return (globalThis.window as unknown as { api?: { github?: GithubApi } }).api?.github
-}
-
-function messageOf(error: unknown) {
-  if (error instanceof Error && error.message) return error.message
-  return String(error)
-}
-
-function relativeTime(iso?: string) {
-  if (!iso) return undefined
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return undefined
-  const minutes = Math.round((Date.now() - then) / 60000)
-  if (minutes < 1) return "just now"
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  if (days < 30) return `${days}d ago`
-  const months = Math.round(days / 30)
-  if (months < 12) return `${months}mo ago`
-  return `${Math.round(months / 12)}y ago`
-}
 
 export function SessionGithubPush(props: { placement?: ComponentProps<typeof TooltipV2>["placement"] }) {
   const dialog = useDialog()
@@ -177,23 +92,11 @@ export function DialogGithubPush(props: { projectPath: string }) {
 
   // OAuth flow state.
   const [authStatus, setAuthStatus] = createSignal<GithubAuthStatus>()
-  const [deviceCode, setDeviceCode] = createSignal<GithubDeviceCode>()
-  const [authError, setAuthError] = createSignal<string>()
-  const [starting, setStarting] = createSignal(false)
-  const [copied, setCopied] = createSignal(false)
   const [repos, setRepos] = createSignal<GithubRepo[]>()
   const [repoError, setRepoError] = createSignal<string>()
   const [search, setSearch] = createSignal("")
   const [selection, setSelection] = createSignal<RepoSelection>()
   const [pushing, setPushing] = createSignal(false)
-
-  let disposed = false
-  let copyTimer: ReturnType<typeof setTimeout> | undefined
-  onCleanup(() => {
-    disposed = true
-    if (copyTimer) clearTimeout(copyTimer)
-    if (mode() === "device-code") void api?.auth?.cancel().catch(() => {})
-  })
 
   const ready = createMemo(() => Boolean(api && name().trim() && !publishing()))
   const stateLabel = createMemo(() => {
@@ -210,11 +113,9 @@ export function DialogGithubPush(props: { projectPath: string }) {
     return true
   })
 
-  const filteredRepos = createMemo(() => {
-    const query = search().trim().toLowerCase()
-    const list = repos() ?? []
-    if (!query) return list
-    return list.filter((repo) => repo.fullName.toLowerCase().includes(query))
+  const selectedRepo = createMemo(() => {
+    const current = selection()
+    return current?.kind === "repo" ? current.repo.fullName : undefined
   })
 
   const dialogDescription = createMemo(() => {
@@ -222,7 +123,6 @@ export function DialogGithubPush(props: { projectPath: string }) {
       case "legacy":
         return "Commit the current project, then push to its existing origin or create a new repository with your local GitHub login."
       case "signed-out":
-      case "device-code":
         return "Connect your GitHub account to commit and push this project."
       case "picker":
         return "Commit the current project and push it to a repository on your GitHub account."
@@ -302,64 +202,15 @@ export function DialogGithubPush(props: { projectPath: string }) {
     })
   }
 
-  async function startAuth() {
-    const auth = api?.auth
-    if (!auth || starting()) return
-    setStarting(true)
-    setAuthError(undefined)
-    try {
-      setDeviceCode(await auth.start())
-      setMode("device-code")
-      void waitForAuthorization()
-    } catch (error) {
-      setAuthError(messageOf(error))
-      showToast({ variant: "error", title: "Could not reach GitHub", description: messageOf(error) })
-    }
-    setStarting(false)
-  }
-
-  async function waitForAuthorization() {
-    const auth = api?.auth
-    if (!auth) return
-    try {
-      const outcome = await auth.complete()
-      if (disposed) return
-      if (outcome.ok) {
-        setAuthStatus({ configured: true, authenticated: true, login: outcome.login })
-        showToast({
-          variant: "success",
-          title: outcome.login ? `Connected as ${outcome.login}` : "GitHub connected",
-          description: "Pick a repository to push this project to.",
-        })
-        setMode("picker")
-        void loadRepos()
-      } else {
-        setAuthError(outcome.error || "GitHub did not authorize this device.")
-      }
-    } catch (error) {
-      if (!disposed) setAuthError(messageOf(error))
-    }
-  }
-
-  async function openVerification() {
-    try {
-      await api?.auth?.openVerification()
-    } catch (error) {
-      showToast({ variant: "error", title: "Could not open GitHub", description: messageOf(error) })
-    }
-  }
-
-  async function copyCode() {
-    const code = deviceCode()?.userCode
-    if (!code) return
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      if (copyTimer) clearTimeout(copyTimer)
-      copyTimer = setTimeout(() => setCopied(false), 2000)
-    } catch (error) {
-      showToast({ variant: "error", title: "Copy failed", description: messageOf(error) })
-    }
+  function connected(login?: string) {
+    setAuthStatus({ configured: true, authenticated: true, login })
+    showToast({
+      variant: "success",
+      title: login ? `Connected as ${login}` : "GitHub connected",
+      description: "Pick a repository to push this project to.",
+    })
+    setMode("picker")
+    void loadRepos()
   }
 
   async function loadRepos() {
@@ -445,70 +296,11 @@ export function DialogGithubPush(props: { projectPath: string }) {
         </Match>
 
         <Match when={mode() === "signed-out"}>
-          <div class="flex flex-col items-center gap-4 p-8 pt-4 text-center">
-            <Icon name="github" size="large" />
-            <div class="text-16-medium text-text-strong">Connect GitHub</div>
-            <p class="max-w-[380px] text-13-regular text-text-weak">
-              Authorize Vector with your GitHub account to create repositories and push this project. No command-line
-              tools required.
-            </p>
-            <Show when={authError()}>
-              <div class="w-full rounded-lg border border-[rgba(236,94,94,0.35)] bg-[rgba(236,94,94,0.08)] px-4 py-3 text-12-regular text-text-strong">
-                {authError()}
-              </div>
-            </Show>
-            <div class="flex items-center gap-2">
-              <Button type="button" variant="ghost" onClick={() => dialog.close()}>
-                Close
-              </Button>
-              <Button type="button" variant="primary" onClick={() => void startAuth()} disabled={starting()}>
-                {starting() ? "Contacting GitHub…" : "Connect GitHub"}
-              </Button>
-            </div>
-          </div>
-        </Match>
-
-        <Match when={mode() === "device-code"}>
-          <div class="flex flex-col items-center gap-4 p-8 pt-4 text-center">
-            <div class="text-13-regular text-text-weak">
-              Enter this code at <span class="text-13-medium text-text-strong">github.com/login/device</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="select-all rounded-lg border border-border-weak-base bg-surface-base px-5 py-3 font-mono text-[24px] font-medium tracking-[0.3em] text-text-strong">
-                {deviceCode()?.userCode}
-              </div>
-              <Button type="button" size="small" onClick={() => void copyCode()}>
-                {copied() ? "Copied" : "Copy"}
-              </Button>
-            </div>
-            <Show when={deviceCode()?.expiresIn}>
-              <div class="text-11-regular text-text-weak">
-                Code expires in about {Math.max(1, Math.round((deviceCode()?.expiresIn ?? 0) / 60))} minutes.
-              </div>
-            </Show>
-            <Button type="button" onClick={() => void openVerification()}>
-              Open GitHub
-            </Button>
-            <Show
-              when={authError()}
-              fallback={
-                <div class="flex items-center gap-2 text-12-regular text-text-weak">
-                  <Spinner class="size-3.5" />
-                  Waiting for you to authorize…
-                </div>
-              }
-            >
-              <div class="w-full rounded-lg border border-[rgba(236,94,94,0.35)] bg-[rgba(236,94,94,0.08)] px-4 py-3 text-12-regular text-text-strong">
-                {authError()}
-              </div>
-              <Button type="button" size="small" onClick={() => void startAuth()} disabled={starting()}>
-                {starting() ? "Contacting GitHub…" : "Try again"}
-              </Button>
-            </Show>
-            <Button type="button" variant="ghost" onClick={() => dialog.close()}>
-              Cancel
-            </Button>
-          </div>
+          <GithubDeviceSignIn
+            intro="Authorize Vector with your GitHub account to create repositories and push this project. No command-line tools required."
+            onConnected={connected}
+            onClose={() => dialog.close()}
+          />
         </Match>
 
         <Match when={mode() === "picker"}>
@@ -537,71 +329,18 @@ export function DialogGithubPush(props: { projectPath: string }) {
                 placeholder="Search repositories…"
               />
 
-              <div class="max-h-[200px] overflow-y-auto rounded-lg border border-border-weak-base">
-                <Show
-                  when={repos()}
-                  fallback={
-                    <div class="flex items-center gap-2 px-4 py-3 text-12-regular text-text-weak">
-                      <Spinner class="size-3.5" />
-                      Loading repositories…
-                    </div>
-                  }
-                >
-                  <Show when={repoError()}>
-                    <div class="flex items-center justify-between gap-3 px-4 py-3">
-                      <span class="text-12-regular text-text-weak">{repoError()}</span>
-                      <Button type="button" size="small" onClick={() => void loadRepos()}>
-                        Retry
-                      </Button>
-                    </div>
-                  </Show>
-                  <For
-                    each={filteredRepos()}
-                    fallback={
-                      <Show when={!repoError()}>
-                        <div class="px-4 py-3 text-12-regular text-text-weak">
-                          {search().trim()
-                            ? "No repositories match your search."
-                            : "No repositories yet — create one below."}
-                        </div>
-                      </Show>
-                    }
-                  >
-                    {(repo) => {
-                      const selected = () => {
-                        const current = selection()
-                        return current?.kind === "repo" && current.repo.fullName === repo.fullName
-                      }
-                      return (
-                        <button
-                          type="button"
-                          role="radio"
-                          aria-checked={selected()}
-                          disabled={pushing()}
-                          onClick={() => setSelection({ kind: "repo", repo })}
-                          class="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-surface-raised-base-hover"
-                          classList={{ "bg-surface-raised-base": selected() }}
-                        >
-                          <span class="grid size-3.5 shrink-0 place-items-center rounded-full border border-border-weak-base">
-                            <Show when={selected()}>
-                              <span class="size-2 rounded-full bg-[rgb(139,92,246)]" />
-                            </Show>
-                          </span>
-                          <span class="min-w-0 flex-1 truncate text-13-medium text-text-strong">{repo.fullName}</span>
-                          <Show when={repo.private}>
-                            <span class="shrink-0 rounded-full border border-border-weak-base px-2 py-0.5 text-11-medium text-text-weak">
-                              Private
-                            </span>
-                          </Show>
-                          <Show when={relativeTime(repo.pushedAt)}>
-                            <span class="shrink-0 text-11-regular text-text-weak">{relativeTime(repo.pushedAt)}</span>
-                          </Show>
-                        </button>
-                      )
-                    }}
-                  </For>
-                </Show>
-              </div>
+              <GithubRepoOptions
+                repos={repos()}
+                error={repoError()}
+                query={search()}
+                selected={selectedRepo()}
+                disabled={pushing()}
+                emptyText={
+                  search().trim() ? "No repositories match your search." : "No repositories yet — create one below."
+                }
+                onSelect={(repo) => setSelection({ kind: "repo", repo })}
+                onRetry={() => void loadRepos()}
+              />
 
               <div class="rounded-lg border border-border-weak-base">
                 <button

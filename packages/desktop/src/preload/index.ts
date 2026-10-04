@@ -318,6 +318,18 @@ const api: ElectronAPI = {
       create: (input) => ipcRenderer.invoke("github-repos-create", input),
     },
     pushOauth: (input) => ipcRenderer.invoke("github-push-oauth", input),
+    clone: {
+      parent: () => ipcRenderer.invoke("github-clone-parent"),
+      pickParent: () => ipcRenderer.invoke("github-clone-pick-parent"),
+      parse: (input) => ipcRenderer.invoke("github-clone-parse", input),
+      start: (input) => ipcRenderer.invoke("github-clone-start", input),
+      cancel: (runId) => ipcRenderer.invoke("github-clone-cancel", runId),
+      subscribe: (cb) => {
+        const handler = (_: unknown, event: Parameters<typeof cb>[0]) => cb(event)
+        ipcRenderer.on("github-clone-progress", handler)
+        return () => ipcRenderer.removeListener("github-clone-progress", handler)
+      },
+    },
   },
   gitlab: {
     auth: {
