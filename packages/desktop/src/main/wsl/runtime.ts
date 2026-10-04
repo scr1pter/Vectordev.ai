@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
+import { createRequire } from "node:module"
 import { join } from "node:path"
-import * as pty from "@lydell/node-pty"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import type { WslDistroProbe, WslInstalledDistro, WslOnlineDistro, WslRuntimeCheck } from "../../preload/types"
 import { wslTerminalArgs } from "./policy"
@@ -35,6 +35,10 @@ export type RunWslOptions = {
 
 const DEFAULT_WSL_TIMEOUT_MS = 20_000
 const DEFAULT_WSL_INSTALL_TIMEOUT_MS = 15 * 60_000
+// The main process imports this module on every platform at startup, and @lydell/node-pty throws while loading when its
+// platform package is missing or the wrong architecture. Load it only for the WSL installs that need a PTY, so a bad
+// binary fails that one action instead of stopping Vector from opening.
+const load = createRequire(import.meta.url)
 
 export function wslArgs(args: string[], distro?: string | null, user?: string | null) {
   return [...(distro ? ["-d", distro] : []), ...(user ? ["--user", user] : []), "--", ...args]
@@ -116,6 +120,7 @@ function runCommand(command: string, args: string[], opts: RunWslOptions = {}) {
 
 function runInteractiveCommand(command: string, args: string[], opts: RunWslOptions = {}, defaultTimeoutMs: number) {
   return new Promise<WslCommandResult>((resolve, reject) => {
+    const pty: typeof import("@lydell/node-pty") = load("@lydell/node-pty")
     const child = pty.spawn(command, args, {
       name: "xterm-color",
       cols: 80,

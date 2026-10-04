@@ -534,7 +534,10 @@ jobs:
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
-          install-flags: --frozen-lockfile
+          # Bun installs only the host CPU's optional packages by default. These jobs package other
+          # architectures too (x64 on an arm64 Mac, arm64 on x64 Windows and Linux), and electron-builder
+          # copies only what is installed, so install every CPU's node-pty, parcel watcher and msgpackr builds.
+          install-flags: --frozen-lockfile --cpu='*'
       - name: Set exact build version
         run: |
           version=$(node -p 'require("./packages/desktop/package.json").version')
@@ -738,7 +741,10 @@ jobs:
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
-          install-flags: --frozen-lockfile
+          # Bun installs only the host CPU's optional packages by default. These jobs package other
+          # architectures too (x64 on an arm64 Mac, arm64 on x64 Windows and Linux), and electron-builder
+          # copies only what is installed, so install every CPU's node-pty, parcel watcher and msgpackr builds.
+          install-flags: --frozen-lockfile --cpu='*'
       - name: Set exact build version
         shell: bash
         run: |
@@ -882,7 +888,10 @@ jobs:
       - name: Set up Bun
         uses: ./.github/actions/setup-bun
         with:
-          install-flags: --frozen-lockfile
+          # Bun installs only the host CPU's optional packages by default. These jobs package other
+          # architectures too (x64 on an arm64 Mac, arm64 on x64 Windows and Linux), and electron-builder
+          # copies only what is installed, so install every CPU's node-pty, parcel watcher and msgpackr builds.
+          install-flags: --frozen-lockfile --cpu='*'
       - name: Set exact build version
         run: |
           version=$(node -p 'require("./packages/desktop/package.json").version')

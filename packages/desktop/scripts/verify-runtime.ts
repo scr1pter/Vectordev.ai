@@ -9,6 +9,13 @@ if (!bundled.includes('"@lydell/node-pty"')) {
   throw new Error("Desktop build does not reference the platform-neutral PTY loader.")
 }
 
+// @lydell/node-pty throws while loading when its platform package is missing or the wrong architecture. A static import
+// runs that when the main process or the engine starts, so Vector would not open at all; load it inside the spawn paths.
+const staticImport = bundled.match(/^\s*import\s[^;]*?["']@lydell\/node-pty["']/m)
+if (staticImport) {
+  throw new Error(`Desktop build loads @lydell/node-pty at startup: ${staticImport[0].trim()}`)
+}
+
 const platformSpecific = bundled.match(/@lydell\/node-pty-(?:darwin|linux|win32)-(?:arm64|x64)/g)
 if (platformSpecific?.length) {
   throw new Error(`Desktop build is pinned to the build machine: ${[...new Set(platformSpecific)].join(", ")}`)
