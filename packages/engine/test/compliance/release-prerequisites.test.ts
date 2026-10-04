@@ -22,7 +22,7 @@ if (process.argv[3] === process.env.MISSING_PACKAGE) process.exit(1)
 console.log(JSON.stringify(process.argv[3].slice(process.argv[3].lastIndexOf("@") + 1)))
 `)
     await chmod(npm, 0o755)
-    for (const missing of ["", "@vectordevai/plugin@1.2.3", "@vectordevai/cli-linux-arm64@4.5.6"]) {
+    for (const missing of ["", "@vectordevai/plugin@4.5.6", "@vectordevai/cli-linux-arm64@4.5.6"]) {
       const child = Bun.spawn(["bash", "-c", script!], {
         cwd: directory,
         env: { PATH: path.dirname(npm) + path.delimiter + process.env.PATH, HOME: directory, MISSING_PACKAGE: missing },
@@ -34,7 +34,9 @@ console.log(JSON.stringify(process.argv[3].slice(process.argv[3].lastIndexOf("@"
       if (missing) expect(stdout).toContain(`Publish ${missing} before starting the desktop release.`)
     }
     const requested = await Bun.file(path.join(directory, "requests")).text()
-    expect(requested).toContain("@vectordevai/plugin@1.2.3")
+    // The plugin SDK publishes with the CLI, so the desktop requires it at the CLI version, not its own.
+    expect(requested).toContain("@vectordevai/plugin@4.5.6")
+    expect(requested).not.toContain("@1.2.3")
     expect(requested).toContain("@vectordevai/cli-windows-x64@4.5.6")
     expect(requested).toContain("@vectordevai/cli-windows-arm64@4.5.6")
     expect(requested).not.toContain("@null")

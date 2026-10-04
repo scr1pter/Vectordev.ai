@@ -48,6 +48,22 @@ test("website and README copy no longer call 1.99.99 unpublished or say Vector c
   ).toEqual([])
 })
 
+test("release notes contain no unfinished placeholders", async () => {
+  // The draft release job copies changelog.json word for word into the GitHub release notes, and the desktop's
+  // What's new dialog reads it from vectordev.ai, which deploys from main before any desktop release ships.
+  const notes = [
+    ...sources.filter((source) => source.file.startsWith("src/data/")),
+    { file: "public/changelog.json", text: await Bun.file(`${web}public/changelog.json`).text() },
+  ]
+  expect(
+    notes.flatMap((source) =>
+      (source.text.match(/\w*PLACEHOLDER\w*|\bTODO\b|\bTBD\b|\bFIXME\b|\bXXX\b/g) ?? []).map(
+        (match) => `${source.file}: ${match}`,
+      ),
+    ),
+  ).toEqual([])
+})
+
 test("copy does not hard-code which release is current", () => {
   // Releases ship on their own schedules, so "currently 1.99.99" goes stale without anyone touching the page.
   expect(

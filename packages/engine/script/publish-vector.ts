@@ -10,7 +10,8 @@
  *
  * Env:
  *   VECTOR_RELEASE_CATALOG_PATH / VECTOR_RELEASE_CATALOG_SHA256  reviewed workflow artifact
- *   VECTOR_CLI_VERSION   version to publish (default: packages/desktop version)
+ *   VECTOR_CLI_VERSION   version to publish (default: vectorRequiredCliVersion in packages/desktop/package.json,
+ *                        the CLI version the desktop release requires; the desktop's own version may not be a CLI release)
  *   VECTOR_CLI_TARGETS   comma list, default darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64,windows-arm64
  *                        (the desktop release refuses to start unless every one of these is on npm)
  *
@@ -33,7 +34,7 @@ process.chdir(dir)
 
 const SCOPE = "@vectordevai"
 const UMBRELLA = `${SCOPE}/cli`
-const version = process.env.VECTOR_CLI_VERSION ?? desktop.version
+const version = process.env.VECTOR_CLI_VERSION ?? desktop.vectorRequiredCliVersion
 const targets = (
   process.env.VECTOR_CLI_TARGETS ?? "darwin-arm64,darwin-x64,linux-x64,linux-arm64,windows-x64,windows-arm64"
 )

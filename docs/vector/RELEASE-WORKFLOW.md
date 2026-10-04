@@ -25,10 +25,18 @@ Set the desktop version in `packages/desktop/package.json` and record the exact
 compatible standalone CLI version in its `vectorRequiredCliVersion`. Pass the CLI
 version as `VECTOR_CLI_VERSION` to the CLI publisher. These versions may differ;
 the desktop release verifies the recorded CLI manifest and all six Linux targets.
-Plugin staging derives its default public version from the desktop version; the
-CLI publisher explicitly passes its selected version as `VECTOR_PLUGIN_VERSION` to
-both compilation and plugin staging. Internal workspace manifest versions do not
-set the public plugin artifact version.
+
+The plugin SDK `@vectordevai/plugin` is published with the CLI at the CLI's
+version. The CLI publisher passes its selected version as `VECTOR_PLUGIN_VERSION`
+to both compilation and plugin staging, so each CLI build installs the plugin SDK
+published with it. The desktop engine instead embeds `vectorRequiredCliVersion` as
+its plugin SDK version (`packages/engine/script/build-node.ts`; `VECTOR_PLUGIN_VERSION`
+or `VECTOR_REQUIRED_CLI_VERSION` override it), and the desktop release requires
+`@vectordevai/plugin` at that version, not at the desktop version. A desktop-only
+release, such as desktop 1.99.100 with the CLI and plugin at 1.99.99, therefore
+needs no npm publication. Plugin staging run on its own also defaults to
+`vectorRequiredCliVersion`. Internal workspace manifest versions do not set the
+public plugin artifact version.
 
 1. Obtain the first-publication approval, build and verify the plugin package and
    its clean-consumer checks. Review public package licensing before publication.
@@ -44,7 +52,9 @@ set the public plugin artifact version.
    its channel. See [standalone CLI releases](owner-actions/standalone-cli-release.md).
 4. Verify packages can be installed from the registry and the required standalone
    CLI release is complete. Only then create the desktop release tag and run the
-   desktop workflow. Its prepare job rejects absent or mismatched dependencies.
+   desktop workflow. Its prepare job rejects absent or mismatched dependencies:
+   the plugin and every CLI package must exist at `vectorRequiredCliVersion`. When
+   that version is already published, a desktop-only release skips steps 1 to 3.
 5. Confirm all platform installers, manifests and update channels before marking
    the release available. Unsigned releases also advance the update feeds (owner decision,
    2 October 2026, confirmed again for 1.99.99), so installed copies are offered them through

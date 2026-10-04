@@ -48,7 +48,11 @@ async function fixture() {
     Bun.file(path.join(root, "packages/engine/script/publish-vector.ts")),
   )
   await Bun.write(path.join(dir, "script/artifact-audit.ts"), Bun.file(path.join(root, "script/artifact-audit.ts")))
-  await Bun.write(path.join(dir, "packages/desktop/package.json"), JSON.stringify({ version }))
+  // The publisher defaults to the CLI version the desktop requires, which need not be the desktop's own version.
+  await Bun.write(
+    path.join(dir, "packages/desktop/package.json"),
+    JSON.stringify({ version: "9.9.9", vectorRequiredCliVersion: version }),
+  )
   await Bun.write(
     path.join(dir, "packages/plugin/package.json"),
     JSON.stringify({ name: "@vectordevai/plugin", version: "0.1.0" }),

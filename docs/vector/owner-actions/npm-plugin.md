@@ -2,7 +2,9 @@
 
 Status: preparation only. No package has been published by this work. The owner must explicitly approve the first public publication of `@vectordevai/plugin`; choosing a release version or approving a CLI release alone does not substitute for that approval.
 
-The public SDK is built from `packages/plugin`. Its workspace manifest version is not its release version. Staging uses `VECTOR_PLUGIN_VERSION` when supplied, otherwise the selected version in `packages/desktop/package.json`. Publish the plugin before the CLI and desktop artifacts at the same approved version.
+The public SDK is built from `packages/plugin`. Its workspace manifest version is not its release version. The plugin and the CLI share one version: publish the plugin before the CLI packages at the CLI's approved version. Staging uses `VECTOR_PLUGIN_VERSION` when supplied (the CLI publisher always passes its CLI version), otherwise `vectorRequiredCliVersion` in `packages/desktop/package.json`.
+
+The desktop app installs the plugin SDK at its `vectorRequiredCliVersion`, not at its own version, and the desktop release requires the plugin at that version. A desktop release whose required CLI is already published, such as desktop 1.99.100 requiring CLI 1.99.99, needs no new plugin publication.
 
 ## Owner decisions before publication
 
@@ -13,7 +15,7 @@ The public SDK is built from `packages/plugin`. Its workspace manifest version i
 
 ## Reviewable preparation
 
-From `packages/plugin`, set `VECTOR_PLUGIN_VERSION` to the approved release version, then run:
+From `packages/plugin`, set `VECTOR_PLUGIN_VERSION` to the approved CLI release version, then run:
 
 ```sh
 bun run stage
