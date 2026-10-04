@@ -11,6 +11,8 @@ import type { BrowserAgentInput, FatalRendererError, ServerReadyData, TitlebarTh
 import { runDesktopMenuAction } from "./desktop-menu-actions"
 import { assertAttachmentBudget, createPickedFileAuthorizations } from "./attachment-picker"
 import { getStore, removeStoreFileIfEmpty } from "./store"
+import { isRendererStoreName } from "./store-keys"
+import { write } from "./logging"
 import { sendBugReport } from "./bug-report"
 import { askHelpAssistant, type HelpInput } from "./help-assistant"
 import { clearLocalMemory, readLocalMemory, writeLocalMemory } from "./local-memory"
@@ -119,6 +121,16 @@ import {
   startDeviceLogin,
   type GithubCreateRepoInput,
 } from "./github-auth"
+import {
+  cancelGithubClone,
+  cancelGithubClonesFor,
+  cloneGithubRepository,
+  githubCloneParent,
+  parseGithubCloneSource,
+  pickGithubCloneParent,
+  sweepGithubCloneSecrets,
+  type GithubCloneInput,
+} from "./github-clone"
 import { pushWithOauth as pushToGitlab, type GitlabOauthPushInput } from "./gitlab"
 import {
   cancelDeviceLogin as cancelGitlabLogin,
@@ -459,10 +471,51 @@ export function registerIpcHandlers(deps: Deps) {
   handle("github-auth-open-verification", () => openVerification())
   handle("github-auth-complete", () => completeDeviceLogin())
   handle("github-auth-cancel", () => cancelDeviceLogin())
-  handle("github-auth-logout", () => logoutGithub())
+  handle("github-auth-logout", () => {
+    logoutGithub()
+    // A clone Vector couldn't clean up may have left the token in its private auth config.
+    void sweepGithubCloneSecrets()
+  })
   handle("github-repos-list", () => listRepos())
   handle("github-repos-create", (_event: IpcMainInvokeEvent, input: GithubCreateRepoInput) => createRepo(input))
   handle("github-push-oauth", (_event: IpcMainInvokeEvent, input: GithubOauthPushInput) => pushWithOauth(input))
+  // Removes auth config that a clone interrupted by a crash or force quit left behind.
+  void sweepGithubCloneSecrets()
+  handle("github-clone-parent", () => githubCloneParent())
+  handle("github-clone-pick-parent", (event: IpcMainInvokeEvent) =>
+    pickGithubCloneParent(BrowserWindow.fromWebContents(event.sender) ?? undefined),
+  )
+  handle("github-clone-parse", (_event: IpcMainInvokeEvent, input: unknown) =>
+    parseGithubCloneSource(typeof input === "string" ? input : ""),
+  )
+  handle("github-clone-start", (event: IpcMainInvokeEvent, input: GithubCloneInput) => {
+    const sender = event.sender
+    const senderID = sender.id
+    // Closing, reloading or crashing the page that started a clone cancels it, which also removes the partial folder.
+    // A reload keeps the same WebContents, so "destroyed" alone would leave a run no page can cancel.
+    const stop = () => cancelGithubClonesFor(senderID)
+    const navigated = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>) => {
+      if (details.isMainFrame && !details.isSameDocument) stop()
+    }
+    sender.once("destroyed", stop)
+    sender.on("did-start-navigation", navigated)
+    sender.on("render-process-gone", stop)
+    return cloneGithubRepository(input, {
+      sender: senderID,
+      emit: (progress) => {
+        if (!sender.isDestroyed()) sender.send("github-clone-progress", progress)
+      },
+      log: (line) => write("github-clone", line),
+    }).finally(() => {
+      if (sender.isDestroyed()) return
+      sender.removeListener("destroyed", stop)
+      sender.removeListener("did-start-navigation", navigated)
+      sender.removeListener("render-process-gone", stop)
+    })
+  })
+  handle("github-clone-cancel", (event: IpcMainInvokeEvent, runId: unknown) =>
+    cancelGithubClone(event.sender.id, runId),
+  )
   handle("gitlab-auth-status", () => getGitlabAuthStatus())
   handle("gitlab-auth-start", () => startGitlabLogin())
   handle("gitlab-auth-open-verification", () => openGitlabVerification())
@@ -664,7 +717,10 @@ export function registerIpcHandlers(deps: Deps) {
   handle("record-fatal-renderer-error", (_event: IpcMainInvokeEvent, error: FatalRendererError) =>
     deps.recordFatalRendererError(error),
   )
+  // The renderer reaches only its own .dat stores. vector.settings (which holds the remembered clone folder) and the
+  // encrypted sign-in stores belong to the main process.
   handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
+    if (!isRendererStoreName(name)) return null
     try {
       const store = getStore(name)
       const value = store.get(key)
@@ -675,22 +731,22 @@ export function registerIpcHandlers(deps: Deps) {
     }
   })
   handle("store-set", (_event: IpcMainInvokeEvent, name: string, key: string, value: string) => {
-    getStore(name).set(key, value)
+    getStore(requireRendererStore(name)).set(key, value)
   })
   handle("store-delete", (_event: IpcMainInvokeEvent, name: string, key: string) => {
-    getStore(name).delete(key)
+    getStore(requireRendererStore(name)).delete(key)
     void removeStoreFileIfEmpty(name)
   })
   handle("store-clear", (_event: IpcMainInvokeEvent, name: string) => {
-    getStore(name).clear()
+    getStore(requireRendererStore(name)).clear()
     void removeStoreFileIfEmpty(name)
   })
   handle("store-keys", (_event: IpcMainInvokeEvent, name: string) => {
-    const store = getStore(name)
+    const store = getStore(requireRendererStore(name))
     return Object.keys(store.store)
   })
   handle("store-length", (_event: IpcMainInvokeEvent, name: string) => {
-    const store = getStore(name)
+    const store = getStore(requireRendererStore(name))
     return Object.keys(store.store).length
   })
   handle("voice-speak", (event: IpcMainInvokeEvent, text: string) => {
@@ -855,6 +911,11 @@ export function registerIpcHandlers(deps: Deps) {
       relaunch: deps.relaunch,
     })
   })
+}
+
+function requireRendererStore(name: unknown) {
+  if (!isRendererStoreName(name)) throw new Error("Vector rejected access to a private settings store.")
+  return name
 }
 
 function safeExternalUrl(value: string) {

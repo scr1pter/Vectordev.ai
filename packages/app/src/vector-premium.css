@@ -939,7 +939,14 @@ html[data-vector-navigation-resizing] * {
   font-weight: 620;
 }
 
-.vector-home-project-deck__heading > button {
+.vector-home-project-deck__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.vector-home-project-deck__actions > button {
   display: inline-flex;
   height: 30px;
   align-items: center;
@@ -957,7 +964,7 @@ html[data-vector-navigation-resizing] * {
     color 180ms var(--vx-ease);
 }
 
-.vector-home-project-deck__heading > button:hover {
+.vector-home-project-deck__actions > button:hover {
   border-color: rgba(178, 140, 255, 0.3);
   background: rgba(147, 116, 236, 0.08);
   color: var(--vx-text);

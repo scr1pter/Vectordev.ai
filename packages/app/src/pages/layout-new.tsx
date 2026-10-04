@@ -40,6 +40,8 @@ import { SDKProvider } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useServerSDK } from "@/context/server-sdk"
 import { DialogReportBug } from "@/components/dialog-report-bug"
+import { useCloneFromGithub } from "@/components/dialog-clone-github"
+import { useLanguage } from "@/context/language"
 import { HelpPanel } from "@/features/help/help-panel"
 import { AgentDashboard } from "@/features/agents/agent-dashboard"
 import { agentReviewCopy, agentRuntimeLabel, type AgentRuntime } from "@/features/agents/agent-runtime-copy"
@@ -566,6 +568,8 @@ export default function NewLayout(props: ParentProps) {
   const server = useServer()
   const tabs = useTabs()
   const layout = useLayout()
+  const language = useLanguage()
+  const cloneFromGithub = useCloneFromGithub()
   const navigate = useNavigate()
   const location = useLocation()
   const [toolsOpen, setToolsOpen] = createSignal(false)
@@ -753,6 +757,19 @@ export default function NewLayout(props: ParentProps) {
       title: navigationVisible() ? "Hide Vector sidebar" : "Show Vector sidebar",
       category: "Vector",
       onSelect: () => setNavigationVisible((visible) => !visible),
+    },
+    // Registered here because this layout is mounted on every route, so the File menu item and the keybind work from
+    // Home as well as from a session.
+    {
+      id: "project.openGithub",
+      title: language.t("command.project.openGithub"),
+      category: language.t("command.category.project"),
+      keybind: "mod+shift+o",
+      disabled: !cloneFromGithub.available(server.current),
+      onSelect: () => {
+        const conn = server.current
+        if (conn && cloneFromGithub.available(conn)) cloneFromGithub.open(conn)
+      },
     },
   ])
   createEffect(() => {

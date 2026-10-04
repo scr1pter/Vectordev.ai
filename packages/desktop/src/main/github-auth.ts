@@ -78,6 +78,7 @@ export type GithubRepo = {
   pushedAt?: string
   defaultBranch?: string
   htmlUrl: string
+  canPush: boolean
 }
 
 export type GithubCreateRepoInput = { name: string; private: boolean; description?: string }
@@ -95,7 +96,7 @@ type DeviceFlow = {
 
 let activeFlow: DeviceFlow | null = null
 
-function apiHeaders(token: string): Record<string, string> {
+export function apiHeaders(token: string): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
     accept: "application/vnd.github+json",
@@ -303,6 +304,7 @@ type RawRepo = {
   default_branch?: string | null
   html_url?: string
   owner?: { login?: string } | null
+  permissions?: { push?: boolean } | null
 }
 
 // Exported for unit tests.
@@ -317,6 +319,9 @@ export function mapGithubRepo(raw: RawRepo): GithubRepo {
     pushedAt: raw.pushed_at ?? undefined,
     defaultBranch: raw.default_branch ?? undefined,
     htmlUrl: raw.html_url ?? (owner && name ? `https://github.com/${owner}/${name}` : ""),
+    // Organization membership lists repositories the user may only read. A response without permissions, such as a
+    // repository the user just created, is their own.
+    canPush: raw.permissions?.push ?? true,
   }
 }
 
@@ -326,11 +331,15 @@ async function requireToken(): Promise<string> {
   return token
 }
 
+// Five pages of 100 cover nearly every account; past that, pasting the repository's link still works.
+const REPO_PAGE_LIMIT = 5
+
 export async function listRepos(): Promise<GithubRepo[]> {
   const token = await requireToken()
-  const res = await fetch("https://api.github.com/user/repos?sort=pushed&per_page=100&affiliation=owner,collaborator", {
-    headers: apiHeaders(token),
-  }).catch(() => undefined)
+  const res = await fetch(
+    "https://api.github.com/user/repos?sort=pushed&per_page=100&affiliation=owner,collaborator,organization_member",
+    { headers: apiHeaders(token) },
+  ).catch(() => undefined)
   if (!res) throw new Error(NETWORK_ERROR)
   if (res.status === 401) {
     logoutGithub()
@@ -338,7 +347,33 @@ export async function listRepos(): Promise<GithubRepo[]> {
   }
   if (!res.ok) throw new Error(`GitHub returned HTTP ${res.status} while listing repositories.`)
   const raw = (await res.json().catch(() => undefined)) as RawRepo[] | undefined
-  return (Array.isArray(raw) ? raw : []).map(mapGithubRepo)
+  const later = await laterRepoPages(token, nextPageUrl(res.headers.get("link")), REPO_PAGE_LIMIT - 1)
+  // Pages can overlap when a push reorders the list mid-walk; the first (most recently pushed) copy wins.
+  const repos = new Map<string, GithubRepo>()
+  for (const repo of [...(Array.isArray(raw) ? raw : []), ...later].map(mapGithubRepo)) {
+    if (!repos.has(repo.fullName)) repos.set(repo.fullName, repo)
+  }
+  return [...repos.values()]
+}
+
+// A failed later page keeps the repositories already loaded rather than failing the whole list.
+async function laterRepoPages(token: string, url: string | undefined, remaining: number): Promise<RawRepo[]> {
+  if (!url || remaining <= 0) return []
+  const res = await fetch(url, { headers: apiHeaders(token) }).catch(() => undefined)
+  if (!res?.ok) return []
+  const raw = (await res.json().catch(() => undefined)) as RawRepo[] | undefined
+  if (!Array.isArray(raw)) return []
+  return [...raw, ...(await laterRepoPages(token, nextPageUrl(res.headers.get("link")), remaining - 1))]
+}
+
+// The rel="next" URL from GitHub's Link header. Only an api.github.com URL is followed, because the token rides along.
+// Exported for unit tests.
+export function nextPageUrl(link: string | null | undefined) {
+  const next = link
+    ?.split(",")
+    .map((part) => /<([^>]+)>\s*;\s*rel="?next"?/.exec(part.trim())?.[1])
+    .find(Boolean)
+  return next?.startsWith("https://api.github.com/") ? next : undefined
 }
 
 export async function createRepo(input: GithubCreateRepoInput): Promise<GithubRepo> {

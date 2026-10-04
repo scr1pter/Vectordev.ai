@@ -11,6 +11,18 @@ describe("desktop menu", () => {
     expect(items.every((item) => item.type === "item" && item.command === "logs.export" && !item.action)).toBe(true)
   })
 
+  test("Open from GitHub sits right after Open Project and runs through the command registry", () => {
+    const items = DESKTOP_MENU.find((menu) => menu.id === "file")?.items ?? []
+    const open = items.findIndex((item) => item.type === "item" && item.label === "Open Project...")
+    expect(open).toBeGreaterThanOrEqual(0)
+    expect(items[open + 1]).toEqual({
+      type: "item",
+      label: "Open from GitHub...",
+      command: "project.openGithub",
+      accelerator: { macos: "Shift+Cmd+O" },
+    })
+  })
+
   test("Help reports and feedback use the public Vector support form", () => {
     const help = DESKTOP_MENU.find((menu) => menu.id === "help")
     const reports = help?.items

@@ -33,6 +33,13 @@ import type {
   GithubDeviceLoginStart,
   GithubRepo,
 } from "../main/github-auth"
+import type {
+  GithubCloneInput,
+  GithubCloneParent,
+  GithubCloneParse,
+  GithubCloneProgress,
+  GithubCloneResult,
+} from "../main/github-clone"
 import type { GitlabOauthPushInput, GitlabPublishResult } from "../main/gitlab"
 import type {
   GitlabAuthStatus,
@@ -121,6 +128,16 @@ export type {
   GithubDeviceLoginStart,
   GithubRepo,
 } from "../main/github-auth"
+export type {
+  GithubCloneErrorKind,
+  GithubCloneInput,
+  GithubCloneParent,
+  GithubCloneParse,
+  GithubClonePhase,
+  GithubCloneProgress,
+  GithubCloneRepo,
+  GithubCloneResult,
+} from "../main/github-clone"
 export type { GitlabOauthPushInput, GitlabPublishResult } from "../main/gitlab"
 export type {
   GitlabAuthStatus,
@@ -923,6 +940,14 @@ export type ElectronAPI = {
       create: (input: GithubCreateRepoInput) => Promise<GithubRepo>
     }
     pushOauth: (input: GithubOauthPushInput) => Promise<GithubPublishResult>
+    clone: {
+      parent: () => Promise<GithubCloneParent>
+      pickParent: () => Promise<GithubCloneParent | null>
+      parse: (input: string) => Promise<GithubCloneParse>
+      start: (input: GithubCloneInput) => Promise<GithubCloneResult>
+      cancel: (runId: string) => Promise<void>
+      subscribe: (cb: (progress: GithubCloneProgress) => void) => () => void
+    }
   }
   gitlab: {
     auth: {

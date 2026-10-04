@@ -163,6 +163,9 @@ export function toolBinDirectories(env: PathEnvironment = process.env, platform:
       // A running app keeps the PATH it started with, so a CLI that winget, its
       // MSI, Scoop or Chocolatey installed afterwards is only found here.
       join(env.ProgramFiles || "C:\\Program Files", "GitHub CLI"),
+      // Git for Windows puts git.exe in Git\cmd, machine-wide or per-user, and only adds it to PATH for new sessions.
+      join(env.ProgramFiles || "C:\\Program Files", "Git", "cmd"),
+      join(localAppData, "Programs", "Git", "cmd"),
       join(localAppData, "Microsoft", "WinGet", "Links"),
       join(env.SCOOP || join(home, "scoop"), "shims"),
       join(env.ChocolateyInstall || "C:\\ProgramData\\chocolatey", "bin"),
