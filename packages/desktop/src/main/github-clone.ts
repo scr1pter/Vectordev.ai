@@ -94,7 +94,7 @@ const MESSAGES = {
     "Vector can only clone repositories from github.com. Paste a link like https://github.com/owner/name or type owner/name.",
   invalidRepo: "That isn't a valid GitHub repository. Use owner/name, for example octocat/Hello-World.",
   emptyFolder: "Enter a folder name.",
-  folderCharacters: 'Folder names can\'t contain / \\ : * ? " < > | or control characters.',
+  folderCharacters: "Folder names can't contain / \\ : * ? \" < > | or control characters.",
   dotFolder: "Choose a folder name other than . or ..",
   dashFolder: "Folder names can't start with a dash (-).",
   folderEnding: "Folder names can't end with a dot or a space.",
@@ -138,7 +138,10 @@ type CloneContext = { signedIn: boolean; repo: string; owner: string; parent: st
 const runs = new Map<string, CloneRun>()
 let exitHookInstalled = false
 
-export async function cloneGithubRepository(input: GithubCloneInput, deps: GithubCloneDeps): Promise<GithubCloneResult> {
+export async function cloneGithubRepository(
+  input: GithubCloneInput,
+  deps: GithubCloneDeps,
+): Promise<GithubCloneResult> {
   const runId = typeof input?.runId === "string" && RUN_ID.test(input.runId) ? input.runId : undefined
   if (!runId || runs.has(runId)) return { ok: false, kind: "invalid", error: MESSAGES.badRun }
   const run: CloneRun = { sender: deps.sender, label: "repository", created: false, canceled: false }
@@ -531,7 +534,10 @@ export function parseCloneProgress(line: string) {
   if (!match) return
   const range = PHASES[match[1] as keyof typeof PHASES]
   const percent = Math.min(100, Number(match[2]))
-  return { phase: range[0] as GithubClonePhase, percent: Math.round(range[1] + ((range[2] - range[1]) * percent) / 100) }
+  return {
+    phase: range[0] as GithubClonePhase,
+    percent: Math.round(range[1] + ((range[2] - range[1]) * percent) / 100),
+  }
 }
 
 // Patterns run in order against git's English stderr (LC_ALL=C). Messages never quote the raw output; the redacted
@@ -681,7 +687,11 @@ export function repositoryLookupResult(
   status: number | undefined,
   body: unknown,
 ): GithubRepositoryLookup {
-  const data = (body && typeof body === "object" ? body : {}) as { full_name?: unknown; private?: unknown; message?: unknown }
+  const data = (body && typeof body === "object" ? body : {}) as {
+    full_name?: unknown
+    private?: unknown
+    message?: unknown
+  }
   const message = typeof data.message === "string" ? data.message : ""
   const name = `${repo.owner}/${repo.name}`
   if (status === 200) {

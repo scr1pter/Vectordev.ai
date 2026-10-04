@@ -98,7 +98,24 @@ describe("parseGithubCloneSource", () => {
 
 describe("parseCloneFolder", () => {
   test("rejects names that are unsafe or unportable", () => {
-    for (const input of ["", "   ", "a/b", "a\\b", "a:b", "a*b", ".", "..", "-x", "con", "CON.txt", "lpt1", "x.", "x ", "a\u0001", "x".repeat(256)]) {
+    for (const input of [
+      "",
+      "   ",
+      "a/b",
+      "a\\b",
+      "a:b",
+      "a*b",
+      ".",
+      "..",
+      "-x",
+      "con",
+      "CON.txt",
+      "lpt1",
+      "x.",
+      "x ",
+      "a\u0001",
+      "x".repeat(256),
+    ]) {
       expect({ input, ok: parseCloneFolder(input).ok }).toEqual({ input, ok: false })
     }
   })
@@ -129,19 +146,64 @@ describe("classifyCloneFailure", () => {
 
   test("maps git's English errors to kinds and messages", () => {
     const cases: Array<[string, boolean, string, RegExp]> = [
-      ["xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools)", false, "git-missing", /xcode-select --install/],
-      ["remote: The 'acme' organization has enabled or enforced SAML SSO.", true, "auth", /acme requires single sign-on/],
+      [
+        "xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools)",
+        false,
+        "git-missing",
+        /xcode-select --install/,
+      ],
+      [
+        "remote: The 'acme' organization has enabled or enforced SAML SSO.",
+        true,
+        "auth",
+        /acme requires single sign-on/,
+      ],
       ["git@github.com: Permission denied (publickey).", false, "auth", /SSH key/],
-      ["fatal: unable to access 'https://github.com/acme/app.git/': The requested URL returned error: 403", true, "auth", /refused access to acme\/app/],
-      ["fatal: could not read Username for 'https://github.com': terminal prompts disabled", false, "auth", /If it's a private repository, connect GitHub/],
-      ["fatal: could not read Username for 'https://github.com': terminal prompts disabled", true, "not-found", /doesn't have access/],
+      [
+        "fatal: unable to access 'https://github.com/acme/app.git/': The requested URL returned error: 403",
+        true,
+        "auth",
+        /refused access to acme\/app/,
+      ],
+      [
+        "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+        false,
+        "auth",
+        /If it's a private repository, connect GitHub/,
+      ],
+      [
+        "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+        true,
+        "not-found",
+        /doesn't have access/,
+      ],
       ["fatal: repository 'https://github.com/acme/app.git/' not found", false, "auth", /connect GitHub/],
       ["remote: Repository not found.", true, "not-found", /couldn't find acme\/app/],
-      ["fatal: unable to access 'https://github.com/acme/app.git/': SSL certificate problem: unable to get local issuer certificate", false, "network", /http\.sslCAInfo/],
+      [
+        "fatal: unable to access 'https://github.com/acme/app.git/': SSL certificate problem: unable to get local issuer certificate",
+        false,
+        "network",
+        /http\.sslCAInfo/,
+      ],
       ["error: RPC failed; curl 92 HTTP/2 stream 5 was not closed cleanly", false, "network", /stalled or dropped/],
-      ["error: RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds", false, "network", /stalled or dropped/],
-      ["fatal: unable to access 'https://github.com/acme/app.git/': Could not resolve host: github.com", false, "network", /Couldn't reach GitHub/],
-      ["fatal: unable to access 'https://github.com/acme/app.git/': CONNECT tunnel failed, response 403", false, "network", /Couldn't reach GitHub/],
+      [
+        "error: RPC failed; curl 28 Operation too slow. Less than 1000 bytes/sec transferred the last 60 seconds",
+        false,
+        "network",
+        /stalled or dropped/,
+      ],
+      [
+        "fatal: unable to access 'https://github.com/acme/app.git/': Could not resolve host: github.com",
+        false,
+        "network",
+        /Couldn't reach GitHub/,
+      ],
+      [
+        "fatal: unable to access 'https://github.com/acme/app.git/': CONNECT tunnel failed, response 403",
+        false,
+        "network",
+        /Couldn't reach GitHub/,
+      ],
       ["fatal: write error: No space left on device", false, "disk", /enough free disk space in \/work/],
       ["error: unable to create file src/very/long/path.ts: Filename too long", false, "disk", /core\.longpaths/],
       ["fatal: could not create work tree dir 'app': Permission denied", false, "disk", /can't write to \/work/],
@@ -192,12 +254,17 @@ describe("repositoryLookupResult", () => {
     ).toMatchObject({ ok: false, kind: "auth", error: expect.stringContaining("acme requires single sign-on") })
     expect(
       repositoryLookupResult(repo, true, 403, {
-        message: "Although you appear to have the correct authorization credentials, the `acme` organization has enabled OAuth App access restrictions.",
+        message:
+          "Although you appear to have the correct authorization credentials, the `acme` organization has enabled OAuth App access restrictions.",
       }),
     ).toMatchObject({ ok: false, kind: "auth", error: expect.stringContaining("blocks apps") })
     expect(repositoryLookupResult(repo, false, 403, { message: "API rate limit exceeded" })).toEqual({ ok: true, repo })
     expect(repositoryLookupResult(repo, true, undefined, undefined)).toEqual({ ok: true, repo })
-    expect(repositoryLookupResult(repo, true, 200, { full_name: "../../x" })).toEqual({ ok: true, repo, private: undefined })
+    expect(repositoryLookupResult(repo, true, 200, { full_name: "../../x" })).toEqual({
+      ok: true,
+      repo,
+      private: undefined,
+    })
   })
 })
 
@@ -234,7 +301,14 @@ describe("gitCloneEnvironment", () => {
       ["http.https://github.com/.extraheader", buildOauthPushHeader(TOKEN)],
     ])
     expect(Object.values(env).some((value) => value?.includes(TOKEN))).toBe(false)
-    for (const key of ["GIT_ASKPASS", "SSH_ASKPASS", "GIT_CONFIG_PARAMETERS", "GIT_TRACE_CURL", "GIT_DIR", "VECTOR_CLOUD_TOKEN"]) {
+    for (const key of [
+      "GIT_ASKPASS",
+      "SSH_ASKPASS",
+      "GIT_CONFIG_PARAMETERS",
+      "GIT_TRACE_CURL",
+      "GIT_DIR",
+      "VECTOR_CLOUD_TOKEN",
+    ]) {
       expect({ key, value: env[key as keyof typeof env] }).toEqual({ key, value: undefined })
     }
     expect(env).toMatchObject({
@@ -463,7 +537,19 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     const target = join(parent, "n")
     execFileSync(realGit!, ["init", "-q", target])
     execFileSync(realGit!, ["-C", target, "remote", "add", "origin", "https://github.com/O/N.git"])
-    execFileSync(realGit!, ["-C", target, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"])
+    execFileSync(realGit!, [
+      "-C",
+      target,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "init",
+    ])
     const result = await start().result
     expect(result).toEqual({ ok: true, directory: target, reused: true, fullName: "o/n" })
     expect(await exists(join(state, "argv"))).toBe(false)

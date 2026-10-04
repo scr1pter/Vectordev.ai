@@ -37,6 +37,7 @@ import { Icon } from "@vectordevai/ui/icon"
 import { DateTime } from "luxon"
 import { useDialog } from "@vectordevai/ui/context/dialog"
 import { useDirectoryPicker } from "@/components/directory-picker"
+import { useCloneFromGithub } from "@/components/dialog-clone-github"
 import { DialogSelectServer, useServerManagementController } from "@/components/dialog-select-server"
 import { DialogServerV2 } from "@/components/settings-v2/dialog-server-v2"
 import { ServerConnection, serverName, useServer } from "@/context/server"
@@ -249,6 +250,7 @@ export function NewHome() {
   const sync = useServerSync()
   const layout = useLayout()
   const pickDirectory = useDirectoryPicker()
+  const cloneFromGithub = useCloneFromGithub()
   const dialog = useDialog()
   const server = useServer()
   const language = useLanguage()
@@ -566,7 +568,25 @@ export function NewHome() {
       hidden: true,
       onSelect: () => focusSessionSearch?.(),
     },
+    // The legacy layout registers project.open only around /:dir routes, so Home needs its own for File > Open
+    // Project... and the keybind.
+    {
+      id: "project.open",
+      title: language.t("command.project.open"),
+      category: language.t("command.category.project"),
+      keybind: "mod+o",
+      onSelect: () => {
+        const conn = focusedServer() ?? global.servers.list()[0]
+        if (conn) chooseProject(conn)
+      },
+    },
   ])
+
+  const cloneAction = createMemo(() => {
+    const conn = focusedServer() ?? global.servers.list()[0]
+    if (!conn || !cloneFromGithub.available(conn)) return
+    return () => cloneFromGithub.open(conn)
+  })
 
   createEffect(() => {
     const list = global.servers.list()
@@ -794,6 +814,7 @@ export function NewHome() {
             const conn = focusedServer() ?? global.servers.list()[0]
             if (conn) chooseProject(conn)
           }}
+          cloneFromGithub={cloneAction()}
         />
 
         <HomeUsagePulse
@@ -878,6 +899,7 @@ export function NewHome() {
                             if (conn) chooseProject(conn)
                           }
                     }
+                    onCloneFromGithub={newSessionProject() ? undefined : cloneAction()}
                   />
                 }
               >
@@ -916,7 +938,12 @@ export function NewHome() {
   )
 }
 
-function HomeAutomations(props: { supported: boolean; records: AutomationRecord[]; error?: string; onOpen: () => void }) {
+function HomeAutomations(props: {
+  supported: boolean
+  records: AutomationRecord[]
+  error?: string
+  onOpen: () => void
+}) {
   // Still on the schedule. A settled one-shot keeps its runAt in the past, so
   // counting it would pin the summary to "Due now" forever.
   const pending = createMemo(() =>
@@ -999,9 +1026,7 @@ function HomeProjectRules(props: { onOpen: () => void }) {
         <span class="block [font-family:var(--vx-mono)] text-[9.5px] uppercase [font-weight:650] text-v2-text-text-faint">
           Project rules
         </span>
-        <strong class="mt-1 block text-[15px] [font-weight:620] text-v2-text-text-base">
-          Your house, your rules
-        </strong>
+        <strong class="mt-1 block text-[15px] [font-weight:620] text-v2-text-text-base">Your house, your rules</strong>
       </div>
       <button
         type="button"
@@ -1138,6 +1163,7 @@ function HomeProjectDeck(props: {
   editProject: (server: ServerConnection.Any, project: LocalProject) => void
   closeProject: (server: ServerConnection.Any, directory: string) => void
   chooseProject: () => void
+  cloneFromGithub?: () => void
 }) {
   return (
     <section class="vector-home-project-deck" aria-label="Repositories">
@@ -1176,6 +1202,22 @@ function HomeProjectDeck(props: {
           <strong>Open another repository</strong>
           <small>Choose a local folder</small>
         </button>
+        <Show when={props.cloneFromGithub}>
+          {(clone) => (
+            <button
+              type="button"
+              class="vector-home-project-card vector-home-project-card--add"
+              data-action="home-open-github"
+              onClick={() => clone()()}
+            >
+              <span>
+                <Icon name="github" size="small" />
+              </span>
+              <strong>Open from GitHub</strong>
+              <small>Clone a repository</small>
+            </button>
+          )}
+        </Show>
       </div>
     </section>
   )
@@ -1895,6 +1937,7 @@ function HomeSessionRow(props: {
 function HomeSessionsEmpty(props: {
   onNewSession?: () => void
   onOpenProject?: () => void
+  onCloneFromGithub?: () => void
   hasKnownProjects?: boolean
 }) {
   const language = useLanguage()
@@ -1929,6 +1972,19 @@ function HomeSessionsEmpty(props: {
             onClick={onOpenProject()}
           >
             Open repository
+          </ButtonV2>
+        )}
+      </Show>
+      <Show when={props.onCloneFromGithub}>
+        {(onCloneFromGithub) => (
+          <ButtonV2
+            data-action="home-open-github"
+            variant="neutral"
+            size="normal"
+            icon="download"
+            onClick={onCloneFromGithub()}
+          >
+            Open from GitHub
           </ButtonV2>
         )}
       </Show>

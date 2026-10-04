@@ -101,6 +101,12 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       { type: "item", label: "Open Project...", command: "project.open", accelerator: { macos: "Cmd+O" } },
       {
         type: "item",
+        label: "Open from GitHub...",
+        command: "project.openGithub",
+        accelerator: { macos: "Shift+Cmd+O" },
+      },
+      {
+        type: "item",
         label: "New Window",
         action: "window.new",
         accelerator: { macos: "Cmd+Shift+N", windows: "Ctrl+Shift+N" },

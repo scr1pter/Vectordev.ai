@@ -162,7 +162,9 @@ export function GithubDeviceSignIn(props: {
   async function waitForAuthorization() {
     if (!auth) return
     waiting = true
-    const outcome = await auth.complete().catch((error: unknown) => ({ ok: false, login: undefined, error: messageOf(error) }))
+    const outcome = await auth
+      .complete()
+      .catch((error: unknown) => ({ ok: false, login: undefined, error: messageOf(error) }))
     waiting = false
     if (disposed) return
     if (outcome.ok) {
