@@ -660,24 +660,16 @@ export default function NewLayout(props: ParentProps) {
       .catch(() => setExternalAgentStatuses([]))
       .finally(() => setExternalAgentsChecking(false))
   }
+  // Detect once each time the composer opens. A failed detection leaves the list empty, and treating that as "not yet
+  // checked" re-ran the probes in a loop for as long as the composer stayed open; Re-check is the retry.
+  let externalAgentsAttempted = false
   createEffect(() => {
+    if (!parallelComposerOpen()) externalAgentsAttempted = false
     if (!parallelComposerOpen() || parallelLaunchMode() !== "agent") return
     void refreshOpenTeams()
-    if (externalAgentStatuses().length || externalAgentsChecking()) return
-    const api = (
-      globalThis.window?.api as
-        | (typeof globalThis.window.api & {
-            externalAgents?: { detect?: () => Promise<ExternalAgentStatus[]> }
-          })
-        | undefined
-    )?.externalAgents
-    if (!api?.detect) return
-    setExternalAgentsChecking(true)
-    void api
-      .detect()
-      .then(setExternalAgentStatuses)
-      .catch(() => setExternalAgentStatuses([]))
-      .finally(() => setExternalAgentsChecking(false))
+    if (externalAgentStatuses().length || externalAgentsAttempted) return
+    externalAgentsAttempted = true
+    detectExternalRuntimes()
   })
   const [parallelDetailTab, setParallelDetailTab] = createSignal<"session" | "review">("session")
   const [diffViewMode, setDiffViewMode] = createSignal<DiffViewMode>("agent")

@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process"
+import { spawn } from "node:child_process"
 import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, extname, join, relative } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
@@ -24,6 +24,7 @@ import {
   getCloudProviderRuntimeAuth,
 } from "./cloud-connections"
 import { extractDeployUrl, normalizeDeployUrl } from "./publish-url"
+import { agentEnvironment, resolveAgentPath, runCli, shimmedCommand } from "./external-agents"
 
 export { normalizeDeployUrl } from "./publish-url"
 
@@ -111,20 +112,21 @@ function emitProgress(
   emit({ runId: input.runId, stage, level, message, at: new Date().toISOString() })
 }
 
-function execOk(command: string, args: string[]) {
-  return new Promise<boolean>((resolve) => {
-    execFile(command, args, { timeout: 10_000, env: untrustedChildEnvironment() }, (error) => resolve(!error))
-  })
+// `path` is what resolveAgentPath found. npm installs vercel, netlify and npx as .cmd shims on Windows: a bare name
+// never finds them there (libuv's PATH search only tries .com and .exe), and Node will not run a .cmd itself, so
+// runCli launches it through cmd.exe.
+function execOk(path: string | undefined, args: string[]) {
+  if (!path) return Promise.resolve(false)
+  return runCli(path, args, 10_000, agentEnvironment()).then((result) => !result.failed)
 }
 
 // Capture stdout so we can read the logged-in account (`vercel whoami`).
 // Read-only; returns undefined when the CLI is missing or not logged in.
-function execOut(command: string, args: string[]) {
-  return new Promise<string | undefined>((resolve) => {
-    execFile(command, args, { timeout: 10_000, env: untrustedChildEnvironment() }, (error, stdout) =>
-      resolve(error ? undefined : stdout.trim() || undefined),
-    )
-  })
+function execOut(path: string | undefined, args: string[]) {
+  if (!path) return Promise.resolve(undefined)
+  return runCli(path, args, 10_000, agentEnvironment()).then((result) =>
+    result.failed ? undefined : result.stdout.trim() || undefined,
+  )
 }
 
 function runProcess(input: {
@@ -133,6 +135,7 @@ function runProcess(input: {
   cwd: string
   timeoutMs?: number
   shell?: boolean
+  windowsVerbatimArguments?: boolean
   onOutput?: (output: string) => void
   env?: NodeJS.ProcessEnv
 }) {
@@ -141,6 +144,7 @@ function runProcess(input: {
       cwd: input.cwd,
       env: untrustedChildEnvironment(process.env, input.env, { CI: "1", FORCE_COLOR: "0" }),
       shell: input.shell,
+      windowsVerbatimArguments: input.windowsVerbatimArguments,
     })
     let output = ""
     const capture = (chunk: Buffer) => {
@@ -170,20 +174,22 @@ function runProcess(input: {
 export async function detectPublishTargets(): Promise<PublishTarget[]> {
   const vercelConnection = cachedCloudProviderConnection("vercel")
   const netlifyConnection = cachedCloudProviderConnection("netlify")
-  const [vercel, netlify, npx] = await Promise.all([
-    execOk("vercel", ["--version"]),
-    execOk("netlify", ["--version"]),
-    execOk("npx", ["--version"]),
-  ])
+  // Each is the CLI's resolved path when it runs, so a deploy launches exactly what was detected.
+  const [vercel, netlify, npx] = await Promise.all(
+    ["vercel", "netlify", "npx"].map(async (cli) => {
+      const path = await resolveAgentPath(cli, agentEnvironment())
+      return (await execOk(path, ["--version"])) ? path : undefined
+    }),
+  )
   // Only ask who's logged in when the CLI is actually installed.
   const [vercelAccount, netlifyAccount] = await Promise.all([
     vercel
-      ? execOut("vercel", ["whoami"])
+      ? execOut(vercel, ["whoami"])
       : npx
-        ? execOut("npx", ["--yes", "vercel", "whoami"])
+        ? execOut(npx, ["--yes", "vercel", "whoami"])
         : Promise.resolve(undefined),
     netlify
-      ? execOut("netlify", ["status"]).then((out) => out?.match(/Email:\s*(\S+)/i)?.[1])
+      ? execOut(netlify, ["status"]).then((out) => out?.match(/Email:\s*(\S+)/i)?.[1])
       : Promise.resolve(undefined),
   ])
   return [
@@ -199,21 +205,21 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
     {
       id: "vercel",
       label: vercel ? "Vercel" : "Vercel (via npx)",
-      command: vercel ? ["vercel"] : ["npx", "--yes", "vercel"],
+      command: vercel ? [vercel] : [npx ?? "npx", "--yes", "vercel"],
       loginHint: vercelConnection.connected
         ? "Connected through Vector Cloud."
         : "Connect Vercel in Vector Cloud, or sign in with the Vercel CLI.",
-      available: (vercel || npx) && Boolean(vercelConnection.connected || vercelAccount),
+      available: Boolean(vercel || npx) && Boolean(vercelConnection.connected || vercelAccount),
       account: vercelConnection.account ?? vercelAccount,
     },
     {
       id: "netlify",
       label: netlify ? "Netlify" : "Netlify (via npx)",
-      command: netlify ? ["netlify"] : ["npx", "--yes", "netlify-cli"],
+      command: netlify ? [netlify] : [npx ?? "npx", "--yes", "netlify-cli"],
       loginHint: netlifyConnection.connected
         ? "Connected through Vector Cloud."
         : "Connect Netlify in Vector Cloud, or sign in with the Netlify CLI.",
-      available: (netlify || npx) && Boolean(netlifyConnection.connected || netlifyAccount),
+      available: Boolean(netlify || npx) && Boolean(netlifyConnection.connected || netlifyAccount),
       account: netlifyConnection.account ?? netlifyAccount,
     },
   ]
@@ -828,11 +834,13 @@ export async function publishProject(
       : `Creating an immutable ${target.label} preview.`,
   )
 
+  const launch = shimmedCommand(target.command[0], args)
   const command = await new Promise<{ ok: boolean; code: number | null; signal: NodeJS.Signals | null; log: string }>(
     (resolve) => {
-      const child = spawn(target.command[0], args, {
+      const child = spawn(launch.command, launch.args, {
         cwd: directory,
         env: untrustedChildEnvironment(process.env, providerEnv, { CI: "1", FORCE_COLOR: "0" }),
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
       })
       activePublishes.set(publishKey, child)
       let output = ""
@@ -962,9 +970,9 @@ async function vercelDeploymentCommand(deployment: CloudDeployment, action: "pro
   const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
   if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
   const auth = await getCloudProviderRuntimeAuth("vercel")
+  const launch = shimmedCommand(target.command[0], [...target.command.slice(1), action, deployment.url, "--yes"])
   const result = await runProcess({
-    command: target.command[0],
-    args: [...target.command.slice(1), action, deployment.url, "--yes"],
+    ...launch,
     cwd: deployment.deploymentPath ?? deployment.projectPath,
     env: auth.token ? { VERCEL_TOKEN: auth.token } : undefined,
   })
@@ -1056,19 +1064,19 @@ export async function fetchDeploymentRuntimeLogs(input: DeploymentActionInput): 
   const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
   if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
   const auth = await getCloudProviderRuntimeAuth("vercel")
+  const launch = shimmedCommand(target.command[0], [
+    ...target.command.slice(1),
+    "logs",
+    "--deployment",
+    deployment.url,
+    "--json",
+    "--limit",
+    "100",
+    "--since",
+    "1h",
+  ])
   const result = await runProcess({
-    command: target.command[0],
-    args: [
-      ...target.command.slice(1),
-      "logs",
-      "--deployment",
-      deployment.url,
-      "--json",
-      "--limit",
-      "100",
-      "--since",
-      "1h",
-    ],
+    ...launch,
     cwd: deployment.deploymentPath ?? deployment.projectPath,
     timeoutMs: 30_000,
     env: auth.token ? { VERCEL_TOKEN: auth.token } : undefined,
