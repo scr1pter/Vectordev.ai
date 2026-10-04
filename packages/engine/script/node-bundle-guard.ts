@@ -54,9 +54,10 @@ export function unguardedBunReferences(code: string, allow: { module: string; ap
     }
     if (char === "/" && next === "/") {
       const end = code.indexOf("\n", index) === -1 ? code.length : code.indexOf("\n", index)
-      // Bun.build marks the start of each module's code with `// <path>` at column 0.
-      const marker = /^\/\/ (\S+)$/.exec(code.slice(index, end))
-      if (marker && (index === 0 || code[index - 1] === "\n")) module = marker[1]
+      // Bun.build marks the start of each module's code with `// <path>` at column 0. The Windows release build runs
+      // this guard too, so a backslash path still has to match the allowed entries.
+      const marker = /^\/\/ (\S+)\r?$/.exec(code.slice(index, end))
+      if (marker && (index === 0 || code[index - 1] === "\n")) module = marker[1].replaceAll("\\", "/")
       index = end
       continue
     }

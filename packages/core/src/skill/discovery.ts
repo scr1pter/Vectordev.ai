@@ -111,7 +111,11 @@ const layer = Layer.effect(
         )
         if (!data) return []
 
-        const sourceRoot = path.resolve(global.cache, "skills", createHash("sha256").update(base).digest("hex").slice(0, 16))
+        const sourceRoot = path.resolve(
+          global.cache,
+          "skills",
+          createHash("sha256").update(base).digest("hex").slice(0, 16),
+        )
         return yield* Effect.forEach(
           data.skills.flatMap((skill) => {
             if (!isSafeSegment(skill.name)) {
