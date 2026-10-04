@@ -29,6 +29,7 @@ import { Dialog } from "@vectordevai/ui/dialog"
 import { getFilename } from "@vectordevai/core/util/path"
 import { Session } from "@vectordevai/sdk/v2/client"
 import { usePlatform } from "@/context/platform"
+import { useUpdaterAction } from "@/components/updater-action"
 import { useSettings } from "@/context/settings"
 import { createStore, produce } from "solid-js/store"
 import { DragDropProvider, DragDropSensors, DragOverlay, SortableProvider, closestCenter } from "@thisbeyond/solid-dnd"
@@ -163,7 +164,8 @@ export default function LegacyLayout(props: ParentProps) {
     if (state?.status !== "ready") return
     return state.version
   }
-  const installUpdate = () => void platform.updater?.install()
+  const updater = useUpdaterAction()
+  const installUpdate = () => void updater.install()
   const titlebarUpdate: TitlebarUpdate = {
     version: updateVersion,
     installing: () => platform.updater?.state().status === "installing",

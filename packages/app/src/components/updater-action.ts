@@ -40,16 +40,35 @@ export async function updateVectorToLatest(updater: UpdaterPlatform | undefined)
   return updater.state()
 }
 
+export function updaterFailure(updater: UpdaterPlatform | undefined, error: unknown) {
+  const state = updater?.state()
+  // The desktop bridge prefixes a rejected call with its IPC channel, so prefer the message the updater published
+  // with its error state.
+  if (state?.status === "error") return state.message
+  return error instanceof Error ? error.message : String(error)
+}
+
+// Reports a failed install through onError instead of rejecting: the install is started from click handlers that
+// would otherwise leave the rejection unhandled.
+export async function installUpdate(updater: UpdaterPlatform | undefined, onError: (message: string) => void) {
+  await updater?.install().catch((error) => onError(updaterFailure(updater, error)))
+}
+
 export function useUpdaterAction() {
   const platform = usePlatform()
   const language = useLanguage()
   const action = createMemo(() => updaterAction(platform.updater?.state()))
+  const failed = (message: string) => {
+    showToast({ title: language.t("common.requestFailed"), description: message })
+  }
+  const install = () => installUpdate(platform.updater, failed)
 
   return {
     action,
+    install,
     async run() {
       const run = action().run
-      if (run === "install") return platform.updater?.install()
+      if (run === "install") return install()
       if (run !== "check") return
 
       const state = await platform.updater?.check()
@@ -62,7 +81,7 @@ export function useUpdaterAction() {
         })
       }
       if (state?.status === "error") {
-        showToast({ title: language.t("common.requestFailed"), description: state.message })
+        failed(state.message)
       }
     },
     async updateLatest() {
@@ -77,13 +96,10 @@ export function useUpdaterAction() {
           })
         }
         if (state.status === "error") {
-          showToast({ title: language.t("common.requestFailed"), description: state.message })
+          failed(state.message)
         }
       } catch (error) {
-        showToast({
-          title: language.t("common.requestFailed"),
-          description: error instanceof Error ? error.message : String(error),
-        })
+        failed(updaterFailure(platform.updater, error))
       }
     },
   }

@@ -14,6 +14,7 @@ import {
 } from "@/features/privacy/telemetry"
 import { errorDescriptionKey } from "./error-description"
 import { DialogReportBug } from "@/components/dialog-report-bug"
+import { updaterFailure } from "@/components/updater-action"
 import { openSupportReport } from "@/features/help/support-report"
 
 export type InitError = {
@@ -264,9 +265,7 @@ export const ErrorPage: Component<ErrorPageProps> = (props) => {
     await platform.updater
       ?.install()
       .then(() => setStore("actionError", undefined))
-      .catch((err) => {
-        setStore("actionError", formatError(err, language.t))
-      })
+      .catch((err) => setStore("actionError", updaterFailure(platform.updater, err)))
   }
 
   const updateVersion = () => {

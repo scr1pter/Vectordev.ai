@@ -18,6 +18,7 @@ import { useCommand } from "@/context/command"
 import { useLayout } from "@/context/layout"
 import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
+import { useUpdaterAction } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
@@ -3303,6 +3304,7 @@ export default function NewLayout(props: ParentProps) {
   globalThis.window?.addEventListener("keydown", handleGlobalKeyDown, { capture: true })
   onCleanup(() => globalThis.window?.removeEventListener("keydown", handleGlobalKeyDown, { capture: true }))
 
+  const updater = useUpdaterAction()
   const update: TitlebarUpdate = {
     version: () => {
       const state = platform.updater?.state()
@@ -3310,7 +3312,7 @@ export default function NewLayout(props: ParentProps) {
       return state.version
     },
     installing: () => platform.updater?.state().status === "installing",
-    install: () => void platform.updater?.install(),
+    install: () => void updater.install(),
   }
 
   const renderExternalAgentWorkspace = (recordAccessor: () => ParallelWorkspaceRecord) => {

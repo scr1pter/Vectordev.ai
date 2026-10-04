@@ -1,16 +1,19 @@
+import { constants } from "node:fs"
+import { access } from "node:fs/promises"
+import { dirname } from "node:path"
 import { app, dialog } from "electron"
 import pkg from "electron-updater"
 import { UPDATER_DISABLED_REASON, UPDATER_ENABLED } from "./constants"
-import { createUpdaterController, type UpdaterReadyRecord } from "./updater-controller"
+import { createUpdaterController, startPlatformInstall, type UpdaterReadyRecord } from "./updater-controller"
 import { getLogger } from "./logging"
 import { getStore } from "./store"
 import { setAppQuitting } from "./windows"
-import { launchMacUpdateInstaller } from "./mac-update-installer"
+import { prepareMacUpdateInstaller, recordUpdateFailure, takeUpdateFailure } from "./mac-update-installer"
 
 const { autoUpdater } = pkg
 const key = "ready"
 
-export function setupAutoUpdater(stop: () => Promise<void>) {
+export function setupAutoUpdater(input: { stop: () => Promise<void>; relaunch: () => void }) {
   const logger = getLogger()
   autoUpdater.logger = logger
   autoUpdater.channel = "latest"
@@ -28,8 +31,9 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
   })
 
   const store = getStore("vector.updater")
+  const userData = app.getPath("userData")
   let downloadedFiles: string[] = []
-  return createUpdaterController({
+  const controller = createUpdaterController({
     enabled: UPDATER_ENABLED,
     currentVersion: app.getVersion(),
     backend: {
@@ -38,26 +42,45 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
         downloadedFiles = await autoUpdater.downloadUpdate()
         return downloadedFiles
       },
-      quitAndInstall: async () => {
-        try {
-          if (process.platform === "darwin") {
-            const archive = downloadedFiles.find((file) => file.endsWith(".zip"))
-            if (!archive) throw new Error("Vector could not find the downloaded macOS update")
-            await launchMacUpdateInstaller(archive)
-            setAppQuitting()
-            app.quit()
-            return
+      prepareInstall: async (version) => {
+        if (process.platform === "darwin") {
+          const installer = await prepareMacUpdateInstaller({
+            archive: downloadedFiles.find((file) => file.endsWith(".zip")),
+            executable: app.getPath("exe"),
+            userData,
+            version,
+            from: app.getVersion(),
+          })
+          return {
+            handOff: () => {
+              installer.launch()
+              setAppQuitting()
+              app.quit()
+            },
+            discard: installer.discard,
           }
+        }
 
-          // quitAndInstall closes all windows before emitting before-quit, so
-          // flag the quit first to keep window ids persisted for restore.
-          setAppQuitting()
-          autoUpdater.quitAndInstall()
-        } catch (error) {
-          // The install failed and the app keeps running; clear the flag so
-          // deliberate window closes prune ids again.
-          setAppQuitting(false)
-          throw error
+        // electron-updater replaces an AppImage by deleting it and moving the download into its folder.
+        const appImage = process.env.APPIMAGE
+        if (appImage) {
+          await access(dirname(appImage), constants.W_OK).catch(() => {
+            throw new Error(
+              `Vector cannot replace ${appImage} because its folder is not writable for your account. Move the AppImage to a folder you can write to, reopen it and try again.`,
+            )
+          })
+        }
+        return {
+          handOff: () => {
+            // quitAndInstall closes all windows before emitting before-quit, so
+            // flag the quit first to keep window ids persisted for restore.
+            setAppQuitting()
+            const refused = startPlatformInstall(autoUpdater)
+            if (!refused) return
+            // The app keeps running; clear the flag so deliberate window closes prune ids again.
+            setAppQuitting(false)
+            throw refused
+          },
         }
       },
     },
@@ -70,16 +93,38 @@ export function setupAutoUpdater(stop: () => Promise<void>) {
       set: (value) => store.set(key, value),
       clear: () => store.delete(key),
     },
-    stop,
+    failure: takeUpdateFailure(userData),
+    stop: input.stop,
+    record: (failure) => recordUpdateFailure(userData, failure),
+    // Relaunching is the one reliable way back to a running local server; the next launch reports the recorded failure.
+    restart: input.relaunch,
     log: (message, data) => logger.log(message, data),
   })
+
+  // The only error a new controller starts in is an install the previous run could not finish, e.g. the macOS helper
+  // reopened the old app after it failed.
+  const state = controller.getState()
+  if (state.status === "error") {
+    void dialog.showMessageBox({
+      type: "error",
+      title: "Update Error",
+      message: "Vector couldn't install the update.",
+      detail: state.message,
+    })
+  }
+  return controller
 }
 
 export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoUpdater>, alertOnFail: boolean) {
   const state = await controller.check()
   if (state.status === "error") {
     if (!alertOnFail) return
-    await dialog.showMessageBox({ type: "error", message: "Update check failed.", title: "Update Error" })
+    await dialog.showMessageBox({
+      type: "error",
+      message: "Update check failed.",
+      detail: state.message,
+      title: "Update Error",
+    })
     return
   }
   if (state.status === "up-to-date") {
@@ -97,5 +142,13 @@ export async function showUpdaterDialog(controller: ReturnType<typeof setupAutoU
     defaultId: 0,
     cancelId: 1,
   })
-  if (response.response === 0) await controller.install()
+  if (response.response !== 0) return
+  await controller.install().catch((error) =>
+    dialog.showMessageBox({
+      type: "error",
+      message: "Vector couldn't install the update.",
+      detail: error instanceof Error ? error.message : String(error),
+      title: "Update Error",
+    }),
+  )
 }

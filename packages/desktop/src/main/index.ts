@@ -197,7 +197,13 @@ const main = Effect.gen(function* () {
     requestQuit()
     setAppQuitting()
     void stopSidecars().finally(() => {
-      app.relaunch()
+      // An AppImage runs from a temporary mount that is removed when this process exits, so relaunch the AppImage
+      // file instead. APPIMAGE alone can be inherited from another AppImage (e.g. a dev run from its terminal), so
+      // only trust it when this executable is inside APPDIR. Electron drops the original arguments whenever execPath
+      // is given, so pass them on.
+      const appDir = process.env.APPDIR
+      const appImage = appDir && process.execPath.startsWith(`${appDir}/`) ? process.env.APPIMAGE : undefined
+      app.relaunch(appImage ? { execPath: appImage, args: process.argv.slice(1) } : undefined)
       app.exit(0)
     })
   }
@@ -355,7 +361,7 @@ const main = Effect.gen(function* () {
   app.setAsDefaultProtocolClient("vector")
   registerRendererProtocol()
   setDockIcon()
-  const updater = setupAutoUpdater(stopSidecars)
+  const updater = setupAutoUpdater({ stop: stopSidecars, relaunch })
   registerIpcHandlers({
     killSidecar: () => killSidecar(),
     relaunch,
@@ -384,7 +390,7 @@ const main = Effect.gen(function* () {
   })
   registerWslIpcHandlers(wslServers)
   void updater.start()
-  const updateTimer = setInterval(() => void updater.check(), 10 * 60 * 1000)
+  const updateTimer = setInterval(() => void updater.poll(), 10 * 60 * 1000)
   updateTimer.unref()
   app.once("will-quit", () => clearInterval(updateTimer))
   yield* Effect.promise(() => startNetLog()).pipe(

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { updaterAction, updateVectorToLatest } from "./updater-action"
+import { installUpdate, updaterAction, updaterFailure, updateVectorToLatest } from "./updater-action"
 import type { UpdaterPlatform, UpdaterState } from "@/updater"
 
 describe("updaterAction", () => {
@@ -103,3 +103,72 @@ describe("an updater that cannot run", () => {
   })
 })
 
+describe("an install that fails", () => {
+  const rejected = new Error(
+    "Error invoking remote method 'updater-install': Error: Vector 2.0.0 could not be installed. Move Vector to your Applications folder.",
+  )
+
+  test("reports the message the updater published with its error state", () => {
+    const updater: UpdaterPlatform = {
+      state: () => ({
+        status: "error",
+        message: "Vector 2.0.0 could not be installed. Move Vector to your Applications folder.",
+      }),
+      check: async () => ({ status: "up-to-date" }),
+      install: async () => {},
+    }
+
+    expect(updaterFailure(updater, rejected)).toBe(
+      "Vector 2.0.0 could not be installed. Move Vector to your Applications folder.",
+    )
+  })
+
+  test("falls back to the rejection when the updater published no error", () => {
+    const updater: UpdaterPlatform = {
+      state: () => ({ status: "ready", version: "2.0.0" }),
+      check: async () => ({ status: "ready", version: "2.0.0" }),
+      install: async () => {},
+    }
+
+    expect(updaterFailure(updater, rejected)).toBe(rejected.message)
+    expect(updaterFailure(undefined, "offline")).toBe("offline")
+  })
+
+  test("reports a rejected install with the updater's message instead of leaving it unhandled", async () => {
+    let state: UpdaterState = { status: "ready", version: "2.0.0" }
+    const updater: UpdaterPlatform = {
+      state: () => state,
+      check: async () => state,
+      async install() {
+        state = {
+          status: "error",
+          message: "Vector 2.0.0 could not be installed. Move Vector to your Applications folder.",
+        }
+        throw rejected
+      },
+    }
+    const errors: string[] = []
+
+    await expect(installUpdate(updater, (message) => errors.push(message))).resolves.toBeUndefined()
+
+    expect(errors).toEqual(["Vector 2.0.0 could not be installed. Move Vector to your Applications folder."])
+  })
+
+  test("reports nothing when the install starts", async () => {
+    const calls: string[] = []
+    const updater: UpdaterPlatform = {
+      state: () => ({ status: "installing", version: "2.0.0" }),
+      check: async () => ({ status: "ready", version: "2.0.0" }),
+      install: async () => {
+        calls.push("install")
+      },
+    }
+    const errors: string[] = []
+
+    await installUpdate(updater, (message) => errors.push(message))
+    await installUpdate(undefined, (message) => errors.push(message))
+
+    expect(calls).toEqual(["install"])
+    expect(errors).toEqual([])
+  })
+})
