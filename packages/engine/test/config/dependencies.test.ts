@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import path from "node:path"
 import fs from "node:fs/promises"
 import { pathToFileURL } from "node:url"
+import { createRequire } from "node:module"
 import { Effect, Layer } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Global } from "@vectordevai/core/global"
@@ -15,6 +16,35 @@ const dependencyLayer = (cache: string, add: Npm.Interface["add"]) =>
     [Global.node, Global.layerWith({ cache })],
     [Npm.node, Layer.mock(Npm.Service, { add })],
   ])
+
+async function diag(label: string, file: string, extra: Record<string, unknown> = {}) {
+  if (!process.env.VECTOR_DIAG) return
+  const dir = path.dirname(file)
+  const attempt = (run: () => unknown) => {
+    try {
+      return run()
+    } catch (error) {
+      return String(error)
+    }
+  }
+  console.error(
+    label,
+    JSON.stringify(
+      {
+        file,
+        resolveSync: attempt(() => Bun.resolveSync("@vectordevai/plugin", dir)),
+        metaResolve: attempt(() => import.meta.resolve("@vectordevai/plugin", pathToFileURL(file).href)),
+        paths: createRequire(file).resolve.paths("@vectordevai/plugin"),
+        localLink: await fs.realpath(path.join(dir, "node_modules", "@vectordevai", "plugin")).catch((error) => String(error)),
+        realDir: await fs.realpath(dir).catch((error) => String(error)),
+        env: Object.fromEntries(Object.entries(process.env).filter((entry) => /NODE|BUN|VECTOR|XDG|TEMP|TMP|HOME/.test(entry[0]))),
+        ...extra,
+      },
+      null,
+      1,
+    ),
+  )
+}
 
 async function loadOffline(entry: string, directory: string) {
   const child = Bun.spawn(
@@ -154,6 +184,7 @@ test("cached SDK imports work offline through a shared link and preserve a proje
   const file = path.join(tmp.path, "pinned", "plugins", "plugin.mjs")
   await Bun.write(file, 'import { tool } from "@vectordevai/plugin"; export default tool({});\n')
   expect(await ConfigDependencies.link(pathToFileURL(file).href, cache)).toBe(true)
+  await diag("DIAG1", file, { pinned: await fs.realpath(pinned).catch((error) => String(error)) })
   expect((await import(pathToFileURL(file).href)).default).toEqual({ pinned: true })
   expect(await Bun.file(path.join(pinned, "index.js")).text()).toContain("pinned: true")
   expect(await fs.lstat(path.join(path.dirname(file), "node_modules")).catch(() => undefined)).toBeUndefined()
@@ -197,7 +228,9 @@ test("an SDK-dependent plugin prefers a completed shared SDK over its bundled fa
   )
   await Bun.write(path.join(sdk, "index.js"), 'export const tool = () => ({ source: "shared" });\n')
   await Bun.write(ConfigDependencies.readyFile(cache), ConfigDependencies.specifier)
-  expect(await loadOffline(entry, tmp.path)).toEqual({ source: "shared" })
+  const reloaded = await loadOffline(entry, tmp.path)
+  await diag("DIAG2", entry, { reloaded, sdk, ready: ConfigDependencies.readyFile(cache), specifier: ConfigDependencies.specifier })
+  expect(reloaded).toEqual({ source: "shared" })
   expect(await fs.realpath(path.join(path.dirname(entry), "node_modules", ConfigDependencies.packageName))).toBe(
     await fs.realpath(sdk),
   )
