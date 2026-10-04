@@ -1,7 +1,11 @@
-name: Vector production schema checks
+name: Vector production checks
 
 on:
   deployment_status:
+  # Firewall and project settings change in the Vercel dashboard without a deployment, and a challenge on the
+  # legacy licence routes walls desktop builds before 1.99.99, so those routes are also checked every hour.
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,3 +23,15 @@ jobs:
           bun-version: 1.3.14
       - name: Verify public schema routes
         run: bun script/verify-deployed-schemas.ts https://vectordev.ai
+
+  legacy-desktop-access:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Verify the licence routes desktop builds before 1.99.99 call
+        run: bun script/verify-legacy-desktop-access.ts https://vectordev.ai

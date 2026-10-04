@@ -12,6 +12,10 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       return json(response, 200, {
         access: true,
         state: "beta",
+        // These builds store this answer. When a later launch cannot reach vectordev.ai they stay open for 7 days
+        // after the last check, but only while expiresAt is in the future; without it an activated copy is walled
+        // on its first offline launch.
+        expiresAt: "2100-01-01T00:00:00.000Z",
         message: "Vector is free. Choose Check for Updates to install the latest version.",
       })
     throw new ApiError(405, "METHOD_NOT_ALLOWED", "Use GET or POST for this endpoint.")

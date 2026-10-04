@@ -1487,7 +1487,15 @@ jobs:
               exit 1
             }
           done
-          echo "Verified production account configuration and anonymous download gate."
+
+          # Windows and Linux desktop builds from 1.17.29 to 1.99.8 hide the whole app, Check for Updates included,
+          # unless the legacy licence routes let them in. Refuse to publish while those routes would wall them, so a
+          # release never ships that they cannot reach.
+          bun script/verify-legacy-desktop-access.ts "$api_origin" || {
+            echo "Production licence routes would wall desktop builds before 1.99.99; refusing to publish release pointers."
+            exit 1
+          }
+          echo "Verified production account configuration, anonymous download gate and legacy desktop access."
 
       - name: Commit Vector download and update pointers
         env:

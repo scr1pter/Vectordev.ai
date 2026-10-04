@@ -86,6 +86,20 @@ jobs:
         working-directory: packages/engine
         run: bun run test:httpapi
 
+      # The repo-root test/ suite covers the hosted API in api/ and its vercel.json routes. It is not a workspace,
+      # so turbo skips it, and Vercel deploys main without waiting for the desktop release workflow that also runs it.
+      - name: Run hosted API tests
+        if: runner.os == 'Linux'
+        working-directory: test
+        run: GITHUB_ACTIONS=false bun test --only-failures
+
+      # packages/web has no test script, so turbo skips its tests. This one keeps the site from calling a shipped
+      # desktop release unpublished or telling people Vector cannot update itself.
+      - name: Run website release copy tests
+        if: runner.os == 'Linux'
+        working-directory: packages/web
+        run: GITHUB_ACTIONS=false bun test test/release-copy.test.ts
+
   engine-windows:
     name: engine (windows, shard ${{ matrix.shard }}/4)
     strategy:
