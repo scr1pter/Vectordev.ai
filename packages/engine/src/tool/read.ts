@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { Effect, Option, Schema, Scope, Stream } from "effect"
 import { NonNegativeInt } from "@vectordevai/core/schema"
 import * as path from "path"
@@ -339,7 +340,7 @@ export const ReadTool = Tool.define<
         params.limit ?? DEFAULT_READ_LIMIT,
         Option.getOrUndefined(stat.mtime)?.getTime(),
         Number(stat.size),
-        Bun.hash(sample).toString(16),
+        createHash("sha256").update(sample).digest("hex"),
       ].join("|")
       // The same lines of an unchanged file are already in the conversation, so point back to them rather than send
       // the file again. Only a visible result counts: ctx.messages starts after the last compaction summary, and a

@@ -269,7 +269,7 @@ async function prepared(directory: string, operation: string): Promise<Result> {
       }
       if (status.value.state === "failed") throw new Error(status.value.message ?? "Deferred operation failed.")
     }
-    await Bun.sleep(100)
+    await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error(
     `The deferred operation did not become ready. Inspect ${statusFile}; the current executable has not been replaced.`,

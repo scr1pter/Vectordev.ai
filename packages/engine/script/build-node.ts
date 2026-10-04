@@ -2,6 +2,7 @@
 
 import { Script } from "@vectordevai/script"
 import { prepareGitLab } from "../../../script/prepare-gitlab"
+import { unguardedBunReferences } from "./node-bundle-guard"
 import path from "path"
 import { fileURLToPath } from "url"
 
@@ -15,7 +16,7 @@ const generated = await import("./generate.ts")
 
 await prepareGitLab()
 
-await Bun.build({
+const result = await Bun.build({
   target: "node",
   entrypoints: ["./src/node.ts"],
   outdir: "./dist/node",
@@ -32,5 +33,17 @@ await Bun.build({
     "vector-web-ui.gen.ts": "",
   },
 })
+
+// The desktop app runs this bundle on Node.js, where any Bun API it reaches throws "Bun is not defined".
+for (const output of result.outputs.filter((item) => item.path.endsWith(".js"))) {
+  const unguarded = unguardedBunReferences(await output.text())
+  if (!unguarded.length) continue
+  throw new Error(
+    [
+      `${path.relative(dir, output.path)} uses Bun-only APIs that throw on Node.js. Use a Node API, guard the reference with typeof Bun on the same line, or add a commented entry to script/node-bundle-guard.ts:`,
+      ...unguarded.map((item) => `  ${item.module || "(unknown module)"}: ${item.api} (bundle line ${item.line})`),
+    ].join("\n"),
+  )
+}
 
 console.log("Build complete")
