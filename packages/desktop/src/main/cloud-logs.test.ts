@@ -5,7 +5,16 @@ import { join } from "node:path"
 // imports electron's shell, so both are mocked before the module is imported.
 const userDataPath = "/tmp/vector-cloud-logs-test"
 const store = new Map<string, Map<string, unknown>>()
-const electronMock = { app: { getPath: () => userDataPath }, shell: { openExternal: async () => {} } }
+// Bun keeps a module mock for the rest of the run, so it carries every export a later test file's imports bind.
+const electronMock = {
+  app: { getPath: () => userDataPath },
+  shell: { openExternal: async () => {} },
+  safeStorage: {
+    isEncryptionAvailable: () => false,
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString(),
+  },
+}
 mock.module("electron", () => ({ default: electronMock, ...electronMock }))
 mock.module("./store", () => ({
   getStore: (name = "default") => {

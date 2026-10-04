@@ -6,7 +6,16 @@ import { join } from "node:path"
 
 const userDataPath = join(tmpdir(), "vector-cloud-console-test")
 const stores = new Map<string, Map<string, unknown>>()
-const electron = { app: { getPath: () => userDataPath }, shell: { openExternal: async () => {} } }
+// Bun keeps a module mock for the rest of the run, so it carries every export a later test file's imports bind.
+const electron = {
+  app: { getPath: () => userDataPath },
+  shell: { openExternal: async () => {} },
+  safeStorage: {
+    isEncryptionAvailable: () => false,
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString(),
+  },
+}
 mock.module("electron", () => ({ default: electron, ...electron }))
 mock.module("./store", () => ({
   getStore: (name = "default") => {
