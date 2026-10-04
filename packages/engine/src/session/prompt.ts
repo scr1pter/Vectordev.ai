@@ -1162,6 +1162,8 @@ const layer = Layer.effect(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      // Read before the message exists: a prompt sent while a run is going joins that run.
+      const joined = (yield* status.get(input.sessionID)).type !== "idle"
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
       yield* sessions.touch(input.sessionID)
@@ -1180,7 +1182,7 @@ const layer = Layer.effect(
       // A prompt sent while the session is busy joins the run already going, and that run can end without reading it:
       // a rejected permission, a content filter or a provider error ends the loop where it is. It is answered now,
       // unless the run was stopped.
-      if (result.info.id > message.info.id) return result
+      if (!joined || result.info.id > message.info.id) return result
       if (result.info.role === "assistant" && SessionV1.AbortedError.isInstance(result.info.error)) return result
       return yield* loop({ sessionID: input.sessionID })
     })

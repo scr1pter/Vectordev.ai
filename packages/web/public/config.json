@@ -1200,7 +1200,7 @@
             },
             "prune": {
               "type": "boolean",
-              "description": "Enable pruning of old tool outputs (default: false)"
+              "description": "Clear old tool outputs when a prompt arrives after the provider's prompt cache has expired, when the history is re-sent at full price anyway (default: true)"
             },
             "tail_turns": {
               "minimum": 0,
@@ -1219,6 +1219,16 @@
               "type": "integer",
               "maximum": 9007199254740991,
               "description": "Token buffer for compaction. Leaves enough window to avoid overflow during compaction."
+            },
+            "max_context": {
+              "minimum": 0,
+              "type": "integer",
+              "maximum": 9007199254740991,
+              "description": "Compact once the conversation reaches this many tokens, even when the model's window is larger. Every request re-sends the whole conversation, so a smaller context costs less per step. Defaults to just below a model's long-context price tier, and to 200000 for models with a window of 500000 or more and no tier; 0 uses the model's whole window."
+            },
+            "clear": {
+              "type": "boolean",
+              "description": "During a long run, clear old tool outputs once the context passes 60000 tokens and at least 40000 tokens of older output can go (default: false)"
             }
           },
           "additionalProperties": false

@@ -10,7 +10,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Definitions).toBe(SchemaEventManifest.Definitions)
     expect(EventManifest.Latest).toBe(SchemaEventManifest.Latest)
     expect(EventManifest.Durable).toBe(SchemaEventManifest.Durable)
-    expect(EventManifest.Latest.size).toBe(92)
+    expect(EventManifest.Latest.size).toBe(93)
     expect(EventManifest.Latest.get("provider.unavailable")).toBe(Integration.Event.Unavailable)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Latest.get("session.next.step.resumed")).toBe(SessionEvent.Step.Resumed)
@@ -21,7 +21,7 @@ describe("public event manifest", () => {
   })
 
   test("contains only the current step settlement versions", () => {
-    expect(EventManifest.Durable.size).toBe(38)
+    expect(EventManifest.Durable.size).toBe(39)
     expect(EventManifest.Durable.get("session.next.step.resumed.1")).toBe(SessionEvent.Step.Resumed)
     expect(EventManifest.Durable.has("session.next.step.ended.1")).toBe(false)
     expect(EventManifest.Durable.get("session.next.step.ended.2")).toBe(SessionEvent.Step.Ended)
