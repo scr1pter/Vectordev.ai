@@ -5,6 +5,7 @@ import { type Accessor, createMemo } from "solid-js"
 import type { PromptInputControls } from "@/components/prompt-input"
 import type { PromptProjectControls } from "@/components/prompt-project-selector"
 import { useDirectoryPicker } from "@/components/directory-picker"
+import { useCloneFromGithub } from "@/components/dialog-clone-github"
 import { useGlobal } from "@/context/global"
 import { useLayout } from "@/context/layout"
 import { useLocal } from "@/context/local"
@@ -75,6 +76,7 @@ export function createPromptProjectControls() {
   const tabs = useTabs()
   const global = useGlobal()
   const pickDirectory = useDirectoryPicker()
+  const cloneFromGithub = useCloneFromGithub()
   const [search] = useSearchParams<{ draftId?: string }>()
   const projectServer = () => serverSDK().server
   const projectServerCtx = createMemo(() => global.ensureServerCtx(projectServer()))
@@ -129,11 +131,27 @@ export function createPromptProjectControls() {
     })
   }
 
-  return createMemo<PromptProjectControls>(() => ({
-    available: projects(),
-    directory: sdk().directory,
-    server: server.list.length > 1 ? ServerConnection.key(projectServer()) : undefined,
-    select: selectProject,
-    add: addProject,
-  }))
+  // Cloning needs a server whose folders this computer can open: the project's own server when it can, otherwise the
+  // first one that can (with several servers, the local one).
+  const cloneServer = createMemo(() =>
+    cloneFromGithub.available(projectServer())
+      ? projectServer()
+      : server.list.find((conn) => cloneFromGithub.available(conn)),
+  )
+  const cloneProject = (conn: ServerConnection.Any) =>
+    cloneFromGithub.open(conn, (directory) =>
+      selectProject(directory, server.list.length > 1 ? ServerConnection.key(conn) : undefined),
+    )
+
+  return createMemo<PromptProjectControls>(() => {
+    const conn = cloneServer()
+    return {
+      available: projects(),
+      directory: sdk().directory,
+      server: server.list.length > 1 ? ServerConnection.key(projectServer()) : undefined,
+      select: selectProject,
+      add: addProject,
+      clone: conn ? () => cloneProject(conn) : undefined,
+    }
+  })
 }

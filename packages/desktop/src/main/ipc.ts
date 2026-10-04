@@ -123,6 +123,7 @@ import {
 } from "./github-auth"
 import {
   cancelGithubClone,
+  cancelGithubClonesFor,
   cloneGithubRepository,
   githubCloneParent,
   parseGithubCloneSource,
@@ -483,9 +484,15 @@ export function registerIpcHandlers(deps: Deps) {
   handle("github-clone-start", (event: IpcMainInvokeEvent, input: GithubCloneInput) => {
     const sender = event.sender
     const senderID = sender.id
-    // Closing or reloading the window that started a clone cancels it, which also removes the partial folder.
-    const stop = () => cancelGithubClone(senderID, input?.runId)
+    // Closing, reloading or crashing the page that started a clone cancels it, which also removes the partial folder.
+    // A reload keeps the same WebContents, so "destroyed" alone would leave a run no page can cancel.
+    const stop = () => cancelGithubClonesFor(senderID)
+    const navigated = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>) => {
+      if (details.isMainFrame && !details.isSameDocument) stop()
+    }
     sender.once("destroyed", stop)
+    sender.on("did-start-navigation", navigated)
+    sender.on("render-process-gone", stop)
     return cloneGithubRepository(input, {
       sender: senderID,
       emit: (progress) => {
@@ -493,7 +500,10 @@ export function registerIpcHandlers(deps: Deps) {
       },
       log: (line) => write("github-clone", line),
     }).finally(() => {
-      if (!sender.isDestroyed()) sender.removeListener("destroyed", stop)
+      if (sender.isDestroyed()) return
+      sender.removeListener("destroyed", stop)
+      sender.removeListener("did-start-navigation", navigated)
+      sender.removeListener("render-process-gone", stop)
     })
   })
   handle("github-clone-cancel", (event: IpcMainInvokeEvent, runId: unknown) =>

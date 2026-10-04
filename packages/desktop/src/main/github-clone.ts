@@ -1,6 +1,8 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import { rmSync } from "node:fs"
-import { lstat, mkdir, realpath, rm, stat } from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, isAbsolute, join, posix, win32 } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import electron from "electron"
@@ -9,7 +11,13 @@ import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import { buildOauthPushHeader, parseGithubRemote } from "./github"
 import { apiHeaders, getGithubToken, logoutGithub } from "./github-auth"
-import { resolveAgentPath, signalAgentProcess, stopAgentProcess, type AgentEnvironment } from "./external-agents"
+import {
+  resolveAgentPath,
+  signalAgentProcess,
+  stopAgentProcess,
+  windowsTaskkillArguments,
+  type AgentEnvironment,
+} from "./external-agents"
 import { redactText } from "./security-redaction"
 import { getStore } from "./store"
 import { GITHUB_CLONE_PARENT_KEY } from "./store-keys"
@@ -17,8 +25,9 @@ import { GITHUB_CLONE_PARENT_KEY } from "./store-keys"
 // "Open from GitHub": clone a github.com repository with the system git, then the renderer opens the folder the same
 // way Open Project does. The renderer never names a destination path. It sends one validated folder name and echoes
 // the parent folder main gave it, which is either the fixed OS default or a folder the user chose in a native picker
-// opened here. The GitHub token reaches git only through the child's environment for this one clone: never argv, the
-// remote URL, .git/config, logs, progress events or error text.
+// opened here. git clones into a hidden sibling folder that takes the chosen name only after git succeeds. The GitHub
+// token reaches git only through a private temporary config file that this one clone's environment includes: never
+// argv, the environment itself, the remote URL, .git/config, logs, progress events or error text.
 
 export type GithubCloneRepo = { owner: string; name: string }
 export type GithubCloneParse = { ok: true; repo: GithubCloneRepo } | { ok: false; error: string }
@@ -63,7 +72,9 @@ const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/
 // No leading "-", so a name can never read as an option even before the "--" in the clone command.
 const NAME = /^[A-Za-z0-9._][A-Za-z0-9._-]{0,99}$/
 const RUN_ID = /^[A-Za-z0-9-]{1,100}$/
-const XCRUN = /xcrun: error|invalid active developer path/i
+// Apple's /usr/bin/git stub on a Mac without Command Line Tools, or tools broken by an OS upgrade.
+const XCRUN = /xcrun: error|invalid active developer path|no developer tools were found|xcode-select: note/i
+const SECRETS = /^vector-git-auth-(\d+)-/
 const PROGRESS =
   /^(?:remote:\s*)?(Counting objects|Compressing objects|Receiving objects|Resolving deltas|Updating files|Filtering content):\s+(\d{1,3})%/
 const PHASES = {
@@ -75,7 +86,7 @@ const PHASES = {
   "Filtering content": ["checkout", 95, 100],
 } as const
 // Variables that only point git at the user's certificates, SSH setup or config files survive; every other GIT_*
-// variable (askpass, inherited GIT_CONFIG_*, traces that would print the header, GIT_DIR) is dropped.
+// variable (askpass, inherited GIT_CONFIG_*, traces that would print the auth config, GIT_DIR) is dropped.
 const KEEP = new Set([
   "GIT_SSL_CAINFO",
   "GIT_SSL_CAPATH",
@@ -128,7 +139,10 @@ type CloneRun = {
   sender: number
   label: string
   target?: string
-  created: boolean
+  // The hidden sibling of target that git clones into. It exists only while this run owns it.
+  partial?: string
+  // The private temporary folder holding this clone's auth config.
+  secrets?: string
   canceled: boolean
   child?: ChildProcessWithoutNullStreams
 }
@@ -144,10 +158,13 @@ export async function cloneGithubRepository(
 ): Promise<GithubCloneResult> {
   const runId = typeof input?.runId === "string" && RUN_ID.test(input.runId) ? input.runId : undefined
   if (!runId || runs.has(runId)) return { ok: false, kind: "invalid", error: MESSAGES.badRun }
-  const run: CloneRun = { sender: deps.sender, label: "repository", created: false, canceled: false }
+  const run: CloneRun = { sender: deps.sender, label: "repository", canceled: false }
   runs.set(runId, run)
   installExitHook()
   const result = await performClone(runId, run, input, deps).catch((error: unknown) => failedClone(run, error))
+  // The auth config goes as soon as git is done, whatever the outcome.
+  const secrets = run.secrets
+  if (secrets) await rm(secrets, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(() => {})
   runs.delete(runId)
   deps.log?.(
     `github clone ${run.label} -> ${run.target ?? "(no destination)"}: ${result.ok ? (result.reused ? "reused" : "ok") : result.kind}`,
@@ -161,6 +178,11 @@ export function cancelGithubClone(sender: number, runId: unknown) {
   if (!run || run.sender !== sender) return
   run.canceled = true
   if (run.child) stopAgentProcess(run.child, 3_000)
+}
+
+// A page that reloads, navigates away or crashes loses track of its runs, so main cancels all of them.
+export function cancelGithubClonesFor(sender: number) {
+  for (const [runId, run] of runs) if (run.sender === sender) cancelGithubClone(sender, runId)
 }
 
 async function performClone(
@@ -185,17 +207,19 @@ async function performClone(
   const context = { signedIn: Boolean(token), repo: fullName, owner: lookup.repo.owner, parent, target, folder }
 
   const names = new Set([run.label.toLowerCase(), fullName.toLowerCase()])
-  if ((await claimTarget(run, git, environment, names, context)) === "reused") {
+  if (await reusableClone(git, environment, names, context)) {
     return { ok: true, directory: target, reused: true, fullName }
   }
-  if (run.canceled) fail("canceled", MESSAGES.canceled)
 
+  run.partial = await createPartial(context)
   // Least privilege: a repository GitHub reports as public clones without the token.
+  const auth = token && lookup.private !== false ? await writeAuthConfig(run, token) : undefined
+  if (run.canceled) fail("canceled", MESSAGES.canceled)
   const result = await runClone(runId, run, git, {
     url: `https://github.com/${fullName}.git`,
-    target,
+    target: run.partial,
     cwd: parent,
-    env: gitCloneEnvironment(environment, lookup.private === false ? undefined : token),
+    env: gitCloneEnvironment(environment, auth),
     emit: deps.emit,
   })
   if (run.canceled) fail("canceled", MESSAGES.canceled)
@@ -203,11 +227,13 @@ async function performClone(
     const failure = classifyCloneFailure(result.output, context)
     fail(failure.kind, failure.error, { detail: failure.detail })
   }
+  await moveIntoPlace(run.partial, context)
+  run.partial = undefined
   return { ok: true, directory: target, reused: false, fullName }
 }
 
-// Removes only the folder this run created, after git has exited, so a failed or canceled clone leaves nothing behind
-// and nothing that existed before is touched.
+// Removes only the hidden folder this run created, after git has exited, so a failed or canceled clone leaves nothing
+// behind and nothing that existed before is touched.
 async function failedClone(run: CloneRun, error: unknown): Promise<GithubCloneResult> {
   const failure = run.canceled
     ? new CloneFailure("canceled", MESSAGES.canceled)
@@ -216,20 +242,19 @@ async function failedClone(run: CloneRun, error: unknown): Promise<GithubCloneRe
       : new CloneFailure("failed", `Git couldn't clone ${run.label}. Open "Git output" below for details.`, {
           detail: redactText(error instanceof Error ? error.message : String(error)),
         })
-  const target = run.target
-  const removed =
-    run.created && target
-      ? await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).then(
-          () => true,
-          () => false,
-        )
-      : true
+  const partial = run.partial
+  const removed = partial
+    ? await rm(partial, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).then(
+        () => true,
+        () => false,
+      )
+    : true
   return {
     ok: false,
     kind: failure.kind,
     error: removed
       ? failure.message
-      : `${failure.message} Vector couldn't remove the partial folder ${target}. Delete it before cloning there again.`,
+      : `${failure.message} Vector couldn't remove the unfinished clone in ${partial}. You can delete that folder.`,
     ...failure.extra,
   }
 }
@@ -272,31 +297,14 @@ function targetKey(target: string) {
   return process.platform === "win32" || process.platform === "darwin" ? target.toLowerCase() : target
 }
 
-// A missing folder is claimed with a non-recursive mkdir, which is atomic. An existing folder is reused only when it is
-// a finished clone of this repository. Symlinks are never followed.
-async function claimTarget(
-  run: CloneRun,
-  git: string,
-  environment: AgentEnvironment,
-  names: Set<string>,
-  context: CloneContext,
-) {
-  const exists = await lstat(context.target).then(
-    () => true,
-    (error: NodeJS.ErrnoException) => (error.code === "ENOENT" ? false : fsFailure(error, context)),
+// An existing folder is reused only when it is a finished clone of this repository; anything else is left alone.
+// Symlinks are never followed.
+async function reusableClone(git: string, environment: AgentEnvironment, names: Set<string>, context: CloneContext) {
+  const stats = await lstat(context.target).catch((error: NodeJS.ErrnoException) =>
+    error.code === "ENOENT" ? undefined : fsFailure(error, context),
   )
-  const created =
-    !exists &&
-    (await mkdir(context.target).then(
-      () => true,
-      (error: NodeJS.ErrnoException) => (error.code === "EEXIST" ? false : fsFailure(error, context)),
-    ))
-  if (created) {
-    run.created = true
-    return "created" as const
-  }
+  if (!stats) return false
 
-  const stats = await lstat(context.target)
   const env = gitCloneEnvironment(environment)
   // --file reads only that file (no includes, no repository discovery) and --git-dir skips discovery, so neither runs
   // into safe.directory or a parent repository.
@@ -316,14 +324,65 @@ async function claimTarget(
     ["--git-dir", join(context.target, ".git"), "rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
     env,
   )
-  if (!head.ok) {
+  // git writes HEAD before it checks out the working tree, so a clone stopped during checkout (by an older Vector, a
+  // crash, or plain git) still resolves HEAD. Only a written index without a leftover lock shows the checkout finished.
+  const finished =
+    head.ok &&
+    (await present(join(context.target, ".git", "index"))) &&
+    !(await present(join(context.target, ".git", "index.lock")))
+  if (!finished) {
     fail(
       "exists",
       `"${context.folder}" in ${context.parent} has an unfinished clone of ${context.repo}. Delete that folder or choose another folder name.`,
       { suggestedFolder: await suggestFolder(context) },
     )
   }
-  return "reused" as const
+  return true
+}
+
+function present(path: string) {
+  return lstat(path).then(
+    () => true,
+    () => false,
+  )
+}
+
+// git works in a hidden sibling, so the chosen name never holds a half-written clone that a later attempt could adopt,
+// whether the clone fails, is canceled, or Vector quits or crashes mid-clone and the cleanup can't finish.
+async function createPartial(context: CloneContext) {
+  const partial = join(
+    context.parent,
+    `.${context.folder.slice(0, 60)}.vector-partial-${randomBytes(4).toString("hex")}`,
+  )
+  await mkdir(partial).catch((error: NodeJS.ErrnoException) => fsFailure(error, context))
+  return partial
+}
+
+async function moveIntoPlace(partial: string, context: CloneContext) {
+  // On POSIX rename() would silently replace an empty folder, so a folder that appeared during the clone wins.
+  if (await present(context.target)) {
+    fail(
+      "exists",
+      `"${context.folder}" appeared in ${context.parent} while cloning. Choose another folder name or location.`,
+      { suggestedFolder: await suggestFolder(context) },
+    )
+  }
+  // Antivirus scanners and indexers briefly lock freshly written files on Windows.
+  for (let attempt = 1; ; attempt++) {
+    const error = await rename(partial, context.target).then(
+      () => undefined,
+      (error: NodeJS.ErrnoException) => error,
+    )
+    if (!error) return
+    if (attempt >= 12 || !["EPERM", "EACCES", "EBUSY"].includes(error.code ?? "")) {
+      if (error.code === "ENOSPC" || error.code === "EROFS") fsFailure(error, context)
+      fail(
+        "disk",
+        `Git finished, but Vector couldn't move the clone into ${context.target}. Another program may be using its files. Try again.`,
+      )
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
 }
 
 async function suggestFolder(context: CloneContext) {
@@ -467,19 +526,34 @@ function runClone(runId: string, run: CloneRun, git: string, command: CloneComma
   })
 }
 
-// Quitting mid-clone stops git and removes the folder this run created. On Windows a locked file can leave it behind;
-// the HEAD check then reports it as an unfinished clone instead of opening a broken repository.
+// Quitting mid-clone stops git, then removes the hidden folder and the auth config this run created. Anything a locked
+// file keeps behind stays under the hidden name, which no later clone adopts.
 function installExitHook() {
   if (exitHookInstalled) return
   exitHookInstalled = true
   process.once("exit", () => {
     for (const run of runs.values()) {
-      if (run.child) signalAgentProcess(run.child, "SIGKILL")
-      if (!run.created || !run.target) continue
-      try {
-        rmSync(run.target, { recursive: true, force: true })
-      } catch {
-        // An exit handler must not throw.
+      // An exit handler can only run synchronous work, and on Windows signalAgentProcess only starts taskkill, so
+      // git would still hold its files open during the delete below.
+      if (run.child?.pid && process.platform === "win32") {
+        try {
+          execFileSync("taskkill", windowsTaskkillArguments(run.child.pid, true), {
+            stdio: "ignore",
+            timeout: 5_000,
+            windowsHide: true,
+          })
+        } catch {
+          // taskkill fails once git has already exited.
+        }
+      }
+      if (run.child && process.platform !== "win32") signalAgentProcess(run.child, "SIGKILL")
+      for (const path of [run.partial, run.secrets]) {
+        if (!path) continue
+        try {
+          rmSync(path, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+        } catch {
+          // An exit handler must not throw.
+        }
       }
     }
   })
@@ -487,10 +561,53 @@ function installExitHook() {
 
 // ---- Auth, environment and progress ----------------------------------------------------------------------------
 
-// The token rides only in this child's environment, as GIT_CONFIG_COUNT/KEY/VALUE entries. Git applies them to this
-// one command and never writes them to .git/config, so the remote stays the plain https URL and later pushes use the
-// user's own credentials (or Vector's push, which adds the header again for that push only).
-export function gitCloneEnvironment(base: NodeJS.ProcessEnv, token?: string) {
+// The header lives in a 0600 file inside a fresh 0700 temporary folder, so it never sits in an environment variable
+// that git passes to every hook, filter and helper it starts (git-lfs, for one, copies GIT_* variables into its logs
+// inside the clone). The folder is removed when the clone ends and by the exit hook.
+async function writeAuthConfig(run: CloneRun, token: string) {
+  await sweepStaleSecrets()
+  const unusable = () =>
+    fail(
+      "disk",
+      "Vector couldn't write a private temporary file for this clone. Check that your temporary folder has free space, then try again.",
+    )
+  run.secrets = await mkdtemp(join(tmpdir(), `vector-git-auth-${process.pid}-`)).catch(unusable)
+  const file = join(run.secrets, "auth.gitconfig")
+  await writeFile(file, `[http "https://github.com/"]\n\textraheader = "${buildOauthPushHeader(token)}"\n`, {
+    mode: 0o600,
+    flag: "wx",
+  }).catch(unusable)
+  // Git for Windows reads forward slashes in include paths reliably.
+  return process.platform === "win32" ? file.replaceAll("\\", "/") : file
+}
+
+// A crash or force quit skips every cleanup, so a later clone removes auth folders whose Vector process is gone.
+async function sweepStaleSecrets() {
+  const names = await readdir(tmpdir()).catch(() => [] as string[])
+  await Promise.all(
+    names.map((name) => {
+      const pid = Number(SECRETS.exec(name)?.[1])
+      if (!pid || pid === process.pid || processAlive(pid)) return
+      return rm(join(tmpdir(), name), { recursive: true, force: true }).catch(() => {})
+    }),
+  )
+}
+
+function processAlive(pid: number) {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // EPERM: the process exists but belongs to someone else.
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+// Settings ride in this child's environment as GIT_CONFIG_COUNT/KEY/VALUE entries, and the auth header only as an
+// include of the private file from writeAuthConfig. Git applies them to this one command and never writes them to
+// .git/config, so the remote stays the plain https URL and later pushes use the user's own credentials (or Vector's
+// push, which adds the header again for that push only).
+export function gitCloneEnvironment(base: NodeJS.ProcessEnv, authConfig?: string) {
   const config = [
     // git runs an askpass helper before it checks GIT_TERMINAL_PROMPT, so none may be configured.
     ["core.askPass", ""],
@@ -499,12 +616,13 @@ export function gitCloneEnvironment(base: NodeJS.ProcessEnv, token?: string) {
     // Stalls fail as "too slow" instead of hanging; there is no overall timeout, because large repositories are slow.
     ["http.lowSpeedLimit", "1000"],
     ["http.lowSpeedTime", "60"],
-    ...(token
+    ...(authConfig
       ? [
           // With the token, no credential helper is asked or told anything, and the header never follows a redirect.
           ["credential.helper", ""],
           ["http.followRedirects", "false"],
-          ["http.https://github.com/.extraheader", buildOauthPushHeader(token)],
+          // Adds the header after the reset above. Only the file's path is ever visible in the environment.
+          ["include.path", authConfig],
         ]
       : []),
   ]
@@ -515,6 +633,11 @@ export function gitCloneEnvironment(base: NodeJS.ProcessEnv, token?: string) {
       ),
     ),
     GIT_TERMINAL_PROMPT: "0",
+    // trace2 targets in the user's or system gitconfig (enterprise telemetry often ships these off the machine) would
+    // record the included header through trace2.configParams; these override every config-set target.
+    GIT_TRACE2: "0",
+    GIT_TRACE2_EVENT: "0",
+    GIT_TRACE2_PERF: "0",
     // Git Credential Manager would otherwise open a sign-in window; saved credentials still work.
     GCM_INTERACTIVE: "never",
     // English messages, so the failure patterns below match.
@@ -546,11 +669,19 @@ export function classifyCloneFailure(
   output: string,
   context: Pick<CloneContext, "signedIn" | "repo" | "owner" | "parent">,
 ): { kind: GithubCloneErrorKind; error: string; detail?: string } {
-  const text = output.toLowerCase()
+  // Only git's own wording counts: the "Cloning into" line and every quoted URL or path are blanked, so an owner,
+  // repository or folder named like "python3-saml" or "/Users/samlee" can't pick a rule.
+  const text = output
+    .split(/[\r\n]+/)
+    .filter((line) => !/^cloning into /i.test(line.trim()))
+    .join("\n")
+    .replace(/'[^'\n]*'/g, "''")
+    .toLowerCase()
   const rules: Array<[RegExp, GithubCloneErrorKind, string]> = [
     [XCRUN, "git-missing", gitInstallHint("darwin")],
     [
-      /saml/,
+      // GitHub's wording: "enabled or enforced SAML SSO" and "protected by organization SAML enforcement".
+      /saml sso|saml enforcement|single sign-on/,
       "auth",
       `${context.owner} requires single sign-on. On github.com, go to Settings > Applications > Authorized OAuth Apps > Vector, grant access to ${context.owner}, then try again.`,
     ],

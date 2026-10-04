@@ -43,15 +43,20 @@ export function useCloneFromGithub() {
     // and remote servers could not open the folder.
     available: (conn?: ServerConnection.Any) =>
       Boolean(conn && githubApi()?.clone && directoryPickerKind(platform.platform, conn) === "native"),
-    open(conn: ServerConnection.Any) {
+    // By default the clone opens in a new draft session; a caller that already has a draft (the composer's project
+    // picker) passes its own onOpened to select the folder there instead.
+    open(conn: ServerConnection.Any, onOpened?: (directory: string) => void) {
       dialog.show(() => (
         <DialogCloneGithub
-          onOpened={(directory) => {
-            const ctx = global.ensureServerCtx(conn)
-            ctx.projects.open(directory)
-            ctx.projects.touch(directory)
-            tabs.newDraft({ server: ServerConnection.key(conn), directory })
-          }}
+          onOpened={
+            onOpened ??
+            ((directory) => {
+              const ctx = global.ensureServerCtx(conn)
+              ctx.projects.open(directory)
+              ctx.projects.touch(directory)
+              tabs.newDraft({ server: ServerConnection.key(conn), directory })
+            })
+          }
         />
       ))
     },

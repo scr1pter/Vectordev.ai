@@ -24,10 +24,13 @@ export type PromptProjectControls = {
   server?: string
   select: (worktree: string, server?: string) => void
   add: (title: string, server?: string) => void
+  // Present only when a server can open a folder cloned on this computer.
+  clone?: () => void
 }
 
 const actionPrefix = "action:"
 const projectPrefix = "project:"
+const cloneKey = "clone:github"
 
 function projectKey(project: PromptProject) {
   return `${projectPrefix}${encodeURIComponent(project.server?.key ?? "")}:${encodeURIComponent(project.worktree)}`
@@ -66,8 +69,9 @@ export function createPromptProjectController(input: {
       .available.map((project) => project.server)
       .filter((server, index, all) => server && all.findIndex((item) => item?.key === server.key) === index)
   const keys = () => {
+    const clone = input.controls().clone ? [cloneKey] : []
     if (servers().length <= 1) {
-      return [...projects().map(projectKey), actionKey(servers()[0]?.key)]
+      return [...projects().map(projectKey), actionKey(servers()[0]?.key), ...clone]
     }
     return [
       ...servers().flatMap((server) =>
@@ -76,6 +80,7 @@ export function createPromptProjectController(input: {
           .map(projectKey),
       ),
       actionKey(),
+      ...clone,
     ]
   }
   const initialActive = () => {
@@ -101,6 +106,10 @@ export function createPromptProjectController(input: {
     setStore({ open: false, search: "", active: "" })
     input.controls().add(language.t("command.project.open"), server)
   }
+  const clone = () => {
+    setStore({ open: false, search: "", active: "" })
+    input.controls().clone?.()
+  }
 
   return {
     selected,
@@ -108,6 +117,8 @@ export function createPromptProjectController(input: {
     servers,
     projectKey,
     actionKey,
+    cloneKey,
+    canClone: () => Boolean(input.controls().clone),
     open: () => store.open,
     search: () => store.search,
     active: () => store.active,
@@ -116,8 +127,10 @@ export function createPromptProjectController(input: {
       clear: () => language.t("common.clear"),
       new: () => language.t("session.new.project.new"),
       search: () => language.t("session.new.project.search"),
+      clone: () => language.t("command.project.openGithub"),
     },
     add,
+    clone,
     select,
     setOpen(open: boolean) {
       if (open) {
@@ -164,6 +177,9 @@ export function createPromptProjectController(input: {
     activeAction() {
       return store.active.startsWith(actionPrefix)
     },
+    activeClone() {
+      return store.active === cloneKey
+    },
     setSearchRef(el: HTMLInputElement) {
       searchRef = el
     },
@@ -206,10 +222,19 @@ export function PromptProjectSelector(props: {
     props.controller.setOpen(false)
     afterClose(() => props.controller.add(server))
   }
+  const selectClone = () => {
+    restoreTrigger = false
+    props.controller.setOpen(false)
+    afterClose(() => props.controller.clone())
+  }
   const selectActive = () => {
     const project = props.controller.activeProject()
     if (project) {
       selectProject(project)
+      return
+    }
+    if (props.controller.activeClone()) {
+      selectClone()
       return
     }
     if (props.controller.activeAction() && props.controller.servers().length > 1) {
@@ -395,6 +420,9 @@ export function PromptProjectSelector(props: {
                 </DropdownMenu.Portal>
               </DropdownMenu.Sub>
             </Show>
+            <Show when={props.controller.canClone()}>
+              <CloneAction controller={props.controller} onSelect={selectClone} />
+            </Show>
           </div>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
@@ -404,16 +432,30 @@ export function PromptProjectSelector(props: {
 
 export function PromptProjectAddButton(props: { controller: PromptProjectController }) {
   return (
-    <button
-      data-action="prompt-project"
-      type="button"
-      class="flex h-7 min-w-0 max-w-[160px] items-center gap-1.5 rounded-sm px-2 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
-      onClick={() => props.controller.add()}
-    >
-      <Icon name="folder-add-left" size="small" class="shrink-0 text-v2-icon-icon-muted" />
-      <span class="min-w-0 truncate leading-5">{props.controller.labels.new()}</span>
-      <Icon name="chevron-down" size="small" class="shrink-0 text-v2-icon-icon-muted" />
-    </button>
+    <>
+      <button
+        data-action="prompt-project"
+        type="button"
+        class="flex h-7 min-w-0 max-w-[160px] items-center gap-1.5 rounded-sm px-2 text-[13px] font-[440] leading-5 tracking-[-0.04px] text-v2-text-text-faint transition-colors hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
+        onClick={() => props.controller.add()}
+      >
+        <Icon name="folder-add-left" size="small" class="shrink-0 text-v2-icon-icon-muted" />
+        <span class="min-w-0 truncate leading-5">{props.controller.labels.new()}</span>
+        <Icon name="chevron-down" size="small" class="shrink-0 text-v2-icon-icon-muted" />
+      </button>
+      <Show when={props.controller.canClone()}>
+        <button
+          data-action="prompt-project-github"
+          type="button"
+          class="flex size-7 shrink-0 items-center justify-center rounded-sm text-v2-icon-icon-muted transition-colors hover:bg-v2-overlay-simple-overlay-hover focus-visible:bg-v2-overlay-simple-overlay-hover focus-visible:outline-none"
+          title={props.controller.labels.clone()}
+          aria-label={props.controller.labels.clone()}
+          onClick={() => props.controller.clone()}
+        >
+          <Icon name="github" size="small" />
+        </button>
+      </Show>
+    </>
   )
 }
 
@@ -537,6 +579,27 @@ function ProjectAction(props: {
       <Icon name="plus" size="small" />
       <DropdownMenu.ItemLabel class="min-w-0 truncate leading-5">
         {props.controller.labels.add()}
+      </DropdownMenu.ItemLabel>
+    </DropdownMenu.Item>
+  )
+}
+
+function CloneAction(props: { controller: PromptProjectController; onSelect: () => void }) {
+  return (
+    <DropdownMenu.Item
+      id={props.controller.cloneKey}
+      data-option-key={props.controller.cloneKey}
+      class={projectActionClass}
+      classList={{ "!bg-v2-overlay-simple-overlay-hover": props.controller.active() === props.controller.cloneKey }}
+      onMouseEnter={() => {
+        props.controller.setActive(props.controller.cloneKey)
+        props.controller.focusSearch()
+      }}
+      onSelect={props.onSelect}
+    >
+      <Icon name="github" size="small" />
+      <DropdownMenu.ItemLabel class="min-w-0 truncate leading-5">
+        {props.controller.labels.clone()}
       </DropdownMenu.ItemLabel>
     </DropdownMenu.Item>
   )

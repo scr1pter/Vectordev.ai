@@ -1169,10 +1169,20 @@ function HomeProjectDeck(props: {
           <span>Repositories</span>
           <strong>Pick up where you left off</strong>
         </div>
-        <button type="button" onClick={props.chooseProject}>
-          <IconV2 name="folder-add-left" />
-          Add repository
-        </button>
+        <div class="vector-home-project-deck__actions">
+          <Show when={props.cloneFromGithub}>
+            {(clone) => (
+              <button type="button" data-action="home-deck-open-github" onClick={() => clone()()}>
+                <Icon name="github" size="small" />
+                From GitHub
+              </button>
+            )}
+          </Show>
+          <button type="button" onClick={props.chooseProject}>
+            <IconV2 name="folder-add-left" />
+            Add repository
+          </button>
+        </div>
       </div>
       <div class="vector-home-project-deck__rail">
         <For each={props.projects}>
