@@ -29,7 +29,7 @@ vector
 
 Published builds and their notes are at [vectordev.ai/releases](https://vectordev.ai/releases).
 
-**Release status.** Desktop **1.99.100** and CLI **1.99.99** are published, including the guarded personal OpenRouter free-model setup described below. Installed copies update with Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS. Vector is free; model access follows the provider you connect. Version 2 is reserved. See the [release notes](https://vectordev.ai/releases#release-1-99-100) for what changed and what remains unavailable.
+**Release status.** Desktop **1.99.101** and CLI **1.99.99** are published, including the guarded personal OpenRouter free-model setup described below. Installed copies update with Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS. Vector is free; model access follows the provider you connect. Version 2 is reserved. See the [release notes](https://vectordev.ai/releases#release-1-99-101) for what changed and what remains unavailable.
 
 ## Features
 

@@ -21,7 +21,7 @@ export const upcomingRelease = {
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.100"
+export const publishedDesktopVersion = "1.99.101"
 
 export const releaseSeries: VectorRelease[] = [
   {
@@ -632,8 +632,6 @@ export const release199: VectorRelease[] = [
   {
     version: "1.99.101",
     title: "Open a GitHub repository from Vector",
-    availability:
-      "Upcoming, not published: 1.99.101 is prepared as an unsigned desktop release. Desktop downloads remain at 1.99.100 until its installers are published, and the npm CLI and plugin SDK stay at 1.99.99.",
     summary:
       "Besides opening a folder on your computer, you can now open a repository from GitHub: choose Open from GitHub on the Home screen or in the project menu, or press Shift+Cmd+O (Shift+Ctrl+O on Windows and Linux). Pick one of your repositories or paste a GitHub link, choose where to put it, and Vector clones it with a progress bar and opens it like Open Project. Public repositories work without signing in; connect GitHub to see your own and your organizations' repositories and to clone private ones. Vector uses your GitHub sign-in only for the clone and never writes it into the repository, its settings or Vector's logs, and a canceled or failed clone leaves nothing behind and never replaces an existing folder. Push to GitHub now lists only repositories you can push to, and on Windows Vector also finds Git for Windows installed after Vector started. The terminal agent stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
   },
