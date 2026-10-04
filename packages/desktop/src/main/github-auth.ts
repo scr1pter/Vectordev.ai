@@ -78,6 +78,7 @@ export type GithubRepo = {
   pushedAt?: string
   defaultBranch?: string
   htmlUrl: string
+  canPush: boolean
 }
 
 export type GithubCreateRepoInput = { name: string; private: boolean; description?: string }
@@ -303,6 +304,7 @@ type RawRepo = {
   default_branch?: string | null
   html_url?: string
   owner?: { login?: string } | null
+  permissions?: { push?: boolean } | null
 }
 
 // Exported for unit tests.
@@ -317,6 +319,9 @@ export function mapGithubRepo(raw: RawRepo): GithubRepo {
     pushedAt: raw.pushed_at ?? undefined,
     defaultBranch: raw.default_branch ?? undefined,
     htmlUrl: raw.html_url ?? (owner && name ? `https://github.com/${owner}/${name}` : ""),
+    // Organization membership lists repositories the user may only read. A response without permissions, such as a
+    // repository the user just created, is their own.
+    canPush: raw.permissions?.push ?? true,
   }
 }
 

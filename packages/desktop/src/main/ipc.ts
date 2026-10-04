@@ -128,6 +128,7 @@ import {
   githubCloneParent,
   parseGithubCloneSource,
   pickGithubCloneParent,
+  sweepGithubCloneSecrets,
   type GithubCloneInput,
 } from "./github-clone"
 import { pushWithOauth as pushToGitlab, type GitlabOauthPushInput } from "./gitlab"
@@ -470,10 +471,16 @@ export function registerIpcHandlers(deps: Deps) {
   handle("github-auth-open-verification", () => openVerification())
   handle("github-auth-complete", () => completeDeviceLogin())
   handle("github-auth-cancel", () => cancelDeviceLogin())
-  handle("github-auth-logout", () => logoutGithub())
+  handle("github-auth-logout", () => {
+    logoutGithub()
+    // A clone Vector couldn't clean up may have left the token in its private auth config.
+    void sweepGithubCloneSecrets()
+  })
   handle("github-repos-list", () => listRepos())
   handle("github-repos-create", (_event: IpcMainInvokeEvent, input: GithubCreateRepoInput) => createRepo(input))
   handle("github-push-oauth", (_event: IpcMainInvokeEvent, input: GithubOauthPushInput) => pushWithOauth(input))
+  // Removes auth config that a clone interrupted by a crash or force quit left behind.
+  void sweepGithubCloneSecrets()
   handle("github-clone-parent", () => githubCloneParent())
   handle("github-clone-pick-parent", (event: IpcMainInvokeEvent) =>
     pickGithubCloneParent(BrowserWindow.fromWebContents(event.sender) ?? undefined),

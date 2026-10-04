@@ -217,7 +217,8 @@ export function DialogGithubPush(props: { projectPath: string }) {
     setRepoError(undefined)
     setRepos(undefined)
     try {
-      setRepos(api?.repos ? await api.repos.list() : [])
+      // The list includes organization repositories the user may only read, which can't take a push.
+      setRepos(api?.repos ? (await api.repos.list()).filter((repo) => repo.canPush !== false) : [])
     } catch (error) {
       setRepos([])
       setRepoError(messageOf(error))

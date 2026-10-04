@@ -90,7 +90,15 @@ describe("mapGithubRepo", () => {
       pushedAt: "2026-07-01T00:00:00Z",
       defaultBranch: "main",
       htmlUrl: "https://github.com/octo/hello",
+      canPush: true,
     })
+  })
+
+  test("reads push access, treating a missing answer as the user's own repository", () => {
+    expect(mapGithubRepo({ full_name: "acme/app", permissions: { push: true } }).canPush).toBe(true)
+    expect(mapGithubRepo({ full_name: "acme/app", permissions: { push: false } }).canPush).toBe(false)
+    expect(mapGithubRepo({ full_name: "acme/app", permissions: null }).canPush).toBe(true)
+    expect(mapGithubRepo({ full_name: "acme/app" }).canPush).toBe(true)
   })
 
   test("fills gaps from full_name and drops null timestamps", () => {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { chmod, chown, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -31,6 +31,7 @@ const {
   parseCloneProgress,
   parseGithubCloneSource,
   repositoryLookupResult,
+  sweepGithubCloneSecrets,
 } = await import("./github-clone")
 const { buildOauthPushHeader } = await import("./github")
 
@@ -338,7 +339,8 @@ describe("gitCloneEnvironment", () => {
       ["http.lowSpeedLimit", "1000"],
       ["http.lowSpeedTime", "60"],
       ["credential.helper", ""],
-      ["http.followRedirects", "false"],
+      ["http.https://github.com/.sslVerify", "true"],
+      ["http.https://github.com/.followRedirects", "false"],
       ["include.path", "/private/tmp/vector-git-auth-1-x/auth.gitconfig"],
     ])
     expect(Object.values(env).some((value) => value?.toUpperCase().includes("AUTHORIZATION"))).toBe(false)
@@ -374,6 +376,51 @@ describe("gitCloneEnvironment", () => {
     ])
     expect(Object.values(env).some((value) => value?.includes("leaked"))).toBe(false)
   })
+
+  test("a Git older than 2.31 gets the same settings as quoted GIT_CONFIG_PARAMETERS", () => {
+    const env = gitCloneEnvironment(base, "/home/o'brien/auth.gitconfig", true)
+    expect(env).not.toHaveProperty("GIT_CONFIG_COUNT")
+    expect(env.GIT_CONFIG_PARAMETERS).toBe(
+      [
+        "'core.askPass='",
+        "'http.https://github.com/.extraheader='",
+        "'http.lowSpeedLimit=1000'",
+        "'http.lowSpeedTime=60'",
+        "'credential.helper='",
+        "'http.https://github.com/.sslVerify=true'",
+        "'http.https://github.com/.followRedirects=false'",
+        "'include.path=/home/o'\\''brien/auth.gitconfig'",
+      ].join(" "),
+    )
+  })
+
+  test.skipIf(process.platform === "win32" || !Bun.which("git"))(
+    "with a token, the user's own config can't turn off TLS verification or follow redirects",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "vector-clone-config-"))
+      await writeFile(
+        join(dir, ".gitconfig"),
+        '[http]\n\tsslVerify = false\n\tfollowRedirects = true\n[http "https://github.com/"]\n\tsslVerify = false\n\tfollowRedirects = true\n',
+      )
+      const auth = join(dir, "it's", "auth.gitconfig")
+      const read = (env: NodeJS.ProcessEnv, ...args: string[]) =>
+        execFileSync("git", ["config", ...args], { cwd: dir, env, encoding: "utf8" }).trim()
+      for (const legacy of [false, true]) {
+        const env = gitCloneEnvironment({ PATH: process.env.PATH, HOME: dir, GIT_CONFIG_NOSYSTEM: "1" }, auth, legacy)
+        const url = "https://github.com/o/n.git"
+        expect({ legacy, sslVerify: read(env, "--get-urlmatch", "http.sslverify", url) }).toEqual({
+          legacy,
+          sslVerify: "true",
+        })
+        expect({ legacy, follow: read(env, "--get-urlmatch", "http.followredirects", url) }).toEqual({
+          legacy,
+          follow: "false",
+        })
+        expect({ legacy, include: read(env, "--get", "include.path") }).toEqual({ legacy, include: auth })
+      }
+      await rm(dir, { recursive: true, force: true })
+    },
+  )
 })
 
 describe("destination parent", () => {
@@ -410,15 +457,11 @@ case "$1" in
   clone)
     printf '%s\\n' "$@" > "$FAKE_GIT_STATE/argv"
     env > "$FAKE_GIT_STATE/env"
-    i=0
-    while [ "$i" -lt "\${GIT_CONFIG_COUNT:-0}" ]; do
-      eval "key=\\$GIT_CONFIG_KEY_$i value=\\$GIT_CONFIG_VALUE_$i"
-      if [ "$key" = include.path ]; then
-        printf '%s' "$value" > "$FAKE_GIT_STATE/auth-path"
-        cat "$value" > "$FAKE_GIT_STATE/auth"
-      fi
-      i=$((i + 1))
-    done
+    auth=$("$REAL_GIT" config --get include.path)
+    if [ -n "$auth" ]; then
+      printf '%s' "$auth" > "$FAKE_GIT_STATE/auth-path"
+      cat "$auth" > "$FAKE_GIT_STATE/auth"
+    fi
     case "$FAKE_GIT_MODE" in
       fail)
         echo "Cloning into '$5'..." >&2
@@ -439,6 +482,13 @@ case "$1" in
     printf 'Resolving deltas: 100%% (5/5), done.\\n' >&2
     mkdir -p "$5/.git"
     printf '[remote "origin"]\\n\\turl = %s\\n' "$4" > "$5/.git/config"
+    # The immutable flag makes rename fail with EPERM, the way an open file does on Windows.
+    case "$FAKE_GIT_MODE" in
+      pin) chattr +i "$5" ;;
+      pin-briefly)
+        chattr +i "$5"
+        (sleep 1; chattr -i "$5") </dev/null >/dev/null 2>&1 & ;;
+    esac
     exit 0 ;;
 esac
 exec "$REAL_GIT" "$@"
@@ -446,6 +496,15 @@ exec "$REAL_GIT" "$@"
 
 const realGit = Bun.which("git")
 const runnable = process.platform !== "win32" && Boolean(realGit)
+// Setting the immutable flag needs root and a filesystem that supports it.
+const pinnable = (() => {
+  if (!runnable || !Bun.which("chattr")) return false
+  const probe = mkdtempSync(join(tmpdir(), "vector-clone-pin-"))
+  const pinned = Bun.spawnSync(["chattr", "+i", probe]).exitCode === 0
+  Bun.spawnSync(["chattr", "-i", probe])
+  rmSync(probe, { recursive: true, force: true })
+  return pinned
+})()
 
 describe.skipIf(!runnable)("cloneGithubRepository", () => {
   let root = ""
@@ -464,6 +523,8 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     await writeFile(fakeGit, FAKE_GIT)
     await chmod(fakeGit, 0o755)
     sender += 1
+    // The auth folders go under the app's data folder.
+    home = root
   })
 
   afterEach(async () => {
@@ -527,7 +588,8 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     expect(result).toEqual({ ok: true, directory: target, reused: false, fullName: "o/n" })
     const argv = (await readFile(join(state, "argv"), "utf8")).trim().split("\n")
     expect(argv.slice(0, 4)).toEqual(["clone", "--progress", "--", "https://github.com/o/n.git"])
-    expect(argv[4]).toStartWith(join(parent, ".n.vector-partial-"))
+    expect(argv[4]).toMatch(/\/\.vector-[0-9a-f]{8}$/)
+    expect(argv[4]).toStartWith(parent)
     expect(argv).toHaveLength(5)
     expect(await readFile(join(target, ".git", "config"), "utf8")).toContain("https://github.com/o/n.git")
     expect(await readdir(parent)).toEqual(["n"])
@@ -539,8 +601,10 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     expect(await readFile(join(state, "argv"), "utf8")).not.toContain("extraheader")
     expect(await readFile(join(state, "auth"), "utf8")).toContain(`extraheader = "${header}"`)
     const authPath = await readFile(join(state, "auth-path"), "utf8")
+    expect(authPath).toStartWith(join(root, "git-auth", `vector-git-auth-${process.pid}-`))
     expect(env).toContain(authPath)
     expect(await exists(authPath)).toBe(false)
+    expect(await readdir(join(root, "git-auth"))).toEqual([])
     expect(run.events.every((event) => event.runId === run.runId)).toBe(true)
     const percents = run.events.map((event) => event.percent)
     expect(percents).toEqual([...percents].sort((a, b) => a - b))
@@ -559,17 +623,49 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     expect(env).not.toContain("include.path")
   })
 
-  test("a later clone removes auth folders left by a Vector process that is gone", async () => {
+  test("the sweep removes auth folders no running clone owns and touches nothing else", async () => {
+    const secrets = join(root, "git-auth")
+    const victim = join(root, "victim")
+    await mkdir(secrets)
+    await mkdir(victim)
+    await writeFile(join(victim, "notes.txt"), "keep")
     const dead = Bun.spawnSync(["true"]).pid
-    const stale = join(tmpdir(), `vector-git-auth-${dead}-test${sender}`)
-    const live = join(tmpdir(), `vector-git-auth-${process.ppid}-test${sender}`)
-    await mkdir(stale)
-    await mkdir(live)
+    const folder = async (name: string, age = 0) => {
+      await mkdir(join(secrets, name))
+      await writeFile(join(secrets, name, "auth.gitconfig"), "secret")
+      const time = new Date(Date.now() - age)
+      await utimes(join(secrets, name), time, time)
+      return join(secrets, name)
+    }
+    const crashed = await folder(`vector-git-auth-${dead}-a`)
+    const failedHere = await folder(`vector-git-auth-${process.pid}-b`)
+    const running = await folder(`vector-git-auth-${process.ppid}-c`)
+    // A day-old folder whose PID now belongs to an unrelated process.
+    const reused = await folder(`vector-git-auth-${process.ppid}-d`, 2 * 24 * 60 * 60 * 1000)
+    const extra = await folder(`vector-git-auth-${dead}-e`)
+    await writeFile(join(extra, "other.txt"), "keep")
+    await symlink(victim, join(secrets, `vector-git-auth-${dead}-link`))
+    const foreign = await folder(`vector-git-auth-${dead}-f`)
+    if (process.getuid?.() === 0) await chown(foreign, 4242, 4242)
+
+    await sweepGithubCloneSecrets()
+    expect(await exists(crashed)).toBe(false)
+    expect(await exists(failedHere)).toBe(false)
+    expect(await exists(reused)).toBe(false)
+    expect(await exists(running)).toBe(true)
+    // Only the one file a clone writes is removed; a folder with anything else stays.
+    expect(await readdir(extra)).toEqual(["other.txt"])
+    expect(await readFile(join(victim, "notes.txt"), "utf8")).toBe("keep")
+    if (process.getuid?.() === 0) expect(await exists(join(foreign, "auth.gitconfig"))).toBe(true)
+  })
+
+  test("a signed-in clone also sweeps auth folders left by a Vector process that is gone", async () => {
+    const dead = Bun.spawnSync(["true"]).pid
+    const stale = join(root, "git-auth", `vector-git-auth-${dead}-x`)
+    await mkdir(stale, { recursive: true })
     await writeFile(join(stale, "auth.gitconfig"), "secret")
     expect((await start({}, { token: async () => TOKEN }).result).ok).toBe(true)
     expect(await exists(stale)).toBe(false)
-    expect(await exists(live)).toBe(true)
-    await rm(live, { recursive: true, force: true })
   })
 
   test("cancel stops the whole process tree and removes only the folder this run created", async () => {
@@ -653,14 +749,66 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     expect(await exists(join(state, "argv"))).toBe(false)
   })
 
-  test("an unfinished clone of the same repository is reported, not opened", async () => {
+  test("an existing clone of an empty repository is opened, even after the user starts adding files", async () => {
     const target = join(parent, "n")
     execFileSync(realGit!, ["init", "-q", target])
     execFileSync(realGit!, ["-C", target, "remote", "add", "origin", "https://github.com/o/n.git"])
+    expect(await start().result).toEqual({ ok: true, directory: target, reused: true, fullName: "o/n" })
+    await writeFile(join(target, "README.md"), "draft\n")
+    execFileSync(realGit!, ["-C", target, "add", "README.md"])
+    expect(await start().result).toEqual({ ok: true, directory: target, reused: true, fullName: "o/n" })
+    expect(await exists(join(state, "argv"))).toBe(false)
+  })
+
+  test("a clone whose HEAD doesn't resolve although it has refs is reported, never with advice to delete it", async () => {
+    const target = join(parent, "n")
+    execFileSync(realGit!, ["init", "-q", target])
+    execFileSync(realGit!, ["-C", target, "remote", "add", "origin", "https://github.com/o/n.git"])
+    execFileSync(realGit!, [
+      "-C",
+      target,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "x",
+    ])
+    execFileSync(realGit!, ["-C", target, "symbolic-ref", "HEAD", "refs/heads/missing"])
     const result = await start().result
     expect(result).toMatchObject({ ok: false, kind: "exists", suggestedFolder: "n-2" })
-    if (!result.ok) expect(result.error).toContain("unfinished clone")
+    if (!result.ok) {
+      expect(result.error).toContain("can't confirm is complete")
+      expect(result.error.toLowerCase()).not.toContain("delete")
+    }
     expect(await exists(target)).toBe(true)
+  })
+
+  test("cancel while GitHub is checked stops the run before it opens an existing clone", async () => {
+    const target = join(parent, "n")
+    execFileSync(realGit!, ["init", "-q", target])
+    execFileSync(realGit!, ["-C", target, "remote", "add", "origin", "https://github.com/o/n.git"])
+    const answer = Promise.withResolvers<void>()
+    const looking = Promise.withResolvers<void>()
+    const run = start(
+      {},
+      {
+        lookup: async (repo) => {
+          looking.resolve()
+          await answer.promise
+          return { ok: true, repo }
+        },
+      },
+    )
+    await looking.promise
+    cancelGithubClone(sender, run.runId)
+    answer.resolve()
+    expect(await run.result).toMatchObject({ ok: false, kind: "canceled" })
+    expect(await readdir(parent)).toEqual(["n"])
+    expect(await exists(join(target, ".git", "config"))).toBe(true)
   })
 
   test("a clone stopped during checkout is reported, not opened, although HEAD resolves", async () => {
@@ -683,12 +831,20 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     // Killed before the index was written.
     await rm(join(target, ".git", "index"))
     const missing = await start().result
-    expect(missing).toMatchObject({ ok: false, kind: "exists", error: expect.stringContaining("unfinished clone") })
+    expect(missing).toMatchObject({
+      ok: false,
+      kind: "exists",
+      error: expect.stringContaining("can't confirm is complete"),
+    })
     // Killed while the index lock was held.
     execFileSync(realGit!, ["-C", target, "reset", "-q"])
     await writeFile(join(target, ".git", "index.lock"), "")
     const locked = await start().result
-    expect(locked).toMatchObject({ ok: false, kind: "exists", error: expect.stringContaining("unfinished clone") })
+    expect(locked).toMatchObject({
+      ok: false,
+      kind: "exists",
+      error: expect.stringContaining("can't confirm is complete"),
+    })
     expect(await exists(join(target, ".git", "index.lock"))).toBe(true)
   })
 
@@ -697,10 +853,10 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
       ok: false,
       kind: "git-missing",
     })
-    expect(await start({}, { environment: environment({ FAKE_GIT_VERSION: "2.25.1" }) }).result).toMatchObject({
+    expect(await start({}, { environment: environment({ FAKE_GIT_VERSION: "2.12.5" }) }).result).toMatchObject({
       ok: false,
       kind: "git-outdated",
-      error: expect.stringContaining("This computer has Git 2.25.1"),
+      error: expect.stringContaining("This computer has Git 2.12.5"),
     })
     // Apple's /usr/bin/git stub on a Mac without Command Line Tools.
     expect(await start({}, { environment: environment({ FAKE_GIT_MODE: "stub" }) }).result).toMatchObject({
@@ -710,6 +866,46 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
     })
     expect(await readdir(parent)).toEqual([])
   })
+
+  test("a Git older than 2.31 clones with the auth config included through GIT_CONFIG_PARAMETERS", async () => {
+    const result = await start(
+      {},
+      { token: async () => TOKEN, environment: environment({ FAKE_GIT_VERSION: "2.25.1" }) },
+    ).result
+    expect(result).toMatchObject({ ok: true, reused: false })
+    const env = await readFile(join(state, "env"), "utf8")
+    expect(env).toContain("GIT_CONFIG_PARAMETERS=")
+    expect(env).not.toContain("GIT_CONFIG_COUNT")
+    expect(env).not.toContain(TOKEN)
+    expect(await readFile(join(state, "auth"), "utf8")).toContain(`extraheader = "${buildOauthPushHeader(TOKEN)}"`)
+  })
+
+  test.skipIf(!pinnable)(
+    "a rename blocked only briefly still lands the clone",
+    async () => {
+      const result = await start({}, { environment: environment({ FAKE_GIT_MODE: "pin-briefly" }) }).result
+      expect(result).toEqual({ ok: true, directory: join(parent, "n"), reused: false, fullName: "o/n" })
+      expect(await readdir(parent)).toEqual(["n"])
+    },
+    15_000,
+  )
+
+  test.skipIf(!pinnable)(
+    "a finished clone that can't be renamed is kept and its folder named",
+    async () => {
+      const result = await start({}, { environment: environment({ FAKE_GIT_MODE: "pin" }) }).result
+      const names = await readdir(parent)
+      names.forEach((name) => Bun.spawnSync(["chattr", "-i", join(parent, name)]))
+      expect(names).toHaveLength(1)
+      expect(names[0]).toStartWith(".vector-")
+      const partial = join(parent, names[0])
+      expect(result).toMatchObject({ ok: false, kind: "disk" })
+      if (!result.ok) expect(result.error).toContain(`The complete clone is in ${partial}`)
+      expect(await readFile(join(partial, ".git", "config"), "utf8")).toContain("https://github.com/o/n.git")
+      expect(await exists(join(parent, "n"))).toBe(false)
+    },
+    15_000,
+  )
 
   test("refuses a second clone into the same folder and a parent the renderer made up", async () => {
     // Either may claim the folder first; the other must be refused.
@@ -764,7 +960,7 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
         `\teventTarget = ${join(state, "trace-event")}`,
         `\tperfTarget = ${join(state, "trace-perf")}`,
         "\tconfigParams = http.*,include.*",
-        "\tenvVars = GIT_CONFIG_VALUE_6",
+        "\tenvVars = GIT_CONFIG_VALUE_7",
         "",
       ].join("\n"),
     )

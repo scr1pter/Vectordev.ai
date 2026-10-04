@@ -44,6 +44,7 @@ export type GithubRepo = {
   pushedAt?: string
   defaultBranch?: string
   htmlUrl: string
+  canPush?: boolean
 }
 
 export type GithubCloneRepo = { owner: string; name: string }

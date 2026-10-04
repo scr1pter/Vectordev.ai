@@ -887,7 +887,15 @@ export function agentOutcome(runtime: CodingAgentRuntime, exitCode: number, outp
 
 export function signalAgentProcess(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals) {
   if (process.platform === "win32") {
-    if (child.pid) execFile("taskkill", windowsTaskkillArguments(child.pid, signal === "SIGKILL"), () => undefined)
+    // taskkill is a console program; without windowsHide each stop flashes a console window.
+    if (child.pid) {
+      execFile(
+        "taskkill",
+        windowsTaskkillArguments(child.pid, signal === "SIGKILL"),
+        { windowsHide: true },
+        () => undefined,
+      )
+    }
     return
   }
   if (child.exitCode !== null || child.signalCode !== null) return
