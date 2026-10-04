@@ -1,5 +1,6 @@
 export * as LocalPluginSdk from "./local-sdk"
 
+import { createHash } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -12,6 +13,10 @@ type Module = { source: string; imports: Import[]; targets: Map<number, string> 
 // Resolve compatibility imports in an isolated module graph, never in the user's package tree.
 // Existing packages and their export maps remain authoritative for every import that resolves.
 export async function prepare(entry: string) {
+  // The rewrite needs Bun's loader: its resolver, Bun.plugin virtual modules and import.meta.require. The desktop
+  // engine runs on Node.js, so it imports the plugin in place, and an SDK import the plugin cannot resolve fails with
+  // Node's module-not-found error instead of reaching the bundled SDK.
+  if (typeof Bun === "undefined") return entry
   const { parse } = await import("@babel/parser")
   const first = await fs.realpath(entry.startsWith("file:") ? fileURLToPath(entry) : entry)
   const modules = new Map<string, Module>()
@@ -20,7 +25,7 @@ export async function prepare(entry: string) {
   while (pending.length) {
     const file = pending.pop()!
     if (modules.has(file)) continue
-    const source = await Bun.file(file).text()
+    const source = await fs.readFile(file, "utf8")
     const imports = moduleImports(source, file, parse)
     const targets = new Map<number, string>()
     modules.set(file, { source, imports, targets })
@@ -44,7 +49,7 @@ export async function prepare(entry: string) {
   if (!missing.size && ![...modules.values()].some((module) => module.imports.some((item) => item.d >= 0 && !item.n)))
     return entry
   await installRuntime()
-  const digest = new Bun.CryptoHasher("sha256")
+  const digest = createHash("sha256")
   for (const [file, module] of modules)
     digest
       .update(file)
@@ -56,7 +61,7 @@ export async function prepare(entry: string) {
   )
   await fs.mkdir(cache, { recursive: true })
   for (const [file, module] of modules) {
-    const metadata = `__vector_plugin_meta_${new Bun.CryptoHasher("sha256").update(file).digest("hex").slice(0, 16)}`
+    const metadata = `__vector_plugin_meta_${createHash("sha256").update(file).digest("hex").slice(0, 16)}`
     const runtime = `${metadata}_runtime`
     const origin = JSON.stringify(pathToFileURL(file).href)
     const edits = module.imports
@@ -83,7 +88,7 @@ export async function prepare(entry: string) {
 const ${metadata} = { ...import.meta, url: ${origin}, filename: ${filename}, path: ${filename}, dirname: ${dirname}, dir: ${dirname}, resolve: (specifier, parent = ${origin}) => ${runtime}.resolve(specifier, parent), require: (specifier) => import.meta.require(${runtime}.resolve(specifier, ${origin})) };\n`
     const output = files.get(file)!
     const temporary = `${output}.${crypto.randomUUID()}.tmp`
-    await Bun.write(temporary, prefix + rewritten.replace(/^#![^\n]*\n/, ""))
+    await fs.writeFile(temporary, prefix + rewritten.replace(/^#![^\n]*\n/, ""))
     await fs.rename(temporary, output)
   }
   return pathToFileURL(files.get(first)!).href

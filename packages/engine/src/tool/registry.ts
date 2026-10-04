@@ -101,6 +101,7 @@ const layer = Layer.effect(
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
     const auth = yield* Auth.Service
+    const fsutil = yield* FSUtil.Service
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
@@ -225,7 +226,7 @@ const layer = Layer.effect(
         const questionEnabled = ["app", "cli", "desktop"].includes(flags.client) || flags.enableQuestionTool
         // A Parallel Workspace writes its team marker while it is provisioned, before any session runs there, so
         // a directory without one never has teammates and the tool would only cost tokens on every request.
-        const team = yield* Effect.promise(() => Bun.file(path.join(ctx.directory, TEAM_MARKER_RELATIVE_PATH)).exists())
+        const team = yield* fsutil.isFile(path.join(ctx.directory, TEAM_MARKER_RELATIVE_PATH))
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),

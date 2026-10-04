@@ -432,6 +432,20 @@ jobs:
         env:
           VECTOR_CHANNEL: prod
         run: ${{ matrix.command }}
+      # The desktop runs the engine bundle in Electron's utility process, which is Node, while every engine test runs
+      # on Bun. Boot the bundle this build just made under Node and send one prompt through a Read tool call, so a
+      # stray Bun API ("Bun is not defined" on every message, as in 1.99.99) fails here, before any installer is built.
+      # Node 24 matches the Node line Electron 42 ships, and is set up after the build so the build itself is unchanged.
+      - name: Set up Node for the desktop engine smoke test
+        if: matrix.name == 'desktop'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Smoke-test the desktop engine bundle under Node
+        if: matrix.name == 'desktop'
+        working-directory: packages/engine
+        timeout-minutes: 5
+        run: node script/smoke-node-bundle.ts
 
   draft:
     name: Prepare draft GitHub release
