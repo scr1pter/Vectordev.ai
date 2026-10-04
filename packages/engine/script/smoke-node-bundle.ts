@@ -276,9 +276,13 @@ async function watchTurn(body: ReadableStream<Uint8Array>, sessionID: string) {
   const decoder = new TextDecoder()
   let buffer = ""
   let idle = false
+  // A reader rather than for await: the engine's DOM lib types give ReadableStream no async iterator.
+  const reader = body.getReader()
   try {
-    for await (const chunk of body) {
-      buffer += decoder.decode(chunk, { stream: true })
+    while (true) {
+      const chunk = await reader.read()
+      if (chunk.done) break
+      buffer += decoder.decode(chunk.value, { stream: true })
       const blocks = buffer.split("\n\n")
       buffer = blocks.pop() ?? ""
       const events = blocks.flatMap((block) =>
