@@ -185,13 +185,27 @@ function cursorBundleDirectories(cli: string, directories: string[]) {
   return cli === "code" ? [] : directories
 }
 
-type RunResult = { stdout: string; stderr: string; failed: boolean }
+export type CliResult = { stdout: string; stderr: string; failed: boolean }
 
-function run(command: string, args: string[], timeoutMs: number, env?: AgentEnvironment) {
-  return new Promise<RunResult>((resolve) => {
-    execFile(command, args, { timeout: timeoutMs, maxBuffer: 1024 * 1024, env }, (error, stdout, stderr) => {
-      resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) })
-    })
+// Runs a CLI resolveAgentPath found and collects its output. A Windows .cmd/.bat shim goes through cmd.exe
+// (shimmedCommand), since Node refuses to spawn one directly. Node throws spawn errors other than the ENOENT-like ones
+// synchronously instead of passing them to the callback (EINVAL for a shim, EFTYPE for a .ps1), and a CLI that cannot
+// start is a failed run, not an exception that takes every other probe down with it.
+export function runCli(path: string, args: string[], timeoutMs: number, env?: AgentEnvironment) {
+  const launch = shimmedCommand(path, args)
+  return new Promise<CliResult>((resolve) => {
+    try {
+      execFile(
+        launch.command,
+        launch.args,
+        { timeout: timeoutMs, maxBuffer: 1024 * 1024, env, windowsVerbatimArguments: launch.windowsVerbatimArguments },
+        (error, stdout, stderr) => {
+          resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), failed: Boolean(error) })
+        },
+      )
+    } catch (error) {
+      resolve({ stdout: "", stderr: error instanceof Error ? error.message : String(error), failed: true })
+    }
   })
 }
 
@@ -231,12 +245,12 @@ async function detectOne(candidate: ExternalAgentCandidate): Promise<ExternalAge
   if (!path) return { id: candidate.id, name: candidate.name, cli: candidate.cli, installed: false }
   // Node-based CLIs are shims that need their own runtime on PATH, so the
   // version probe gets the same environment the real run will get.
-  const result = await run(path, ["--version"], 5_000, agentEnvironment())
+  const result = await runCli(path, ["--version"], 5_000, agentEnvironment())
   const version = result.failed ? undefined : (firstLine(result.stdout) ?? firstLine(result.stderr))
   const probe = AUTH_PROBE[candidate.id]
   // Parsed even when the probe exits non-zero: a signed-out CLI is entitled to
   // report that with a failing exit code.
-  const auth = probe ? await run(path, probe, 5_000, agentEnvironment()) : undefined
+  const auth = probe ? await runCli(path, probe, 5_000, agentEnvironment()) : undefined
   const signedIn = auth ? signedInFromProbe(`${auth.stdout}\n${auth.stderr}`) : undefined
   return { id: candidate.id, name: candidate.name, cli: candidate.cli, installed: true, version, path, signedIn }
 }
@@ -248,7 +262,10 @@ let cache: { at: number; result: ExternalAgentStatus[] } | undefined
 
 export async function detectExternalAgents(): Promise<ExternalAgentStatus[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.result
-  const result = await Promise.all(CANDIDATES.map(detectOne))
+  // One candidate that cannot be probed must not hide the others.
+  const result = await Promise.all(
+    CANDIDATES.map((candidate) => detectOne(candidate).catch(() => ({ ...candidate, installed: false }))),
+  )
   cache = { at: Date.now(), result }
   return result
 }
@@ -266,7 +283,7 @@ const EDITOR_CLIS: Record<OpenInEditorApp, string> = { cursor: "cursor", vscode:
 // Cursor's own `bin\code.cmd` — so those go through cmd.exe with an
 // already-quoted command line. shell:true would re-split the prompt.
 export function shimmedCommand(path: string, args: string[], platform: NodeJS.Platform = process.platform) {
-  if (platform !== "win32" || !/\.(?:cmd|bat)$/i.test(path)) {
+  if (!runsThroughCmd(path, platform)) {
     return { command: path, args, windowsVerbatimArguments: false }
   }
   const quoted = [path, ...args].map((value) => `"${value.replace(/"/g, '""')}"`).join(" ")
@@ -275,6 +292,10 @@ export function shimmedCommand(path: string, args: string[], platform: NodeJS.Pl
     args: ["/d", "/s", "/c", `"${quoted}"`],
     windowsVerbatimArguments: true,
   }
+}
+
+export function runsThroughCmd(path: string, platform: NodeJS.Platform = process.platform) {
+  return platform === "win32" && /\.(?:cmd|bat)$/i.test(path)
 }
 
 export async function openInEditor(input: OpenInEditorInput): Promise<OpenInEditorResult> {
@@ -328,7 +349,7 @@ const RUNS_DIRECTORY_NAME = "external-agent-runs"
 export type PrepareWorkspaceResult = { path: string; isolation: "git-worktree" | "copy" }
 
 function runIn(command: string, args: string[], cwd: string, timeoutMs: number) {
-  return new Promise<RunResult>((resolve) => {
+  return new Promise<CliResult>((resolve) => {
     execFile(
       command,
       args,
@@ -446,7 +467,18 @@ function redactAgentOutput(value: string) {
 
 // Resume argv is not the fresh argv plus a flag: `codex exec resume` rejects
 // --sandbox and -C outright, so each runtime branches before its fresh form.
-export function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, prompt: string, resumeSessionId?: string) {
+// With promptOnStdin the prompt is left out of argv for the caller to write to
+// stdin: `claude -p` with no prompt argument, and codex's `-` prompt, read it
+// from there. Cursor has no such form, so it always takes the prompt in argv.
+export function runtimeArguments(
+  runtime: CodingAgentRuntime,
+  cwd: string,
+  prompt: string,
+  resumeSessionId?: string,
+  promptOnStdin = false,
+) {
+  const claudePrompt = promptOnStdin ? [] : [prompt]
+  const codexPrompt = promptOnStdin ? "-" : prompt
   if (runtime === "claude-code" && resumeSessionId) {
     // The id must be the immediately-following argv element: --resume takes an
     // OPTIONAL value, so any gap lets it swallow the prompt and open the
@@ -455,7 +487,7 @@ export function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, promp
       "--resume",
       resumeSessionId,
       "-p",
-      prompt,
+      ...claudePrompt,
       "--output-format",
       "stream-json",
       "--verbose",
@@ -467,7 +499,7 @@ export function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, promp
   if (runtime === "claude-code") {
     return [
       "-p",
-      prompt,
+      ...claudePrompt,
       "--output-format",
       "stream-json",
       "--verbose",
@@ -487,11 +519,11 @@ export function runtimeArguments(runtime: CodingAgentRuntime, cwd: string, promp
       "-c",
       'sandbox_mode="workspace-write"',
       resumeSessionId,
-      prompt,
+      codexPrompt,
     ]
   }
   if (runtime === "codex") {
-    return ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd, prompt]
+    return ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-C", cwd, codexPrompt]
   }
   // Cursor's partial mode emits indistinguishable deltas AND aggregate text
   // envelopes. Complete-block stream-json stays live at tool/retry boundaries
@@ -910,8 +942,25 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     )
   }
 
+  // cmd.exe ends a command line at the first line feed, even inside quotes, and npm's shim re-reads %* the same way.
+  // Through claude.cmd or codex.cmd the prompt, which always spans lines, would arrive cut to its first line and every
+  // flag after it would be lost, so those two read it from stdin there.
+  const promptOnStdin = runsThroughCmd(path) && input.runtime !== "cursor"
   return new Promise((resolve, reject) => {
-    const launch = shimmedCommand(path, runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId))
+    const launch = shimmedCommand(
+      path,
+      runtimeArguments(input.runtime, input.cwd, input.prompt, input.resumeSessionId, promptOnStdin),
+    )
+    // Only Cursor gets here: it has no stdin prompt form, and its Windows install may provide no other entry point than
+    // this script, so the error names a way forward that exists rather than a reinstall that might not.
+    if (launch.windowsVerbatimArguments && launch.args.some((arg) => /[\r\n]/.test(arg))) {
+      reject(
+        new Error(
+          `${setup.label} on Windows runs through a command script (${path}), and Windows cuts a prompt passed that way at its first line, so Vector cannot send it this task. Choose Claude Code or Codex for this task instead.`,
+        ),
+      )
+      return
+    }
     const child = spawn(launch.command, launch.args, {
       cwd: input.cwd,
       detached: process.platform !== "win32",
@@ -990,7 +1039,9 @@ export async function runExternalCodingAgent(input: RunExternalAgentInput): Prom
     const timeout = setTimeout(() => stop("timeout"), Math.max(1, input.timeoutMs ?? 30 * 60_000))
     timeout.unref?.()
     input.signal?.addEventListener("abort", abort, { once: true })
-    child.stdin.end()
+    // A CLI that exits before reading its prompt makes the write fail with EPIPE; its exit already reports the run.
+    child.stdin.on("error", () => undefined)
+    child.stdin.end(promptOnStdin ? input.prompt : undefined)
     if (input.signal?.aborted) abort()
     child.stdout.on("data", (chunk: Buffer) => consume("stdout", chunk))
     child.stderr.on("data", (chunk: Buffer) => consume("stderr", chunk))

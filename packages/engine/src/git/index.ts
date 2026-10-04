@@ -3,16 +3,15 @@ import { AppProcess } from "@vectordevai/core/process"
 import { Effect, Layer, Context, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 
+// These run against the user's own repository, so leave line-ending and symlink settings to their git config. Forcing
+// core.autocrlf=false on Git for Windows (installer default autocrlf=true) makes every CRLF line look rewritten and
+// commits CRLF blobs; the snapshot store sets its own config on its private git dir.
 const cfg = [
   "--no-optional-locks",
-  "-c",
-  "core.autocrlf=false",
   "-c",
   "core.fsmonitor=false",
   "-c",
   "core.longpaths=true",
-  "-c",
-  "core.symlinks=true",
   "-c",
   "core.quotepath=false",
 ] as const

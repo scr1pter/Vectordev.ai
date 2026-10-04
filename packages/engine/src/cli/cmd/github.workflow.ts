@@ -22,10 +22,11 @@ export interface WorkflowOptions {
   mentions?: readonly string[] // baked into the route job; Vectorscope mentions and legacy aliases by default
 }
 
-// Development builds use the desktop release version instead of a moving registry tag.
+// Development builds pin the CLI version the desktop release requires instead of a moving registry tag. The desktop
+// version itself is not always on npm: a desktop release can ship while the CLI stays at an earlier version.
 export function cliVersionSpec(version: string): { spec: string; pinned: boolean } {
   const pinned = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/.test(version) && !version.startsWith("0.0.0")
-  return { spec: pinned ? version : release.version, pinned: true }
+  return { spec: pinned ? version : release.vectorRequiredCliVersion, pinned: true }
 }
 
 // The route job's script for actions/github-script. It embeds core's parser, so the route job and the CLI can never

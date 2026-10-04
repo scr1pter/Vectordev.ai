@@ -1,8 +1,10 @@
 export * as Npm from "./npm"
 
+import { existsSync, readFileSync, statSync } from "fs"
 import path from "path"
+import { pathToFileURL } from "url"
 import npa from "npm-package-arg"
-import { Effect, Schema, Context, Layer, Option, FileSystem } from "effect"
+import { Effect, Schema, Context, Layer, Option, FileSystem, Predicate } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
@@ -53,7 +55,9 @@ export function sanitize(pkg: string) {
 const resolveEntryPoint = (name: string, dir: string): EntryPoint => {
   let entrypoint: string | undefined
   try {
-    entrypoint = typeof Bun !== "undefined" ? import.meta.resolve(name, dir) : import.meta.resolve(dir)
+    // Node's import.meta.resolve takes no parent URL without a flag, so on Node (the desktop engine) it resolves the
+    // package directory itself, which import() rejects with ERR_UNSUPPORTED_DIR_IMPORT.
+    entrypoint = typeof Bun !== "undefined" ? import.meta.resolve(name, dir) : packageEntry(dir)
   } catch {
     entrypoint = undefined
   }
@@ -61,6 +65,45 @@ const resolveEntryPoint = (name: string, dir: string): EntryPoint => {
     directory: dir,
     entrypoint,
   }
+}
+
+const EXPORT_CONDITIONS = new Set(["node", "import", "default"])
+
+// The file Node's ESM loader would import for the package installed at `dir`, as a file: URL: the "." export under
+// the node/import/default conditions, else `main`, else index.js. Undefined when none of them is a file.
+export function packageEntry(dir: string) {
+  const manifest = readManifest(dir)
+  const exported = exportTarget(manifest?.exports)
+  const main = typeof manifest?.main === "string" ? manifest.main.trim() : ""
+  const file = [
+    ...(exported ? [exported] : []),
+    ...(main ? [main, `${main}.js`, path.join(main, "index.js")] : []),
+    "index.js",
+  ]
+    .map((value) => path.resolve(dir, value))
+    .find((file) => statSync(file, { throwIfNoEntry: false })?.isFile())
+  return file ? pathToFileURL(file).href : undefined
+}
+
+function readManifest(dir: string) {
+  const file = path.join(dir, "package.json")
+  if (!existsSync(file)) return undefined
+  const value = Option.getOrUndefined(
+    Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(readFileSync(file, "utf8")),
+  )
+  return Predicate.isObject(value) ? value : undefined
+}
+
+// Condition keys are matched in package order, as Node does, so `{ require, import }` still picks import.
+function exportTarget(value: unknown): string | undefined {
+  if (typeof value === "string") return value
+  if (Array.isArray(value)) return value.map(exportTarget).find((item) => item !== undefined)
+  if (!Predicate.isObject(value)) return undefined
+  if (Object.keys(value).some((key) => key.startsWith("."))) return exportTarget(value["."])
+  return Object.entries(value)
+    .filter((entry) => EXPORT_CONDITIONS.has(entry[0]))
+    .map((entry) => exportTarget(entry[1]))
+    .find((item) => item !== undefined)
 }
 
 interface ArboristNode {

@@ -164,6 +164,34 @@ describe("Git", () => {
     }),
   )
 
+  it.live("honors the repository's core.autocrlf for diffs and commits", () =>
+    Effect.gen(function* () {
+      // Git for Windows' installer default: LF blobs, CRLF working tree.
+      const tmp = yield* scopedTmpdir({ git: true })
+      const file = path.join(tmp.path, "crlf.txt")
+      yield* Effect.promise(() => fs.writeFile(file, "a\nb\nc\nd\n", "utf-8"))
+      yield* Effect.promise(() => $`git add crlf.txt`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => $`git commit --no-gpg-sign -m "add lf file"`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => $`git config core.autocrlf true`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => fs.rm(file))
+      yield* Effect.promise(() => $`git checkout -- crlf.txt`.cwd(tmp.path).quiet())
+      expect(yield* Effect.promise(() => fs.readFile(file, "utf-8"))).toBe("a\r\nb\r\nc\r\nd\r\n")
+
+      // An editor save that keeps the content is not a change.
+      yield* Effect.promise(() => fs.writeFile(file, "a\r\nb\r\nc\r\nd\r\n", "utf-8"))
+      const git = yield* Git.Service
+      expect(yield* git.status(tmp.path)).toEqual([])
+
+      yield* Effect.promise(() => fs.writeFile(file, "a\r\nB\r\nc\r\nd\r\n", "utf-8"))
+      expect(yield* git.stats(tmp.path, "HEAD")).toEqual([{ file: "crlf.txt", additions: 1, deletions: 1 }])
+
+      yield* git.run(["add", "-A", "--", "."], { cwd: tmp.path })
+      yield* git.run(["commit", "--no-gpg-sign", "-m", "edit", "--", "."], { cwd: tmp.path })
+      const blob = yield* Effect.promise(() => $`git cat-file -p HEAD:crlf.txt`.cwd(tmp.path).quiet().text())
+      expect(blob).toBe("a\nB\nc\nd\n")
+    }),
+  )
+
   it.live("show() returns empty text for binary blobs", () =>
     Effect.gen(function* () {
       const tmp = yield* scopedTmpdir({ git: true })

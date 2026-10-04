@@ -20,9 +20,10 @@ export async function stagePlugin(packageDirectory = directory, compile = true) 
   await cp(path.join(packageDirectory, "dist"), path.join(output, "dist"), { recursive: true })
   const sdkManifest = await Bun.file(path.join(sdk, "package.json")).json()
   const source = await Bun.file(path.join(packageDirectory, "package.json")).json()
+  // The plugin SDK publishes with the CLI at one version, so default to the CLI version the desktop requires.
   const version =
     process.env.VECTOR_PLUGIN_VERSION ??
-    (await Bun.file(path.join(root, "packages/desktop/package.json")).json()).version
+    (await Bun.file(path.join(root, "packages/desktop/package.json")).json()).vectorRequiredCliVersion
   const catalog = (await Bun.file(path.join(root, "package.json")).json()).workspaces.catalog
   for await (const file of new Bun.Glob("**/*.d.ts").scan(path.join(sdk, "dist"))) {
     await Bun.write(path.join(output, "dist/sdk", file), Bun.file(path.join(sdk, "dist", file)))
@@ -90,7 +91,7 @@ export async function verifyPlugin(output: string) {
   const source = await Bun.file(path.resolve(output, "../package.json")).json()
   const version =
     process.env.VECTOR_PLUGIN_VERSION ??
-    (await Bun.file(path.resolve(output, "../../desktop/package.json")).json()).version
+    (await Bun.file(path.resolve(output, "../../desktop/package.json")).json()).vectorRequiredCliVersion
   if (manifest.name !== source.name || manifest.version !== version) {
     throw new Error("Staged plugin identity does not match its source; rebuild before packaging")
   }

@@ -3,6 +3,7 @@
 import { Script } from "@vectordevai/script"
 import { prepareGitLab } from "../../../script/prepare-gitlab"
 import { unguardedBunReferences } from "./node-bundle-guard"
+import desktop from "../../desktop/package.json"
 import path from "path"
 import { fileURLToPath } from "url"
 
@@ -27,7 +28,11 @@ const result = await Bun.build({
     VECTOR_MODEL_CATALOG: generated.modelsData,
     VECTOR_CHANNEL: `'${Script.channel}'`,
     VECTOR_VERSION: `'${Script.version}'`,
-    VECTOR_PLUGIN_VERSION: JSON.stringify(process.env.VECTOR_PLUGIN_VERSION ?? Script.version),
+    // The desktop installs the plugin SDK published with the CLI it requires, not one at its own version: a desktop
+    // release can ship without an npm publication, and local builds carry a 0.0.0 preview version npm never has.
+    VECTOR_PLUGIN_VERSION: JSON.stringify(
+      process.env.VECTOR_PLUGIN_VERSION ?? process.env.VECTOR_REQUIRED_CLI_VERSION ?? desktop.vectorRequiredCliVersion,
+    ),
   },
   files: {
     "vector-web-ui.gen.ts": "",

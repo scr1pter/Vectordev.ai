@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import { access, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
+import { agentEnvironment, resolveAgentPath, shimmedCommand } from "./external-agents"
 
 const MAX_OUTPUT_BYTES = 80_000
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -128,42 +129,66 @@ export async function detectWorkspaceChecks(root: string, changedFiles: string[]
   return checks.slice(0, 5)
 }
 
-function runCheck(check: GuardrailCheck, root: string, timeoutMs: number): Promise<GuardrailCheckResult> {
+async function runCheck(check: GuardrailCheck, root: string, timeoutMs: number): Promise<GuardrailCheckResult> {
   const started = Date.now()
+  // npm, pnpm and yarn are .cmd shims on Windows, which a bare-name execFile never finds and Node will not run without
+  // cmd.exe, so every check would have been skipped there as "not installed".
+  // A runner that is not found keeps its bare name and fails with ENOENT, which counts as skipped below.
+  const env = agentEnvironment()
+  const launch = shimmedCommand((await resolveAgentPath(check.command, env)) ?? check.command, check.args)
   return new Promise((resolve) => {
-    const child = execFile(
-      check.command,
-      check.args,
-      {
-        cwd: root,
-        env: untrustedChildEnvironment(process.env, { CI: "1", FORCE_COLOR: "0", NO_COLOR: "1" }),
-        maxBuffer: MAX_OUTPUT_BYTES * 4,
-        timeout: timeoutMs,
-      },
-      (error, stdout, stderr) => {
-        const raw = `${stdout || ""}${stderr ? `${stdout ? "\n" : ""}${stderr}` : ""}`
-        const output = raw.length > MAX_OUTPUT_BYTES ? `${raw.slice(0, MAX_OUTPUT_BYTES)}\n… output truncated` : raw
-        // ENOENT covers a missing runner, but the common case in an isolated
-        // workspace is a runner that exists and a project-local binary that
-        // does not: a git worktree never carries gitignored node_modules, so
-        // `bun run typecheck` exits 127 with "command not found". Treating that
-        // as a failure made every merge, selective merge and PR unreachable for
-        // any project with local dev dependencies — this repository included.
-        const exitCode = typeof (error as NodeJS.ErrnoException | null)?.code === "number" ? Number(error!.code) : undefined
-        const notInstalled = exitCode === 127 || /command not found|: not found\b/i.test(raw)
-        const missing = (error as NodeJS.ErrnoException | null)?.code === "ENOENT" || (Boolean(error) && notInstalled)
-        resolve({
-          ...check,
-          status: missing ? "skipped" : error ? "failed" : "passed",
-          exitCode: typeof (error as any)?.code === "number" ? (error as any).code : error ? 1 : 0,
-          durationMs: Date.now() - started,
-          output: missing
-            ? `${check.command} could not run in this isolated workspace (a tool it needs is not installed there), so ${check.label} was skipped.`
-            : output.trim() || (error ? String(error) : `${check.label} passed.`),
-        })
-      },
-    )
-    child.stdin?.end()
+    // Node throws a spawn it refuses synchronously instead of passing it to the callback: EFTYPE when the first match
+    // for the runner on a Windows PATH is a .ps1 or an extensionless script, EINVAL for a shim it cannot launch. A
+    // runner that cannot start is skipped like a missing one, as runCli in external-agents.ts treats it.
+    try {
+      const child = execFile(
+        launch.command,
+        launch.args,
+        {
+          cwd: root,
+          env: untrustedChildEnvironment(env, { CI: "1", FORCE_COLOR: "0", NO_COLOR: "1" }),
+          maxBuffer: MAX_OUTPUT_BYTES * 4,
+          timeout: timeoutMs,
+          windowsVerbatimArguments: launch.windowsVerbatimArguments,
+        },
+        (error, stdout, stderr) => {
+          const raw = `${stdout || ""}${stderr ? `${stdout ? "\n" : ""}${stderr}` : ""}`
+          const output = raw.length > MAX_OUTPUT_BYTES ? `${raw.slice(0, MAX_OUTPUT_BYTES)}\n… output truncated` : raw
+          // ENOENT covers a missing runner, but the common case in an isolated
+          // workspace is a runner that exists and a project-local binary that
+          // does not: a git worktree never carries gitignored node_modules, so
+          // `bun run typecheck` exits 127 with "command not found". Treating that
+          // as a failure made every merge, selective merge and PR unreachable for
+          // any project with local dev dependencies — this repository included.
+          // On Windows the script runs through cmd.exe, which reports a missing tool as "is not recognized" and 9009.
+          const exitCode =
+            typeof (error as NodeJS.ErrnoException | null)?.code === "number" ? Number(error!.code) : undefined
+          const notInstalled =
+            exitCode === 127 ||
+            exitCode === 9009 ||
+            /command not found|: not found\b|is not recognized as an internal or external command/i.test(raw)
+          const missing = (error as NodeJS.ErrnoException | null)?.code === "ENOENT" || (Boolean(error) && notInstalled)
+          resolve({
+            ...check,
+            status: missing ? "skipped" : error ? "failed" : "passed",
+            exitCode: typeof (error as any)?.code === "number" ? (error as any).code : error ? 1 : 0,
+            durationMs: Date.now() - started,
+            output: missing
+              ? `${check.command} could not run in this isolated workspace (a tool it needs is not installed there), so ${check.label} was skipped.`
+              : output.trim() || (error ? String(error) : `${check.label} passed.`),
+          })
+        },
+      )
+      child.stdin?.end()
+    } catch (error) {
+      resolve({
+        ...check,
+        status: "skipped",
+        exitCode: 1,
+        durationMs: Date.now() - started,
+        output: `${launch.command} could not start (${error instanceof Error ? error.message : String(error)}), so ${check.label} was skipped.`,
+      })
+    }
   })
 }
 

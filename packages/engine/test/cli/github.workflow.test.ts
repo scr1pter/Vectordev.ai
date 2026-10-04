@@ -434,15 +434,15 @@ describe("buildWorkflowYaml", () => {
   test("both jobs pin the CLI, including workflows created by development builds", () => {
     expect(cliVersionSpec("1.17.14")).toEqual({ spec: "1.17.14", pinned: true })
     expect(cliVersionSpec("1.18.0-beta.2")).toEqual({ spec: "1.18.0-beta.2", pinned: true })
-    expect(cliVersionSpec("local")).toEqual({ spec: release.version, pinned: true })
-    expect(cliVersionSpec("0.0.0-dev-202609141200")).toEqual({ spec: release.version, pinned: true })
+    expect(cliVersionSpec("local")).toEqual({ spec: release.vectorRequiredCliVersion, pinned: true })
+    expect(cliVersionSpec("0.0.0-dev-202609141200")).toEqual({ spec: release.vectorRequiredCliVersion, pinned: true })
     const install = (version: string) =>
       parse(buildWorkflowYaml({ ...OPENAI, version })).jobs.review.steps.find((step) => step.name === "Install Vector")
     expect(install("1.17.14")?.run).toBe(
       "npm install -g @vectordevai/cli@1.17.14 --prefer-offline --no-audit --no-fund",
     )
     expect(install("local")?.run).toBe(
-      `npm install -g @vectordevai/cli@${release.version} --prefer-offline --no-audit --no-fund`,
+      `npm install -g @vectordevai/cli@${release.vectorRequiredCliVersion} --prefer-offline --no-audit --no-fund`,
     )
     for (const version of ["1.17.14", "local"]) {
       const jobs = parse(buildWorkflowYaml({ ...OPENAI, version })).jobs

@@ -3,7 +3,9 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 
+import { Arch } from "electron-builder"
 import type { Configuration } from "electron-builder"
+import { verifyNativeModules } from "./scripts/verify-native"
 
 const execFileAsync = promisify(execFile)
 const packageDir = path.dirname(fileURLToPath(import.meta.url))
@@ -86,12 +88,17 @@ const getBase = (appId: string, executableName: string): Configuration => ({
     desktopName: `${appId}.desktop`,
   },
   files: ["out/**/*", "resources/**/*"],
-  afterPack: unsignedMac
-    ? async (context) => {
-        if (context.electronPlatformName !== "darwin") return
-        await signUnsignedMac(path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`))
-      }
-    : undefined,
+  afterPack: async (context) => {
+    const platform = context.electronPlatformName
+    if (platform !== "darwin" && platform !== "win32" && platform !== "linux") return
+    const app = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`)
+    const resources =
+      platform === "darwin" ? path.join(app, "Contents", "Resources") : path.join(context.appOutDir, "resources")
+    const arch = Arch[context.arch]
+    for (const target of arch === "universal" ? ["x64", "arm64"] : [arch])
+      await verifyNativeModules(resources, platform, target)
+    if (unsignedMac && platform === "darwin") await signUnsignedMac(app)
+  },
   extraResources: [
     {
       // Written by the same build invocation that compiles CHANNEL into the

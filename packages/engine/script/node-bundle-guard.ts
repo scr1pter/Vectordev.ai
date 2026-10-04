@@ -35,12 +35,14 @@ export function unguardedBunReferences(code: string, allow: { module: string; ap
   }
   const template = (start: number) => {
     for (let at = start; at < code.length; at++) {
-      if (code[at] === "\\") at++
-      else if (code[at] === "`") return at + 1
-      else if (code[at] === "$" && code[at + 1] === "{") {
-        substitutions.push(depth)
-        return at + 2
+      if (code[at] === "\\") {
+        at++
+        continue
       }
+      if (code[at] === "`") return at + 1
+      if (code[at] !== "$" || code[at + 1] !== "{") continue
+      substitutions.push(depth)
+      return at + 2
     }
     return fail(start, "unterminated template literal")
   }
@@ -159,14 +161,18 @@ function regexEnd(code: string, index: number, previous: string) {
   for (let at = index + 1; at < code.length; at++) {
     const char = code[at]
     if (char === "\n") return index
-    if (char === "\\") at++
-    else if (char === "[") inClass = true
-    else if (char === "]") inClass = false
-    else if (char === "/" && !inClass) {
-      flags.lastIndex = at + 1
-      flags.exec(code)
-      return flags.lastIndex
+    if (char === "\\") {
+      at++
+      continue
     }
+    if (char === "[" || char === "]") {
+      inClass = char === "["
+      continue
+    }
+    if (char !== "/" || inClass) continue
+    flags.lastIndex = at + 1
+    flags.exec(code)
+    return flags.lastIndex
   }
   return index
 }
@@ -199,7 +205,5 @@ const expressionKeywords = new Set([
 ])
 
 function lineOf(code: string, index: number) {
-  let line = 1
-  for (let at = code.indexOf("\n"); at !== -1 && at < index; at = code.indexOf("\n", at + 1)) line++
-  return line
+  return code.slice(0, index).split("\n").length
 }

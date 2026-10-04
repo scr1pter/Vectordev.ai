@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { createServer } from "node:http"
+import { pathToFileURL } from "node:url"
 import { describe, expect, test } from "bun:test"
 import { Effect, Exit, Fiber, Option } from "effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
@@ -39,6 +40,52 @@ describe("Npm.sanitize", () => {
     const spec = "acme@git+https://github.com/vector/acme.git"
     const expected = win ? "acme@git+https_//github.com/vector/acme.git" : spec
     expect(Npm.sanitize(spec)).toBe(expected)
+  })
+})
+
+// The desktop engine runs on Node, where resolveEntryPoint uses packageEntry instead of Bun's import.meta.resolve.
+describe("Npm.packageEntry", () => {
+  const file = (dir: string, name: string, text = "export {}\n") =>
+    fs.mkdir(path.dirname(path.join(dir, name)), { recursive: true }).then(() => Bun.write(path.join(dir, name), text))
+
+  test("picks the import condition of an ESM-only exports map", async () => {
+    await using tmp = await tmpdir()
+    await writePackage(tmp.path, {
+      name: "esm-only",
+      type: "module",
+      exports: { ".": { types: "./dist/index.d.ts", import: "./dist/index.js" }, "./package.json": "./package.json" },
+    })
+    await file(tmp.path, "dist/index.js")
+    expect(Npm.packageEntry(tmp.path)).toBe(pathToFileURL(path.join(tmp.path, "dist", "index.js")).href)
+  })
+
+  test("matches conditions in package order like Node", async () => {
+    await using tmp = await tmpdir()
+    await writePackage(tmp.path, {
+      name: "dual",
+      exports: { require: "./dist/index.cjs", node: { import: "./dist/node.mjs" }, default: "./dist/index.mjs" },
+    })
+    await file(tmp.path, "dist/index.cjs", "module.exports = {}\n")
+    await file(tmp.path, "dist/node.mjs")
+    await file(tmp.path, "dist/index.mjs")
+    expect(Npm.packageEntry(tmp.path)).toBe(pathToFileURL(path.join(tmp.path, "dist", "node.mjs")).href)
+  })
+
+  test("falls back to main, then index.js", async () => {
+    await using main = await tmpdir()
+    await writePackage(main.path, { name: "legacy", main: "lib/entry" })
+    await file(main.path, "lib/entry.js", "module.exports = {}\n")
+    expect(Npm.packageEntry(main.path)).toBe(pathToFileURL(path.join(main.path, "lib", "entry.js")).href)
+
+    await using bare = await tmpdir()
+    await file(bare.path, "index.js")
+    expect(Npm.packageEntry(bare.path)).toBe(pathToFileURL(path.join(bare.path, "index.js")).href)
+  })
+
+  test("never returns the package directory", async () => {
+    await using tmp = await tmpdir()
+    await writePackage(tmp.path, { name: "empty", exports: { require: "./index.cjs" } })
+    expect(Npm.packageEntry(tmp.path)).toBeUndefined()
   })
 })
 

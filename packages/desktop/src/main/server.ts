@@ -47,14 +47,17 @@ export function preferAppEnv(userDataPath: string) {
   const shell = process.platform === "win32" ? null : getUserShell()
   const configDir = join(userDataPath, "config", "vector")
   const dataHome = join(userDataPath, "xdg-data")
-  const xdgConfigHome = join(userDataPath, "xdg-config")
   const cacheHome = join(userDataPath, "xdg-cache")
   const stateHome = join(userDataPath, "xdg-state")
-  for (const dir of [configDir, dataHome, xdgConfigHome, cacheHome, stateHome]) {
+  for (const dir of [configDir, dataHome, cacheHome, stateHome]) {
     mkdirSync(dir, { recursive: true })
   }
   const logger = getLogger()
   const loaded = shell ? loadShellEnv(shell, logger) : null
+  // XDG_CONFIG_HOME stays as Vector was launched. On Linux Electron derives appData from it, and app.relaunch() and the
+  // AppImage updater hand this environment to the next launch, which would then open a different, empty profile. The
+  // sidecar points its own XDG_CONFIG_HOME into userData (prepareSidecarEnv in sidecar.ts).
+  const shellEnv = Object.fromEntries(Object.entries(loaded ?? {}).filter((entry) => entry[0] !== "XDG_CONFIG_HOME"))
   // The login shell's PATH first, then whatever Electron was launched with,
   // then the directories package and version managers install into. The
   // sidecar and every MCP child it spawns inherit this, so node/npx/bun stay
@@ -64,7 +67,7 @@ export function preferAppEnv(userDataPath: string) {
     `[server] PATH for child processes has ${path.split(pathDelimiter()).length} entries (shell probe ${loaded ? "loaded" : "unavailable"})`,
   )
   Object.assign(process.env, {
-    ...loaded,
+    ...shellEnv,
     PATH: path,
     ...VECTOR_AGENT_RUNTIME_ENV,
     VECTOR_EXPERIMENTAL_ICON_DISCOVERY: "true",
@@ -74,7 +77,6 @@ export function preferAppEnv(userDataPath: string) {
 
     VECTOR_APP_NAMESPACE: "vector",
     XDG_DATA_HOME: process.env.XDG_DATA_HOME ?? dataHome,
-    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME ?? xdgConfigHome,
     XDG_CACHE_HOME: process.env.XDG_CACHE_HOME ?? cacheHome,
     XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? stateHome,
   })

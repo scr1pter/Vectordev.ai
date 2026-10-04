@@ -6,7 +6,9 @@
 // every desktop message with "ReferenceError: Bun is not defined". This script boots the bundle the way
 // packages/desktop/src/main/sidecar.ts does, points a provider at a fake OpenAI-compatible model that calls the Read
 // tool on a file in a temporary project, sends one prompt over the HTTP API the app uses, and fails unless the turn
-// finishes cleanly. It uses node: APIs only and must run under node, never bun:
+// finishes cleanly. It runs the turn twice: once through a bundled provider SDK, and once through an SDK the engine
+// installs into its package cache, which Node must import from the package's real entry file rather than its
+// directory. It uses node: APIs only and must run under node, never bun:
 //
 //   bun script/build-node.ts && node script/smoke-node-bundle.ts [path/to/node.js]
 
@@ -22,6 +24,9 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 
 const PROVIDER = "smoke"
 const MODEL = "smoke-model"
+// Not in BUNDLED_PROVIDERS, so the engine loads it through Npm.add from the package cache.
+const NPM_PROVIDER = "smoke-npm"
+const NPM_PACKAGE = "smoke-ai-provider"
 const REPLY = "The notes file holds the smoke marker."
 const START_TIMEOUT = 60_000
 const TURN_TIMEOUT = 120_000
@@ -47,7 +52,11 @@ async function smoke(bundle: string) {
   const model = await startFakeModel(notes)
   try {
     const engine = await startEngine(bundle, root, model.url)
-    const turn = await runTurn(engine, project, marker)
+    const turn = await runTurn(engine, project, marker, PROVIDER)
+      .then(async (failures) => [
+        ...failures,
+        ...(await runTurn(engine, project, marker, NPM_PROVIDER)).map((failure) => `${NPM_PACKAGE}: ${failure}`),
+      ])
       .catch((error) => [`the turn could not run: ${String(error)}`])
       .finally(engine.stop)
     const logs = engine.output.join("")
@@ -57,7 +66,9 @@ async function smoke(bundle: string) {
       ...(BUN_MISSING.test(logs) ? ["engine output or logs mention 'Bun is not defined'"] : []),
     ]
     if (failures.length === 0) {
-      console.log(`node bundle smoke passed on node ${process.version}: Read tool completed and the model replied`)
+      console.log(
+        `node bundle smoke passed on node ${process.version}: Read tool completed and the model replied, with a bundled and a cached provider SDK`,
+      )
       return
     }
     console.error(`node bundle smoke FAILED on node ${process.version} (${bundle}):`)
@@ -111,7 +122,9 @@ async function startEngine(bundle: string, root: string, modelUrl: string) {
   await mkdir(configDir, { recursive: true })
   // The desktop reads the user's global config from VECTOR_AGENT_CONFIG_DIR, so the provider goes there too.
   await writeFile(path.join(configDir, "vector.json"), JSON.stringify(providerConfig(modelUrl), null, 2))
-  const child = spawn(process.execPath, [script, "--serve", bundle], {
+  await seedCachedProvider(path.join(userData, "xdg-cache", "vector", "packages", NPM_PACKAGE))
+  // execArgv carries --experimental-strip-types, which Node before 22.18 needs to run this script in the child too.
+  const child = spawn(process.execPath, [...process.execArgv, script, "--serve", bundle], {
     cwd: root,
     env: sidecarEnv({ home, userData, configDir, password }),
     stdio: ["ignore", "pipe", "pipe"],
@@ -186,7 +199,45 @@ function sidecarEnv(input: { home: string; userData: string; configDir: string; 
   }
 }
 
+// An installed package as Npm.add leaves it, ESM-only with just an `import` export condition. It wraps the repo's
+// openai-compatible SDK so the turn reaches the same fake model.
+async function seedCachedProvider(dir: string) {
+  const pkg = path.join(dir, "node_modules", NPM_PACKAGE)
+  await mkdir(path.join(pkg, "dist"), { recursive: true })
+  await writeFile(
+    path.join(pkg, "package.json"),
+    JSON.stringify({
+      name: NPM_PACKAGE,
+      version: "1.0.0",
+      type: "module",
+      exports: { ".": { import: "./dist/index.js" } },
+    }),
+  )
+  await writeFile(
+    path.join(pkg, "dist", "index.js"),
+    `export { createOpenAICompatible as createSmoke } from ${JSON.stringify(import.meta.resolve("@ai-sdk/openai-compatible"))}\n`,
+  )
+}
+
 function providerConfig(baseURL: string) {
+  const provider = (name: string, npm: string) => ({
+    name,
+    npm,
+    models: {
+      [MODEL]: {
+        id: MODEL,
+        name: "Smoke Model",
+        attachment: false,
+        reasoning: false,
+        temperature: false,
+        tool_call: true,
+        release_date: "2025-01-01",
+        limit: { context: 100_000, output: 10_000 },
+        cost: { input: 0, output: 0 },
+      },
+    },
+    options: { apiKey: "smoke-key", baseURL },
+  })
   return {
     $schema: "https://vectordev.ai/config.json",
     model: `${PROVIDER}/${MODEL}`,
@@ -194,30 +245,19 @@ function providerConfig(baseURL: string) {
     formatter: false,
     lsp: false,
     provider: {
-      [PROVIDER]: {
-        name: "Smoke",
-        npm: "@ai-sdk/openai-compatible",
-        models: {
-          [MODEL]: {
-            id: MODEL,
-            name: "Smoke Model",
-            attachment: false,
-            reasoning: false,
-            temperature: false,
-            tool_call: true,
-            release_date: "2025-01-01",
-            limit: { context: 100_000, output: 10_000 },
-            cost: { input: 0, output: 0 },
-          },
-        },
-        options: { apiKey: "smoke-key", baseURL },
-      },
+      [PROVIDER]: provider("Smoke", "@ai-sdk/openai-compatible"),
+      [NPM_PROVIDER]: provider("Smoke npm", NPM_PACKAGE),
     },
   }
 }
 
 // Sends the prompt the way the app does (prompt_async, then the instance event stream) and reports what went wrong.
-async function runTurn(engine: { url: URL; authorization: string }, project: string, marker: string) {
+async function runTurn(
+  engine: { url: URL; authorization: string },
+  project: string,
+  marker: string,
+  providerID: string,
+) {
   const request = (route: string, init?: { method?: string; body?: unknown; signal?: AbortSignal }) =>
     fetch(new URL(route, engine.url), {
       method: init?.method ?? "GET",
@@ -248,7 +288,7 @@ async function runTurn(engine: { url: URL; authorization: string }, project: str
     method: "POST",
     body: {
       agent: "build",
-      model: { providerID: PROVIDER, modelID: MODEL },
+      model: { providerID, modelID: MODEL },
       parts: [{ type: "text", text: "Read notes.txt and tell me what it says." }],
     },
   })

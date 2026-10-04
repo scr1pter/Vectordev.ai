@@ -13,7 +13,9 @@ import {
   detectExternalAgents,
   executableNames,
   resolveAgentPath,
+  runCli,
   runExternalCodingAgent,
+  runsThroughCmd,
   signedInFromProbe,
   runtimeArguments,
   sessionFromAgentLine,
@@ -868,6 +870,43 @@ describe("launching a resolved CLI", () => {
       args: ["-p", "hi"],
       windowsVerbatimArguments: false,
     })
+  })
+
+  test("only a Windows .cmd or .bat file needs cmd.exe", () => {
+    expect(runsThroughCmd("C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.CMD", "win32")).toBe(true)
+    expect(runsThroughCmd("C:\\Program Files\\nodejs\\npx.bat", "win32")).toBe(true)
+    expect(runsThroughCmd("C:\\Users\\dev\\.local\\bin\\claude.exe", "win32")).toBe(false)
+    expect(runsThroughCmd("/usr/local/bin/claude.cmd", "darwin")).toBe(false)
+  })
+
+  // Node throws a spawn it refuses (EINVAL for a .cmd, EFTYPE for a .ps1 on Windows) synchronously. Detection probed
+  // VS Code's code.cmd that way, the throw rejected the whole detection, and the renderer retried it in a loop.
+  test("a probe whose spawn throws is a failed run, not an exception", async () => {
+    const result = await runCli("/bin/echo", ["not\0valid"], 1_000)
+    expect(result.failed).toBe(true)
+  })
+
+  // cmd.exe ends the command line at the first line feed, even inside quotes. Through claude.cmd the multi-line
+  // Parallel Workspace prompt arrived cut to its first line, without --output-format or --permission-mode.
+  test("through a Windows .cmd shim, Claude Code and Codex take the prompt on stdin", () => {
+    const prompt = "You are Vector's Parallel Workspace engineering agent.\n\nTask:\nFix %PATH% handling"
+    const shim = "C:\\Users\\dev\\AppData\\Roaming\\npm\\claude.cmd"
+    for (const resume of [undefined, "sid-4"]) {
+      const claude = runtimeArguments("claude-code", "C:\\w", prompt, resume, true)
+      expect(claude).not.toContain(prompt)
+      expect(claude[claude.indexOf("-p") + 1]).toBe("--output-format")
+      expect(claude).toContain("stream-json")
+      expect(claude[claude.indexOf("--permission-mode") + 1]).toBe("acceptEdits")
+      if (resume) expect(claude[claude.indexOf("--resume") + 1]).toBe(resume)
+
+      const codex = runtimeArguments("codex", "C:\\w", prompt, resume, true)
+      expect(codex).not.toContain(prompt)
+      expect(codex.at(-1)).toBe("-")
+
+      for (const args of [claude, codex]) {
+        expect(shimmedCommand(shim, args, "win32").args.join(" ")).not.toMatch(/[\r\n%]/)
+      }
+    }
   })
 
   test("Windows process cleanup always targets the entire child tree", () => {

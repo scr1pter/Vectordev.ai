@@ -7,7 +7,10 @@ import { stagePlugin, verifyPlugin } from "../script/build"
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "vector-plugin-package-"))
   const directory = path.join(root, "packages/plugin")
-  await Bun.write(path.join(root, "packages/desktop/package.json"), JSON.stringify({ version: "1.2.3" }))
+  await Bun.write(
+    path.join(root, "packages/desktop/package.json"),
+    JSON.stringify({ version: "9.9.9", vectorRequiredCliVersion: "1.2.3" }),
+  )
   await Bun.write(path.join(root, "package.json"), JSON.stringify({ workspaces: { catalog: { zod: "4.1.8" } } }))
   await Bun.write(
     path.join(directory, "package.json"),
@@ -88,7 +91,7 @@ test("a stale stage cannot be published under a newer source version", async () 
   await using tmp = await fixture()
   const output = await stagePlugin(tmp.directory, false)
   const file = Bun.file(path.join(tmp.root, "packages/desktop/package.json"))
-  await file.write(JSON.stringify({ version: "1.2.4" }))
+  await file.write(JSON.stringify({ version: "9.9.9", vectorRequiredCliVersion: "1.2.4" }))
   await expect(verifyPlugin(output)).rejects.toThrow("Staged plugin identity does not match its source")
 })
 
