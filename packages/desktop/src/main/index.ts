@@ -40,6 +40,7 @@ import { createWslServersController } from "./wsl/servers"
 import { registerWslIpcHandlers } from "./wsl/ipc"
 import { spawnWslSidecar } from "./wsl/sidecar"
 import { migrate } from "./migrate"
+import { leakedXdgHomes } from "./xdg-env"
 import { cleanupStoreFiles, removeLegacyAccessFiles } from "./store-cleanup"
 import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
 import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
@@ -140,6 +141,12 @@ const main = Effect.gen(function* () {
   process.env.VECTOR_DISABLE_EMBEDDED_WEB_UI = "true"
 
   const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.vector.app.dev"
+  // A Restart or AppImage update from 1.99.99 passes its leaked XDG values on; undo them before anything reads appData.
+  if (process.platform === "linux") {
+    const leaked = leakedXdgHomes(process.env, appId)
+    if (leaked.appData) app.setPath("appData", leaked.appData)
+    for (const key of leaked.keys) delete process.env[key]
+  }
   const onboardingTestRoot = ((): string | undefined => {
     if (!TEST_ONBOARDING) return
 
