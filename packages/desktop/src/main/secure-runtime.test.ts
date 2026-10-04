@@ -26,6 +26,8 @@ const electronMock = {
       return value.toString().replace(/^sealed:/, "")
     },
   },
+  // Bun keeps a module mock for the rest of the run, so it carries every export a later test file's imports bind.
+  shell: { openExternal: async () => {} },
 }
 mock.module("electron", () => ({ default: electronMock, ...electronMock }))
 

@@ -380,6 +380,11 @@ jobs:
         uses: ./.github/actions/setup-bun
         with:
           install-flags: --frozen-lockfile
+      # Electron 42 downloads its runtime on first launch rather than on install, and the macOS
+      # package copies Electron's and Chromium's licences out of that runtime.
+      - name: Install the Electron runtime
+        if: matrix.name == 'desktop'
+        run: bun packages/desktop/node_modules/electron/install.js
       - name: Run package tests
         working-directory: ${{ matrix.directory }}
         env:
@@ -542,6 +547,11 @@ jobs:
             echo "Production macOS releases require: ${missing[*]}"
             exit 1
           fi
+
+      # Electron 42 downloads its runtime on first launch rather than on install, and the macOS
+      # package copies Electron's and Chromium's licences out of that runtime.
+      - name: Install the Electron runtime
+        run: bun packages/desktop/node_modules/electron/install.js
 
       - name: Build desktop app
         env:

@@ -35,6 +35,8 @@ async function fixture(arch = "x64", version = "1.16.2") {
     "rm",
     "rmdir",
     "shasum",
+    // GNU tar runs gzip for -z; BSD tar has it built in.
+    "gzip",
   ]) {
     const actual = Bun.which(command)
     if (!actual) throw new Error(`Missing fixture utility ${command}`)
@@ -230,7 +232,7 @@ shellTest("legacy migration respects the standalone installation lock", async ()
   expect(result.code).toBe(1)
   expect(result.stderr).toContain("Another Vector installation")
   expect(await Bun.file(native).text()).toBe(old)
-  expect(await readdir(path.join(instance.home, ".vector/bin"))).toEqual([
+  expect((await readdir(path.join(instance.home, ".vector/bin"))).toSorted()).toEqual([
     ".vector-vector-native.lock",
     "vector-native",
   ])
