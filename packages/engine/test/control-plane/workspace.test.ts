@@ -119,6 +119,9 @@ afterEach(async () => {
 async function initGitRepo(dir: string) {
   await fs.mkdir(dir, { recursive: true })
   await $`git init`.cwd(dir).quiet()
+  // Vector's git commands follow the repository's line-ending settings, and Git for Windows defaults to autocrlf=true,
+  // which would apply patches with CRLF. These tests compare exact file contents, so pin LF.
+  await $`git config core.autocrlf false`.cwd(dir).quiet()
   await $`git config core.fsmonitor false`.cwd(dir).quiet()
   await $`git config commit.gpgsign false`.cwd(dir).quiet()
   await $`git config user.email "test@vector.test"`.cwd(dir).quiet()
