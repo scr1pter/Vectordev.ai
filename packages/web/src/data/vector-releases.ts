@@ -8,20 +8,20 @@ export type VectorRelease = {
 }
 
 // Shared by the landing release feed and documentation changelog. This is not a versioned release:
-// it lists services that stay switched off or unpublished beyond the next personal-account release.
+// it lists services that stay switched off or unpublished after the published personal-account release.
 export const upcomingRelease = {
   label: "Upcoming — unversioned",
   title: "Features waiting on Vector's own setup",
   summary:
-    "The next release, 1.99.99, prepares guarded free-model access through each user's own OpenRouter account. Vector's shared free allowance stays off. Other features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, standalone CLI distribution through shell and PowerShell installers, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Personal OpenRouter access, API-key connections and Sign in with ChatGPT do not require those hosted services.",
+    "Vector's shared free allowance stays off. Other features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Personal OpenRouter access, API-key connections and Sign in with ChatGPT do not require those hosted services.",
   status:
-    "No release date is announced for the services still awaiting setup. The 1.99.99 installers are not published; desktop downloads remain at 1.99.8. Shared service activation requires a separate decision.",
+    "No release date is announced for the services still awaiting setup. Shared service activation requires a separate decision. Version 2 is reserved for the final release.",
 }
 
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.8"
+export const publishedDesktopVersion = "1.99.99"
 
 export const releaseSeries: VectorRelease[] = [
   {
@@ -620,8 +620,6 @@ export const release199: VectorRelease[] = [
   {
     version: "1.99.99",
     title: "Vector is free, updates itself, and agents can change branch",
-    availability:
-      "Upcoming, not published: 1.99.99 is prepared as an unsigned release. Desktop downloads remain at 1.99.8 and npm CLI at 1.99.7 until new artifacts are published. These existing downloads do not include the guarded personal free-model setup or read the VECTOR_ names and vector.json. Version 2 is reserved for the final release.",
     summary:
       "Vector is now free: create a free Vector account to download the desktop app, and the same account signs in the terminal agent. Installed copies now update from inside the app: choose Check for Updates and Vector downloads the new release, installs it and restarts. You can change an agent's branch: click the branch name in the session header to switch that checkout to another local branch, or type a new name to create one from the current commit. Vector never stashes or discards your work to switch, and it refuses while a Vector agent is running in that checkout; in agent workspaces Vector manages, you can create a branch but not switch to an existing one. 1.99.99 is the first release with no dependency on the upstream service. Connect a provider with your own API key, sign in with ChatGPT for OpenAI models, or use Connect OpenRouter with your own OpenRouter account; its eligible zero-price models appear under Free models inside of Vector and stop at their limits instead of switching to a paid model, and Vector's shared free allowance stays off. The model list is current again, including GPT-6 Astra, GPT-6 Sol, GPT-6.1 Sol and GPT-6 Luna for ChatGPT sign-in, and Vector refreshes it from vectordev.ai when it starts and every hour. On first launch after upgrading, Vector imports your 1.99.8 settings, agents, commands, skills, plugins, MCP servers and permission rules, and keeps the originals. Security fixes keep stored API keys, auth headers and MCP tokens out of what Vector's server sends to connected clients and invite guests (an invite guest still has full access to your workspace, including the terminal, so invite only people you trust), keep Vector's internal secrets out of the integrated terminal, and protect passwordless local servers from rebinding web pages. Cloud connections keep client secrets on Vector's server, project variables keep their names when you change projects, local .env writes preserve literal values, and agent publishing uses one linked destination or asks you to choose; registration of the Cloud sign-ins is still pending. Reliability: stopping a prompt during first startup no longer leaves later prompts stuck, search recovers after an interrupted first lookup, an interrupted workspace no longer hangs shutdown, shell commands keep their final output when a process exits quickly, local plugins resolve JavaScript-style imports to their TypeScript source, and switching agents keeps the selected free model. In the desktop app, agents spend less: subagents start from a much shorter prompt, small fixes and lookups stay with the main agent instead of starting a subagent, explore no longer runs at a model's highest thinking budget, the LLM-as-a-judge instructions are sent once per session rather than with every message, a background subagent's report is capped like any other tool result, and the cost shown for a session includes what its subagents spent. Read-only agents such as explore and review now keep your deny rules and the prompts before reading secret files, and can no longer write files through a shell redirect. Code Archaeology has been removed; Rewind code + chat still takes you back to earlier work. Dialogs have a look of their own, the send button lines up with the composer, the code reviewer is called Vectorscope, crash reports open as editable drafts, and providers without artwork use a neutral Vector icon. The Terms and software licence now include a minimum liability cap. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
   },

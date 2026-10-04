@@ -223,6 +223,7 @@
 .acct .free-download-firstrun summary { color: rgba(238, 231, 247, 0.8); }
 .acct .free-download-firstrun p { color: rgba(225, 216, 235, 0.6); font-size: 12.5px; }
 .acct .free-download-firstrun a { color: #e6dcff; }
+.acct .free-download-note a { color: #e6dcff; }
 
 @media (max-width: 560px) {
   .acct-header-inner,

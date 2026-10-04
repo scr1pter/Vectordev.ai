@@ -40,6 +40,10 @@ export const prerender = true
             <div slot="fallback" class="auth-loading" role="status">Preparing your workspace…</div>
           </AuthPage>
         </div>
+        <p class="auth-installers-note">
+          To download Vector without an account, get any installer from
+          <a href="https://github.com/scr1pter/Vectordev.ai/releases/latest">GitHub releases</a>.
+        </p>
         <footer class="auth-panel-footer">
           <span>© {new Date().getFullYear()} Vector</span>
           <div><a href="/legal/terms">Terms of Service</a><a href="/legal/privacy">Privacy Policy</a></div>
@@ -48,3 +52,20 @@ export const prerender = true
     </main>
   </div>
 </MarketingLayout>
+
+<style>
+  .auth-installers-note {
+    max-width: 320px;
+    margin: 0 auto 22px;
+    color: #91829e;
+    font-size: 11px;
+    line-height: 1.7;
+    text-align: center;
+  }
+
+  .auth-installers-note a {
+    color: #ba9cd5;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+</style>

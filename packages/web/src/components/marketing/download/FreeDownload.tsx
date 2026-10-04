@@ -76,7 +76,8 @@ export function FreeDownload({ accessToken }: { accessToken?: string }) {
       </button>
 
       <p className="free-download-note">
-        Free with your Vector account. macOS, Windows and Linux.
+        Free with your Vector account. macOS, Windows and Linux. Every installer is also on{" "}
+        <a href="https://github.com/scr1pter/Vectordev.ai/releases/latest">GitHub releases</a>, no account needed.
       </p>
       {error && <p className="download-error">{error}</p>}
 
@@ -97,12 +98,14 @@ export function FreeDownload({ accessToken }: { accessToken?: string }) {
           </p>
         ) : (
           <p>
-            Make the AppImage executable with <code>chmod +x</code>, then run it.
+            Make the AppImage executable with <code>chmod +x</code>, then run it. Keep running the AppImage itself:
+            in-app updates only work there.
           </p>
         )}
         <p>
-          Preview builds do not update themselves yet, so come back here for new versions.{" "}
-          <a href="/docs#troubleshooting">More help</a>
+          After you install Vector, it updates itself: choose <strong>Check now</strong> in Settings →{" "}
+          {"Updates & about"}, or <strong>Check for Updates</strong> in the Vector menu on macOS.{" "}
+          <a href="/docs/troubleshooting">More help</a>
         </p>
       </details>
 

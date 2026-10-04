@@ -11,9 +11,8 @@ export const prerender = true
     quotas and terms. Free model inference does not make hosting or database operations free.
   </p>
   <p class="note">
-    The connection, environment and publishing improvements below are prepared for the upcoming 1.99.99 desktop
-    release. Public downloads remain desktop 1.99.8 and CLI 1.99.7. Hosted provider sign-in is not enabled yet;
-    use the manual token option in Connections where your desktop version supports it.
+    The connection, environment and publishing improvements below arrived in desktop 1.99.99. Hosted provider
+    sign-in is not enabled yet; use the manual token option in Connections where your desktop version supports it.
   </p>
 
   <h2 id="connect-accounts">Connect an account and select a project</h2>
@@ -25,7 +24,7 @@ export const prerender = true
   </p>
   <p>
     Link the existing Vercel or Netlify project that this repository should use, or choose its Supabase project in
-    Database. The upcoming desktop uses an encrypted temporary callback relay for Vercel and Netlify, and PKCE for
+    Database. From 1.99.99, the desktop uses an encrypted temporary callback relay for Vercel and Netlify, and PKCE for
     Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
   </p>
 

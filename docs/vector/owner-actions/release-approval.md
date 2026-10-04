@@ -1,5 +1,12 @@
 # Release approval and external prerequisites
 
+**Published, October 4, 2026 UTC.** Desktop and CLI 1.99.99 are published.
+Desktop release run [37179230286](https://github.com/scr1pter/Vectordev.ai/actions/runs/37179230286)
+built `0575c41f370cbc828940e27d6857bf2c27f0e33f` and published GitHub release
+`v1.99.99` (latest, not a draft) at 05:45:30 UTC with every installer and the
+four in-app update feeds (`scope=full`). The records below are the preparation
+history that led to it.
+
 Status checked October 3, 2026 UTC. The owner reserved version 2 and allowed an
 interim 1.x release. The candidate follows main's **1.99.99** desktop and CLI
 version; earlier **1.999.99** preparation records remain historical. Unsigned
@@ -523,9 +530,9 @@ not reached. Its load timeouts followed the ONNX optimizer errors repaired in
    candidate, and launch it. The owner handles any operating-system password or
    keychain prompt; the agent must not enter those credentials.
 
-Unsigned releases update manual downloads, not the signed automatic-update feed.
-Preserve the existing signed feed and the workflow's complete-platform gate. Do
-not advertise a partial upload as the latest release.
+Unsigned releases update both the manual downloads and the in-app update feeds
+(the workflow publishes them with `scope=full`). Preserve the workflow's
+complete-platform gate. Do not advertise a partial upload as the latest release.
 
 ## Free-model scope
 
