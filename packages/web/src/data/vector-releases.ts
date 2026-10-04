@@ -21,7 +21,7 @@ export const upcomingRelease = {
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.99"
+export const publishedDesktopVersion = "1.99.100"
 
 export const releaseSeries: VectorRelease[] = [
   {
@@ -626,8 +626,6 @@ export const release199: VectorRelease[] = [
   {
     version: "1.99.100",
     title: "Messages work again in the desktop app",
-    availability:
-      "Upcoming, not published: 1.99.100 is prepared as an unsigned desktop release. Desktop downloads remain at 1.99.99 until its installers are published, and the npm CLI and plugin SDK stay at 1.99.99.",
     summary:
       "This release fixes the desktop app, where in 1.99.99 every message failed with \"Bun is not defined\" on macOS, Windows and Linux. Local plugins and skills loaded from a URL failed in the desktop app with the same error, and plugins installed from npm and providers whose SDK Vector downloads on first use could not load there; all of them work now. The 1.99.99 apps for Intel Macs, Windows on Arm and Linux on Arm did not open, because they were built without the terminal component for their processor. 1.99.100 includes it on every platform, and a terminal component that cannot load now affects only terminals. A copy that does not open never reaches its update check, so on those computers download 1.99.100 from your account page or GitHub releases and install it over the old one; your projects and settings stay where they are. On Windows, Vector's Git commands now follow your Git line-ending and symlink settings: a file whose only change is its line endings no longer shows as edited or blocks switching an agent's branch, and Vector's commits keep the line endings your repository expects. Also on Windows, Claude Code and Codex installed with npm receive the whole Parallel Workspace prompt instead of only its first line, Cursor Agent installed as a command script says it cannot take the prompt instead of running with part of it, detecting these agents no longer fails when one of them or VS Code is installed as a command script, Publish finds Vercel and Netlify CLIs installed with npm, and merge and pull-request checks run npm, pnpm and yarn instead of skipping them. A failed agent check no longer repeats in a loop while the Parallel Workspace composer is open. On Linux, Restart in 1.99.99 and in-app updates to it could open a new, empty profile; 1.99.100 opens your original profile again, so anything you signed in to or set up only in that empty profile needs to be set up again. The terminal agent was not affected and stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
   },
