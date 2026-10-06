@@ -8,7 +8,6 @@ import ShotIcon from "./ShotIcon.astro"
 
 interface Props {
   id: string
-  open: boolean
   // The specialist's clock, in seconds and as the session shot formats it.
   seconds: number
   time: string
@@ -131,7 +130,7 @@ const id = Astro.props.id
   data-tasks-panel
   data-floating=""
   data-expanded=""
-  hidden={!Astro.props.open}
+  hidden
   aria-labelledby={`${id}-title`}
 >
   <header class="bgt-header">

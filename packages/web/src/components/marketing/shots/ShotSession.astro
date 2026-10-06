@@ -1,15 +1,14 @@
 ---
 // An agent session in the desktop app, drawn from its components
 // (session-header.tsx, branch-picker.tsx, the subagent task chip, the todo dock
-// and vector-premium.css) and driven by sample data. Three of the landing
-// page's screenshots are this one screen in different states: the session,
-// the same session with Background tasks popped out, and the session with the
-// browser open beside it.
+// and vector-premium.css) and driven by sample data. Two of the landing page's
+// windows are this one screen in different states: the session in the hero,
+// and the session with the browser open beside it.
 //
 // Everything here works on the page itself. The header tools open their
 // panels, the branch picker switches and creates branches, the clocks run and
-// stopping the specialist stops them. The composer is a picture, for the
-// reason ProductDemo gives: there is no model behind the page.
+// stopping the specialist stops them. The composer is a picture: there is no
+// model behind the page.
 //
 // The stage can be laid out anywhere from 1440px down to 420px wide (see
 // AppShots), so the screen reflows as the app does in a smaller window: the
@@ -23,7 +22,7 @@ import ShotTasksPanel from "./ShotTasksPanel.astro"
 
 interface Props {
   id: string
-  variant: "session" | "tasks" | "browser"
+  variant: "session" | "browser"
   // Seconds on the turn's clock and on the running specialist's.
   turn: number
   task: number
@@ -211,8 +210,8 @@ const clock = (seconds: number, pad: boolean) =>
           type="button"
           class="ss-tool"
           data-tool="tasks"
-          data-active={String(variant === "tasks")}
-          aria-expanded={variant === "tasks"}
+          data-active="false"
+          aria-expanded="false"
           aria-controls={`${id}-tasks`}
           aria-label="Background tasks, 1 running"
         >
@@ -372,7 +371,7 @@ const clock = (seconds: number, pad: boolean) =>
         }
       </aside>
 
-      <ShotTasksPanel id={`${id}-tasks`} open={variant === "tasks"} seconds={Astro.props.task} time={clock(Astro.props.task, true)} />
+      <ShotTasksPanel id={`${id}-tasks`} seconds={Astro.props.task} time={clock(Astro.props.task, true)} />
     </div>
 
     <section class="ss-term" id={`${id}-terminal`} data-terminal aria-label="Terminal" hidden>
