@@ -1,0 +1,1194 @@
+---
+// The browser in the session's side panel (BrowserPanel in
+// packages/app/src/pages/session/session-side-panel.tsx): back, forward,
+// reload, an address bar, the sidebar toggle, open-in-browser and Publish over
+// a page. The pages are small drawings of this site, so the address bar has
+// somewhere real to go and "open in your browser" opens the same page here.
+import { docsNav } from "../../../data/docs-nav"
+import { publishedDesktopVersion, release199 } from "../../../data/vector-releases"
+import { wordmarkCells } from "../../../lib/wordmark"
+import ShotIcon from "./ShotIcon.astro"
+
+const releases = release199
+  .slice(0, release199.findIndex((release) => release.version === publishedDesktopVersion) + 1)
+  .reverse()
+  .slice(0, 4)
+
+// The site's mobile menu (MarketingNav) and the docs page's "Get going" steps
+// (pages/docs/index.astro), so the drawing reads like the pages it opens.
+const menu = [
+  { name: "Documentation", path: "/docs" },
+  { name: "Releases", path: "/releases" },
+  { name: "About", path: "/about" },
+  { name: "Login", path: "/login" },
+]
+const steps = [
+  ["install", "Install Vector", "macOS, Windows or Linux, and the CLI in any terminal."],
+  ["first-task", "Your first task", "Point Vector at a project on your disk, ask for a change, review what it did."],
+  ["vector-agent", "Vector Agent", "What the agent can do, its tools, and the rules it follows."],
+]
+
+// The page's falling glyphs, laid out once at build time from a fixed hash so
+// every visitor sees the same field: dim glyphs, alone or in short runs,
+// scattered over the whole page, a little denser toward the right.
+const hash = (x: number, y: number) => {
+  const value = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453
+  return value - Math.floor(value)
+}
+const glyphs = "01VECTOR{}[]<>/\\+=:*"
+const field = Array.from({ length: 330 }, (_, run) => {
+  // Snapped to 9px columns, as a terminal font would set them.
+  const x = Math.round((Math.pow(hash(run, 1), 0.85) * 640) / 9) * 9 + 3
+  const weight = x / 640
+  const top = hash(run, 2) * 680 - 20
+  const length = 1 + Math.floor(Math.pow(hash(run, 3), 2) * (1.5 + weight * 2))
+  return Array.from({ length }, (_, step) => {
+    const glyph = glyphs[Math.floor(hash(run, step + 4) * glyphs.length)]
+    const alpha = (0.1 + hash(step, run) * 0.3) * (0.7 + weight * 0.3)
+    return `<text x="${x}" y="${Math.round(top + step * 10)}" fill-opacity="${alpha.toFixed(2)}">${glyph.replace("<", "&lt;").replace(">", "&gt;")}</text>`
+  }).join("")
+}).join("")
+const rain = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="647" height="660" font-family="monospace" font-size="9" fill="#a474ff">${field}</svg>`,
+)}")`
+---
+
+<div class="bp" data-browser>
+  <div class="bp-toolbar">
+    <button type="button" class="bp-btn" data-browser-back aria-label="Go back" title="Go back" disabled>
+      <ShotIcon name="back" size={14} />
+    </button>
+    <button type="button" class="bp-btn" data-browser-forward aria-label="Go forward" title="Go forward" disabled>
+      <ShotIcon name="forward" size={14} />
+    </button>
+    <button type="button" class="bp-btn" data-browser-reload aria-label="Reload page" title="Reload page">
+      <ShotIcon name="reload" size={14} class="bp-reload" />
+    </button>
+    <form class="bp-address" data-browser-form>
+      <input
+        type="text"
+        aria-label="Browser address"
+        value="https://vectordev.ai/"
+        spellcheck="false"
+        autocomplete="off"
+        data-browser-url
+      />
+      <button type="submit" class="bp-go" aria-label="Open URL" title="Open URL"><ShotIcon name="go" size={14} /></button>
+    </form>
+    <button type="button" class="bp-btn" data-sidebar-toggle aria-label="Toggle Vector sidebar" title="Toggle Vector sidebar" aria-pressed="false">
+      <ShotIcon name="panel" size={14} />
+    </button>
+    <a class="bp-btn" data-browser-open href="https://vectordev.ai/" target="_blank" rel="noopener" aria-label="Open in system browser" title="Open in system browser">
+      <ShotIcon name="external" size={14} />
+    </a>
+    <button type="button" class="bp-publish" data-browser-publish>Publish</button>
+  </div>
+
+  <div class="bp-viewport" style={`--bp-rain: ${rain}`} data-browser-viewport>
+    <div class="bp-head">
+      <nav class="bp-nav" aria-label="vectordev.ai">
+        <a class="bp-logo" href="https://vectordev.ai/" data-browser-link="/" aria-label="vectordev.ai home">
+          <span><ShotIcon name="chip" size={20} /></span>
+        </a>
+        <button type="button" class="bp-menu" data-browser-menu aria-expanded="false" aria-label="Menu">
+          <ShotIcon name="menu" size={16} />
+        </button>
+        <div class="bp-menu-list" data-browser-menu-list hidden>
+          {
+            menu.map((item) => (
+              <a href={`https://vectordev.ai${item.path}`} data-browser-link={item.path} data-menu-path={item.path}>
+                {item.name}
+              </a>
+            ))
+          }
+        </div>
+      </nav>
+    </div>
+
+    <section class="bp-page bp-home" data-page="/" aria-label="vectordev.ai home page">
+      <svg class="bp-wordmark" viewBox="0 0 40 7" fill="currentColor" aria-hidden="true">
+        {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="0.84" height="0.84" />)}
+      </svg>
+      <p class="bp-headline">An engineering workspace that <span>has a 300B model coming.</span></p>
+      <p class="bp-deck">
+        Open a repository on your computer. Plan, edit, run, and ship with Vector's own agent beside your editor — on
+        your desktop, in your terminal, or from the cloud.
+      </p>
+      <div class="bp-actions">
+        <a class="bp-cta" href="https://vectordev.ai/login" data-browser-link="/login">Get Vector <ShotIcon name="arrow" size={16} /></a>
+        <a
+          class="bp-secondary"
+          href="https://vectordev.ai/docs/terminal-agent#install-the-cli"
+          data-browser-link="/docs/terminal-agent#install-the-cli">Install the CLI</a
+        >
+      </div>
+      <p class="bp-note">Free with a Vector account. macOS, Windows, and Linux.</p>
+      <div class="bp-window" aria-hidden="true">
+        <div class="bp-window-bar"><span class="bp-lights"><i></i><i></i><i></i></span><span>Vector — Workspace</span><span class="bp-ready"><i></i>Ready</span></div>
+        <div class="bp-window-row"><span class="bp-lights is-dim"><i></i><i></i><i></i></span><span>vectordev.ai — main</span><span class="bp-model">GPT-6 Astra</span></div>
+        <div class="bp-window-body">
+          <div class="bp-window-switch"><span>Agent</span><span>Editor</span></div>
+          <div class="bp-window-next"><span></span><span></span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bp-page bp-doc" data-page="/docs" aria-label="vectordev.ai docs page" hidden>
+      <p class="bp-eyebrow">Start here</p>
+      <p class="bp-title">Vector documentation</p>
+      <p class="bp-lead">
+        Vector is an engineering workspace with an agent of its own: an editor, a terminal, a browser and a code reviewer
+        around one agent that works in the repository already on your disk. These pages cover every part of it.
+      </p>
+      <p class="bp-heading">Get going</p>
+      <ol class="bp-steps">
+        {
+          steps.map(([path, name, text]) => (
+            <li>
+              <a href={`https://vectordev.ai/docs/${path}`} data-browser-link={`/docs/${path}`}>
+                {name}
+              </a>
+              <span>{text}</span>
+            </li>
+          ))
+        }
+      </ol>
+      <p class="bp-heading">Everything else</p>
+      <div class="bp-guides">
+        {
+          docsNav.map((group) => (
+            <a class="bp-guide" href={`https://vectordev.ai/docs/${group.links[0].id}`} data-browser-link={`/docs/${group.links[0].id}`}>
+              <span class="bp-guide-name">{group.label}</span>
+              <span class="bp-guide-text">
+                {group.links
+                  .map((link) => link.title)
+                  .slice(0, 3)
+                  .join(" · ")}
+              </span>
+              <span class="bp-guide-count">{group.links.length} pages</span>
+            </a>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="bp-page bp-doc" data-page="/releases" aria-label="vectordev.ai releases page" hidden>
+      <p class="bp-eyebrow">Vector releases</p>
+      <p class="bp-title">Every version. One evolving workspace.</p>
+      <ol class="bp-releases">
+        {
+          releases.map((release, index) => (
+            <li class={index === 0 ? "is-latest" : undefined}>
+              <span class="bp-version">
+                {release.version}
+                {index === 0 ? <em>Latest</em> : null}
+              </span>
+              <span class="bp-release-title">{release.title}</span>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+
+    <section class="bp-page bp-doc" data-page="missing" aria-label="Page not in this preview" hidden>
+      <p class="bp-eyebrow">Not in this preview</p>
+      <p class="bp-title">This browser only has three pages.</p>
+      <p class="bp-lead">
+        It is a drawing of Vector's browser, so it can open the home page, the docs and the releases. The desktop app
+        opens anything, starting with the app you are building on localhost.
+      </p>
+      <div class="bp-links">
+        <a href="https://vectordev.ai/" data-browser-link="/">vectordev.ai</a>
+        <a href="https://vectordev.ai/docs" data-browser-link="/docs">/docs</a>
+        <a href="https://vectordev.ai/releases" data-browser-link="/releases">/releases</a>
+      </div>
+      <a class="bp-real" href="https://vectordev.ai/" target="_blank" rel="noopener" data-browser-real hidden>
+        Open <span data-browser-real-label></span> in your browser <ShotIcon name="external" size={13} />
+      </a>
+    </section>
+
+    <div class="bp-toast" data-browser-toast role="status" hidden>
+      <button type="button" class="bp-toast-close" data-browser-toast-close aria-label="Dismiss"><ShotIcon name="x" size={14} /></button>
+      <p class="bp-toast-title">Publish runs in the desktop app</p>
+      <p class="bp-toast-text">
+        It deploys the open project with your own Vercel or Netlify CLI and hands back the live link. This preview has
+        no project to deploy.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const pages = ["/", "/docs", "/releases"]
+  const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+
+  // "vectordev.ai/docs", "https://vectordev.ai/docs/", "docs" and "/docs" all
+  // name the same page; anything else is a page this preview does not have.
+  const pathOf = (input: string) =>
+    `/${input
+      .trim()
+      .replace(/^https?:\/\//i, "")
+      .replace(/^(www\.)?vectordev\.ai/i, "")
+      .replace(/^\/+|\/+$/g, "")}`
+  const resolve = (input: string) => (pages.includes(pathOf(input)) ? pathOf(input) : "missing")
+  // Where "open in your browser" goes: the same page on the real site when
+  // the address is one of its pages, the home page otherwise.
+  const realURL = (input: string) =>
+    /^(https?:\/\/)?((www\.)?vectordev\.ai)?(\/[\w./-]*)?(#[\w-]*)?$/i.test(input.trim()) && input.trim() !== ""
+      ? `https://vectordev.ai${pathOf(input) === "/" ? "/" : pathOf(input)}`
+      : "https://vectordev.ai/"
+
+  const boot = (root: HTMLElement) => {
+    const url = root.querySelector<HTMLInputElement>("[data-browser-url]")
+    const back = root.querySelector<HTMLButtonElement>("[data-browser-back]")
+    const forward = root.querySelector<HTMLButtonElement>("[data-browser-forward]")
+    const open = root.querySelector<HTMLAnchorElement>("[data-browser-open]")
+    const toast = root.querySelector<HTMLElement>("[data-browser-toast]")
+    const menu = root.querySelector<HTMLButtonElement>("[data-browser-menu]")
+    const menuList = root.querySelector<HTMLElement>("[data-browser-menu-list]")
+    const real = root.querySelector<HTMLAnchorElement>("[data-browser-real]")
+    const realLabel = root.querySelector<HTMLElement>("[data-browser-real-label]")
+    if (!url || !back || !forward || !open || !toast || !menu || !menuList || !real || !realLabel) return
+    const state = { history: [{ path: "/", typed: "https://vectordev.ai/" }], at: 0, toast: 0 }
+
+    const setMenu = (on: boolean) => {
+      menuList.hidden = !on
+      menu.setAttribute("aria-expanded", String(on))
+    }
+
+    const show = () => {
+      const entry = state.history[state.at]
+      root.querySelectorAll<HTMLElement>("[data-page]").forEach((page) => {
+        page.hidden = page.dataset.page !== entry.path
+        page.scrollTop = 0
+      })
+      root
+        .querySelectorAll("[data-menu-path]")
+        .forEach((link) =>
+          link.setAttribute("aria-current", link.getAttribute("data-menu-path") === entry.path ? "page" : "false"),
+        )
+      url.value = entry.path === "missing" ? entry.typed : `https://vectordev.ai${entry.path === "/" ? "/" : entry.path}`
+      open.href = realURL(entry.path === "missing" ? entry.typed : entry.path)
+      // A missing page that is a real page of the site offers to open it.
+      real.hidden = entry.path !== "missing" || open.href === "https://vectordev.ai/"
+      real.href = open.href
+      realLabel.textContent = open.href.replace(/^https:\/\//, "")
+      back.disabled = state.at === 0
+      forward.disabled = state.at === state.history.length - 1
+      setMenu(false)
+    }
+
+    const reload = () => {
+      show()
+      if (reducedMotion()) return
+      root.dataset.loading = ""
+      setTimeout(() => delete root.dataset.loading, 450)
+    }
+
+    // Opening the address already showing reloads it, as a browser does,
+    // rather than adding it to the history again.
+    const go = (typed: string) => {
+      const entry = state.history[state.at]
+      const path = resolve(typed)
+      if (path === entry.path && (path !== "missing" || typed.trim() === entry.typed.trim())) {
+        reload()
+        return
+      }
+      state.history = [...state.history.slice(0, state.at + 1), { path, typed }]
+      state.at = state.history.length - 1
+      show()
+    }
+
+    back.addEventListener("click", () => {
+      state.at = Math.max(0, state.at - 1)
+      show()
+    })
+    forward.addEventListener("click", () => {
+      state.at = Math.min(state.history.length - 1, state.at + 1)
+      show()
+    })
+    root.querySelector("[data-browser-reload]")?.addEventListener("click", reload)
+    root.querySelector("[data-browser-form]")?.addEventListener("submit", (event) => {
+      event.preventDefault()
+      go(url.value)
+      url.blur()
+    })
+    url.addEventListener("focus", () => url.select())
+    url.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return
+      // Handled here, so the session around it does not close anything too.
+      event.preventDefault()
+      show()
+      url.blur()
+    })
+    root.querySelectorAll<HTMLAnchorElement>("[data-browser-link]").forEach((link) =>
+      link.addEventListener("click", (event) => {
+        event.preventDefault()
+        go(link.href)
+      }),
+    )
+
+    // The site's menu closes on a second press, a press anywhere else, or
+    // Escape.
+    menu.addEventListener("click", () => setMenu(menuList.hidden))
+    root.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || menuList.hidden || event.defaultPrevented) return
+      event.preventDefault()
+      setMenu(false)
+      menu.focus({ preventScroll: true })
+    })
+    const outside = (event: PointerEvent) => {
+      if (!root.isConnected) {
+        document.removeEventListener("pointerdown", outside)
+        return
+      }
+      const target = event.target as Node
+      if (!menuList.hidden && !menuList.contains(target) && !menu.contains(target)) setMenu(false)
+    }
+    document.addEventListener("pointerdown", outside)
+
+    const hideToast = () => {
+      clearTimeout(state.toast)
+      toast.hidden = true
+    }
+    root.querySelector("[data-browser-publish]")?.addEventListener("click", () => {
+      clearTimeout(state.toast)
+      toast.hidden = false
+      state.toast = window.setTimeout(hideToast, 7000)
+    })
+    root.querySelector("[data-browser-toast-close]")?.addEventListener("click", hideToast)
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-browser]").forEach(boot)
+  // A window put back by its Reset brings a fresh browser with it.
+  document.addEventListener("shot:mounted", (event) => {
+    if (!(event.target instanceof HTMLElement)) return
+    event.target.querySelectorAll<HTMLElement>("[data-browser]").forEach(boot)
+  })
+</script>
+
+<style>
+  .bp {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    font-family: var(--as-font);
+  }
+
+  :where(.bp) :is(h3, p, ul, ol) {
+    margin: 0;
+    padding: 0;
+  }
+
+  .bp-toolbar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 2px;
+    height: 40px;
+    padding: 0 8px 0 7px;
+    border-bottom: 1px solid rgba(226, 213, 237, 0.07);
+    background: #1f1e25;
+  }
+
+  .bp-btn {
+    display: grid;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.58);
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .bp-btn:hover:not(:disabled),
+  .bp-btn[aria-pressed="true"] {
+    background: rgba(255, 255, 255, 0.07);
+    color: #fff;
+  }
+
+  .bp-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .bp-btn + .bp-btn {
+    margin-left: 2px;
+  }
+
+  .bp :is(button, a, input):focus-visible {
+    outline: 2px solid rgba(147, 116, 236, 0.75);
+    outline-offset: 1px;
+  }
+
+  .bp[data-loading] :global(.bp-reload) {
+    animation: bp-spin 450ms linear;
+  }
+
+  @keyframes bp-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .bp-address {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    min-width: 0;
+    height: 28px;
+    margin: 0 10px 0 12px;
+    padding: 0 4px 0 12px;
+    border: 1px solid rgba(226, 213, 237, 0.08);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.12);
+  }
+
+  .bp-address:focus-within {
+    border-color: rgba(147, 116, 236, 0.5);
+    background: rgba(0, 0, 0, 0.28);
+  }
+
+  .bp-address input {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.86);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+
+  /* Under 16px, Safari on a phone zooms the whole page into a field it
+     focuses and leaves it zoomed. */
+  @media (pointer: coarse) {
+    .bp-address input {
+      font-size: 16px;
+    }
+  }
+
+  .bp-address input:focus-visible {
+    outline: none;
+  }
+
+  .bp-go {
+    display: grid;
+    width: 22px;
+    height: 22px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+  }
+
+  .bp-publish {
+    height: 24px;
+    margin-left: 7px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #a98af7, #8f6ff0);
+    color: #f6f2ff;
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .bp-publish:hover {
+    filter: brightness(1.1);
+  }
+
+  /* The site's nav stays at the top of every page; the page under it fills
+     the rest. The glow sits under the nav and the wordmark, as on the site. */
+  .bp-viewport {
+    container: bp / inline-size;
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background:
+      radial-gradient(420px 320px at 15% 18%, rgba(120, 64, 220, 0.2), transparent 70%),
+      radial-gradient(360px 300px at 8% 72%, rgba(143, 82, 255, 0.12), transparent 70%),
+      var(--bp-rain) right top,
+      #0e0a17;
+    background-repeat: no-repeat;
+    color: #f5f2f8;
+  }
+
+  .bp-head {
+    position: relative;
+    z-index: 2;
+    flex: none;
+    padding: 11px 24px 0 21px;
+  }
+
+  .bp-page {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    padding: 0 24px 0 21px;
+  }
+
+  .bp-page[hidden] {
+    display: none;
+  }
+
+  /* The home page runs its hero window down to the panel's bottom edge
+     and on past it, however short the panel is. */
+  .bp-home {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .bp-home > :not(.bp-window) {
+    flex-shrink: 0;
+  }
+
+  /* The site's glass nav: one light edge around a dark fill. */
+  .bp-nav {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 55px;
+    margin-left: 4px;
+    padding: 0 8px;
+    border: 1px solid rgba(235, 228, 255, 0.3);
+    border-radius: 22px;
+    background: linear-gradient(100deg, rgba(38, 24, 66, 0.95), rgba(24, 15, 40, 0.92));
+    box-shadow:
+      inset 0 0 14px rgba(8, 5, 16, 0.3),
+      0 10px 30px rgba(0, 0, 0, 0.3);
+  }
+
+  .bp-logo {
+    display: grid;
+    flex: none;
+    box-sizing: border-box;
+    width: 38px;
+    height: 38px;
+    place-items: center;
+    border: 1px solid rgba(235, 228, 255, 0.22);
+    border-radius: 13px;
+    background: rgba(70, 56, 92, 0.55);
+  }
+
+  .bp-logo > span {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    border-radius: 9px;
+    background: linear-gradient(145deg, #b4a3f6, #7e66da);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    color: #1d1338;
+  }
+
+  .bp-logo :global(svg *) {
+    stroke-width: 1.9;
+  }
+
+  .bp-menu {
+    display: grid;
+    width: 39px;
+    height: 39px;
+    margin-left: auto;
+    place-items: center;
+    padding: 0;
+    border: 1px solid rgba(235, 228, 255, 0.2);
+    border-radius: 12px;
+    background: #201b2c;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    color: rgba(241, 236, 251, 0.8);
+    cursor: pointer;
+  }
+
+  .bp-menu :global(path) {
+    stroke-width: 1.6;
+  }
+
+  .bp-menu:hover {
+    background: #2a2339;
+    color: #f1ecfb;
+  }
+
+  .bp-menu-list {
+    position: absolute;
+    z-index: 2;
+    top: calc(100% + 6px);
+    right: 0;
+    display: grid;
+    min-width: 150px;
+    padding: 5px;
+    border: 1px solid rgba(235, 228, 255, 0.16);
+    border-radius: 14px;
+    background: rgba(30, 20, 50, 0.96);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+  }
+
+  .bp-menu-list[hidden] {
+    display: none;
+  }
+
+  .bp-menu-list a {
+    padding: 8px 12px;
+    border-radius: 9px;
+    color: #f1ecfb;
+    font-size: 13px;
+    text-decoration: none;
+  }
+
+  .bp-menu-list a:hover {
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  .bp-menu-list a[aria-current="page"] {
+    color: #cdbdfb;
+  }
+
+  .bp-wordmark {
+    display: block;
+    flex: none;
+    width: 233px;
+    height: 42px;
+    margin: 43px 0 0 4px;
+    color: #b79aff;
+    filter: drop-shadow(0 0 18px rgba(143, 82, 255, 0.28));
+  }
+
+  .bp-headline {
+    margin-top: 36px;
+    color: #f5f2f8;
+    font-size: 28.3px;
+    font-weight: 600;
+    line-height: 32px;
+    letter-spacing: -0.025em;
+  }
+
+  .bp-headline span {
+    display: block;
+    color: #c9b0ff;
+  }
+
+  .bp-deck {
+    max-width: 500px;
+    margin-top: 18px;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 16px;
+    line-height: 26.4px;
+  }
+
+  .bp-actions {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-top: 24px;
+  }
+
+  .bp-cta {
+    display: inline-flex;
+    text-decoration: none;
+    align-items: center;
+    gap: 22px;
+    height: 47px;
+    padding: 0 24px 0 25px;
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(245, 240, 255, 0.98), rgba(207, 184, 255, 0.94));
+    color: #120d17;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .bp-secondary {
+    padding-bottom: 1px;
+    border-bottom: 1px solid rgba(224, 211, 255, 0.35);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 14px;
+    text-decoration: none;
+  }
+
+  .bp-note {
+    margin-top: 19px;
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 12.5px;
+  }
+
+  /* The window on the site's hero, solid so the glyph field stops at its
+     edge. Its bottom runs off the page, as on the site. */
+  .bp-window {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    margin-top: 35px;
+    padding: 7px 7px 0;
+    border: 1px solid rgba(235, 228, 255, 0.24);
+    border-radius: 24px 24px 0 0;
+    border-bottom: 0;
+    background: #3a3343;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11.5px;
+  }
+
+  .bp-window-bar,
+  .bp-window-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 40px;
+    padding: 0 14px;
+  }
+
+  .bp-window-bar {
+    height: 36px;
+    border-radius: 19px 19px 0 0;
+    background: #231f2c;
+  }
+
+  .bp-window-row {
+    height: 42px;
+    justify-content: flex-start;
+    gap: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    background: #222128;
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  .bp-window-body {
+    flex: 1 0 auto;
+    padding: 14px 0 0 16px;
+    background: #151419;
+  }
+
+  .bp-lights {
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .bp-lights i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #f26d6d;
+  }
+
+  .bp-lights i:nth-child(2) {
+    background: #f2b25c;
+  }
+
+  .bp-lights i:nth-child(3) {
+    background: #63c98b;
+  }
+
+  .bp-lights.is-dim i {
+    background: #4a4552;
+  }
+
+  .bp-ready {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: rgba(255, 255, 255, 0.42);
+  }
+
+  .bp-ready i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #63c98b;
+  }
+
+  .bp-model {
+    margin-left: auto;
+    padding: 3px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .bp-window-switch {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background: #312f39;
+  }
+
+  .bp-window-switch span {
+    padding: 6px 22px;
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  /* The next row starts at the page's edge: a tab and the long input. */
+  .bp-window-next {
+    display: flex;
+    gap: 12px;
+    height: 30px;
+    margin-top: 10px;
+    padding-right: 12px;
+  }
+
+  .bp-window-next span {
+    width: 124px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    background: #23222a;
+  }
+
+  .bp-window-next span:last-child {
+    flex: 1;
+    background: #1f1e28;
+  }
+
+  /* The docs, releases and missing pages: one reading column, which
+     scrolls under the nav when the panel is too short for it. */
+  .bp-doc {
+    padding-bottom: 28px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+    scrollbar-width: thin;
+  }
+
+  .bp-eyebrow {
+    margin: 34px 0 0 4px;
+    color: #aa8cff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .bp-title {
+    margin: 10px 0 0 4px;
+    color: #f5f2f8;
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+
+  .bp-lead {
+    max-width: 520px;
+    margin: 12px 0 0 4px;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .bp-heading {
+    margin: 26px 0 0 4px;
+    color: #f1ecfb;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .bp-steps {
+    display: grid;
+    gap: 12px;
+    margin: 12px 0 0 4px;
+    list-style: none;
+    counter-reset: bp-step;
+  }
+
+  .bp-steps li {
+    position: relative;
+    display: grid;
+    gap: 2px;
+    padding-left: 34px;
+    counter-increment: bp-step;
+  }
+
+  .bp-steps li::before {
+    content: counter(bp-step);
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: grid;
+    width: 22px;
+    height: 22px;
+    place-items: center;
+    border: 1px solid rgba(170, 140, 255, 0.4);
+    border-radius: 50%;
+    color: #cdbdfb;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .bp-steps a {
+    justify-self: start;
+    color: #d9cbff;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .bp-steps span {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .bp-guides {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 12px 0 0 4px;
+  }
+
+  .bp-guide {
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    padding: 13px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background: rgba(20, 16, 30, 0.82);
+    text-decoration: none;
+    transition: border-color 120ms ease;
+  }
+
+  .bp-steps a:hover,
+  .bp-guide:hover .bp-guide-name {
+    text-decoration: underline;
+  }
+
+  .bp-guide:hover {
+    border-color: rgba(170, 140, 255, 0.35);
+  }
+
+  .bp-guide-name {
+    color: #d9cbff;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+
+  .bp-guide-text {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .bp-guide-count {
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 11px;
+  }
+
+  .bp-releases {
+    display: grid;
+    gap: 8px;
+    margin: 22px 0 0 4px;
+    list-style: none;
+  }
+
+  .bp-releases li {
+    display: grid;
+    gap: 4px;
+    padding: 13px 15px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    background: rgba(20, 16, 30, 0.82);
+  }
+
+  .bp-releases li.is-latest {
+    border-color: rgba(170, 140, 255, 0.4);
+    background: linear-gradient(120deg, rgba(143, 82, 255, 0.16), rgba(20, 16, 30, 0.85) 60%);
+  }
+
+  .bp-version {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(255, 255, 255, 0.55);
+    font-family: var(--as-mono);
+    font-size: 11.5px;
+  }
+
+  .bp-version em {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(170, 140, 255, 0.18);
+    color: #cdbdfb;
+    font-family: var(--as-font);
+    font-size: 10.5px;
+    font-style: normal;
+  }
+
+  .bp-release-title {
+    color: #f1ecfb;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .bp-links {
+    display: flex;
+    gap: 8px;
+    margin: 20px 0 0 4px;
+  }
+
+  .bp-links a {
+    padding: 7px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    color: #e2d7ff;
+    font-family: var(--as-mono);
+    font-size: 12px;
+    text-decoration: none;
+  }
+
+  .bp-links a:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .bp-real {
+    display: inline-block;
+    margin: 18px 0 0 4px;
+    color: #cdbdfb;
+    font-size: 13px;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  .bp-real:hover {
+    text-decoration: underline;
+  }
+
+  .bp-real :global(svg) {
+    display: inline-block;
+    margin-left: 3px;
+    vertical-align: -2px;
+  }
+
+  .bp-real[hidden] {
+    display: none;
+  }
+
+  /* The site reflows for a narrow panel, as it does on a phone. */
+  @container bp (max-width: 559.98px) {
+    .bp-head {
+      padding: 10px 14px 0;
+    }
+
+    .bp-page {
+      padding: 0 14px;
+    }
+
+    .bp-doc {
+      padding-bottom: 24px;
+    }
+
+    .bp-wordmark {
+      width: 180px;
+      height: 32px;
+      margin-top: 30px;
+    }
+
+    .bp-headline {
+      margin-top: 24px;
+      font-size: 23px;
+      line-height: 27px;
+    }
+
+    .bp-deck {
+      font-size: 14.5px;
+      line-height: 23px;
+    }
+
+    .bp-guides {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .bp-window-row .bp-model {
+      display: none;
+    }
+  }
+
+  /* The app's publish sheet, slid over the bottom of the page. */
+  .bp-toast {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 3;
+    padding: 16px 44px 18px 18px;
+    border-top: 1px solid rgba(226, 213, 237, 0.09);
+    background: color-mix(in srgb, #232228 92%, transparent);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.45);
+    animation: bp-sheet 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .bp-toast[hidden] {
+    display: none;
+  }
+
+  @keyframes bp-sheet {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+  }
+
+  .bp-toast-title {
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .bp-toast-text {
+    max-width: 92%;
+    margin-top: 4px;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  .bp-toast-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+  }
+
+  .bp-toast-close:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #fff;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bp-toast {
+      animation: none;
+    }
+  }
+</style>

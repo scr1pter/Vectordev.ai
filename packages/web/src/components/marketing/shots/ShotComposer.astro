@@ -1,0 +1,125 @@
+---
+// The session composer as a picture, the same choice ProductDemo makes: with no
+// model behind the page it would swallow whatever was typed, so it shows the
+// controls without pretending to take a prompt. The stop button is the one the
+// app shows while a turn runs.
+import ShotIcon from "./ShotIcon.astro"
+---
+
+<div class="cp" role="img" aria-label="Prompt composer, shown as a picture: GPT-5.6 Sol, Manual, Max effort, Normal speed">
+  <p class="cp-text">Ask anything, / for commands, @ for context...</p>
+  <div class="cp-row" aria-hidden="true">
+    <span class="cp-control cp-model"><ShotIcon name="model" size={13} />GPT-5.6 Sol<ShotIcon name="caret" size={12} /></span>
+    <span class="cp-control cp-strong"><i></i>Manual<ShotIcon name="caret" size={12} /></span>
+    <span class="cp-control cp-effort">Max<ShotIcon name="caret" size={12} /></span>
+    <span class="cp-control cp-strong"><i></i>Normal<ShotIcon name="caret" size={12} /></span>
+    <span class="cp-icon cp-mic"><ShotIcon name="mic" size={14} /></span>
+    <span class="cp-icon"><ShotIcon name="clip" size={14} /></span>
+    <span class="cp-stop"><ShotIcon name="stop" size={18} /></span>
+  </div>
+</div>
+
+<style>
+  .cp {
+    container-type: inline-size;
+    position: relative;
+    z-index: 1;
+    height: 92px;
+    margin-top: -1px;
+    padding: 14px 7px 0 14px;
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    border-radius: 12px;
+    background: #1e1e20;
+    box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.18);
+    cursor: default;
+    user-select: none;
+  }
+
+  .cp-text {
+    margin: 0;
+    color: #8b8a8e;
+    font-size: 14.6px;
+    line-height: 20px;
+  }
+
+  .cp-row {
+    display: flex;
+    align-items: center;
+    height: 35px;
+    margin-top: 15px;
+    color: #c7c6ca;
+    font-size: 13px;
+  }
+
+  .cp-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .cp-control :global(svg:last-child) {
+    color: #7d7c80;
+  }
+
+  .cp-model {
+    gap: 7px;
+    margin-left: 7px;
+  }
+
+  .cp-model :global(svg:first-child) {
+    color: #6f6e72;
+  }
+
+  .cp-strong {
+    margin-left: 28px;
+    color: #d2d1d5;
+    font-weight: 600;
+  }
+
+  .cp-strong i {
+    width: 4px;
+    height: 4px;
+    margin-right: 1px;
+    border-radius: 50%;
+    background: #8d8c90;
+  }
+
+  .cp-effort {
+    margin-left: 38px;
+    color: #a996f6;
+  }
+
+  .cp-effort + .cp-strong {
+    margin-left: 40px;
+  }
+
+  .cp-icon {
+    display: grid;
+    width: 28px;
+    place-items: center;
+    color: #8b8a8e;
+  }
+
+  .cp-mic {
+    margin-left: auto;
+  }
+
+  /* Squeezed beside a panel, the speed control gives way to the buttons. */
+  @container (max-width: 560px) {
+    .cp-effort + .cp-strong {
+      display: none;
+    }
+  }
+
+  .cp-stop {
+    display: grid;
+    width: 36px;
+    height: 35px;
+    margin-left: 5px;
+    place-items: center;
+    border-radius: 8px;
+    background: #b596ff;
+    color: #141217;
+  }
+</style>

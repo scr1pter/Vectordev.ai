@@ -1,0 +1,828 @@
+---
+// The Agent Dashboard (packages/app/src/features/agents/agent-dashboard.tsx)
+// before any isolated workspace has started, as in the reference: no agents,
+// and every control in place. Board and List, search, the three filter menus
+// and Clear all work; with no agents yet, both views and every filter show the
+// same empty state, as the app's do. The X closes the dashboard the way the
+// app does and leaves the way back open, from the button or the sidebar's own
+// row. Under 900px of stage the header and the toolbar stack, as the app's do.
+import ShotIcon from "./ShotIcon.astro"
+import ShotSidebar from "./ShotSidebar.astro"
+
+interface Props {
+  id: string
+}
+
+const filters = [
+  {
+    key: "status",
+    label: "Status",
+    single: false,
+    options: ["Editing", "Testing", "Needs Review", "Complete", "Failed", "Merged"],
+  },
+  { key: "runtime", label: "Runtime", single: false, options: ["Vector", "Claude Code", "Codex", "Cursor Agent"] },
+  { key: "pr", label: "Pull request", single: true, options: ["Open", "Merged", "No pull request"] },
+]
+const id = Astro.props.id
+---
+
+<div class="db" data-shot-dashboard>
+  <section class="db-view" data-dashboard aria-label="Agent Dashboard" tabindex="-1">
+    <header class="db-header">
+      <span class="db-mark" aria-hidden="true">
+        <svg viewBox="0 0 18 18" width="15" height="15">
+          <rect x="2.5" y="3" width="4.3" height="5" rx="1" fill="currentColor" opacity=".7"></rect>
+          <rect x="6.9" y="3" width="4.3" height="7.5" rx="1" fill="currentColor"></rect>
+          <rect x="11.3" y="3" width="4.3" height="11" rx="1" fill="currentColor" opacity=".75"></rect>
+        </svg>
+      </span>
+      <div class="db-heading">
+        <h3>Agent Dashboard</h3>
+        <p>Every workspace, agent, and review in one place</p>
+      </div>
+      <p class="db-counts">
+        <span><strong>0</strong> running</span>
+        <span><strong>0</strong> need you</span>
+        <span><strong>0</strong> done</span>
+      </p>
+      <button type="button" class="db-close" data-dashboard-close aria-label="Close Agent Dashboard">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path d="m4 4 8 8m0-8-8 8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"></path>
+        </svg>
+      </button>
+    </header>
+
+    <div class="db-main">
+      <div class="db-controls">
+        <div class="db-views" role="group" aria-label="View">
+          <button type="button" aria-pressed="true" data-view="board">Board</button>
+          <button type="button" aria-pressed="false" data-view="list">List</button>
+        </div>
+        <label class="db-search">
+          <span class="db-sr">Search agents</span>
+          <ShotIcon name="magnifier" size={11} />
+          <input type="search" placeholder="Search agents, tasks, models, or activity" autocomplete="off" data-dashboard-search />
+        </label>
+        <div class="db-filters">
+          {
+            filters.map((filter) => (
+              <div class="db-filter" data-filter={filter.key} data-single={filter.single ? "" : undefined}>
+                <button
+                  type="button"
+                  class="db-filter-button"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-controls={`${id}-${filter.key}`}
+                >
+                  <span>{filter.label}</span>
+                  <span class="db-filter-value" data-filter-value />
+                  <ShotIcon name="caret" size={10} />
+                </button>
+                <div class="db-menu" id={`${id}-${filter.key}`} role="menu" aria-label={`${filter.label} filter`} hidden>
+                  <p class="db-menu-label">{filter.label}</p>
+                  {filter.options.map((option) => (
+                    <button
+                      type="button"
+                      role={filter.single ? "menuitemradio" : "menuitemcheckbox"}
+                      aria-checked="false"
+                      data-value={option}
+                    >
+                      <span>{option}</span>
+                      <ShotIcon name="check" size={11} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          }
+          <button type="button" class="db-clear" data-dashboard-clear hidden>Clear</button>
+        </div>
+      </div>
+      <p class="db-summary"><span>0 agents</span><span>0 files touched</span></p>
+
+      <div class="db-empty">
+        <p class="db-empty-title">No agents yet</p>
+        <p class="db-empty-text">Start an isolated workspace and its live status will appear here.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="db-closed" data-dashboard-closed aria-label="Vector workspace" hidden>
+    <div class="db-closed-sidebar">
+      <ShotSidebar branch="security-boundaries" compact />
+    </div>
+    <div class="db-closed-main">
+      <span class="db-mark db-mark-large" aria-hidden="true">
+        <svg viewBox="0 0 18 18" width="20" height="20">
+          <rect x="2.5" y="3" width="4.3" height="5" rx="1" fill="currentColor" opacity=".7"></rect>
+          <rect x="6.9" y="3" width="4.3" height="7.5" rx="1" fill="currentColor"></rect>
+          <rect x="11.3" y="3" width="4.3" height="11" rx="1" fill="currentColor" opacity=".75"></rect>
+        </svg>
+      </span>
+      <p class="db-closed-title">The dashboard is closed</p>
+      <p class="db-closed-text">It opens from Agent Dashboard under Project tools, over whatever you were doing.</p>
+      <button type="button" class="db-open" data-dashboard-open>Open Agent Dashboard</button>
+    </div>
+  </section>
+</div>
+
+<script>
+  const boot = (root: HTMLElement) => {
+    // Kept untouched, so the window's Reset can put it back the way it was.
+    const template = root.cloneNode(true)
+    const lifetime = new AbortController()
+    const signal = lifetime.signal
+    const view = root.querySelector<HTMLElement>("[data-dashboard]")
+    const closed = root.querySelector<HTMLElement>("[data-dashboard-closed]")
+    const search = root.querySelector<HTMLInputElement>("[data-dashboard-search]")
+    const clear = root.querySelector<HTMLElement>("[data-dashboard-clear]")
+    if (!view || !closed || !search || !clear) return
+    const chosen = new Map<string, string[]>()
+
+    root.addEventListener(
+      "shot:reset",
+      () => {
+        lifetime.abort()
+        const fresh = template.cloneNode(true)
+        if (!(fresh instanceof HTMLElement)) return
+        root.replaceWith(fresh)
+        boot(fresh)
+      },
+      { signal },
+    )
+
+    // With no agents yet nothing can match, so the empty state stays "No
+    // agents yet" whatever is filtered, as in the app; the toolbar's Clear
+    // comes and goes with the filters.
+    const render = () => {
+      clear.hidden = search.value.trim() === "" && [...chosen.values()].every((values) => values.length === 0)
+    }
+
+    // Board and List lay agents out differently; with none, both show the
+    // one empty state, and only the switch changes.
+    root.querySelectorAll<HTMLElement>("[data-view]").forEach((button) =>
+      button.addEventListener("click", () =>
+        root
+          .querySelectorAll("[data-view]")
+          .forEach((other) => other.setAttribute("aria-pressed", String(other === button))),
+      ),
+    )
+    // "search" too: a search field can be emptied without an input event.
+    search.addEventListener("input", render)
+    search.addEventListener("search", render)
+
+    const menus = Array.from(root.querySelectorAll<HTMLElement>("[data-filter]"))
+    const closeMenus = (except?: HTMLElement) =>
+      menus
+        .filter((filter) => filter !== except)
+        .forEach((filter) => {
+          const menu = filter.querySelector<HTMLElement>("[role=menu]")
+          if (menu) menu.hidden = true
+          filter.querySelector(".db-filter-button")?.setAttribute("aria-expanded", "false")
+        })
+    const anyOpen = () => menus.some((filter) => !filter.querySelector<HTMLElement>("[role=menu]")?.hidden)
+
+    menus.forEach((filter) => {
+      const key = filter.dataset.filter ?? ""
+      const single = filter.hasAttribute("data-single")
+      const button = filter.querySelector<HTMLElement>(".db-filter-button")
+      const menu = filter.querySelector<HTMLElement>("[role=menu]")
+      const value = filter.querySelector<HTMLElement>("[data-filter-value]")
+      if (!button || !menu || !value) return
+      const options = Array.from(menu.querySelectorAll<HTMLElement>("[data-value]"))
+      const paint = () => {
+        const values = chosen.get(key) ?? []
+        options.forEach((option) =>
+          option.setAttribute("aria-checked", String(values.includes(option.dataset.value ?? ""))),
+        )
+        value.textContent = values.length > 1 ? `${values[0]} +${values.length - 1}` : (values[0] ?? "")
+        button.toggleAttribute("data-on", values.length > 0)
+        render()
+      }
+      const setOpen = (open: boolean, focus?: HTMLElement) => {
+        closeMenus(filter)
+        menu.hidden = !open
+        button.setAttribute("aria-expanded", String(open))
+        // The window is shorter than the app's, so a long menu stops above
+        // its bottom edge and scrolls.
+        const frame = root.getBoundingClientRect()
+        const room = (frame.bottom - menu.getBoundingClientRect().top) / (frame.height / root.offsetHeight) - 8
+        if (open) menu.style.maxHeight = `${Math.min(236, room)}px`
+        focus?.focus({ preventScroll: true })
+      }
+      button.addEventListener("click", () => setOpen(menu.hidden, menu.hidden ? options[0] : undefined))
+      // Arrow keys open a closed menu at its first or last option.
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+        event.preventDefault()
+        setOpen(true, event.key === "ArrowDown" ? options[0] : options.at(-1))
+      })
+      options.forEach((option) =>
+        option.addEventListener("click", () => {
+          const values = chosen.get(key) ?? []
+          const picked = option.dataset.value ?? ""
+          // Pull request is one choice at a time; the others combine. Either
+          // way the menu stays open, as the app's does.
+          const next = values.includes(picked)
+            ? values.filter((item) => item !== picked)
+            : single
+              ? [picked]
+              : [...values, picked]
+          chosen.set(key, next)
+          paint()
+        }),
+      )
+      menu.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          // Handled here, so the dashboard's own Escape does not close it too.
+          event.preventDefault()
+          setOpen(false, button)
+          return
+        }
+        const at = options.indexOf(document.activeElement as HTMLElement)
+        const next = new Map([
+          ["ArrowDown", options[(at + 1) % options.length]],
+          ["ArrowUp", options[(at - 1 + options.length) % options.length]],
+          ["Home", options[0]],
+          ["End", options.at(-1)],
+        ]).get(event.key)
+        if (!next) return
+        event.preventDefault()
+        next.focus()
+      })
+      // A press inside the menu keeps focus where it is, so only focus that
+      // really leaves the filter closes it.
+      menu.addEventListener("mousedown", (event) => event.preventDefault())
+      filter.addEventListener("focusout", (event) => {
+        if (!menu.hidden && !filter.contains(event.relatedTarget as Node | null)) setOpen(false)
+      })
+      root.addEventListener("dashboard:clear", paint)
+    })
+    // Pointer, not click, so the page's self-driving demos cannot close a menu.
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!menus.some((filter) => filter.contains(event.target as Node))) closeMenus()
+      },
+      { signal },
+    )
+
+    // Clear hides itself, so focus goes to the search, except on a touch
+    // screen, where that would bring up the keyboard nobody asked for.
+    clear.addEventListener("click", () => {
+      search.value = ""
+      chosen.clear()
+      root.dispatchEvent(new Event("dashboard:clear"))
+      const touch = globalThis.matchMedia?.("(pointer: coarse)").matches ?? false
+      if (touch) view.focus({ preventScroll: true })
+      if (!touch) search.focus({ preventScroll: true })
+    })
+
+    const setClosed = (shut: boolean) => {
+      closeMenus()
+      view.hidden = shut
+      closed.hidden = !shut
+      render()
+      if (shut) root.querySelector<HTMLElement>("[data-dashboard-open]")?.focus({ preventScroll: true })
+      if (!shut) view.focus({ preventScroll: true })
+    }
+    root.querySelector("[data-dashboard-close]")?.addEventListener("click", () => setClosed(true))
+    root.querySelector("[data-dashboard-open]")?.addEventListener("click", () => setClosed(false))
+    // The sidebar's Agent Dashboard row opens it here instead of going to
+    // this window.
+    root.querySelectorAll('[data-sidebar-link="dashboard"]').forEach((link) =>
+      link.addEventListener("click", (event) => {
+        event.preventDefault()
+        setClosed(false)
+      }),
+    )
+    view.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || anyOpen()) return
+      // Escape empties a search before it closes anything.
+      if (event.target === search && search.value !== "") {
+        event.preventDefault()
+        search.value = ""
+        render()
+        return
+      }
+      setClosed(true)
+    })
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-shot-dashboard]").forEach(boot)
+</script>
+
+<style>
+  /* Clip, not hidden: a control focused near the edge never slides the
+     dashboard sideways inside its window. Off a Mac this window's Inter is
+     set a little wider than the others', as the app's dashboard is. */
+  .db {
+    --as-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Shot Inter Dashboard", Inter, "Inter Variable",
+      "Segoe UI", system-ui, sans-serif;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: clip;
+    background: #18171f;
+    color: var(--as-text-1);
+    font-family: var(--as-font);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :where(.db) :is(h3, p) {
+    margin: 0;
+  }
+
+  :where(.db) button {
+    font: inherit;
+    color: inherit;
+  }
+
+  .db :is(button, input):focus-visible {
+    outline: 2px solid rgba(146, 116, 236, 0.75);
+    outline-offset: 2px;
+  }
+
+  .db-view {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    outline: none;
+  }
+
+  .db-view[hidden],
+  .db-closed[hidden] {
+    display: none;
+  }
+
+  .db-header {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 11px;
+    height: 56px;
+    padding: 0 15px 0 20px;
+    border-bottom: 1px solid #2f2b33;
+    background: #252129;
+  }
+
+  .db-mark {
+    display: grid;
+    width: 26px;
+    height: 26px;
+    flex: none;
+    place-items: center;
+    border-radius: 7px;
+    background: #383347;
+    color: #b5a3e6;
+  }
+
+  .db-heading h3 {
+    color: #ebe7ee;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 18px;
+    letter-spacing: -0.01em;
+  }
+
+  .db-heading p {
+    margin-top: 5px;
+    color: #86828c;
+    font-size: 10.5px;
+    line-height: 14px;
+  }
+
+  .db-counts {
+    display: flex;
+    gap: 14px;
+    margin-left: auto;
+    color: #86828c;
+    font-size: 11px;
+  }
+
+  .db-counts strong {
+    color: #bab6be;
+    font-weight: 500;
+  }
+
+  .db-close {
+    display: grid;
+    width: 26px;
+    height: 26px;
+    margin-left: 3px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    background: #332f39;
+    color: #ebe7ee;
+    cursor: pointer;
+  }
+
+  .db-close:hover {
+    background: #3b3642;
+    color: #fff;
+  }
+
+  /* The empty state takes whatever height the toolbar leaves, so a filter
+     row that wraps on a phone squeezes it rather than the window. */
+  .db-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    padding: 24px 22px 26px 27px;
+  }
+
+  .db-controls {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+
+  .db-views {
+    display: flex;
+    height: 30px;
+    align-items: center;
+    padding: 2px;
+    border: 1px solid #39383f;
+    border-radius: 8px;
+    background: #2a2631;
+  }
+
+  .db-views button {
+    height: 24px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #86828c;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .db-views button:hover {
+    color: #ebe7ee;
+  }
+
+  .db-views button[aria-pressed="true"] {
+    background: #3e394b;
+    color: #ebe7ee;
+    font-weight: 500;
+  }
+
+  .db-search {
+    position: relative;
+    display: flex;
+    flex: 0 1 440px;
+    min-width: 0;
+    height: 30px;
+    align-items: center;
+    gap: 9px;
+    padding: 0 12px 0 13px;
+    border: 1px solid #39383f;
+    border-radius: 8px;
+    background: #2a2631;
+    color: #86828c;
+  }
+
+  .db-search:focus-within {
+    border-color: rgba(146, 116, 236, 0.55);
+  }
+
+  .db-search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: #ebe7ee;
+    font: inherit;
+    font-size: 12.5px;
+    outline: none;
+  }
+
+  .db-search input:focus-visible {
+    outline: none;
+  }
+
+  .db-search input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+
+  .db-search input::placeholder {
+    color: #86828c;
+  }
+
+  /* Under 16px, Safari on a phone zooms the page into a focused field. */
+  @media (pointer: coarse) {
+    .db-search input {
+      font-size: 16px;
+    }
+  }
+
+  .db-filters {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+  }
+
+  .db-filter {
+    position: relative;
+  }
+
+  .db-filter-button {
+    display: inline-flex;
+    height: 27px;
+    align-items: center;
+    gap: 4px;
+    padding: 0 9px 0 10px;
+    border: 1px solid #323138;
+    border-radius: 7px;
+    background: #2a2631;
+    color: #86828c;
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .db-filter-button:hover {
+    background: #332e3a;
+    color: #ebe7ee;
+  }
+
+  .db-filter-button[data-on] {
+    border-color: rgba(146, 116, 236, 0.45);
+    background: rgba(182, 159, 247, 0.14);
+    color: #ebe7ee;
+  }
+
+  .db-filter-value {
+    max-width: 112px;
+    overflow: hidden;
+    color: #c9c3cd;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .db-filter-value:empty {
+    display: none;
+  }
+
+  .db-filter-button :global(svg) {
+    color: #5a5560;
+  }
+
+  .db-filter-button:hover :global(svg),
+  .db-filter-button[data-on] :global(svg) {
+    color: #a7a1ae;
+  }
+
+  .db-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 3;
+    min-width: 204px;
+    max-height: 236px;
+    padding: 6px 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-color: #3e394b transparent;
+    scrollbar-width: thin;
+    border: 1px solid rgba(226, 213, 237, 0.09);
+    border-radius: 10px;
+    background: #29252f;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+  }
+
+  .db-menu[hidden] {
+    display: none;
+  }
+
+  .db-menu-label {
+    padding: 4px 12px;
+    color: #837c8a;
+    font-size: 10px;
+    font-weight: 500;
+  }
+
+  .db-menu button {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: #b9b2bf;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .db-menu button:hover,
+  .db-menu button:focus-visible {
+    background: #332e3a;
+    color: #ebe7ee;
+    outline: none;
+  }
+
+  .db-menu button span {
+    flex: 1;
+  }
+
+  .db-menu button :global(svg) {
+    color: #b69ff7;
+    opacity: 0;
+  }
+
+  .db-menu button[aria-checked="true"] :global(svg) {
+    opacity: 1;
+  }
+
+  .db-clear {
+    height: 27px;
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    color: #86828c;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+
+  .db-clear:hover {
+    color: #ebe7ee;
+  }
+
+  .db-clear[hidden] {
+    display: none;
+  }
+
+  .db-summary {
+    display: flex;
+    gap: 17px;
+    margin-top: 13px;
+    color: #86828c;
+    font-size: 11px;
+  }
+
+  /* Fine, short dashes, which a CSS dashed border draws too long. */
+  .db-empty {
+    display: grid;
+    flex: 1;
+    align-content: center;
+    justify-items: center;
+    gap: 7px;
+    margin-top: 20px;
+    padding: 16px 20px;
+    border-radius: 10px;
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' rx='10' fill='none' stroke='%233b3942' stroke-width='2' stroke-dasharray='3 2'/%3E%3C/svg%3E")
+        0 0 / 100% 100%,
+      #1e1a22;
+    text-align: center;
+  }
+
+  .db-empty-title {
+    color: #e2dfe7;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .db-empty-text {
+    color: #86828c;
+    font-size: 11.5px;
+  }
+
+  /* Closed: the workspace the dashboard was covering, with a sidebar short
+     enough for this window. */
+  .db-closed {
+    display: flex;
+    height: 100%;
+  }
+
+  .db-closed-sidebar {
+    display: flex;
+    flex: none;
+  }
+
+  /* ---- a stage under 900px: the header and toolbar stack ---- */
+  @container shot-stage (max-width: 899.98px) {
+    .db-header {
+      display: grid;
+      grid-template-columns: 26px minmax(0, 1fr) 26px;
+      grid-template-areas:
+        "mark heading close"
+        ". counts counts";
+      row-gap: 6px;
+      height: auto;
+      padding: 12px 15px 12px 16px;
+    }
+
+    .db-header > .db-mark {
+      grid-area: mark;
+    }
+
+    .db-heading {
+      grid-area: heading;
+    }
+
+    .db-counts {
+      grid-area: counts;
+      margin-left: 0;
+    }
+
+    .db-close {
+      grid-area: close;
+      margin-left: 0;
+    }
+
+    .db-main {
+      padding: 20px 16px 34px;
+    }
+
+    .db-controls {
+      flex-wrap: wrap;
+      row-gap: 10px;
+    }
+
+    .db-search {
+      flex: 1 1 200px;
+    }
+
+    .db-filters {
+      flex-basis: 100%;
+      flex-wrap: wrap;
+      row-gap: 6px;
+      margin-left: 0;
+    }
+
+    .db-menu {
+      right: auto;
+      left: 0;
+    }
+
+    .db-empty {
+      padding: 14px 18px;
+    }
+
+    .db-closed-sidebar {
+      display: none;
+    }
+  }
+
+  .db-closed-main {
+    display: grid;
+    flex: 1;
+    align-content: center;
+    justify-items: center;
+    gap: 8px;
+    background: #1e1a22;
+    text-align: center;
+  }
+
+  .db-mark-large {
+    width: 38px;
+    height: 38px;
+    margin-bottom: 6px;
+    border-radius: 10px;
+  }
+
+  .db-closed-title {
+    color: #ebe7ee;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .db-closed-text {
+    max-width: 340px;
+    color: #86828c;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .db-open {
+    margin-top: 8px;
+    padding: 8px 14px;
+    border: 1px solid rgba(146, 116, 236, 0.4);
+    border-radius: 8px;
+    background: rgba(182, 159, 247, 0.14);
+    color: #cdbdf9;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .db-open:hover {
+    background: rgba(182, 159, 247, 0.22);
+  }
+
+  .db-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+</style>

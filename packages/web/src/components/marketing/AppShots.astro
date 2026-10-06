@@ -1,0 +1,554 @@
+---
+// Four screens from the desktop app, rebuilt as pages rather than pasted in as
+// pictures: an agent session, its Background tasks, the browser beside it and
+// the Agent Dashboard. Each is laid out at the app's own size inside a window
+// like the hero's and scaled to fit. On a narrower screen the window is laid
+// out as the app would be in a narrower window, so it never shrinks below
+// about four fifths of life size and stays readable and tappable on a phone.
+// Everything in them works on the page; nothing connects to a repository or a
+// model.
+import "@fontsource/ibm-plex-mono/400.css"
+import interLatin from "@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url"
+import ShotDashboard from "./shots/ShotDashboard.astro"
+import ShotSession from "./shots/ShotSession.astro"
+
+const shots = [
+  {
+    id: "shot-session",
+    kicker: "Agent session",
+    title: "One task, written down before it starts.",
+    text: "The agent states what done means, keeps a todo list against it and hands slow work to a background specialist while it carries on. Switch the branch, open the changes or the terminal, fold the todos away.",
+    bar: "Vector — Session",
+    // Taller when narrower, so the transcript, which wraps onto more lines
+    // and gains a row for its cost, still fits without scrolling.
+    height: 770,
+    mid: 824,
+    compact: 880,
+    variant: "session",
+    turn: 549,
+    task: 533,
+  },
+  {
+    id: "shot-tasks",
+    kicker: "Background tasks",
+    title: "Subagents work out of the way, never out of sight.",
+    text: "Every specialist the agent starts shows its phase, model, tokens and clock. Open the finished ones, fold a phase, dock the panel or pop it out, and stop a run you no longer need.",
+    bar: "Vector — Background tasks",
+    height: 770,
+    mid: 770,
+    compact: 770,
+    variant: "tasks",
+    turn: 646,
+    task: 630,
+  },
+  {
+    id: "shot-browser",
+    kicker: "Built-in browser",
+    title: "A browser beside the conversation.",
+    text: "Vector opens pages in a panel next to the session, so the agent can load your app while you watch it. Go back, reload, or type a path: the pages here are small drawings of this site.",
+    bar: "Vector — Browser",
+    height: 770,
+    mid: 770,
+    compact: 770,
+    variant: "browser",
+    turn: 143,
+    task: 728,
+  },
+  {
+    id: "shot-dashboard",
+    kicker: "Agent Dashboard",
+    title: "Every workspace on one board.",
+    text: "Each isolated workspace you start lands here with its live status, the files it touched and its pull request. Search, filter by status, runtime or pull request, or switch the board to a list.",
+    bar: "Vector — Agent Dashboard",
+    height: 322,
+    mid: 322,
+    compact: 362,
+    variant: "dashboard",
+  },
+] as const
+
+// The windows' text uses the system face on a Mac, as the app does. Elsewhere
+// it falls back to the page's Inter, which sets about five percent wider than
+// SF Pro, so this copy of it is scaled to SF's width and lines break where
+// they do in the app. The dashboard's copy is scaled a little less, to match
+// how that screen sets.
+const face = [
+  ["Shot Inter", 95],
+  ["Shot Inter Dashboard", 97.5],
+]
+  .map(
+    ([name, adjust]) =>
+      `@font-face{font-family:"${name}";font-style:normal;font-weight:100 900;font-display:swap;size-adjust:${adjust}%;src:url(${interLatin}) format("woff2-variations")}`,
+  )
+  .join("")
+---
+
+<style is:inline set:html={face}></style>
+
+<section id="inside" data-chapter="Inside Vector" class="shots" aria-labelledby="shots-title">
+  <div class="shots-head" data-reveal-group>
+    <p class="shots-kicker" data-reveal>Inside the app</p>
+    <h2 id="shots-title" class="shots-title" data-reveal>Four screens, rebuilt to&nbsp;click.</h2>
+    <p class="shots-sub" data-reveal>
+      Not screenshots: each window below is the desktop app redrawn in HTML from the app's design and run on sample
+      data, so you can click it. The composer stays a picture — there is no repository or model behind this page.
+    </p>
+  </div>
+
+  {
+    shots.map((shot) => (
+      <article id={shot.id} class="shot" aria-labelledby={`${shot.id}-title`}>
+        <div class="shot-copy" data-reveal-group>
+          <p class="shot-kicker" data-reveal>{shot.kicker}</p>
+          <h3 id={`${shot.id}-title`} class="shot-title" data-reveal>
+            {shot.title}
+          </h3>
+          <p class="shot-text" data-reveal>
+            {shot.text}
+          </p>
+        </div>
+        <figure class="shot-window" data-shot-window tabindex="-1">
+          <div class="shot-bar">
+            <span class="shot-traffic" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+            <span class="shot-bar-title" aria-hidden="true">
+              {shot.bar}
+            </span>
+            <span class="shot-bar-end">
+              <button type="button" class="shot-reset" data-shot-reset hidden>
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                  <path
+                    d="M3.5 8a4.5 4.5 0 1 0 1.32-3.18M3.5 3v2.5H6"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.4"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                Reset<span class="shot-sr"> the {shot.kicker} window</span>
+              </button>
+              <span class="shot-bar-note" aria-hidden="true">
+                <i /> Interactive
+              </span>
+            </span>
+          </div>
+          <div
+            class="shot-viewport"
+            data-shot-viewport
+            data-variant={shot.variant}
+            style={`--shot-h-wide: ${shot.height}px; --shot-h-mid: ${shot.mid}px; --shot-h-compact: ${shot.compact}px`}
+          >
+            <div class="shot-stage">
+              {shot.variant === "dashboard" ? (
+                <ShotDashboard id={shot.id} />
+              ) : (
+                <ShotSession id={shot.id} variant={shot.variant} turn={shot.turn} task={shot.task} />
+              )}
+            </div>
+          </div>
+        </figure>
+      </article>
+    ))
+  }
+</section>
+
+<script>
+  // The stylesheet sizes and scales each stage from the window's width; this
+  // repeats that arithmetic exactly where the browser lacks it.
+  const viewports = Array.from(document.querySelectorAll<HTMLElement>("[data-shot-viewport]"))
+  const fit = () =>
+    viewports.forEach((viewport) => {
+      const stage = viewport.firstElementChild
+      if (!(stage instanceof HTMLElement)) return
+      viewport.style.setProperty("--shot-scale", String(viewport.clientWidth / stage.offsetWidth))
+    })
+  const observer = new ResizeObserver(fit)
+  viewports.forEach((viewport) => observer.observe(viewport))
+
+  // Once a window has been used, its bar offers to put it back the way it
+  // was. Each window listens for "shot:reset" and rebuilds itself.
+  document.querySelectorAll<HTMLElement>("[data-shot-window]").forEach((frame) => {
+    const reset = frame.querySelector<HTMLElement>("[data-shot-reset]")
+    const viewport = frame.querySelector<HTMLElement>("[data-shot-viewport]")
+    if (!reset || !viewport) return
+    const used = () => (reset.hidden = false)
+    viewport.addEventListener("pointerdown", used)
+    viewport.addEventListener("keydown", used)
+    reset.addEventListener("click", () => {
+      viewport.querySelector(".shot-stage")?.firstElementChild?.dispatchEvent(new Event("shot:reset"))
+      reset.hidden = true
+      frame.focus({ preventScroll: true })
+    })
+  })
+</script>
+
+<style>
+  .shots {
+    --shots-width: min(1440px, calc(100% - 40px));
+    position: relative;
+    padding: clamp(120px, 11vw, 168px) 0 24px;
+  }
+
+  /* Where the page shows its scroll rail on the right edge, keep the windows
+     clear of it. */
+  @media (min-width: 1360px) and (hover: hover) and (pointer: fine) {
+    .shots {
+      --shots-width: min(1440px, calc(100% - 128px));
+    }
+  }
+
+  .shots-head {
+    position: relative;
+    isolation: isolate;
+    width: min(1180px, calc(100% - 40px));
+    margin-inline: auto;
+    text-align: center;
+  }
+
+  /* A dark pool under the words, as the story sections have, so the glyph
+     field moves around the copy rather than through it. */
+  .shots-head::before,
+  .shot-copy::before {
+    content: "";
+    position: absolute;
+    inset: -96px -12%;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(8, 6, 13, 0.86), rgba(8, 6, 13, 0.62) 55%, rgba(8, 6, 13, 0) 100%);
+  }
+
+  .shots-kicker,
+  .shot-kicker {
+    margin: 0 0 18px;
+    color: #aa8cff;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .shots-title {
+    margin: 0;
+    color: #f5f5f7;
+    font-size: 64px;
+    font-weight: 500;
+    line-height: 68px;
+    letter-spacing: -1px;
+    text-wrap: balance;
+  }
+
+  .shots-sub {
+    max-width: 640px;
+    margin: 24px auto 0;
+    color: rgba(245, 245, 247, 0.72);
+    font-size: 19px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  .shot {
+    width: var(--shots-width);
+    margin: clamp(88px, 9vw, 136px) auto 0;
+    scroll-margin-top: 96px;
+  }
+
+  /* The words beside each window: the title on the left, the caption on the
+     right, both on the window's edge. */
+  .shot-copy {
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 48px;
+    align-items: end;
+    margin-bottom: 28px;
+    padding-inline: 8px;
+  }
+
+  .shot-kicker {
+    grid-column: 1 / -1;
+    margin-bottom: 14px;
+    font-size: 12px;
+  }
+
+  .shot-title {
+    margin: 0;
+    color: #f5f5f7;
+    font-size: 36px;
+    font-weight: 500;
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .shot-text {
+    max-width: 560px;
+    margin: 0;
+    color: #a1a1a6;
+    font-size: 16.5px;
+    line-height: 1.6;
+    text-wrap: pretty;
+  }
+
+  /* The hero's .product-window, so the four read as the same kind of window.
+     It is also the container the stage measures itself against. */
+  .shot-window {
+    container: shot-window / inline-size;
+    margin: 0;
+    overflow: hidden;
+    padding: 7px;
+    border: 1px solid rgba(235, 228, 255, 0.22);
+    border-radius: 28px;
+    outline: none;
+    background: var(--glass-fill-strong);
+    box-shadow:
+      0 40px 120px rgba(0, 0, 0, 0.66),
+      0 0 80px rgba(132, 86, 219, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.13);
+    -webkit-backdrop-filter: blur(28px) saturate(145%);
+    backdrop-filter: blur(28px) saturate(145%);
+  }
+
+  .shot-bar {
+    display: flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 0 14px;
+    border-bottom: 1px solid rgba(190, 166, 255, 0.1);
+    border-radius: 20px 20px 0 0;
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11.5px;
+  }
+
+  .shot-traffic {
+    display: inline-flex;
+    flex: 1 1 0;
+    gap: 6px;
+  }
+
+  .shot-traffic i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #f26d6d;
+  }
+
+  .shot-traffic i:nth-child(2) {
+    background: #f2b25c;
+  }
+
+  .shot-traffic i:nth-child(3) {
+    background: #63c98b;
+  }
+
+  .shot-bar-title {
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
+  }
+
+  .shot-bar-end {
+    display: inline-flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+  }
+
+  .shot-bar-note {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+  }
+
+  .shot-bar-note i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #b69ff7;
+    box-shadow: 0 0 10px rgba(182, 159, 247, 0.45);
+  }
+
+  .shot-reset {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 9px;
+    border: 1px solid rgba(235, 228, 255, 0.16);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.72);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .shot-reset:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #fff;
+  }
+
+  .shot-reset:focus-visible {
+    outline: 2px solid #9d84ee;
+    outline-offset: 2px;
+  }
+
+  .shot-reset[hidden] {
+    display: none;
+  }
+
+  .shot-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  /* The stage is laid out at the app's width, 1440px, while the window has
+     room for it at four fifths of life size or more. Below that it is laid
+     out narrower instead, the way the app reflows in a smaller window, down
+     to 420px. Then it is scaled to fill the window exactly. Clip, not hidden:
+     a clipped box cannot be scrolled, so focusing a control near the stage's
+     far edge never slides the picture inside its frame. */
+  .shot-viewport {
+    --shot-w: clamp(420px, 125cqw, 1440px);
+    --shot-h: var(--shot-h-wide);
+    --shot-fit: tan(atan2(100cqw, var(--shot-w)));
+    position: relative;
+    height: calc(var(--shot-h) * var(--shot-scale, var(--shot-fit)));
+    overflow: clip;
+    border-radius: 0 0 20px 20px;
+  }
+
+  /* Each window's height for a stage under 1313px (where the session's
+     conversation narrows) and under 900px (where the dashboard stacks its
+     controls and the sidebars have gone). */
+  @container shot-window (max-width: 1050px) {
+    .shot-viewport {
+      --shot-h: var(--shot-h-mid);
+    }
+  }
+
+  @container shot-window (max-width: 719.98px) {
+    .shot-viewport {
+      --shot-h: var(--shot-h-compact);
+    }
+  }
+
+  /* The app's own tokens (packages/app/src/vector-premium.css), tuned to the
+     reference screenshots, for every window to share. */
+  .shot-stage {
+    --as-canvas: #1e1a22;
+    --as-header: #1c1b22;
+    --as-sidebar: #252129;
+    --as-sidebar-top: #232028;
+    --as-sidebar-foot: #201c24;
+    --as-card: #221f27;
+    --as-text: #ebe7ee;
+    --as-text-1: #e8e8ea;
+    --as-text-2: #a8a6ad;
+    --as-text-3: #878590;
+    --as-bright: #b69ff7;
+    --as-green: #65c78e;
+    --as-amber: #d6a95c;
+    --as-red: #e6787d;
+    --as-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Shot Inter", Inter, "Inter Variable", "Segoe UI",
+      system-ui, sans-serif;
+    --as-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "IBM Plex Mono", Consolas, monospace;
+    container: shot-stage / inline-size;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--shot-w);
+    height: var(--shot-h);
+    transform: scale(var(--shot-scale, var(--shot-fit)));
+    transform-origin: 0 0;
+    font-family: var(--as-font);
+    font-size: 13px;
+    line-height: normal;
+    letter-spacing: normal;
+    text-align: left;
+  }
+
+  @media (max-width: 900px) {
+    .shots-title {
+      font-size: 52px;
+      line-height: 1.06;
+    }
+
+    .shot-copy {
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .shot-title {
+      font-size: 30px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .shots {
+      --shots-width: calc(100% - 24px);
+      padding-top: 88px;
+    }
+
+    .shots-title {
+      font-size: clamp(34px, 10.2vw, 44px);
+      letter-spacing: -0.02em;
+    }
+
+    .shots-sub {
+      margin-top: 18px;
+      font-size: 17px;
+    }
+
+    .shot {
+      margin-top: 72px;
+    }
+
+    .shot-copy {
+      padding-inline: 4px;
+    }
+
+    .shot-copy::before {
+      inset: -40px -20px;
+    }
+
+    .shot-title {
+      font-size: 26px;
+    }
+
+    .shot-text {
+      font-size: 15.5px;
+    }
+
+    .shot-window {
+      padding: 5px;
+      border-radius: 21px;
+    }
+
+    .shot-bar {
+      min-height: 34px;
+      padding-inline: 10px;
+    }
+
+    .shot-bar-title {
+      display: none;
+    }
+
+    .shot-viewport {
+      border-radius: 0 0 16px 16px;
+    }
+  }
+</style>

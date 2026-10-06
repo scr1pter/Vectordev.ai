@@ -1,0 +1,189 @@
+---
+// The glyphs the app screenshots draw with, copied from the desktop app so the
+// replicas match it line for line: the 16px set from the sidebar, header and
+// browser panel (packages/app/src/components/workspace-navigation.tsx,
+// session-header.tsx, session-side-panel.tsx) and the 20px square-cap set from
+// packages/ui/src/components/icon.tsx that the header tools and the Background
+// tasks panel use.
+
+interface Props {
+  name: keyof typeof glyphs
+  size?: number
+  class?: string
+}
+
+const stroke = (d: string, width = 1.15) =>
+  `<path d="${d}" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"/>`
+const square = (d: string) => `<path d="${d}" fill="none" stroke="currentColor" stroke-linecap="square"/>`
+
+const glyphs = {
+  branch: {
+    box: 16,
+    body: stroke(
+      "M4.15 2.25v6.2a2.65 2.65 0 0 0 2.65 2.65h2.45M4.15 2.25a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Zm7.7 8.85a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3Zm0 0V5.8A2.65 2.65 0 0 0 9.2 3.15H7.5",
+    ),
+  },
+  "sidebar-hide": {
+    box: 16,
+    body: `<rect x="2.25" y="2.5" width="11.5" height="11" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.15"/>${stroke("M6 2.75v10.5m3.5-7-2 2 2 2")}`,
+  },
+  home: {
+    box: 16,
+    body: stroke("M3 7.15 8 3l5 4.15v5.6a.75.75 0 0 1-.75.75h-2.6V9.9h-3.3v3.6h-2.6A.75.75 0 0 1 3 12.75v-5.6Z", 1.2),
+  },
+  search: { box: 16, body: stroke("M7.1 12.1a5 5 0 1 1 0-10 5 5 0 0 1 0 10Zm3.55-1.45 3 3", 1.2) },
+  plus: { box: 16, body: stroke("M8 3v10M3 8h10", 1.2) },
+  caret: { box: 16, body: stroke("m4.75 6.25 3.25 3 3.25-3", 1.25) },
+  project: {
+    box: 16,
+    body: `<rect x="3" y="3" width="10" height="10" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.1"/>${stroke("M5.5 8h5M8 5.5v5", 1.05)}`,
+  },
+  dashboard: {
+    box: 16,
+    body: [
+      [2.3, 2.6],
+      [9, 2.6],
+      [2.3, 8.7],
+      [9, 8.7],
+    ]
+      .map(
+        ([x, y]) =>
+          `<rect x="${x}" y="${y}" width="4.7" height="4.7" rx="1.1" fill="none" stroke="currentColor" stroke-width="1.15"/>`,
+      )
+      .join(""),
+  },
+  browser: {
+    box: 16,
+    body: `<rect x="2.25" y="3" width="11.5" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.15"/>${stroke("M2.75 5.45h10.5M4.4 4.2h.01M6 4.2h.01")}`,
+  },
+  pulls: {
+    box: 16,
+    body: `<circle cx="4.2" cy="3.6" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15"/><circle cx="4.2" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15"/><circle cx="11.8" cy="12.4" r="1.5" fill="none" stroke="currentColor" stroke-width="1.15"/>${stroke("M4.2 5.1v5.8M11.8 10.9V6.4a2 2 0 0 0-2-2H7.4m0 0 1.6-1.5M7.4 4.4 9 5.9")}`,
+  },
+  mcp: {
+    box: 16,
+    body: stroke(
+      "M3.25 5.25a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm9.5 0a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM8 14.75a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM4.95 4.3l1.8 6.5M11.05 4.3l-1.8 6.5M5.1 3.25h5.8",
+    ),
+  },
+  plugins: {
+    box: 16,
+    body: stroke(
+      "M6.1 1.6v2.7M9.9 1.6v2.7M4.6 4.3h6.8v1.7a3.4 3.4 0 0 1-6.8 0V4.3ZM8 9.4v.9c0 1.5-3.2.9-3.2 2.4 0 1.4 2.7 1.6 4.6.9",
+    ),
+  },
+  help: {
+    box: 16,
+    body: `<circle cx="8" cy="8" r="6.1" fill="none" stroke="currentColor" stroke-width="1.15"/>${stroke("M6.2 6.25a1.85 1.85 0 0 1 3.6.55c0 1.15-1.8 1.35-1.8 2.4")}<circle cx="8" cy="11.35" r="0.7" fill="currentColor"/>`,
+  },
+  settings: {
+    box: 16,
+    body: stroke(
+      "M8 10.35A2.35 2.35 0 1 0 8 5.65a2.35 2.35 0 0 0 0 4.7Zm4.72-1.35a4.8 4.8 0 0 0 0-2l1.2-.92-1.2-2.08-1.42.58a5.1 5.1 0 0 0-1.72-1L9.4 2H6.6l-.18 1.58a5.1 5.1 0 0 0-1.72 1L3.28 4l-1.2 2.08 1.2.92a4.8 4.8 0 0 0 0 2l-1.2.92L3.28 12l1.42-.58a5.1 5.1 0 0 0 1.72 1L6.6 14h2.8l.18-1.58a5.1 5.1 0 0 0 1.72-1l1.42.58 1.2-2.08-1.2-.92Z",
+    ),
+  },
+  x: { box: 16, body: stroke("m4.5 4.5 7 7m0-7-7 7", 1.3) },
+  back: { box: 16, body: stroke("m9.75 3.5-4.5 4.5 4.5 4.5", 1.35) },
+  forward: { box: 16, body: stroke("m6.25 3.5 4.5 4.5-4.5 4.5", 1.35) },
+  reload: { box: 16, body: stroke("M12.5 5.25V2.8m0 0h-2.45m2.45 0-1.3 1.3A4.75 4.75 0 1 0 12.5 8", 1.25) },
+  go: { box: 16, body: stroke("M3.5 8h9M9 4.5 12.5 8 9 11.5", 1.25) },
+  panel: {
+    box: 16,
+    body: `<rect x="2.25" y="2.5" width="11.5" height="11" rx="1.75" fill="none" stroke="currentColor" stroke-width="1.15"/>${stroke("M6 2.75v10.5")}`,
+  },
+  external: {
+    box: 16,
+    body: stroke(
+      "M6.5 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v7.5a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V9.5M9.5 2.75h3.75V6.5M13 3 7.75 8.25",
+      1.25,
+    ),
+  },
+  magnifier: {
+    box: 16,
+    body: `<circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.3"/>${stroke("m10.2 10.2 3 3", 1.3)}`,
+  },
+  check: { box: 12, body: stroke("m2.5 6.5 2.5 2.5 4.5-5", 1.5) },
+  mic: {
+    box: 16,
+    body: stroke(
+      "M8 2.25a2 2 0 0 0-2 2v3.5a2 2 0 0 0 4 0v-3.5a2 2 0 0 0-2-2ZM4.25 7.5a3.75 3.75 0 0 0 7.5 0M8 11.25v2.5",
+      1.15,
+    ),
+  },
+  clip: {
+    box: 16,
+    body: stroke(
+      "m13.1 7.6-5.25 5.25a3.1 3.1 0 0 1-4.4-4.4l5.6-5.6a2.05 2.05 0 0 1 2.9 2.9L6.4 11.3a1 1 0 0 1-1.45-1.45l5.05-5.05",
+      1.15,
+    ),
+  },
+  // A six-petal rosette, standing in for the model's mark without copying
+  // any provider's logo.
+  model: {
+    box: 16,
+    body: stroke("M8 8A5.6 5.6 0 0 1 8.00 2.40A5.6 5.6 0 0 1 8 8M8 8A5.6 5.6 0 0 1 12.85 5.20A5.6 5.6 0 0 1 8 8M8 8A5.6 5.6 0 0 1 12.85 10.80A5.6 5.6 0 0 1 8 8M8 8A5.6 5.6 0 0 1 8.00 13.60A5.6 5.6 0 0 1 8 8M8 8A5.6 5.6 0 0 1 3.15 10.80A5.6 5.6 0 0 1 8 8M8 8A5.6 5.6 0 0 1 3.15 5.20A5.6 5.6 0 0 1 8 8", 1),
+  },
+  // The context meter: a dim track with the part of the window in use drawn
+  // brighter from the top.
+  ring: {
+    box: 16,
+    body: `<circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".72"/><path d="M8 1.6a6.4 6.4 0 0 1 2.45.49" fill="none" stroke="#d9d6de" stroke-width="1.4" stroke-linecap="round"/>`,
+  },
+  dots: {
+    box: 16,
+    body: `<circle cx="3.5" cy="8" r="1.05" fill="currentColor"/><circle cx="8" cy="8" r="1.05" fill="currentColor"/><circle cx="12.5" cy="8" r="1.05" fill="currentColor"/>`,
+  },
+  menu: { box: 16, body: stroke("M3 4.75h10M3 8h10M3 11.25h10", 1.25) },
+  chip: {
+    box: 16,
+    body: `<rect x="4" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="6.4" y="6.4" width="3.2" height="3.2" rx=".6" fill="none" stroke="currentColor" stroke-width="1.1"/>${stroke("M6 2v2M10 2v2M6 12v2M10 12v2M2 6h2M2 10h2M12 6h2M12 10h2", 1.1)}`,
+  },
+  arrow: { box: 16, body: stroke("M3 8h10M9 4l4 4-4 4", 1.6) },
+  // The 20px set: square caps and a 1-unit stroke.
+  task: {
+    box: 20,
+    body: square(
+      "M9.99992 2.0835V17.9168M7.08325 3.75016H2.08325V16.2502H7.08325M12.9166 16.2502H17.9166V3.75016H12.9166",
+    ),
+  },
+  review: {
+    box: 20,
+    body: `<path d="M7 14.5H13M7 7.99512H10.0049M10.0049 7.99512H13M10.0049 7.99512V5M10.0049 7.99512V11M18 18V2L2 2L2 18H18Z" fill="none" stroke="currentColor"/>`,
+  },
+  terminal: { box: 20, body: square("M6.5 8L8.64286 10L6.5 12M10.9286 12H13.5M2 18H18V2H2V18Z") },
+  "chevron-down": { box: 20, body: square("M6.6665 8.33325L9.99984 11.6666L13.3332 8.33325") },
+  "chevron-right": { box: 20, body: square("M8 15L13 10L8 5") },
+  close: { box: 20, body: square("M3.75 3.75L16.25 16.25M16.25 3.75L3.75 16.25") },
+  "close-small": { box: 20, body: square("M6 6L14 14M14 6L6 14") },
+  expand: { box: 20, body: square("M4.58301 10.4163V15.4163H9.58301M10.4163 4.58301H15.4163V9.58301") },
+  collapse: { box: 20, body: `${square("M16.666 8.33398H11.666V3.33398")}${square("M8.33398 16.666V11.666H3.33398")}` },
+  dock: {
+    box: 20,
+    body: `<path d="M2.91536 2.91406H17.082V17.0807H2.91536ZM6.9987 2.91406V17.0807" fill="none" stroke="currentColor" stroke-width="1.1"/>`,
+  },
+  popout: {
+    box: 20,
+    body: square(
+      "M7.91675 2.9165H2.91675V17.0832H17.0834V12.0832M12.0834 2.9165H17.0834V7.9165M9.58342 10.4165L16.6667 3.33317",
+    ),
+  },
+  trash: {
+    box: 20,
+    body: `<path d="M4.16677 4.58008 4.72792 17.4934H15.2503L15.8334 4.58008M2.08342 4.45508H17.9167M6.83951 4.35149C7.33 2.9 8.6 2.2 10.0001 2.2C11.4 2.2 12.67 2.9 13.1607 4.35149" fill="none" stroke="currentColor"/>`,
+  },
+  stop: { box: 20, body: `<rect x="5" y="5" width="10" height="10" fill="currentColor"/>` },
+}
+
+const glyph = glyphs[Astro.props.name]
+---
+
+<svg
+  class={Astro.props.class}
+  width={Astro.props.size ?? 16}
+  height={Astro.props.size ?? 16}
+  viewBox={`0 0 ${glyph.box} ${glyph.box}`}
+  fill="none"
+  aria-hidden="true"
+  focusable="false"
+  set:html={glyph.body}
+/>

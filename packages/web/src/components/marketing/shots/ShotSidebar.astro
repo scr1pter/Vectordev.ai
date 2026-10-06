@@ -1,0 +1,414 @@
+---
+// The desktop app's left sidebar (workspace-navigation.tsx) as the screenshots
+// show it: one project, its main workspace on a branch, and the tool groups.
+// Most of it is a picture of the navigation. Agent Dashboard and Browser have
+// windows of their own on the page, so those two rows go to them; a window
+// that shows one itself (the dashboard's, the browser's) takes the click over.
+// "compact" leaves out the projects and connections, for a window too short to
+// hold the whole sidebar. "collapsible" makes the hide button at its top work,
+// for a window whose own controls can bring the sidebar back.
+import ShotIcon from "./ShotIcon.astro"
+
+interface Props {
+  branch: string
+  compact?: boolean
+  collapsible?: boolean
+}
+
+const groups = [
+  {
+    label: "Project tools",
+    items: [
+      { icon: "dashboard", name: "Agent Dashboard", link: "dashboard" },
+      { icon: "browser", name: "Browser", link: "browser" },
+    ],
+  },
+  {
+    label: "Connections",
+    items: [
+      { icon: "pulls", name: "Pull Requests" },
+      { icon: "mcp", name: "MCP" },
+      { icon: "plugins", name: "Plugins" },
+    ],
+  },
+] as const
+const compact = Astro.props.compact ?? false
+---
+
+<aside class="sb" aria-label="Vector sidebar">
+  <div class="sb-top">
+    <div class="sb-mode" aria-hidden="true">
+      <span class="is-on">Agent</span>
+      <span>Editor</span>
+    </div>
+    {
+      Astro.props.collapsible ? (
+        <button type="button" class="sb-hide" data-sidebar-hide aria-label="Hide sidebar" title="Hide sidebar">
+          <ShotIcon name="sidebar-hide" size={15} />
+        </button>
+      ) : (
+        <span class="sb-hide">
+          <ShotIcon name="sidebar-hide" size={15} />
+        </span>
+      )
+    }
+  </div>
+
+  <div class="sb-primary">
+    <p class="sb-item"><ShotIcon name="home" size={13} /><span>Home</span></p>
+    <p class="sb-item"><ShotIcon name="search" size={13} /><span>Search</span><kbd>⌘P</kbd></p>
+  </div>
+
+  <div class="sb-projects" hidden={compact}>
+    <p class="sb-label sb-label-row"><span>Projects</span><ShotIcon name="plus" size={13} /></p>
+    <p class="sb-project">
+      <ShotIcon name="caret" size={13} class="sb-caret" />
+      <span class="sb-project-mark"><ShotIcon name="project" size={11} /></span>
+      <span class="sb-project-name">Vectordev.ai</span>
+      <span class="sb-project-count">1</span>
+    </p>
+    <div class="sb-row">
+      <span class="sb-row-icon"><ShotIcon name="branch" size={15} /></span>
+      <span class="sb-row-text">
+        <span class="sb-row-name">Vector</span>
+        <span class="sb-row-sub"><span data-shot-branch-label>{Astro.props.branch}</span> · Ready</span>
+      </span>
+      <span class="sb-row-chip">main</span>
+    </div>
+    <p class="sb-hint">Launch an isolated workspace to run another agent without touching main.</p>
+  </div>
+
+  {
+    groups
+      .filter((group) => !compact || group.label === "Project tools")
+      .map((group) => (
+        <div class="sb-group">
+          <p class="sb-label">{group.label}</p>
+          {group.items.map((item) =>
+            "link" in item ? (
+              <a class="sb-item sb-link" href={`#shot-${item.link}`} data-sidebar-link={item.link}>
+                <ShotIcon name={item.icon} size={13} />
+                <span>{item.name}</span>
+              </a>
+            ) : (
+              <p class="sb-item">
+                <ShotIcon name={item.icon} size={13} />
+                <span>{item.name}</span>
+              </p>
+            ),
+          )}
+        </div>
+      ))
+  }
+
+  <div class="sb-foot">
+    <span>Vector workspace</span>
+    <span class="sb-foot-icon"><ShotIcon name="help" size={13} /></span>
+    <span class="sb-foot-icon"><ShotIcon name="settings" size={13} /></span>
+  </div>
+</aside>
+
+<style>
+  .sb {
+    position: relative;
+    display: flex;
+    flex: 0 0 268px;
+    flex-direction: column;
+    width: 268px;
+    height: 100%;
+    overflow: hidden;
+    border-right: 1px solid rgba(255, 255, 255, 0.035);
+    background: var(--as-sidebar);
+    color: var(--as-text-2);
+    font-size: 13px;
+    cursor: default;
+    user-select: none;
+  }
+
+  :where(.sb) p {
+    margin: 0;
+  }
+
+  .sb-top {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    height: 47px;
+    padding: 0 10px 0 9px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    background: var(--as-sidebar-top);
+  }
+
+  .sb-mode {
+    display: grid;
+    flex: 1;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    height: 23px;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+
+  .sb-mode span {
+    display: grid;
+    height: 100%;
+    place-items: center;
+    color: var(--as-text-3);
+  }
+
+  .sb-mode .is-on {
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 5px;
+    background: #221f27;
+    color: var(--as-text-1);
+  }
+
+  .sb-hide {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--as-text-3);
+  }
+
+  button.sb-hide {
+    cursor: pointer;
+  }
+
+  button.sb-hide:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--as-text);
+  }
+
+  button.sb-hide:focus-visible {
+    outline: 2px solid #9d84ee;
+    outline-offset: -2px;
+  }
+
+  .sb-primary {
+    display: grid;
+    gap: 1px;
+    padding: 6px 8px 7px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  }
+
+  .sb-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    height: 32px;
+    padding: 0 9px 0 4px;
+    border-radius: 5px;
+    color: #c4c1c8;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .sb-link {
+    margin: 0 -4px;
+    padding-left: 8px;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .sb-link:hover {
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--as-text);
+  }
+
+  .sb-link:focus-visible {
+    outline: 2px solid #9d84ee;
+    outline-offset: -2px;
+  }
+
+  .sb-projects[hidden] {
+    display: none;
+  }
+
+  .sb-item :global(svg) {
+    flex: none;
+    color: var(--as-text-3);
+  }
+
+  .sb-item kbd {
+    margin-left: auto;
+    color: var(--as-text-3);
+    font: inherit;
+    font-size: 10px;
+  }
+
+  .sb-label {
+    padding: 0 8px 4px 4px;
+    color: #9a96a0;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .sb-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 30px;
+    padding: 0 9px 0 0;
+    font-size: 11.5px;
+  }
+
+  .sb-label-row :global(svg) {
+    color: var(--as-text-3);
+  }
+
+  .sb-projects {
+    padding: 2px 8px 19.5px;
+  }
+
+  .sb-project {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 6px 0 0;
+    color: var(--as-text-1);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .sb-project :global(.sb-caret) {
+    color: var(--as-text-3);
+  }
+
+  .sb-project-mark {
+    display: grid;
+    width: 17px;
+    height: 17px;
+    place-items: center;
+    border-radius: 5px;
+    background: rgba(182, 159, 247, 0.14);
+    color: var(--as-bright);
+  }
+
+  .sb-project-name {
+    flex: 1;
+  }
+
+  .sb-project-count {
+    color: var(--as-text-3);
+    font-size: 11px;
+    font-weight: 400;
+  }
+
+  /* [data-vector-workspace-row][data-active="true"] in the app. */
+  .sb-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 50px;
+    margin: 0 -5px;
+    padding: 2px 8px 4px 7px;
+    border-radius: 5px;
+    background: linear-gradient(90deg, rgba(182, 159, 247, 0.12), transparent 72%), rgba(255, 255, 255, 0.068);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+    color: var(--as-text-1);
+  }
+
+  .sb-row::before {
+    content: "";
+    position: absolute;
+    inset: 6px auto 6px 0;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--as-bright);
+    box-shadow: 0 0 12px rgba(182, 159, 247, 0.42);
+  }
+
+  .sb-row-icon {
+    display: grid;
+    flex: none;
+    width: 18px;
+    place-items: center;
+    margin-top: 2px;
+    color: var(--as-text-3);
+  }
+
+  .sb-row-text {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .sb-row-name {
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .sb-row-sub {
+    overflow: hidden;
+    padding-left: 10px;
+    color: #bdb9c2;
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sb-row-chip {
+    flex: none;
+    padding: 4px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+    color: #a3a0a8;
+    font-size: 11px;
+  }
+
+  .sb-hint {
+    max-width: 212px;
+    padding: 9px 5px 0;
+    color: #9a96a0;
+    font-size: 11.5px;
+    line-height: 17.5px;
+  }
+
+  .sb-group {
+    padding: 15px 8px 10px;
+    border-top: 1px solid rgba(226, 213, 237, 0.075);
+  }
+
+  .sb-group .sb-label {
+    padding-bottom: 6px;
+  }
+
+  .sb-group .sb-item {
+    height: 33px;
+  }
+
+  .sb-foot {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 46px;
+    margin-top: auto;
+    padding: 0 8px 0 9px;
+    border-top: 1px solid rgba(255, 255, 255, 0.045);
+    background: var(--as-sidebar-foot);
+    color: var(--as-text-3);
+    font-size: 10.5px;
+  }
+
+  .sb-foot > span:first-child {
+    flex: 1;
+  }
+
+  .sb-foot-icon {
+    display: grid;
+    width: 26px;
+    place-items: center;
+  }
+</style>

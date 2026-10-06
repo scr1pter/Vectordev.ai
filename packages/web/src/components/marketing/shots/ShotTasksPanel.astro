@@ -1,0 +1,892 @@
+---
+// The Background tasks panel (packages/app/src/features/background-tasks),
+// popped out and expanded as in the reference: one running specialist with its
+// phase and agent table, and the finished tasks folded under their count. The
+// session shot's script drives it; this file is the markup and the panel's own
+// styles, copied from background-tasks.css.
+import ShotIcon from "./ShotIcon.astro"
+
+interface Props {
+  id: string
+  open: boolean
+  // The specialist's clock, in seconds and as the session shot formats it.
+  seconds: number
+  time: string
+}
+
+const finished = [
+  {
+    title: "Map workspace trust entry points",
+    kind: "Specialist · Explore",
+    status: "done",
+    time: "2m 41s",
+    tokens: "286.4k",
+    text: "List every place a project can make Vector run something: config files, MCP server definitions, hooks and scripts.",
+  },
+  {
+    title: "Audit fingerprint storage",
+    kind: "Specialist · Security",
+    status: "done",
+    time: "6m 12s",
+    tokens: "1.21M",
+    text: "Check how a trusted folder's fingerprint is stored and compared, and whether a moved or edited folder keeps its trust.",
+  },
+  {
+    title: "Trace project config loading",
+    kind: "Subagent",
+    status: "done",
+    time: "3m 05s",
+    tokens: "402.7k",
+    text: "Follow project configuration from disk to the permission layer and note where an untrusted value can widen it.",
+  },
+  {
+    title: "Review MCP server launch policy",
+    kind: "Specialist · Review",
+    status: "done",
+    time: "4m 47s",
+    tokens: "688.0k",
+    text: "Review the staged launch checks for MCP servers declared by the project rather than by the user.",
+  },
+  {
+    title: "Write trust prompt tests",
+    kind: "Specialist · Test",
+    status: "done",
+    time: "5m 30s",
+    tokens: "742.9k",
+    text: "Cover the trust prompt: first open, a changed fingerprint, a declined prompt, and a symlinked config.",
+  },
+  {
+    title: "Reproduce the bypass in a fixture",
+    kind: "Specialist · Debug",
+    status: "failed",
+    time: "1m 58s",
+    tokens: "133.5k",
+    text: "The fixture repository could not be created in the sandbox, so the bypass was not reproduced.",
+  },
+  {
+    title: "Reproduce the bypass with a symlinked config",
+    kind: "Specialist · Debug",
+    status: "done",
+    time: "3m 22s",
+    tokens: "251.8k",
+    text: "Reproduced the bypass through a symlinked config and confirmed the staged patch closes it.",
+  },
+  {
+    title: "Check generated client types",
+    kind: "Subagent",
+    status: "done",
+    time: "1m 14s",
+    tokens: "92.4k",
+    text: "Regenerate the client and confirm the trust fields match the protocol.",
+  },
+  {
+    title: "Typecheck affected packages",
+    kind: "Specialist · Test",
+    status: "done",
+    time: "2m 36s",
+    tokens: "140.2k",
+    text: "Run the typecheck in every package the patch touches.",
+  },
+  {
+    title: "Benchmark config hashing",
+    kind: "Specialist · Performance",
+    status: "done",
+    time: "1m 49s",
+    tokens: "118.6k",
+    text: "Time fingerprinting on a large repository to make sure opening a project stays fast.",
+  },
+  {
+    title: "Draft a trusted folders note",
+    kind: "Specialist · Migration",
+    status: "stopped",
+    time: "52s",
+    tokens: "61.0k",
+    text: "Stopped before it finished: the note was left for the final commit message instead.",
+  },
+  {
+    title: "Smoke test the app build",
+    kind: "Subagent",
+    status: "done",
+    time: "4m 03s",
+    tokens: "377.1k",
+    text: "Build the app, open it in the browser and walk through the trust prompt once.",
+  },
+  {
+    title: "First judge pass on the staged patch",
+    kind: "Specialist · Judge",
+    status: "done",
+    time: "2m 18s",
+    tokens: "205.6k",
+    text: "Weighed the request, the changed files and the test output, and asked for a fresh integration with origin/main.",
+  },
+] as const
+
+const words = { done: "Done", failed: "Failed", stopped: "Stopped" }
+const id = Astro.props.id
+---
+
+<aside
+  class="bgt"
+  id={id}
+  data-tasks-panel
+  data-floating=""
+  data-expanded=""
+  hidden={!Astro.props.open}
+  aria-labelledby={`${id}-title`}
+>
+  <header class="bgt-header">
+    <h2 class="bgt-title" id={`${id}-title`} tabindex="-1">Background tasks</h2>
+    <button type="button" class="bgt-icon" data-tasks-float aria-pressed="true" aria-label="Dock background tasks" title="Dock">
+      <ShotIcon name="dock" size={16} class="bgt-when-floating" />
+      <ShotIcon name="popout" size={16} class="bgt-when-docked" />
+    </button>
+    <button type="button" class="bgt-icon" data-tasks-expand aria-pressed="true" aria-label="Collapse panel" title="Collapse">
+      <ShotIcon name="collapse" size={16} class="bgt-when-expanded" />
+      <ShotIcon name="expand" size={16} class="bgt-when-narrow" />
+    </button>
+    <button type="button" class="bgt-icon" data-tasks-close aria-label="Close background tasks" title="Close">
+      <ShotIcon name="close" size={16} />
+    </button>
+  </header>
+
+  <div class="bgt-list" data-reveal-scroll>
+    <section class="bgt-section" aria-labelledby={`${id}-running`}>
+      <h3 class="bgt-label" id={`${id}-running`}>Running</h3>
+      <p class="bgt-idle" data-tasks-idle hidden>Nothing running right now</p>
+      <ul class="bgt-cards" data-tasks-running aria-label="Running tasks">
+        <li>
+          <article class="bgt-card" tabindex="-1" aria-labelledby={`${id}-live`}>
+            <div class="bgt-card-head">
+              <h4 class="bgt-card-title" id={`${id}-live`}>Final security diff audit</h4>
+              <button type="button" class="bgt-stop" data-tasks-stop aria-label="Stop Final security diff audit" title="Stop">
+                <ShotIcon name="stop" size={14} />
+              </button>
+            </div>
+            <p class="bgt-meta">
+              <span>Specialist · Security</span>
+              <time class="bgt-time" data-tick="pad" data-seconds={Astro.props.seconds}>{Astro.props.time}</time>
+            </p>
+            <p class="bgt-meta bgt-counts">
+              <span><span class="bgt-num">1</span> agent</span>
+              <span><span class="bgt-num">4.13M</span> tokens</span>
+            </p>
+            <p class="bgt-desc">
+              Perform a final read-only application security review of the currently staged patch in ~/Vectordev.ai on
+              branch security-boundaries, comparing the staged diff to HEAD and considering origin/main where relevant,
+              without editing any files. Focus on the intended security boundaries: explicit fingerprint-bound workspace trust
+              for project executable configuration; untrusted project policy that cannot widen permissions or launch MCP
+              servers; and the checks that keep the generated client in step with both.
+            </p>
+            <h5 class="bgt-phases-label">Phases</h5>
+            <ol class="bgt-phases">
+              <li class="bgt-phase" data-state="running" data-tasks-phase-item>
+                <button type="button" class="bgt-phase-toggle" data-tasks-phase aria-expanded="true" aria-controls={`${id}-phase`}>
+                  <span class="bgt-phase-name">Phase 1 · Security</span>
+                  <span class="bgt-phase-count" aria-label="0 of 1 done">0/1</span>
+                  <ShotIcon name="chevron-right" size={16} class="bgt-chevron" />
+                  <span class="bgt-squares" role="img" aria-label="1 running" data-tasks-squares-label>
+                    <span class="bgt-square" data-status="running" data-tasks-mark></span>
+                  </span>
+                </button>
+                <div class="bgt-phase-body" id={`${id}-phase`}>
+                  <table class="bgt-table">
+                    <caption class="bgt-sr">Agents in Phase 1 · Security</caption>
+                    <colgroup><col /><col class="bgt-col-model" /><col class="bgt-col-tokens" /><col class="bgt-col-time" /></colgroup>
+                    <thead>
+                      <tr><th scope="col">Agent</th><th scope="col">Model</th><th scope="col">Tokens</th><th scope="col">Time</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><span class="bgt-agent"><span class="bgt-agent-state" data-status="running" data-tasks-mark></span><span class="bgt-agent-name">Final security diff audit</span></span></td>
+                        <td title="GPT-5.6 Sol">GPT-5.6 Sol</td>
+                        <td>4.13M</td>
+                        <td><time data-tick="pad" data-seconds={Astro.props.seconds}>{Astro.props.time}</time></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </li>
+            </ol>
+          </article>
+        </li>
+      </ul>
+    </section>
+
+    <section class="bgt-section" data-tasks-finished-section aria-labelledby={`${id}-finished-label`}>
+      <div class="bgt-section-head">
+        <h3 class="bgt-label" id={`${id}-finished-label`}>
+          <button type="button" class="bgt-finished-toggle" data-tasks-finished-toggle aria-expanded="false" aria-controls={`${id}-finished`}>
+            <span>Finished</span>
+            <span class="bgt-count" data-tasks-finished-count>{finished.length}</span>
+            <ShotIcon name="chevron-right" size={16} class="bgt-chevron" />
+          </button>
+        </h3>
+        <button type="button" class="bgt-icon" data-tasks-clear aria-label="Clear finished tasks" title="Clear finished tasks">
+          <ShotIcon name="trash" size={16} />
+        </button>
+      </div>
+      <ul class="bgt-cards" id={`${id}-finished`} data-tasks-finished hidden aria-label="Finished tasks">
+        <li data-tasks-stopped hidden>
+          <article class="bgt-card" tabindex="-1">
+            <div class="bgt-card-head">
+              <h4 class="bgt-card-heading">
+                <button type="button" class="bgt-card-toggle" data-tasks-card aria-expanded="false" aria-controls={`${id}-stopped-desc`}>
+                  <span>Final security diff audit</span>
+                  <ShotIcon name="chevron-right" size={16} class="bgt-chevron" />
+                </button>
+              </h4>
+              <span class="bgt-card-status" data-status="stopped">Stopped</span>
+            </div>
+            <p class="bgt-meta"><span>Specialist · Security</span><time class="bgt-time" data-tasks-stopped-time>{Astro.props.time}</time></p>
+            <p class="bgt-meta bgt-counts"><span><span class="bgt-num">1</span> agent</span><span><span class="bgt-num">4.13M</span> tokens</span></p>
+            <p class="bgt-desc" id={`${id}-stopped-desc`} hidden>You stopped this review from the panel before it reported back.</p>
+          </article>
+        </li>
+        {
+          finished.map((task, index) => (
+            <li>
+              <article class="bgt-card">
+                <div class="bgt-card-head">
+                  <h4 class="bgt-card-heading">
+                    <button type="button" class="bgt-card-toggle" data-tasks-card aria-expanded="false" aria-controls={`${id}-done-${index}`}>
+                      <span>{task.title}</span>
+                      <ShotIcon name="chevron-right" size={16} class="bgt-chevron" />
+                    </button>
+                  </h4>
+                  <span class="bgt-card-status" data-status={task.status}>{words[task.status]}</span>
+                </div>
+                <p class="bgt-meta"><span>{task.kind}</span><time class="bgt-time">{task.time}</time></p>
+                <p class="bgt-meta bgt-counts"><span><span class="bgt-num">1</span> agent</span><span><span class="bgt-num">{task.tokens}</span> tokens</span></p>
+                <p class="bgt-desc" id={`${id}-done-${index}`} hidden>{task.text}</p>
+              </article>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+  </div>
+
+  <p class="bgt-sr" aria-live="polite" data-tasks-live></p>
+</aside>
+
+<style>
+  /* Tokens and rules from background-tasks.css, on the screenshot's surfaces. */
+  .bgt {
+    --bgt-pane: #18171f;
+    --bgt-card: #221f27;
+    --bgt-well: #29252f;
+    --bgt-well-hover: #332e3a;
+    --bgt-well-run: #342e44;
+    --bgt-well-run-hover: #3a3350;
+    --bgt-text-1: #ebe7ee;
+    --bgt-text-2: #c9c3cd;
+    --bgt-text-3: #a39dab;
+    --bgt-run: #8b73d6;
+    --bgt-run-text: #cdbdf5;
+    --bgt-stop: var(--bgt-text-2);
+    position: relative;
+    z-index: 4;
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    width: 320px;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid rgba(226, 213, 237, 0.16);
+    border-radius: 12px;
+    background: var(--bgt-pane);
+    color: var(--bgt-text-1);
+    font-size: 13px;
+    line-height: 1.5;
+    transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .bgt[hidden] {
+    display: none;
+  }
+
+  .bgt[data-expanded] {
+    width: 662px;
+  }
+
+  /* Popped out: hung 10px under the session header, clear of the composer,
+     and never taller or wider than the session leaves room for. */
+  .bgt[data-floating] {
+    position: absolute;
+    top: 10px;
+    right: 16px;
+    height: min(540px, calc(100% - 20px));
+    max-width: calc(100% - 32px);
+    background: color-mix(in srgb, var(--bgt-pane) 98%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    backdrop-filter: blur(18px) saturate(1.2);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+    transform-origin: 100% 0;
+  }
+
+  .bgt[data-floating][data-animate] {
+    animation: bgt-pop 160ms ease-out;
+  }
+
+  /* Docked: the last column of the session row, set off by a hairline. */
+  .bgt:not([data-floating]) {
+    align-self: stretch;
+    border-width: 0 0 0 1px;
+    border-color: rgba(226, 213, 237, 0.09);
+    border-radius: 0;
+  }
+
+  /* Docked, it is expanded only where the conversation keeps most of the
+     row; in a narrower session it stays at its narrow width and Expand goes. */
+  @container ss-body (max-width: 999.98px) {
+    .bgt:not([data-floating]) {
+      width: 320px;
+    }
+
+    .bgt:not([data-floating]) [data-tasks-expand] {
+      display: none;
+    }
+  }
+
+  /* In a narrow session the panel takes the conversation's width: popped out
+     it is a card over it, docked it covers it edge to edge. Expand has
+     nothing left to do there. */
+  @container ss-body (max-width: 759.98px) {
+    .bgt[data-floating] {
+      right: 12px;
+      width: calc(100% - 24px);
+      max-width: none;
+    }
+
+    .bgt:not([data-floating]) {
+      position: absolute;
+      inset: 0;
+      width: auto;
+    }
+
+    .bgt [data-tasks-expand] {
+      display: none;
+    }
+  }
+
+  @keyframes bgt-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+
+  :where(.bgt) :is(h2, h3, h4, h5, p, ul, ol) {
+    margin: 0;
+    padding: 0;
+    font-size: inherit;
+    font-weight: inherit;
+  }
+
+  :where(.bgt) button {
+    font: inherit;
+    color: inherit;
+  }
+
+  .bgt button:focus-visible {
+    outline: 2px solid #9d84ee;
+    outline-offset: 2px;
+  }
+
+  .bgt-header {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 2px;
+    height: 48px;
+    padding: 0 10px 0 24px;
+  }
+
+  .bgt-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bgt-title:focus {
+    outline: none;
+  }
+
+  .bgt-icon {
+    display: inline-grid;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--bgt-text-2);
+    cursor: pointer;
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+
+  .bgt-icon:hover {
+    background: var(--bgt-card);
+    color: var(--bgt-text-1);
+  }
+
+  .bgt-icon[aria-pressed="true"] {
+    background: rgba(182, 159, 247, 0.16);
+    color: #c4b2fa;
+  }
+
+  .bgt-icon[aria-pressed="true"]:hover {
+    background: rgba(182, 159, 247, 0.22);
+  }
+
+  /* Each two-state button carries both glyphs; the panel's state picks one. */
+  .bgt:not([data-floating]) :global(.bgt-when-floating),
+  .bgt[data-floating] :global(.bgt-when-docked),
+  .bgt:not([data-expanded]) :global(.bgt-when-expanded),
+  .bgt[data-expanded] :global(.bgt-when-narrow) {
+    display: none;
+  }
+
+  .bgt-list {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+    padding: 0 8px 12px;
+    overflow-y: auto;
+    scrollbar-color: var(--bgt-well) transparent;
+    scrollbar-width: thin;
+  }
+
+  .bgt-section {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+  }
+
+  .bgt-section[hidden] {
+    display: none;
+  }
+
+  .bgt-label {
+    padding: 4px 16px 8px;
+    color: var(--bgt-text-3);
+  }
+
+  .bgt-idle {
+    padding: 0 16px 4px;
+    color: var(--bgt-text-3);
+  }
+
+  .bgt-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 12px 0 10px;
+  }
+
+  .bgt-section-head > .bgt-label {
+    min-width: 0;
+    padding: 0;
+  }
+
+  .bgt-finished-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--bgt-text-3);
+    cursor: pointer;
+  }
+
+  .bgt-finished-toggle:hover {
+    background: var(--bgt-card);
+    color: var(--bgt-text-2);
+  }
+
+  .bgt-count {
+    color: var(--bgt-text-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bgt :global(.bgt-chevron) {
+    flex: none;
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .bgt [aria-expanded="true"] > :global(.bgt-chevron) {
+    transform: rotate(90deg);
+  }
+
+  .bgt-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    list-style: none;
+  }
+
+  .bgt-cards[hidden],
+  .bgt-cards > li[hidden] {
+    display: none;
+  }
+
+  .bgt-section-head + .bgt-cards {
+    margin-top: 4px;
+  }
+
+  .bgt-card {
+    padding: 16px;
+    border-radius: 12px;
+    background: var(--bgt-card);
+  }
+
+  .bgt-card:focus {
+    outline: none;
+  }
+
+  .bgt-card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .bgt-card-title,
+  .bgt-card-heading {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+  }
+
+  .bgt-card-toggle {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+    margin: -2px 0 -2px -4px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .bgt-card-toggle:hover {
+    background: var(--bgt-well);
+  }
+
+  .bgt-card-toggle > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bgt-stop {
+    display: inline-grid;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    margin: -4px -4px 0 0;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: var(--bgt-well);
+    cursor: pointer;
+  }
+
+  .bgt-stop:hover {
+    background: var(--bgt-well-hover);
+  }
+
+  .bgt-card-status {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    margin-top: 1px;
+    color: var(--bgt-text-2);
+    white-space: nowrap;
+  }
+
+  .bgt-card-status::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--bgt-text-3);
+  }
+
+  .bgt-card-status[data-status="failed"] {
+    color: #e6787d;
+  }
+
+  .bgt-card-status[data-status="failed"]::before {
+    background: #e6787d;
+  }
+
+  .bgt-card-status[data-status="stopped"] {
+    color: var(--bgt-text-3);
+  }
+
+  .bgt-card-status[data-status="stopped"]::before {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--bgt-stop);
+  }
+
+  .bgt-meta {
+    display: flex;
+    align-items: baseline;
+    column-gap: 10px;
+    min-width: 0;
+    color: var(--bgt-text-2);
+    white-space: nowrap;
+  }
+
+  .bgt-card-head + .bgt-meta {
+    margin-top: 4px;
+  }
+
+  .bgt-time {
+    color: var(--bgt-text-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bgt-counts {
+    column-gap: 12px;
+    color: var(--bgt-text-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bgt-num {
+    color: var(--bgt-text-2);
+  }
+
+  .bgt-desc {
+    display: -webkit-box;
+    margin-top: 10px;
+    overflow: hidden;
+    color: var(--bgt-text-3);
+    line-height: 1.6;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+  }
+
+  .bgt-desc[hidden] {
+    display: none;
+  }
+
+  .bgt-phases-label {
+    margin: 14px 0 8px;
+  }
+
+  .bgt-phases {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    list-style: none;
+  }
+
+  .bgt-phase-toggle {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 16px;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 12px 12px 16px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--bgt-well);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .bgt-phase[data-state="running"] > .bgt-phase-toggle {
+    background: var(--bgt-well-run);
+  }
+
+  .bgt-phase[data-state="running"] > .bgt-phase-toggle:hover {
+    background: var(--bgt-well-run-hover);
+  }
+
+  .bgt-phase-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bgt-phase[data-state="running"] .bgt-phase-name {
+    color: var(--bgt-run-text);
+  }
+
+  .bgt-phase-count {
+    color: var(--bgt-text-2);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bgt-phase-toggle > :global(.bgt-chevron) {
+    color: var(--bgt-text-2);
+  }
+
+  .bgt-squares {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 4px;
+  }
+
+  .bgt-square,
+  .bgt-agent-state::before {
+    box-sizing: border-box;
+    width: 8px;
+    height: 8px;
+    border: 1px solid var(--bgt-mark);
+    border-radius: 50%;
+    background: var(--bgt-mark);
+  }
+
+  [data-status="running"].bgt-square,
+  [data-status="running"].bgt-agent-state {
+    --bgt-mark: var(--bgt-run);
+  }
+
+  [data-status="stopped"].bgt-square,
+  [data-status="stopped"].bgt-agent-state {
+    --bgt-mark: var(--bgt-stop);
+  }
+
+  [data-status="stopped"].bgt-square,
+  [data-status="stopped"].bgt-agent-state::before {
+    background: linear-gradient(var(--bgt-mark) 0 0) center / 4px 1px no-repeat;
+  }
+
+  .bgt-phase-body {
+    padding: 6px 12px 4px 16px;
+  }
+
+  .bgt-phase-body[hidden] {
+    display: none;
+  }
+
+  .bgt-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  /* The app's own column widths: the model name gives way first. */
+  .bgt-col-model {
+    width: 48px;
+  }
+
+  .bgt-col-tokens {
+    width: 52px;
+  }
+
+  .bgt-col-time {
+    width: 60px;
+  }
+
+  .bgt-table :is(th, td) {
+    padding: 3px 0 3px 6px;
+    overflow: hidden;
+    color: var(--bgt-text-3);
+    font-size: 12px;
+    font-weight: inherit;
+    line-height: 1.5;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bgt-table :is(th, td):first-child {
+    padding-left: 0;
+  }
+
+  .bgt-table :is(th, td):nth-child(n + 3) {
+    text-align: right;
+  }
+
+  .bgt-table td {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bgt-agent {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    color: var(--bgt-text-2);
+  }
+
+  .bgt-agent-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bgt-agent-state {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 12px;
+    height: 18px;
+  }
+
+  .bgt-agent-state::before {
+    content: "";
+  }
+
+  /* Running marks breathe; the page's reduced-motion rule holds them still. */
+  [data-status="running"].bgt-square,
+  [data-status="running"].bgt-agent-state::before {
+    animation: bgt-breathe 1.6s ease-in-out infinite;
+  }
+
+  @keyframes bgt-breathe {
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bgt,
+    .bgt :global(.bgt-chevron) {
+      transition: none;
+    }
+
+    .bgt[data-floating][data-animate],
+    [data-status="running"].bgt-square,
+    [data-status="running"].bgt-agent-state::before {
+      animation: none;
+    }
+  }
+
+  .bgt-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+</style>
