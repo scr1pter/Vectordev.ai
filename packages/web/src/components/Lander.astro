@@ -30,7 +30,8 @@ import {
   Workflow,
 } from "lucide-react"
 import MarketingNav from "./marketing/MarketingNav.astro"
-import ProductDemo from "./marketing/ProductDemo.astro"
+import ShotWindow from "./marketing/shots/ShotWindow.astro"
+import { sessionShot } from "./marketing/shots/shots"
 import AppShots from "./marketing/AppShots.astro"
 import LanderMotion from "./marketing/LanderMotion.astro"
 import LanderMaterials from "./marketing/LanderMaterials.astro"
@@ -307,17 +308,10 @@ const trustCards = [
         </div>
 
         <div class="showcase simple-showcase" aria-label="Interactive preview of the Vector interface">
-          <figure class="product-window">
-            <div class="product-bar" aria-hidden="true">
-              <span class="traffic"><i></i><i></i><i></i></span>
-              <span class="product-title">Vector — Workspace</span>
-              <span class="product-status"><i></i> Ready</span>
-            </div>
-            <ProductDemo bare />
-          </figure>
+          <ShotWindow shot={sessionShot} class="product-window" />
           <p class="showcase-note">
-            An interactive preview — move around the rail, filter the board, open a file. The desktop app connects
-            these surfaces to your real repository and agents.
+            An interactive preview — switch the branch, open Tasks, Changes or the terminal, fold the todos. The desktop
+            app connects it to your real repository and agents.
           </p>
         </div>
       </div>
@@ -1134,50 +1128,6 @@ const trustCards = [
     color: var(--ink-40);
   }
 
-  .product-window {
-    margin: 0;
-    overflow: hidden;
-    padding: 7px;
-    border: 1px solid rgba(235, 228, 255, 0.22);
-    border-radius: 28px;
-    background: var(--glass-fill-strong);
-    box-shadow:
-      0 40px 120px rgba(0, 0, 0, 0.66),
-      0 0 80px rgba(132, 86, 219, 0.12),
-      inset 0 1px 0 rgba(255, 255, 255, 0.13);
-    backdrop-filter: blur(28px) saturate(145%);
-    -webkit-backdrop-filter: blur(28px) saturate(145%);
-  }
-
-  .product-bar {
-    min-height: 40px;
-    padding: 0 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    color: var(--ink-40);
-    background: rgba(255, 255, 255, 0.045);
-    border-bottom: 1px solid rgba(190, 166, 255, 0.1);
-    border-radius: 20px 20px 0 0;
-    font-size: 11.5px;
-  }
-
-  .traffic { display: inline-flex; gap: 6px; }
-  .traffic i { width: 9px; height: 9px; border-radius: 50%; background: #3f3752; }
-  .traffic i:first-child { background: #f26d6d; }
-  .traffic i:nth-child(2) { background: #f2b25c; }
-  .traffic i:nth-child(3) { background: #63c98b; }
-  .product-title { color: var(--ink-55); }
-  .product-status { display: inline-flex; align-items: center; gap: 7px; }
-  .product-status i {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #63c98b;
-    box-shadow: 0 0 10px rgba(99, 201, 139, 0.4);
-  }
-
   /* ---- keyframes ---- */
 
   @keyframes field-breathe {
@@ -1193,9 +1143,6 @@ const trustCards = [
     .headline { min-height: 4.6em; font-size: clamp(26px, 7.6vw, 32px); }
 
     .showcase { width: calc(100% - 24px); padding-top: 44px; }
-    .product-window { padding: 5px; border-radius: 21px; }
-    .product-bar { min-height: 34px; padding-inline: 10px; }
-    .product-title { display: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {
