@@ -1,0 +1,1985 @@
+---
+// An agent session in the desktop app, drawn from its components
+// (session-header.tsx, branch-picker.tsx, the subagent task chip, the todo dock
+// and vector-premium.css) and driven by sample data. Three of the landing
+// page's screenshots are this one screen in different states: the session,
+// the same session with Background tasks popped out, and the session with the
+// browser open beside it.
+//
+// Everything here works on the page itself. The header tools open their
+// panels, the branch picker switches and creates branches, the clocks run and
+// stopping the specialist stops them. The composer is a picture, for the
+// reason ProductDemo gives: there is no model behind the page.
+//
+// The stage can be laid out anywhere from 1440px down to 420px wide (see
+// AppShots), so the screen reflows as the app does in a smaller window: the
+// sidebar goes first, then the header tools drop their labels, and the side
+// panels cover the conversation instead of sitting beside it.
+import ShotBrowserPanel from "./ShotBrowserPanel.astro"
+import ShotComposer from "./ShotComposer.astro"
+import ShotIcon from "./ShotIcon.astro"
+import ShotSidebar from "./ShotSidebar.astro"
+import ShotTasksPanel from "./ShotTasksPanel.astro"
+
+interface Props {
+  id: string
+  variant: "session" | "tasks" | "browser"
+  // Seconds on the turn's clock and on the running specialist's.
+  turn: number
+  task: number
+}
+
+const variant = Astro.props.variant
+const id = Astro.props.id
+const branch = "security-boundaries"
+const branches = ["main", "security-boundaries", "session-recovery", "fix-scroll-state", "regenerate-sdk"]
+
+const todos = [
+  "Audit the staged security patch and repository state",
+  "Fetch and integrate the latest origin/main in isolation",
+  "Re-run focused verification on the integrated tree",
+  "Obtain an independent judge PASS",
+  "Commit, update main, push, and verify the remote commit",
+]
+
+// The first hunk of each file, with the counts its header claims, and how much
+// of the file's diff is left unshown.
+const changes = [
+  {
+    dir: "packages/engine/src/project/",
+    name: "trust.ts",
+    add: 64,
+    del: 9,
+    diff: [
+      "@@ -41,3 +41,6 @@ export function trusted(project: Project) {",
+      "   const settings = Settings.current()",
+      "-  return settings.trusted.includes(project.directory)",
+      "+  const record = settings.trusted.find((item) => item.directory === project.directory)",
+      "+  if (!record) return false",
+      "+  // A moved or edited folder is a different folder.",
+      "+  return record.fingerprint === fingerprint(project)",
+      " }",
+    ],
+    more: "3 more hunks",
+  },
+  {
+    dir: "packages/engine/src/config/",
+    name: "project-policy.ts",
+    add: 31,
+    del: 12,
+    diff: [
+      "@@ -18,3 +18,6 @@ export function resolvePolicy(user: Policy, project: ProjectPolicy) {",
+      "   return {",
+      "-    permissions: merge(user.permissions, project.permissions),",
+      "+    // An untrusted project can narrow permissions, never widen them.",
+      "+    permissions: project.trusted",
+      "+      ? merge(user.permissions, project.permissions)",
+      "+      : narrow(user.permissions, project.permissions),",
+      "     tools: merge(user.tools, project.tools),",
+    ],
+    more: "2 more hunks",
+  },
+  {
+    dir: "packages/engine/src/mcp/",
+    name: "launch.ts",
+    add: 18,
+    del: 6,
+    diff: [
+      "@@ -27,2 +27,4 @@ export async function launch(server: McpServer) {",
+      "   const env = await resolveEnv(server)",
+      '+  if (server.source === "project" && !trusted(server.project))',
+      '+    return refuse(server, "Trust this folder to start its MCP servers.")',
+      "   return spawn(server.command, server.args, { env })",
+    ],
+    more: "2 more hunks",
+  },
+  {
+    dir: "packages/engine/src/permission/",
+    name: "executable.ts",
+    add: 22,
+    del: 4,
+    diff: [
+      "@@ -12,2 +12,4 @@ export function run(config: ExecutableConfig) {",
+      "   if (!config.command) return",
+      "+  // Project config asks first until its folder is trusted.",
+      "+  if (!trusted(config.project)) return ask(config.command)",
+      "   return spawn(config.command)",
+    ],
+    more: "2 more hunks",
+  },
+  {
+    dir: "packages/app/src/components/",
+    name: "workspace-trust-dialog.tsx",
+    add: 47,
+    del: 0,
+    diff: [
+      "@@ -0,0 +1,47 @@",
+      "+export function WorkspaceTrustDialog(props: { project: Project }) {",
+      "+  return (",
+      '+    <Dialog title="Trust this folder?">',
+    ],
+    more: "44 more lines",
+  },
+  {
+    dir: "packages/engine/test/project/",
+    name: "trust.test.ts",
+    add: 96,
+    del: 0,
+    diff: [
+      "@@ -0,0 +1,96 @@",
+      '+test("a changed fingerprint revokes trust", async () => {',
+      "+  const project = await fixture({ trusted: true })",
+      '+  await project.write("vector.json", "{}")',
+      "+  expect(trusted(project)).toBe(false)",
+    ],
+    more: "91 more lines",
+  },
+]
+
+const tests = [
+  "an untrusted project cannot run executable config [2.91ms]",
+  "a changed fingerprint revokes trust [1.12ms]",
+  "a symlinked config resolves before the check [0.84ms]",
+  "project policy cannot widen permissions [0.67ms]",
+  "project MCP servers wait for trust [1.38ms]",
+]
+
+const clock = (seconds: number, pad: boolean) =>
+  `${Math.floor(seconds / 60)}m ${pad ? String(seconds % 60).padStart(2, "0") : seconds % 60}s`
+---
+
+<div class="ss" data-shot-session data-variant={variant} data-side-open={variant === "browser" ? "" : undefined}>
+  <div class="ss-sidebar" data-sidebar hidden={variant === "browser"}>
+    <ShotSidebar branch={branch} collapsible={variant === "browser"} />
+  </div>
+
+  <div class="ss-main">
+    <header class="ss-header">
+      <div class="ss-identity">
+        <span class="ss-branch-icon"><ShotIcon name="branch" size={16} /></span>
+        <span class="ss-title">Vector</span>
+      </div>
+
+      <div class="ss-controls">
+        <div class="ss-picker" data-branch-picker>
+          <button
+            type="button"
+            class="ss-branch"
+            data-branch-toggle
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls={`${id}-branches`}
+            aria-label={`Branch ${branch}. Switch branch`}
+          >
+            <span data-shot-branch-label>{branch}</span>
+            <ShotIcon name="chevron-down" size={12} />
+          </button>
+          <div class="ss-menu" id={`${id}-branches`} data-branch-menu hidden>
+            <label class="ss-menu-search">
+              <ShotIcon name="magnifier" size={14} />
+              <input
+                type="text"
+                placeholder="Switch to or create a branch"
+                aria-label="Branch name"
+                spellcheck="false"
+                autocomplete="off"
+                data-branch-search
+              />
+            </label>
+            <div class="ss-menu-list" role="menu" aria-label="Branches" data-branch-list>
+              {
+                branches.map((name) => (
+                  <button type="button" role="menuitemradio" aria-checked={name === branch} data-branch={name}>
+                    <span>{name}</span>
+                    <ShotIcon name="check" size={12} />
+                  </button>
+                ))
+              }
+            </div>
+            <p class="ss-menu-note" data-branch-none hidden>No branches match.</p>
+            <button type="button" class="ss-menu-create" data-branch-create hidden>
+              <ShotIcon name="plus" size={13} />
+              <span>Create branch</span>
+              <code data-branch-create-name></code>
+            </button>
+          </div>
+        </div>
+
+        <span class="ss-status"><i aria-hidden="true"></i>Testing</span>
+
+        <button
+          type="button"
+          class="ss-tool"
+          data-tool="tasks"
+          data-active={String(variant === "tasks")}
+          aria-expanded={variant === "tasks"}
+          aria-controls={`${id}-tasks`}
+          aria-label="Background tasks, 1 running"
+        >
+          <ShotIcon name="task" size={16} />
+          <span class="ss-tool-label">Tasks</span>
+          <span class="ss-count" data-running-count>1</span>
+        </button>
+        <button
+          type="button"
+          class="ss-tool"
+          data-tool="changes"
+          data-active={String(variant === "browser")}
+          aria-expanded={variant === "browser"}
+          aria-controls={`${id}-side`}
+        >
+          <ShotIcon name="review" size={16} />
+          <span class="ss-tool-label">Changes</span>
+        </button>
+        <button type="button" class="ss-tool" data-tool="terminal" data-active="false" aria-expanded="false" aria-controls={`${id}-terminal`}>
+          <ShotIcon name="terminal" size={16} />
+          <span class="ss-tool-label">Terminal</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="ss-body">
+      <div class="ss-conv">
+        <div class="ss-scroll" data-transcript tabindex="0" role="region" aria-label="Transcript">
+          <div class="ss-column">
+            <div class="ss-earlier">
+              <p class="ss-prose">
+                The three boundaries are staged: fingerprint-bound trust for project executable configuration, a project
+                policy that can only narrow permissions, and a trust check before a project's MCP servers start. Focused
+                tests pass on the staged tree.
+              </p>
+              <p class="ss-prose">
+                Next I will integrate the latest <code class="is-ref">origin/main</code>, re-run the checks and ask a judge
+                for a verdict before anything is committed.
+              </p>
+            </div>
+            <p class="ss-divider"><span>Interrupted</span></p>
+            <p class="ss-meta">
+              <span class="ss-cost">
+                <span class="ss-sr">Session cost</span><b>$0.00</b><i aria-hidden="true">·</i><span>58.8M</span>
+                <span class="ss-sr">tokens</span>
+              </span>
+              <span class="ss-meta-icon"><ShotIcon name="ring" size={16} /></span>
+              <span class="ss-meta-icon"><ShotIcon name="dots" size={16} /></span>
+            </p>
+            <p class="ss-user">continue</p>
+            <p class="ss-reason">Defining success criteria and original request</p>
+            <p class="ss-reason">Specifying detailed success criteria for security patch</p>
+            <p class="ss-prose">
+              Success means: the staged security controls remain intact with no Critical/High bypasses; the patch
+              integrates cleanly with the latest <code class="is-ref">origin/main</code>; focused tests, package
+              typechecks, generated-client checks, the app build, and a browser smoke check pass; an independent judge
+              returns PASS; and the resulting conventional commit is pushed with remote <code>main</code> pointing to
+              that exact commit. Unrelated untracked WIP must remain untouched.
+            </p>
+            <button
+              type="button"
+              class="ss-task"
+              data-task-card
+              aria-controls={`${id}-tasks`}
+              aria-label="Final security diff audit, Specialist · Security, 1 agent. Show in Background tasks"
+            >
+              <span class="ss-task-title">Final security diff audit</span>
+              <ShotIcon name="chevron-right" size={16} class="ss-task-chevron" />
+              <span class="ss-task-meta">
+                <span>Specialist · Security</span>
+                <span class="ss-dim">1 agent</span>
+                <span class="ss-task-stopped">Stopped</span>
+                <time class="ss-dim" data-tick="pad" data-seconds={Astro.props.task}>{clock(Astro.props.task, true)}</time>
+              </span>
+              <span class="ss-task-dot"></span>
+            </button>
+          </div>
+        </div>
+
+        <p class="ss-turn">
+          <time data-tick="plain" data-seconds={Astro.props.turn}>{clock(Astro.props.turn, false)}</time> · 33K
+          tokens<span data-running-note> · 1 running task</span>
+        </p>
+
+        <div class="ss-dock">
+          <section class="ss-todos" data-todos>
+            <button type="button" class="ss-todos-head" data-todos-toggle aria-expanded="true" aria-controls={`${id}-todos`}>
+              <span>0 of 5 todos completed</span>
+              <ShotIcon name="chevron-down" size={16} class="ss-todos-chevron" />
+            </button>
+            <ul class="ss-todos-list" id={`${id}-todos`}>
+              {
+                todos.map((todo, index) => (
+                  <li data-state={index === 0 ? "in_progress" : "pending"}>
+                    <span class="ss-check" aria-hidden="true" />
+                    <span class="ss-todo-text">{todo}</span>
+                    <span class="ss-sr">{index === 0 ? ", in progress" : ", not started"}</span>
+                  </li>
+                ))
+              }
+            </ul>
+          </section>
+          <ShotComposer />
+        </div>
+      </div>
+
+      <aside class="ss-side" id={`${id}-side`} data-side data-kind={variant === "browser" ? "browser" : "changes"} hidden={variant !== "browser"}>
+        <div class="ss-side-tabs">
+          <div class="ss-side-group">
+            <span class="ss-side-tab">
+              <ShotIcon name={variant === "browser" ? "browser" : "review"} size={14} />
+              <span>{variant === "browser" ? "Browser" : "Changes"}</span>
+              {variant === "browser" ? null : <span class="ss-count">{changes.length}</span>}
+              <button type="button" class="ss-side-x" data-side-close aria-label={variant === "browser" ? "Close the Browser tab" : "Close the Changes tab"}>
+                <ShotIcon name="close-small" size={14} />
+              </button>
+            </span>
+            <button type="button" class="ss-side-close" data-side-close aria-label="Close side panel">
+              <ShotIcon name="close" size={16} />
+            </button>
+          </div>
+        </div>
+        {
+          variant === "browser" ? (
+            <ShotBrowserPanel />
+          ) : (
+            <div class="ss-changes" data-reveal-scroll>
+              <p class="ss-changes-sum">
+                <span>{changes.length} files staged</span>
+                <span class="ss-add">+{changes.reduce((sum, file) => sum + file.add, 0)}</span>
+                <span class="ss-del">−{changes.reduce((sum, file) => sum + file.del, 0)}</span>
+              </p>
+              <ul class="ss-files">
+                {changes.map((file, index) => (
+                  <li>
+                    <button type="button" class="ss-file" data-file-toggle aria-expanded="false" aria-controls={`${id}-diff-${index}`}>
+                      <ShotIcon name="chevron-right" size={14} class="ss-file-chevron" />
+                      <span class="ss-file-name">
+                        {file.name}
+                        <span>{file.dir}</span>
+                      </span>
+                      <span class="ss-add">+{file.add}</span>
+                      <span class="ss-del">−{file.del}</span>
+                    </button>
+                    <div class="ss-diff" id={`${id}-diff-${index}`} hidden>
+                      {file.diff.map((line) => (
+                        <code class={line.startsWith("@@") ? "is-hunk" : line.startsWith("+") ? "is-add" : line.startsWith("-") ? "is-del" : undefined}>{line}</code>
+                      ))}
+                      <code class="is-more">⋯ {file.more}</code>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <p class="ss-changes-note" data-changes-note>The patch the specialist is auditing. Its own review is read-only.</p>
+            </div>
+          )
+        }
+      </aside>
+
+      <ShotTasksPanel id={`${id}-tasks`} open={variant === "tasks"} seconds={Astro.props.task} time={clock(Astro.props.task, true)} />
+    </div>
+
+    <section class="ss-term" id={`${id}-terminal`} data-terminal aria-label="Terminal" hidden>
+      <div class="ss-term-bar">
+        <span class="ss-term-tab"><ShotIcon name="terminal" size={13} />zsh</span>
+        <button type="button" class="ss-term-close" data-terminal-close aria-label="Close terminal">
+          <ShotIcon name="close" size={14} />
+        </button>
+      </div>
+      <div class="ss-term-body" tabindex="0" role="region" aria-label="Terminal output">
+        <div>
+          <p><span class="ss-prompt">~/Vectordev.ai (<span data-shot-branch-label>{branch}</span>) $</span> bun test packages/engine/test/project/trust.test.ts</p>
+          <p class="ss-faint">bun test v1.3.14</p>
+          <p class="ss-gap">packages/engine/test/project/trust.test.ts:</p>
+          {tests.map((test) => <p><span class="ss-pass">✓</span> trust &gt; {test}</p>)}
+          <p class="ss-gap ss-indent ss-pass">5 pass</p>
+          <p class="ss-indent">0 fail</p>
+          <p class="ss-indent">14 expect() calls</p>
+          <p>Ran 5 tests across 1 file. <span class="ss-faint">[143.00ms]</span></p>
+          <p><span class="ss-prompt">~/Vectordev.ai (<span data-shot-branch-label>{branch}</span>) $</span> <span class="ss-caret"></span></p>
+        </div>
+      </div>
+    </section>
+  </div>
+  <p class="ss-sr" aria-live="polite" data-session-live></p>
+</div>
+
+<script>
+  const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+
+  // The two clocks the app shows: the turn's ("9m 9s") and a task's ("8m 53s",
+  // seconds padded once there are minutes, from formatDuration).
+  const format = (seconds: number, pad: boolean) => {
+    if (seconds < 60) return `${seconds}s`
+    return `${Math.floor(seconds / 60)}m ${pad ? String(seconds % 60).padStart(2, "0") : seconds % 60}s`
+  }
+
+  const press = (button: HTMLElement | null, on: boolean) => {
+    if (!button) return
+    button.dataset.active = String(on)
+    button.setAttribute("aria-expanded", String(on))
+  }
+
+  // Scrolls a list just far enough to show what a disclosure opened, without
+  // moving the page around the window.
+  const reveal = (target: HTMLElement | null) => {
+    const list = target?.closest<HTMLElement>("[data-reveal-scroll]")
+    if (!target || !list) return
+    const top = Math.min(target.offsetTop - 8, target.offsetTop + target.offsetHeight - list.clientHeight + 12)
+    if (top > list.scrollTop) list.scrollTo({ top, behavior: reducedMotion() ? "auto" : "smooth" })
+  }
+
+  const boot = (root: HTMLElement) => {
+    // Kept untouched, so the window's Reset can put it back the way it was.
+    const template = root.cloneNode(true)
+    const lifetime = new AbortController()
+    const signal = lifetime.signal
+    const panel = root.querySelector<HTMLElement>("[data-tasks-panel]")
+    const body = root.querySelector<HTMLElement>(".ss-body")
+    const side = root.querySelector<HTMLElement>("[data-side]")
+    const terminal = root.querySelector<HTMLElement>("[data-terminal]")
+    const live = root.querySelector<HTMLElement>("[data-session-live]")
+    const tasksTool = root.querySelector<HTMLElement>('[data-tool="tasks"]')
+    const changesTool = root.querySelector<HTMLElement>('[data-tool="changes"]')
+    const terminalTool = root.querySelector<HTMLElement>('[data-tool="terminal"]')
+    const picker = root.querySelector<HTMLElement>("[data-branch-picker]")
+    const pickerToggle = root.querySelector<HTMLElement>("[data-branch-toggle]")
+    const menu = root.querySelector<HTMLElement>("[data-branch-menu]")
+    const search = root.querySelector<HTMLInputElement>("[data-branch-search]")
+    const list = root.querySelector<HTMLElement>("[data-branch-list]")
+    const none = root.querySelector<HTMLElement>("[data-branch-none]")
+    const create = root.querySelector<HTMLElement>("[data-branch-create]")
+    const createName = root.querySelector<HTMLElement>("[data-branch-create-name]")
+    if (!panel || !body || !side || !terminal || !live || !tasksTool || !changesTool || !terminalTool) return
+    if (!picker || !pickerToggle || !menu || !search || !list || !none || !create || !createName) return
+    const conceal = (selector: string, hidden: boolean) =>
+      root.querySelectorAll<HTMLElement>(selector).forEach((node) => (node.hidden = hidden))
+
+    root.addEventListener(
+      "shot:reset",
+      () => {
+        lifetime.abort()
+        const fresh = template.cloneNode(true)
+        if (!(fresh instanceof HTMLElement)) return
+        root.replaceWith(fresh)
+        boot(fresh)
+        fresh.dispatchEvent(new Event("shot:mounted", { bubbles: true }))
+      },
+      { signal },
+    )
+
+    // ---- panels ----
+    // Docked, Background tasks takes the side panel's column, and in a
+    // narrow session either one covers the conversation, so there the two
+    // replace each other rather than stack. Popped out in a wide session, the
+    // panel floats clear of the side panel and both stay.
+    const shareColumn = () => !panel.hasAttribute("data-floating") || body.clientWidth < 760
+    const openPanel = (open: boolean) => {
+      const appear = open && panel.hidden
+      panel.hidden = !open
+      press(tasksTool, open)
+      if (appear && !reducedMotion()) panel.toggleAttribute("data-animate", true)
+      if (!open || side.hidden || !shareColumn()) return
+      showSide(false)
+      live.textContent = "Background tasks opened in place of the side panel"
+    }
+    panel.addEventListener("animationend", (event) => {
+      if (event.target === panel) panel.removeAttribute("data-animate")
+    })
+    const showSide = (open: boolean) => {
+      side.hidden = !open
+      press(changesTool, open)
+      root.toggleAttribute("data-side-open", open)
+      if (!open || panel.hidden || !shareColumn()) return
+      openPanel(false)
+      live.textContent = "The side panel opened in place of Background tasks"
+    }
+
+    tasksTool.addEventListener("click", () => openPanel(panel.hidden))
+    changesTool.addEventListener("click", () => showSide(side.hidden))
+    terminalTool.addEventListener("click", () => {
+      terminal.hidden = !terminal.hidden
+      press(terminalTool, !terminal.hidden)
+    })
+    root.querySelectorAll("[data-side-close]").forEach((button) =>
+      button.addEventListener("click", () => {
+        showSide(false)
+        changesTool.focus({ preventScroll: true })
+      }),
+    )
+    root.querySelector("[data-terminal-close]")?.addEventListener("click", () => {
+      terminal.hidden = true
+      press(terminalTool, false)
+      terminalTool.focus({ preventScroll: true })
+    })
+    // The browser toolbar's "Toggle Vector sidebar" shows the sidebar the
+    // browser shot starts without, and the sidebar's own hide button puts it
+    // away again. In a narrow window it is a drawer over the session, which a
+    // press outside it or Escape also closes.
+    const sidebar = root.querySelector<HTMLElement>("[data-sidebar]")
+    const sidebarToggle = root.querySelector<HTMLElement>("[data-sidebar-toggle]")
+    const showSidebar = (open: boolean) => {
+      if (!sidebar) return
+      sidebar.hidden = !open
+      sidebarToggle?.setAttribute("aria-pressed", String(open))
+    }
+    const drawer = () => !!sidebar && !sidebar.hidden && getComputedStyle(sidebar).position === "absolute"
+    sidebarToggle?.addEventListener("click", () => showSidebar(!!sidebar?.hidden))
+    root.querySelector("[data-sidebar-hide]")?.addEventListener("click", () => {
+      showSidebar(false)
+      sidebarToggle?.focus({ preventScroll: true })
+    })
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        const target = event.target as Node
+        if (drawer() && !sidebar?.contains(target) && !sidebarToggle?.contains(target)) showSidebar(false)
+      },
+      { signal },
+    )
+    // In the browser shot the sidebar's Browser row brings the browser back
+    // rather than going to this window.
+    root.querySelectorAll<HTMLElement>('[data-sidebar-link="browser"]').forEach((link) =>
+      link.addEventListener("click", (event) => {
+        if (root.dataset.variant !== "browser") return
+        event.preventDefault()
+        showSide(true)
+        root.querySelector<HTMLElement>("[data-browser-url]")?.focus({ preventScroll: true })
+      }),
+    )
+
+    // The chip in the transcript shows its card: open the panel and bring the
+    // running card to the top of it. Once stopped, its card is under
+    // Finished, which opens to show it, even after Clear hid it.
+    const chip = root.querySelector<HTMLElement>("[data-task-card]")
+    chip?.addEventListener("click", () => {
+      openPanel(true)
+      if (chip.dataset.status !== "stopped") {
+        panel.querySelector(".bgt-list")?.scrollTo({ top: 0 })
+        panel.querySelector<HTMLElement>("[data-tasks-running] article")?.focus({ preventScroll: true })
+        return
+      }
+      const stopped = panel.querySelector<HTMLElement>("[data-tasks-stopped]")
+      if (!stopped) return
+      stopped.hidden = false
+      recount()
+      if (finishedToggle) disclose(finishedToggle, true)
+      const card = stopped.querySelector<HTMLElement>("article")
+      reveal(card)
+      card?.focus({ preventScroll: true })
+    })
+
+    // ---- the todo dock ----
+    if (root.dataset.variant === "browser") root.querySelector(".ss-todos-list")?.scrollTo({ top: 3 })
+    const todosToggle = root.querySelector<HTMLElement>("[data-todos-toggle]")
+    todosToggle?.addEventListener("click", () => {
+      const open = todosToggle.getAttribute("aria-expanded") !== "true"
+      todosToggle.setAttribute("aria-expanded", String(open))
+      root.querySelector<HTMLElement>("[data-todos]")?.toggleAttribute("data-collapsed", !open)
+    })
+
+    // ---- the branch picker ----
+    const items = () => Array.from(list.querySelectorAll<HTMLElement>("[data-branch]"))
+    const typed = () => search.value.trim().replace(/\s+/g, "-")
+    const setOpen = (open: boolean) => {
+      menu.hidden = !open
+      pickerToggle.setAttribute("aria-expanded", String(open))
+      if (!open) return
+      search.value = ""
+      filter()
+      search.focus({ preventScroll: true })
+    }
+    const filter = () => {
+      const needle = typed().toLowerCase()
+      items().forEach((item) => (item.hidden = !(item.dataset.branch ?? "").toLowerCase().includes(needle)))
+      const exact = items().some((item) => (item.dataset.branch ?? "").toLowerCase() === needle)
+      // Git refuses names with spaces, "..", a leading dash and a few marks.
+      const valid = /^(?!-)(?!.*\.\.)[\w./-]+$/.test(typed()) && !typed().endsWith("/")
+      create.hidden = !needle || exact || !valid
+      createName.textContent = typed()
+      none.hidden = items().some((item) => !item.hidden) || !create.hidden
+    }
+    const choose = (name: string) => {
+      root.querySelectorAll("[data-shot-branch-label]").forEach((label) => (label.textContent = name))
+      items().forEach((item) => item.setAttribute("aria-checked", String(item.dataset.branch === name)))
+      pickerToggle.setAttribute("aria-label", `Branch ${name}. Switch branch`)
+      live.textContent = `Switched to ${name}`
+      setOpen(false)
+      pickerToggle.focus({ preventScroll: true })
+    }
+    const bind = (item: HTMLElement) => item.addEventListener("click", () => choose(item.dataset.branch ?? "main"))
+    items().forEach(bind)
+
+    pickerToggle.addEventListener("click", () => setOpen(menu.hidden))
+    search.addEventListener("input", filter)
+    search.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault()
+        items()
+          .find((item) => !item.hidden)
+          ?.focus()
+        return
+      }
+      if (event.key !== "Enter") return
+      event.preventDefault()
+      if (!create.hidden) {
+        create.click()
+        return
+      }
+      const first = items().find((item) => !item.hidden)
+      if (first) choose(first.dataset.branch ?? "main")
+    })
+    list.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+      const visible = items().filter((item) => !item.hidden)
+      const at = visible.indexOf(document.activeElement as HTMLElement)
+      event.preventDefault()
+      if (event.key === "ArrowUp" && at <= 0) {
+        search.focus()
+        return
+      }
+      visible[Math.min(visible.length - 1, at + (event.key === "ArrowDown" ? 1 : -1))]?.focus()
+    })
+    // A new branch is created from the current commit and checked out, as
+    // the app's "Create branch" row does.
+    create.addEventListener("click", () => {
+      const name = typed()
+      const template = items()[0]
+      if (!template) return
+      const item = template.cloneNode(true) as HTMLElement
+      item.dataset.branch = name
+      item.hidden = false
+      const label = item.querySelector("span")
+      if (label) label.textContent = name
+      list.append(item)
+      bind(item)
+      choose(name)
+    })
+    // Pressing inside the menu keeps focus in the search field, so the menu's
+    // own rows never read as focus leaving it. Focus that does leave closes
+    // it, as does a press anywhere else. Pointer, not click: the page's other
+    // demos drive themselves with scripted clicks, which are not the reader.
+    menu.addEventListener("mousedown", (event) => {
+      if (event.target !== search) event.preventDefault()
+    })
+    picker.addEventListener("focusout", (event) => {
+      if (!menu.hidden && !picker.contains(event.relatedTarget as Node | null)) setOpen(false)
+    })
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (!menu.hidden && !picker.contains(event.target as Node)) setOpen(false)
+      },
+      { signal },
+    )
+
+    // Escape closes what is open, innermost first, wherever focus is.
+    root.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      if (!menu.hidden) {
+        event.preventDefault()
+        setOpen(false)
+        pickerToggle.focus({ preventScroll: true })
+        return
+      }
+      if (drawer()) {
+        event.preventDefault()
+        showSidebar(false)
+        sidebarToggle?.focus({ preventScroll: true })
+        return
+      }
+      if (panel.hidden) return
+      event.preventDefault()
+      openPanel(false)
+      tasksTool.focus({ preventScroll: true })
+    })
+
+    // ---- the Background tasks panel ----
+    const floatButton = panel.querySelector<HTMLElement>("[data-tasks-float]")
+    const expandButton = panel.querySelector<HTMLElement>("[data-tasks-expand]")
+    floatButton?.addEventListener("click", () => {
+      const floating = !panel.hasAttribute("data-floating")
+      panel.toggleAttribute("data-floating", floating)
+      floatButton.setAttribute("aria-pressed", String(floating))
+      floatButton.setAttribute("aria-label", floating ? "Dock background tasks" : "Pop out background tasks")
+      floatButton.title = floating ? "Dock" : "Pop out"
+      if (floating || side.hidden) return
+      showSide(false)
+      live.textContent = "Background tasks docked in place of the side panel"
+    })
+    expandButton?.addEventListener("click", () => {
+      const expanded = !panel.hasAttribute("data-expanded")
+      panel.toggleAttribute("data-expanded", expanded)
+      expandButton.setAttribute("aria-pressed", String(expanded))
+      expandButton.setAttribute("aria-label", expanded ? "Collapse panel" : "Expand panel")
+      expandButton.title = expanded ? "Collapse" : "Expand"
+    })
+    panel.querySelector("[data-tasks-close]")?.addEventListener("click", () => {
+      openPanel(false)
+      tasksTool.focus({ preventScroll: true })
+    })
+
+    // Every disclosure (Finished, a phase, a finished card, a changed file)
+    // shows or hides the element its aria-controls names.
+    const disclose = (toggle: HTMLElement, open: boolean) => {
+      toggle.setAttribute("aria-expanded", String(open))
+      const target = root.querySelector<HTMLElement>(`#${toggle.getAttribute("aria-controls")}`)
+      if (target) target.hidden = !open
+    }
+    // Opened by hand, it also brings what it opened into view in its list.
+    root
+      .querySelectorAll<HTMLElement>(
+        "[data-tasks-finished-toggle], [data-tasks-phase], [data-tasks-card], [data-file-toggle]",
+      )
+      .forEach((toggle) =>
+        toggle.addEventListener("click", () => {
+          const open = toggle.getAttribute("aria-expanded") !== "true"
+          disclose(toggle, open)
+          if (open) reveal(toggle.closest<HTMLElement>("[data-tasks-finished-section], article, li"))
+        }),
+      )
+    const finishedToggle = panel.querySelector<HTMLElement>("[data-tasks-finished-toggle]")
+    const finishedCount = panel.querySelector<HTMLElement>("[data-tasks-finished-count]")
+    // Finished counts the cards it lists and goes when there are none.
+    const recount = () => {
+      const shown = Array.from(panel.querySelectorAll<HTMLElement>("[data-tasks-finished] > li")).filter(
+        (item) => !item.hidden,
+      ).length
+      if (finishedCount) finishedCount.textContent = String(shown)
+      conceal("[data-tasks-finished-section]", shown === 0)
+    }
+    // Clearing hides every finished card, as the app's trash does; a card
+    // that finishes later, or one its chip asks for, starts the list again.
+    panel.querySelector("[data-tasks-clear]")?.addEventListener("click", () => {
+      panel.querySelectorAll<HTMLElement>("[data-tasks-finished] > li").forEach((item) => (item.hidden = true))
+      recount()
+      live.textContent = "Cleared finished tasks"
+      panel.querySelector<HTMLElement>(".bgt-title")?.focus({ preventScroll: true })
+    })
+
+    // Stopping the specialist ends its run: the card moves to Finished, its
+    // clocks stop and the header's running count goes. The turn itself, and
+    // its clock, carry on: the main agent is still working.
+    panel.querySelector("[data-tasks-stop]")?.addEventListener("click", () => {
+      const time = panel.querySelector("[data-tasks-running] time")?.textContent ?? ""
+      root.querySelectorAll('[data-tick="pad"]').forEach((node) => node.removeAttribute("data-tick"))
+      root.querySelectorAll("[data-tasks-stopped-time]").forEach((node) => (node.textContent = time))
+      conceal("[data-tasks-running], [data-running-count], [data-running-note]", true)
+      conceal("[data-tasks-idle], [data-tasks-stopped]", false)
+      recount()
+      if (finishedToggle) disclose(finishedToggle, true)
+      tasksTool.setAttribute("aria-label", "Background tasks")
+      const note = root.querySelector("[data-changes-note]")
+      if (note) note.textContent = "The patch the specialist was auditing when you stopped it."
+      chip?.setAttribute("data-status", "stopped")
+      chip?.setAttribute(
+        "aria-label",
+        "Final security diff audit, Specialist · Security, 1 agent, stopped. Show in Background tasks",
+      )
+      live.textContent = "Final security diff audit: stopped"
+      panel.querySelector<HTMLElement>(".bgt-title")?.focus({ preventScroll: true })
+    })
+
+    // The clocks run only while the window is on screen.
+    const visibility = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => root.toggleAttribute("data-visible", entry.isIntersecting))
+    })
+    visibility.observe(root)
+    signal.addEventListener("abort", () => visibility.disconnect())
+  }
+
+  document.querySelectorAll<HTMLElement>("[data-shot-session]").forEach(boot)
+
+  if (!reducedMotion()) {
+    setInterval(() => {
+      if (document.hidden) return
+      document.querySelectorAll<HTMLElement>("[data-shot-session][data-visible] [data-tick]").forEach((node) => {
+        const seconds = Number(node.dataset.seconds) + 1
+        node.dataset.seconds = String(seconds)
+        node.textContent = format(seconds, node.dataset.tick === "pad")
+      })
+    }, 1000)
+  }
+</script>
+
+<style>
+  .ss {
+    container: ss / inline-size;
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--as-canvas);
+    color: var(--as-text-1);
+    font-family: var(--as-font);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :where(.ss) p {
+    margin: 0;
+  }
+
+  .ss-sidebar[hidden] {
+    display: none;
+  }
+
+  /* A narrow window drops the sidebar; the browser shot, whose toolbar can
+     bring it back, shows it as a drawer over the session. */
+  @container ss (max-width: 859.98px) {
+    .ss:not([data-variant="browser"]) .ss-sidebar {
+      display: none;
+    }
+
+    .ss-sidebar {
+      position: absolute;
+      inset: 0 auto 0 0;
+      z-index: 8;
+      box-shadow: 24px 0 70px rgba(0, 0, 0, 0.55);
+    }
+  }
+
+  .ss-main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  :where(.ss) button {
+    font: inherit;
+  }
+
+  .ss :is(button, input):focus-visible {
+    outline: 2px solid #9d84ee;
+    outline-offset: 2px;
+  }
+
+  /* ---- header: [data-vector-session-header] ---- */
+
+  .ss-header {
+    container: ss-header / inline-size;
+    position: relative;
+    z-index: 6;
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    height: 47px;
+    padding: 0 9px 0 18px;
+    background: var(--as-header);
+  }
+
+  .ss-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .ss-branch-icon {
+    display: grid;
+    width: 17px;
+    place-items: center;
+    color: var(--as-text-3);
+  }
+
+  .ss-title {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .ss-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .ss-picker {
+    position: relative;
+  }
+
+  .ss-branch,
+  .ss-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 7px 0 8px;
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.025);
+    color: var(--as-text-2);
+    font-size: 11.5px;
+    line-height: 1;
+  }
+
+  .ss-branch {
+    max-width: 220px;
+    font-family: var(--as-mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .ss-branch > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ss-branch:hover,
+  .ss-branch[aria-expanded="true"] {
+    border-color: rgba(226, 213, 237, 0.16);
+    background: rgba(235, 231, 238, 0.06);
+    color: var(--as-text);
+  }
+
+  .ss-branch :global(svg) {
+    flex: none;
+    opacity: 0.7;
+  }
+
+  .ss-status {
+    margin-left: 1px;
+    color: var(--as-amber);
+    font-size: 12px;
+  }
+
+  .ss-status i {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--as-amber);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--as-amber) 48%, transparent);
+    animation: ss-working 1.15s ease-in-out infinite;
+  }
+
+  @keyframes ss-working {
+    50% {
+      opacity: 0.38;
+      transform: scale(0.78);
+    }
+  }
+
+  /* [data-vector-session-tool] */
+  .ss-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--as-text-2);
+    font-size: 12px;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease;
+  }
+
+  /* The tools' glyphs sit a step dimmer than their names until used. */
+  .ss-tool > :global(svg) {
+    color: var(--as-text-3);
+    transition: color 120ms ease;
+  }
+
+  .ss-tool:hover {
+    border-color: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--as-text);
+  }
+
+  .ss-tool:hover > :global(svg),
+  .ss-tool[data-active="true"] > :global(svg) {
+    color: inherit;
+  }
+
+  .ss-tool[data-active="true"] {
+    border-color: rgba(182, 159, 247, 0.28);
+    background: rgba(182, 159, 247, 0.11);
+    color: var(--as-bright);
+  }
+
+  .ss-count {
+    min-width: 13px;
+    margin-left: 2px;
+    padding: 2px 3px;
+    border-radius: 4px;
+    background: rgba(182, 159, 247, 0.14);
+    color: var(--as-bright);
+    font: 600 10px/1 var(--as-mono);
+    text-align: center;
+  }
+
+  .ss-count[hidden] {
+    display: none;
+  }
+
+  /* A narrow header keeps the tools' icons and counts; the names stay for
+     screen readers. */
+  @container ss-header (max-width: 639.98px) {
+    .ss-tool {
+      padding: 0 6px;
+    }
+
+    .ss-tool-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .ss-branch {
+      max-width: 132px;
+    }
+
+    .ss-menu {
+      right: auto;
+      left: 0;
+    }
+  }
+
+  /* ---- branch picker popover ---- */
+
+  .ss-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 10;
+    width: 300px;
+    overflow: hidden;
+    border: 1px solid rgba(226, 213, 237, 0.16);
+    border-radius: 12px;
+    background: #24212a;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  }
+
+  .ss-menu[hidden] {
+    display: none;
+  }
+
+  .ss-menu-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 44px;
+    margin: 0;
+    padding: 0 14px;
+    border-bottom: 1px solid rgba(226, 213, 237, 0.09);
+    color: var(--as-text-3);
+  }
+
+  .ss-menu-search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: var(--as-text-1);
+    font: inherit;
+    font-size: 13.5px;
+    outline: none;
+  }
+
+  .ss-menu-search input:focus-visible {
+    outline: none;
+  }
+
+  /* Under 16px, Safari on a phone zooms the page into a focused field. */
+  @media (pointer: coarse) {
+    .ss-menu-search input {
+      font-size: 16px;
+    }
+  }
+
+  .ss-menu-search input::placeholder {
+    color: var(--as-text-3);
+  }
+
+  .ss-menu-list {
+    display: grid;
+    padding: 4px;
+  }
+
+  .ss-menu-list button,
+  .ss-menu-create {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--as-text-1);
+    font-family: var(--as-mono);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ss-menu-list button[hidden] {
+    display: none;
+  }
+
+  .ss-menu-list button > span {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ss-menu-list button:hover,
+  .ss-menu-list button:focus-visible,
+  .ss-menu-create:hover {
+    background: rgba(235, 231, 238, 0.06);
+    outline: none;
+  }
+
+  .ss-menu-list button :global(svg) {
+    color: var(--as-bright);
+    opacity: 0;
+  }
+
+  .ss-menu-list button[aria-checked="true"] :global(svg) {
+    opacity: 1;
+  }
+
+  .ss-menu-note {
+    padding: 8px 14px 10px;
+    color: var(--as-text-3);
+    font-size: 11.5px;
+  }
+
+  .ss-menu-note[hidden],
+  .ss-menu-create[hidden] {
+    display: none;
+  }
+
+  .ss-menu-create {
+    width: calc(100% - 8px);
+    margin: 0 4px 4px;
+    font-family: var(--as-font);
+  }
+
+  .ss-menu-create code {
+    overflow: hidden;
+    color: var(--as-bright);
+    font-family: var(--as-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ---- body ---- */
+
+  .ss-body {
+    container: ss-body / inline-size;
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .ss-conv {
+    container: ss-conv / inline-size;
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    padding: 0 0 30px;
+    background: var(--as-canvas);
+  }
+
+  /* The session's cost and context, at the head of the transcript: on its own
+     row above the latest message, or, where the conversation is wide enough
+     to keep it clear of the reading column, in the pane's top corner. */
+  .ss-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 9px;
+    margin: 0 0 7px;
+    padding-right: 6px;
+    color: var(--as-text-2);
+  }
+
+  @container ss-conv (min-width: 1045px) {
+    .ss-meta {
+      position: absolute;
+      top: 9px;
+      right: 14px;
+      margin: 0;
+      padding: 4px 6px 4px 0;
+    }
+
+    .ss-divider {
+      margin-bottom: 34px;
+    }
+  }
+
+  /* In its own row the cost would show in the gap above a popped-out
+     Background tasks panel; the panel covers it instead, as in the app. */
+  @container ss-conv (max-width: 1044.98px) {
+    .ss:has(.bgt[data-floating]:not([hidden])) .ss-meta {
+      visibility: hidden;
+    }
+  }
+
+  .ss-cost {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
+    color: var(--as-text-1);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ss-cost b {
+    color: #a28df0;
+    font-weight: 400;
+  }
+
+  .ss-cost i {
+    color: var(--as-text-2);
+    font-style: normal;
+  }
+
+  .ss-meta-icon {
+    display: grid;
+    width: 24px;
+    place-items: center;
+    color: #9a96a0;
+  }
+
+  /* The transcript is pinned to its latest turn, like a chat scrolled to the
+     end: reversed, a scroller starts at its end and stays there as panels
+     take room, and the older lines above can still be scrolled back to. */
+  .ss-scroll {
+    display: flex;
+    flex: 1;
+    flex-direction: column-reverse;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+
+  .ss-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ss-scroll:focus-visible {
+    outline: 2px solid #9d84ee;
+    outline-offset: -2px;
+  }
+
+  .ss-column {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    width: min(636px, calc(100% - 40px));
+    margin: 0 auto;
+    padding-bottom: 19px;
+  }
+
+  /* The end of the turn before this one, above the fold until the dock or
+     the terminal gives the transcript more room. */
+  .ss-earlier {
+    display: grid;
+    gap: 14px;
+    padding-bottom: 30px;
+  }
+
+  .ss-earlier .ss-prose {
+    margin-top: 0;
+  }
+
+  .ss-divider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: var(--as-text-3);
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .ss-divider::before,
+  .ss-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.13);
+  }
+
+  .ss-user {
+    align-self: flex-end;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.035);
+    border-radius: 5px;
+    background: #2a2631;
+    color: var(--as-text-1);
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .ss-reason {
+    margin-top: 44px;
+    color: #b3b0b8;
+    font-size: 13.2px;
+    line-height: 18px;
+  }
+
+  .ss-reason + .ss-reason {
+    margin-top: 27px;
+  }
+
+  .ss-prose {
+    margin-top: 34px;
+    color: #e6e4ea;
+    font-size: 14px;
+    line-height: 21.6px;
+  }
+
+  .ss-prose code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: #37343a;
+    color: #eceaf0;
+    font-family: var(--as-mono);
+    font-size: 13.5px;
+  }
+
+  .ss-prose code.is-ref {
+    background: #232a43;
+    color: #a9b7f2;
+  }
+
+  /* The subagent task chip (.vector-task-chip) in the transcript. */
+  .ss-task {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 16px;
+    row-gap: 3px;
+    width: min(601px, 100%);
+    margin-top: 13px;
+    padding: 11px 14px 13px 15px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--as-card);
+    color: var(--as-text-1);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .ss-task:hover {
+    background: #29252f;
+  }
+
+  .ss-task-title {
+    font-size: 14px;
+    line-height: 21px;
+  }
+
+  .ss-task :global(.ss-task-chevron) {
+    align-self: center;
+    color: #a39dab;
+  }
+
+  .ss-task-meta {
+    display: flex;
+    grid-column: 1 / -1;
+    gap: 10px;
+    color: #c9c3cd;
+    font-size: 13px;
+    line-height: 19px;
+  }
+
+  .ss-dim {
+    color: #a39dab;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ss-task-stopped {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    color: #a39dab;
+  }
+
+  .ss-task-stopped::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    box-shadow: inset 0 0 0 1px #c9c3cd;
+  }
+
+  .ss-task[data-status="stopped"] .ss-task-stopped {
+    display: inline-flex;
+  }
+
+  .ss-task-dot {
+    width: 8px;
+    height: 8px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: #7f68c9;
+    animation: ss-breathe 1.6s ease-in-out infinite;
+  }
+
+  .ss-task[data-status="stopped"] .ss-task-dot {
+    border: 1px solid #c9c3cd;
+    background: linear-gradient(#c9c3cd 0 0) center / 4px 1px no-repeat;
+    animation: none;
+  }
+
+  @keyframes ss-breathe {
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  /* The status line, the todos and the composer keep a gutter from the
+     pane's edges however narrow the conversation gets. */
+  .ss-turn {
+    width: min(859px, calc(100% - 28px));
+    margin: 0 auto;
+    padding: 0 3px 6px;
+    color: #8d8a92;
+    font-size: 13.7px;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ss-turn [hidden] {
+    display: none;
+  }
+
+  /* ---- the todo dock and the composer ---- */
+
+  .ss-dock {
+    width: min(859px, calc(100% - 28px));
+    margin: 0 auto;
+  }
+
+  .ss-todos {
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    background: #111;
+  }
+
+  .ss-todos-head {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    height: 35px;
+    padding: 1px 10px 0 11px;
+    border: 0;
+    border-radius: 12px 12px 0 0;
+    background: transparent;
+    color: var(--as-text-1);
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .ss-todos-head :global(.ss-todos-chevron) {
+    color: #8b8a8e;
+    transition: transform 200ms cubic-bezier(0.34, 1, 0.64, 1);
+  }
+
+  .ss-todos[data-collapsed] :global(.ss-todos-chevron) {
+    transform: rotate(180deg);
+  }
+
+  .ss-todos-list {
+    display: grid;
+    margin: 0;
+    padding: 0 11px;
+    list-style: none;
+  }
+
+  .ss-todos[data-collapsed] .ss-todos-list {
+    display: none;
+  }
+
+  .ss-todos-list li {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    height: 22.4px;
+    color: #e8e8ea;
+    font-size: 14px;
+  }
+
+  .ss-todo-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ss-todos-list li[data-state="pending"] {
+    opacity: 0.94;
+  }
+
+  .ss-check {
+    position: relative;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 3px;
+    background: #141414;
+  }
+
+  li[data-state="in_progress"] .ss-check {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: #3a3a3c;
+  }
+
+  li[data-state="in_progress"] .ss-check::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    background: #8a8a8d;
+  }
+
+  /* ---- side panel: Changes, or the Browser tab ---- */
+
+  .ss-side {
+    position: relative;
+    display: flex;
+    flex: 0 0 min(440px, 45%);
+    flex-direction: column;
+    min-width: 0;
+    border-left: 1px solid rgba(226, 213, 237, 0.09);
+    background: #17151c;
+  }
+
+  .ss-side[data-kind="browser"] {
+    flex-basis: min(647px, 55%);
+  }
+
+  .ss-side[hidden] {
+    display: none;
+  }
+
+  /* Too narrow to share, a side panel covers the conversation instead. */
+  @container ss-body (max-width: 759.98px) {
+    .ss-side {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      border-left: 0;
+    }
+  }
+
+  /* A popped-out Background tasks panel keeps clear of an open side panel. */
+  @container ss-body (min-width: 760px) {
+    .ss[data-side-open] :global(.bgt[data-floating]) {
+      right: calc(min(440px, 45%) + 16px);
+      max-width: calc(100% - min(440px, 45%) - 32px);
+    }
+
+    .ss[data-side-open][data-variant="browser"] :global(.bgt[data-floating]) {
+      right: calc(min(647px, 55%) + 16px);
+      max-width: calc(100% - min(647px, 55%) - 32px);
+    }
+  }
+
+  .ss-side::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    z-index: 2;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(182, 159, 247, 0.28), #9274ec, rgba(205, 190, 252, 0.24));
+  }
+
+  /* The tab strip: the open tabs and the panel's close button sit on a
+     darker block at its start, and the active tab is a filled chip
+     underlined in white. */
+  .ss-side-tabs {
+    display: flex;
+    flex: none;
+    height: 43px;
+    border-bottom: 1px solid rgba(226, 213, 237, 0.07);
+    background: #221e29;
+  }
+
+  .ss-side-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px 0 12px;
+    background: #16151c;
+  }
+
+  .ss-side-tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 24px;
+    padding: 0 3px 0 5px;
+    border-radius: 7px;
+    background: #231f2a;
+    color: var(--as-text);
+    font-size: 14px;
+  }
+
+  .ss-side-tab > :global(svg) {
+    color: #b3a1f2;
+  }
+
+  .ss-side-tab::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: -9.5px;
+    left: 0;
+    height: 1.5px;
+    background: #e2dfe7;
+  }
+
+  .ss-side-x,
+  .ss-side-close,
+  .ss-term-close {
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--as-text-3);
+    cursor: pointer;
+  }
+
+  .ss-side-x {
+    width: 16px;
+    height: 16px;
+    margin-left: -2px;
+  }
+
+  .ss-side-close {
+    width: 28px;
+    height: 28px;
+    margin-left: 5px;
+    color: var(--as-text-2);
+  }
+
+  .ss-side-x:hover,
+  .ss-side-close:hover,
+  .ss-term-close:hover {
+    background: rgba(255, 255, 255, 0.07);
+    color: #fff;
+  }
+
+  .ss-changes {
+    position: relative;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 10px;
+    font-size: 13px;
+  }
+
+  .ss-changes-sum {
+    display: flex;
+    gap: 10px;
+    padding: 0 8px 10px;
+    color: var(--as-text-2);
+  }
+
+  .ss-changes-sum span:first-child {
+    flex: 1;
+  }
+
+  .ss-add {
+    color: var(--as-green);
+    font-family: var(--as-mono);
+    font-size: 12px;
+  }
+
+  .ss-del {
+    color: var(--as-red);
+    font-family: var(--as-mono);
+    font-size: 12px;
+  }
+
+  .ss-files {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ss-file {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 6px 10px 6px 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--as-text-1);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ss-file:hover,
+  .ss-file[aria-expanded="true"] {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .ss-file :global(.ss-file-chevron) {
+    flex: none;
+    color: var(--as-text-3);
+    transition: transform 160ms ease;
+  }
+
+  .ss-file[aria-expanded="true"] :global(.ss-file-chevron) {
+    transform: rotate(90deg);
+  }
+
+  .ss-file-name {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  .ss-file-name span {
+    overflow: hidden;
+    color: var(--as-text-3);
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ss-diff {
+    display: grid;
+    margin: 2px 0 8px 28px;
+    padding: 8px 0;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    background: #121117;
+    font-family: var(--as-mono);
+    font-size: 11px;
+    line-height: 17px;
+  }
+
+  .ss-diff[hidden] {
+    display: none;
+  }
+
+  .ss-diff code {
+    padding: 0 10px;
+    overflow: hidden;
+    color: var(--as-text-2);
+    text-overflow: ellipsis;
+    white-space: pre;
+  }
+
+  .ss-diff .is-hunk {
+    color: #8a84c9;
+  }
+
+  .ss-diff .is-add {
+    background: rgba(101, 199, 142, 0.1);
+    color: #a8e2bf;
+  }
+
+  .ss-diff .is-del {
+    background: rgba(230, 120, 125, 0.1);
+    color: #f0b0b3;
+  }
+
+  .ss-diff .is-more {
+    margin-top: 4px;
+    color: var(--as-text-3);
+    font-family: var(--as-font);
+  }
+
+  .ss-changes-note {
+    margin-top: auto;
+    padding: 12px 8px 0;
+    color: var(--as-text-3);
+    font-size: 12px;
+  }
+
+  /* ---- terminal ---- */
+
+  .ss-term {
+    display: flex;
+    flex: 0 0 214px;
+    flex-direction: column;
+    border-top: 1px solid rgba(226, 213, 237, 0.09);
+    background: #15141a;
+  }
+
+  .ss-term[hidden] {
+    display: none;
+  }
+
+  .ss-term-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 34px;
+    padding: 0 8px 0 10px;
+    border-bottom: 1px solid rgba(226, 213, 237, 0.06);
+  }
+
+  .ss-term-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 24px;
+    padding: 0 10px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--as-text-1);
+    font-size: 12px;
+  }
+
+  .ss-term-close {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* Reversed, like the transcript, so the terminal shows its last lines
+     when they wrap past its height, and scrolls back to the rest. */
+  .ss-term-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column-reverse;
+    min-height: 0;
+    padding: 9px 14px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    color: #d6d3db;
+    font-family: var(--as-mono);
+    font-size: 11.5px;
+    line-height: 15.5px;
+    scrollbar-width: none;
+  }
+
+  .ss-term-body::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ss-term-body:focus-visible {
+    outline: 2px solid #9d84ee;
+    outline-offset: -2px;
+  }
+
+  .ss-term-body p {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .ss-term-body .ss-gap {
+    margin-top: 15.5px;
+  }
+
+  .ss-term-body .ss-indent {
+    padding-left: 1ch;
+  }
+
+  .ss-prompt {
+    color: var(--as-bright);
+  }
+
+  .ss-pass {
+    color: var(--as-green);
+  }
+
+  .ss-faint {
+    color: var(--as-text-3);
+  }
+
+  .ss-caret {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    vertical-align: -2px;
+    background: #d6d3db;
+  }
+
+  /* ---- the browser shot: no sidebar, the session beside the browser ---- */
+
+  /* With the browser open the conversation runs nearly to its edges; closed,
+     it goes back to a centred reading column. */
+  .ss[data-variant="browser"][data-side-open] .ss-column {
+    width: auto;
+    margin: 0 14px 0 9px;
+    padding-bottom: 25px;
+  }
+
+  .ss[data-variant="browser"] .ss-task {
+    width: min(603px, 100%);
+  }
+
+  /* As in the reference, the todos here are scrolled a few pixels, so the
+     first one slips under the dock's header behind a fade. */
+  .ss[data-variant="browser"] .ss-todos-list {
+    max-height: 112px;
+    padding-bottom: 3px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(transparent, #000 12px);
+    mask-image: linear-gradient(transparent, #000 12px);
+  }
+
+  .ss[data-variant="browser"] .ss-todos-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ss[data-variant="browser"][data-side-open] :is(.ss-turn, .ss-dock) {
+    width: calc(100% - 4px);
+  }
+
+  .ss[data-variant="browser"][data-side-open] .ss-turn {
+    padding-left: 0;
+  }
+
+  .ss-sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ss-status i,
+    .ss-task-dot {
+      animation: none;
+    }
+
+    .ss :global(svg) {
+      transition: none !important;
+    }
+  }
+</style>
