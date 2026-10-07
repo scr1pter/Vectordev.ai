@@ -18,9 +18,10 @@ permission to redistribute it.
 
 2. Product use is licensed separately.
 
-Purchasing Vector grants only the end-user rights described in the Vector
-Software License at https://vectordev.ai/legal/license. It does not transfer
-ownership of Vector or grant rights to its private source code.
+Vector is free to download and use under the end-user rights described in the
+Vector Software License at https://vectordev.ai/legal/license. Installing or
+using Vector does not transfer ownership of Vector or grant rights to its
+private source code. The third-party rights preserved below still apply.
 
 3. Third-party software remains under its original terms.
 
@@ -28,6 +29,14 @@ Portions of Vector derive from or incorporate open-source projects, including
 OpenCode-derived portions licensed under the MIT License. You keep every right
 those licenses grant for the code they cover. Nothing in this file narrows or
 removes those rights.
+
+Notwithstanding the restrictions above, LGPL-covered components and combined
+works containing them may be modified for your own use and reverse engineered
+to debug those modifications, to the extent required by the applicable LGPL
+version. You may also use modified or replacement libraries and replacement or
+relinked builds as required by that license. This exception does not grant
+additional redistribution rights in Vector Materials beyond those provided by
+the applicable third-party license.
 
 4. No warranty.
 

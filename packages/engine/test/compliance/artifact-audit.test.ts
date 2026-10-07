@@ -187,6 +187,7 @@ describe("release artifact audit", () => {
     'apiKey: "public"',
     "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
     "Ov23li8tweQw6odWQebz",
+    "app_EMoamEEZ73f0CkXaXp7hrann",
     "b1a00492-073a-47ea-816f-4c329264a828",
   ])("borrowed registration or shared key %s fails", async (literal) => {
     const report = await audit({ "bin/vector": binary(Buffer.from(`{clientId:${literal}}`)) })
@@ -195,9 +196,11 @@ describe("release artifact audit", () => {
     expect(wide.violations.map((item) => [item.kind, item.encoding])).toEqual([["credential", "utf-16le"]])
   })
 
-  test("the owner-approved Codex CLI client for ChatGPT sign-in passes", async () => {
+  test("the borrowed Codex CLI client cannot ship in a ChatGPT sign-in request", async () => {
     const report = await audit({ "bin/vector": binary(Buffer.from('client_id:"app_EMoamEEZ73f0CkXaXp7hrann"')) })
-    expect(report.violations).toEqual([])
+    expect(report.violations.map((item) => [item.kind, item.label])).toEqual([
+      ["credential", "borrowed ChatGPT OAuth registration"],
+    ])
   })
 
   test("matches across stream chunk boundaries are found exactly once", async () => {

@@ -8,12 +8,11 @@ import { Script } from "@vectordevai/script"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
 import pkg from "../package.json"
 import { modelsData } from "./generate"
+import { compileRuntime } from "../../../script/compile-runtime"
 
 const dir = path.resolve(import.meta.dirname, "..")
 const binary = "lildax"
 process.chdir(dir)
-
-await rm("dist", { recursive: true, force: true })
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
@@ -49,7 +48,20 @@ const targets = singleFlag
     })
   : allTargets
 
+const executablePath = await compileRuntime({
+  executable: process.env.VECTOR_BUN_EXECUTABLE_PATH,
+  single: singleFlag,
+  baseline: baselineFlag,
+  targets,
+})
+
+await rm("dist", { recursive: true, force: true })
+
 if (!skipInstall) await $`bun install --os="*" --cpu="*" @opentui/core@${pkg.dependencies["@opentui/core"]}`
+
+const { dependencyNotices } = await import("../../../script/dependency-notices.ts")
+const notices = await dependencyNotices(path.resolve(dir, "../.."))
+await Bun.write(path.resolve(dir, "../../DEPENDENCY_NOTICES.md"), notices.body)
 
 const localParserWorker = path.resolve(dir, "node_modules/@opentui/core/parser.worker.js")
 const rootParserWorker = path.resolve(dir, "../../node_modules/@opentui/core/parser.worker.js")
@@ -82,6 +94,7 @@ for (const item of targets) {
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: target.replace(binary, "bun") as Bun.Build.CompileTarget,
+      ...(executablePath ? { executablePath } : {}),
       outfile: `./dist/${name}/bin/${binary}`,
       execArgv: [`--user-agent=${binary}/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
@@ -114,7 +127,8 @@ for (const item of targets) {
         name: `@vectordevai/${name}`,
         version: Script.version,
         private: true,
-        license: "MIT",
+        license: "SEE LICENSE IN LICENSE",
+        files: ["bin", "LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"],
         repository: { type: "git", url: "git+https://github.com/scr1pter/Vectordev.ai.git" },
         os: [item.os],
         cpu: [item.arch],
@@ -123,4 +137,7 @@ for (const item of targets) {
       2,
     ),
   )
+  for (const notice of ["LICENSE", "THIRD_PARTY_NOTICES.md", "DEPENDENCY_NOTICES.md"]) {
+    await Bun.write(`dist/${name}/${notice}`, Bun.file(path.join(dir, "../..", notice)))
+  }
 }

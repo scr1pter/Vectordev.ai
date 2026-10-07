@@ -13,7 +13,7 @@ export const upcomingRelease = {
   label: "Upcoming — unversioned",
   title: "Features waiting on Vector's own setup",
   summary:
-    "Vector's shared free allowance stays off. Other features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Personal OpenRouter access, API-key connections and Sign in with ChatGPT do not require those hosted services.",
+    "Vector's shared free allowance stays off. Other features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Personal OpenRouter access and API-key connections do not require those hosted services. Built-in Sign in with ChatGPT is disabled pending provider authorization; the separately installed Codex runtime remains available.",
   status:
     "No release date is announced for the services still awaiting setup. Shared service activation requires a separate decision. Version 2 is reserved for the final release.",
 }

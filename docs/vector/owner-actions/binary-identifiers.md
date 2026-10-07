@@ -34,7 +34,7 @@ The standalone archives that `packages/engine/script/build.ts` uploads to GitHub
 
 Not covered: `packages/sdk/js/script/publish.ts` and `packages/ui/script/publish.ts` do not run the audit. No release workflow and no CLI publish calls either of them; before publishing either package by hand, run the audit on its staged output (`dist-publish` for the SDK, the packed `.tgz` for the UI package).
 
-It fails on the former name in any case in UTF-8 and both UTF-16 byte orders, retired upstream hosts (the former product domain and the public model catalog service URL), and borrowed OAuth registrations or shared-key literals. The Codex CLI client used for ChatGPT sign-in is allowed. Five classes are allowed and each is counted in the output: exact notice lines from `THIRD_PARTY_NOTICES.md` and `LICENSE`; Monaco's open-code-editor method name in its one exact casing (one leading underscore is tolerated); Bun's built-in package table entry between its pinned neighbours; and the two desktop classes, `node` and `drizzle`, described below. Run it by hand with `bun script/artifact-audit.ts <file-or-directory>...`.
+The artifact audit rejects the Codex CLI OAuth registration in every distributed artifact. Built-in ChatGPT sign-in is disabled pending provider authorization; the external installed Codex runtime is unchanged. See [the current requirements](chatgpt.md).
 
 ## Decision: both desktop identifier classes are allowed (1 October 2026)
 

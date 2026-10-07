@@ -7,7 +7,7 @@ import { PoeAuthPlugin } from "../../src/plugin/poe"
 import { XaiAuthPlugin } from "../../src/plugin/xai"
 
 describe("Vector provider authentication", () => {
-  test("ChatGPT sign-in is offered; other borrowed sign-ins stay paused while API keys remain", async () => {
+  test("unapproved provider sign-ins stay paused while API keys remain", async () => {
     const hooks = await Promise.all([
       CodexAuthPlugin({} as never),
       CopilotAuthPlugin({} as never),
@@ -16,7 +16,7 @@ describe("Vector provider authentication", () => {
       XaiAuthPlugin({} as never),
     ])
     expect(hooks.map((hook) => hook.auth?.methods.map((method) => method.type))).toEqual([
-      ["oauth", "oauth", "api"],
+      ["api"],
       [],
       ["api"],
       ["api"],

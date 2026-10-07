@@ -6,6 +6,7 @@ import { prepareGitLab } from "../../../script/prepare-gitlab"
 import path from "path"
 import { fileURLToPath } from "url"
 import { createSolidTransformPlugin } from "@opentui/solid/bun-plugin"
+import { compileRuntime } from "../../../script/compile-runtime"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -153,6 +154,13 @@ const targets = singleFlag
       return only.includes(key)
     })
 
+const executablePath = await compileRuntime({
+  executable: process.env.VECTOR_BUN_EXECUTABLE_PATH,
+  single: singleFlag,
+  baseline: baselineFlag,
+  targets,
+})
+
 await $`rm -rf dist`
 await Bun.write("dist/api.json", generated.modelsData)
 
@@ -204,6 +212,7 @@ for (const item of targets) {
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: name.replace("vector", "bun") as Bun.Build.CompileTarget,
+      ...(executablePath ? { executablePath } : {}),
       outfile: `dist/${name}/bin/vector`,
       execArgv: [`--user-agent=vector/${Script.version}`, "--use-system-ca", "--"],
       windows: {},

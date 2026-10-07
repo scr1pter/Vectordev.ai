@@ -40,13 +40,12 @@ import { Readable } from "node:stream"
 const root = path.resolve(import.meta.dir, "..")
 // Bytes of surrounding text kept around each match: longer than any notice line.
 const CONTEXT = 256
-// The Codex CLI client used for ChatGPT sign-in is deliberately absent: the owner approved
-// it on 26 September 2026.
 const credentials = [
   { label: "retired public model key assignment", value: 'apiKey:"public"' },
   { label: "retired public model key assignment", value: 'apiKey: "public"' },
   { label: "retired shared key hash", value: "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e" },
   { label: "borrowed GitHub OAuth registration", value: "Ov23li8tweQw6odWQebz" },
+  { label: "borrowed ChatGPT OAuth registration", value: "app_EMoamEEZ73f0CkXaXp7hrann" },
   { label: "borrowed OAuth registration", value: "b1a00492-073a-47ea-816f-4c329264a828" },
 ]
 // Bun's default trusted-package table is alphabetical; the entry sits between these
