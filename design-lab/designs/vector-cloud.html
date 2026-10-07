@@ -1,0 +1,2678 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/lab.css" />
+    <style>
+      /* D13 Vector Cloud runs. Everything is scoped under .d-vector-cloud. */
+      .d-vector-cloud {
+        --vc-run: #8b73d6;
+        --vc-run-text: #cdbdf5;
+        --vc-well: #29252f;
+        --vc-pane: #18171f;
+      }
+
+      .d-vector-cloud :is(h3, h4, p, ul, ol) {
+        margin: 0;
+        padding: 0;
+      }
+
+      .d-vector-cloud ul,
+      .d-vector-cloud ol {
+        list-style: none;
+      }
+
+      .d-vector-cloud svg {
+        flex: none;
+      }
+
+      .d-vector-cloud code {
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+
+      /* ---- header ---- */
+      .d-vector-cloud .vc-usage {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        height: 27px;
+        padding: 0 10px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 999px;
+        color: var(--text-2);
+        font-size: 11.5px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-vector-cloud .vc-usage b {
+        color: #a28df0;
+        font-weight: 400;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .d-vector-cloud .vc-usage .vc-meter {
+        width: 54px;
+      }
+
+      .d-vector-cloud .vc-meter {
+        position: relative;
+        height: 4px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .d-vector-cloud .vc-meter > i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: inherit;
+        background: var(--violet);
+        transition: width 400ms var(--ease);
+      }
+
+      .d-vector-cloud .vc-meter[data-tone="amber"] > i {
+        background: var(--amber);
+      }
+
+      .d-vector-cloud .vc-meter[data-tone="muted"] > i {
+        background: var(--text-3);
+      }
+
+      /* ---- body: runs list + detail ---- */
+      .d-vector-cloud .vc-body {
+        display: flex;
+        height: 100%;
+        min-height: 0;
+      }
+
+      .d-vector-cloud .vc-list {
+        display: flex;
+        flex: 0 0 384px;
+        flex-direction: column;
+        min-height: 0;
+        border-right: 1px solid rgba(226, 213, 237, 0.07);
+        background: #19171d;
+      }
+
+      .d-vector-cloud .vc-list .tabs {
+        flex: none;
+        padding: 0 10px;
+      }
+
+      .d-vector-cloud .vc-list .tab {
+        padding: 0 9px;
+        font-size: 12.5px;
+      }
+
+      .d-vector-cloud .vc-list .tab .count {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-2);
+      }
+
+      .d-vector-cloud .vc-list .tab[aria-selected="true"] .count {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-runs {
+        flex: 1;
+        min-height: 0;
+        padding: 8px 8px 12px;
+      }
+
+      .d-vector-cloud .vc-group + .vc-group {
+        margin-top: 12px;
+      }
+
+      .d-vector-cloud .vc-group-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px 6px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-vector-cloud .vc-group-label span:last-child {
+        color: var(--text-2);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-vector-cloud .vc-run {
+        position: relative;
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 11px;
+        min-height: 54px;
+        padding: 7px 12px 7px 13px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+        transition: background-color 120ms ease;
+      }
+
+      .d-vector-cloud .vc-run:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-vector-cloud .vc-run[aria-current="true"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.1), transparent 70%), rgba(255, 255, 255, 0.055);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+      }
+
+      .d-vector-cloud .vc-run[aria-current="true"]::before {
+        content: "";
+        position: absolute;
+        inset: 9px auto 9px 0;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--violet-bright);
+        box-shadow: 0 0 12px rgba(182, 159, 247, 0.42);
+      }
+
+      .d-vector-cloud .vc-run-text {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        gap: 3px;
+      }
+
+      .d-vector-cloud .vc-run-name {
+        overflow: hidden;
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-run-sub {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        color: var(--text-3);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-run-sub .mono {
+        overflow: hidden;
+        font-size: 11px;
+        text-overflow: ellipsis;
+      }
+
+      .d-vector-cloud .vc-run-sub svg {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .vc-run-end {
+        display: grid;
+        flex: none;
+        justify-items: end;
+        gap: 3px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-vector-cloud .vc-run-end span:first-child {
+        color: var(--text-2);
+      }
+
+      .d-vector-cloud .vc-run-end span:last-child {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      /* status marks, in the Background tasks vocabulary */
+      .d-vector-cloud .vc-mark {
+        position: relative;
+        display: inline-grid;
+        flex: none;
+        width: 12px;
+        height: 12px;
+        place-items: center;
+      }
+
+      .d-vector-cloud .vc-mark::before {
+        content: "";
+        box-sizing: border-box;
+        width: 8px;
+        height: 8px;
+        border: 1px solid var(--vc-mark, var(--text-3));
+        border-radius: 50%;
+        background: var(--vc-mark, transparent);
+      }
+
+      .d-vector-cloud [data-status="running"] > .vc-mark,
+      .d-vector-cloud .vc-mark[data-status="running"] {
+        --vc-mark: var(--vc-run);
+      }
+
+      .d-vector-cloud [data-status="starting"] > .vc-mark,
+      .d-vector-cloud .vc-mark[data-status="starting"] {
+        --vc-mark: var(--vc-run);
+      }
+
+      .d-vector-cloud [data-status="running"] > .vc-mark::before,
+      .d-vector-cloud [data-status="starting"] > .vc-mark::before,
+      .d-vector-cloud .vc-mark[data-status="running"]::before {
+        animation: vc-breathe 1.6s ease-in-out infinite;
+      }
+
+      .d-vector-cloud [data-status="paused"] > .vc-mark,
+      .d-vector-cloud .vc-mark[data-status="paused"] {
+        --vc-mark: var(--amber);
+      }
+
+      .d-vector-cloud [data-status="done"] > .vc-mark,
+      .d-vector-cloud .vc-mark[data-status="done"] {
+        --vc-mark: var(--green);
+      }
+
+      .d-vector-cloud [data-status="failed"] > .vc-mark,
+      .d-vector-cloud .vc-mark[data-status="failed"] {
+        --vc-mark: var(--red);
+      }
+
+      .d-vector-cloud [data-status="local"] > .vc-mark,
+      .d-vector-cloud .vc-mark[data-status="local"] {
+        --vc-mark: var(--blue);
+      }
+
+      .d-vector-cloud [data-status="stopped"] > .vc-mark::before,
+      .d-vector-cloud .vc-mark[data-status="stopped"]::before {
+        border-color: var(--text-2);
+        background: linear-gradient(var(--text-2) 0 0) center / 4px 1px no-repeat;
+      }
+
+      @keyframes vc-breathe {
+        50% {
+          opacity: 0.45;
+        }
+      }
+
+      /* runners card at the foot of the list */
+      .d-vector-cloud .vc-runners {
+        flex: none;
+        display: grid;
+        gap: 10px;
+        padding: 12px 18px 14px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-vector-cloud .vc-runner {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr) auto;
+        align-items: center;
+        column-gap: 10px;
+        row-gap: 6px;
+        color: var(--text-1);
+        font-size: 12.5px;
+      }
+
+      .d-vector-cloud .vc-runner > span:first-child {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .vc-runner > span:nth-child(2) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-runner .vc-runner-note {
+        color: var(--text-3);
+        font-size: 11px;
+        font-family: var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-vector-cloud .vc-runner .vc-meter {
+        grid-column: 2 / -1;
+      }
+
+      /* ---- detail ---- */
+      .d-vector-cloud .vc-detail {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--stage);
+      }
+
+      .d-vector-cloud .vc-dhead {
+        flex: none;
+        padding: 18px 22px 0 24px;
+      }
+
+      .d-vector-cloud .vc-dtitle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 28px;
+      }
+
+      .d-vector-cloud .vc-dtitle h3 {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-1);
+        font-size: 17px;
+        font-weight: 550;
+        letter-spacing: -0.01em;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-state {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        gap: 6px;
+        height: 22px;
+        padding: 0 9px 0 7px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-2);
+        font-size: 11.5px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .vc-state .vc-mark {
+        width: 10px;
+      }
+
+      .d-vector-cloud .vc-state[data-status="running"],
+      .d-vector-cloud .vc-state[data-status="starting"] {
+        background: rgba(139, 115, 214, 0.16);
+        color: var(--vc-run-text);
+      }
+
+      .d-vector-cloud .vc-state[data-status="paused"] {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .d-vector-cloud .vc-state[data-status="done"] {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-vector-cloud .vc-state[data-status="failed"] {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .d-vector-cloud .vc-state[data-status="local"] {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .d-vector-cloud .vc-dactions {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+      }
+
+      .d-vector-cloud .vc-continue {
+        border-color: rgba(146, 116, 236, 0.45);
+        background: rgba(182, 159, 247, 0.13);
+        color: #d6c9fb;
+      }
+
+      .d-vector-cloud .vc-continue:hover {
+        background: rgba(182, 159, 247, 0.21);
+      }
+
+      .d-vector-cloud .vc-continue[disabled] {
+        opacity: 0.5;
+        cursor: default;
+      }
+
+      .d-vector-cloud .vc-dmeta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 14px;
+        margin-top: 9px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-vector-cloud .vc-dmeta > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-vector-cloud .vc-dmeta svg {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .vc-branch {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 7px;
+        border: 1px solid rgba(255, 255, 255, 0.075);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-2);
+        font: 11px/1 var(--mono);
+      }
+
+      .d-vector-cloud .vc-branch .vc-base {
+        color: var(--text-3);
+      }
+
+      /* stat strip */
+      .d-vector-cloud .vc-stats {
+        display: grid;
+        grid-template-columns: 1fr 1.35fr 1fr 1.15fr;
+        margin-top: 16px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+      }
+
+      .d-vector-cloud .vc-stat {
+        display: grid;
+        align-content: start;
+        gap: 6px;
+        min-width: 0;
+        padding: 11px 14px 12px;
+      }
+
+      .d-vector-cloud .vc-stat + .vc-stat {
+        border-left: 1px solid var(--hairline);
+      }
+
+      .d-vector-cloud .vc-stat-label {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-stat-value {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        color: var(--text-1);
+        font: 15px/1.1 var(--mono);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-stat-value small {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-vector-cloud .vc-stat .vc-meter {
+        margin-top: 3px;
+      }
+
+      /* where it runs */
+      .d-vector-cloud .vc-journey {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 10px;
+        padding: 9px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-vector-cloud .vc-hop {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        gap: 7px;
+        color: var(--text-3);
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-hop b {
+        color: var(--text-2);
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .vc-hop time {
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .d-vector-cloud .vc-hop-icon {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.025);
+      }
+
+      .d-vector-cloud .vc-hop[data-on] .vc-hop-icon {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 14px rgba(182, 159, 247, 0.18);
+      }
+
+      .d-vector-cloud .vc-hop[data-on] b {
+        color: var(--text-1);
+      }
+
+      .d-vector-cloud .vc-link {
+        flex: 1;
+        min-width: 24px;
+        height: 1px;
+        background: var(--line-strong);
+      }
+
+      .d-vector-cloud .vc-link[data-on] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.25), var(--violet));
+      }
+
+      .d-vector-cloud .vc-journey-note {
+        flex: 0 1 360px;
+        min-width: 0;
+        margin-left: 4px;
+        padding-left: 14px;
+        border-left: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+
+      /* callout for runs that need the reader */
+      .d-vector-cloud .vc-callout {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 10px;
+        padding: 10px 12px 10px 14px;
+        border: 1px solid rgba(214, 169, 92, 0.32);
+        border-radius: 10px;
+        background: rgba(214, 169, 92, 0.07);
+        color: var(--text-1);
+        font-size: 12.5px;
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="red"] {
+        border-color: rgba(230, 120, 125, 0.32);
+        background: rgba(230, 120, 125, 0.07);
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="green"] {
+        border-color: rgba(101, 199, 142, 0.28);
+        background: rgba(101, 199, 142, 0.06);
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="blue"] {
+        border-color: rgba(107, 166, 221, 0.3);
+        background: rgba(107, 166, 221, 0.07);
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="muted"] {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .d-vector-cloud .vc-callout-text {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .d-vector-cloud .vc-callout-text span {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-callout > svg {
+        color: var(--amber);
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="red"] > svg {
+        color: var(--red);
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="green"] > svg {
+        color: var(--green);
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="blue"] > svg {
+        color: var(--blue);
+      }
+
+      .d-vector-cloud .vc-callout[data-tone="muted"] > svg {
+        color: var(--text-3);
+      }
+
+      /* tabs + panels */
+      .d-vector-cloud .vc-detail .tabs {
+        flex: none;
+        margin-top: 8px;
+        padding: 0 16px;
+      }
+
+      .d-vector-cloud .vc-detail .tab .count {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-2);
+      }
+
+      .d-vector-cloud .vc-detail .tab[aria-selected="true"] .count {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-tabs-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 4px 9px auto;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-panel {
+        flex: 1;
+        min-height: 0;
+      }
+
+      .d-vector-cloud .vc-panel[hidden] {
+        display: none;
+      }
+
+      /* timeline */
+      .d-vector-cloud .vc-steps {
+        position: relative;
+        padding: 10px 22px 18px 24px;
+      }
+
+      .d-vector-cloud .vc-step {
+        position: relative;
+        display: grid;
+        grid-template-columns: 62px 24px minmax(0, 1fr) auto;
+        column-gap: 12px;
+        padding: 7px 0;
+      }
+
+      .d-vector-cloud .vc-step::before {
+        content: "";
+        position: absolute;
+        top: 30px;
+        bottom: -8px;
+        left: 85px;
+        width: 1px;
+        background: var(--line);
+      }
+
+      .d-vector-cloud .vc-step:last-child::before {
+        display: none;
+      }
+
+      .d-vector-cloud .vc-step[data-new] {
+        animation: vc-in 380ms var(--ease);
+      }
+
+      @keyframes vc-in {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+      }
+
+      .d-vector-cloud .vc-step time {
+        padding-top: 5px;
+        color: var(--text-3);
+        font: 11px/1.4 var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-vector-cloud .vc-step-icon {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--card);
+        color: var(--text-2);
+      }
+
+      .d-vector-cloud .vc-step[data-kind="handoff"] .vc-step-icon,
+      .d-vector-cloud .vc-step[data-kind="pr"] .vc-step-icon {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-step[data-kind="note"] .vc-step-icon {
+        border-color: rgba(107, 166, 221, 0.35);
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .d-vector-cloud .vc-step[data-kind="fail"] .vc-step-icon {
+        border-color: rgba(230, 120, 125, 0.35);
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .d-vector-cloud .vc-step[data-kind="pause"] .vc-step-icon {
+        border-color: rgba(214, 169, 92, 0.35);
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .d-vector-cloud .vc-step[data-state="running"] .vc-step-icon {
+        border-color: rgba(139, 115, 214, 0.5);
+        color: var(--vc-run-text);
+      }
+
+      .d-vector-cloud .vc-step[data-state="running"] .vc-step-icon svg {
+        animation: vc-spin 1.1s linear infinite;
+      }
+
+      @keyframes vc-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .d-vector-cloud .vc-step-text {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+        padding-top: 3px;
+      }
+
+      .d-vector-cloud .vc-step-title {
+        color: var(--text-1);
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .d-vector-cloud .vc-step[data-state="running"] .vc-step-title {
+        color: var(--vc-run-text);
+      }
+
+      .d-vector-cloud .vc-step-title code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: #2f2b35;
+        color: #eceaf0;
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-step-sub {
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 17px;
+      }
+
+      .d-vector-cloud .vc-step-sub .add,
+      .d-vector-cloud .vc-step-sub .del {
+        font-size: 11px;
+      }
+
+      .d-vector-cloud .vc-step-end {
+        padding-top: 5px;
+        color: var(--text-3);
+        font: 11px/1.4 var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* log */
+      .d-vector-cloud .vc-log {
+        height: 100%;
+        margin: 0;
+        padding: 12px 24px 16px;
+        background: #15141a;
+        color: #d6d3db;
+        font: 11.5px/17px var(--mono);
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .d-vector-cloud .vc-log .l-dim {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .vc-log .l-cmd {
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-log .l-ok {
+        color: var(--green);
+      }
+
+      .d-vector-cloud .vc-log .l-bad {
+        color: var(--red);
+      }
+
+      .d-vector-cloud .vc-log .l-warn {
+        color: var(--amber);
+      }
+
+      .d-vector-cloud .vc-caret {
+        display: inline-block;
+        width: 7px;
+        height: 13px;
+        vertical-align: -2px;
+        background: #d6d3db;
+        animation: vc-blink 1.1s steps(1) infinite;
+      }
+
+      @keyframes vc-blink {
+        50% {
+          opacity: 0;
+        }
+      }
+
+      /* changes, as in the Changes panel */
+      .d-vector-cloud .vc-changes {
+        padding: 12px 14px 16px;
+      }
+
+      .d-vector-cloud .vc-changes-sum {
+        display: flex;
+        gap: 10px;
+        padding: 0 10px 10px;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-vector-cloud .vc-changes-sum span:first-child {
+        flex: 1;
+      }
+
+      .d-vector-cloud .vc-changes .add,
+      .d-vector-cloud .vc-changes .del {
+        font-size: 12px;
+      }
+
+      .d-vector-cloud .vc-file {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 6px 12px 6px 6px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-vector-cloud .vc-file:hover,
+      .d-vector-cloud .vc-file[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .d-vector-cloud .vc-file .vc-chev {
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+
+      .d-vector-cloud .vc-file[aria-expanded="true"] .vc-chev {
+        transform: rotate(90deg);
+      }
+
+      .d-vector-cloud .vc-file-name {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+      }
+
+      .d-vector-cloud .vc-file-name span {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-diff {
+        display: grid;
+        margin: 2px 0 8px 28px;
+        padding: 8px 0;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 6px;
+        background: #121117;
+        font: 11px/17px var(--mono);
+      }
+
+      .d-vector-cloud .vc-diff[hidden] {
+        display: none;
+      }
+
+      .d-vector-cloud .vc-diff code {
+        padding: 0 10px;
+        overflow: hidden;
+        color: var(--text-2);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: pre;
+      }
+
+      .d-vector-cloud .vc-diff .is-hunk {
+        color: #8a84c9;
+      }
+
+      .d-vector-cloud .vc-diff .is-add {
+        background: rgba(101, 199, 142, 0.1);
+        color: #a8e2bf;
+      }
+
+      .d-vector-cloud .vc-diff .is-del {
+        background: rgba(230, 120, 125, 0.1);
+        color: #f0b0b3;
+      }
+
+      .d-vector-cloud .vc-diff .is-more {
+        margin-top: 4px;
+        color: var(--text-3);
+        font-family: var(--font);
+      }
+
+      /* checks */
+      .d-vector-cloud .vc-checks {
+        display: grid;
+        gap: 2px;
+        padding: 12px 14px;
+      }
+
+      .d-vector-cloud .vc-check {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-height: 42px;
+        padding: 6px 12px;
+        border-radius: 7px;
+      }
+
+      .d-vector-cloud .vc-check:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .d-vector-cloud .vc-check-name {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+        font-size: 13px;
+      }
+
+      .d-vector-cloud .vc-check-name span {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-vector-cloud .vc-check-end {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-vector-cloud .vc-check[data-status="pending"] .vc-check-name {
+        color: var(--text-2);
+      }
+
+      /* steer composer */
+      .d-vector-cloud .vc-steer {
+        flex: none;
+        padding: 10px 22px 16px 24px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-vector-cloud .vc-steer-box {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 42px;
+        padding: 0 6px 0 14px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 10px;
+        background: #1e1e20;
+      }
+
+      .d-vector-cloud .vc-steer-box:focus-within {
+        border-color: rgba(182, 159, 247, 0.5);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.12);
+      }
+
+      .d-vector-cloud .vc-steer-box input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 13px;
+      }
+
+      .d-vector-cloud .vc-steer-box input::placeholder {
+        color: #8b8a8e;
+      }
+
+      .d-vector-cloud .vc-send {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border: 0;
+        border-radius: 7px;
+        background: #b596ff;
+        color: #141217;
+      }
+
+      .d-vector-cloud .vc-send[disabled] {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-3);
+        cursor: default;
+      }
+
+      .d-vector-cloud .vc-steer-hint {
+        margin-top: 7px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* ---- overlay, sheet, dialog, toast ---- */
+      .d-vector-cloud .vc-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        background: rgba(10, 8, 13, 0.58);
+        animation: vc-fade 160ms ease-out;
+      }
+
+      .d-vector-cloud .vc-scrim[hidden] {
+        display: none;
+      }
+
+      @keyframes vc-fade {
+        from {
+          opacity: 0;
+        }
+      }
+
+      .d-vector-cloud .vc-sheet {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 21;
+        display: flex;
+        width: 480px;
+        flex-direction: column;
+        border-left: 1px solid var(--line-strong);
+        background: #1b1920;
+        box-shadow: -30px 0 80px rgba(0, 0, 0, 0.45);
+        animation: vc-slide 240ms var(--ease);
+      }
+
+      .d-vector-cloud .vc-sheet[hidden] {
+        display: none;
+      }
+
+      @keyframes vc-slide {
+        from {
+          transform: translateX(40px);
+          opacity: 0;
+        }
+      }
+
+      .d-vector-cloud .vc-sheet-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 20px 18px 16px 24px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-vector-cloud .vc-sheet-head h3 {
+        font-size: 16px;
+        font-weight: 550;
+      }
+
+      .d-vector-cloud .vc-sheet-head p {
+        margin-top: 5px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        line-height: 1.45;
+      }
+
+      .d-vector-cloud .vc-sheet-body {
+        display: grid;
+        flex: 1;
+        align-content: start;
+        gap: 18px;
+        min-height: 0;
+        padding: 18px 24px 20px;
+      }
+
+      .d-vector-cloud .vc-field {
+        display: grid;
+        gap: 7px;
+      }
+
+      .d-vector-cloud .vc-field-label {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        color: var(--text-2);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .vc-field-label span {
+        color: var(--text-3);
+        font-weight: 400;
+      }
+
+      .d-vector-cloud .vc-row2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .d-vector-cloud .vc-select {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        background: rgba(0, 0, 0, 0.18);
+        color: var(--text-1);
+        font-size: 12.5px;
+        text-align: left;
+      }
+
+      .d-vector-cloud .vc-select > .vc-sel-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .vc-select svg {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .vc-select .mono {
+        font-size: 12px;
+      }
+
+      .d-vector-cloud .vc-sheet .input {
+        height: 32px;
+        border-radius: 7px;
+      }
+
+      .d-vector-cloud .vc-sheet .input input {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .d-vector-cloud .vc-textarea {
+        width: 100%;
+        min-height: 84px;
+        padding: 9px 11px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        outline: 0;
+        background: rgba(0, 0, 0, 0.18);
+        font-size: 13px;
+        line-height: 1.5;
+        resize: none;
+      }
+
+      .d-vector-cloud .vc-textarea:focus {
+        border-color: rgba(182, 159, 247, 0.6);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.14);
+      }
+
+      .d-vector-cloud .vc-runner-pick {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .d-vector-cloud .vc-option {
+        position: relative;
+        display: grid;
+        align-content: start;
+        gap: 6px;
+        padding: 12px 12px 12px 13px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+        text-align: left;
+        transition:
+          border-color 120ms ease,
+          background-color 120ms ease;
+      }
+
+      .d-vector-cloud .vc-option:hover {
+        border-color: var(--line-strong);
+      }
+
+      .d-vector-cloud .vc-option[aria-checked="true"] {
+        border-color: rgba(182, 159, 247, 0.55);
+        background: linear-gradient(180deg, rgba(182, 159, 247, 0.09), transparent 80%), var(--card);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.1);
+      }
+
+      .d-vector-cloud .vc-option-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .vc-option-top svg {
+        color: var(--text-2);
+      }
+
+      .d-vector-cloud .vc-option[aria-checked="true"] .vc-option-top svg {
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-radio {
+        width: 14px;
+        height: 14px;
+        margin-left: auto;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+      }
+
+      .d-vector-cloud .vc-option[aria-checked="true"] .vc-radio {
+        border: 4px solid var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-option p {
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+
+      .d-vector-cloud .vc-option .vc-price {
+        color: var(--text-2);
+        font: 11px var(--mono);
+      }
+
+      .d-vector-cloud .vc-budget {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .d-vector-cloud [data-budget] {
+        display: flex;
+        height: 32px;
+        align-items: center;
+      }
+
+      .d-vector-cloud [data-budget] button {
+        flex: 1;
+        height: 26px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-budget .seg button {
+        min-width: 46px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-budget-note {
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+
+      .d-vector-cloud .vc-toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-top: 1px solid var(--hairline);
+        font-size: 12.5px;
+      }
+
+      .d-vector-cloud .vc-toggle-row div {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+      }
+
+      .d-vector-cloud .vc-toggle-row span {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-sheet-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 18px 16px 24px;
+        border-top: 1px solid var(--hairline);
+        background: #19171d;
+      }
+
+      .d-vector-cloud .vc-estimate {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-estimate b {
+        color: var(--text-1);
+        font: 500 12.5px var(--mono);
+      }
+
+      .d-vector-cloud .btn kbd {
+        height: 16px;
+        min-width: 16px;
+        border-color: rgba(255, 255, 255, 0.28);
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        font-size: 10px;
+      }
+
+      /* continue dialog */
+      .d-vector-cloud .vc-dialog {
+        position: absolute;
+        top: 170px;
+        left: 50%;
+        z-index: 21;
+        width: 460px;
+        margin-left: -96px;
+        padding: 20px 20px 16px 22px;
+        border: 1px solid var(--line-strong);
+        border-radius: 14px;
+        background: #211e27;
+        box-shadow: var(--shadow-float);
+        animation: vc-pop 180ms var(--ease);
+      }
+
+      .d-vector-cloud .vc-dialog[hidden] {
+        display: none;
+      }
+
+      @keyframes vc-pop {
+        from {
+          opacity: 0;
+          transform: scale(0.97);
+        }
+      }
+
+      .d-vector-cloud .vc-dialog h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 15px;
+        font-weight: 550;
+      }
+
+      .d-vector-cloud .vc-dialog h3 .vc-hop-icon {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-dialog > p {
+        margin-top: 8px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      .d-vector-cloud .vc-handoff {
+        display: grid;
+        gap: 2px;
+        margin-top: 14px;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.14);
+      }
+
+      .d-vector-cloud .vc-handoff li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 36px;
+        padding: 4px 8px;
+        color: var(--text-3);
+        font-size: 12.5px;
+      }
+
+      .d-vector-cloud .vc-handoff li > span:nth-child(2) {
+        display: grid;
+        flex: 1;
+        gap: 1px;
+      }
+
+      .d-vector-cloud .vc-handoff li small {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-vector-cloud .vc-handoff li[data-state="active"],
+      .d-vector-cloud .vc-handoff li[data-state="done"] {
+        color: var(--text-1);
+      }
+
+      .d-vector-cloud .vc-tick {
+        display: grid;
+        width: 18px;
+        height: 18px;
+        flex: none;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+        color: transparent;
+      }
+
+      .d-vector-cloud li[data-state="active"] .vc-tick {
+        border-color: var(--vc-run);
+        border-top-color: transparent;
+        animation: vc-spin 0.9s linear infinite;
+      }
+
+      .d-vector-cloud li[data-state="done"] .vc-tick {
+        border-color: rgba(101, 199, 142, 0.5);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-vector-cloud .vc-dialog-foot {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .d-vector-cloud .vc-toast {
+        position: absolute;
+        right: 22px;
+        bottom: 98px;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        max-width: 420px;
+        padding: 11px 12px 11px 14px;
+        font-size: 12.5px;
+        animation: vc-pop 200ms var(--ease);
+      }
+
+      .d-vector-cloud .vc-toast[hidden] {
+        display: none;
+      }
+
+      .d-vector-cloud .vc-toast svg {
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .vc-toast div {
+        display: grid;
+        gap: 2px;
+      }
+
+      .d-vector-cloud .vc-toast span {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .vc-empty {
+        padding: 30px 16px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        text-align: center;
+      }
+
+      .d-vector-cloud .btn[hidden] {
+        display: none;
+      }
+
+      .d-vector-cloud .vc-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .d-vector-cloud *,
+        .d-vector-cloud *::before {
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="vector-cloud"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-vector-cloud">
+            <div class="app">
+              <nav data-lab-sidebar data-active="cloud" data-workspace="Vector" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="chip" data-size="15" class="muted"></i>
+                  <h2>Vector Cloud</h2>
+                  <span class="app-header-sub">Agents that keep working with your laptop closed</span>
+                  <div class="app-header-end">
+                    <span class="vc-usage" title="Vector Cloud usage this month">
+                      <span>October</span>
+                      <b data-usage>$23.18</b>
+                      <span class="muted">of $60</span>
+                      <span class="vc-meter" aria-hidden="true"><i data-usage-bar style="width: 38%"></i></span>
+                    </span>
+                    <button class="btn btn-primary" type="button" data-open-sheet>
+                      <i data-icon="plus" data-size="14"></i>Start a cloud run
+                    </button>
+                  </div>
+                </header>
+                <div class="app-body vc-body">
+                  <section class="vc-list" aria-label="Cloud runs">
+                    <div class="tabs" role="tablist" aria-label="Filter runs" data-filters>
+                      <button class="tab" role="tab" type="button" aria-selected="true" data-filter="all">All <span class="count" data-count="all">7</span></button>
+                      <button class="tab" role="tab" type="button" aria-selected="false" data-filter="running">Running <span class="count" data-count="running">3</span></button>
+                      <button class="tab" role="tab" type="button" aria-selected="false" data-filter="needs">Needs you <span class="count" data-count="needs">1</span></button>
+                      <button class="tab" role="tab" type="button" aria-selected="false" data-filter="finished">Finished <span class="count" data-count="finished">3</span></button>
+                    </div>
+                    <div class="vc-runs scroll" data-runs></div>
+                    <div class="vc-runners" aria-label="Runners">
+                      <div class="vc-runner">
+                        <span data-glyph="cloud"></span>
+                        <span>Vector Cloud <span class="muted">· us-east</span></span>
+                        <span class="vc-runner-note" data-slots>2 of 4 slots</span>
+                        <span class="vc-meter" aria-hidden="true"><i data-slots-bar style="width: 50%"></i></span>
+                      </div>
+                      <div class="vc-runner">
+                        <span data-glyph="actions"></span>
+                        <span>GitHub Actions <span class="muted">· Vectordev.ai</span></span>
+                        <span class="vc-runner-note">1,240 of 3,000 min</span>
+                        <span class="vc-meter" data-tone="muted" aria-hidden="true"><i style="width: 41%"></i></span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="vc-detail" aria-live="off" data-detail></section>
+                </div>
+              </main>
+            </div>
+
+            <div class="vc-scrim" data-scrim hidden></div>
+
+            <aside class="vc-sheet" data-sheet role="dialog" aria-modal="true" aria-labelledby="vc-sheet-title" hidden>
+              <div class="vc-sheet-head">
+                <div style="flex: 1">
+                  <h3 id="vc-sheet-title">Start a cloud run</h3>
+                  <p>The agent gets its own machine and a branch of its own. Close your laptop whenever you like; it reports back here and on your phone.</p>
+                </div>
+                <button class="icon-btn" type="button" data-close-sheet aria-label="Close"><i data-icon="close" data-size="16"></i></button>
+              </div>
+              <div class="vc-sheet-body scroll">
+                <div class="vc-row2">
+                  <div class="vc-field">
+                    <span class="vc-field-label">Repository</span>
+                    <button class="vc-select" type="button"><span data-glyph="repo"></span><span class="vc-sel-text mono">Vectordev/Vectordev.ai</span><i data-icon="caret" data-size="13"></i></button>
+                  </div>
+                  <div class="vc-field">
+                    <span class="vc-field-label">From branch</span>
+                    <button class="vc-select" type="button"><i data-icon="branch" data-size="14"></i><span class="vc-sel-text mono">main</span><i data-icon="caret" data-size="13"></i></button>
+                  </div>
+                </div>
+                <label class="vc-field">
+                  <span class="vc-field-label">Task</span>
+                  <textarea class="vc-textarea" data-task rows="3">The Changes panel loses its scroll position when a file's diff is expanded and the list re-renders. Keep the open file in view and add a test.</textarea>
+                </label>
+                <label class="vc-field">
+                  <span class="vc-field-label">New branch <span>pushed as the run goes</span></span>
+                  <span class="input"><i data-icon="branch" data-size="14" class="muted"></i><input data-branch value="changes-scroll" spellcheck="false" autocomplete="off" /></span>
+                </label>
+                <div class="vc-field">
+                  <span class="vc-field-label">Runs on</span>
+                  <div class="vc-runner-pick" role="radiogroup" aria-label="Runner">
+                    <button class="vc-option" type="button" role="radio" aria-checked="true" data-runner="cloud">
+                      <span class="vc-option-top"><span data-glyph="cloud"></span>Vector Cloud<span class="vc-radio"></span></span>
+                      <p>A managed sandbox with 4 vCPU and 8 GB. Starts in about 15 seconds.</p>
+                      <span class="vc-price">$0.04 / min + model</span>
+                    </button>
+                    <button class="vc-option" type="button" role="radio" aria-checked="false" data-runner="actions">
+                      <span class="vc-option-top"><span data-glyph="actions"></span>GitHub Actions<span class="vc-radio"></span></span>
+                      <p>Your repository's own runners, through the <code>vector.yml</code> workflow.</p>
+                      <span class="vc-price">Actions minutes + model</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="vc-row2">
+                  <div class="vc-field">
+                    <span class="vc-field-label">Model</span>
+                    <button class="vc-select" type="button"><i data-icon="model" data-size="14"></i><span class="vc-sel-text">GPT-6 Sol</span><i data-icon="caret" data-size="13"></i></button>
+                  </div>
+                  <div class="vc-field">
+                    <span class="vc-field-label">Budget cap</span>
+                    <div class="seg" data-budget role="group" aria-label="Budget cap">
+                      <button type="button" aria-pressed="false" data-value="2">$2</button>
+                      <button type="button" aria-pressed="true" data-value="5">$5</button>
+                      <button type="button" aria-pressed="false" data-value="10">$10</button>
+                      <button type="button" aria-pressed="false" data-value="25">$25</button>
+                    </div>
+                  </div>
+                </div>
+                <p class="vc-budget-note" data-budget-note>At $5.00 the run pauses at its next safe step and asks you before spending more.</p>
+                <div>
+                  <div class="vc-toggle-row">
+                    <div>Open a draft pull request when done<span>Titled from the run, conventional commit style</span></div>
+                    <button class="switch" role="switch" aria-checked="true" type="button" aria-label="Open a draft pull request when done"></button>
+                  </div>
+                  <div class="vc-toggle-row">
+                    <div>Notify my phone when it needs me<span>Permission asks, budget cap, failures</span></div>
+                    <button class="switch" role="switch" aria-checked="true" type="button" aria-label="Notify my phone"></button>
+                  </div>
+                </div>
+              </div>
+              <div class="vc-sheet-foot">
+                <div class="vc-estimate"><span>Estimate</span><b data-estimate>$0.90 – $2.10 · about 20 min</b></div>
+                <button class="btn" type="button" data-close-sheet>Cancel</button>
+                <button class="btn btn-primary" type="button" data-start>Start run <kbd>⌘↵</kbd></button>
+              </div>
+            </aside>
+
+            <div class="vc-dialog" data-dialog role="dialog" aria-modal="true" aria-labelledby="vc-dialog-title" hidden>
+              <h3 id="vc-dialog-title"><span class="vc-hop-icon" data-glyph="laptop"></span><span data-dialog-title>Continue on this laptop</span></h3>
+              <p data-dialog-text>The cloud run pauses at its next safe step and the session moves here with its branch, messages and tool results. Nothing is lost and nothing runs twice.</p>
+              <ol class="vc-handoff" data-handoff></ol>
+              <div class="vc-dialog-foot">
+                <button class="btn" type="button" data-dialog-cancel>Cancel</button>
+                <button class="btn btn-primary" type="button" data-dialog-go>Move it here</button>
+              </div>
+            </div>
+
+            <div class="vc-toast float" data-toast role="status" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="/assets/icons.js"></script>
+    <script src="/assets/links.js"></script>
+    <script src="/assets/registry/review.js"></script>
+    <script src="/assets/registry/connections.js"></script>
+    <script src="/assets/registry/settings.js"></script>
+    <script src="/assets/registry/agents.js"></script>
+    <script src="/assets/lab.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const stage = document.querySelector(".d-vector-cloud")
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+
+        // Glyphs the shared set does not have, drawn in its style.
+        const paths = {
+          cloud: '<path d="M4.7 12.4h6.8a2.85 2.85 0 0 0 .3-5.68 3.9 3.9 0 0 0-7.55.9A2.4 2.4 0 0 0 4.7 12.4Z"/>',
+          laptop: '<rect x="3.1" y="3.6" width="9.8" height="6.7" rx="1"/><path d="M1.8 12.4h12.4"/>',
+          actions: '<circle cx="8" cy="8" r="5.7"/><path d="M6.9 5.9 10 8l-3.1 2.1Z"/>',
+          repo: '<path d="M4 3.3A1.3 1.3 0 0 1 5.3 2h6.7v9.4H5.3A1.3 1.3 0 0 0 4 12.7Zm0 9.4A1.3 1.3 0 0 0 5.3 14H12M6.6 4.7h2.8"/>',
+          doc: '<path d="M4.5 2.5h4.6l2.4 2.4v8.6h-7Z"/><path d="M9 2.6v2.5h2.4M6.4 8h3.3M6.4 10.4h3.3"/>',
+          pencil: '<path d="m10.1 3.4 2.5 2.5-6.8 6.8H3.3v-2.5Z"/><path d="m8.8 4.7 2.5 2.5"/>',
+          spark: '<path d="M8 2.8c.4 2.6 1.6 3.8 4.2 4.2-2.6.4-3.8 1.6-4.2 4.2-.4-2.6-1.6-3.8-4.2-4.2 2.6-.4 3.8-1.6 4.2-4.2Z"/>',
+          note: '<path d="M3 4.3A1.3 1.3 0 0 1 4.3 3h7.4A1.3 1.3 0 0 1 13 4.3v5A1.3 1.3 0 0 1 11.7 10.6H7.3l-2.9 2.3v-2.3A1.3 1.3 0 0 1 3 9.3Z"/>',
+          pause: '<path d="M6 4.5v7M10 4.5v7"/>',
+          play: '<path d="M5.6 3.9v8.2L12 8Z"/>',
+          fail: '<path d="m5.2 5.2 5.6 5.6m0-5.6-5.6 5.6"/>',
+          spin: '<path d="M8 2.6a5.4 5.4 0 1 1-5.2 4" opacity=".9"/>',
+          coin: '<circle cx="8" cy="8" r="5.6"/><path d="M9.6 6.3c-.3-.6-.9-.9-1.6-.9-.9 0-1.6.5-1.6 1.2 0 1.6 3.3.8 3.3 2.5 0 .7-.7 1.2-1.7 1.2-.8 0-1.4-.4-1.7-1M8 4.4v1M8 10.3v1.2"/>',
+          clock: '<circle cx="8" cy="8" r="5.6"/><path d="M8 5.1v3.1l2 1.3"/>',
+          up: '<path d="M8 12.5v-9M4.6 6.9 8 3.5l3.4 3.4"/>',
+          check: '<path d="m3.8 8.3 2.7 2.7 5.7-6"/>',
+          warn: '<path d="M8 2.8 13.6 12.6H2.4Z"/><path d="M8 6.6v2.6M8 11v.01"/>',
+          bolt: '<path d="M8.8 2.5 4.2 9h3.6l-.6 4.5L11.8 7H8.2Z"/>',
+        }
+        const glyph = (name, size = 16) => {
+          if (paths[name])
+            return `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`
+          return LabUI.svg(name, size)
+        }
+        const fillGlyphs = (root) =>
+          root.querySelectorAll("[data-glyph]").forEach((el) => {
+            el.innerHTML = glyph(el.dataset.glyph, Number(el.dataset.size ?? 15))
+            el.style.display = "inline-grid"
+            el.style.placeItems = "center"
+          })
+
+        const esc = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        const fmt = (s) => {
+          if (s < 60) return `${s}s`
+          if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
+          return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`
+        }
+        const money = (n) => `$${n.toFixed(2)}`
+        const tokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${(n / 1e3).toFixed(1)}k`)
+        const clock = (base, plus) => {
+          const [h, m, s] = base.split(":").map(Number)
+          const t = h * 3600 + m * 60 + s + plus
+          return [Math.floor(t / 3600) % 24, Math.floor((t % 3600) / 60), t % 60].map((v) => String(v).padStart(2, "0")).join(":")
+        }
+
+        const RUNNER = {
+          cloud: { name: "Vector Cloud", where: "us-east · 4 vCPU · 8 GB", glyph: "cloud" },
+          actions: { name: "GitHub Actions", where: "ubuntu-latest · vector.yml", glyph: "actions" },
+        }
+
+        // ---- sample runs, grounded in the Vectordev.ai repository ----
+        const runs = [
+          {
+            id: "r1",
+            title: "Fix flaky session recovery test",
+            branch: "session-recovery",
+            runner: "cloud",
+            model: "GPT-6 Sol",
+            status: "running",
+            elapsed: 862,
+            cost: 0.62,
+            cap: 5,
+            tokens: 1840000,
+            startedAt: "18:02:11",
+            origin: { from: "laptop", at: "18:02", moved: "18:04", why: "when the lid closed" },
+            files: [
+              { dir: "packages/engine/src/session/", name: "run-coordinator.ts", add: 22, del: 4, diff: ["@@ -88,4 +88,9 @@ export function wake(sessionID: SessionID) {", "-  queueMicrotask(() => drain(sessionID))", "+  // Wait for the admit transaction: a wake that fires before the", "+  // inbox row commits drains nothing and the Session goes idle.", "+  pending.add(sessionID)", "+  return Database.afterCommit(() => drain(sessionID))", " }"], more: "2 more hunks" },
+              { dir: "packages/engine/src/session/", name: "execution.ts", add: 38, del: 11, diff: ["@@ -142,3 +142,5 @@ const drainOnce = Effect.fn(function* (sessionID) {", "   const rows = yield* inbox.eligible(sessionID)", "-  if (rows.length === 0) return yield* idle(sessionID)", "+  if (rows.length === 0 && !pending.has(sessionID)) return yield* idle(sessionID)", "+  pending.delete(sessionID)"], more: "3 more hunks" },
+              { dir: "packages/engine/test/session/", name: "recovery.test.ts", add: 41, del: 9, diff: ["@@ -12,4 +12,6 @@ describe(\"session recovery\", () => {", "-  await Bun.sleep(50)", "+  // A fixed clock instead of a sleep, so the drain order is", "+  // the same on a loaded CI runner as on a laptop.", "+  const clock = testClock()", "   await admit(session, prompt)"], more: "36 more lines" },
+            ],
+            checks: [
+              { name: "Typecheck", scope: "packages/engine", status: "done", time: "41s" },
+              { name: "Session tests ×50", scope: "bun test test/session --rerun-each 50", status: "running", time: "" },
+              { name: "Full engine suite", scope: "bun test packages/engine", status: "pending", time: "" },
+            ],
+            steps: [
+              { t: "18:02:11", kind: "play", title: "Started on this laptop", sub: "The session recovery test fails about one run in five on CI. Find out why and fix it without adding sleeps." },
+              { t: "18:02:40", kind: "doc", title: "Read 9 files", sub: "AGENTS.md, session/execution.ts, session/run-coordinator.ts, test/session/recovery.test.ts and 5 more", end: "29s" },
+              { t: "18:03:55", kind: "terminal", title: "Ran <code>bun test test/session/recovery.test.ts --rerun-each 20</code>", sub: "17 pass · 3 fail, always on “drains admitted input after restart”", end: "1m 15s", log: ["$ bun test test/session/recovery.test.ts --rerun-each 20", "bun test v1.3.14", "(fail) session recovery > drains admitted input after restart [212.40ms]", "  Expected: \"busy\"   Received: \"idle\"", "17 pass", "3 fail"] },
+              { t: "18:04:02", kind: "cloud", type: "handoff", title: "Moved to Vector Cloud", sub: "Your laptop went to sleep. The session, its branch and 3 open tool results moved with it." },
+              { t: "18:05:30", kind: "spark", title: "Found the race", sub: "The wake can fire before the inbox row commits, so the drain sees nothing and the Session goes idle." },
+              { t: "18:07:12", kind: "pencil", title: "Edited <code>run-coordinator.ts</code>", sub: '<span class="add">+22</span> <span class="del">−4</span> · wake after the admit transaction commits' },
+              { t: "18:09:48", kind: "pencil", title: "Edited <code>execution.ts</code>", sub: '<span class="add">+38</span> <span class="del">−11</span> · a pending wake keeps the drain from going idle' },
+              { t: "18:12:30", kind: "pencil", title: "Edited <code>recovery.test.ts</code>", sub: '<span class="add">+41</span> <span class="del">−9</span> · a fixed test clock instead of <code>Bun.sleep</code>' },
+              { t: "18:14:05", kind: "terminal", title: "Ran <code>bun typecheck</code> in packages/engine", sub: "No errors", end: "41s", log: ["$ cd packages/engine && bun typecheck", "$ tsgo --noEmit", "Done in 41.2s"] },
+              { t: "18:15:51", kind: "terminal", state: "running", title: "Running <code>bun test test/session --rerun-each 50</code>", sub: "50 runs of every session test, to be sure the race is gone", log: ["$ bun test test/session --rerun-each 50", "bun test v1.3.14", "test/session/recovery.test.ts:"] },
+            ],
+            queue: [
+              { kind: "terminal", title: "Ran <code>bun test test/session --rerun-each 50</code>", sub: "2,150 pass · 0 fail across 50 runs", end: "48s", replace: true, check: [1, "done", "48s"], log: ["(pass) session recovery > drains admitted input after restart ×50", "2150 pass", "0 fail", "Ran 2150 tests across 6 files. [48.02s]"] },
+              { kind: "pencil", title: "Added <code>test/fixture/clock.ts</code>", sub: '<span class="add">+17</span> <span class="del">−0</span> · shared by the two other suites that slept', file: { dir: "packages/engine/test/fixture/", name: "clock.ts", add: 17, del: 0, diff: ["@@ -0,0 +1,17 @@", "+export function testClock(start = 0) {", "+  let now = start", "+  return { now: () => now, tick: (ms: number) => (now += ms) }"], more: "13 more lines" } },
+              { kind: "terminal", state: "running", title: "Running <code>bun test</code> in packages/engine", sub: "The full suite, before opening a pull request", check: [2, "running", ""], log: ["$ cd packages/engine && bun test"] },
+              { kind: "terminal", title: "Ran <code>bun test</code> in packages/engine", sub: "1,284 pass · 0 fail", end: "38s", replace: true, check: [2, "done", "38s"], log: ["1284 pass", "0 fail", "Ran 1284 tests across 211 files. [38.10s]"] },
+              { kind: "pulls", type: "pr", title: "Opened draft pull request #2490", sub: "fix(core): wake the drain after the admit commits", finish: "done" },
+            ],
+          },
+          {
+            id: "r2",
+            title: "Keep transcript scroll on card expand",
+            branch: "fix-scroll-state",
+            runner: "actions",
+            model: "GPT-6 Astra",
+            status: "running",
+            elapsed: 365,
+            cost: 0.21,
+            cap: 3,
+            tokens: 612400,
+            startedAt: "18:10:28",
+            origin: { from: "issue", at: "18:10", label: "Issue #2431", why: "from an @vector comment" },
+            files: [
+              { dir: "packages/app/src/pages/session/", name: "timeline.tsx", add: 31, del: 14, diff: ["@@ -204,3 +204,6 @@ function onSizeChange(partID: string) {", "-  list.scrollToIndex(index)", "+  // Keep the reader's anchor still while a card grows above it.", "+  const anchor = list.anchor()", "+  list.restore(anchor)"], more: "4 more hunks" },
+              { dir: "packages/app/src/features/background-tasks/", name: "subagent-task-chip.tsx", add: 6, del: 2, diff: ["@@ -28,2 +28,3 @@ createEffect(", "-      () => props.onSizeChange?.(),", "+      () => requestAnimationFrame(() => props.onSizeChange?.()),"], more: "1 more hunk" },
+            ],
+            checks: [
+              { name: "Typecheck", scope: "packages/app", status: "running", time: "" },
+              { name: "Unit tests", scope: "bun test packages/app", status: "pending", time: "" },
+              { name: "App build", scope: "bun run build", status: "pending", time: "" },
+            ],
+            steps: [
+              { t: "18:10:28", kind: "actions", title: "Started from issue #2431", sub: "@vector fix this: the transcript jumps when a subagent card expands under the reading position." },
+              { t: "18:11:02", kind: "doc", title: "Read 6 files", sub: "session/timeline.tsx, background-tasks/subagent-task-chip.tsx and 4 more", end: "34s" },
+              { t: "18:12:40", kind: "spark", title: "Cause", sub: "The chip reports its new size before layout, so the list re-anchors to the old height." },
+              { t: "18:14:18", kind: "pencil", title: "Edited <code>timeline.tsx</code>", sub: '<span class="add">+31</span> <span class="del">−14</span>' },
+              { t: "18:15:01", kind: "pencil", title: "Edited <code>subagent-task-chip.tsx</code>", sub: '<span class="add">+6</span> <span class="del">−2</span>' },
+              { t: "18:15:40", kind: "terminal", state: "running", title: "Running <code>bun typecheck</code> in packages/app", sub: "Runner job #1184 on ubuntu-latest", log: ["$ cd packages/app && bun typecheck", "$ tsgo --noEmit"] },
+            ],
+            queue: [
+              { kind: "terminal", title: "Ran <code>bun typecheck</code> in packages/app", sub: "No errors", end: "52s", replace: true, check: [0, "done", "52s"], log: ["Done in 52.4s"] },
+              { kind: "terminal", state: "running", title: "Running <code>bun test</code> in packages/app", sub: "Timeline and chip tests", check: [1, "running", ""], log: ["$ cd packages/app && bun test"] },
+              { kind: "terminal", title: "Ran <code>bun test</code> in packages/app", sub: "412 pass · 0 fail", end: "21s", replace: true, check: [1, "done", "21s"], log: ["412 pass", "0 fail"] },
+            ],
+          },
+          {
+            id: "r3",
+            title: "Add tests for workspace trust",
+            branch: "trust-tests",
+            runner: "cloud",
+            model: "GPT-6 Sol",
+            status: "running",
+            elapsed: 1900,
+            cost: 1.48,
+            cap: 5,
+            tokens: 3920000,
+            startedAt: "17:44:53",
+            origin: { from: "laptop", at: "17:44", moved: "17:52", why: "when you shut down" },
+            files: [
+              { dir: "packages/engine/test/project/", name: "trust.test.ts", add: 96, del: 0, diff: ["@@ -0,0 +1,96 @@", "+test(\"a changed fingerprint revokes trust\", async () => {", "+  const project = await fixture({ trusted: true })", "+  await project.write(\"vector.json\", \"{}\")", "+  expect(trusted(project)).toBe(false)"], more: "91 more lines" },
+              { dir: "packages/engine/test/mcp/", name: "launch.test.ts", add: 58, del: 0, diff: ["@@ -0,0 +1,58 @@", "+test(\"project MCP servers wait for trust\", async () => {"], more: "57 more lines" },
+              { dir: "packages/engine/test/project/", name: "fixture.ts", add: 34, del: 2, diff: ["@@ -9,2 +9,4 @@ export async function fixture(input: FixtureInput) {", "+  if (input.symlink) await symlink(input.symlink, path.join(dir, \"vector.json\"))"], more: "1 more hunk" },
+            ],
+            checks: [
+              { name: "Typecheck", scope: "packages/engine", status: "done", time: "39s" },
+              { name: "Trust tests", scope: "bun test test/project", status: "running", time: "" },
+            ],
+            steps: [
+              { t: "17:44:53", kind: "play", title: "Started on this laptop", sub: "Cover workspace trust: first open, a changed fingerprint, a declined prompt and a symlinked config." },
+              { t: "17:52:10", kind: "cloud", type: "handoff", title: "Moved to Vector Cloud", sub: "You shut down. The run carried on from the same step." },
+              { t: "18:03:22", kind: "pencil", title: "Wrote <code>trust.test.ts</code>", sub: '<span class="add">+96</span> · 9 tests' },
+              { t: "18:09:40", kind: "pencil", title: "Wrote <code>launch.test.ts</code>", sub: '<span class="add">+58</span> · 4 tests' },
+              { t: "18:15:12", kind: "terminal", state: "running", title: "Running <code>bun test test/project</code>", sub: "13 new tests", log: ["$ bun test test/project"] },
+            ],
+            queue: [
+              { kind: "terminal", title: "Ran <code>bun test test/project</code>", sub: "13 pass · 0 fail", end: "3.1s", replace: true, check: [1, "done", "3.1s"], log: ["13 pass", "0 fail"] },
+            ],
+          },
+          {
+            id: "r4",
+            title: "Refresh the free model list",
+            branch: "openrouter-free",
+            runner: "cloud",
+            model: "GPT-6 Luna",
+            status: "paused",
+            elapsed: 1330,
+            cost: 2.0,
+            cap: 2,
+            tokens: 5210000,
+            startedAt: "17:31:06",
+            origin: { from: "phone", at: "17:31", label: "Vector on iPhone", why: "from your phone" },
+            files: [
+              { dir: "packages/engine/src/provider/", name: "openrouter.ts", add: 44, del: 18, diff: ["@@ -61,3 +61,5 @@ export function eligible(model: OpenRouterModel) {", "   if (!model.pricing) return false", "+  // Zero-price and tool-capable, in OpenRouter's ZDR list.", "+  return isFree(model.pricing) && model.tools && zdr.has(model.endpoint)"], more: "3 more hunks" },
+              { dir: "packages/engine/src/provider/models/", name: "free.json", add: 212, del: 97, diff: ["@@ -1,4 +1,4 @@", "-  \"generatedAt\": \"2026-09-12\",", "+  \"generatedAt\": \"2026-10-07\","], more: "305 more lines" },
+            ],
+            checks: [
+              { name: "Typecheck", scope: "packages/engine", status: "done", time: "44s" },
+              { name: "Provider tests", scope: "bun test test/provider", status: "pending", time: "" },
+            ],
+            steps: [
+              { t: "17:31:06", kind: "note", title: "Started from your phone", sub: "Refresh the free OpenRouter models and drop any that lost tool support." },
+              { t: "17:36:30", kind: "doc", title: "Fetched 318 models from OpenRouter", sub: "41 zero-price, 23 tool-capable, 19 in the ZDR list" },
+              { t: "17:47:02", kind: "pencil", title: "Edited <code>openrouter.ts</code>", sub: '<span class="add">+44</span> <span class="del">−18</span>' },
+              { t: "17:52:44", kind: "pencil", title: "Regenerated <code>free.json</code>", sub: '<span class="add">+212</span> <span class="del">−97</span>' },
+              { t: "17:53:16", kind: "pause", type: "pause", title: "Paused at the $2.00 budget cap", sub: "Step 41. About 6 steps left: provider tests and a pull request." },
+            ],
+            queue: [
+              { kind: "terminal", state: "running", title: "Running <code>bun test test/provider</code>", sub: "Resumed with a $5.00 cap", check: [1, "running", ""], log: ["$ bun test test/provider"] },
+              { kind: "terminal", title: "Ran <code>bun test test/provider</code>", sub: "88 pass · 0 fail", end: "6.2s", replace: true, check: [1, "done", "6.2s"], log: ["88 pass", "0 fail"] },
+            ],
+          },
+          {
+            id: "r5",
+            title: "Regenerate SDK types",
+            branch: "regenerate-sdk",
+            runner: "actions",
+            model: "GPT-6 Sol",
+            status: "done",
+            elapsed: 552,
+            cost: 0.34,
+            cap: 3,
+            tokens: 488000,
+            startedAt: "16:20:44",
+            pr: 2481,
+            origin: { from: "laptop", at: "16:20", moved: "16:21", why: "sent straight to the cloud" },
+            files: [
+              { dir: "packages/client/src/generated/", name: "types.gen.ts", add: 418, del: 377, diff: ["@@ -1022,3 +1022,4 @@ export type SessionInfo = {", "   id: string", "+  location?: Location"], more: "61 more hunks" },
+              { dir: "packages/sdk/js/", name: "index.ts", add: 4, del: 1, diff: ["@@ -3,1 +3,4 @@", "-export * from \"./v1\"", "+export * from \"./v1\""], more: "1 more hunk" },
+            ],
+            checks: [
+              { name: "Typecheck", scope: "packages/client", status: "done", time: "33s" },
+              { name: "Generated is current", scope: "bun run generate --check", status: "done", time: "12s" },
+            ],
+            steps: [
+              { t: "16:20:44", kind: "play", title: "Started on this laptop", sub: "Regenerate the client after the protocol change." },
+              { t: "16:21:30", kind: "actions", type: "handoff", title: "Sent to GitHub Actions", sub: "Job #1179 on ubuntu-latest" },
+              { t: "16:24:12", kind: "terminal", title: "Ran <code>bun run generate</code> in packages/client", sub: "12 files regenerated", end: "1m 02s" },
+              { t: "16:28:50", kind: "terminal", title: "Ran <code>./packages/sdk/js/script/build.ts</code>", sub: "Legacy SDK rebuilt", end: "48s" },
+              { t: "16:29:56", kind: "pulls", type: "pr", title: "Opened draft pull request #2481", sub: "chore(sdk): regenerate types" },
+            ],
+            queue: [],
+          },
+          {
+            id: "r6",
+            title: "Bump Electron to 39",
+            branch: "electron-39",
+            runner: "cloud",
+            model: "GPT-6 Astra",
+            status: "failed",
+            elapsed: 768,
+            cost: 0.57,
+            cap: 5,
+            tokens: 921000,
+            startedAt: "15:48:02",
+            origin: { from: "laptop", at: "15:48", moved: "15:55", why: "when the lid closed" },
+            files: [
+              { dir: "packages/desktop/", name: "package.json", add: 2, del: 2, diff: ["@@ -41,2 +41,2 @@", "-    \"electron\": \"38.4.0\",", "+    \"electron\": \"39.1.2\","], more: "1 more hunk" },
+              { dir: "packages/desktop/src/main/", name: "window.ts", add: 9, del: 6, diff: ["@@ -77,3 +77,3 @@ export function createWindow() {", "-    vibrancy: \"under-window\",", "+    backgroundMaterial: \"acrylic\","], more: "2 more hunks" },
+            ],
+            checks: [
+              { name: "Typecheck", scope: "packages/desktop", status: "failed", time: "29s" },
+              { name: "Desktop build", scope: "bun run build", status: "pending", time: "" },
+            ],
+            steps: [
+              { t: "15:48:02", kind: "play", title: "Started on this laptop", sub: "Move the desktop app to Electron 39 and fix what breaks." },
+              { t: "15:55:40", kind: "cloud", type: "handoff", title: "Moved to Vector Cloud", sub: "Your laptop went to sleep." },
+              { t: "15:58:31", kind: "pencil", title: "Edited <code>window.ts</code>", sub: '<span class="add">+9</span> <span class="del">−6</span>' },
+              { t: "16:00:44", kind: "fail", type: "fail", title: "<code>bun typecheck</code> failed in packages/desktop", sub: "3 errors in src/main/window.ts: BrowserWindowConstructorOptions changed shape", log: ["$ cd packages/desktop && bun typecheck", "src/main/window.ts(79,5): error TS2353: Object literal may only specify known properties", "Found 3 errors."] },
+            ],
+            queue: [],
+          },
+          {
+            id: "r7",
+            title: "Draft trusted folders docs",
+            branch: "trusted-docs",
+            runner: "actions",
+            model: "GPT-6 Luna",
+            status: "stopped",
+            elapsed: 182,
+            cost: 0.08,
+            cap: 2,
+            tokens: 96000,
+            startedAt: "15:12:20",
+            origin: { from: "laptop", at: "15:12", moved: "15:12", why: "sent straight to the cloud" },
+            files: [],
+            checks: [],
+            steps: [
+              { t: "15:12:20", kind: "play", title: "Started on this laptop", sub: "Write a docs page for trusted folders." },
+              { t: "15:13:02", kind: "doc", title: "Read 4 files", sub: "packages/web/src/pages/docs and the trust prompt copy" },
+              { t: "15:15:22", kind: "stop", title: "Stopped by you", sub: "The note went into the release notes instead." },
+            ],
+            queue: [],
+          },
+        ]
+
+        const ACTIVE = ["running", "starting"]
+        const groupOf = (run) =>
+          ACTIVE.includes(run.status) ? "running" : run.status === "paused" ? "needs" : run.status === "local" ? "local" : "finished"
+        const WORD = {
+          running: "Running",
+          starting: "Starting",
+          paused: "Needs you",
+          done: "Done",
+          failed: "Failed",
+          stopped: "Stopped",
+          local: "On this laptop",
+        }
+
+        let selected = "r1"
+        let filter = "all"
+        let tab = "timeline"
+        let usage = 23.18
+
+        const listEl = stage.querySelector("[data-runs]")
+        const detailEl = stage.querySelector("[data-detail]")
+        const byId = (id) => runs.find((run) => run.id === id)
+
+        // ---- the runs list ----
+        function renderList() {
+          const focusedId = document.activeElement?.closest?.("[data-run]")?.dataset.run
+          const groups = [
+            ["running", "Running"],
+            ["needs", "Needs you"],
+            ["local", "Moved to this laptop"],
+            ["finished", "Finished today"],
+          ]
+          const visible = (key) => filter === "all" || filter === key || (filter === "finished" && key === "local")
+          const html = groups
+            .filter(([key]) => visible(key))
+            .map(([key, label]) => {
+              const items = runs.filter((run) => groupOf(run) === key)
+              if (items.length === 0) return ""
+              return `<div class="vc-group"><p class="vc-group-label"><span>${label}</span><span>${items.length}</span></p>${items.map(rowHtml).join("")}</div>`
+            })
+            .join("")
+          listEl.innerHTML = html || `<p class="vc-empty">No runs here.</p>`
+          ;["all", "running", "needs", "finished"].forEach((key) => {
+            const n =
+              key === "all"
+                ? runs.length
+                : runs.filter((run) => groupOf(run) === key || (key === "finished" && groupOf(run) === "local")).length
+            stage.querySelector(`[data-count="${key}"]`).textContent = n
+          })
+          if (focusedId) listEl.querySelector(`[data-run="${focusedId}"]`)?.focus({ preventScroll: true })
+        }
+
+        function rowHtml(run) {
+          const r = RUNNER[run.runner]
+          return `<button class="vc-run" type="button" data-run="${run.id}" data-status="${run.status}" aria-current="${run.id === selected}">
+            <span class="vc-mark" aria-hidden="true"></span>
+            <span class="vc-run-text">
+              <span class="vc-run-name">${esc(run.title)}</span>
+              <span class="vc-run-sub"><span class="mono">${run.branch}</span><span>·</span>${glyph(r.glyph, 12)}<span>${run.status === "local" ? "This laptop" : r.name}</span></span>
+            </span>
+            <span class="vc-run-end"><span data-tick-time="${run.id}">${fmt(run.elapsed)}</span><span data-tick-cost="${run.id}">${money(run.cost)}</span></span>
+            <span class="vc-sr">${WORD[run.status]}</span>
+          </button>`
+        }
+
+        listEl.addEventListener("click", (event) => {
+          const row = event.target.closest("[data-run]")
+          if (!row) return
+          select(row.dataset.run)
+        })
+        listEl.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+          const rows = [...listEl.querySelectorAll("[data-run]")]
+          const at = rows.indexOf(document.activeElement)
+          if (at < 0) return
+          event.preventDefault()
+          const next = rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))]
+          next.focus()
+          select(next.dataset.run)
+        })
+
+        stage.querySelector("[data-filters]").addEventListener("click", (event) => {
+          const button = event.target.closest("[data-filter]")
+          if (!button) return
+          filter = button.dataset.filter
+          stage.querySelectorAll("[data-filter]").forEach((b) => b.setAttribute("aria-selected", String(b === button)))
+          renderList()
+        })
+
+        function select(id) {
+          selected = id
+          listEl.querySelectorAll("[data-run]").forEach((row) => row.setAttribute("aria-current", String(row.dataset.run === id)))
+          renderDetail()
+        }
+
+        // ---- the detail ----
+        function journeyHtml(run) {
+          const r = RUNNER[run.runner]
+          const o = run.origin
+          const startIcon = o.from === "issue" ? "repo" : o.from === "phone" ? "note" : "laptop"
+          const startName = o.label ?? "This laptop"
+          const local = run.status === "local"
+          const note =
+            run.status === "local"
+              ? "Moved back here at the step it had reached. The cloud machine was released."
+              : ACTIVE.includes(run.status) || run.status === "paused"
+                ? o.why === "sent straight to the cloud"
+                  ? `Sent straight to the cloud from this laptop at ${o.at}. It keeps going while this laptop sleeps.`
+                  : o.from === "laptop"
+                  ? `Started here at ${o.at}, moved to the cloud at ${o.moved} ${o.why}. It keeps going while this laptop sleeps.`
+                  : `Started ${o.why} at ${o.at}. This laptop never had to be awake.`
+                : `Ran ${o.from === "laptop" ? `from ${o.at}` : o.why} and released its machine when it ${run.status === "done" ? "finished" : run.status === "failed" ? "failed" : "stopped"}.`
+          return `<div class="vc-journey" aria-label="Where this run has been">
+            <span class="vc-hop"><span class="vc-hop-icon">${glyph(startIcon, 14)}</span><b>${startName}</b><time>${o.at}</time></span>
+            <span class="vc-link" ${!local ? "data-on" : ""}></span>
+            <span class="vc-hop" ${!local ? "data-on" : ""}><span class="vc-hop-icon">${glyph(r.glyph, 14)}</span><b>${r.name}</b><time>${o.moved ?? o.at}</time></span>
+            ${local ? `<span class="vc-link" data-on></span><span class="vc-hop" data-on><span class="vc-hop-icon">${glyph("laptop", 14)}</span><b>This laptop</b><time>now</time></span>` : ""}
+            <span class="vc-journey-note">${note}</span>
+          </div>`
+        }
+
+        function calloutHtml(run) {
+          if (run.status === "paused")
+            return `<div class="vc-callout">${glyph("coin", 16)}<div class="vc-callout-text"><b>Paused at its ${money(run.cap)} budget cap</b><span>Step 41 of about 47. It stopped at a safe point; nothing is half-written.</span></div><button class="btn btn-sm" type="button" data-raise>Raise cap to $5</button></div>`
+          if (run.status === "failed")
+            return `<div class="vc-callout" data-tone="red">${glyph("warn", 16)}<div class="vc-callout-text"><b>Failed on <code>bun typecheck</code> in packages/desktop</b><span>3 errors in src/main/window.ts. The branch has the work so far.</span></div><button class="btn btn-sm" type="button" data-retry>Retry in the cloud</button></div>`
+          if (run.status === "done")
+            return `<div class="vc-callout" data-tone="green">${glyph("check", 16)}<div class="vc-callout-text"><b>Finished · draft pull request #${run.pr}</b><span>${run.id === "r1" ? "fix(core): wake the drain after the admit commits" : "chore(sdk): regenerate types"}</span></div><button class="btn btn-sm" type="button">${glyph("external", 13)}Open pull request</button></div>`
+          if (run.status === "local")
+            return `<div class="vc-callout" data-tone="blue">${glyph("laptop", 16)}<div class="vc-callout-text"><b>Continuing on this laptop</b><span>Workspace <code>${run.branch}</code> is open with the full session. Send it back to the cloud any time.</span></div><button class="btn btn-sm" type="button" data-back>Send back to the cloud</button></div>`
+          if (run.status === "stopped")
+            return `<div class="vc-callout" data-tone="muted">${glyph("stop", 15)}<div class="vc-callout-text"><b>Stopped by you at 15:15</b><span>Its branch keeps what it wrote. Continue it here or start it again.</span></div></div>`
+          return ""
+        }
+
+        let shown = null
+        function renderDetail() {
+          const run = byId(selected)
+          // A re-render of the same run keeps what the reader opened or typed.
+          const same = shown === run.id
+          const opened = same ? [...detailEl.querySelectorAll('[data-file][aria-expanded="true"]')].map((b) => b.dataset.file) : []
+          const draft = same ? (detailEl.querySelector("[data-steer-input]")?.value ?? "") : ""
+          const typing = same && document.activeElement?.matches?.("[data-steer-input]")
+          shown = run.id
+          const r = RUNNER[run.runner]
+          const live = ACTIVE.includes(run.status)
+          const canContinue = run.status !== "local" && run.status !== "stopped"
+          const pct = Math.min(100, (run.cost / run.cap) * 100)
+          const add = run.files.reduce((sum, f) => sum + f.add, 0)
+          const del = run.files.reduce((sum, f) => sum + f.del, 0)
+          const passed = run.checks.filter((c) => c.status === "done").length
+          detailEl.innerHTML = `
+            <div class="vc-dhead">
+              <div class="vc-dtitle">
+                <h3>${esc(run.title)}</h3>
+                <span class="vc-state" data-status="${run.status}"><span class="vc-mark" data-status="${run.status}"></span>${WORD[run.status]}</span>
+                <div class="vc-dactions">
+                  <button class="btn vc-continue" type="button" data-continue ${canContinue ? "" : "disabled"}>${glyph("laptop", 14)}${run.status === "local" ? "Open session" : "Continue on this laptop"}</button>
+                  ${live ? `<button class="btn" type="button" data-stop>${glyph("stop", 14)}Stop</button>` : ""}
+                  <button class="icon-btn" type="button" aria-label="More actions">${glyph("dots", 16)}</button>
+                </div>
+              </div>
+              <p class="vc-dmeta">
+                <span class="vc-branch">${glyph("branch", 12)}${run.branch}<span class="vc-base">← main</span></span>
+                <span>${glyph(r.glyph, 13)}${r.name} · ${r.where}</span>
+                <span>${glyph("model", 13)}${run.model}</span>
+                <span>${glyph("clock", 13)}Started ${run.startedAt.slice(0, 5)}</span>
+              </p>
+              <div class="vc-stats">
+                <div class="vc-stat"><span class="vc-stat-label">Elapsed</span><span class="vc-stat-value" data-d="elapsed">${fmt(run.elapsed)}</span></div>
+                <div class="vc-stat"><span class="vc-stat-label">Spent of budget</span><span class="vc-stat-value"><span data-d="cost">${money(run.cost)}</span><small>of ${money(run.cap)}</small></span><span class="vc-meter" ${pct >= 100 ? 'data-tone="amber"' : ""} aria-hidden="true"><i data-d="bar" style="width:${pct}%"></i></span></div>
+                <div class="vc-stat"><span class="vc-stat-label">Tokens</span><span class="vc-stat-value" data-d="tokens">${tokens(run.tokens)}</span></div>
+                <div class="vc-stat"><span class="vc-stat-label">Changes</span><span class="vc-stat-value"><span data-d="files">${run.files.length} files</span><small class="add" data-d="add">+${add}</small><small class="del" data-d="del">−${del}</small></span></div>
+              </div>
+              ${journeyHtml(run)}
+              ${calloutHtml(run)}
+            </div>
+            <div class="tabs" role="tablist" aria-label="Run detail">
+              ${[
+                ["timeline", "Timeline", run.steps.length],
+                ["log", "Log", null],
+                ["changes", "Changes", run.files.length],
+                ["checks", "Checks", run.checks.length ? `${passed}/${run.checks.length}` : null],
+              ]
+                .map(([key, label, n]) => `<button class="tab" role="tab" type="button" aria-selected="${tab === key}" data-tab-key="${key}">${label}${n !== null ? ` <span class="count" data-n="${key}">${n}</span>` : ""}</button>`)
+                .join("")}
+              <span class="vc-tabs-end">${live ? `<span class="dot dot-violet"></span>Live` : ""}</span>
+            </div>
+            <div class="vc-panel scroll" data-panel-key="timeline" ${tab === "timeline" ? "" : "hidden"}><ol class="vc-steps" data-steps>${run.steps.map(stepHtml).join("")}</ol></div>
+            <div class="vc-panel scroll" data-panel-key="log" ${tab === "log" ? "" : "hidden"} style="background:#15141a"><pre class="vc-log" data-log>${logHtml(run)}</pre></div>
+            <div class="vc-panel scroll" data-panel-key="changes" ${tab === "changes" ? "" : "hidden"}>${changesHtml(run)}</div>
+            <div class="vc-panel scroll" data-panel-key="checks" ${tab === "checks" ? "" : "hidden"}>${checksHtml(run)}</div>
+            <div class="vc-steer">
+              <form class="vc-steer-box" data-steer>
+                ${glyph("note", 15)}
+                <input data-steer-input placeholder="${live ? "Steer this run. It reads your note before its next step…" : run.status === "paused" ? "Add a note for when it resumes…" : run.status === "local" ? "This run continues in your local workspace. Open the session to keep going." : "This run has ended. Continue it on this laptop to keep going."}" ${live || run.status === "paused" ? "" : "disabled"} aria-label="Note for this run" autocomplete="off" />
+                <button class="vc-send" type="submit" aria-label="Send note" disabled>${glyph("up", 15)}</button>
+              </form>
+              <p class="vc-steer-hint">${live ? "Notes reach the cloud machine in about a second. You'll get a push notification if it needs you." : "&nbsp;"}</p>
+            </div>`
+          opened.forEach((index) => {
+            const file = detailEl.querySelector(`[data-file="${index}"]`)
+            if (!file) return
+            file.setAttribute("aria-expanded", "true")
+            file.nextElementSibling.hidden = false
+          })
+          const input = detailEl.querySelector("[data-steer-input]")
+          if (draft && !input.disabled) {
+            input.value = draft
+            detailEl.querySelector(".vc-send").disabled = false
+          }
+          if (typing && !input.disabled) input.focus({ preventScroll: true })
+          scrollTimeline()
+        }
+
+        function stepHtml(step) {
+          const icon = step.state === "running" ? "spin" : step.kind
+          return `<li class="vc-step" data-kind="${step.type ?? step.kind}" data-state="${step.state ?? "done"}" ${step.isNew ? "data-new" : ""}>
+            <time>${step.t}</time>
+            <span class="vc-step-icon">${glyph(icon, 14)}</span>
+            <span class="vc-step-text"><span class="vc-step-title">${step.title}</span>${step.sub ? `<span class="vc-step-sub">${step.sub}</span>` : ""}</span>
+            <span class="vc-step-end" ${step.state === "running" ? 'data-d="step"' : ""}>${step.state === "running" ? fmt(step.secs ?? 0) : (step.end ?? "")}</span>
+          </li>`
+        }
+
+        function logHtml(run) {
+          const lines = [
+            `<span class="l-dim">vector cloud · ${RUNNER[run.runner].name} · ${RUNNER[run.runner].where}</span>`,
+            `<span class="l-dim">$ git clone github.com/Vectordev/Vectordev.ai && git checkout -b ${run.branch} origin/main</span>`,
+            `<span class="l-dim">$ bun install</span>`,
+            `<span class="l-dim">1,812 packages installed [9.84s]</span>`,
+          ]
+          run.steps.forEach((step) =>
+            (step.log ?? []).forEach((line) => {
+              const cls = line.startsWith("$") ? "l-cmd" : /fail|error/i.test(line) && !/^0 fail/.test(line) ? "l-bad" : /pass|Done/.test(line) ? "l-ok" : ""
+              lines.push(cls ? `<span class="${cls}">${esc(line)}</span>` : esc(line))
+            }),
+          )
+          if (ACTIVE.includes(run.status)) lines.push('<span class="vc-caret"></span>')
+          return lines.join("\n")
+        }
+
+        function changesHtml(run) {
+          if (run.files.length === 0) return `<p class="vc-empty">No changes yet.</p>`
+          const add = run.files.reduce((sum, f) => sum + f.add, 0)
+          const del = run.files.reduce((sum, f) => sum + f.del, 0)
+          return `<div class="vc-changes">
+            <p class="vc-changes-sum"><span>${run.files.length} files changed on <span class="mono" style="font-size:12px">${run.branch}</span></span><span class="add">+${add}</span><span class="del">−${del}</span></p>
+            <ul>${run.files
+              .map(
+                (file, index) => `<li>
+                  <button class="vc-file" type="button" aria-expanded="false" data-file="${index}">
+                    <span class="vc-chev">${glyph("chevron-right", 14)}</span>
+                    <span class="vc-file-name">${file.name}<span>${file.dir}</span></span>
+                    <span class="add">+${file.add}</span><span class="del">−${file.del}</span>
+                  </button>
+                  <div class="vc-diff" hidden>${file.diff
+                    .map((line) => `<code class="${line.startsWith("@@") ? "is-hunk" : line.startsWith("+") ? "is-add" : line.startsWith("-") ? "is-del" : ""}">${esc(line)}</code>`)
+                    .join("")}<code class="is-more">⋯ ${file.more}</code></div>
+                </li>`,
+              )
+              .join("")}</ul>
+          </div>`
+        }
+
+        function checksHtml(run) {
+          if (run.checks.length === 0) return `<p class="vc-empty">No checks ran.</p>`
+          const word = { done: "Passed", running: "Running", pending: "Waiting", failed: "Failed" }
+          const mark = { done: "done", running: "running", pending: "", failed: "failed" }
+          return `<div class="vc-checks">${run.checks
+            .map(
+              (c) => `<div class="vc-check" data-status="${c.status}">
+                <span class="vc-mark" data-status="${mark[c.status]}"></span>
+                <span class="vc-check-name">${c.name}<span>${c.scope}</span></span>
+                <span class="vc-check-end">${word[c.status]}${c.time ? ` · ${c.time}` : ""}</span>
+              </div>`,
+            )
+            .join("")}</div>`
+        }
+
+        function scrollTimeline() {
+          const panel = detailEl.querySelector('[data-panel-key="timeline"]')
+          if (panel) panel.scrollTop = panel.scrollHeight
+          const log = detailEl.querySelector('[data-panel-key="log"]')
+          if (log) log.scrollTop = log.scrollHeight
+        }
+
+        detailEl.addEventListener("click", (event) => {
+          const tabButton = event.target.closest("[data-tab-key]")
+          if (tabButton) {
+            tab = tabButton.dataset.tabKey
+            detailEl.querySelectorAll("[data-tab-key]").forEach((b) => b.setAttribute("aria-selected", String(b === tabButton)))
+            detailEl.querySelectorAll("[data-panel-key]").forEach((p) => (p.hidden = p.dataset.panelKey !== tab))
+            scrollTimeline()
+            return
+          }
+          const file = event.target.closest("[data-file]")
+          if (file) {
+            const open = file.getAttribute("aria-expanded") !== "true"
+            file.setAttribute("aria-expanded", String(open))
+            file.nextElementSibling.hidden = !open
+            return
+          }
+          const run = byId(selected)
+          if (event.target.closest("[data-continue]")) {
+            if (run.status === "local") return toast("laptop", "Opened workspace " + run.branch, "The session is in the sidebar under Vectordev.ai")
+            return openDialog(run)
+          }
+          if (event.target.closest("[data-stop]")) {
+            run.status = "stopped"
+            run.steps.forEach((s) => s.state === "running" && ((s.state = "done"), (s.end = fmt(s.secs ?? 0))))
+            run.steps.push({ t: nowClock(run), kind: "stop", title: "Stopped by you", sub: "Its branch keeps what it wrote so far.", isNew: true })
+            renderList()
+            renderDetail()
+            toast("stop", `Stopped “${run.title}”`, "The cloud machine was released")
+            return
+          }
+          if (event.target.closest("[data-raise]")) {
+            run.cap = 5
+            run.status = "running"
+            run.steps.push({ t: nowClock(run), kind: "coin", title: "Cap raised to $5.00 by you", sub: "Resuming from step 41", isNew: true })
+            advance(run)
+            renderList()
+            renderDetail()
+            toast("coin", "Budget raised to $5.00", `“${run.title}” is running again`)
+            return
+          }
+          if (event.target.closest("[data-retry]")) {
+            run.status = "running"
+            run.checks[0].status = "running"
+            run.checks[0].time = ""
+            run.steps.push({ t: nowClock(run), kind: "spin", state: "running", title: "Retrying with the type errors as context", sub: "Fixing BrowserWindowConstructorOptions in window.ts", isNew: true, secs: 0 })
+            run.queue = [
+              { kind: "pencil", title: "Edited <code>window.ts</code>", sub: '<span class="add">+4</span> <span class="del">−3</span> · uses the new <code>backgroundMaterial</code> option', replace: true },
+              { kind: "terminal", title: "Ran <code>bun typecheck</code> in packages/desktop", sub: "No errors", end: "31s", check: [0, "done", "31s"] },
+            ]
+            renderList()
+            renderDetail()
+            return
+          }
+          if (event.target.closest("[data-back]")) {
+            run.status = "running"
+            run.steps.push({ t: nowClock(run), kind: "cloud", type: "handoff", title: "Sent back to Vector Cloud", sub: "From this laptop, at the step it had reached", isNew: true })
+            renderList()
+            renderDetail()
+            toast("cloud", "Back on Vector Cloud", "You can close your laptop again")
+          }
+        })
+
+        detailEl.addEventListener("input", (event) => {
+          if (!event.target.matches("[data-steer-input]")) return
+          detailEl.querySelector(".vc-send").disabled = event.target.value.trim() === ""
+        })
+        detailEl.addEventListener("submit", (event) => {
+          event.preventDefault()
+          const input = detailEl.querySelector("[data-steer-input]")
+          const text = input.value.trim()
+          if (!text) return
+          const run = byId(selected)
+          run.steps.push({ t: nowClock(run), kind: "note", title: "Note from you", sub: esc(text), isNew: true })
+          input.value = ""
+          detailEl.querySelector(".vc-send").disabled = true
+          detailEl.querySelector('[data-tab-key="timeline"]')?.click()
+          appendSteps(run)
+          setTimeout(() => {
+            run.steps.push({ t: nowClock(run), kind: "spark", title: "Read your note", sub: "It will apply it from the next step", isNew: true })
+            if (selected === run.id) appendSteps(run)
+          }, reduced ? 0 : 1400)
+        })
+
+        function nowClock(run) {
+          return clock(run.startedAt, run.elapsed)
+        }
+
+        // Only new steps are added, so the reader's scroll and focus stay put.
+        function appendSteps(run) {
+          if (selected !== run.id) return
+          const list = detailEl.querySelector("[data-steps]")
+          if (!list) return
+          list.innerHTML = run.steps.map(stepHtml).join("")
+          run.steps.forEach((s) => delete s.isNew)
+          const log = detailEl.querySelector("[data-log]")
+          if (log) log.innerHTML = logHtml(run)
+          const n = detailEl.querySelector('[data-n="timeline"]')
+          if (n) n.textContent = run.steps.length
+          scrollTimeline()
+        }
+
+        // ---- the live clock: runs tick, steps arrive ----
+        function advance(run) {
+          const next = run.queue.shift()
+          if (!next) return false
+          const t = nowClock(run)
+          if (next.replace) {
+            const last = run.steps.findLast((s) => s.state === "running")
+            if (last) run.steps.splice(run.steps.indexOf(last), 1)
+          } else {
+            run.steps.forEach((s) => s.state === "running" && ((s.state = "done"), (s.end = fmt(s.secs ?? 0))))
+          }
+          run.steps.push({ ...next, t, isNew: true, secs: 0 })
+          if (next.check) {
+            const [i, status, time] = next.check
+            if (run.checks[i]) Object.assign(run.checks[i], { status, time })
+          }
+          if (next.file) run.files.push(next.file)
+          if (next.finish) {
+            run.status = next.finish
+            run.pr = 2490
+            renderList()
+            if (selected === run.id) renderDetail()
+            toast("pulls", `“${run.title}” finished`, "Draft pull request #2490 is ready for review")
+            return true
+          }
+          if (selected === run.id) {
+            if (next.check || next.file) {
+              renderDetail()
+            } else {
+              appendSteps(run)
+            }
+          }
+          return true
+        }
+
+        let beat = 0
+        function tick() {
+          beat += 1
+          runs
+            .filter((run) => ACTIVE.includes(run.status))
+            .forEach((run) => {
+              run.elapsed += 1
+              const spend = 0.0006 + Math.random() * 0.0011
+              run.cost = Math.min(run.cap, run.cost + spend)
+              usage += spend
+              run.tokens += 900 + Math.floor(Math.random() * 1800)
+              const step = run.steps.findLast((s) => s.state === "running")
+              if (step) step.secs = (step.secs ?? 0) + 1
+              stage.querySelector(`[data-tick-time="${run.id}"]`)?.replaceChildren(fmt(run.elapsed))
+              stage.querySelector(`[data-tick-cost="${run.id}"]`)?.replaceChildren(money(run.cost))
+              if (run.id === selected) {
+                detailEl.querySelector('[data-d="elapsed"]')?.replaceChildren(fmt(run.elapsed))
+                detailEl.querySelector('[data-d="cost"]')?.replaceChildren(money(run.cost))
+                detailEl.querySelector('[data-d="tokens"]')?.replaceChildren(tokens(run.tokens))
+                const bar = detailEl.querySelector('[data-d="bar"]')
+                if (bar) bar.style.width = `${Math.min(100, (run.cost / run.cap) * 100)}%`
+                if (step) detailEl.querySelector('[data-d="step"]')?.replaceChildren(fmt(step.secs))
+              }
+              // Each run moves on at its own pace.
+              const pace = { r1: 7, r2: 9, r3: 13, r4: 8, r6: 6 }[run.id] ?? 6
+              if (beat % pace === 0) advance(run)
+            })
+          stage.querySelector("[data-usage]").textContent = money(usage)
+          stage.querySelector("[data-usage-bar]").style.width = `${(usage / 60) * 100}%`
+        }
+        if (!reduced) setInterval(() => !document.hidden && tick(), 1000)
+
+        // ---- start a cloud run ----
+        const scrim = stage.querySelector("[data-scrim]")
+        const sheet = stage.querySelector("[data-sheet]")
+        const dialog = stage.querySelector("[data-dialog]")
+        let runner = "cloud"
+        let cap = 5
+        let lastFocus = null
+
+        function openSheet() {
+          lastFocus = document.activeElement
+          scrim.hidden = false
+          sheet.hidden = false
+          sheet.querySelector("[data-task]").focus({ preventScroll: true })
+        }
+        function closeOverlays() {
+          scrim.hidden = true
+          sheet.hidden = true
+          dialog.hidden = true
+          handoffTimers.forEach(clearTimeout)
+          handoffTimers = []
+          lastFocus?.focus?.({ preventScroll: true })
+        }
+        stage.querySelector("[data-open-sheet]").addEventListener("click", openSheet)
+        stage.querySelectorAll("[data-close-sheet]").forEach((b) => b.addEventListener("click", closeOverlays))
+        scrim.addEventListener("click", () => {
+          if (dialog.dataset.busy) return
+          closeOverlays()
+        })
+        stage.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && (!sheet.hidden || !dialog.hidden) && !dialog.dataset.busy) {
+            event.preventDefault()
+            closeOverlays()
+          }
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !sheet.hidden) {
+            event.preventDefault()
+            startRun()
+          }
+        })
+
+        sheet.querySelectorAll("[data-runner]").forEach((option) =>
+          option.addEventListener("click", () => {
+            runner = option.dataset.runner
+            sheet.querySelectorAll("[data-runner]").forEach((o) => o.setAttribute("aria-checked", String(o === option)))
+            estimate()
+          }),
+        )
+        sheet.querySelector("[data-budget]").addEventListener("lab:seg", (event) => {
+          cap = Number(event.target.closest(".seg").querySelector('[aria-pressed="true"]').dataset.value)
+          sheet.querySelector("[data-budget-note]").textContent = `At ${money(cap)} the run pauses at its next safe step and asks you before spending more.`
+          estimate()
+        })
+        function estimate() {
+          const low = runner === "cloud" ? 0.9 : 0.5
+          const high = Math.min(cap, runner === "cloud" ? 2.1 : 1.6)
+          sheet.querySelector("[data-estimate]").textContent = `${money(Math.min(low, cap))} – ${money(high)} · about 20 min`
+        }
+
+        stage.querySelector("[data-start]").addEventListener("click", startRun)
+        function startRun() {
+          const task = sheet.querySelector("[data-task]").value.trim() || "Untitled task"
+          const branch = sheet.querySelector("[data-branch]").value.trim().replace(/\s+/g, "-") || "cloud-run"
+          const title = task.split(/[.!?]/)[0].length < 48 ? task.split(/[.!?]/)[0] : "Keep the open file in view in Changes"
+          const run = {
+            id: `n${Date.now()}`,
+            title,
+            branch,
+            runner,
+            model: "GPT-6 Sol",
+            status: "starting",
+            elapsed: 0,
+            cost: 0,
+            cap,
+            tokens: 0,
+            startedAt: "18:16:40",
+            origin: { from: "laptop", at: "18:16", moved: "18:16", why: "sent straight to the cloud" },
+            files: [],
+            checks: [{ name: "Typecheck", scope: "packages/app", status: "pending", time: "" }],
+            steps: [
+              { t: "18:16:40", kind: "play", title: "Started on this laptop", sub: esc(task) },
+              { t: "18:16:41", kind: "spin", state: "running", title: runner === "cloud" ? "Starting a Vector Cloud machine" : "Queuing a GitHub Actions job", sub: runner === "cloud" ? "us-east · 4 vCPU · 8 GB" : "Workflow vector.yml on ubuntu-latest", secs: 0 },
+            ],
+            queue: [
+              { kind: runner === "cloud" ? "cloud" : "actions", type: "handoff", title: runner === "cloud" ? "Running on Vector Cloud" : "Running on GitHub Actions", sub: `Cloned Vectordev.ai and created <code>${esc(branch)}</code> from main`, replace: true, log: [`$ git checkout -b ${branch} origin/main`, "Switched to a new branch '" + branch + "'"] },
+              { kind: "doc", title: "Read 7 files", sub: "AGENTS.md, packages/app/src/features/changes/changes-panel.tsx and 5 more", end: "22s" },
+              { kind: "spark", title: "Plan", sub: "Remember the open file's key, restore its offset after the list re-renders." },
+              { kind: "pencil", title: "Edited <code>changes-panel.tsx</code>", sub: '<span class="add">+19</span> <span class="del">−6</span>', file: { dir: "packages/app/src/features/changes/", name: "changes-panel.tsx", add: 19, del: 6, diff: ["@@ -140,2 +140,5 @@ export function ChangesPanel() {", "+  // Keep the open file where the reader left it.", "+  const anchor = createAnchor(list)"], more: "2 more hunks" } },
+              { kind: "terminal", state: "running", title: "Running <code>bun typecheck</code> in packages/app", sub: "", check: [0, "running", ""], log: ["$ cd packages/app && bun typecheck"] },
+            ],
+          }
+          runs.unshift(run)
+          closeOverlays()
+          filter = "all"
+          stage.querySelectorAll("[data-filter]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.filter === "all")))
+          tab = "timeline"
+          selected = run.id
+          renderList()
+          renderDetail()
+          listEl.scrollTop = 0
+          const slots = runs.filter((r) => r.runner === "cloud" && ACTIVE.includes(r.status)).length
+          stage.querySelector("[data-slots]").textContent = `${slots} of 4 slots`
+          stage.querySelector("[data-slots-bar]").style.width = `${(slots / 4) * 100}%`
+          toast(RUNNER[runner].glyph, "Cloud run started", "You can close your laptop. It reports back here and on your phone.")
+          setTimeout(() => {
+            run.status = "running"
+            renderList()
+            if (selected === run.id) renderDetail()
+          }, reduced ? 0 : 2200)
+          if (reduced) advance(run)
+        }
+
+        // ---- continue on this laptop ----
+        let handoffTimers = []
+        function openDialog(run) {
+          lastFocus = document.activeElement
+          const live = ACTIVE.includes(run.status)
+          const items = [
+            [live ? "Pause at the next safe step" : "Take the run's last state", live ? "The current tool call finishes first" : `${WORD[run.status]} at ${nowClock(run).slice(0, 5)}`],
+            [`Push ${run.branch} to origin`, `${run.files.length} files, ${run.files.reduce((s, f) => s + f.add, 0)} lines added`],
+            ["Open a local workspace", `~/Vectordev.ai/.vector/workspaces/${run.branch}`],
+            ["Restore the session", `${run.steps.length * 23 + 41} messages and tool results`],
+          ]
+          dialog.querySelector("[data-handoff]").innerHTML = items
+            .map(([name, sub]) => `<li data-state="todo"><span class="vc-tick">${glyph("check", 11)}</span><span><span>${name}</span><small>${esc(sub)}</small></span></li>`)
+            .join("")
+          dialog.querySelector("[data-dialog-title]").textContent = "Continue on this laptop"
+          dialog.querySelector("[data-dialog-text]").textContent = live
+            ? "The cloud run pauses at its next safe step and the session moves here with its branch, messages and tool results. Nothing is lost and nothing runs twice."
+            : "The session moves here with its branch, messages and tool results, so you can pick it up where it ended."
+          const go = dialog.querySelector("[data-dialog-go]")
+          go.textContent = "Move it here"
+          go.disabled = false
+          delete go.dataset.done
+          dialog.querySelector("[data-dialog-cancel]").hidden = false
+          scrim.hidden = false
+          dialog.hidden = false
+          go.focus({ preventScroll: true })
+        }
+        dialog.querySelector("[data-dialog-cancel]").addEventListener("click", closeOverlays)
+        dialog.querySelector("[data-dialog-go]").addEventListener("click", () => {
+          const go = dialog.querySelector("[data-dialog-go]")
+          const run = byId(selected)
+          if (go.dataset.done) {
+            closeOverlays()
+            return
+          }
+          go.disabled = true
+          dialog.dataset.busy = "1"
+          dialog.querySelector("[data-dialog-cancel]").hidden = true
+          const items = [...dialog.querySelectorAll("[data-handoff] li")]
+          const step = reduced ? 0 : 750
+          items.forEach((item, index) => {
+            handoffTimers.push(setTimeout(() => (item.dataset.state = "active"), index * step))
+            handoffTimers.push(setTimeout(() => (item.dataset.state = "done"), index * step + step * 0.85))
+          })
+          handoffTimers.push(
+            setTimeout(() => {
+              delete dialog.dataset.busy
+              run.steps.forEach((s) => s.state === "running" && ((s.state = "done"), (s.end = fmt(s.secs ?? 0))))
+              run.steps.push({ t: nowClock(run), kind: "laptop", type: "handoff", title: "Continued on this laptop", sub: `Workspace <code>${run.branch}</code>, same session, same branch`, isNew: true })
+              run.queue = []
+              run.status = "local"
+              go.disabled = false
+              go.dataset.done = "1"
+              go.textContent = "Open session"
+              dialog.querySelector("[data-dialog-title]").textContent = "It's on this laptop now"
+              dialog.querySelector("[data-dialog-text]").textContent = `Same session, same branch, now in a local workspace. The cloud machine was released and nothing ran twice.`
+              renderList()
+              renderDetail()
+              toast("laptop", "Continued on this laptop", `Workspace ${run.branch} is open in the sidebar`)
+              go.focus({ preventScroll: true })
+            }, items.length * step),
+          )
+        })
+
+        // ---- toast ----
+        const toastEl = stage.querySelector("[data-toast]")
+        let toastTimer = 0
+        function toast(icon, title, sub) {
+          toastEl.innerHTML = `${glyph(icon, 16)}<div><b style="font-weight:500">${esc(title)}</b><span>${esc(sub)}</span></div>`
+          toastEl.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (toastEl.hidden = true), 4200)
+        }
+
+        fillGlyphs(stage)
+        renderList()
+        renderDetail()
+      })
+    </script>
+  </body>
+</html>

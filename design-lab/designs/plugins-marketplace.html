@@ -1,0 +1,1447 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-plugins-marketplace .app-main {
+        position: relative;
+      }
+
+      .d-plugins-marketplace .app-body {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .d-plugins-marketplace input[type="search"]::-webkit-search-cancel-button {
+        -webkit-appearance: none;
+      }
+
+      .d-plugins-marketplace .btn:disabled {
+        cursor: default;
+        opacity: 0.5;
+      }
+
+      .d-plugins-marketplace .tile {
+        display: grid;
+        flex: none;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+        color: var(--text-2);
+      }
+
+      .d-plugins-marketplace .tile-lg {
+        width: 46px;
+        height: 46px;
+        border-radius: 11px;
+      }
+
+      .d-plugins-marketplace .spin {
+        animation: pm-spin 0.9s linear infinite;
+      }
+
+      @keyframes pm-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Top strip */
+      .d-plugins-marketplace .p-top {
+        display: flex;
+        flex: none;
+        align-items: flex-end;
+        gap: 10px;
+        height: 47px;
+        padding: 0 14px 0 12px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-plugins-marketplace .p-top .tabs {
+        height: 46px;
+        padding: 0;
+        border: 0;
+      }
+
+      .d-plugins-marketplace .tab .count {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-2);
+      }
+
+      .d-plugins-marketplace .tab[aria-selected="true"] .count {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-plugins-marketplace .p-top-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        align-self: center;
+        margin-left: auto;
+      }
+
+      .d-plugins-marketplace .p-top-end .input {
+        width: 250px;
+        height: 28px;
+      }
+
+      .d-plugins-marketplace .p-grid {
+        display: grid;
+        flex: 1;
+        grid-template-columns: 196px 1fr 432px;
+        min-height: 0;
+      }
+
+      /* Category rail */
+      .d-plugins-marketplace .p-rail {
+        padding: 12px 8px;
+        border-right: 1px solid var(--hairline);
+      }
+
+      .d-plugins-marketplace .p-rail .section-title {
+        margin: 6px 10px 8px;
+      }
+
+      .d-plugins-marketplace .rail-item {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        height: 30px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12.5px;
+        text-align: left;
+      }
+
+      .d-plugins-marketplace .rail-item:hover {
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-1);
+      }
+
+      .d-plugins-marketplace .rail-item[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-1);
+      }
+
+      .d-plugins-marketplace .rail-item[aria-pressed="true"] svg {
+        color: var(--violet-bright);
+      }
+
+      .d-plugins-marketplace .rail-item svg {
+        flex: none;
+        color: var(--text-3);
+      }
+
+      .d-plugins-marketplace .rail-item.is-empty {
+        color: #6f6c77;
+      }
+
+      .d-plugins-marketplace .rail-item .n {
+        margin-left: auto;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+
+      .d-plugins-marketplace .rail-note {
+        margin: 18px 10px 0;
+        padding-top: 14px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+
+      .d-plugins-marketplace .rail-note code {
+        color: var(--text-2);
+        font: 11px var(--mono);
+      }
+
+      /* Results */
+      .d-plugins-marketplace .p-results {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--line);
+      }
+
+      .d-plugins-marketplace .p-sum {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+        padding: 14px 18px 8px;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-plugins-marketplace .p-sum > span:first-child {
+        flex: 1;
+      }
+
+      .d-plugins-marketplace .p-sum .seg button {
+        height: 22px;
+        padding: 0 9px;
+        font-size: 11.5px;
+      }
+
+      .d-plugins-marketplace .p-list {
+        flex: 1;
+        min-height: 0;
+        padding: 0 8px 14px;
+      }
+
+      .d-plugins-marketplace .featured {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        padding: 4px 4px 10px;
+      }
+
+      .d-plugins-marketplace .feat {
+        display: grid;
+        gap: 8px;
+        padding: 13px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: radial-gradient(240px 90px at 0% 0%, rgba(182, 159, 247, 0.09), transparent 70%), var(--card);
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-plugins-marketplace .feat:hover {
+        border-color: var(--line-strong);
+      }
+
+      .d-plugins-marketplace .feat[aria-pressed="true"] {
+        border-color: var(--violet-line);
+      }
+
+      .d-plugins-marketplace .feat-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .d-plugins-marketplace .feat-top .row-text {
+        gap: 1px;
+      }
+
+      .d-plugins-marketplace .feat p {
+        margin: 0;
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .d-plugins-marketplace .feat-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-plugins-marketplace .p-group {
+        display: flex;
+        gap: 8px;
+        margin: 0;
+        padding: 10px 10px 6px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-plugins-marketplace .p-group .mono {
+        font-size: 11px;
+      }
+
+      .d-plugins-marketplace .item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-right: 12px;
+        border-radius: 7px;
+      }
+
+      .d-plugins-marketplace .item:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-plugins-marketplace .item[aria-selected="true"] {
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      }
+
+      .d-plugins-marketplace .item[aria-selected="true"] .tile {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-plugins-marketplace .item-main {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        align-items: center;
+        gap: 11px;
+        min-height: 52px;
+        padding: 7px 0 7px 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        text-align: left;
+      }
+
+      .d-plugins-marketplace .item-name {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        color: var(--text-1);
+        font-size: 13px;
+      }
+
+      .d-plugins-marketplace .item-name .by {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-plugins-marketplace .kind {
+        height: 17px;
+        padding: 0 6px;
+        font-size: 10px;
+      }
+
+      .d-plugins-marketplace .item.is-off .item-name,
+      .d-plugins-marketplace .item.is-off .tile {
+        opacity: 0.55;
+      }
+
+      .d-plugins-marketplace .item-end {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+      }
+
+      .d-plugins-marketplace .item-end .badge {
+        font-family: var(--font);
+      }
+
+      .d-plugins-marketplace .verified {
+        display: inline-flex;
+        color: var(--violet-bright);
+        vertical-align: -2px;
+      }
+
+      .d-plugins-marketplace .p-empty {
+        display: grid;
+        place-items: center;
+        gap: 6px;
+        padding: 60px 20px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      .d-plugins-marketplace .p-empty strong {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      /* Detail */
+      .d-plugins-marketplace .p-detail {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--panel);
+      }
+
+      .d-plugins-marketplace .pd-head {
+        display: flex;
+        gap: 14px;
+        padding: 20px 20px 14px;
+      }
+
+      .d-plugins-marketplace .pd-head .row-text {
+        gap: 5px;
+      }
+
+      .d-plugins-marketplace .pd-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-plugins-marketplace .pd-title h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+      }
+
+      .d-plugins-marketplace .pd-sub {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-plugins-marketplace .pd-sub b {
+        color: var(--text-2);
+        font-weight: 500;
+      }
+
+      .d-plugins-marketplace .pd-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 20px 16px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-plugins-marketplace .pd-actions .grow {
+        flex: 1;
+      }
+
+      .d-plugins-marketplace .pd-actions .seg button {
+        height: 24px;
+      }
+
+      .d-plugins-marketplace .pd-switch {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-plugins-marketplace .btn-text-danger {
+        color: #f0b0b3;
+      }
+
+      .d-plugins-marketplace .steps {
+        display: grid;
+        flex: 1;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font-size: 12px;
+      }
+
+      .d-plugins-marketplace .steps li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-3);
+      }
+
+      .d-plugins-marketplace .steps li.is-done {
+        color: var(--text-2);
+      }
+
+      .d-plugins-marketplace .steps li.is-done svg {
+        color: var(--green);
+      }
+
+      .d-plugins-marketplace .steps li.is-now {
+        color: var(--text-1);
+      }
+
+      .d-plugins-marketplace .steps .mono {
+        overflow: hidden;
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-plugins-marketplace .steps .ph {
+        display: inline-block;
+        width: 13px;
+        height: 13px;
+        border: 1px dashed rgba(255, 255, 255, 0.18);
+        border-radius: 50%;
+      }
+
+      .d-plugins-marketplace .pd-body {
+        flex: 1;
+        min-height: 0;
+        padding: 16px 20px 20px;
+      }
+
+      .d-plugins-marketplace .pd-body > p {
+        margin: 0 0 18px;
+        color: var(--text-2);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .d-plugins-marketplace .pd-sec {
+        margin-bottom: 20px;
+      }
+
+      .d-plugins-marketplace .pd-sec-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .d-plugins-marketplace .pd-sec-head .section-title {
+        margin: 0;
+      }
+
+      .d-plugins-marketplace .pd-sec-head .muted {
+        margin-left: auto;
+        font-size: 11.5px;
+      }
+
+      .d-plugins-marketplace .adds {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .d-plugins-marketplace .add-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+
+      .d-plugins-marketplace .add-chip span {
+        color: var(--text-3);
+        font-family: var(--font);
+        font-size: 11px;
+      }
+
+      .d-plugins-marketplace .perms {
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--card);
+      }
+
+      .d-plugins-marketplace .perm + .perm {
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-plugins-marketplace .perm-btn {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+        min-height: 46px;
+        padding: 7px 12px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+      }
+
+      .d-plugins-marketplace .perm-btn:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+
+      .d-plugins-marketplace .perm-btn > svg:last-child {
+        flex: none;
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+
+      .d-plugins-marketplace .perm-btn[aria-expanded="true"] > svg:last-child {
+        transform: rotate(90deg);
+      }
+
+      .d-plugins-marketplace .risk {
+        display: grid;
+        flex: none;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-2);
+      }
+
+      .d-plugins-marketplace .risk.is-med {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .d-plugins-marketplace .risk.is-high {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .d-plugins-marketplace .perm .row-sub.mono {
+        font-size: 11px;
+      }
+
+      .d-plugins-marketplace .perm-detail {
+        margin: 0;
+        padding: 0 14px 12px 48px;
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .d-plugins-marketplace .code {
+        display: grid;
+        padding: 8px 0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 7px;
+        background: #121117;
+        font: 11.5px/19px var(--mono);
+      }
+
+      .d-plugins-marketplace .code code {
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        overflow: hidden;
+        color: #d8d4de;
+        white-space: pre;
+      }
+
+      .d-plugins-marketplace .code code > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .d-plugins-marketplace .code code::before {
+        content: attr(data-n);
+        padding-right: 10px;
+        color: #5e5b66;
+        text-align: right;
+      }
+
+      .d-plugins-marketplace .code .k {
+        color: #b69ff7;
+      }
+
+      .d-plugins-marketplace .code .s {
+        color: #a8e2bf;
+      }
+
+      .d-plugins-marketplace .code .c {
+        color: #75727d;
+      }
+
+      .d-plugins-marketplace .code .is-add {
+        background: rgba(101, 199, 142, 0.1);
+      }
+
+      .d-plugins-marketplace .notes {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.45;
+      }
+
+      .d-plugins-marketplace .notes li {
+        display: flex;
+        gap: 8px;
+      }
+
+      .d-plugins-marketplace .notes li::before {
+        content: "";
+        flex: none;
+        width: 4px;
+        height: 4px;
+        margin-top: 7px;
+        border-radius: 50%;
+        background: var(--violet-bright);
+      }
+
+      .d-plugins-marketplace .facts {
+        display: grid;
+        grid-template-columns: 0.7fr 2fr 0.9fr;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+      }
+
+      .d-plugins-marketplace .facts div {
+        display: grid;
+        gap: 4px;
+        padding: 10px 12px;
+      }
+
+      .d-plugins-marketplace .facts div + div {
+        border-left: 1px solid var(--hairline);
+      }
+
+      .d-plugins-marketplace .facts span {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-plugins-marketplace .facts b {
+        color: var(--text-1);
+        font: 500 12.5px var(--mono);
+      }
+
+      .d-plugins-marketplace .confirm {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        gap: 8px;
+        color: #f0b0b3;
+        font-size: 12.5px;
+      }
+
+      .d-plugins-marketplace .confirm span {
+        flex: 1;
+      }
+
+      /* Toast */
+      .d-plugins-marketplace .toast {
+        position: absolute;
+        bottom: 18px;
+        left: 50%;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        animation: pm-rise 220ms var(--ease);
+      }
+
+      .d-plugins-marketplace .toast[hidden] {
+        display: none;
+      }
+
+      .d-plugins-marketplace .toast svg {
+        color: var(--green);
+      }
+
+      @keyframes pm-rise {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 10px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="plugins-marketplace"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-plugins-marketplace">
+            <div class="app">
+              <nav data-lab-sidebar data-active="plugins" data-workspace="Vector" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="plugins" data-size="15" class="muted"></i>
+                  <h2>Plugins</h2>
+                  <span class="app-header-sub">Plugins, skills and agents for Vectordev.ai</span>
+                  <div class="app-header-end">
+                    <button class="btn btn-ghost" type="button" data-act="from-npm"><i data-icon="terminal" data-size="14"></i>Install from npm</button>
+                    <button class="btn" type="button" data-act="new-skill"><i data-icon="plus" data-size="14"></i>New skill</button>
+                  </div>
+                </header>
+                <div class="app-body">
+                  <div class="p-top">
+                    <div class="tabs" role="tablist" aria-label="Plugins view" data-views></div>
+                    <div class="p-top-end">
+                      <label class="input"><i data-icon="search" data-size="14" class="muted"></i><input type="search" placeholder="Search plugins, skills, agents" aria-label="Search" data-q /></label>
+                    </div>
+                  </div>
+                  <div class="p-grid">
+                    <nav class="p-rail scroll" aria-label="Categories" data-rail></nav>
+                    <section class="p-results" aria-label="Results">
+                      <div class="p-sum" data-sum></div>
+                      <div class="p-list scroll" role="listbox" aria-label="Plugins" data-list></div>
+                    </section>
+                    <section class="p-detail" aria-label="Details" data-detail></section>
+                  </div>
+                </div>
+                <div class="toast float" role="status" hidden data-toast></div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-plugins-marketplace")
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const icon = (name, size = 14, cls = "") => `<i data-icon="${name}" data-size="${size}"${cls ? ` class="${cls}"` : ""}></i>`
+        const svg = (d, size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="${d}" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+        // Kind glyphs: plug for plugins, book for skills, spark for agents.
+        const glyph = {
+          plugin: (s = 16) => svg("M6 2v3M10 2v3M4.5 5h7v2.2A3.5 3.5 0 0 1 8 10.7 3.5 3.5 0 0 1 4.5 7.2V5ZM8 10.7V14", s),
+          skill: (s = 16) => svg("M3 3.2c1.8-.6 3.5-.4 5 .8 1.5-1.2 3.2-1.4 5-.8v9.4c-1.8-.6-3.5-.4-5 .8-1.5-1.2-3.2-1.4-5-.8V3.2ZM8 4v9.4", s),
+          agent: (s = 16) => svg("M8 2.2 9.3 6.7 13.8 8 9.3 9.3 8 13.8 6.7 9.3 2.2 8 6.7 6.7 8 2.2Z", s),
+        }
+        const check = svg("M3.5 8.4 6.6 11.4 12.5 4.8", 13)
+        const shield = svg("M8 2 13 3.8V8c0 3-2.2 5.1-5 6-2.8-.9-5-3-5-6V3.8L8 2Z", 14)
+        const eye = svg("M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8ZM8 9.9a1.9 1.9 0 1 0 0-3.8 1.9 1.9 0 0 0 0 3.8Z", 14)
+        const bolt = svg("M8.8 2 4 9h4l-.8 5L12 7H8l.8-5Z", 14)
+        const net = svg("M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12ZM2.4 6h11.2M2.4 10h11.2M8 2c-2.2 2.9-2.2 9.1 0 12M8 2c2.2 2.9 2.2 9.1 0 12", 14)
+        const term = svg("M3 4.5 6 8l-3 3.5M7.5 11.5H13", 14)
+        const file = svg("M4 2h5.2L12 4.8V14H4V2ZM9 2v3h3", 14)
+        const verified = `<span class="verified" title="Verified publisher">${svg("M8 1.8 9.6 3l2 .1.6 1.9 1.6 1.2-.6 1.9.6 1.9-1.6 1.2-.6 1.9-2 .1L8 14.4 6.4 13.2l-2-.1-.6-1.9-1.6-1.2.6-1.9-.6-1.9 1.6-1.2.6-1.9 2-.1L8 1.8ZM5.8 8.2l1.5 1.5 3-3.2", 13)}</span>`
+
+        const riskIcon = { hook: bolt, read: eye, net, run: term, file, policy: shield }
+
+        // ---------- Catalog, shaped like Vector's plugin hooks, SKILL.md and agent markdown ----------
+
+        const items = [
+          {
+            id: "env-guard", kind: "plugin", name: "Env Guard", author: "vectordev", verified: true, cat: "security", version: "0.9.1", latest: "1.0.0", installs: "18.2k", installed: true, enabled: true, scope: "project", featured: true,
+            spec: "@vectordev/plugin-env-guard",
+            desc: "Keeps secrets out of the conversation. Blocks reads of .env files and strips tokens from the environment of shell commands the agent runs.",
+            adds: [["hook", "tool.execute.before"], ["hook", "shell.env"], ["command", "/secrets"]],
+            perms: [
+              { level: "high", icon: "hook", label: "Sees every tool call before it runs", api: "tool.execute.before", tag: "Can block", detail: "Reads the arguments of read, grep and bash calls so it can stop the agent from opening .env, .npmrc and key files. It can block a call but cannot change its arguments." },
+              { level: "med", icon: "run", label: "Edits the environment of shell commands", api: "shell.env", detail: "Removes variables that look like secrets, such as AWS_SECRET_ACCESS_KEY and *_TOKEN, before bash runs. Your own shell is not changed." },
+              { level: "low", icon: "file", label: "Reads .vector/env-guard.json", api: "config", detail: "Optional allow list for files the agent may still read, for example .env.example." },
+            ],
+            changelog: ["Blocks reads through symlinks that point at .env files", "New /secrets command lists what was blocked in this session", "Allow list now supports globs, e.g. config/*.example"],
+          },
+          {
+            id: "conventional-commits", kind: "plugin", name: "Conventional Commits", author: "vectordev", verified: true, cat: "git", version: "1.4.2", installs: "24.9k", installed: true, enabled: true, scope: "project",
+            spec: "vector-plugin-conventional-commits",
+            desc: "Checks every git commit the agent makes against type(scope): summary, and suggests a fix before the commit lands.",
+            adds: [["hook", "tool.execute.before"], ["command", "/commit"]],
+            perms: [
+              { level: "med", icon: "hook", label: "Reads bash commands before they run", api: "tool.execute.before", tag: "Can block", detail: "Only looks at commands that start with git commit. A message that does not match the pattern is sent back to the agent with a suggestion." },
+              { level: "low", icon: "file", label: "Reads the repository's commit config", api: "commitlint.config.*", detail: "Uses your allowed types and scopes when the repository has a commitlint config." },
+            ],
+          },
+          {
+            id: "notify", kind: "plugin", name: "Desktop Notify", author: "mara-k", verified: false, cat: "workflow", version: "2.1.0", installs: "9.7k", installed: true, enabled: false, scope: "global",
+            spec: "vector-plugin-notify",
+            desc: "Sends a system notification when a session goes idle, finishes a long task, or is waiting on a permission prompt.",
+            adds: [["hook", "event"], ["hook", "permission.ask"]],
+            perms: [
+              { level: "low", icon: "read", label: "Receives session events", api: "event", detail: "Session idle, error and task-finished events, with the session title. No message content." },
+              { level: "med", icon: "policy", label: "Is told when a permission prompt opens", api: "permission.ask", detail: "Used only to notify you. This plugin leaves the answer to you and never sets allow or deny." },
+            ],
+          },
+          {
+            id: "cost-guard", kind: "plugin", name: "Cost Guard", author: "vectordev", verified: true, cat: "workflow", version: "0.3.0", latest: "0.4.0", installs: "6.1k", installed: true, enabled: true, scope: "global",
+            spec: "vector-plugin-cost-guard",
+            desc: "Sets a spending limit per session and per day. Lowers max output tokens as you approach it and pauses the session when it is reached.",
+            adds: [["hook", "chat.params"], ["hook", "event"], ["command", "/budget"]],
+            perms: [
+              { level: "med", icon: "hook", label: "Changes model parameters for each request", api: "chat.params", detail: "Only maxOutputTokens. Temperature, top-p and provider options are left as they are." },
+              { level: "low", icon: "read", label: "Reads token usage and cost", api: "event", detail: "From step-finished events, to keep a running total." },
+            ],
+            changelog: ["Daily limit resets at local midnight instead of UTC", "Subagent costs now count toward the parent session"],
+          },
+          {
+            id: "docker-workspaces", kind: "plugin", name: "Docker Workspaces", author: "vectordev", verified: true, cat: "workspaces", version: "0.6.0", installs: "3.4k", installed: false,
+            spec: "@vectordev/plugin-docker-workspace",
+            desc: "Runs each new workspace in its own container, built from your Dockerfile or devcontainer.json, so agents can install and run anything without touching your machine.",
+            adds: [["workspace", "docker"], ["command", "/container"]],
+            perms: [
+              { level: "high", icon: "run", label: "Runs docker on your machine", api: "experimental_workspace", tag: "Runs code", detail: "Builds images and starts and removes containers named vector-ws-*. Needs Docker Desktop or a compatible engine." },
+              { level: "med", icon: "file", label: "Mounts the project folder into containers", api: "workspace.create", detail: "Read and write, so changes made inside the container show up in the Changes panel." },
+              { level: "low", icon: "net", label: "Pulls base images", api: "network", detail: "From the registries your Dockerfile names." },
+            ],
+          },
+          {
+            id: "wakatime", kind: "plugin", name: "WakaTime", author: "wakatime", verified: true, cat: "workflow", version: "1.2.3", installs: "11.3k", installed: false,
+            spec: "vector-wakatime",
+            desc: "Tracks time spent in agent sessions per project and branch, next to your editor time on wakatime.com.",
+            adds: [["hook", "event"]],
+            perms: [
+              { level: "low", icon: "read", label: "Receives session events", api: "event", detail: "Project, branch and timestamps. No prompts, code or file contents." },
+              { level: "med", icon: "net", label: "Sends heartbeats to api.wakatime.com", api: "network", detail: "Uses the API key in ~/.wakatime.cfg." },
+            ],
+          },
+          {
+            id: "github-copilot", kind: "plugin", name: "GitHub Copilot sign-in", author: "Vector", verified: true, builtin: true, cat: "providers", version: "built in", installs: "—", installed: true, enabled: true,
+            spec: "built in",
+            desc: "Lets you use models from your GitHub Copilot plan. Signs in with GitHub's device flow.",
+            adds: [["auth", "github-copilot"]],
+            perms: [{ level: "low", icon: "policy", label: "Provides sign-in for one provider", api: "auth", detail: "Stores the token in Vector's auth store and adds it only to requests for github-copilot models." }],
+          },
+          {
+            id: "openrouter", kind: "plugin", name: "OpenRouter sign-in", author: "Vector", verified: true, builtin: true, cat: "providers", version: "built in", installs: "—", installed: true, enabled: true,
+            spec: "built in",
+            desc: "One-click OpenRouter sign-in, including your own free models: up to 50 requests a day, no payment needed.",
+            adds: [["auth", "openrouter"]],
+            perms: [{ level: "low", icon: "policy", label: "Provides sign-in for one provider", api: "auth", detail: "Opens openrouter.ai in your browser and receives a key on a localhost callback." }],
+          },
+          {
+            id: "snowflake", kind: "plugin", name: "Snowflake Cortex", author: "Vector", verified: true, builtin: true, cat: "providers", version: "built in", installs: "—", installed: false,
+            spec: "built in",
+            desc: "Connects Cortex models through your Snowflake account with key-pair or OAuth authentication.",
+            adds: [["auth", "snowflake-cortex"]],
+            perms: [{ level: "low", icon: "policy", label: "Provides sign-in for one provider", api: "auth", detail: "Credentials stay in Vector's auth store." }],
+          },
+          {
+            id: "customize-vector", kind: "skill", name: "customize-vector", author: "Vector", verified: true, builtin: true, cat: "docs", version: "built in", installs: "—", installed: true, enabled: true,
+            spec: "built in",
+            desc: "Gives the agent Vector's real config schemas when it edits vector.json, agents, skills, plugins, MCP servers or permission rules, so it does not guess.",
+            adds: [["skill", "customize-vector"]],
+            perms: [{ level: "low", icon: "read", label: "Loaded into context when relevant", api: "skill", detail: "Only when you ask to change Vector's own configuration. Never for your application code." }],
+            skillmd: ["---", "name: customize-vector", "description: Use ONLY when the user is editing or", "  creating Vector's own configuration…", "---", "", "# Customize Vector", "Vector hard-fails on invalid config…"],
+          },
+          {
+            id: "effect-patterns", kind: "skill", name: "effect-patterns", author: "vectordev", verified: true, cat: "code", version: "2.0.1", installs: "4.8k", installed: true, enabled: true, featured: true, scope: "project",
+            spec: "https://skills.vectordev.ai/index.json",
+            desc: "Write Effect services, layers and schemas the way this repository does: named service bindings, Schema over JSON.parse, no nested yields.",
+            adds: [["skill", "effect-patterns"], ["files", "reference/ · 6"]],
+            perms: [
+              { level: "low", icon: "read", label: "Loaded into context when relevant", api: "skill", detail: "When a task touches Effect code. About 3.1k tokens." },
+              { level: "low", icon: "file", label: "Ships reference files only", api: "reference/", detail: "Markdown references. No scripts to run." },
+            ],
+            skillmd: ["---", "name: effect-patterns", "description: Effect v4 services, layers and Schema", "  in the style of this repo.", "---", "", "# Effect patterns", "Bind services to named variables before…"],
+          },
+          {
+            id: "changelog-writer", kind: "skill", name: "changelog-writer", author: "vectordev", verified: true, cat: "docs", version: "1.1.0", installs: "7.2k", installed: false,
+            spec: "https://skills.vectordev.ai/index.json",
+            desc: "Turns merged pull requests into a release changelog grouped by feat, fix and docs, in plain user-facing language.",
+            adds: [["skill", "changelog-writer"], ["files", "scripts/ · 1"]],
+            perms: [
+              { level: "low", icon: "read", label: "Loaded into context when relevant", api: "skill", detail: "When you ask for release notes or a changelog." },
+              { level: "med", icon: "run", label: "Ships a script the agent may run", api: "scripts/merged-prs.sh", tag: "Asks first", detail: "Runs git log and gh pr list. It goes through your bash permission rules, so it asks unless you allowed it." },
+            ],
+            skillmd: ["---", "name: changelog-writer", "description: Write a user-facing changelog", "  from merged pull requests.", "---", "", "# Changelog writer", "Run scripts/merged-prs.sh <since-tag>…"],
+          },
+          {
+            id: "frontend-design", kind: "skill", name: "frontend-design", author: "anthropic", verified: true, cat: "design", version: "1.0.4", installs: "31.0k", installed: false, featured: false,
+            spec: "~/.claude/skills/frontend-design",
+            desc: "Distinctive, production-grade interfaces: real type scales, spacing and states instead of generic defaults.",
+            adds: [["skill", "frontend-design"]],
+            perms: [{ level: "low", icon: "read", label: "Loaded into context when relevant", api: "skill", detail: "When you build or restyle UI." }],
+            skillmd: ["---", "name: frontend-design", "description: Create distinctive, production-grade", "  frontend interfaces.", "---"],
+          },
+          {
+            id: "playwright-smoke", kind: "skill", name: "playwright-smoke", author: "vectordev", verified: true, cat: "testing", version: "0.8.0", installs: "5.5k", installed: false,
+            spec: "https://skills.vectordev.ai/index.json",
+            desc: "Writes and runs a short Playwright smoke test for the page the agent just changed, and attaches the screenshot to the session.",
+            adds: [["skill", "playwright-smoke"], ["files", "scripts/ · 2"]],
+            perms: [
+              { level: "low", icon: "read", label: "Loaded into context when relevant", api: "skill", detail: "After UI changes, or when you ask for a smoke test." },
+              { level: "med", icon: "run", label: "Runs bunx playwright test", api: "scripts/smoke.ts", tag: "Asks first", detail: "Through your bash rules. Starts your dev server if it is not running." },
+            ],
+            skillmd: ["---", "name: playwright-smoke", "description: Smoke-test the page you changed.", "---"],
+          },
+          {
+            id: "pr-description", kind: "skill", name: "pr-description", author: "you", verified: false, cat: "git", version: "local", installs: "—", installed: true, enabled: true, discovered: ".claude/skills",
+            spec: ".claude/skills/pr-description/SKILL.md",
+            desc: "Your team's pull request template: summary, testing notes and a risk section. Found in .claude/skills, which Vector reads too.",
+            adds: [["skill", "pr-description"]],
+            perms: [{ level: "low", icon: "read", label: "Loaded into context when relevant", api: "skill", detail: "When the agent opens or edits a pull request." }],
+            skillmd: ["---", "name: pr-description", "description: Write PR descriptions in our format.", "---"],
+          },
+          {
+            id: "docs-writer", kind: "agent", name: "docs-writer", author: "vectordev", verified: true, cat: "docs", version: "1.3.0", installs: "8.9k", installed: true, enabled: true, scope: "project", featured: true,
+            spec: ".vector/agents/docs-writer.md",
+            desc: "A subagent specialist that updates docs after a change: finds the pages a diff affects, edits them, and checks every link.",
+            adds: [["agent", "@docs-writer"], ["model", "claude-sonnet-5"]],
+            perms: [
+              { level: "med", icon: "file", label: "Edits files under docs/ without asking", api: "edit: { \"docs/**\": allow }", detail: "Edits anywhere else ask first, under your normal rules." },
+              { level: "low", icon: "run", label: "Cannot run shell commands", api: "bash: deny", detail: "Link checks use webfetch instead." },
+              { level: "low", icon: "net", label: "Fetches pages to check links", api: "webfetch: allow", detail: "GET requests only, to URLs found in the docs." },
+            ],
+            agentmd: ["---", "description: Update docs after a change", "mode: subagent", "model: anthropic/claude-sonnet-5", "steps: 40", "permission:", "  edit: { \"docs/**\": allow }", "  bash: deny", "---"],
+          },
+          {
+            id: "dependency-auditor", kind: "agent", name: "dependency-auditor", author: "vectordev", verified: true, cat: "security", version: "0.5.2", installs: "2.6k", installed: false,
+            spec: ".vector/agents/dependency-auditor.md",
+            desc: "Reviews new and upgraded packages in a diff: maintainers, install scripts, known advisories and bundle size, then reports risks.",
+            adds: [["agent", "@dependency-auditor"], ["model", "gpt-5.6-sol"]],
+            perms: [
+              { level: "low", icon: "file", label: "Read only", api: "edit: deny", detail: "Reports findings; never changes lockfiles." },
+              { level: "med", icon: "run", label: "Runs npm view and bun pm ls", api: "bash: { \"npm view *\": allow }", detail: "Other commands ask first." },
+              { level: "med", icon: "net", label: "Reads advisories online", api: "webfetch: allow", detail: "github.com/advisories and the npm registry." },
+            ],
+            agentmd: ["---", "description: Audit new dependencies in a diff", "mode: subagent", "model: openai/gpt-5.6-sol", "permission:", "  edit: deny", "  bash: { \"npm view *\": allow }", "---"],
+          },
+          {
+            id: "i18n-checker", kind: "agent", name: "i18n-checker", author: "lucas-r", verified: false, cat: "review", version: "0.2.0", installs: "880", installed: false,
+            spec: ".vector/agents/i18n-checker.md",
+            desc: "Finds hard-coded strings in changed UI files and adds keys to every locale file, flagging missing translations.",
+            adds: [["agent", "@i18n-checker"]],
+            perms: [
+              { level: "med", icon: "file", label: "Edits locale files without asking", api: "edit: { \"**/i18n/**\": allow }", detail: "Other edits ask first." },
+              { level: "low", icon: "run", label: "Cannot run shell commands", api: "bash: deny", detail: "" },
+            ],
+            agentmd: ["---", "description: Catch untranslated strings", "mode: subagent", "permission:", "  edit: { \"**/i18n/**\": allow }", "---"],
+          },
+          {
+            id: "migration", kind: "agent", name: "migration", author: "Vector", verified: true, builtin: true, cat: "review", version: "built in", installs: "—", installed: true, enabled: true,
+            spec: "built in",
+            desc: "Vector's migration specialist: plans and applies framework and API upgrades in small, verified steps.",
+            adds: [["agent", "@migration"]],
+            perms: [{ level: "med", icon: "file", label: "Uses your project's edit and bash rules", api: "permission: inherit", detail: "Nothing is allowed beyond what you already allow." }],
+            agentmd: ["# built-in specialist", "mode: subagent", "native: true"],
+          },
+          {
+            id: "sentry-triage", kind: "agent", name: "sentry-triage", author: "vectordev", verified: true, cat: "testing", version: "0.4.0", installs: "1.9k", installed: false,
+            spec: ".vector/agents/sentry-triage.md",
+            desc: "Takes a Sentry issue, reproduces it with a failing test, and proposes a fix in a new workspace. Needs the Sentry MCP server.",
+            adds: [["agent", "@sentry-triage"], ["mcp", "sentry"]],
+            perms: [
+              { level: "med", icon: "net", label: "Uses the Sentry MCP server", api: "sentry_*: allow", detail: "Read tools only. update_issue still asks." },
+              { level: "med", icon: "run", label: "Runs your test command", api: "bash: { \"bun test *\": allow }", detail: "" },
+            ],
+            agentmd: ["---", "description: Reproduce and fix a Sentry issue", "mode: subagent", "---"],
+          },
+        ]
+
+        const cats = [
+          ["all", "All", "plugin"],
+          ["review", "Review & quality"],
+          ["testing", "Testing"],
+          ["security", "Security"],
+          ["docs", "Docs & writing"],
+          ["git", "Git & workflow"],
+          ["workflow", "Productivity"],
+          ["code", "Languages"],
+          ["design", "Design & UI"],
+          ["workspaces", "Workspaces"],
+          ["providers", "Providers"],
+        ]
+        const catIcon = {
+          all: "M2.8 2.8h4.1v4.1H2.8zM9.1 2.8h4.1v4.1H9.1zM2.8 9.1h4.1v4.1H2.8zM9.1 9.1h4.1v4.1H9.1z",
+          review: "M2.5 8s2-4 5.5-4 5.5 4 5.5 4-2 4-5.5 4-5.5-4-5.5-4ZM8 9.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2Z",
+          testing: "M6 2h4M6.8 2v4.2L3.2 12.4A1.1 1.1 0 0 0 4.1 14h7.8a1.1 1.1 0 0 0 .9-1.6L9.2 6.2V2M4.8 10h6.4",
+          security: "M8 2 13 3.8V8c0 3-2.2 5.1-5 6-2.8-.9-5-3-5-6V3.8L8 2Z",
+          docs: "M4 2h5.2L12 4.8V14H4V2ZM6 8h4M6 10.5h4",
+          git: "M4.5 2.5v11M4.5 9.5c0-2.5 7-1.5 7-5M11.5 4.5a1.5 1.5 0 1 0 0-.1M4.5 13.5a1.5 1.5 0 1 0 0-.1",
+          workflow: "M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12ZM8 4.8V8l2.2 1.6",
+          code: "M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5",
+          design: "M3 13l2.6-.6 7-7a1.4 1.4 0 0 0-2-2l-7 7L3 13ZM9.4 4.6l2 2",
+          workspaces: "M2.5 4.5h11v8h-11zM2.5 7h11M5 2.5h6",
+          providers: "M6.1 1.6v2.7M9.9 1.6v2.7M4.6 4.3h6.8v1.7a3.4 3.4 0 0 1-6.8 0V4.3ZM8 9.4V14",
+        }
+
+        const state = { view: "discover", kind: "all", cat: "all", q: "", sel: "env-guard", openPerm: new Set([0]), install: null, scope: "project", confirm: false }
+
+        const kindLabel = { plugin: "Plugin", skill: "Skill", agent: "Agent" }
+        const visible = () => {
+          const q = state.q.trim().toLowerCase()
+          return items.filter((it) => {
+            if (state.view === "installed" && !it.installed) return false
+            if (state.view === "updates" && !(it.installed && it.latest)) return false
+            if (state.kind !== "all" && it.kind !== state.kind) return false
+            if (state.cat !== "all" && it.cat !== state.cat) return false
+            if (q && !`${it.name} ${it.desc} ${it.author} ${it.spec}`.toLowerCase().includes(q)) return false
+            return true
+          })
+        }
+        const sel = () => items.find((it) => it.id === state.sel)
+
+        // ---------- Render ----------
+
+        function renderViews() {
+          const n = { discover: items.length, installed: items.filter((i) => i.installed).length, updates: items.filter((i) => i.installed && i.latest).length }
+          root.querySelector("[data-views]").innerHTML = [
+            ["discover", "Discover"],
+            ["installed", "Installed"],
+            ["updates", "Updates"],
+          ]
+            .map(([id, label]) => `<button class="tab" type="button" role="tab" data-view="${id}" aria-selected="${state.view === id}">${label}${id === "discover" ? "" : `<span class="count">${n[id]}</span>`}</button>`)
+            .join("")
+        }
+
+        function renderRail() {
+          const base = items.filter((it) => (state.view === "installed" ? it.installed : state.view === "updates" ? it.installed && it.latest : true))
+          const rail = root.querySelector("[data-rail]")
+          rail.innerHTML = `<p class="section-title">Categories</p>${cats
+            .map(([id, label]) => {
+              const n = id === "all" ? base.length : base.filter((it) => it.cat === id).length
+              return `<button class="rail-item${n ? "" : " is-empty"}" type="button" data-cat="${id}" aria-pressed="${state.cat === id}">${svg(catIcon[id], 14)}<span>${label}</span><span class="n">${n}</span></button>`
+            })
+            .join("")}
+            <p class="rail-note">Plugins are npm packages listed under <code>plugin</code> in vector.json. Skills are folders with a <code>SKILL.md</code>; Vector also reads <code>.claude/skills</code>.</p>`
+        }
+
+        function itemEnd(it) {
+          if (state.install?.id === it.id) return `${icon("ring", 13, "spin")}<span>Installing</span>`
+          if (it.installed && it.latest) return `<span class="badge badge-violet">Update ${it.latest}</span>`
+          if (it.builtin && it.installed) return `<span>Built in</span>`
+          if (it.installed && it.discovered) return `<span>Local</span>`
+          if (it.installed) return it.enabled ? `<span class="dot dot-green" title="Enabled"></span><span>v${it.version}</span>` : `<span class="dot"></span><span>Off</span>`
+          return `<span>${it.installs === "—" ? "" : `${it.installs} installs`}</span>`
+        }
+
+        function itemRow(it) {
+          return `<div class="item${it.installed && !it.enabled ? " is-off" : ""}" role="option" aria-selected="${state.sel === it.id}" data-item="${it.id}">
+            <button class="item-main" type="button" data-pick="${it.id}">
+              <span class="tile">${glyph[it.kind]()}</span>
+              <span class="row-text">
+                <span class="item-name"><span>${esc(it.name)}</span><span class="badge kind">${kindLabel[it.kind]}</span><span class="by">by ${esc(it.author)}${it.verified ? ` ${verified}` : ""}</span></span>
+                <span class="row-sub">${esc(it.desc)}</span>
+              </span>
+            </button>
+            <span class="item-end">${itemEnd(it)}</span>
+          </div>`
+        }
+
+        function renderList() {
+          const list = visible()
+          const kinds = [
+            ["all", "All"],
+            ["plugin", "Plugins"],
+            ["skill", "Skills"],
+            ["agent", "Agents"],
+          ]
+          const updates = list.filter((i) => i.installed && i.latest)
+          const noun = state.kind === "all" ? "" : ` ${list.length === 1 ? state.kind : kinds.find((k) => k[0] === state.kind)[1].toLowerCase()}`
+          const label = state.view === "installed" ? `${list.length}${noun} installed` : state.view === "updates" ? `${list.length} ${list.length === 1 ? "update" : "updates"} available` : `${list.length}${noun} in the catalog`
+          root.querySelector("[data-sum]").innerHTML = `<span>${label}</span>
+            ${state.view === "updates" && updates.length ? `<button class="btn btn-sm btn-primary" type="button" data-act="update-all">Update all</button>` : ""}
+            <div class="seg" role="group" aria-label="Kind" data-kinds>${kinds.map(([id, l]) => `<button type="button" data-value="${id}" aria-pressed="${state.kind === id}">${l}</button>`).join("")}</div>`
+          const el = root.querySelector("[data-list]")
+          if (!list.length) {
+            el.innerHTML = `<div class="p-empty">${glyph.plugin(18)}<strong>${state.view === "updates" ? "Everything is up to date" : "Nothing matches"}</strong><span>${state.view === "updates" ? "Vector checks for new versions when it starts." : "Try another category or search."}</span></div>`
+            return
+          }
+          const showFeatured = state.view === "discover" && state.cat === "all" && state.kind === "all" && !state.q
+          const featured = items.filter((i) => i.featured)
+          const groups =
+            state.view === "discover"
+              ? [
+                  ["Available", list.filter((i) => !i.installed)],
+                  ["Installed", list.filter((i) => i.installed)],
+                ]
+              : [
+                  ["Plugins", list.filter((i) => i.kind === "plugin")],
+                  ["Skills", list.filter((i) => i.kind === "skill")],
+                  ["Agents", list.filter((i) => i.kind === "agent")],
+                ]
+          el.innerHTML = `${
+            showFeatured
+              ? `<p class="p-group"><span>Made for Vector</span></p><div class="featured">${featured
+                  .slice(0, 2)
+                  .map(
+                    (it) => `<button class="feat" type="button" data-pick="${it.id}" aria-pressed="${state.sel === it.id}">
+                    <span class="feat-top"><span class="tile">${glyph[it.kind]()}</span><span class="row-text"><span class="row-name">${esc(it.name)}</span><span class="row-sub">${kindLabel[it.kind]} · by ${esc(it.author)}</span></span></span>
+                    <p>${esc(it.desc)}</p>
+                    <span class="feat-meta"><span>${it.installs} installs</span><span>·</span><span>v${it.latest ?? it.version}</span>${it.installed ? `<span class="badge badge-green" style="margin-left:auto;font-family:var(--font)">Installed</span>` : ""}</span>
+                  </button>`,
+                  )
+                  .join("")}</div>`
+              : ""
+          }${groups
+            .filter(([, g]) => g.length)
+            .map(([label, g]) => `<p class="p-group"><span>${label}</span><span class="mono">${g.length}</span></p>${g.map(itemRow).join("")}`)
+            .join("")}`
+        }
+
+        function actions(it) {
+          if (state.install?.id === it.id) {
+            const steps = it.kind === "plugin"
+              ? [`Resolving ${it.spec}@${it.latest ?? it.version}`, "Installing into ~/.cache/vector/plugins", "Loading hooks"]
+              : it.kind === "skill"
+                ? [`Downloading ${it.name} from the skills index`, "Writing SKILL.md and files", "Adding to available skills"]
+                : [`Writing ${it.spec}`, "Checking its permission rules", "Adding @" + it.name + " to the agent list"]
+            const lbl = state.install.update ? "Updating" : "Installing"
+            return `<ol class="steps" aria-label="${lbl}">${steps
+              .map((s, i) => {
+                const st = i < state.install.step ? "is-done" : i === state.install.step ? "is-now" : ""
+                return `<li class="${st}">${st === "is-done" ? check : st === "is-now" ? icon("ring", 13, "spin") : `<span class="ph"></span>`}<span class="mono">${esc(s)}</span></li>`
+              })
+              .join("")}</ol>`
+          }
+          if (state.confirm) {
+            return `<div class="confirm"><span>Remove ${esc(it.name)} from ${it.scope === "global" ? "~/.config/vector" : "vector.json"}? New sessions will not load it.</span><button class="btn btn-sm" type="button" data-act="cancel-remove">Keep</button><button class="btn btn-sm btn-danger" type="button" data-act="remove">Uninstall</button></div>`
+          }
+          if (!it.installed) {
+            return `<button class="btn btn-primary" type="button" data-act="install">${icon("plus", 13)}Install${it.builtin ? "" : ` ${kindLabel[it.kind].toLowerCase()}`}</button>
+              ${it.builtin ? "" : `<div class="seg" role="group" aria-label="Install for" data-scope><button type="button" data-value="project" aria-pressed="${state.scope === "project"}">This project</button><button type="button" data-value="global" aria-pressed="${state.scope === "global"}">Everywhere</button></div>`}
+              <span class="grow"></span>`
+          }
+          return `${it.latest ? `<button class="btn btn-primary" type="button" data-act="update">Update to ${it.latest}</button>` : ""}
+            <span class="pd-switch"><button class="switch" type="button" role="switch" aria-checked="${it.enabled}" aria-label="Enable ${esc(it.name)}" data-sw="enable"></button>${it.enabled ? "Enabled" : "Disabled"}</span>
+            <span class="grow"></span>
+            ${it.builtin ? `<span class="muted" style="font-size:12px">Ships with Vector</span>` : `<button class="btn btn-ghost btn-sm btn-text-danger" type="button" data-act="ask-remove">${icon("trash", 13)}Uninstall</button>`}`
+        }
+
+        function sourceBlock(it) {
+          if (it.kind === "skill" && it.skillmd) return ["SKILL.md", it.skillmd.map((l) => (l.startsWith("---") || l.startsWith("#") ? `<span class="c">${esc(l)}</span>` : esc(l).replace(/^(\s*)([a-z]+):/, '$1<span class="k">$2</span>:')))]
+          if (it.kind === "agent" && it.agentmd) return [it.builtin ? "built-in agent" : it.spec, it.agentmd.map((l) => (l.startsWith("---") || l.startsWith("#") ? `<span class="c">${esc(l)}</span>` : esc(l).replace(/^(\s*)([a-z]+):/, '$1<span class="k">$2</span>:')))]
+          if (it.builtin) return null
+          const where = (it.installed ? it.scope : state.scope) === "global" ? "~/.config/vector/vector.json" : "vector.json"
+          const ver = it.latest ?? it.version
+          return [
+            where,
+            [`{`, `  <span class="k">"plugin"</span>: [`, `    <span class="s">"vector-plugin-conventional-commits"</span>,`, `__ADD__    <span class="s">"${esc(it.spec)}@${ver}"</span>`, `  ]`, `}`].filter((l) => it.id !== "conventional-commits" || !l.startsWith("__ADD__")),
+          ]
+        }
+
+        function renderDetail() {
+          const it = sel()
+          const d = root.querySelector("[data-detail]")
+          if (!it) {
+            d.innerHTML = `<div class="p-empty">Select something to see what it does.</div>`
+            return
+          }
+          const high = it.perms.filter((p) => p.level === "high").length
+          const med = it.perms.filter((p) => p.level === "med").length
+          const src = sourceBlock(it)
+          d.innerHTML = `
+            <div class="pd-head">
+              <span class="tile tile-lg">${glyph[it.kind](20)}</span>
+              <span class="row-text">
+                <span class="pd-title"><h3>${esc(it.name)}</h3><span class="badge">${kindLabel[it.kind]}</span>${it.installed ? `<span class="badge badge-green">Installed</span>` : ""}</span>
+                <span class="pd-sub">by <b>${esc(it.author)}</b>${it.verified ? ` ${verified} verified` : " · community"} · ${it.version === "built in" || it.version === "local" ? it.version : `v${it.version}`}${it.installs !== "—" ? ` · ${it.installs} installs` : ""}</span>
+              </span>
+            </div>
+            <div class="pd-actions" data-actions>${actions(it)}</div>
+            <div class="pd-body scroll">
+              <p>${esc(it.desc)}</p>
+              ${
+                it.latest && it.installed && it.changelog
+                  ? `<div class="pd-sec"><div class="pd-sec-head"><h4 class="section-title">New in ${it.latest}</h4><span class="muted mono">${it.version} → ${it.latest}</span></div><ul class="notes">${it.changelog.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></div>`
+                  : ""
+              }
+              <div class="pd-sec"><div class="pd-sec-head"><h4 class="section-title">Adds</h4></div>
+                <div class="adds">${it.adds.map(([k, v]) => `<span class="add-chip"><span>${k}</span>${esc(v)}</span>`).join("")}</div></div>
+              <div class="pd-sec"><div class="pd-sec-head"><h4 class="section-title">${it.installed ? "Permissions it has" : "Permissions it asks for"}</h4><span class="muted">${high ? `<span style="color:var(--red)">${high} sensitive</span>` : med ? `${med} to review` : "Nothing sensitive"}</span></div>
+                <div class="perms">${it.perms
+                  .map((p, i) => {
+                    const open = state.openPerm.has(i)
+                    return `<div class="perm"><button class="perm-btn" type="button" aria-expanded="${open}" data-perm="${i}">
+                      <span class="risk ${p.level === "high" ? "is-high" : p.level === "med" ? "is-med" : ""}">${riskIcon[p.icon]}</span>
+                      <span class="row-text"><span class="row-name">${esc(p.label)}</span><span class="row-sub mono">${esc(p.api)}</span></span>
+                      ${p.tag ? `<span class="badge ${p.level === "high" ? "badge-red" : "badge-amber"}">${p.tag}</span>` : ""}
+                      ${LabUI.svg("chevron-right", 14)}
+                    </button>${open && p.detail ? `<p class="perm-detail">${esc(p.detail)}</p>` : ""}</div>`
+                  })
+                  .join("")}</div></div>
+              ${
+                src
+                  ? `<div class="pd-sec"><div class="pd-sec-head"><h4 class="section-title">${it.kind === "plugin" ? (it.installed ? "Listed in" : "Will be added to") : "Source"}</h4><span class="muted mono">${esc(src[0])}</span></div>
+                    <div class="code">${src[1].map((l, i) => `<code data-n="${i + 1}"${l.startsWith("__ADD__") && !it.installed ? ' class="is-add"' : ""}><span>${l.replace("__ADD__", "")}</span></code>`).join("")}</div></div>`
+                  : ""
+              }
+              <div class="facts">
+                <div><span>Kind</span><b>${it.kind}</b></div>
+                <div><span>${it.kind === "plugin" ? "Package" : "Location"}</span><b title="${esc(it.spec)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.spec.replace("https://", ""))}</b></div>
+                <div><span>Scope</span><b>${it.builtin ? "built in" : it.installed ? (it.scope === "global" ? "everywhere" : it.discovered ? ".claude" : "project") : "—"}</b></div>
+              </div>
+            </div>`
+          LabUI.renderIcons(d)
+        }
+
+        function renderAll() {
+          renderViews()
+          renderRail()
+          renderList()
+          renderDetail()
+          LabUI.renderIcons(root.querySelector(".app-body"))
+        }
+
+        let toastTimer
+        function toast(text) {
+          const t = root.querySelector("[data-toast]")
+          t.innerHTML = `${check}<span>${esc(text)}</span>`
+          t.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (t.hidden = true), 2600)
+        }
+
+        function runInstall(it, update) {
+          state.install = { id: it.id, step: 0, update }
+          renderList()
+          renderDetail()
+          LabUI.renderIcons(root.querySelector("[data-list]"))
+          const advance = () => {
+            state.install.step++
+            if (state.install.step < 3) {
+              if (state.sel === it.id) {
+                root.querySelector("[data-actions]").innerHTML = actions(it)
+                LabUI.renderIcons(root.querySelector("[data-actions]"))
+              }
+              return setTimeout(advance, 650)
+            }
+            state.install = null
+            if (update) {
+              it.version = it.latest
+              delete it.latest
+            }
+            it.installed = true
+            it.enabled = true
+            it.scope = it.scope ?? state.scope
+            renderAll()
+            toast(update ? `${it.name} updated to ${it.version}` : `${it.name} installed · active in new sessions`)
+          }
+          setTimeout(advance, 650)
+        }
+
+        // ---------- Events ----------
+
+        root.addEventListener("click", (e) => {
+          const t = e.target
+          if (t.closest(".switch")) return
+          const view = t.closest("[data-view]")
+          if (view) {
+            state.view = view.dataset.view
+            state.cat = "all"
+            const first = visible()[0]
+            if (first && !visible().includes(sel())) state.sel = first.id
+            state.confirm = false
+            renderAll()
+            return
+          }
+          const cat = t.closest("[data-cat]")
+          if (cat) {
+            state.cat = cat.dataset.cat
+            renderRail()
+            renderList()
+            LabUI.renderIcons(root.querySelector("[data-list]"))
+            return
+          }
+          const pick = t.closest("[data-pick]")
+          if (pick) {
+            state.sel = pick.dataset.pick
+            state.openPerm = new Set([0])
+            state.confirm = false
+            root.querySelectorAll("[data-item]").forEach((r) => r.setAttribute("aria-selected", String(r.dataset.item === state.sel)))
+            root.querySelectorAll(".feat").forEach((r) => r.setAttribute("aria-pressed", String(r.dataset.pick === state.sel)))
+            renderDetail()
+            return
+          }
+          const perm = t.closest("[data-perm]")
+          if (perm) {
+            const i = Number(perm.dataset.perm)
+            state.openPerm.has(i) ? state.openPerm.delete(i) : state.openPerm.add(i)
+            renderDetail()
+            root.querySelector(`[data-perm="${i}"]`).focus()
+            return
+          }
+          const act = t.closest("[data-act]")
+          if (!act) return
+          const it = sel()
+          const a = act.dataset.act
+          if (a === "install") runInstall(it, false)
+          if (a === "update") runInstall(it, true)
+          if (a === "update-all") {
+            const ups = items.filter((i) => i.installed && i.latest)
+            ups.forEach((u) => {
+              u.version = u.latest
+              delete u.latest
+            })
+            renderAll()
+            toast(`${ups.length} updates installed`)
+          }
+          if (a === "ask-remove") {
+            state.confirm = true
+            renderDetail()
+          }
+          if (a === "cancel-remove") {
+            state.confirm = false
+            renderDetail()
+          }
+          if (a === "remove") {
+            it.installed = false
+            it.enabled = false
+            delete it.latest
+            state.confirm = false
+            const name = it.name
+            if (state.view !== "discover" && !visible().includes(it)) state.sel = visible()[0]?.id ?? state.sel
+            renderAll()
+            toast(`${name} uninstalled`)
+          }
+          if (a === "from-npm") {
+            const q = root.querySelector("[data-q]")
+            state.view = "discover"
+            state.cat = "all"
+            q.value = "@vectordev/"
+            state.q = q.value
+            renderAll()
+            q.focus()
+          }
+          if (a === "new-skill") toast("Created .vector/skills/new-skill/SKILL.md")
+        })
+
+        root.addEventListener("lab:seg", (e) => {
+          if (e.target.matches("[data-kinds]")) {
+            state.kind = e.detail
+            renderList()
+            LabUI.renderIcons(root.querySelector("[data-list]"))
+          }
+          if (e.target.matches("[data-scope]")) {
+            state.scope = e.detail
+            renderDetail()
+          }
+        })
+
+        root.addEventListener("lab:switch", (e) => {
+          if (e.target.dataset.sw !== "enable") return
+          const it = sel()
+          it.enabled = e.detail
+          renderList()
+          renderRail()
+          renderDetail()
+          LabUI.renderIcons(root.querySelector("[data-list]"))
+          toast(`${it.name} ${it.enabled ? "enabled" : "disabled"} · applies to new sessions`)
+        })
+
+        root.addEventListener("input", (e) => {
+          if (!e.target.matches("[data-q]")) return
+          state.q = e.target.value
+          renderList()
+          LabUI.renderIcons(root.querySelector("[data-list]"))
+        })
+
+        root.addEventListener("keydown", (e) => {
+          if ((e.key === "ArrowDown" || e.key === "ArrowUp") && e.target.closest("[data-pick]")) {
+            e.preventDefault()
+            const all = [...root.querySelectorAll(".item-main")]
+            const i = all.indexOf(e.target.closest("[data-pick]"))
+            const next = all[i + (e.key === "ArrowDown" ? 1 : -1)]
+            if (next) {
+              next.click()
+              next.focus()
+            }
+          }
+        })
+
+        renderAll()
+      })()
+    </script>
+  </body>
+</html>
