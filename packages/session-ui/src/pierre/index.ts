@@ -274,11 +274,12 @@ export const reviewUnsafeCSS = `
   font-style: normal !important;
 }
 
+/* The left padding holds the comment "+" of a hovered row, beside its number. */
 [data-diff] :is([data-column-number], [data-gutter-buffer]) {
   background-color: var(--vr-bg);
   color: rgba(135, 133, 144, 0.6);
   font-size: 11px;
-  padding: 0 8px 0 10px;
+  padding: 0 8px 0 24px;
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -328,28 +329,11 @@ export const reviewUnsafeCSS = `
   opacity: var(--vr-deleted-numbers, 0);
 }
 
-/* The comment "+" sits over the number column of the row it belongs to. */
+/* The comment "+" sits in the number column's left padding, so the number beside it
+   stays visible and dragging along the numbers still selects a range. */
 [data-diff] [data-gutter-utility-slot] {
   left: 0;
-  justify-content: center;
-}
-
-[data-diff] [data-column-number]:has(> [data-gutter-utility-slot]) [data-line-number-content] {
-  opacity: 0;
-}
-
-/* On a deleted row in unified view the hovered row shows its old number, and the
-   comment "+" takes its place only once the pointer is on the number column. */
-[data-diff][data-diff-type='single']
-  [data-column-number][data-line-type='change-deletion']:not(:hover)
-  > [data-gutter-utility-slot] {
-  visibility: hidden;
-}
-
-[data-diff][data-diff-type='single']
-  [data-column-number][data-line-type='change-deletion']:not(:hover):has(> [data-gutter-utility-slot])
-  [data-line-number-content] {
-  opacity: 1;
+  justify-content: flex-start;
 }
 
 [data-diff] [data-line][data-line-type='change-addition']::before {

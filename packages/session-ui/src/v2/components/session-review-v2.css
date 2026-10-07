@@ -720,10 +720,10 @@
   outline-offset: -2px;
 }
 
-/* The gutter "+" (styled inline in comment-hover.ts), centred over the number column. */
+/* The gutter "+" (styled inline in comment-hover.ts), left of the row's number. */
 [data-component="session-review-v2"] .vector-review-diff [data-slot="line-comment-add"] {
   top: 2px !important;
-  left: 0 !important;
+  left: 5px !important;
   width: 16px !important;
   height: 16px !important;
   border-radius: 4px !important;
