@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* This design's own styles. Scope everything under .d-SLUG so nothing leaks. */
+      .d-SLUG .example {
+        padding: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="SLUG"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <!-- data-height: the stage height at the app's 1440px width -->
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-SLUG">
+            <div class="app">
+              <!-- data-active: home | search | dashboard | browser | cloud | pulls | vectorscope | mcp | plugins | settings | workspace -->
+              <nav data-lab-sidebar data-active="workspace" data-workspace="Vector" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="branch" data-size="15" class="muted"></i>
+                  <h2>Screen title</h2>
+                  <span class="app-header-sub">context</span>
+                  <div class="app-header-end">
+                    <button class="chip-tool" type="button"><i data-icon="task" data-size="15"></i>Tasks</button>
+                    <button class="btn btn-primary" type="button">Primary action</button>
+                  </div>
+                </header>
+                <div class="app-body scroll">
+                  <div class="example">Design content goes here.</div>
+                </div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      // This design's interactions. LabUI.renderIcons(el) after inserting HTML that contains <i data-icon>.
+    </script>
+  </body>
+</html>

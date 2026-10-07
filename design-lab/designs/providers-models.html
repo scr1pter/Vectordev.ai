@@ -443,12 +443,15 @@
       }
 
       .d-providers-models .tb .input {
-        width: 220px;
+        flex: 1;
+        min-width: 150px;
         height: 28px;
       }
 
       .d-providers-models .cap-filter {
         display: inline-flex;
+        flex: none;
+        white-space: nowrap;
         align-items: center;
         gap: 6px;
         height: 26px;
@@ -472,7 +475,8 @@
       }
 
       .d-providers-models .tb .seg {
-        margin-left: auto;
+        flex: none;
+        margin-left: 4px;
       }
 
       .d-providers-models .tb .seg button {
@@ -488,7 +492,7 @@
 
       .d-providers-models .tr {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 64px 74px 74px 106px 112px 128px;
+        grid-template-columns: minmax(0, 1fr) 56px 66px 66px 96px 100px 92px;
         align-items: center;
         column-gap: 12px;
         min-height: 42px;
@@ -505,6 +509,11 @@
       .d-providers-models .th .num,
       .d-providers-models .tr .num {
         text-align: right;
+      }
+
+      .d-providers-models .th .num {
+        color: inherit;
+        font: inherit;
       }
 
       .d-providers-models .th button {
@@ -1202,7 +1211,7 @@
             ["reasoning", "Reasoning"],
             ["vision", "Images"],
             ["long", "1M context"],
-            ["free", "No per-token cost"],
+            ["free", "Free or local"],
           ]
           const groups =
             state.prov === "all" && state.sort === "default"
@@ -1259,9 +1268,9 @@
           const r = btn.getBoundingClientRect()
           const scale = main.width / root.querySelector(".app-main").offsetWidth
           p.style.left = `${(r.right - main.left) / scale + 8}px`
-          p.style.top = `${Math.max(56, (r.top - main.top) / scale - 300)}px`
           p.hidden = false
           renderPicker("")
+          p.style.top = `${Math.max(56, Math.min((r.top - main.top) / scale - 40, root.querySelector(".app-main").offsetHeight - p.offsetHeight - 12))}px`
           renderDefaults()
           p.querySelector("input").focus()
         }

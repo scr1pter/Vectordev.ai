@@ -218,8 +218,17 @@
         line-height: 21.6px;
       }
 
-      .d-subagent-orchestration .so-prose code,
-      .d-subagent-orchestration .so-result code {
+      .d-subagent-orchestration .so-result code,
+      .d-subagent-orchestration .so-returned code {
+        padding: 0 3px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--so-t2);
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+
+      .d-subagent-orchestration .so-prose code {
         padding: 1px 4px;
         border-radius: 4px;
         background: #37343a;
@@ -586,6 +595,24 @@
         }
       }
 
+      .d-subagent-orchestration .so-waiting[data-idle] {
+        border-style: solid;
+        border-color: var(--line);
+      }
+
+      .d-subagent-orchestration .so-waiting[data-idle] .so-spinner {
+        display: none;
+      }
+
+      .d-subagent-orchestration .so-status[data-tone="muted"] {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-status[data-tone="muted"] i {
+        box-shadow: none;
+        animation: none;
+      }
+
       .d-subagent-orchestration .so-done-note {
         display: flex;
         align-items: center;
@@ -683,7 +710,7 @@
         color: #8b8a8e;
       }
 
-      .d-subagent-orchestration .so-cicon:first-of-type {
+      .d-subagent-orchestration .so-cicon.is-first {
         margin-left: auto;
       }
 
@@ -1297,6 +1324,15 @@
         background: repeating-linear-gradient(90deg, rgba(182, 159, 247, 0.3) 0 3px, transparent 3px 6px);
       }
 
+      .d-subagent-orchestration .so-glen {
+        position: absolute;
+        top: 10px;
+        margin-left: 6px;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+        white-space: nowrap;
+      }
+
       .d-subagent-orchestration .so-dep {
         position: absolute;
         top: 3px;
@@ -1317,8 +1353,8 @@
       .d-subagent-orchestration .so-now::before {
         content: "now";
         position: absolute;
-        top: 0;
-        left: 4px;
+        bottom: -16px;
+        left: -10px;
         color: var(--violet-bright);
         font: 10px var(--mono);
       }
@@ -1340,7 +1376,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 6px 14px;
-        margin-top: 14px;
+        margin-top: 26px;
         padding-top: 12px;
         border-top: 1px solid var(--hairline);
         color: var(--text-3);
@@ -1527,7 +1563,7 @@
                         <span class="so-cc"><i data-icon="model" data-size="13"></i>GPT-6 Sol<i data-icon="caret" data-size="12"></i></span>
                         <span class="so-cc is-strong">Manual<i data-icon="caret" data-size="12"></i></span>
                         <span class="so-cc is-effort">Max<i data-icon="caret" data-size="12"></i></span>
-                        <span class="so-cicon"><i data-icon="mic" data-size="14"></i></span>
+                        <span class="so-cicon is-first"><i data-icon="mic" data-size="14"></i></span>
                         <span class="so-cicon"><i data-icon="clip" data-size="14"></i></span>
                         <span class="so-stop" data-stop-btn><i data-icon="stop" data-size="18"></i></span>
                       </div>
@@ -1646,7 +1682,7 @@
           },
           {
             id: 5, sid: "ses_01JB4N8Y3H", title: "Write trust tests", agent: "test", kind: "specialist", bg: true, phase: 2,
-            status: "queued", startAt: null, secs: 0, dur: 10, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", depends: [2, 3],
+            status: "queued", startAt: null, secs: 0, dur: 13, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", depends: [2, 3],
             owned: ["packages/engine/test/project/", "packages/engine/test/mcp/"],
             brief: "Once both Subagents are in, cover workspace trust: first open, a changed fingerprint, a declined prompt and a symlinked config, plus project MCP servers waiting for trust. Run the suite in packages/engine.",
             criteria: ["Covers first open, changed fingerprint, declined prompt, symlinked config", "Project MCP servers wait for trust", "bun test passes in packages/engine"],
@@ -1655,21 +1691,21 @@
           },
           {
             id: 6, sid: "ses_01JB4R1A9D", title: "Security review of the patch", agent: "security", kind: "specialist", bg: true, phase: 3,
-            status: "pending", startAt: null, secs: 0, dur: 11, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", owned: [], depends: [],
+            status: "pending", startAt: null, secs: 0, dur: 16, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", owned: [], depends: [],
             brief: "Read-only review of the staged diff against HEAD: fingerprint-bound trust, narrowing-only project policy, and the MCP launch gate. Report bypasses by severity.",
             criteria: ["No Critical or High bypass", "Each finding names a file and line"],
             result: "No Critical or High findings. Untrusted policy can only narrow permissions; project MCP servers wait for trust. Medium: a trust record for a deleted folder lingers in settings; suggest pruning on load.",
           },
           {
             id: 7, sid: "ses_01JB4R1C2F", title: "Code review", agent: "review", kind: "specialist", bg: true, phase: 3,
-            status: "pending", startAt: null, secs: 0, dur: 7, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", owned: [], depends: [],
+            status: "pending", startAt: null, secs: 0, dur: 11, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", owned: [], depends: [],
             brief: "Read-only review of the staged diff for correctness, regressions and missing tests.",
             criteria: ["Findings are actionable", "Missing tests are listed"],
             result: "No blocking issues. One suggestion: rename <code>fingerprint()</code> to <code>folderFingerprint()</code>, since <code>fingerprint</code> is also a field on the trust record.",
           },
           {
             id: 8, sid: "ses_01JB4R1E6M", title: "Independent verdict", agent: "judge", kind: "specialist", bg: false, phase: 3,
-            status: "pending", startAt: null, secs: 0, dur: 8, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Astra", owned: [], depends: [6, 7],
+            status: "pending", startAt: null, secs: 0, dur: 11, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Astra", owned: [], depends: [6, 7],
             brief: "Judge the staged change against the original request and its success criteria. Score requirement coverage, correctness, regression safety, evidence and security; return PASS, FAIL or INCONCLUSIVE.",
             criteria: ["Verdict with a score per rubric line", "Evidence cited for each"],
             result: "<b>PASS</b>. Requirement coverage 5/5, correctness 5/5, regression safety 4/5, evidence 5/5, security 5/5. Ready to commit.",
@@ -1710,9 +1746,21 @@
             <span class="so-squares">${list.map((a) => `<span class="so-sq" data-kind="${a.kind}" data-status="${a.status === "queued" ? "" : a.status}"></span>`).join("")}</span>
           </button>`
         }
+        // A task_id continuation is its own chip: one agent, its second run.
+        function runChipHtml(a) {
+          const live = a.status === "running"
+          return `<button class="so-chip" type="button" data-chip="${a.phase}" aria-label="${esc(a.title)}, run 2. Show in the Subagents panel">
+            <span class="so-chip-title">${esc(a.title)}</span>${glyph("chevron-right", 16)}
+            <span class="so-chip-meta"><span>${kindLabel(a)}</span><span>Run 2</span><span class="so-dim">task_id ${a.sid}</span>${live ? "" : `<span class="so-word" data-status="${a.status === "failed" ? "failed" : "done"}">${a.status === "failed" ? "Failed" : "Done"}</span>`}</span>
+            <span class="so-squares"><span class="so-sq" data-kind="${a.kind}" data-status="${a.status}"></span></span>
+          </button>`
+        }
         function refreshChips() {
           stage.querySelectorAll("[data-chip-slot]").forEach((slot) => {
             slot.innerHTML = chipHtml(Number(slot.dataset.chipSlot))
+          })
+          stage.querySelectorAll("[data-run-chip]").forEach((slot) => {
+            slot.innerHTML = runChipHtml(byId(Number(slot.dataset.runChip)))
           })
         }
 
@@ -1800,7 +1848,7 @@
             if (out?.launch) launchPhase(out.launch)
             const extra = out?.launch ? `<div data-chip-slot="${out.launch}"></div>` : ""
             append(followHtml(a, text, extra))
-            turn.mainSegments.push([turn.secs, turn.secs + 6])
+            turn.mainSegments.push([Math.max(0, turn.secs - 6), turn.secs + 16])
             turn.mainState = out?.final ? "done" : "waiting"
             if (out?.final) finish()
             refreshChips()
@@ -1859,12 +1907,24 @@
           } else if (out.length) {
             title.textContent = `Waiting for ${out.length} background ${out.length === 1 ? (out[0].kind === "subagent" ? "Subagent" : "specialist") : "subagents"}`
             sub.textContent = "The main agent is idle until a result arrives. It never polls."
-          } else if (blocked.length) {
+          } else if (blocked.length && turn.mainState !== "reading") {
+            turn.mainState = "idle"
             title.textContent = `${blocked.map((a) => a.title).join(", ")} can't start`
             sub.textContent = "A subagent it depends on was cancelled. Continue it from the panel."
+          } else if (turn.mainState === "reading") {
+            title.textContent = "Following up on a result"
+            sub.textContent = "The main agent read what came back and is deciding what's next."
           } else {
-            title.textContent = "Working"
-            sub.textContent = ""
+            // Nothing left to wait for and nothing to follow up: the turn ends.
+            turn.mainState = "idle"
+            title.textContent = "Turn ended, nothing running"
+            sub.textContent = "The cancellation reaches the main agent with your next message."
+          }
+          waiting.toggleAttribute("data-idle", turn.mainState === "idle")
+          stage.querySelector("[data-stop-btn]").toggleAttribute("data-idle", turn.mainState === "idle" || turn.mainState === "done")
+          if (turn.mainState === "idle") {
+            pill.dataset.tone = blocked.length ? "" : "muted"
+            text.textContent = blocked.length ? "Needs you" : "Idle"
           }
           stage.querySelector("[data-waiting-squares]").innerHTML = out
             .concat(blocked)
@@ -1944,7 +2004,7 @@
           const keep = tree.scrollTop
           const phases = [...new Set(agents.filter((a) => a.status !== "pending").map((a) => a.phase))]
           const mainSub =
-            turn.mainState === "done" ? "Finished the turn" : turn.mainState === "reading" ? "Reading a result and following up" : "Idle, waiting for results"
+            turn.mainState === "done" ? "Finished the turn" : turn.mainState === "idle" ? "Turn ended, cancellation recorded" : turn.mainState === "reading" ? "Reading a result and following up" : "Idle, waiting for results"
           tree.innerHTML = `
             <div class="so-root">
               <span class="so-root-icon">${glyph("main", 15)}</span>
@@ -1985,7 +2045,7 @@
               const bar =
                 a.startAt === null
                   ? `<span class="so-bar" data-status="${a.status}" style="left:${pct(turn.secs)};width:${pct(60)}"></span><span class="so-dep" style="left:calc(${pct(turn.secs + 60)} + 6px)">after ${a.depends.map((id) => `#${id}`).join(" ")}</span>`
-                  : `<span class="so-bar" data-status="${a.status}" style="left:${pct(a.startAt)};width:${pct(Math.max(a.secs, 4))}"></span>`
+                  : `<span class="so-bar" data-status="${a.status}" style="left:${pct(a.startAt)};width:${pct(Math.max(a.secs, 4))}"></span><span class="so-glen" style="left:${pct(a.startAt + Math.max(a.secs, 4))}">${fmt(a.secs)}</span>`
               return `<div class="so-grow"><span class="so-glabel"><span class="so-id">#${a.id}</span><span>${esc(a.title)}</span></span><span class="so-track">${bar}</span></div>`
             })
             .join("")
@@ -2043,7 +2103,9 @@
           const toggle = event.target.closest("[data-toggle]")
           if (toggle) {
             const id = Number(toggle.dataset.toggle)
-            open.has(id) ? open.delete(id) : open.add(id)
+            const was = open.has(id)
+            open.clear()
+            if (!was) open.add(id)
             renderTree()
             tree.querySelector(`[data-toggle="${id}"]`)?.focus({ preventScroll: true })
             return
@@ -2091,7 +2153,7 @@
           a.bg = true
           if (!a.continueResult) a.continueResult = `Done: ${esc(note)} Stayed within its owned paths.`
           dependents(a).forEach((d) => d.status === "blocked" && (d.status = "queued"))
-          append(`<div data-chip-slot="${a.phase}"></div>`)
+          append(`<div data-run-chip="${a.id}"></div>`)
           turn.mainState = "waiting"
           stage.querySelector("[data-stop-btn]").toggleAttribute("data-idle", false)
           waiting.hidden = false
@@ -2151,18 +2213,20 @@
         stage.querySelector("[data-view-seg]").addEventListener("lab:seg", (event) => setView(event.detail))
 
         // ---- the clock ----
+        // The concept plays at four times real speed, so a whole turn fits in about a minute.
+        const SPEED = 4
         function tick() {
-          if (turn.mainState !== "done") {
-            turn.secs += 1
-            turn.tokens += turn.mainState === "reading" ? 2400 : 0
+          if (turn.mainState !== "done" && turn.mainState !== "idle") {
+            turn.secs += SPEED
+            turn.tokens += turn.mainState === "reading" ? 2400 * SPEED : 0
           }
           let changed = false
           agents
             .filter((a) => a.status === "running")
             .forEach((a) => {
-              a.secs += 1
-              a.tokens += 2600 + Math.floor(Math.random() * 3200)
-              a.cost += 0.0011
+              a.secs += SPEED
+              a.tokens += (2600 + Math.floor(Math.random() * 3200)) * SPEED
+              a.cost += 0.0011 * SPEED
               a.tools += Math.random() < 0.3 ? 1 : 0
               a.dur -= 1
               tree.querySelector(`[data-agent-time="${a.id}"]`)?.replaceChildren(fmt(a.secs))

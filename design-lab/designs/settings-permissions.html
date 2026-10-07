@@ -545,11 +545,16 @@
         align-items: center;
         gap: 10px;
         padding: 10px 12px;
-        border-top: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--hairline);
         background: rgba(0, 0, 0, 0.12);
       }
+      .d-settings-permissions .tester-label {
+        color: var(--text-3);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
       .d-settings-permissions .tester .input {
-        width: 300px;
+        width: 280px;
       }
       .d-settings-permissions .tester .input input {
         font: 12px var(--mono);
@@ -899,7 +904,7 @@
       .d-settings-permissions .meter {
         position: relative;
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: 4fr 5fr 4fr 3fr;
         gap: 3px;
         margin: 16px 0 6px;
       }
@@ -936,7 +941,7 @@
       }
       .d-settings-permissions .meter-labels {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: 4fr 5fr 4fr 3fr;
         color: var(--text-3);
         font-size: 10.5px;
       }
@@ -1067,8 +1072,8 @@
       }
       .d-settings-permissions .toast {
         position: absolute;
-        bottom: 22px;
-        left: calc(248px + 405px);
+        bottom: 72px;
+        left: calc(248px + 404px);
         z-index: 30;
         padding: 9px 14px;
         border-radius: 10px;
@@ -1132,11 +1137,12 @@
                           </span>
                           <button class="btn btn-primary" type="submit"><i data-icon="plus" data-size="14"></i>Add rule</button>
                         </form>
-                        <ol class="rules" id="cmd-list"></ol>
                         <div class="tester">
+                          <span class="tester-label">Try a command</span>
                           <label class="input"><span class="muted mono" style="font-size:12px">$</span><input id="cmd-test" value="git push --force origin main" aria-label="Try a command" spellcheck="false" /></label>
                           <span class="verdict" id="cmd-verdict" aria-live="polite"></span>
                         </div>
+                        <ol class="rules" id="cmd-list"></ol>
                       </div>
                     </div>
 
@@ -1232,8 +1238,8 @@
                           <span class="link"></span>
                           <span class="node">Build <small>main agent · gets every rule</small></span>
                           <div class="branches">
-                            <div class="branch"><span class="node">Debug, Test, Performance, Migration</span><p>Carry your deny rules and folder rules. Cannot start subagents or write todos unless their own rules allow it.</p></div>
-                            <div class="branch"><span class="node">Explore, Review, Judge, Security</span><p>Always read-only: search, read and verification commands. Your rules can narrow them, never widen them.</p></div>
+                            <div class="branch"><span class="node">Debug, Test, Performance, Migration</span><p>Inherit your deny and folder rules. No subagents or todos of their own.</p></div>
+                            <div class="branch"><span class="node">Explore, Review, Judge, Security</span><p>Always read-only. Your rules can narrow them, never widen them.</p></div>
                           </div>
                         </div>
                       </div>
@@ -1399,33 +1405,33 @@
         let scope = "user"
 
         // ---------- Risk: a small, explainable score ----------
+        // Points when a tool runs without asking. Asking and denying add nothing.
         const WEIGHT = {
-          edit: [2, 0.5, 0],
-          bash: [4, 1, 0],
-          unsandboxed_shell: [3, 1, 0],
-          read: [0.5, 0, 0],
-          external_directory: [2.5, 0.5, 0],
-          webfetch: [1, 0.25, 0],
-          websearch: [0.5, 0, 0],
-          browser_external: [1, 0.25, 0],
-          browser_interact: [1.5, 0.25, 0],
-          browser_sensitive: [3, 0.75, 0],
-          mcp: [0, 0, 0],
-          task: [0.5, 0, 0],
-          doom_loop: [1, 0, 0],
+          edit: 2,
+          bash: 4,
+          unsandboxed_shell: 3,
+          read: 0.5,
+          external_directory: 2.5,
+          webfetch: 1,
+          websearch: 0.5,
+          browser_external: 1,
+          browser_interact: 1.5,
+          browser_sensitive: 3,
+          mcp: 0,
+          task: 0.5,
+          doom_loop: 1,
         }
         const LEVELS = [
           ["low", "Low", 0],
           ["moderate", "Moderate", 4],
-          ["elevated", "Elevated", 8],
-          ["high", "High", 12],
+          ["elevated", "Elevated", 9],
+          ["high", "High", 13],
         ]
         const idx = { allow: 0, ask: 1, deny: 2 }
         function risk(s) {
           const factors = []
           TOOLS.forEach((t) => {
-            const points = WEIGHT[t.key][idx[s.modes[t.key]]]
-            if (points >= 1) factors.push({ points, text: `${t.name} ${s.modes[t.key] === "allow" ? "without asking" : "asks"}`, go: ["tools", t.key] })
+            if (s.modes[t.key] === "allow" && WEIGHT[t.key] > 0) factors.push({ points: WEIGHT[t.key], text: `${t.name}, without asking`, go: ["tools", t.key] })
           })
           const servers = Object.entries(s.servers).filter((e) => e[1] === "allow")
           if (s.modes.mcp !== "deny" && servers.length) factors.push({ points: servers.length * 0.75 + (servers.some((e) => e[0] === "postgres-prod") ? 2 : 0), text: `${servers.length} MCP server${servers.length === 1 ? "" : "s"} allowed: ${servers.map((e) => e[0]).join(", ")}`, go: ["tools", "mcp"] })
@@ -1484,7 +1490,7 @@
             return `<div class="tool" data-tool="${t.key}"><div class="tool-row">
               <button type="button" class="expander${t.detail ? "" : " is-blank"}" aria-expanded="${isOpen}" aria-label="Show ${esc(t.name)} rules" data-expand="${t.key}"${t.detail ? "" : ' tabindex="-1"'}>${LabUI.svg("chevron-right", 14)}</button>
               <span class="tool-ico">${icon(t.icon, 15)}</span>
-              <span class="tool-text"><span class="tool-name">${t.name}<code>${t.key === "mcp" ? "<server>_*" : t.key}</code>${changed ? '<span class="changed" title="Changed, not saved"></span>' : ""}</span><span class="tool-desc">${t.desc}</span></span>
+              <span class="tool-text"><span class="tool-name">${t.name}<code>${t.key === "mcp" ? "&lt;server&gt;_*" : t.key}</code>${changed ? '<span class="changed" title="Changed, not saved"></span>' : ""}</span><span class="tool-desc">${t.desc}</span></span>
               ${meta(t)}
               ${aad(t.name, value, { attr: `data-mode="${t.key}"`, lockAllow: lock })}
             </div>${isOpen ? detail(t) : ""}</div>`
@@ -1529,7 +1535,7 @@
             .map(
               (c, i) => `<li class="rule${i === hit ? " is-match" : ""}${c[0] === fresh ? " is-new" : ""}" data-i="${i}">
                 <span class="rule-idx">${i + 1}</span>
-                <span class="rule-text"><code>${esc(c[0])}</code><span>${c[2]}${c[3] ? ` · matched ${c[3]} times this month` : ""}</span></span>
+                <span class="rule-text"><code>${esc(c[0])}</code><span>${c[2]}${c[3] ? ` · matched ${c[3] === 1 ? "once" : `${c[3]} times`} this month` : ""}</span></span>
                 ${aad(`Action for ${c[0]}`, c[1], { sm: true, attr: `data-cmd="${i}"` })}
                 <button type="button" class="icon-btn" data-remove-cmd="${i}" aria-label="Remove ${esc(c[0])}"${c[0] === "*" ? " disabled" : ""}>${LabUI.svg("close-small", 15)}</button>
               </li>`,
@@ -1569,7 +1575,7 @@
           fresh = pattern
           input.value = ""
           update()
-          $("#cmd-list .is-new")?.scrollIntoView({ block: "nearest" })
+          $("#cmd-list .is-new")?.scrollIntoView({ block: "center" })
           toast(`Added ${pattern} as rule ${state.commands.length}. It wins over every rule above it.`)
         })
         $("#cmd-list").addEventListener("click", (event) => {
@@ -1717,7 +1723,9 @@
                   </button>${
                     isOpen
                       ? `<div class="log-detail"><dl><dt>Chat</dt><dd>${esc(d.session)}</dd><dt>Permission</dt><dd><code>${d.perm}</code></dd><dt>Request</dt><dd><code>${esc(d.req)}</code></dd>${d.note ? `<dt>Your note</dt><dd class="quote">“${esc(d.note)}”</dd>` : ""}<dt>Decided</dt><dd>${d.by === "You" ? "By you, in the permission prompt" : `Automatically, by rule <code>${esc(d.by)}</code>`}</dd></dl>${
-                          rule
+                          d.dec === "rule-deny" && d.perm === "bash"
+                            ? `<div class="log-actions"><button type="button" class="btn btn-sm" data-trycmd="${i}">Test in Commands ${LabUI.svg("chevron-right", 12)}</button></div>`
+                            : rule
                             ? `<div class="log-actions"><button type="button" class="btn btn-sm" data-make="${i}" data-action="allow">Always allow <span class="mono">${esc(rule)}</span></button><button type="button" class="btn btn-sm btn-danger" data-make="${i}" data-action="deny">Always deny</button></div>`
                             : ""
                         }</div>`
@@ -1726,7 +1734,7 @@
                 })
                 .join("")
             : `<li class="empty">No decisions match. Try another filter.</li>`
-          $("#mini").innerHTML = LOG.slice(0, 4)
+          $("#mini").innerHTML = LOG.slice(0, 3)
             .map((d) => `<li class="row"><span class="row-text"><span class="row-name">${esc(d.req)}</span><span class="row-sub">${d.agent} · ${d.t}</span></span><span class="row-end"><span class="badge badge-${DEC[d.dec][0]}">${DEC[d.dec][1]}</span></span></li>`)
             .join("")
         }
@@ -1746,6 +1754,14 @@
           input.setSelectionRange(input.value.length, input.value.length)
         })
         $("#log").addEventListener("click", (event) => {
+          const tryCmd = event.target.closest("[data-trycmd]")
+          if (tryCmd) {
+            $("#cmd-test").value = LOG[Number(tryCmd.dataset.trycmd)].req
+            goTo("commands")
+            renderCommands()
+            $("#cmd-list .is-match")?.scrollIntoView({ block: "center" })
+            return
+          }
           const make = event.target.closest("[data-make]")
           if (make) {
             const d = LOG[Number(make.dataset.make)]

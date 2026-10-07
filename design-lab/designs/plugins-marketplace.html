@@ -1204,7 +1204,7 @@
           if (it.kind === "agent" && it.agentmd) return [it.builtin ? "built-in agent" : it.spec, it.agentmd.map((l) => (l.startsWith("---") || l.startsWith("#") ? `<span class="c">${esc(l)}</span>` : esc(l).replace(/^(\s*)([a-z]+):/, '$1<span class="k">$2</span>:')))]
           if (it.builtin) return null
           const where = (it.installed ? it.scope : state.scope) === "global" ? "~/.config/vector/vector.json" : "vector.json"
-          const ver = it.latest ?? it.version
+          const ver = it.installed ? it.version : it.latest ?? it.version
           return [
             where,
             [`{`, `  <span class="k">"plugin"</span>: [`, `    <span class="s">"vector-plugin-conventional-commits"</span>,`, `__ADD__    <span class="s">"${esc(it.spec)}@${ver}"</span>`, `  ]`, `}`].filter((l) => it.id !== "conventional-commits" || !l.startsWith("__ADD__")),

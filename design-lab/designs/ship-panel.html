@@ -1,0 +1,1861 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* D03 Commit, push and open a PR from the Changes panel. Scoped under .d-ship-panel. */
+      .d-ship-panel {
+        --side: #17151c;
+        --code: #121117;
+      }
+
+      .d-ship-panel button {
+        font: inherit;
+      }
+
+      .d-ship-panel a.btn {
+        text-decoration: none;
+      }
+
+      .d-ship-panel .btn svg {
+        flex: none;
+      }
+
+      /* ---- session header, as in the app ---- */
+      .d-ship-panel .branch-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+      }
+
+      .d-ship-panel .ready {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--green);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .ready .dot {
+        width: 5px;
+        height: 5px;
+      }
+
+      .d-ship-panel .chip-tool .count {
+        margin-left: 1px;
+      }
+
+      .d-ship-panel .body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      /* ---- conversation ---- */
+      .d-ship-panel .conv {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+      }
+
+      .d-ship-panel .transcript {
+        flex: 1;
+        min-height: 0;
+        padding: 22px 34px 12px;
+      }
+
+      .d-ship-panel .user {
+        width: fit-content;
+        max-width: 78%;
+        margin: 0 0 18px auto;
+        padding: 9px 13px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--raised);
+        color: var(--text-1);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .d-ship-panel .reason {
+        margin: 0 0 9px;
+        color: var(--text-3);
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .prose {
+        margin: 14px 0;
+        color: var(--text-1);
+        font-size: 13.5px;
+        line-height: 1.62;
+      }
+
+      .d-ship-panel code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-1);
+        font: 0.9em var(--mono);
+      }
+
+      .d-ship-panel .toolcard {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 14px 0;
+        padding: 11px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .toolcard .mono {
+        overflow: hidden;
+        color: var(--text-2);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-ship-panel .toolcard .end {
+        margin-left: auto;
+        color: var(--green);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .d-ship-panel .turn {
+        margin: 18px 0 0;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .shipcard {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 12px;
+        margin: 16px 0 0;
+        padding: 12px 14px;
+        border: 1px solid var(--violet-line);
+        border-radius: 10px;
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.08), transparent 80%), var(--card);
+      }
+
+      .d-ship-panel .shipcard .mark {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-ship-panel .shipcard b {
+        display: block;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-ship-panel .shipcard span {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .composer {
+        flex: none;
+        margin: 0 16px 14px;
+        border: 1px solid var(--line-strong);
+        border-radius: 12px;
+        background: #1b1920;
+      }
+
+      .d-ship-panel .composer p {
+        margin: 0;
+        padding: 14px 14px 10px;
+        color: var(--text-3);
+        font-size: 13.5px;
+      }
+
+      .d-ship-panel .composer-bar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 8px 8px 14px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .composer-bar .send {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        margin-left: auto;
+        place-items: center;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-3);
+      }
+
+      /* ---- the Changes side panel ---- */
+      .d-ship-panel .side {
+        position: relative;
+        display: flex;
+        flex: 0 0 620px;
+        flex-direction: column;
+        min-width: 0;
+        border-left: 1px solid var(--line);
+        background: var(--side);
+      }
+
+      .d-ship-panel .side::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 2;
+        height: 2px;
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.28), #9274ec, rgba(205, 190, 252, 0.24));
+      }
+
+      .d-ship-panel .side-tabs {
+        display: flex;
+        flex: none;
+        height: 43px;
+        border-bottom: 1px solid rgba(226, 213, 237, 0.07);
+        background: #221e29;
+      }
+
+      .d-ship-panel .side-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 8px 0 12px;
+        background: #16151c;
+      }
+
+      .d-ship-panel .side-tab {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 24px;
+        padding: 0 3px 0 5px;
+        border-radius: 7px;
+        background: #231f2a;
+        color: var(--text);
+        font-size: 14px;
+      }
+
+      .d-ship-panel .side-tab > svg {
+        color: #b3a1f2;
+      }
+
+      .d-ship-panel .side-tab::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        bottom: -9.5px;
+        left: 0;
+        height: 1.5px;
+        background: #e2dfe7;
+      }
+
+      .d-ship-panel .side-x {
+        display: grid;
+        width: 16px;
+        height: 16px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-3);
+      }
+
+      .d-ship-panel .side-tabs .icon-btn {
+        margin-left: 4px;
+      }
+
+      /* stepper */
+      .d-ship-panel .steps {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 52px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-ship-panel .step {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 10px 0 6px;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-3);
+        font-size: 12.5px;
+        white-space: nowrap;
+      }
+
+      .d-ship-panel .step:not([disabled]):hover {
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-1);
+      }
+
+      .d-ship-panel .step[disabled] {
+        cursor: default;
+      }
+
+      .d-ship-panel .step .num {
+        display: grid;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+        font: 600 10.5px var(--mono);
+      }
+
+      .d-ship-panel .step[data-state="done"] {
+        color: var(--text-2);
+      }
+
+      .d-ship-panel .step[data-state="done"] .num {
+        border-color: rgba(101, 199, 142, 0.45);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-ship-panel .step[aria-current="step"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--text-1);
+      }
+
+      .d-ship-panel .step[aria-current="step"] .num {
+        border-color: var(--violet-bright);
+        background: var(--violet);
+        color: #fff;
+        box-shadow: 0 0 12px rgba(182, 159, 247, 0.4);
+      }
+
+      .d-ship-panel .step-line {
+        flex: 1;
+        height: 1px;
+        background: var(--line-strong);
+      }
+
+      .d-ship-panel .step-line.is-done {
+        background: rgba(101, 199, 142, 0.45);
+      }
+
+      .d-ship-panel .pane {
+        flex: 1;
+        min-height: 0;
+        padding: 12px 10px 20px;
+      }
+
+      .d-ship-panel .sum {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 30px;
+        padding: 0 10px 0 8px;
+        color: var(--text-2);
+      }
+
+      .d-ship-panel .sum .grow {
+        flex: 1;
+      }
+
+      .d-ship-panel .add,
+      .d-ship-panel .del {
+        font-size: 12px;
+      }
+
+      /* tri-state checkbox */
+      .d-ship-panel .cb {
+        display: grid;
+        flex: none;
+        width: 16px;
+        height: 16px;
+        place-items: center;
+        padding: 0;
+        border: 1px solid var(--line-strong);
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.2);
+        color: transparent;
+      }
+
+      .d-ship-panel .cb[aria-checked="true"],
+      .d-ship-panel .cb[aria-checked="mixed"] {
+        border-color: var(--violet-bright);
+        background: var(--violet);
+        color: #fff;
+      }
+
+      .d-ship-panel .cb .mixed {
+        display: none;
+      }
+
+      .d-ship-panel .cb[aria-checked="mixed"] .tick {
+        display: none;
+      }
+
+      .d-ship-panel .cb[aria-checked="mixed"] .mixed {
+        display: block;
+      }
+
+      .d-ship-panel .files {
+        display: grid;
+        gap: 2px;
+        margin: 2px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .d-ship-panel .file {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 0 10px 0 8px;
+        border-radius: 6px;
+      }
+
+      .d-ship-panel .file:hover,
+      .d-ship-panel .file.open {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .d-ship-panel .file.off .fname,
+      .d-ship-panel .file.off .add,
+      .d-ship-panel .file.off .del {
+        opacity: 0.45;
+      }
+
+      .d-ship-panel .ftoggle {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-ship-panel .ftoggle svg.chev {
+        flex: none;
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+
+      .d-ship-panel .ftoggle[aria-expanded="true"] svg.chev {
+        transform: rotate(90deg);
+      }
+
+      .d-ship-panel .fname {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+      }
+
+      .d-ship-panel .fname span {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-ship-panel .flag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: var(--amber-soft);
+        color: var(--amber);
+        font-size: 10.5px;
+        white-space: nowrap;
+      }
+
+      .d-ship-panel .hunks {
+        display: grid;
+        gap: 8px;
+        margin: 2px 0 8px 32px;
+      }
+
+      .d-ship-panel .hunk {
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 7px;
+        background: var(--code);
+      }
+
+      .d-ship-panel .hunk.off .dl,
+      .d-ship-panel .hunk.off .dl-more,
+      .d-ship-panel .hunk.off .hunk-head .h {
+        opacity: 0.5;
+      }
+
+      .d-ship-panel .hunk-head {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        height: 30px;
+        padding: 0 10px 0 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(146, 116, 236, 0.05);
+      }
+
+      .d-ship-panel .hunk-head .h {
+        flex: 1;
+        overflow: hidden;
+        color: #8f88cc;
+        font: 11px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-ship-panel .note {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(214, 169, 92, 0.07);
+        color: #e7c891;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .d-ship-panel .note svg {
+        flex: none;
+        margin-top: 1px;
+      }
+
+      .d-ship-panel .dl {
+        display: grid;
+        grid-template-columns: 38px 18px minmax(0, 1fr);
+        color: #d9d5de;
+        font: 11.5px/19px var(--mono);
+      }
+
+      .d-ship-panel .dl-n {
+        padding-right: 8px;
+        background: #16141b;
+        color: #6f6b78;
+        text-align: right;
+      }
+
+      .d-ship-panel .dl-s {
+        color: #6f6b78;
+        text-align: center;
+      }
+
+      .d-ship-panel .dl-c {
+        padding-right: 12px;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .d-ship-panel .dl.add {
+        background: rgba(101, 199, 142, 0.075);
+      }
+
+      .d-ship-panel .dl.add .dl-n {
+        background: rgba(101, 199, 142, 0.12);
+        box-shadow: inset 2px 0 0 rgba(101, 199, 142, 0.7);
+        color: #8fcfa9;
+      }
+
+      .d-ship-panel .dl.add .dl-s {
+        color: var(--green);
+      }
+
+      .d-ship-panel .dl.del {
+        background: rgba(230, 120, 125, 0.075);
+      }
+
+      .d-ship-panel .dl.del .dl-n {
+        background: rgba(230, 120, 125, 0.12);
+        box-shadow: inset 2px 0 0 rgba(230, 120, 125, 0.7);
+      }
+
+      .d-ship-panel .dl.del .dl-s {
+        color: var(--red);
+      }
+
+      .d-ship-panel .dl-more {
+        padding: 3px 10px 5px 56px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .tk-k {
+        color: #c6aefc;
+      }
+
+      .tk-s {
+        color: #e3c597;
+      }
+
+      .tk-c {
+        color: #85818e;
+      }
+
+      .tk-n {
+        color: #9cc3ee;
+      }
+
+      /* cards in the panel */
+      .d-ship-panel .card {
+        margin: 14px 4px 0;
+        background: #1c1a22;
+      }
+
+      .d-ship-panel .card-head {
+        gap: 8px;
+        padding: 10px 10px 10px 14px;
+      }
+
+      .d-ship-panel .card-head .grow {
+        flex: 1;
+      }
+
+      .d-ship-panel .ai {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 20px;
+        padding: 0 7px;
+        border-radius: 999px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font-size: 11px;
+        font-weight: 500;
+      }
+
+      .d-ship-panel .ai.is-busy svg {
+        animation: sp-spin 1s linear infinite;
+      }
+
+      @keyframes sp-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .d-ship-panel .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .d-ship-panel .field + .field {
+        margin-top: 12px;
+      }
+
+      .d-ship-panel .label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .label .mono {
+        margin-left: auto;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-ship-panel .label .mono.over {
+        color: var(--amber);
+      }
+
+      .d-ship-panel .text {
+        width: 100%;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        outline: 0;
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text-1);
+        font: 13px var(--font);
+      }
+
+      .d-ship-panel textarea.text {
+        height: auto;
+        min-height: 112px;
+        padding: 8px 10px;
+        resize: vertical;
+        font: 12.5px/1.55 var(--font);
+      }
+
+      .d-ship-panel textarea.mono {
+        font: 12px/1.6 var(--mono);
+      }
+
+      .d-ship-panel .text:focus {
+        border-color: rgba(182, 159, 247, 0.6);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.14);
+      }
+
+      .d-ship-panel .text.flash {
+        animation: sp-flash 900ms var(--ease);
+      }
+
+      @keyframes sp-flash {
+        0% {
+          border-color: var(--violet-bright);
+          box-shadow: 0 0 0 4px rgba(157, 132, 238, 0.24);
+        }
+      }
+
+      .d-ship-panel .opts {
+        display: grid;
+        gap: 2px;
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-ship-panel .opt {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 36px;
+        color: var(--text-1);
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .opt span {
+        display: grid;
+        flex: 1;
+        gap: 1px;
+      }
+
+      .d-ship-panel .opt small {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-ship-panel .newbranch {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 22px;
+        padding: 0 7px;
+        border: 1px dashed var(--violet-line);
+        border-radius: 5px;
+        background: transparent;
+        color: var(--violet-bright);
+        font: 11.5px var(--mono);
+      }
+
+      .d-ship-panel .newbranch input {
+        width: 104px;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--violet-bright);
+        font: inherit;
+      }
+
+      /* push step */
+      .d-ship-panel .commit {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 4px 12px;
+        padding: 14px;
+      }
+
+      .d-ship-panel .commit .ic {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border-radius: 8px;
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-ship-panel .commit b {
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-ship-panel .commit .meta {
+        grid-column: 2;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .ref {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 6px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+
+      .d-ship-panel .route {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .route + .route {
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-ship-panel .route .k {
+        width: 64px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .check {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 38px;
+        padding: 0 14px;
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .check .mono {
+        margin-left: auto;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-ship-panel .log {
+        margin: 0;
+        padding: 10px 12px;
+        border-top: 1px solid var(--hairline);
+        background: var(--code);
+        border-radius: 0 0 10px 10px;
+        color: var(--text-2);
+        font: 11px/18px var(--mono);
+        white-space: pre-wrap;
+      }
+
+      .d-ship-panel .log .ok {
+        color: var(--green);
+      }
+
+      .d-ship-panel .progress {
+        height: 3px;
+        margin: 0 14px 12px;
+        overflow: hidden;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .d-ship-panel .progress i {
+        display: block;
+        width: 0;
+        height: 100%;
+        background: var(--violet-bright);
+        box-shadow: 0 0 10px rgba(182, 159, 247, 0.6);
+        transition: width 300ms var(--ease);
+      }
+
+      .spin {
+        animation: sp-spin 0.9s linear infinite;
+      }
+
+      /* pull request step */
+      .d-ship-panel .base {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px 10px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .seltrig {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 7px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+
+      .d-ship-panel .mini-tabs {
+        display: inline-flex;
+        margin-left: auto;
+      }
+
+      .d-ship-panel .mini-tabs .seg button {
+        height: 20px;
+        padding: 0 8px;
+        font-size: 11.5px;
+      }
+
+      .d-ship-panel .preview {
+        min-height: 112px;
+        max-height: 230px;
+        overflow: auto;
+        padding: 4px 12px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.12);
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+
+      .d-ship-panel .preview h5 {
+        margin: 10px 0 4px;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .d-ship-panel .preview p {
+        margin: 0 0 4px;
+      }
+
+      .d-ship-panel .preview ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .d-ship-panel .people {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-ship-panel .person {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 4px 0 4px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text-1);
+        font-size: 12px;
+      }
+
+      .d-ship-panel .person small {
+        color: var(--violet-bright);
+        font-size: 10.5px;
+      }
+
+      .d-ship-panel .person .side-x {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+      }
+
+      .d-ship-panel .person .side-x:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-1);
+      }
+
+      .d-ship-panel .avatar {
+        display: inline-grid;
+        flex: none;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        border-radius: 50%;
+        font-size: 8.5px;
+        font-weight: 600;
+      }
+
+      .d-ship-panel .add-person {
+        position: relative;
+      }
+
+      .d-ship-panel .picker {
+        position: absolute;
+        top: 32px;
+        right: 0;
+        z-index: 10;
+        width: 260px;
+        padding: 6px;
+        animation: sp-pop 160ms var(--ease);
+      }
+
+      .d-ship-panel .picker[hidden] {
+        display: none;
+      }
+
+      @keyframes sp-pop {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+      }
+
+      .d-ship-panel .picker .input {
+        height: 28px;
+        margin-bottom: 4px;
+      }
+
+      .d-ship-panel .picker button {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 8px;
+        height: 34px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-1);
+        font-size: 12.5px;
+        text-align: left;
+      }
+
+      .d-ship-panel .picker button:hover,
+      .d-ship-panel .picker button:focus-visible {
+        background: rgba(255, 255, 255, 0.06);
+        outline: 0;
+      }
+
+      .d-ship-panel .picker button small {
+        margin-left: auto;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-ship-panel .labels .tagx {
+        display: inline-flex;
+        align-items: center;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        font-size: 11.5px;
+      }
+
+      /* footer */
+      .d-ship-panel .side-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+        min-height: 56px;
+        padding: 0 14px 0 18px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-ship-panel .side-foot .note-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-ship-panel .side-foot .btn[disabled] {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .d-ship-panel .done {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        margin: 26px 4px 0;
+        padding: 28px 22px;
+        border: 1px solid var(--violet-line);
+        border-radius: 12px;
+        background: radial-gradient(280px 130px at 50% 0%, rgba(182, 159, 247, 0.13), transparent 70%), var(--card);
+        text-align: center;
+      }
+
+      .d-ship-panel .done .big {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        border-radius: 12px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 24px rgba(182, 159, 247, 0.25);
+      }
+
+      .d-ship-panel .done h4 {
+        margin: 0;
+        color: var(--text-1);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .d-ship-panel .done p {
+        margin: 0;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .done .row-end {
+        margin: 6px 0 0;
+      }
+
+      .d-ship-panel .vsline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 12px 4px 0;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #1c1a22;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-ship-panel .vsline b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      .d-ship-panel .vsline .end {
+        margin-left: auto;
+      }
+
+      .d-ship-panel .vs-mark {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 7px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-ship-panel .sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="ship-panel"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-ship-panel">
+            <div class="app">
+              <nav data-lab-sidebar data-active="workspace" data-workspace="Pin sessions in the sidebar" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="branch" data-size="15" class="muted"></i>
+                  <h2>Pin sessions in the sidebar</h2>
+                  <div class="app-header-end">
+                    <span class="branch-chip" data-branch-chip>main <i data-icon="chevron-down" data-size="12"></i></span>
+                    <span class="ready"><span class="dot dot-green"></span>Ready</span>
+                    <button class="chip-tool" type="button"><i data-icon="task" data-size="15"></i>Tasks</button>
+                    <button class="chip-tool" type="button" aria-pressed="true" aria-controls="ship-side" data-changes-tool><i data-icon="review" data-size="15"></i>Changes <span class="count">6</span></button>
+                    <button class="chip-tool" type="button"><i data-icon="terminal" data-size="15"></i>Terminal</button>
+                  </div>
+                </header>
+
+                <div class="body">
+                  <section class="conv" aria-label="Session">
+                    <div class="transcript scroll">
+                      <p class="user">Pin sessions to the top of the sidebar. Keep it small, and make the pin survive a restart.</p>
+                      <p class="reason">Reading how the sidebar orders sessions</p>
+                      <p class="reason">Adding a pinned_at column to the session table</p>
+                      <p class="prose">
+                        Done. Pin a session from its menu or with <code>⌘⇧P</code>. Pinned sessions sit above the rest, newest pin
+                        first, and the pin is stored on the session row, so it survives a restart.
+                      </p>
+                      <div class="toolcard">
+                        <span style="color: var(--green); display: grid"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.9" /><path d="m5.6 8.1 1.7 1.7 3.1-3.4" /></svg></span>
+                        <span class="mono">bun test packages/app/src/pages/layout/sidebar-items.test.ts</span>
+                        <span class="end">5 pass · 0.41s</span>
+                      </div>
+                      <div class="toolcard">
+                        <span style="color: var(--green); display: grid"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="5.9" /><path d="m5.6 8.1 1.7 1.7 3.1-3.4" /></svg></span>
+                        <span class="mono">bun typecheck · packages/app, packages/engine</span>
+                        <span class="end">no errors · 6.2s</span>
+                      </div>
+                      <p class="prose">
+                        I left a <code>console.log</code> in <code>sidebar-shell.tsx</code> while checking the order. It is unticked in
+                        Changes, so it stays out of the commit. The commit message and the pull request are drafted there.
+                      </p>
+                      <div class="shipcard">
+                        <span class="mark"><i data-icon="pulls" data-size="15"></i></span>
+                        <span><b>Ready to ship</b><span>5 files · commit to a new branch, push, and open a pull request</span></span>
+                        <button class="btn btn-sm" type="button" data-focus-ship>Review in Changes</button>
+                      </div>
+                      <p class="turn">4m 12s · 21K tokens</p>
+                    </div>
+                    <div class="composer" aria-hidden="true">
+                      <p>Ask anything, / for commands, @ for context…</p>
+                      <div class="composer-bar"><span>GPT-5.6 Sol ⌄</span><span>Manual ⌄</span><span>Normal ⌄</span><span class="send"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3M4 7l4-4 4 4" /></svg></span></div>
+                    </div>
+                  </section>
+
+                  <aside class="side" id="ship-side" aria-label="Changes">
+                    <div class="side-tabs">
+                      <div class="side-group">
+                        <span class="side-tab"><i data-icon="review" data-size="14"></i><span>Changes</span><span class="count">6</span><button type="button" class="side-x" aria-label="Close the Changes tab"><i data-icon="close-small" data-size="14"></i></button></span>
+                        <button type="button" class="icon-btn" aria-label="Close side panel"><i data-icon="close" data-size="16"></i></button>
+                      </div>
+                    </div>
+                    <nav class="steps" aria-label="Ship" data-steps></nav>
+                    <div class="pane scroll" data-pane></div>
+                    <div class="side-foot" data-foot></div>
+                  </aside>
+                </div>
+                <p class="sr" aria-live="polite" data-live></p>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const root = document.querySelector(".d-ship-panel")
+        const $ = (sel) => root.querySelector(sel)
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const svg = (body, size = 14, cls = "") =>
+          `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+        const tint = (c, h) => `<span style="color:${c};display:inline-grid">${h}</span>`
+        const IC = {
+          ok: (s = 14) => tint("var(--green)", svg('<circle cx="8" cy="8" r="5.9"/><path d="m5.6 8.1 1.7 1.7 3.1-3.4"/>', s)),
+          run: (s = 14) => tint("var(--violet-bright)", svg('<circle cx="8" cy="8" r="5.9" opacity=".3"/><path d="M8 2.1a5.9 5.9 0 0 1 5.9 5.9"/>', s, "spin")),
+          pending: (s = 14) => tint("var(--text-3)", svg('<circle cx="8" cy="8" r="5.6" stroke-dasharray="2 2.2"/>', s)),
+          spark: (s = 12) => svg('<path d="M8 2.2c.45 2.85 1.9 4.3 4.75 4.75C9.9 7.4 8.45 8.85 8 11.7c-.45-2.85-1.9-4.3-4.75-4.75C6.1 6.5 7.55 5.05 8 2.2Z"/><path d="M12.4 10.6c.15.95.6 1.4 1.55 1.55-.95.15-1.4.6-1.55 1.55-.15-.95-.6-1.4-1.55-1.55.95-.15 1.4-.6 1.55-1.55Z"/>', s),
+          regen: (s = 13) => LabUI.svg("reload", s),
+          commit: (s = 14) => svg('<circle cx="8" cy="8" r="2.4"/><path d="M1.8 8h3.8M10.4 8h3.8"/>', s),
+          push: (s = 14) => svg('<path d="M8 13V3.5M4.2 7.2 8 3.4l3.8 3.8"/>', s),
+          warn: (s = 13) => svg('<path d="M7.1 2.9a1 1 0 0 1 1.8 0l5 9.1a1 1 0 0 1-.9 1.5H3a1 1 0 0 1-.9-1.5l5-9.1Z"/><path d="M8 6.4v2.8M8 11.1v.1" stroke-width="1.35"/>', s),
+          tick: '<svg class="tick" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.4 2.9 2.8 6-6.4"/></svg>',
+          mixed: '<svg class="mixed" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 8h8"/></svg>',
+          chev: (s = 14) => LabUI.svg("chevron-right", s).replace("<svg", '<svg class="chev"'),
+          down: (s = 11) => LabUI.svg("chevron-down", s),
+          x: (s = 12) => LabUI.svg("close-small", s),
+          pr: (s = 15) => LabUI.svg("pulls", s),
+          vs: (s = 13) => LabUI.svg("review", s),
+          plus: (s = 12) => svg('<path d="M8 3.5v9M3.5 8h9" stroke-width="1.5"/>', s),
+          ext: (s = 13) => LabUI.svg("external", s),
+        }
+
+        // ---------- data: the session's changes, hunk by hunk ----------
+        const files = [
+          {
+            name: "sidebar-items.tsx", dir: "packages/app/src/pages/layout/",
+            hunks: [
+              { head: '@@ -12,6 +12,7 @@ import { useLayout } from "@/context/layout"', add: 1, del: 0, at: 12, lines: [' import { SessionRow } from "./session-row"', '+import { PinIcon } from "@vectordevai/ui/icons/pin"'] },
+              {
+                head: "@@ -48,14 +49,47 @@ export function SidebarItems(props: SidebarItemsProps) {", add: 33, del: 8, at: 49,
+                lines: ["-  const sessions = () => props.sessions", "+  // Pinned sessions stay on top, newest pin first; the rest keep their order.", "+  const sessions = () => [", "+    ...props.sessions.filter((s) => s.pinned_at).toSorted((a, b) => b.pinned_at - a.pinned_at),", "+    ...props.sessions.filter((s) => !s.pinned_at),", "+  ]"],
+                more: 36,
+              },
+            ],
+          },
+          {
+            name: "sidebar-workspace.tsx", dir: "packages/app/src/pages/layout/",
+            hunks: [
+              { head: "@@ -30,5 +30,9 @@ function WorkspaceSessions(props: { workspace: Workspace }) {", add: 4, del: 1, at: 30, lines: ["-      <SessionMenu session={session} />", "+      <SessionMenu session={session}>", '+        <MenuItem onSelect={() => layout.pin(session.id)}>{session.pinned_at ? "Unpin" : "Pin to top"}</MenuItem>', "+      </SessionMenu>"] },
+              { head: "@@ -77,8 +81,25 @@ export function SidebarWorkspace(props: SidebarWorkspaceProps) {", add: 17, del: 2, at: 81, lines: ["+  // ⌘⇧P pins the focused session.", '+  useKeybind("mod+shift+p", () => layout.pin(focused()))'], more: 17 },
+            ],
+          },
+          {
+            name: "session.ts", dir: "packages/engine/src/session/",
+            hunks: [
+              { head: '@@ -41,6 +41,7 @@ export const session = sqliteTable("session", {', add: 1, del: 0, at: 43, lines: ["   created_at: integer().notNull(),", "+  pinned_at: integer(),"] },
+              { head: "@@ -210,9 +211,20 @@ export namespace Session {", add: 11, del: 2, at: 211, lines: ["+  export async function pin(id: SessionID, pinned: boolean) {", "+    await db.update(session).set({ pinned_at: pinned ? Date.now() : null }).where(eq(session.id, id))", "+  }"], more: 10 },
+            ],
+          },
+          {
+            name: "migration.sql", dir: "packages/engine/migration/20261007091512_session-pinned/",
+            hunks: [{ head: "@@ -0,0 +1 @@", add: 1, del: 0, at: 1, lines: ["+ALTER TABLE `session` ADD `pinned_at` integer;"] }],
+          },
+          {
+            name: "sidebar-items.test.ts", dir: "packages/app/src/pages/layout/",
+            hunks: [{ head: "@@ -0,0 +1,64 @@", add: 64, del: 0, at: 1, lines: ['+test("pinned sessions stay on top, newest pin first", () => {', '+  const items = order([session("a"), session("b", { pinned_at: 2 }), session("c", { pinned_at: 5 })])', '+  expect(items.map((s) => s.id)).toEqual(["c", "b", "a"])', "+})"], more: 60 }],
+          },
+          {
+            name: "sidebar-shell.tsx", dir: "packages/app/src/pages/layout/",
+            flag: "Looks like leftover debugging, so Vector left it out of this commit.",
+            hunks: [{ head: "@@ -64,6 +64,7 @@ export function SidebarShell(props: ParentProps) {", add: 1, del: 0, at: 64, lines: ["   const layout = useLayout()", '+  console.log("pinned", layout.pinned())'], on: false }],
+          },
+        ]
+        files.forEach((f) => f.hunks.forEach((h) => (h.on = h.on ?? true)))
+        files[5].open = true
+
+        const messages = [
+          {
+            subject: "pin sessions to the top of the sidebar",
+            body: "Pinned sessions stay above the rest, newest pin first, and survive a restart.\n\n- Add a nullable pinned_at column to session (migration 20261007091512)\n- Pin or unpin from the session menu, or with ⌘⇧P\n- Cover the ordering in sidebar-items.test.ts",
+          },
+          {
+            subject: "let sessions be pinned above the rest",
+            body: "A pinned session keeps its place at the top of the sidebar across restarts.\n\n- session.pinned_at stores when it was pinned\n- Session menu: Pin to top / Unpin; ⌘⇧P pins the focused session\n- Ordering tests for pinned and unpinned sessions",
+          },
+          {
+            subject: "keep pinned sessions at the top of the sidebar",
+            body: "Pinning is stored on the session row, so it survives a restart.\n\n- Migration adds session.pinned_at\n- Sidebar sorts pinned sessions first, newest pin first\n- ⌘⇧P and a session menu item to pin and unpin",
+          },
+        ]
+
+        const PEOPLE = {
+          "mira-lund": ["ML", "#2f3d45", "#cfe6f2", "owns pages/layout"],
+          "devon-ash": ["DA", "#3d3a2c", "#efe3bd", "changed sidebar last week"],
+          "ines-park": ["IP", "#3c2f37", "#f2d3e1", "engine storage"],
+          "theo-wren": ["TW", "#2d3a33", "#cdeedd", "desktop"],
+        }
+
+        const state = {
+          step: 0,
+          reached: 0,
+          type: "feat",
+          scope: "app",
+          msg: 0,
+          subject: messages[0].subject,
+          body: messages[0].body,
+          branch: "pin-sessions",
+          pushAfter: true,
+          sha: "6e1b4a9",
+          push: "idle",
+          pushPct: 0,
+          pushLog: [],
+          title: "",
+          desc: "",
+          descTab: "write",
+          reviewers: ["mira-lund", "devon-ash"],
+          labels: ["app", "engine"],
+          vectorscope: true,
+          draft: false,
+          created: false,
+          vs: "idle",
+        }
+
+        // ---------- helpers ----------
+        const KW = "import|from|export|const|let|return|if|else|for|of|await|async|function|type|interface|namespace|new|true|false|null|test|expect|ALTER|TABLE|ADD"
+        const TOKEN = new RegExp(`(\\/\\/.*$)|("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\\\n]|\\\\.)*'|\`[^\`]*\`)|\\b(${KW})\\b|\\b(\\d+)\\b`, "g")
+        const hl = (code) =>
+          code
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(TOKEN, (m, c, s, k, n) => (c ? `<span class="tk-c">${c}</span>` : s ? `<span class="tk-s">${s}</span>` : k ? `<span class="tk-k">${k}</span>` : `<span class="tk-n">${n}</span>`))
+        const fileState = (f) => {
+          const on = f.hunks.filter((h) => h.on).length
+          return on === 0 ? "false" : on === f.hunks.length ? "true" : "mixed"
+        }
+        const totals = () => {
+          const picked = files.flatMap((f) => f.hunks.filter((h) => h.on))
+          return {
+            files: files.filter((f) => f.hunks.some((h) => h.on)).length,
+            hunks: picked.length,
+            add: picked.reduce((n, h) => n + h.add, 0),
+            del: picked.reduce((n, h) => n + h.del, 0),
+          }
+        }
+        const allAdd = files.reduce((n, f) => n + f.hunks.reduce((m, h) => m + h.add, 0), 0)
+        const allDel = files.reduce((n, f) => n + f.hunks.reduce((m, h) => m + h.del, 0), 0)
+        const cb = (checked, attrs, label) => `<button type="button" class="cb" role="checkbox" aria-checked="${checked}" aria-label="${esc(label)}" ${attrs}>${IC.tick}${IC.mixed}</button>`
+        const avatar = (who) => `<span class="avatar" style="background:${PEOPLE[who][1]};color:${PEOPLE[who][2]}">${PEOPLE[who][0]}</span>`
+        const subjectLine = () => `${state.type}(${state.scope}): ${state.subject}`
+        const live = (text) => ($("[data-live]").textContent = text)
+        const list = (xs) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`)
+        // The header's branch chip and the sidebar row follow the branch the commit landed on.
+        const showBranch = (name) => {
+          $("[data-branch-chip]").innerHTML = `${esc(name)} ${LabUI.svg("chevron-down", 12)}`
+          const sub = document.querySelector(".sb-row.is-active .sb-row-sub")
+          if (sub) sub.textContent = `${name} · Ready`
+        }
+
+        // ---------- render ----------
+        function renderSteps() {
+          const names = ["Commit", "Push", "Pull request"]
+          $("[data-steps]").innerHTML = names
+            .map((name, i) => {
+              const s = state.created || i < state.reached ? "done" : i === state.step ? "current" : "todo"
+              const current = i === state.step && !state.created
+              const num = s === "done" ? `<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.4 2.9 2.8 6-6.4"/></svg>` : i + 1
+              const line = i ? `<span class="step-line${i <= state.reached ? " is-done" : ""}" aria-hidden="true"></span>` : ""
+              return `${line}<button type="button" class="step" data-step="${i}" data-state="${s}" ${current ? 'aria-current="step"' : ""} ${i > state.reached || (i === 0 && state.reached > 0) || state.created || state.push === "running" ? "disabled" : ""}><span class="num">${num}</span>${name}</button>`
+            })
+            .join("")
+        }
+
+        function renderPane() {
+          const pane = $("[data-pane]")
+          const scroll = pane.scrollTop
+          pane.innerHTML = state.created ? createdHtml() : [commitHtml, pushHtml, prHtml][state.step]()
+          LabUI.renderIcons(pane)
+          pane.scrollTop = scroll
+          renderFoot()
+        }
+
+        function commitHtml() {
+          const t = totals()
+          const all = t.hunks === files.reduce((n, f) => n + f.hunks.length, 0) ? "true" : t.hunks === 0 ? "false" : "mixed"
+          const rows = files
+            .map((f, i) => {
+              const st = fileState(f)
+              const add = f.hunks.reduce((n, h) => n + h.add, 0)
+              const del = f.hunks.reduce((n, h) => n + h.del, 0)
+              const hunks = f.open
+                ? `<div class="hunks" id="hunks-${i}">${f.flag ? "" : ""}${f.hunks
+                    .map(
+                      (h, j) => `<div class="hunk${h.on ? "" : " off"}">
+                        <div class="hunk-head">${cb(h.on, `data-hunk="${i}:${j}"`, `Include hunk ${j + 1} of ${f.name}`)}<span class="h">${esc(h.head)}</span><span class="add">+${h.add}</span><span class="del">−${h.del}</span></div>
+                        ${f.flag ? `<div class="note">${IC.warn(13)}<span>${esc(f.flag)}</span></div>` : ""}
+                        ${lines(h)}
+                      </div>`,
+                    )
+                    .join("")}</div>`
+                : ""
+              return `<li>
+                <div class="file${f.open ? " open" : ""}${st === "false" ? " off" : ""}">
+                  ${cb(st, `data-file="${i}"`, `Include ${f.name}`)}
+                  <button type="button" class="ftoggle" data-open="${i}" aria-expanded="${!!f.open}" aria-controls="hunks-${i}">${IC.chev()}<span class="fname">${f.name}<span>${f.dir}</span></span>${f.flag ? `<span class="flag">${IC.warn(10)}Debug log</span>` : ""}${f.hunks.length > 1 ? `<span class="muted" style="font-size:11px">${f.hunks.filter((h) => h.on).length}/${f.hunks.length} hunks</span>` : ""}</button>
+                  <span class="add">+${add}</span><span class="del">−${del}</span>
+                </div>${hunks}
+              </li>`
+            })
+            .join("")
+          const over = subjectLine().length > 72
+          return `
+            <div class="sum">${cb(all, "data-all", "Include all changes")}<span class="grow">${files.length} files changed · <b style="color:var(--text-1);font-weight:500">${t.files} in this commit</b></span><span class="add">+${t.add}</span><span class="del">−${t.del}</span></div>
+            <ul class="files">${rows}</ul>
+            <section class="card" aria-label="Commit message">
+              <div class="card-head"><h3 class="card-title" style="font-size:13px">Commit message</h3><span class="ai" data-ai>${IC.spark(11)}Written by Vector</span><span class="grow"></span>
+                <button class="btn btn-sm btn-ghost" type="button" data-regen title="Write another">${IC.regen()}Regenerate</button></div>
+              <div class="card-body" style="padding-top:12px">
+                <div class="field">
+                  <div class="label">Type<div class="seg" role="group" aria-label="Commit type" data-type style="margin-left:8px">${["feat", "fix", "refactor", "chore", "docs"].map((x) => `<button type="button" data-value="${x}" aria-pressed="${state.type === x}">${x}</button>`).join("")}</div><span class="mono">scope <span style="color:var(--text-1)">${state.scope}</span></span></div>
+                </div>
+                <div class="field">
+                  <label class="label" for="ship-subject">Summary<span class="mono${over ? " over" : ""}" data-count>${subjectLine().length}/72</span></label>
+                  <input class="text" id="ship-subject" data-subject value="${esc(subjectLine())}" spellcheck="false" />
+                </div>
+                <div class="field">
+                  <label class="label" for="ship-body">Description</label>
+                  <textarea class="text" id="ship-body" data-body rows="6">${esc(state.body)}</textarea>
+                </div>
+                <div class="opts">
+                  <div class="opt"><span>Commit to a new branch<small>You're on main. Branch names stay short: three words at most.</small></span><label class="newbranch">${LabUI.svg("branch", 12)}<input data-branch value="${esc(state.branch)}" aria-label="New branch name" spellcheck="false" /></label></div>
+                  <div class="opt"><span>Push after committing<small>Sets origin/${esc(state.branch)} as upstream</small></span><button class="switch" role="switch" type="button" aria-checked="${state.pushAfter}" data-pushafter aria-label="Push after committing"></button></div>
+                </div>
+              </div>
+            </section>`
+        }
+
+        function lines(h) {
+          let n = h.at
+          const rows = h.lines
+            .map((l) => {
+              const sign = l[0]
+              const t = sign === "+" ? "add" : sign === "-" ? "del" : "ctx"
+              const num = t === "del" ? "" : n++
+              return `<div class="dl ${t}"><span class="dl-n">${num}</span><span class="dl-s">${t === "add" ? "+" : t === "del" ? "−" : ""}</span><span class="dl-c">${hl(l.slice(1)) || " "}</span></div>`
+            })
+            .join("")
+          return rows + (h.more ? `<div class="dl-more">⋯ ${h.more} more lines</div>` : "")
+        }
+
+        function pushHtml() {
+          const t = totals()
+          const checks = [
+            ["bun typecheck · packages/app", "6.2s"],
+            ["bun test sidebar-items.test.ts · 5 pass", "0.41s"],
+          ]
+          const running = state.push === "running"
+          const done = state.push === "done"
+          return `
+            <section class="card" style="margin-top:4px">
+              <div class="commit"><span class="ic">${IC.commit(15)}</span><b>${esc(subjectLine())}</b>
+                <span class="meta"><span class="ref">${state.sha}</span>kbharadwaj · just now · ${t.files} files <span class="add">+${t.add}</span><span class="del">−${t.del}</span></span></div>
+            </section>
+            <section class="card">
+              <div class="route"><span class="k">From</span><span class="ref">${LabUI.svg("branch", 12)}&nbsp;${esc(state.branch)}</span><span class="muted">new branch · 1 commit</span></div>
+              <div class="route"><span class="k">To</span><span class="ref">origin</span><span class="muted">github.com/vectordev/Vectordev.ai</span></div>
+            </section>
+            <section class="card">
+              <div class="card-head"><h3 class="card-title" style="font-size:13px">Before pushing</h3><span class="muted" style="font-size:12px;margin-left:auto">Vector ran these on the commit</span></div>
+              ${checks.map(([n, time]) => `<div class="check">${IC.ok()}<span>${n}</span><span class="mono">${time}</span></div>`).join("")}
+              <div class="check">${IC.ok()}<span>Excluded hunks stay in your working tree</span><span class="mono">1 hunk</span></div>
+            </section>
+            ${
+              running || done
+                ? `<section class="card"><div class="card-head"><h3 class="card-title" style="font-size:13px">${done ? "Pushed" : "Pushing to origin"}</h3><span class="muted mono" style="margin-left:auto;font-size:11px">${state.pushPct}%</span></div><div class="progress"><i style="width:${state.pushPct}%"></i></div><pre class="log">${state.pushLog.join("\n")}</pre></section>`
+                : ""
+            }`
+        }
+
+        function prHtml() {
+          const pickerOpen = state.picker
+          const candidates = Object.keys(PEOPLE).filter((p) => !state.reviewers.includes(p))
+          return `
+            <div class="base">${IC.pr(14)}<span>Merge</span><span class="seltrig">${esc(state.branch)}</span><span>into</span><button class="seltrig" type="button" data-base>main ${IC.down()}</button><span class="ai" style="margin-left:auto">${IC.spark(11)}Drafted from the commit and session</span></div>
+            <div class="field" style="padding:0 6px"><label class="label" for="pr-title">Title<span class="mono" data-tcount>${state.title.length}/72</span></label><input class="text" id="pr-title" data-title value="${esc(state.title)}" spellcheck="false" /></div>
+            <div class="field" style="padding:0 6px;margin-top:12px">
+              <div class="label"><span>Description</span><span class="mini-tabs"><span class="seg" role="group" aria-label="Description view" data-desctab><button type="button" data-value="write" aria-pressed="${state.descTab === "write"}">Write</button><button type="button" data-value="preview" aria-pressed="${state.descTab === "preview"}">Preview</button></span></span></div>
+              ${state.descTab === "write" ? `<textarea class="text mono" data-desc rows="9" aria-label="Pull request description">${esc(state.desc)}</textarea>` : `<div class="preview">${md(state.desc)}</div>`}
+            </div>
+            <section class="card" style="margin-top:14px">
+              <div class="card-body" style="display:grid;gap:12px">
+                <div class="field"><div class="label">Reviewers<span class="mono" style="font-family:var(--font)">suggested from file history</span></div>
+                  <div class="people">${state.reviewers
+                    .map((p) => `<span class="person">${avatar(p)}${p}${["mira-lund", "devon-ash"].includes(p) ? "<small>suggested</small>" : ""}<button type="button" class="side-x" data-unreview="${p}" aria-label="Remove ${p}">${IC.x()}</button></span>`)
+                    .join("")}
+                    <span class="add-person"><button class="btn btn-sm btn-ghost" type="button" data-addreviewer aria-expanded="${!!pickerOpen}" aria-haspopup="listbox">${IC.plus()}Add</button>
+                      <div class="picker float" role="listbox" aria-label="Add a reviewer" ${pickerOpen ? "" : "hidden"}>
+                        <label class="input">${LabUI.svg("magnifier", 13)}<input data-psearch placeholder="Search people" aria-label="Search people" /></label>
+                        ${candidates.map((p) => `<button type="button" role="option" data-review="${p}">${avatar(p)}${p}<small>${PEOPLE[p][3]}</small></button>`).join("") || `<p class="muted" style="margin:8px;font-size:12px">Everyone is added.</p>`}
+                      </div></span>
+                  </div></div>
+                <div class="field labels"><div class="label">Labels</div><div class="people">${state.labels.map((l) => `<span class="tagx badge-violet">${l}</span>`).join("")}<span class="tagx badge">size: S</span></div></div>
+              </div>
+              <div class="opts" style="margin:0;padding:6px 14px 8px">
+                <div class="opt"><span class="vs-mark" style="flex:none;width:24px;height:24px">${IC.vs(12)}</span><span>Request a Vectorscope review<small>Reviews the head commit and posts findings on the changed lines</small></span><button class="switch" role="switch" type="button" aria-checked="${state.vectorscope}" data-vectorscope aria-label="Request a Vectorscope review"></button></div>
+                <div class="opt"><span>Open as draft<small>Reviewers aren't notified until it's ready</small></span><button class="switch" role="switch" type="button" aria-checked="${state.draft}" data-draft aria-label="Open as draft"></button></div>
+              </div>
+            </section>`
+        }
+
+        function md(text) {
+          return esc(text)
+            .split(/\n{2,}/)
+            .map((block) => {
+              if (block.startsWith("## ")) {
+                const [head, ...rest] = block.split("\n")
+                return `<h5>${head.slice(3)}</h5>${rest.length ? md(rest.join("\n")) : ""}`
+              }
+              if (block.split("\n").every((l) => l.startsWith("- "))) return `<ul>${block.split("\n").map((l) => `<li>${inline(l.slice(2))}</li>`).join("")}</ul>`
+              return `<p>${inline(block)}</p>`
+            })
+            .join("")
+        }
+        const inline = (s) => s.replace(/`([^`]+)`/g, "<code>$1</code>")
+
+        function createdHtml() {
+          const vs =
+            state.vectorscope
+              ? state.vs === "done"
+                ? `<div class="vsline"><span class="vs-mark">${IC.vs(13)}</span><span><b>Vectorscope</b> · Risk Low · 1 nit on <span class="mono" style="font-size:11.5px">sidebar-items.tsx:52</span></span><a class="btn btn-sm end" href="${LabUI.page("designs/vectorscope-review")}">Open review</a></div>`
+                : `<div class="vsline"><span class="vs-mark">${IC.run(13)}</span><span><b>Vectorscope</b> is reviewing <span class="mono" style="font-size:11.5px">${state.sha}</span> · review + security</span></div>`
+              : ""
+          return `<div class="done"><span class="big">${IC.pr(20)}</span><h4>${state.draft ? "Draft pull request" : "Pull request"} #2326 opened</h4><p>${esc(state.title)}</p>
+              <p class="muted"><span class="mono">${esc(state.branch)}</span> → <span class="mono">main</span> · ${state.reviewers.length ? `review requested from ${list(state.reviewers)}` : "no reviewers"}</p>
+              <div class="row-end"><a class="btn" href="${LabUI.page("designs/pull-requests")}">${IC.pr(14)}View in Pull Requests</a><button class="btn btn-ghost" type="button">${IC.ext()}Open on GitHub</button></div></div>
+            ${vs}
+            <div class="vsline"><span class="vs-mark" style="background:rgba(255,255,255,.04);border-color:var(--line);color:var(--text-2)">${LabUI.svg("branch", 13)}</span><span>Your working tree still has <b>1 excluded hunk</b> in <span class="mono" style="font-size:11.5px">sidebar-shell.tsx</span></span><button class="btn btn-sm end" type="button" data-discard>Discard it</button></div>`
+        }
+
+        function renderFoot() {
+          const t = totals()
+          const foot = $("[data-foot]")
+          if (state.created) {
+            foot.innerHTML = `<span class="note-text">Shipped in 3 steps · ${t.files} files <span class="add">+${t.add}</span> <span class="del">−${t.del}</span></span><button class="btn" type="button" data-again>Start over</button>`
+            return
+          }
+          if (state.step === 0) {
+            const label = t.files ? `${state.pushAfter ? "Commit and push" : "Commit"} ${t.files} file${t.files === 1 ? "" : "s"}` : "Nothing selected"
+            foot.innerHTML = `<span class="note-text">Working tree vs HEAD · ${t.hunks} of ${files.reduce((n, f) => n + f.hunks.length, 0)} hunks · to <span class="mono">${esc(state.branch)}</span></span><button class="btn btn-primary" type="button" data-commit ${t.files ? "" : "disabled"}>${IC.commit(14)}${label}</button>`
+            return
+          }
+          if (state.step === 1) {
+            const busy = state.push === "running"
+            foot.innerHTML = state.push === "done"
+              ? `<span class="note-text">Pushed <span class="mono">${state.sha}</span> to origin/${esc(state.branch)}</span><button class="btn btn-primary" type="button" data-goto="2">${IC.pr(14)}Draft pull request</button>`
+              : `<span class="note-text">1 commit ahead of origin · new upstream</span><button class="btn btn-ghost" type="button" data-undo-commit ${busy ? "disabled" : ""}>Undo commit</button><button class="btn btn-primary" type="button" data-push ${busy ? "disabled" : ""}>${busy ? IC.run(14).replace("var(--violet-bright)", "#fff") : IC.push(14)}${busy ? "Pushing…" : "Push to origin"}</button>`
+            return
+          }
+          foot.innerHTML = `<span class="note-text">${state.reviewers.length} reviewer${state.reviewers.length === 1 ? "" : "s"}${state.vectorscope ? " + Vectorscope" : ""} · base main</span><button class="btn btn-ghost" type="button" data-goto="1">Back</button><button class="btn btn-primary" type="button" data-create ${state.title.trim() ? "" : "disabled"}>${IC.pr(14)}${state.draft ? "Create draft pull request" : "Create pull request"}</button>`
+        }
+
+        function render() {
+          renderSteps()
+          renderPane()
+        }
+
+        function draftPr() {
+          state.title = subjectLine()
+          state.desc = `## Summary\nPinned sessions stay at the top of the sidebar, newest pin first, and survive a restart.\n\n## Changes\n- \`session.pinned_at\`: a nullable column and its migration\n- Session menu: Pin to top / Unpin, and \`⌘⇧P\` for the focused session\n- Sidebar ordering: pinned first, the rest keep their order\n\n## Testing\n- \`bun test sidebar-items.test.ts\` (5 pass)\n- \`bun typecheck\` in packages/app and packages/engine`
+        }
+
+        // ---------- actions ----------
+        function commit() {
+          state.sha = ["6e1b4a9", "a93c51e", "2f7d0b6"][state.msg % 3]
+          state.reached = 1
+          state.step = 1
+          showBranch(state.branch)
+          draftPr()
+          live(`Committed ${state.sha} to ${state.branch}`)
+          render()
+          if (state.pushAfter) push()
+        }
+
+        function push() {
+          state.push = "running"
+          state.pushPct = 0
+          state.pushLog = []
+          const steps = [
+            [18, "Enumerating objects: 23, done."],
+            [42, "Counting objects: 100% (23/23), done."],
+            [70, "Writing objects: 100% (14/14), 4.81 KiB | 4.81 MiB/s, done."],
+            [88, `remote: Create a pull request for '${state.branch}' on GitHub`],
+            [100, `<span class="ok">* [new branch]      ${state.branch} -> ${state.branch}</span>`],
+          ]
+          render()
+          steps.forEach(([pct, line], i) =>
+            setTimeout(() => {
+              state.pushPct = pct
+              state.pushLog.push(line)
+              if (pct === 100) {
+                state.push = "done"
+                state.reached = 2
+                live(`Pushed to origin/${state.branch}`)
+              }
+              if (state.step === 1) render()
+              else renderSteps()
+            }, 380 * (i + 1)),
+          )
+        }
+
+        function create() {
+          state.created = true
+          state.reached = 3
+          state.vs = "running"
+          live("Pull request 2326 opened")
+          render()
+          setTimeout(() => {
+            state.vs = "done"
+            if (state.created) render()
+          }, 3200)
+        }
+
+        // ---------- events ----------
+        root.addEventListener("click", (event) => {
+          const t = event.target.closest("button")
+          if (!event.target.closest(".add-person") && state.picker) {
+            state.picker = false
+            renderPane()
+          }
+          if (!t) return
+          const d = t.dataset
+          if (d.open !== undefined) {
+            const f = files[Number(d.open)]
+            f.open = !f.open
+            return renderPane()
+          }
+          if (d.file !== undefined) {
+            const f = files[Number(d.file)]
+            const on = fileState(f) !== "true"
+            f.hunks.forEach((h) => (h.on = on))
+            return renderPane()
+          }
+          if (d.hunk) {
+            const [i, j] = d.hunk.split(":").map(Number)
+            files[i].hunks[j].on = !files[i].hunks[j].on
+            return renderPane()
+          }
+          if ("all" in d) {
+            const on = totals().hunks !== files.reduce((n, f) => n + f.hunks.length, 0)
+            files.forEach((f) => f.hunks.forEach((h) => (h.on = on)))
+            return renderPane()
+          }
+          if (d.value && t.closest("[data-type]")) {
+            state.type = d.value
+            renderPane()
+            return
+          }
+          if ("regen" in d) {
+            const badge = $("[data-ai]")
+            badge.classList.add("is-busy")
+            badge.innerHTML = `${IC.regen(11)}Writing…`
+            setTimeout(() => {
+              state.msg = (state.msg + 1) % messages.length
+              state.subject = messages[state.msg].subject
+              state.body = messages[state.msg].body
+              renderPane()
+              $("[data-subject]")?.classList.add("flash")
+              $("[data-body]")?.classList.add("flash")
+            }, 700)
+            return
+          }
+          if ("commit" in d) return commit()
+          if ("undoCommit" in d) {
+            Object.assign(state, { step: 0, reached: 0, push: "idle" })
+            showBranch("main")
+            live("Commit undone. Your changes are back in the working tree.")
+            return render()
+          }
+          if ("push" in d) return push()
+          if (d.goto) {
+            state.step = Number(d.goto)
+            return render()
+          }
+          if (d.step && !t.disabled) {
+            state.step = Number(d.step)
+            return render()
+          }
+          if (d.value && t.closest("[data-desctab]")) {
+            state.descTab = d.value
+            return renderPane()
+          }
+          if ("addreviewer" in d) {
+            state.picker = !state.picker
+            renderPane()
+            if (state.picker) $("[data-psearch]")?.focus()
+            return
+          }
+          if (d.review) {
+            state.reviewers.push(d.review)
+            state.picker = false
+            renderPane()
+            return $("[data-addreviewer]")?.focus()
+          }
+          if (d.unreview) {
+            state.reviewers = state.reviewers.filter((p) => p !== d.unreview)
+            return renderPane()
+          }
+          if ("create" in d) return create()
+          if ("again" in d) {
+            Object.assign(state, { step: 0, reached: 0, created: false, push: "idle", vs: "idle" })
+            return render()
+          }
+          if ("discard" in d) {
+            t.closest(".vsline").outerHTML = `<div class="vsline">${IC.ok(15)}<span>Discarded the debug line in <span class="mono" style="font-size:11.5px">sidebar-shell.tsx</span>. The working tree is clean.</span></div>`
+            return
+          }
+          if ("focusShip" in d) {
+            state.step = Math.min(state.step, state.reached)
+            render()
+            $("[data-subject]")?.focus()
+          }
+        })
+
+        root.addEventListener("input", (event) => {
+          const el = event.target
+          if (el.matches("[data-subject]")) {
+            const m = /^(\w+)(?:\(([^)]*)\))?:\s?(.*)$/.exec(el.value)
+            if (m) {
+              state.type = m[1]
+              state.scope = m[2] ?? state.scope
+              state.subject = m[3]
+            } else state.subject = el.value
+            const n = el.value.length
+            const c = $("[data-count]")
+            c.textContent = `${n}/72`
+            c.classList.toggle("over", n > 72)
+            root.querySelectorAll("[data-type] button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === state.type)))
+          }
+          if (el.matches("[data-body]")) state.body = el.value
+          if (el.matches("[data-branch]")) {
+            state.branch = el.value.trim().replace(/\s+/g, "-") || "pin-sessions"
+            renderFoot()
+          }
+          if (el.matches("[data-title]")) {
+            state.title = el.value
+            $("[data-tcount]").textContent = `${el.value.length}/72`
+            renderFoot()
+          }
+          if (el.matches("[data-desc]")) state.desc = el.value
+          if (el.matches("[data-psearch]")) {
+            const q = el.value.toLowerCase()
+            root.querySelectorAll("[data-review]").forEach((b) => (b.hidden = !b.dataset.review.includes(q)))
+          }
+        })
+
+        root.addEventListener("lab:switch", (event) => {
+          if (event.target.matches("[data-pushafter]")) state.pushAfter = event.detail
+          if (event.target.matches("[data-vectorscope]")) state.vectorscope = event.detail
+          if (event.target.matches("[data-draft]")) state.draft = event.detail
+          renderFoot()
+        })
+
+        root.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && state.picker) {
+            state.picker = false
+            renderPane()
+            $("[data-addreviewer]")?.focus()
+          }
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && state.step === 0 && !state.created && totals().files) commit()
+        })
+
+        render()
+      })
+    </script>
+  </body>
+</html>
