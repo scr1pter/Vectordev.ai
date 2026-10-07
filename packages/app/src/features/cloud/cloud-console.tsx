@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { DialogGithubPush } from "@/components/session-github-push"
 import { DialogGitlabPush } from "@/components/session-gitlab-push"
@@ -10,7 +10,6 @@ import {
   publishApi,
   type CloudAgentWorkspace,
   type CloudAwsSnapshot,
-  type CloudBuildSettings,
   type CloudDeployment,
   type CloudDomain,
   type CloudDomainProvider,
@@ -18,14 +17,15 @@ import {
   type CloudProviderConnection,
   type CloudProviderId,
   type CloudProviderProjectLink,
-  type CloudProviderResource,
-  type CloudSupabaseServices,
   type PublishProgressEvent,
   type PublishTarget,
   type PublishTargetId,
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
+import { createCloudBuild, type CloudBuildDraft } from "./cloud-build"
+import { createCloudProviderResources } from "./cloud-provider-resources"
+import { createCloudServices } from "./cloud-services"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -46,7 +46,6 @@ export type CloudSection =
   | "aws"
   | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
-type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
 
 const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string }[] }[] = [
   { items: [{ id: "overview", label: "Project overview" }] },
@@ -320,7 +319,7 @@ function isPublishTargetId(value: string): value is PublishTargetId {
   return value === "vector-cloud" || value === "vercel" || value === "netlify"
 }
 
-function isPackageManager(value: string): value is BuildDraft["packageManager"] {
+function isPackageManager(value: string): value is CloudBuildDraft["packageManager"] {
   return value === "bun" || value === "pnpm" || value === "yarn" || value === "npm" || value === "static"
 }
 
@@ -361,35 +360,26 @@ export function CloudConsole(props: {
   const envVars = () => environment.state.variables
   const [database, setDatabase] = createSignal<CloudDatabaseConnection>(null)
   const [connections, setConnections] = createSignal<CloudProviderConnection[]>([])
-  const [providerResources, setProviderResources] = createSignal<
-    Partial<Record<CloudProviderId, CloudProviderResource[]>>
-  >({})
+  const providerResources = createCloudProviderResources({ api: () => api?.providers })
   const [providerLinks, setProviderLinks] = createSignal<CloudProviderProjectLink[]>([])
   const [providerSelections, setProviderSelections] = createSignal<Partial<Record<CloudProviderId, string>>>({})
   const [providerBusy, setProviderBusy] = createSignal<CloudProviderId | "">("")
   const [manualTokenProvider, setManualTokenProvider] = createSignal<CloudProviderId | "">("")
   const [manualToken, setManualToken] = createSignal("")
   const [manualTokenError, setManualTokenError] = createSignal("")
-  const [buildSettings, setBuildSettings] = createSignal<CloudBuildSettings | null>(null)
-  const [supabaseServices, setSupabaseServices] = createSignal<CloudSupabaseServices>()
-  const [supabaseServicesBusy, setSupabaseServicesBusy] = createSignal(false)
-  const [supabaseServicesLoaded, setSupabaseServicesLoaded] = createSignal(false)
+  const build = createCloudBuild({ api: () => api?.build, notice: setNotice })
+  const buildSettings = () => build.state.settings
+  const buildDraft = () => build.state.draft
+  const setBuildDraft = build.setDraft
+  const services = createCloudServices({ api: () => api?.services })
+  const supabaseServices = () => services.state.snapshot
+  const supabaseServicesBusy = () => services.state.busy
+  const supabaseServicesLoaded = () => services.state.loaded
   const [awsSnapshot, setAwsSnapshot] = createSignal<CloudAwsSnapshot>()
   const [awsBusy, setAwsBusy] = createSignal(false)
   const [awsLoaded, setAwsLoaded] = createSignal(false)
   const [awsProfile, setAwsProfile] = createSignal("")
   const [awsRegion, setAwsRegion] = createSignal("")
-  const [buildDraft, setBuildDraft] = createSignal<BuildDraft>({
-    framework: "",
-    packageManager: "npm",
-    installCommand: "",
-    testCommand: "",
-    buildCommand: "",
-    outputDirectory: "",
-    nodeVersion: "",
-    healthPath: "/",
-    requiredChecks: { test: false, secrets: true, health: true, browser: true },
-  })
 
   const [domainDraft, setDomainDraft] = createSignal("")
   const [domainProvider, setDomainProvider] = createSignal<Exclude<CloudDomainProvider, "vector-cloud">>("vercel")
@@ -401,8 +391,9 @@ export function CloudConsole(props: {
   const [checkingAll, setCheckingAll] = createSignal(false)
   const [deploymentActionId, setDeploymentActionId] = createSignal("")
   const [expandedChecksId, setExpandedChecksId] = createSignal("")
-  const [detectingBuild, setDetectingBuild] = createSignal(false)
-  const [savingBuild, setSavingBuild] = createSignal(false)
+  const detectingBuild = () => build.state.busy === "detect"
+  const savingBuild = () => build.state.busy === "save"
+  const targetLoads = { revision: 0 }
   let confirmTimer: ReturnType<typeof setTimeout> | undefined
   let copiedTimer: ReturnType<typeof setTimeout> | undefined
   const unsubscribePublish = publish?.subscribe((event) => {
@@ -410,6 +401,7 @@ export function CloudConsole(props: {
     setPublishEvents((items) => [...items, event].slice(-200))
   })
   onCleanup(() => {
+    targetLoads.revision++
     clearTimeout(confirmTimer)
     clearTimeout(copiedTimer)
     unsubscribePublish?.()
@@ -428,31 +420,38 @@ export function CloudConsole(props: {
     confirmTimer = setTimeout(() => setConfirmId(""), 3000)
   }
 
+  const refreshPublishTargets = async () => {
+    if (!publish) return
+    const scope = environment.scope()
+    const revision = ++targetLoads.revision
+    const targets = await publish.targets().catch(() => [])
+    if (revision === targetLoads.revision && environment.isCurrent(scope)) setPublishTargets(targets)
+  }
+
   const refreshAll = async () => {
-    if (publish) setPublishTargets(await publish.targets().catch(() => []))
-    if (!api) return
-    const projectPath = props.projectPath
-    const taskId = props.taskId
     const scope = environment.scope()
     const isCurrent = () => environment.isCurrent(scope)
-    const [nextDeployments, nextDomains, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] =
+    void refreshPublishTargets()
+    if (!api) return
+    const projectPath = scope.projectPath
+    const taskId = scope.taskId
+    const [nextDeployments, nextDomains, nextDatabase, nextWorkspaces, nextConnections, nextLinks] =
       await Promise.all([
         api.deployments.list(projectPath, taskId).catch(() => []),
         projectPath ? api.domains.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
         projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
-        projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
         projectPath && workspaceApi
           ? workspaceApi.list({ sourcePath: projectPath, parentSessionId: taskId }).catch(() => [])
           : Promise.resolve([]),
         api.connections.list().catch(() => []),
         projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
         environment.refresh(),
+        build.refresh(),
       ])
     if (!isCurrent()) return
     setDeployments(nextDeployments)
     setDomains(nextDomains)
     setDatabase(nextDatabase)
-    setBuildSettings(nextBuild)
     setAgentWorkspaces(nextWorkspaces)
     setConnections(nextConnections)
     setProviderLinks(nextLinks)
@@ -461,43 +460,38 @@ export function CloudConsole(props: {
       if (first) setDomainProvider(first.provider)
     }
     const connectedProviders = nextConnections.filter((item) => item.connected).map((item) => item.provider)
-    const resources = await Promise.all(
-      connectedProviders.map(async (provider) => ({
-        provider,
-        items: await api.providers.resources(provider).catch(() => []),
-      })),
-    )
+    await Promise.all(connectedProviders.map((provider) => providerResources.refresh(provider)))
     if (!isCurrent()) return
-    setProviderResources(
-      Object.fromEntries(resources.map((entry) => [entry.provider, entry.items])) as Partial<
-        Record<CloudProviderId, CloudProviderResource[]>
-      >,
-    )
-    if (nextBuild) {
-      setBuildDraft({
-        framework: nextBuild.framework,
-        packageManager: nextBuild.packageManager,
-        installCommand: nextBuild.installCommand,
-        testCommand: nextBuild.testCommand,
-        buildCommand: nextBuild.buildCommand,
-        outputDirectory: nextBuild.outputDirectory,
-        nodeVersion: nextBuild.nodeVersion,
-        healthPath: nextBuild.healthPath,
-        requiredChecks: nextBuild.requiredChecks,
-      })
-    }
   }
 
   createEffect(() => {
     // Reload task-scoped data when the active task or project changes.
     environment.changeScope(props.projectPath, props.taskId)
+    services.changeScope(props.projectPath, props.taskId)
+    build.changeScope(props.projectPath, props.taskId)
     setNotice(undefined)
     setDatabase(null)
+    setDeployments([])
+    setAgentWorkspaces([])
+    setDomains([])
     setProviderLinks([])
     setProviderSelections({})
-    setSupabaseServices(undefined)
-    setSupabaseServicesLoaded(false)
-    if (api) void refreshAll()
+    setDomainDraft("")
+    setManualTokenProvider("")
+    setManualToken("")
+    setManualTokenError("")
+    setPublishing(false)
+    setActiveRunId("")
+    setPublishEvents([])
+    setCheckingId("")
+    setCheckingAll(false)
+    setDeploymentActionId("")
+    setExpandedLogId("")
+    setExpandedChecksId("")
+    setConfirmId("")
+    setCopiedId("")
+    setVerifyingId("")
+    if (api) void untrack(refreshAll)
   })
 
   const projectName = createMemo(() => props.projectPath.split("/").filter(Boolean).at(-1) ?? "No project")
@@ -505,8 +499,11 @@ export function CloudConsole(props: {
   // --- Deployments ---------------------------------------------------------
   const removeDeployment = async (deployment: CloudDeployment) => {
     if (!api) return
+    const scope = environment.scope()
     try {
-      setDeployments(await api.deployments.remove(props.projectPath, props.taskId, deployment.id))
+      const next = await api.deployments.remove(scope.projectPath, scope.taskId, deployment.id)
+      if (!environment.isCurrent(scope)) return
+      setDeployments(next)
       setNotice({
         tone: "success",
         text:
@@ -515,6 +512,7 @@ export function CloudConsole(props: {
             : `Removed ${deployment.name} from Vector's deployment history. Manage the live site in ${deployment.target === "vercel" ? "Vercel" : "Netlify"}.`,
       })
     } catch {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: `Could not remove ${deployment.name} — try again.` })
     }
   }
@@ -524,9 +522,11 @@ export function CloudConsole(props: {
     environment?: "preview" | "production"
     workspace?: CloudAgentWorkspace
   }) => {
-    if (!publish || !props.projectPath) return
+    if (!publish || !props.projectPath || publishing()) return
+    const scope = environment.scope()
+    if (override?.workspace && !agentWorkspaces().some((item) => item.id === override.workspace?.id)) return
     const targetId = override?.target ?? publishTargetId()
-    const environment = override?.environment ?? deploymentEnvironment()
+    const releaseEnvironment = override?.environment ?? deploymentEnvironment()
     const target = publishTargets().find((item) => item.id === targetId)
     if (target && !target.available) {
       setNotice({ tone: "error", text: target.loginHint || `${target.label} is not available on this machine.` })
@@ -540,20 +540,21 @@ export function CloudConsole(props: {
       tone: "info",
       text: override?.workspace
         ? `Publishing ${override.workspace.name} as an isolated preview…`
-        : `Publishing a ${environment} release to ${target?.label ?? targetId}… this can take a minute.`,
+        : `Publishing a ${releaseEnvironment} release to ${target?.label ?? targetId}… this can take a minute.`,
     })
     try {
       const result = await publish.run({
-        projectPath: override?.workspace?.isolatedPath ?? props.projectPath,
-        taskId: props.taskId,
-        scopeProjectPath: override?.workspace ? props.projectPath : undefined,
-        scopeTaskId: override?.workspace ? props.taskId : undefined,
+        projectPath: override?.workspace?.isolatedPath ?? scope.projectPath,
+        taskId: scope.taskId,
+        scopeProjectPath: override?.workspace ? scope.projectPath : undefined,
+        scopeTaskId: override?.workspace ? scope.taskId : undefined,
         workspaceId: override?.workspace?.id,
         workspaceName: override?.workspace?.name,
         target: targetId,
-        production: override?.workspace ? false : environment === "production",
+        production: override?.workspace ? false : releaseEnvironment === "production",
         runId,
       })
+      if (!environment.isCurrent(scope)) return
       if (result.ok && result.url) {
         setNotice({
           tone: "success",
@@ -566,16 +567,19 @@ export function CloudConsole(props: {
         })
       }
       if (api && (result.deploymentId || result.url)) {
-        setDeployments(await api.deployments.list(props.projectPath, props.taskId).catch(() => deployments()))
+        const next = await api.deployments.list(scope.projectPath, scope.taskId).catch(() => undefined)
+        if (next && environment.isCurrent(scope)) setDeployments(next)
       }
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Publish failed." })
     } finally {
-      setPublishing(false)
+      if (environment.isCurrent(scope)) setPublishing(false)
     }
   }
 
   const copyDeploymentUrl = async (deployment: CloudDeployment) => {
+    const scope = environment.scope()
     const url = cleanDeploymentUrl(deployment.productionUrl ?? deployment.url)
     if (!url) {
       setNotice({ tone: "error", text: "This deployment does not have a valid public link yet." })
@@ -584,10 +588,12 @@ export function CloudConsole(props: {
     try {
       if (!navigator.clipboard) throw new Error("Clipboard unavailable")
       await navigator.clipboard.writeText(url)
+      if (!environment.isCurrent(scope)) return
       setCopiedId(deployment.id)
       clearTimeout(copiedTimer)
       copiedTimer = setTimeout(() => setCopiedId((current) => (current === deployment.id ? "" : current)), 1500)
     } catch {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: "Could not copy — try selecting the link instead." })
     }
   }
@@ -603,9 +609,11 @@ export function CloudConsole(props: {
 
   const checkDeployment = async (deployment: CloudDeployment) => {
     if (!api || !props.projectPath) return
+    const scope = environment.scope()
     setCheckingId(deployment.id)
     try {
-      const updated = await api.deployments.check(props.projectPath, props.taskId, deployment.id)
+      const updated = await api.deployments.check(scope.projectPath, scope.taskId, deployment.id)
+      if (!environment.isCurrent(scope)) return
       setDeployments((items) => items.map((item) => (item.id === updated.id ? updated : item)))
       setNotice({
         tone: updated.status === "ready" ? "success" : "error",
@@ -615,17 +623,20 @@ export function CloudConsole(props: {
             : `${updated.name} is ${updated.status}: ${updated.healthError ?? "health check failed"}`,
       })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Health check failed." })
     } finally {
-      setCheckingId("")
+      if (environment.isCurrent(scope)) setCheckingId("")
     }
   }
 
   const checkAllDeployments = async () => {
     if (!api || !props.projectPath || !deployments().length) return
+    const scope = environment.scope()
     setCheckingAll(true)
     try {
-      const next = await api.deployments.checkAll(props.projectPath, props.taskId)
+      const next = await api.deployments.checkAll(scope.projectPath, scope.taskId)
+      if (!environment.isCurrent(scope)) return
       setDeployments(next)
       const healthy = next.filter((item) => item.status === "ready").length
       setNotice({
@@ -633,9 +644,10 @@ export function CloudConsole(props: {
         text: `${healthy} of ${next.length} deployments are healthy.`,
       })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Health checks failed." })
     } finally {
-      setCheckingAll(false)
+      if (environment.isCurrent(scope)) setCheckingAll(false)
     }
   }
 
@@ -645,37 +657,49 @@ export function CloudConsole(props: {
 
   const promoteRelease = async (deployment: CloudDeployment) => {
     if (!api) return
+    const scope = environment.scope()
     setDeploymentActionId(deployment.id)
     try {
-      const updated = await api.deployments.promote(props.projectPath, props.taskId, deployment.id)
-      setDeployments(await api.deployments.list(props.projectPath, props.taskId))
+      const updated = await api.deployments.promote(scope.projectPath, scope.taskId, deployment.id)
+      if (!environment.isCurrent(scope)) return
+      const next = await api.deployments.list(scope.projectPath, scope.taskId)
+      if (!environment.isCurrent(scope)) return
+      setDeployments(next)
       setNotice({ tone: "success", text: `${updated.name} is now the current production release.` })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Promotion failed." })
     } finally {
-      setDeploymentActionId("")
+      if (environment.isCurrent(scope)) setDeploymentActionId("")
     }
   }
 
   const rollbackRelease = async (deployment: CloudDeployment) => {
     if (!api) return
+    const scope = environment.scope()
     setDeploymentActionId(deployment.id)
     try {
-      const updated = await api.deployments.rollback(props.projectPath, props.taskId, deployment.id)
-      setDeployments(await api.deployments.list(props.projectPath, props.taskId))
+      const updated = await api.deployments.rollback(scope.projectPath, scope.taskId, deployment.id)
+      if (!environment.isCurrent(scope)) return
+      const next = await api.deployments.list(scope.projectPath, scope.taskId)
+      if (!environment.isCurrent(scope)) return
+      setDeployments(next)
       setNotice({ tone: "success", text: `Production rolled back to ${updated.name}.` })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Rollback failed." })
     } finally {
-      setDeploymentActionId("")
+      if (environment.isCurrent(scope)) setDeploymentActionId("")
     }
   }
 
   const readRuntimeLogs = async (deployment: CloudDeployment) => {
     if (!api) return
+    const scope = environment.scope()
     setDeploymentActionId(deployment.id)
     try {
-      const result = await api.deployments.logs(props.projectPath, props.taskId, deployment.id)
+      const result = await api.deployments.logs(scope.projectPath, scope.taskId, deployment.id)
+      if (!environment.isCurrent(scope)) return
       replaceDeployment({ ...deployment, runtimeLog: result.log, runtimeLogFetchedAt: result.fetchedAt })
       setExpandedLogId(deployment.id)
       setNotice({
@@ -683,17 +707,20 @@ export function CloudConsole(props: {
         text: `Loaded ${result.source === "provider" ? "runtime" : "build and check"} logs.`,
       })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not read deployment logs." })
     } finally {
-      setDeploymentActionId("")
+      if (environment.isCurrent(scope)) setDeploymentActionId("")
     }
   }
 
   const rerunChecks = async (deployment: CloudDeployment) => {
     if (!api) return
+    const scope = environment.scope()
     setDeploymentActionId(deployment.id)
     try {
-      const updated = await api.deployments.rerunChecks(props.projectPath, props.taskId, deployment.id)
+      const updated = await api.deployments.rerunChecks(scope.projectPath, scope.taskId, deployment.id)
+      if (!environment.isCurrent(scope)) return
       replaceDeployment(updated)
       const failed = updated.checks.filter((check) => check.required && check.status === "failed").length
       setNotice({
@@ -703,13 +730,15 @@ export function CloudConsole(props: {
           : "All required release checks passed.",
       })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not run release checks." })
     } finally {
-      setDeploymentActionId("")
+      if (environment.isCurrent(scope)) setDeploymentActionId("")
     }
   }
 
   const repairDeployment = async (deployment: CloudDeployment) => {
+    const scope = environment.scope()
     const evidence = [
       `Repair the deployment for ${deployment.name}.`,
       `Deployment: ${cleanDeploymentUrl(deployment.url) || deployment.url}`,
@@ -728,80 +757,57 @@ export function CloudConsole(props: {
       props.onRepair(evidence)
       return
     }
-    await navigator.clipboard?.writeText(evidence).catch(() => undefined)
-    setNotice({ tone: "info", text: "Repair context copied. Return to the agent and paste it into the composer." })
+    if (!navigator.clipboard) {
+      setNotice({ tone: "error", text: "Clipboard access is unavailable. Open the failed checks to review the repair details." })
+      return
+    }
+    const copied = await navigator.clipboard.writeText(evidence).then(() => true, () => false)
+    if (!environment.isCurrent(scope)) return
+    setNotice(
+      copied
+        ? { tone: "info", text: "Repair context copied. Return to the agent and paste it into the composer." }
+        : { tone: "error", text: "Could not copy repair details. Allow clipboard access and try again." },
+    )
   }
 
-  const detectBuild = async () => {
-    if (!api || !props.projectPath) return
-    setDetectingBuild(true)
-    try {
-      const detected = await api.build.detect(props.projectPath, props.taskId)
-      setBuildSettings(detected)
-      setBuildDraft({
-        framework: detected.framework,
-        packageManager: detected.packageManager,
-        installCommand: detected.installCommand,
-        testCommand: detected.testCommand,
-        buildCommand: detected.buildCommand,
-        outputDirectory: detected.outputDirectory,
-        nodeVersion: detected.nodeVersion,
-        healthPath: detected.healthPath,
-        requiredChecks: detected.requiredChecks,
-      })
-      setNotice({
-        tone: "success",
-        text: `Detected ${detected.framework} with ${detected.packageManager}. Review the commands, then save.`,
-      })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not detect build settings." })
-    } finally {
-      setDetectingBuild(false)
-    }
-  }
-
-  const saveBuild = async () => {
-    if (!api || !props.projectPath) return
-    setSavingBuild(true)
-    try {
-      const saved = await api.build.set(props.projectPath, props.taskId, buildDraft())
-      setBuildSettings(saved)
-      setNotice({ tone: "success", text: "Build and runtime settings saved for this project session." })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not save build settings." })
-    } finally {
-      setSavingBuild(false)
-    }
-  }
+  const detectBuild = () => build.detect()
+  const saveBuild = () => build.save()
 
   // --- Domains -------------------------------------------------------------
   const addDomain = async () => {
     if (!api || !props.projectPath || !domainDraft().trim()) return
+    const scope = environment.scope()
     const provider = domainProvider()
     if (!providerLink(provider)) {
       setNotice({ tone: "error", text: `Link a ${providerLabel(provider)} project before adding a domain.` })
       return
     }
     try {
-      await api.providers.addDomain(props.projectPath, props.taskId, provider, domainDraft().trim())
+      await api.providers.addDomain(scope.projectPath, scope.taskId, provider, domainDraft().trim())
+      if (!environment.isCurrent(scope)) return
       setDomainDraft("")
-      setDomains(await api.domains.list(props.projectPath, props.taskId))
+      const next = await api.domains.list(scope.projectPath, scope.taskId)
+      if (!environment.isCurrent(scope)) return
+      setDomains(next)
       setNotice({
         tone: "success",
         text: `Domain attached to ${providerLabel(provider)}. Configure the DNS record shown, then verify.`,
       })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not add domain." })
     }
   }
   const verifyDomain = async (domain: CloudDomain) => {
     if (!api || !props.projectPath) return
+    const scope = environment.scope()
     setVerifyingId(domain.id)
     try {
       const updated =
         domain.provider === "vector-cloud"
-          ? await api.domains.verify(props.projectPath, props.taskId, domain.id)
-          : await api.providers.verifyDomain(props.projectPath, props.taskId, domain.id)
+          ? await api.domains.verify(scope.projectPath, scope.taskId, domain.id)
+          : await api.providers.verifyDomain(scope.projectPath, scope.taskId, domain.id)
+      if (!environment.isCurrent(scope)) return
       setDomains((list) => list.map((item) => (item.id === updated.id ? updated : item)))
       setNotice(
         updated.status === "verified"
@@ -815,23 +821,26 @@ export function CloudConsole(props: {
           : { tone: "info", text: updated.detail ?? "Not verified yet — DNS can take a few minutes." },
       )
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({
         tone: "error",
         text: error instanceof Error ? error.message : "Verification failed — check your connection and try again.",
       })
     } finally {
-      setVerifyingId("")
+      if (environment.isCurrent(scope)) setVerifyingId("")
     }
   }
   const removeDomain = async (domain: CloudDomain) => {
     if (!api || !props.projectPath) return
+    const scope = environment.scope()
     try {
-      setDomains(
-        domain.provider === "vector-cloud"
-          ? await api.domains.remove(props.projectPath, props.taskId, domain.id)
-          : await api.providers.removeDomain(props.projectPath, props.taskId, domain.id),
-      )
+      const next = domain.provider === "vector-cloud"
+        ? await api.domains.remove(scope.projectPath, scope.taskId, domain.id)
+        : await api.providers.removeDomain(scope.projectPath, scope.taskId, domain.id)
+      if (!environment.isCurrent(scope)) return
+      setDomains(next)
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({
         tone: "error",
         text: error instanceof Error ? error.message : "Could not remove domain — try again.",
@@ -846,6 +855,8 @@ export function CloudConsole(props: {
   // --- Provider connections ------------------------------------------------
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
   const providerLink = (provider: "vercel" | "netlify") => providerLinks().find((item) => item.provider === provider)
+  const selectedProviderProject = (provider: CloudProviderId) =>
+    providerResources.state[provider].items.find((item) => item.id === providerSelections()[provider])
 
   const supabaseDashboard = (pathname = "") => {
     const ref = database()?.projectRef
@@ -864,19 +875,7 @@ export function CloudConsole(props: {
       : `https://app.netlify.com/sites/${encodeURIComponent(link.projectName)}${pathname}`
   }
 
-  const refreshSupabaseServices = async () => {
-    if (!api || !props.projectPath) return
-    setSupabaseServicesBusy(true)
-    try {
-      setSupabaseServices(await api.services.supabase(props.projectPath, props.taskId))
-    } catch (error) {
-      setSupabaseServices(undefined)
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load Supabase services." })
-    } finally {
-      setSupabaseServicesBusy(false)
-      setSupabaseServicesLoaded(true)
-    }
-  }
+  const refreshSupabaseServices = () => services.refresh()
 
   const refreshAws = async () => {
     if (!api) return
@@ -906,13 +905,15 @@ export function CloudConsole(props: {
   })
 
   const connectProvider = async (provider: CloudProviderId) => {
-    if (!api) return
+    if (!api || providerBusy()) return
     setProviderBusy(provider)
     try {
       const connection = await api.connections.connect(provider)
       setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
-      const resources = await api.providers.resources(provider).catch(() => [])
-      setProviderResources((current) => ({ ...current, [provider]: resources }))
+      providerResources.clear(provider)
+      setProviderSelections((current) => ({ ...current, [provider]: "" }))
+      void refreshPublishTargets()
+      await providerResources.refresh(provider)
       setNotice({
         tone: "success",
         text: `${providerLabel(provider)} connected${connection.account ? ` as ${connection.account}` : ""}.`,
@@ -957,8 +958,10 @@ export function CloudConsole(props: {
       // The saved credential no longer belongs in the renderer draft.
       cancelManualToken()
       setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
-      const resources = await api.providers.resources(provider).catch(() => [])
-      setProviderResources((current) => ({ ...current, [provider]: resources }))
+      providerResources.clear(provider)
+      setProviderSelections((current) => ({ ...current, [provider]: "" }))
+      void refreshPublishTargets()
+      await providerResources.refresh(provider)
       setNotice({
         tone: "success",
         text: `${providerLabel(provider)} connected${connection.account ? ` as ${connection.account}` : ""}.`,
@@ -973,7 +976,7 @@ export function CloudConsole(props: {
   }
 
   const disconnectProvider = async (provider: CloudProviderId) => {
-    if (!api) return
+    if (!api || providerBusy()) return
     setProviderBusy(provider)
     try {
       await api.connections.disconnect(provider)
@@ -984,7 +987,9 @@ export function CloudConsole(props: {
             : item,
         ),
       )
-      setProviderResources((current) => ({ ...current, [provider]: [] }))
+      providerResources.clear(provider)
+      setProviderSelections((current) => ({ ...current, [provider]: "" }))
+      void refreshPublishTargets()
       cancelManualToken()
       setNotice({ tone: "info", text: `${providerLabel(provider)} disconnected from Vector.` })
     } catch (error) {
@@ -999,15 +1004,18 @@ export function CloudConsole(props: {
 
   const linkProviderProject = async (provider: CloudProviderId) => {
     if (provider === "supabase") return
-    if (!api || !props.projectPath) return
-    const projectId = providerSelections()[provider]
+    if (!api || !props.projectPath || providerBusy()) return
+    const projectId = selectedProviderProject(provider)?.id
     if (!projectId) return
+    const scope = environment.scope()
     setProviderBusy(provider)
     try {
-      const link = await api.providers.link(props.projectPath, props.taskId, provider, projectId)
+      const link = await api.providers.link(scope.projectPath, scope.taskId, provider, projectId)
+      if (!environment.isCurrent(scope)) return
       setProviderLinks((items) => [link, ...items.filter((item) => item.provider !== provider)])
       setNotice({ tone: "success", text: `${link.projectName} is linked to this Vector project.` })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not link that project." })
     } finally {
       setProviderBusy("")
@@ -1016,12 +1024,16 @@ export function CloudConsole(props: {
 
   const unlinkProviderProject = async (provider: CloudProviderId) => {
     if (provider === "supabase") return
-    if (!api || !props.projectPath) return
+    if (!api || !props.projectPath || providerBusy()) return
+    const scope = environment.scope()
     setProviderBusy(provider)
     try {
-      setProviderLinks(await api.providers.unlink(props.projectPath, props.taskId, provider))
+      const links = await api.providers.unlink(scope.projectPath, scope.taskId, provider)
+      if (!environment.isCurrent(scope)) return
+      setProviderLinks(links)
       setNotice({ tone: "info", text: `${providerLabel(provider)} project link removed.` })
     } catch (error) {
+      if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not unlink that project." })
     } finally {
       setProviderBusy("")
@@ -1030,8 +1042,8 @@ export function CloudConsole(props: {
 
   // --- Database ------------------------------------------------------------
   const connectSupabaseProject = async () => {
-    if (!api || !props.projectPath) return
-    const projectRef = providerSelections().supabase
+    if (!api || !props.projectPath || providerBusy()) return
+    const projectRef = selectedProviderProject("supabase")?.id
     if (!projectRef) return
     const scope = environment.scope()
     setProviderBusy("supabase")
@@ -1041,8 +1053,7 @@ export function CloudConsole(props: {
       setDatabase(connection)
       await environment.refresh()
       if (!environment.isCurrent(scope)) return
-      setSupabaseServices(undefined)
-      setSupabaseServicesLoaded(false)
+      services.reset()
       setNotice({
         tone: "success",
         text: `${connection?.projectName ?? "Supabase"} connected. Vector configured the project locally without asking you to copy API keys.`,
@@ -1061,11 +1072,38 @@ export function CloudConsole(props: {
       await api.database.disconnect(scope.projectPath, scope.taskId)
       if (!environment.isCurrent(scope)) return
       setDatabase(null)
+      services.reset()
       setNotice({ tone: "info", text: "Supabase disconnected. Your .env keys were left in place." })
     } catch (error) {
       if (!environment.isCurrent(scope)) return
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not disconnect — try again." })
     }
+  }
+
+  const ProjectListStatus = (statusProps: { provider: CloudProviderId }) => {
+    const resource = () => providerResources.state[statusProps.provider]
+    return (
+      <div class="cloud-inline-empty mt-3" aria-live="polite">
+        <span>
+          {resource().loading
+            ? "Loading projects…"
+            : resource().error ||
+              (resource().loaded
+                ? resource().items.length
+                  ? `${resource().items.length} ${resource().items.length === 1 ? "project" : "projects"} available`
+                  : `No projects found. Create one in ${providerLabel(statusProps.provider)}, then refresh.`
+                : "Projects have not loaded yet.")}
+        </span>
+        <button
+          class="cloud-button"
+          type="button"
+          disabled={resource().loading || Boolean(providerBusy())}
+          onClick={() => void providerResources.refresh(statusProps.provider)}
+        >
+          {resource().error ? "Retry" : "Refresh projects"}
+        </button>
+      </div>
+    )
   }
 
   return (
@@ -1128,7 +1166,9 @@ export function CloudConsole(props: {
         <main class="cloud-content">
           <div class="cloud-inner">
             <Show when={!api}>
-              <p class="cloud-offline">Cloud controls activate once Vector connects to this workspace.</p>
+              <p class="cloud-offline">
+                Open this repository in Vector Desktop to connect providers and manage deployments and cloud services.
+              </p>
             </Show>
 
             <Show when={notice()}>
@@ -1258,7 +1298,7 @@ export function CloudConsole(props: {
                     const connectionMode = () => cloudProviderConnectionMode(connection())
                     const tokenGuide = () => cloudProviderTokenGuide(provider)
                     const linked = () => (provider === "supabase" ? undefined : providerLink(provider))
-                    const resources = () => providerResources()[provider] ?? []
+                    const resources = () => providerResources.state[provider].items
                     return (
                       <section class="cloud-panel cloud-connection-card">
                         <div class="cloud-provider-mark" data-provider={provider}>
@@ -1297,6 +1337,10 @@ export function CloudConsole(props: {
                                 ? "Hosted sign-in is not configured. Connect with a personal access token encrypted on this device."
                                 : (connection()?.detail ?? "Checking provider availability…")}
                           </p>
+
+                          <Show when={connection()?.connected}>
+                            <ProjectListStatus provider={provider} />
+                          </Show>
 
                           <Show when={manualTokenProvider() === provider && connectionMode() === "token"}>
                             <form
@@ -1344,14 +1388,14 @@ export function CloudConsole(props: {
                                   class="cloud-button"
                                   data-variant="primary"
                                   type="submit"
-                                  disabled={!manualToken().trim() || providerBusy() === provider}
+                                  disabled={!manualToken().trim() || Boolean(providerBusy())}
                                 >
                                   {providerBusy() === provider ? "Validating…" : "Save and connect"}
                                 </button>
                                 <button
                                   class="cloud-button"
                                   type="button"
-                                  disabled={providerBusy() === provider}
+                                  disabled={Boolean(providerBusy())}
                                   onClick={cancelManualToken}
                                 >
                                   Cancel
@@ -1386,8 +1430,8 @@ export function CloudConsole(props: {
                                     type="button"
                                     disabled={
                                       !props.projectPath ||
-                                      !providerSelections()[provider] ||
-                                      providerBusy() === provider
+                                      !selectedProviderProject(provider) ||
+                                      Boolean(providerBusy())
                                     }
                                     onClick={() => void linkProviderProject(provider)}
                                   >
@@ -1404,7 +1448,7 @@ export function CloudConsole(props: {
                                   <button
                                     class="cloud-button"
                                     type="button"
-                                    disabled={providerBusy() === provider}
+                                    disabled={Boolean(providerBusy())}
                                     onClick={() => void unlinkProviderProject(provider)}
                                   >
                                     Unlink
@@ -1440,7 +1484,7 @@ export function CloudConsole(props: {
                                       class="cloud-button"
                                       data-variant="primary"
                                       type="button"
-                                      disabled={providerBusy() === provider || manualTokenProvider() === provider}
+                                      disabled={Boolean(providerBusy()) || manualTokenProvider() === provider}
                                       onClick={() => openManualToken(provider)}
                                     >
                                       {manualTokenProvider() === provider ? "Enter token below" : "Use access token"}
@@ -1452,7 +1496,7 @@ export function CloudConsole(props: {
                                   class="cloud-button"
                                   data-variant="primary"
                                   type="button"
-                                  disabled={!api || providerBusy() === provider}
+                                  disabled={!api || Boolean(providerBusy())}
                                   onClick={() => void connectProvider(provider)}
                                 >
                                   {providerBusy() === provider
@@ -1466,7 +1510,7 @@ export function CloudConsole(props: {
                               class="cloud-button"
                               data-variant="danger"
                               type="button"
-                              disabled={providerBusy() === provider}
+                              disabled={Boolean(providerBusy())}
                               onClick={() =>
                                 requestConfirm(`disconnect-${provider}`, () => void disconnectProvider(provider))
                               }
@@ -1832,7 +1876,7 @@ export function CloudConsole(props: {
                                 type="button"
                                 onClick={() => void repairDeployment(deployment)}
                               >
-                                Repair with Vector
+                                {props.onRepair ? "Repair with Vector" : "Copy repair prompt"}
                               </button>
                             </Show>
                             <Show when={isPublishTargetId(deployment.target) ? deployment.target : undefined}>
@@ -2462,6 +2506,7 @@ export function CloudConsole(props: {
                         <p class="cloud-muted mt-1 text-[12px]">
                           Select the existing Supabase project this repository should use.
                         </p>
+                        <ProjectListStatus provider="supabase" />
                         <div class="cloud-provider-linker mt-3">
                           <select
                             class="cloud-input"
@@ -2474,7 +2519,7 @@ export function CloudConsole(props: {
                             }
                           >
                             <option value="">Choose a Supabase project</option>
-                            <For each={providerResources().supabase ?? []}>
+                            <For each={providerResources.state.supabase.items}>
                               {(resource) => (
                                 <option value={resource.id}>
                                   {resource.name}
@@ -2487,7 +2532,7 @@ export function CloudConsole(props: {
                             class="cloud-button"
                             data-variant="primary"
                             type="button"
-                            disabled={!api || !providerSelections().supabase || providerBusy() === "supabase"}
+                            disabled={!api || !selectedProviderProject("supabase") || Boolean(providerBusy())}
                             onClick={() => void connectSupabaseProject()}
                           >
                             {providerBusy() === "supabase" ? "Connecting…" : "Use this project"}
@@ -2613,6 +2658,11 @@ export function CloudConsole(props: {
                   {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
                 </button>
               </div>
+              <Show when={services.state.error && services.state.snapshot}>
+                <div class="cloud-notice mb-3" data-tone="error" role="alert">
+                  {services.state.error} Previously loaded storage is shown below.
+                </div>
+              </Show>
               <Show
                 when={supabaseServices()?.connected}
                 fallback={
@@ -2620,8 +2670,18 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("storage")}
                     </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect one from Database to inspect its storage buckets.</p>
+                    <strong>
+                      {supabaseServicesBusy()
+                        ? "Loading storage…"
+                        : services.state.error
+                          ? "Could not load storage"
+                          : "No Supabase project linked"}
+                    </strong>
+                    <p role={services.state.error ? "alert" : undefined}>
+                      {supabaseServicesBusy()
+                        ? "Checking the Supabase project connected to this repository."
+                        : services.state.error || "Connect one from Database to inspect its storage buckets."}
+                    </p>
                   </div>
                 }
               >
@@ -2689,6 +2749,11 @@ export function CloudConsole(props: {
                   {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
                 </button>
               </div>
+              <Show when={services.state.error && services.state.snapshot}>
+                <div class="cloud-notice mb-3" data-tone="error" role="alert">
+                  {services.state.error} Previously loaded functions are shown below.
+                </div>
+              </Show>
               <Show
                 when={supabaseServices()?.connected}
                 fallback={
@@ -2696,8 +2761,18 @@ export function CloudConsole(props: {
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("functions")}
                     </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect a database project before inspecting its Edge Functions.</p>
+                    <strong>
+                      {supabaseServicesBusy()
+                        ? "Loading functions…"
+                        : services.state.error
+                          ? "Could not load functions"
+                          : "No Supabase project linked"}
+                    </strong>
+                    <p role={services.state.error ? "alert" : undefined}>
+                      {supabaseServicesBusy()
+                        ? "Checking the Supabase project connected to this repository."
+                        : services.state.error || "Connect a database project before inspecting its Edge Functions."}
+                    </p>
                   </div>
                 }
               >
@@ -3020,13 +3095,13 @@ export function CloudConsole(props: {
                     <button
                       class="cloud-button"
                       type="button"
-                      disabled={!api || detectingBuild()}
+                      disabled={!api || Boolean(build.state.busy)}
                       onClick={() => void detectBuild()}
                     >
                       {detectingBuild() ? "Detecting…" : "Detect from project"}
                     </button>
                   </div>
-                  <div class="cloud-form-grid mt-5">
+                  <fieldset class="cloud-form-grid mt-5" disabled={Boolean(build.state.busy)}>
                     <label>
                       <span>Framework</span>
                       <input
@@ -3122,8 +3197,8 @@ export function CloudConsole(props: {
                         placeholder="/api/health"
                       />
                     </label>
-                  </div>
-                  <div class="cloud-check-config mt-5">
+                  </fieldset>
+                  <fieldset class="cloud-check-config mt-5" disabled={Boolean(build.state.busy)}>
                     <div>
                       <strong>Required release checks</strong>
                       <p>Production promotion stops when a required check fails.</p>
@@ -3152,13 +3227,13 @@ export function CloudConsole(props: {
                         </label>
                       )}
                     </For>
-                  </div>
+                  </fieldset>
                   <div class="mt-5 flex justify-end">
                     <button
                       class="cloud-button"
                       data-variant="primary"
                       type="button"
-                      disabled={!api || savingBuild()}
+                      disabled={!api || Boolean(build.state.busy)}
                       onClick={() => void saveBuild()}
                     >
                       {savingBuild() ? "Saving…" : "Save build settings"}

@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, Show } from "solid-js"
+import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import {
   buildDesktopSummary,
   countBySeverity,
@@ -17,6 +17,7 @@ import {
 import {
   buildPullRequestCreateInput,
   buildPullRequestMergeInput,
+  createPullRequestRequestScope,
   pullRequestErrorMessage,
   pullRequestMergeAction,
   pullRequestProjectIsCurrent,
@@ -73,6 +74,7 @@ type PullRequestsApi = {
   review: (input: {
     cwd: string
     number: number
+    head: string
     body: string
     event: "comment" | "approve" | "request-changes"
   }) => Promise<{ posted: boolean }>
@@ -189,6 +191,11 @@ export function PullRequests(props: {
   let observedProjectPath = props.projectPath
   let projectRevision = 0
   let refreshRequest = 0
+  const selectionRequests = createPullRequestRequestScope(() => ({
+    path: props.projectPath,
+    revision: projectRevision,
+  }))
+  const ciRequests = createPullRequestRequestScope(() => ({ path: props.projectPath, revision: projectRevision }))
 
   const groups = () => {
     const outcome = review()
@@ -212,6 +219,13 @@ export function PullRequests(props: {
     setCheckout(undefined)
     setPostMenuOpen(false)
   }
+
+  onCleanup(() => {
+    projectRevision++
+    selectionRequests.invalidate()
+    ciRequests.invalidate()
+    discardReview()
+  })
 
   const clearProjectState = () => {
     discardReview()
@@ -282,16 +296,20 @@ export function PullRequests(props: {
 
   const inspectCiRun = async (runId: number) => {
     const ci = ciApi()
-    if (!ci || !props.projectPath) return
+    const projectPath = props.projectPath
+    if (!ci || !projectPath) return
+    const current = ciRequests.start()
     if (ciOpenRun() === runId) {
       setCiOpenRun(undefined)
       setCiDetail(undefined)
+      setBusy(undefined)
       return
     }
     setCiOpenRun(runId)
     setCiDetail(undefined)
     setBusy("Reading the failure log…")
-    const result = await ci.repair(props.projectPath, runId).catch(() => undefined)
+    const result = await ci.repair(projectPath, runId).catch(() => undefined)
+    if (!current() || !props.open || ciOpenRun() !== runId) return
     setBusy(undefined)
     if (!result?.ok) {
       setCiNote(result ? result.detail : "Vector could not read that run's log.")
@@ -312,7 +330,12 @@ export function PullRequests(props: {
       clearProjectState()
     }
     if (!open) {
+      projectRevision++
       refreshRequest++
+      selectionRequests.invalidate()
+      ciRequests.invalidate()
+      discardReview()
+      setBusy(undefined)
       return
     }
     void refresh(projectPath)
@@ -321,21 +344,22 @@ export function PullRequests(props: {
   const openPr = async (number: number) => {
     const bridge = api()
     const projectPath = props.projectPath
-    const request = { path: projectPath, revision: projectRevision }
     if (!bridge || !projectPath || reviewRun()) return
+    const active = selectionRequests.start()
+    const current = () => active() && props.open
     setBusy(`Loading #${number}…`)
+    setError(undefined)
+    setSelected(undefined)
     setReview(undefined)
     setCheckout(undefined)
     setPostMenuOpen(false)
     setPosted(false)
     setConfirmingMerge(false)
     const detail = await bridge.view(projectPath, number).catch((cause: unknown) => {
-      if (pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision })) {
-        setError(pullRequestErrorMessage(cause))
-      }
+      if (current()) setError(pullRequestErrorMessage(cause))
       return undefined
     })
-    if (!pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision })) return
+    if (!current()) return
     setSelected(detail)
     setBusy(undefined)
   }
@@ -346,10 +370,12 @@ export function PullRequests(props: {
     const projectPath = props.projectPath
     const request = { path: projectPath, revision: projectRevision }
     if (!bridge || !pr || !projectPath || reviewRun()) return
-    const current = () =>
-      pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
-      selected()?.number === pr.number
     const controller = new AbortController()
+    const current = () =>
+      props.open &&
+      pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
+      selected() === pr &&
+      reviewRun()?.controller === controller
     setReviewRun({ controller, number: pr.number })
     setBusy("Reading the diff…")
     setError(undefined)
@@ -403,8 +429,9 @@ export function PullRequests(props: {
               return undefined
             })
         : undefined
+    const active = current()
     if (reviewRun()?.controller === controller) setReviewRun(undefined)
-    if (!current()) return
+    if (!active) return
     setReview(outcome)
     setBusy(undefined)
   }
@@ -426,17 +453,31 @@ export function PullRequests(props: {
   const postReview = async (event: ReviewEvent) => {
     const bridge = api()
     const pr = selected()
-    const current = review()
-    if (!bridge || !pr || !current || !props.projectPath || !reviewEvents(current.selection)[event]) return
+    const outcome = review()
+    const projectPath = props.projectPath
+    const request = { path: projectPath, revision: projectRevision }
+    if (!bridge || !pr || !outcome || !projectPath || busy() || !reviewEvents(outcome.selection)[event]) return
+    const current = () =>
+      props.open &&
+      pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
+      selected() === pr &&
+      review() === outcome
     setPostMenuOpen(false)
     setBusy("Posting review…")
     setError(undefined)
     const result = await bridge
-      .review({ cwd: props.projectPath, number: pr.number, body: buildDesktopSummary(current, pr.url), event })
+      .review({
+        cwd: projectPath,
+        number: pr.number,
+        head: outcome.head,
+        body: buildDesktopSummary(outcome, pr.url),
+        event,
+      })
       .catch((cause: unknown) => {
-        setError(pullRequestErrorMessage(cause))
+        if (current()) setError(pullRequestErrorMessage(cause))
         return undefined
       })
+    if (!current()) return
     setPosted(Boolean(result?.posted))
     setBusy(undefined)
   }
@@ -486,17 +527,19 @@ export function PullRequests(props: {
     const projectPath = props.projectPath
     const request = { path: projectPath, revision: projectRevision }
     if (!bridge || !projectPath || !pr || busy()) return
+    const current = () =>
+      props.open &&
+      pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
+      selected() === pr
     setBusy(`Merging #${pr.number}…`)
     setError(undefined)
     const result = await bridge
       .merge(buildPullRequestMergeInput({ cwd: projectPath, number: pr.number, strategy: mergeStrategy() }))
       .catch((cause: unknown) => {
-        if (pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision })) {
-          setError(pullRequestErrorMessage(cause))
-        }
+        if (current()) setError(pullRequestErrorMessage(cause))
         return undefined
       })
-    if (!pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision })) return
+    if (!current()) return
     setConfirmingMerge(false)
     if (!result?.merged) {
       setBusy(undefined)

@@ -1,7 +1,7 @@
 // Prices a run from the engine's own per-model cost catalog.
 //
-// Vector already knows what every model charges: the engine resolves each
-// model's rates from the bundled model catalog and hands them to the renderer on
+// The engine resolves available model rates from the bundled model catalog and
+// hands them to the renderer on
 // `Provider.models[id].cost` (USD per 1M tokens, with separate cache read and
 // write rates and optional context tiers). That is the same catalog the engine
 // bills sessions against, so pricing here agrees with the "Total cost" the user
@@ -19,6 +19,8 @@ import type { TokenUsage } from "./economics-types"
 // module doesn't depend on generated SDK types that change shape on
 // regeneration; any real model cost satisfies it.
 export type ModelRates = {
+  /** The catalog has no usable price; numeric compatibility rates are not a quote. */
+  unpriced?: boolean
   /** USD per 1,000,000 input tokens. */
   input: number
   /** USD per 1,000,000 output tokens. */
@@ -46,11 +48,22 @@ export type ModelCostSource = {
 // vector.json, a bad mirror) is no price at all. Return undefined so callers render "cost unknown" rather than an
 // unsupported $0.00 claim or a negative estimate.
 function priced(rates: ModelRates | undefined): ModelRates | undefined {
-  if (!rates) return undefined
-  if (rates.input === 0 && rates.output === 0 && rates.cache.read === 0 && rates.cache.write === 0) return undefined
+  if (!rates || rates.unpriced) return undefined
+  if (
+    rates.unpriced !== false &&
+    rates.input === 0 &&
+    rates.output === 0 &&
+    rates.cache.read === 0 &&
+    rates.cache.write === 0
+  )
+    return undefined
   const invalid = (band: Pick<ModelRates, "input" | "output" | "cache">) =>
     [band.input, band.output, band.cache.read, band.cache.write].some((rate) => !Number.isFinite(rate) || rate < 0)
-  if (invalid(rates) || (rates.tiers ?? []).some(invalid)) return undefined
+  if (
+    invalid(rates) ||
+    (rates.tiers ?? []).some((band) => invalid(band) || !Number.isFinite(band.tier.size) || band.tier.size < 0)
+  )
+    return undefined
   return rates
 }
 
@@ -77,16 +90,17 @@ export function ratesAtContext(rates: ModelRates, contextTokens: number): ModelR
   return { input: applicable.input, output: applicable.output, cache: applicable.cache }
 }
 
-// What a run actually cost, from measured token counts and the model's real
+// What one provider request cost, from measured token counts and the model's real
 // rates. Cache reads and writes are billed at their own rates rather than
 // folded into the input rate — in an agentic coding loop cache traffic is most
 // of the tokens, so charging it as input overstates spend by roughly 10x.
 //
 // Prefer the provider's own reported cost (`ModelOutcome.costUsd`, which the
 // engine computes the same way) whenever it exists; this is for the case where
-// usage was reported but cost was not.
+// usage was reported but cost was not. Do not pass session-wide totals: context
+// tiers apply to individual requests, not to cumulative traffic across turns.
 export function costOfUsage(rates: ModelRates | undefined, usage: TokenUsage): number | undefined {
-  if (!rates) return undefined
+  if (!rates || !priced(rates) || Object.values(usage).some((count) => !Number.isFinite(count))) return undefined
   const at = (count: number, rate: number) => (Math.max(0, count) / 1_000_000) * rate
   const tiered = ratesAtContext(rates, usage.input + usage.cacheRead + usage.cacheWrite)
   return (
@@ -111,15 +125,16 @@ export type ProjectedCost = {
   totalCost: number
 }
 
-// Forward-looking estimate: what one more turn of this size would cost on this
-// model. Input tokens are treated as uncached, which is the conservative
-// direction — a warm cache only makes the real turn cheaper than quoted.
+// Comparison estimate for one turn, treating input as uncached and output as
+// the supplied assumption. Reasoning and further tool turns can increase spend;
+// this is not an upper bound on what the next task will cost.
 export function projectCost(
   rates: ModelRates | undefined,
   inputTokens: number,
   assumedOutputTokens = DEFAULT_ASSUMED_OUTPUT_TOKENS,
 ): ProjectedCost | undefined {
-  if (!rates) return undefined
+  if (!rates || !priced(rates) || !Number.isFinite(inputTokens) || !Number.isFinite(assumedOutputTokens))
+    return undefined
 
   const input = Math.max(0, Math.round(inputTokens))
   const output = Math.max(0, Math.round(assumedOutputTokens))

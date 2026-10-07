@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { outcomeFromSession } from "./session-outcomes"
+import { categoryFromSession, outcomeFromSession } from "./session-outcomes"
 
 const usage = { input: 1_000, output: 300, reasoning: 0, cache: { read: 0, write: 0 } }
 
@@ -83,8 +83,62 @@ describe("outcomeFromSession", () => {
     expect(session()!.id).toContain("s1")
   })
 
+  test("idle time between user turns does not count as model execution time", () => {
+    const outcome = session({
+      messages: [
+        {
+          info: {
+            role: "assistant",
+            providerID: "anthropic",
+            modelID: "sonnet",
+            cost: 0.01,
+            tokens: usage,
+            time: { created: 1_000, completed: 6_000 },
+          },
+        },
+        {
+          info: {
+            role: "assistant",
+            providerID: "anthropic",
+            modelID: "sonnet",
+            cost: 0.01,
+            tokens: usage,
+            time: { created: 86_401_000, completed: 86_407_000 },
+          },
+        },
+      ],
+    })
+    expect(outcome?.latencyMs).toBe(11_000)
+    expect(outcome?.latencyMeasured).toBe(true)
+  })
+
+  test("missing completion timing never makes an interrupted run appear instantaneous", () => {
+    const outcome = session({
+      messages: [
+        {
+          info: {
+            role: "assistant",
+            providerID: "anthropic",
+            modelID: "sonnet",
+            cost: 0.01,
+            tokens: usage,
+            time: { created: 1_000 },
+          },
+        },
+      ],
+    })
+    expect(outcome?.latencyMeasured).toBe(false)
+  })
+
   test("categorises from the first user message", () => {
     expect(session()!.category).toBeTruthy()
+    const messages = [{ info: { id: "m0", role: "user" } }, { info: { id: "m1", role: "user" } }]
+    expect(
+      categoryFromSession(messages, {
+        m0: [{ type: "text", text: "fix the login error" }],
+        m1: [{ type: "text", text: "write docs" }],
+      }),
+    ).toBe("bug-fix")
   })
 
   test("returns undefined when nothing reached a provider", () => {
@@ -97,6 +151,24 @@ describe("outcomeFromSession", () => {
         messages: [{ info: { id: "m1", role: "assistant", providerID: "x", modelID: "y", cost: 0 } }],
       }),
     ).toBeUndefined()
+  })
+
+  test("a model switch cannot train a recommendation for only the final model", () => {
+    expect(
+      session({
+        messages: [
+          { info: { role: "assistant", providerID: "openai", modelID: "large", cost: 2, tokens: usage } },
+          { info: { role: "assistant", providerID: "openai", modelID: "small", cost: 0.01, tokens: usage } },
+        ],
+      }),
+    ).toBeUndefined()
+  })
+
+  test("invalid subagent spend remains unknown rather than corrupting the ranking", () => {
+    for (const subagentCost of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(session({ subagents: { subagentCost } })?.costUsd).toBeUndefined()
+      expect(session({ subagents: { subagentCost } })?.costPriced).toBeUndefined()
+    }
   })
 
   test("counts distinct edited files, not tool calls", () => {

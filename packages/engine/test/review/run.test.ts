@@ -333,7 +333,8 @@ describe("Review.run", () => {
         expect(outcome.report.summary).toBe("Changes last() to index past the end.")
         expect(outcome.partial).toBeUndefined()
         expect(outcome.unreviewed).toEqual([])
-        expect(outcome.cost?.kind).toBe("priced")
+        expect(outcome.cost?.kind).toBe("unknown")
+        expect(outcome.cost?.usageMissing).toBe(true)
         expect(outcome.cost?.model).toBe("lmstudio/test-model")
         expect(outcome.sessions).toHaveLength(1)
         expect(outcome.stats).toEqual({ files: 1, additions: 2, deletions: 1 })
@@ -374,6 +375,8 @@ describe("Review.run", () => {
         expect(outcome.selection.inline).toHaveLength(1)
         // Every step is counted, the finalize included, and the total stays within the cap plus one step.
         expect(outcome.cost?.costUsd).toBeCloseTo(0.201 + 0.301 + 0.301, 6)
+        expect(outcome.cost?.kind).toBe("priced")
+        expect(outcome.cost?.usageMissing).toBeUndefined()
         expect(outcome.cost!.costUsd).toBeLessThanOrEqual(1 + 0.301)
         expect((yield* llm.hits).filter(FINALIZE)).toHaveLength(1)
       }),
@@ -578,13 +581,18 @@ describe("Review.run", () => {
     "checkpoints the spend after each session",
     () =>
       Effect.gen(function* () {
-        const { llm, directory } = yield* useServer()
+        const { llm, directory } = yield* useServer(PRICE)
         yield* llm.pushMatch(
           REVIEW,
-          reply().tool("StructuredOutput", report([finding({ path: "src/auth/session.ts", line: 2 })])),
+          reply()
+            .tool("StructuredOutput", report([finding({ path: "src/auth/session.ts", line: 2 })]))
+            .usage({ input: 1_000, output: 100 }),
         )
-        yield* llm.pushMatch(SECURITY, reply().tool("StructuredOutput", report()))
-        yield* llm.pushMatch(VERIFY, reply().tool("StructuredOutput", { results: [] }))
+        yield* llm.pushMatch(SECURITY, reply().tool("StructuredOutput", report()).usage({ input: 1_000, output: 100 }))
+        yield* llm.pushMatch(
+          VERIFY,
+          reply().tool("StructuredOutput", { results: [] }).usage({ input: 1_000, output: 100 }),
+        )
         const saved: ReviewCost[] = []
 
         const outcome = yield* Review.run(
@@ -601,6 +609,7 @@ describe("Review.run", () => {
         expect(outcome.sessions).toHaveLength(3)
         expect(saved).toHaveLength(3)
         expect(saved.every((spent) => spent.kind === "priced" && spent.model === "lmstudio/test-model")).toBe(true)
+        expect(saved.every((spent) => spent.costUsd > 0)).toBe(true)
       }),
     TIMEOUT,
   )

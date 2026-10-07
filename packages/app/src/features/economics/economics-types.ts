@@ -46,11 +46,11 @@ export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   }
 }
 
-// One verified data point: a single model run against a single task category,
+// One measured data point: a single model run against a single task category,
 // scoped to a project. `checksPassed` is only meaningful when `hadChecks` is
 // true — a run with no validation checks configured has no pass/fail signal.
-// `usage` and `costUsd` are the provider's own reported numbers, so they are
-// absent rather than zero when a run produced no measurable usage.
+// `usage` comes from the provider; `costUsd` is Vector's recorded charge, from
+// catalog rates or provider billing metadata. Unknown figures remain absent.
 export type ModelOutcome = {
   id: string
   projectId: string
@@ -61,6 +61,8 @@ export type ModelOutcome = {
   checksPassed?: boolean
   hadChecks: boolean
   latencyMs: number
+  // False when one or more measured replies lacked complete execution timing.
+  latencyMeasured?: boolean
   changedFiles: number
   usage?: TokenUsage
   costUsd?: number
@@ -76,6 +78,13 @@ export function knownCostUsd(outcome: Pick<ModelOutcome, "costUsd" | "costPriced
   if (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0) return undefined
   if (cost === 0 && outcome.costPriced !== true) return undefined
   return cost
+}
+
+export function knownLatencyMs(outcome: Pick<ModelOutcome, "latencyMs" | "latencyMeasured">) {
+  const latency = outcome.latencyMs
+  if (!Number.isFinite(latency) || latency < 0 || outcome.latencyMeasured === false) return undefined
+  if (latency === 0 && outcome.latencyMeasured !== true) return undefined
+  return latency
 }
 
 // How strongly a model's checked runs back it, for ranking. With no checked runs it sits at an even 0.5, so a model
@@ -96,7 +105,7 @@ export type ModelRecommendation = {
   model: string
   sampleSize: number
   checkPassRate?: number
-  medianLatencyMs: number
+  medianLatencyMs?: number
   // Omitted when no run in the group reported usage — a model with unknown
   // spend must not appear cheaper than one that honestly reported its cost.
   medianCostUsd?: number

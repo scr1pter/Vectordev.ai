@@ -214,6 +214,23 @@ describe("decodeReport", () => {
     expect(decodeReport([{ summary: "array" }])).toBeUndefined()
   })
 
+  test("finds the report after an unrelated JSON fence", () => {
+    const output =
+      'Read result:\n```json\n{"path":"src/a.ts","content":"example"}\n```\nReview:\n```json\n{"summary":"Actual review","risk":"medium","findings":[]}\n```'
+    expect(decodeReport(output)?.summary).toBe("Actual review")
+    expect(
+      decodeReport(
+        '```json\n{"summary":"Tool result"}\n```\n```json\n{"summary":"Actual review","risk":"medium","findings":[]}\n```',
+      )?.summary,
+    ).toBe("Actual review")
+  })
+
+  test("finds separate JSON objects in prose and preserves braces inside strings", () => {
+    const output =
+      'Read result: {"path":"src/a.ts"}. Review: {"summary":"Handle {nested} and \\\"quoted\\\" input","findings":[]}. Done.'
+    expect(decodeReport(output)?.summary).toBe('Handle {nested} and "quoted" input')
+  })
+
   test("drops a fix too long for a comment, and caps the summary", () => {
     const base = { path: "a.ts", line: 1, severity: "concern", category: "bug", title: "t", body: "b", confidence: 0.9 }
     const report = decodeReport({
@@ -265,5 +282,21 @@ describe("decodeVerify", () => {
     expect(decodeVerify('{"results":[{"id":"a","verdict":"confirmed","reason":"r"}]}')).toHaveLength(1)
     expect(decodeVerify({ summary: "no results" })).toBeUndefined()
     expect(decodeVerify("nothing")).toBeUndefined()
+  })
+
+  test("finds verification results after unrelated JSON", () => {
+    expect(
+      decodeVerify(
+        '```json\n{"path":"src/a.ts"}\n```\n```json\n{"results":[{"id":"a","verdict":"confirmed","reason":"Read the caller"}]}\n```',
+      ),
+    ).toEqual([{ id: "a", verdict: "confirmed", reason: "Read the caller" }])
+    expect(decodeVerify('Results: [{"id":"a","verdict":"rejected","reason":"Not reachable"}] Done.')).toEqual([
+      { id: "a", verdict: "rejected", reason: "Not reachable" },
+    ])
+    expect(
+      decodeVerify(
+        '```json\n["src/a.ts"]\n```\n```json\n{"results":[{"id":"a","verdict":"confirmed","reason":"Read the caller"}]}\n```',
+      ),
+    ).toEqual([{ id: "a", verdict: "confirmed", reason: "Read the caller" }])
   })
 })

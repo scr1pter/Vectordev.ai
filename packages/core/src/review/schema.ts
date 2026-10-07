@@ -110,20 +110,44 @@ export interface VerifyResult {
   reason: string
 }
 
-// Models wrap JSON in prose or fences despite instructions. Tries each fenced block, then the outermost {…},
-// then the whole text, and returns the first candidate that parses to an object or array.
-export function extractJson(text: string): unknown {
+// Models wrap JSON in prose or fences despite instructions. Try fenced blocks and balanced objects/arrays,
+// then the whole text. A decoder can skip unrelated JSON such as a tool result quoted before its report.
+export function extractJson(text: string, accept: (value: unknown) => boolean = () => true): unknown {
   const candidates: string[] = []
   for (const match of text.matchAll(/```[^\n`]*\n([\s\S]*?)```/g)) candidates.push(match[1] ?? "")
-  const start = text.indexOf("{")
-  const end = text.lastIndexOf("}")
-  if (start !== -1 && end > start) candidates.push(text.slice(start, end + 1))
+  let start = -1
+  let depth = 0
+  let quoted = false
+  let escaped = false
+  for (let position = 0; position < text.length; position++) {
+    const char = text[position]
+    if (start === -1) {
+      if (char !== "{" && char !== "[") continue
+      start = position
+      depth = 1
+      continue
+    }
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (char === "\\") escaped = true
+      else if (char === '"') quoted = false
+      continue
+    }
+    if (char === '"') quoted = true
+    else if (char === "{" || char === "[") depth++
+    else if (char === "}" || char === "]") {
+      depth--
+      if (depth) continue
+      candidates.push(text.slice(start, position + 1))
+      start = -1
+    }
+  }
   candidates.push(text)
   for (const candidate of candidates) {
     if (!candidate.trim()) continue
     try {
       const value: unknown = JSON.parse(candidate)
-      if (value && typeof value === "object") return value
+      if (value && typeof value === "object" && accept(value)) return value
     } catch {
       continue
     }
@@ -135,7 +159,11 @@ export function extractJson(text: string): unknown {
 // concern and an unknown category bug; numbers given as strings are converted and every value is clamped.
 // Findings without a path or a title are dropped. Returns undefined when there is no report at all.
 export function decodeReport(input: unknown): ModelReport | undefined {
-  const value = typeof input === "string" ? extractJson(input) : input
+  const value =
+    typeof input === "string"
+      ? (extractJson(input, (candidate) => isRecord(candidate) && Array.isArray(candidate.findings)) ??
+        extractJson(input, (candidate) => isRecord(candidate) && !!text(candidate.summary)))
+      : input
   if (!isRecord(value)) return undefined
   const summary = text(value.summary).slice(0, MAX_SUMMARY_CHARS)
   if (!Array.isArray(value.findings) && !summary) return undefined
@@ -166,7 +194,17 @@ export function decodeReport(input: unknown): ModelReport | undefined {
 }
 
 export function decodeVerify(input: unknown): VerifyResult[] | undefined {
-  const value = typeof input === "string" ? extractJson(input) : input
+  const value =
+    typeof input === "string"
+      ? (extractJson(input, (candidate) =>
+          isRecord(candidate)
+            ? Array.isArray(candidate.results)
+            : Array.isArray(candidate) &&
+              candidate.some(
+                (entry) => isRecord(entry) && !!text(entry.id) && /^(confirm|reject)/.test(lower(entry.verdict)),
+              ),
+        ) ?? extractJson(input, Array.isArray))
+      : input
   const entries = Array.isArray(value)
     ? value
     : isRecord(value) && Array.isArray(value.results)

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { measureUsage } from "./token-usage"
+import { aggregateCostUsd, measureUsage } from "./token-usage"
 import { addUsage, emptyUsage, totalTokens } from "./economics-types"
 
 describe("measureUsage", () => {
@@ -90,10 +90,10 @@ describe("measureUsage", () => {
     ])
     expect(measured!.usage.input).toBe(100)
     expect(measured!.usage.output).toBe(0)
-    expect(measured!.costUsd).toBe(0)
+    expect(measured!.costUsd).toBeUndefined()
   })
 
-  test("clamps impossible negative provider usage and spend to zero", () => {
+  test("clamps impossible negative provider usage but leaves invalid spend unknown", () => {
     const measured = measureUsage([
       {
         role: "assistant",
@@ -102,19 +102,72 @@ describe("measureUsage", () => {
       },
     ])
     expect(measured?.usage).toEqual({ input: 100, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 5 })
-    expect(measured?.costUsd).toBe(0)
+    expect(measured?.costUsd).toBeUndefined()
   })
 
-  test("reports the most recent model when a session switches mid-run", () => {
+  test("keeps switched-model totals without attributing the whole run to the last model", () => {
     const measured = measureUsage([
       { role: "assistant", modelID: "gpt-4o-mini", tokens: { input: 10, output: 5 } },
       { role: "assistant", modelID: "claude-opus-5", tokens: { input: 20, output: 5 } },
     ])
-    expect(measured!.model).toBe("claude-opus-5")
+    expect(measured!.model).toBeUndefined()
+    expect(measured!.provider).toBeUndefined()
+    expect(measured!.usage.input).toBe(30)
+  })
+
+  test("counts a cache-write-only response and its real charge", () => {
+    const measured = measureUsage([
+      {
+        role: "assistant",
+        providerID: "anthropic",
+        modelID: "sonnet",
+        cost: 0.00375,
+        tokens: { cache: { write: 1_000 } },
+      },
+    ])
+    expect(measured?.usage.cacheWrite).toBe(1_000)
+    expect(measured?.costUsd).toBe(0.00375)
+    expect(measured?.messageCount).toBe(1)
+  })
+
+  test("a missing charge never becomes a free run or a partial total", () => {
+    expect(measureUsage([{ role: "assistant", tokens: { input: 1_000 } }])?.costUsd).toBeUndefined()
+    expect(
+      measureUsage([
+        { role: "assistant", cost: 0.2, tokens: { input: 1_000 } },
+        { role: "assistant", tokens: { output: 100 } },
+      ])?.costUsd,
+    ).toBeUndefined()
+  })
+
+  test("includes reported charges even when that response lacks token counters", () => {
+    const measured = measureUsage([
+      { role: "assistant", providerID: "x", modelID: "m", cost: 0.02, tokens: { input: 1_000 } },
+      { role: "assistant", providerID: "x", modelID: "m", cost: 0.03 },
+    ])
+    expect(measured?.costUsd).toBeCloseTo(0.05, 10)
+    expect(measured?.model).toBe("m")
+  })
+
+  test("the same model id on different providers is not a single-model sample", () => {
+    const measured = measureUsage([
+      { role: "assistant", providerID: "openai", modelID: "m", cost: 0.02, tokens: { input: 100 } },
+      { role: "assistant", providerID: "openrouter", modelID: "m", cost: 0.03, tokens: { input: 100 } },
+    ])
+    expect(measured?.costUsd).toBeCloseTo(0.05, 10)
+    expect(measured?.model).toBeUndefined()
   })
 })
 
 describe("usage arithmetic", () => {
+  test("whole-task spend includes child sessions and rejects partial or invalid rollups", () => {
+    expect(aggregateCostUsd(0.02, { subagentCost: 0.5 })).toBeCloseTo(0.52, 10)
+    expect(aggregateCostUsd(0)).toBe(0)
+    expect(aggregateCostUsd(undefined, { subagentCost: 0.5 })).toBeUndefined()
+    expect(aggregateCostUsd(0.02, { subagentCost: 0.5, subagentUnpricedSteps: 1 })).toBeUndefined()
+    expect(aggregateCostUsd(0.02, { subagentCost: Number.NaN })).toBeUndefined()
+    expect(aggregateCostUsd(0.02, { subagentUnpricedSteps: Number.NaN })).toBeUndefined()
+  })
   test("totalTokens counts every metered token, cache reads and writes included", () => {
     // Cache writes are separately metered and billed at a premium, so omitting
     // them understated how much work a run did.

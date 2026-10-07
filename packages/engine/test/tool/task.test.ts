@@ -932,6 +932,208 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("rejects live prerequisite changes so sibling follow-ups cannot deadlock each other", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const finished = yield* Deferred.make<void>()
+      const context = taskContext({
+        sessionID: chat.id,
+        messageID: assistant.id,
+        promptOps: {
+          ...stubOps(),
+          prompt: (input) =>
+            input.sessionID === chat.id
+              ? Effect.succeed(reply(input, "noted"))
+              : Deferred.await(finished).pipe(Effect.as(reply(input, "original task done"))),
+        },
+      })
+      const launch = (description: string) =>
+        def.execute({ description, prompt: description, subagent_type: "general", background: true }, context)
+      const first = yield* launch("Inspect first module")
+      const second = yield* launch("Inspect second module")
+
+      for (const [task, dependency] of [
+        [first.metadata.sessionId, second.metadata.sessionId],
+        [second.metadata.sessionId, first.metadata.sessionId],
+      ]) {
+        const exit = yield* Effect.exit(
+          def.execute(
+            {
+              description: "Integrate sibling result",
+              prompt: "Continue once the sibling task finishes.",
+              subagent_type: "general",
+              task_id: task,
+              depends_on: [dependency],
+            },
+            context,
+          ),
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("depends_on cannot change")
+      }
+
+      yield* Deferred.succeed(finished, undefined)
+      for (const task of [first.metadata.sessionId, second.metadata.sessionId]) {
+        expect((yield* jobs.wait({ id: task, timeout: 1_000 })).info?.status).toBe("completed")
+      }
+    }),
+  )
+
+  background.instance("a live follow-up can keep the same normalized dependency set", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const foundation = yield* Deferred.make<void>()
+      yield* jobs.start({
+        id: "task-foundation-update",
+        type: "task",
+        metadata: { parentSessionId: chat.id },
+        run: Deferred.await(foundation).pipe(Effect.as("foundation ready")),
+      })
+      const prompts: string[] = []
+      const context = taskContext({
+        sessionID: chat.id,
+        messageID: assistant.id,
+        promptOps: stubOps({
+          onPrompt: (input) => {
+            if (input.sessionID !== chat.id) {
+              prompts.push(...input.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])))
+            }
+          },
+        }),
+      })
+      const started = yield* def.execute(
+        {
+          description: "Integrate foundation",
+          prompt: "Integrate the foundation.",
+          subagent_type: "general",
+          depends_on: ["task-foundation-update"],
+          background: true,
+        },
+        context,
+      )
+      const updated = yield* def.execute(
+        {
+          description: "Include edge cases",
+          prompt: "Include the edge cases too.",
+          subagent_type: "general",
+          task_id: started.metadata.sessionId,
+          depends_on: [" task-foundation-update ", "task-foundation-update"],
+        },
+        context,
+      )
+      expect(updated.output).toContain("Background task updated")
+      expect(prompts).toEqual([])
+      yield* Deferred.succeed(foundation, undefined)
+      expect((yield* jobs.wait({ id: started.metadata.sessionId, timeout: 1_000 })).info?.status).toBe("completed")
+      expect(prompts).toEqual(["Integrate the foundation.", "Include the edge cases too."])
+    }),
+  )
+
+  background.instance("a settled task can resume with new prerequisites", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const context = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() })
+      const started = yield* def.execute(
+        { description: "Inspect module", prompt: "Inspect the module.", subagent_type: "general", background: true },
+        context,
+      )
+      yield* jobs.wait({ id: started.metadata.sessionId })
+      yield* jobs.start({
+        id: "task-foundation-settled",
+        type: "task",
+        metadata: { parentSessionId: chat.id },
+        run: Effect.succeed("foundation ready"),
+      })
+      yield* jobs.wait({ id: "task-foundation-settled" })
+      const resumed = yield* def.execute(
+        {
+          description: "Integrate foundation",
+          prompt: "Use the foundation to finish the module.",
+          subagent_type: "general",
+          task_id: started.metadata.sessionId,
+          depends_on: ["task-foundation-settled"],
+        },
+        context,
+      )
+      expect(resumed.metadata.sessionId).toBe(started.metadata.sessionId)
+      expect(resumed.metadata.dependsOn).toEqual(["task-foundation-settled"])
+      expect(resumed.output).toContain('state="completed"')
+    }),
+  )
+
+  background.instance("concurrent resumptions cannot extend one run with different prerequisites", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const initial = yield* def.execute(
+        { description: "Inspect module", prompt: "Inspect the module.", subagent_type: "general" },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps: stubOps() }),
+      )
+      for (const dependency of ["task-resume-first", "task-resume-second"]) {
+        yield* jobs.start({
+          id: dependency,
+          type: "task",
+          metadata: { parentSessionId: chat.id },
+          run: Effect.succeed("prerequisite ready"),
+        })
+        yield* jobs.wait({ id: dependency })
+      }
+      const admitted = yield* Deferred.make<void>()
+      const finished = yield* Deferred.make<void>()
+      let arrivals = 0
+      const resumes = yield* Effect.all(
+        ["task-resume-first", "task-resume-second"].map((dependency) =>
+          Effect.exit(
+            def.execute(
+              {
+                description: "Integrate prerequisite",
+                prompt: "Use the prerequisite to finish the module.",
+                subagent_type: "general",
+                task_id: initial.metadata.sessionId,
+                depends_on: [dependency],
+                background: true,
+              },
+              {
+                ...taskContext({
+                  sessionID: chat.id,
+                  messageID: assistant.id,
+                  promptOps: {
+                    ...stubOps(),
+                    prompt: (input) =>
+                      input.sessionID === chat.id
+                        ? Effect.succeed(reply(input, "noted"))
+                        : Deferred.await(finished).pipe(Effect.as(reply(input, "resumed task done"))),
+                  },
+                }),
+                callID: dependency,
+                metadata: () =>
+                  Effect.gen(function* () {
+                    arrivals += 1
+                    if (arrivals === 2) yield* Deferred.succeed(admitted, undefined)
+                    yield* Deferred.await(admitted)
+                  }),
+              },
+            ),
+          ),
+        ),
+        { concurrency: "unbounded" },
+      )
+      expect(resumes.filter(Exit.isSuccess)).toHaveLength(1)
+      const failures = resumes.filter(Exit.isFailure)
+      expect(failures).toHaveLength(1)
+      expect(Cause.pretty(failures[0]!.cause)).toContain("depends_on cannot change")
+      yield* Deferred.succeed(finished, undefined)
+      expect((yield* jobs.wait({ id: initial.metadata.sessionId, timeout: 1_000 })).info?.status).toBe("completed")
+    }),
+  )
+
   background.instance("a background result gets the cap a tool result gets", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()

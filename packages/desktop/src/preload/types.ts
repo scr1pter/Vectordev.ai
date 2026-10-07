@@ -290,6 +290,7 @@ export type PullRequestsAPI = {
   review: (input: {
     cwd: string
     number: number
+    head: string
     body: string
     event: "comment" | "approve" | "request-changes"
   }) => Promise<{ posted: boolean }>

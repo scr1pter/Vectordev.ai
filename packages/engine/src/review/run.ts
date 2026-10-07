@@ -220,18 +220,39 @@ export const run: (
   const measure = Effect.fnUntraced(function* () {
     const children = (yield* Effect.forEach(sessionIDs, (id) => sessions.children(id))).flat().map((child) => child.id)
     const messages = yield* Effect.forEach([...sessionIDs, ...children], (id) =>
-      sessions.messages({ sessionID: id }).pipe(Effect.catch(() => Effect.succeed([]))),
+      sessions.messages({ sessionID: id }).pipe(
+        Effect.map((messages) => ({ messages, complete: true })),
+        Effect.catch(() => Effect.succeed({ messages: [], complete: false })),
+      ),
     )
-    const measured = measureCost(messages.flat())
+    const recorded = messages
+      .flatMap((entry) => entry.messages)
+      .filter((message) => message.info.role !== "assistant" || !message.info.forked)
+    const measured = measureCost(recorded)
+    const assistant = recorded.flatMap((message) => (message.info.role === "assistant" ? [message.info] : []))
+    const incomplete =
+      messages.some((entry) => !entry.complete) ||
+      assistant.some((message) => message.unpriced || !Number.isFinite(message.cost) || message.cost < 0)
+    const sameModel = assistant.every(
+      (message) => message.providerID === input.model.providerID && message.modelID === input.model.modelID,
+    )
     return {
-      costUsd: measured?.costUsd ?? 0,
+      costUsd: measured && Number.isFinite(measured.costUsd) ? measured.costUsd : 0,
       input: measured?.input ?? 0,
       output: measured?.output ?? 0,
       reasoning: measured?.reasoning ?? 0,
       cacheRead: measured?.cacheRead ?? 0,
       cacheWrite: measured?.cacheWrite ?? 0,
-      kind: input.model.costKind,
-      model: `${input.model.providerID}/${input.model.modelID}`,
+      ...(!measured ? { usageMissing: true } : {}),
+      kind:
+        !measured || incomplete || !Number.isFinite(measured.costUsd)
+          ? "unknown"
+          : sameModel
+            ? input.model.costKind
+            : measured.costUsd > 0
+              ? "priced"
+              : "unknown",
+      model: sameModel ? `${input.model.providerID}/${input.model.modelID}` : "Multiple models",
     } satisfies ReviewCost
   })
 

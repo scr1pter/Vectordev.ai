@@ -250,6 +250,25 @@ export const TaskTool = Tool.define(
       const title = subagentTitle(params.description, params.prompt)
       const dependencies = [...new Set(params.depends_on?.map((item) => item.trim()).filter(Boolean) ?? [])]
       const jobs = yield* background.list()
+      const validateDependencyUpdate = (job: BackgroundJob.Info | undefined) => {
+        if (job?.status !== "running" || params.depends_on === undefined) return Effect.void
+        const existing = [...new Set(dependencyIDs(job))]
+        if (
+          dependencies.length === existing.length &&
+          dependencies.every((dependency) => existing.includes(dependency))
+        ) {
+          return Effect.void
+        }
+        // Extensions share the original job's identity and run sequentially.
+        // Changing its prerequisites would leave the dependency graph stale and
+        // allow two extended jobs to wait on each other's completion forever.
+        return Effect.fail(
+          new Error(
+            `Task ${job.id} is still running; its depends_on cannot change. Omit depends_on to send context, or wait for its result before resuming it with new dependencies.`,
+          ),
+        )
+      }
+      yield* validateDependencyUpdate(jobs.find((job) => job.id === params.task_id))
       for (const dependency of dependencies) {
         if (dependency === params.task_id) {
           return yield* Effect.fail(new Error(`Task ${dependency} cannot depend on itself.`))
@@ -813,7 +832,13 @@ export const TaskTool = Tool.define(
       // The child's loop runs in its own scope, so interrupting the job's fiber alone would leave it calling the
       // provider after a stop; every run, first or added, stops the child when interrupted.
       const guardedRun = () => runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id)))
-      const extendRun = () => background.extend({ id: nextSession.id, run: guardedRun() })
+      const extendRun = () =>
+        claimLock.withPermits(1)(
+          background.get(nextSession.id).pipe(
+            Effect.tap(validateDependencyUpdate),
+            Effect.andThen(() => background.extend({ id: nextSession.id, run: guardedRun() })),
+          ),
+        )
       // A foreground run reports its result to the call that started it, so another call cannot add to it and be told
       // it will be notified later.
       const foreground = Effect.fn("TaskTool.foreground")(function* (job: BackgroundJob.Info | undefined) {
@@ -835,24 +860,26 @@ export const TaskTool = Tool.define(
         })
       }
 
-      const info = yield* background.start({
-        id: nextSession.id,
-        type: id,
-        title,
-        metadata,
-        onPromote: Effect.all([
-          Effect.sync(() => {
-            detached = true
-          }),
-          ctx.metadata({
-            title,
-            metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
-          }),
-          SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
-          notify(nextSession.id),
-        ]),
-        run: guardedRun(),
-      })
+      const info = yield* claimLock.withPermits(1)(
+        background.start({
+          id: nextSession.id,
+          type: id,
+          title,
+          metadata,
+          onPromote: Effect.all([
+            Effect.sync(() => {
+              detached = true
+            }),
+            ctx.metadata({
+              title,
+              metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
+            }),
+            SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
+            notify(nextSession.id),
+          ]),
+          run: guardedRun(),
+        }),
+      )
       // start hands back the running job when a concurrent call resuming the same task_id got there first. Join that
       // run instead of dropping this call's prompt, so only the call that started it reports its result.
       if (info.metadata?.startedAt !== startedAt || info.metadata?.callID !== ctx.callID) {

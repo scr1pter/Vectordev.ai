@@ -25,7 +25,7 @@ Usage notes:
 4. For parallel implementation, give each subagent non-overlapping owned_paths and concrete success_criteria. Use depends_on with earlier task IDs when one subagent's work must finish before another starts. Vector rejects overlapping ownership among active sibling subagents instead of letting them overwrite each other.
 5. Once you delegate a piece, do not also do it yourself, and never sleep, poll, or ask a running subagent for status. Continue with non-overlapping work, or wait for the results.
 6. The result comes back only to you; the user does not see it. Read it, integrate it, run the integration checks yourself, and summarize the outcome for the user. A subagent's report is evidence, not proof; use the judge specialist when you need an independent rubric-based verdict.
-7. Each call starts a fresh subagent unless you pass task_id from an earlier result, which continues that same subagent session with its previous messages and tool outputs.
+7. Each call starts a fresh subagent unless you pass task_id from an earlier result, which continues that same subagent session with its previous messages and tool outputs. A follow-up to a running background task adds context to that run: omit depends_on or keep the same prerequisites. Change dependencies only after the task finishes, so running tasks cannot wait on each other forever.
 
 <example>
 user: Remove every place we log user emails.

@@ -40,6 +40,19 @@ export function pullRequestProjectIsCurrent(
   return request.path === current.path && request.revision === current.revision
 }
 
+// Each selection owns its asynchronous response, including when two requests target the same repository.
+export function createPullRequestRequestScope(project: () => { path?: string; revision: number }) {
+  let revision = 0
+  return {
+    invalidate: () => revision++,
+    start: () => {
+      const request = ++revision
+      const target = project()
+      return () => request === revision && pullRequestProjectIsCurrent(target, project())
+    },
+  }
+}
+
 export function pullRequestMergeAction(confirming: boolean) {
   return confirming ? ("merge" as const) : ("confirm" as const)
 }

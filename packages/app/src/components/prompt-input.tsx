@@ -554,12 +554,22 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   }
 
   // Model Economics recommendation: mirrors the delegation chip. Suggests the
-  // model with the best verified track record for this task's category, learned
-  // from real parallel-workspace outcomes. Honest cold start — recommendModel
+  // model supported by this project's recorded outcomes for this task category.
+  // Honest cold start — recommendModel
   // returns undefined until there is enough evidence.
   const taskCategory = createMemo(() => categorizeTask(delegationPromptText()))
   const economicsOutcomes = createOutcomes(() => sdk().directory)
-  const modelRecommendation = createMemo(() => recommendModel(economicsOutcomes() ?? [], taskCategory()))
+  const modelRecommendation = createMemo(() => {
+    const available = props.controls.model.selection.list()
+    return recommendModel(
+      economicsOutcomes() ?? [],
+      taskCategory(),
+      3,
+      (provider, model) =>
+        available.some((entry) => entry.provider.id === provider && entry.id === model) &&
+        props.controls.model.selection.visible({ providerID: provider, modelID: model }),
+    )
+  })
   const [recommendationDismissedFor, setRecommendationDismissedFor] = createSignal("")
   const recommendationDiffersFromCurrent = createMemo(() => {
     const rec = modelRecommendation()
@@ -569,12 +579,18 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
   const showRecommendationChip = createMemo(() => {
     if (!props.controls.newLayoutDesigns) return false
+    if (store.mode === "shell" || props.controls.model.loading || !delegationPromptText().trim()) return false
     if (!modelRecommendation()) return false
     if (!recommendationDiffersFromCurrent()) return false
-    return recommendationDismissedFor() !== `${taskCategory()}:${modelRecommendation()?.model ?? ""}`
+    return (
+      recommendationDismissedFor() !==
+      `${taskCategory()}:${modelRecommendation()?.provider ?? ""}:${modelRecommendation()?.model ?? ""}`
+    )
   })
   const dismissRecommendation = () =>
-    setRecommendationDismissedFor(`${taskCategory()}:${modelRecommendation()?.model ?? ""}`)
+    setRecommendationDismissedFor(
+      `${taskCategory()}:${modelRecommendation()?.provider ?? ""}:${modelRecommendation()?.model ?? ""}`,
+    )
   const useRecommendedModel = () => {
     const rec = modelRecommendation()
     if (!rec) return
@@ -1793,15 +1809,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           <span class="shrink-0 text-[#ad95f5]" aria-hidden="true">
             ✦
           </span>
-          <span class="min-w-0 flex-1 truncate">
-            Best for this {taskCategory()}: {modelRecommendation()?.model} — {modelRecommendation()?.evidence[0]}
+          <span class="min-w-0 flex-1 truncate" title={modelRecommendation()?.evidence.join(" · ")}>
+            Suggested for {taskCategory()}: {modelRecommendation()?.model} · {modelRecommendation()?.sampleSize}{" "}
+            recorded runs
           </span>
           <button
             type="button"
             class="shrink-0 rounded-full bg-[#9374ec] px-2.5 py-1 text-[11px] font-semibold text-white transition hover:brightness-110"
             onClick={useRecommendedModel}
           >
-            Use
+            Use model
           </button>
           <button
             type="button"

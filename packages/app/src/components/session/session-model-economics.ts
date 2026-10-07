@@ -1,4 +1,4 @@
-import { checkPassScore, knownCostUsd, type ModelOutcome } from "@/features/economics/economics-types"
+import { checkPassScore, knownCostUsd, knownLatencyMs, type ModelOutcome } from "@/features/economics/economics-types"
 import { projectCost, ratesFor, type ModelCostSource } from "@/features/economics/model-pricing"
 
 function medianOf(values: number[]): number {
@@ -21,7 +21,7 @@ function medianOf(values: number[]): number {
 export function rankModelsForCategory(
   outcomes: ModelOutcome[],
   category: ModelOutcome["category"],
-  promptTokens: number,
+  promptTokens: number | undefined,
   providers: ReadonlyMap<string, ModelCostSource> | undefined,
 ) {
   const matching = outcomes.filter((outcome) => outcome.category === category)
@@ -41,15 +41,23 @@ export function rankModelsForCategory(
       // Absent rather than zero: a run with no listed price must not read as free next to one that reported real
       // spend, so only fully priced runs count, free ones included.
       const measured = list.map(knownCostUsd).filter((cost): cost is number => cost !== undefined)
+      const timings = list.map(knownLatencyMs).filter((latency): latency is number => latency !== undefined)
+      const projection =
+        promptTokens === undefined
+          ? undefined
+          : projectCost(ratesFor(providers, list[0].provider, list[0].model), promptTokens)
       return {
         provider: list[0].provider,
         model: list[0].model,
         sampleSize: list.length,
         checkPassRate,
+        checkedSampleSize: checked.length,
+        costSampleSize: measured.length,
         checkPassScore: checkPassScore(list),
-        medianLatencyMs: medianOf(list.map((outcome) => outcome.latencyMs)),
+        medianLatencyMs: timings.length ? medianOf(timings) : undefined,
         medianCostUsd: measured.length ? medianOf(measured) : undefined,
-        projectedCostUsd: projectCost(ratesFor(providers, list[0].provider, list[0].model), promptTokens)?.totalCost,
+        projection,
+        projectedCostUsd: projection?.totalCost,
       }
     })
     .sort((a, b) => {
@@ -58,6 +66,8 @@ export function rankModelsForCategory(
       const aCost = a.medianCostUsd ?? Infinity
       const bCost = b.medianCostUsd ?? Infinity
       if (aCost !== bCost) return aCost - bCost
-      return a.medianLatencyMs - b.medianLatencyMs
+      const aLatency = a.medianLatencyMs ?? Infinity
+      const bLatency = b.medianLatencyMs ?? Infinity
+      return aLatency === bLatency ? 0 : aLatency - bLatency
     })
 }
