@@ -107,7 +107,8 @@ export function verifiedDesignLabCookie(request: Pick<ApiRequest, "headers">, no
   }
 }
 
-// Prefer a dedicated secret; otherwise derive a purpose-bound key so the lab never shares
+// Prefer a dedicated secret; otherwise derive a purpose-bound key from the first server-only
+// secret the deployment already has, so the lab works without extra setup and never shares
 // raw key material with other signing uses.
 function sign(value: string) {
   return createHmac("sha256", signingKey()).update(value).digest("base64url")
@@ -116,8 +117,13 @@ function sign(value: string) {
 function signingKey() {
   const dedicated = process.env.VECTOR_DESIGN_LAB_SECRET ?? ""
   if (dedicated.length >= 32) return dedicated
-  const base = process.env.VECTOR_LICENSE_SECRET ?? ""
-  if (base.length < 32) throw new ApiError(503, "DESIGN_LAB_UNAVAILABLE", "This page is not configured.")
+  const base = [
+    process.env.VECTOR_LICENSE_SECRET,
+    process.env.VECTOR_CLI_TOKEN_SECRET,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    process.env.CRON_SECRET,
+  ].find((secret) => (secret ?? "").length >= 32)
+  if (!base) throw new ApiError(503, "DESIGN_LAB_UNAVAILABLE", "This page is not configured.")
   return createHmac("sha256", base).update("vector-design-lab-cookie-v1").digest("base64url")
 }
 

@@ -13,6 +13,9 @@ const original = {
   VECTOR_LICENSE_SECRET: process.env.VECTOR_LICENSE_SECRET,
   VECTOR_DESIGN_LAB_SECRET: process.env.VECTOR_DESIGN_LAB_SECRET,
   VECTOR_DESIGN_LAB_EMAILS: process.env.VECTOR_DESIGN_LAB_EMAILS,
+  VECTOR_CLI_TOKEN_SECRET: process.env.VECTOR_CLI_TOKEN_SECRET,
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  CRON_SECRET: process.env.CRON_SECRET,
 }
 
 afterEach(() => {
@@ -30,6 +33,9 @@ function configure() {
   process.env.VECTOR_LICENSE_SECRET = "x".repeat(40)
   delete process.env.VECTOR_DESIGN_LAB_SECRET
   delete process.env.VECTOR_DESIGN_LAB_EMAILS
+  delete process.env.VECTOR_CLI_TOKEN_SECRET
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY
+  delete process.env.CRON_SECRET
 }
 
 // A token whose payload says how the session was made; Supabase (faked below) verifies it.
@@ -139,6 +145,17 @@ describe("Design Lab cookie", () => {
     expect(verifiedDesignLabCookie(withCookie(cookie), Date.now() + 9 * 60 * 60 * 1000)).toBeUndefined()
     expect(verifiedDesignLabCookie(withCookie(clearedDesignLabCookie()))).toBeUndefined()
     expect(verifiedDesignLabCookie({ headers: {} })).toBeUndefined()
+  })
+})
+
+describe("Design Lab signing key", () => {
+  test("falls back to another server secret, and refuses when none is set", () => {
+    configure()
+    delete process.env.VECTOR_LICENSE_SECRET
+    process.env.SUPABASE_SERVICE_ROLE_KEY = "s".repeat(48)
+    expect(verifiedDesignLabCookie(withCookie(designLabCookie(OWNER)))).toBe(OWNER)
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY
+    expect(() => designLabCookie(OWNER)).toThrow("This page is not configured.")
   })
 })
 
