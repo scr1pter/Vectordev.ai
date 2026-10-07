@@ -1,0 +1,1489 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-providers-models .app-main {
+        position: relative;
+      }
+
+      .d-providers-models .app-body {
+        display: grid;
+        grid-template-columns: 316px 1fr;
+        overflow: hidden;
+      }
+
+      .d-providers-models input[type="search"]::-webkit-search-cancel-button {
+        -webkit-appearance: none;
+      }
+
+      .d-providers-models .btn:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+      .d-providers-models .tile {
+        display: grid;
+        flex: none;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+        color: var(--text-2);
+        font: 600 10.5px/1 var(--font);
+        letter-spacing: 0.02em;
+      }
+
+      .d-providers-models .tile-lg {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        font-size: 12.5px;
+      }
+
+      .d-providers-models .spin {
+        animation: pv-spin 0.9s linear infinite;
+      }
+
+      @keyframes pv-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ---------- Rail ---------- */
+
+      .d-providers-models .pv-rail {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-right: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .d-providers-models .pv-sum {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+        padding: 14px 18px 8px;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-providers-models .pv-sum span:first-child {
+        flex: 1;
+      }
+
+      .d-providers-models .pv-sum .mono {
+        color: var(--text-1);
+        font-size: 12px;
+      }
+
+      .d-providers-models .pv-rows {
+        flex: 1;
+        min-height: 0;
+        padding: 0 8px 8px;
+      }
+
+      .d-providers-models .pv-group {
+        margin: 0;
+        padding: 10px 10px 5px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-providers-models .prov {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+      }
+
+      .d-providers-models .prov[aria-selected="true"] {
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      }
+
+      .d-providers-models .prov[aria-selected="true"] .tile {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-providers-models .prov .row-end {
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+      }
+
+      .d-providers-models .prov.is-off .row-name {
+        color: var(--text-2);
+      }
+
+      .d-providers-models .prov .badge {
+        font-family: var(--font);
+      }
+
+      .d-providers-models .prov .tile.is-free {
+        border-color: rgba(182, 159, 247, 0.22);
+        color: var(--violet-bright);
+      }
+
+      /* Defaults per agent */
+      .d-providers-models .defaults {
+        flex: none;
+        margin: 0 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--card);
+      }
+
+      .d-providers-models .defaults-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px 6px;
+      }
+
+      .d-providers-models .defaults-head .section-title {
+        margin: 0;
+      }
+
+      .d-providers-models .defaults-head .muted {
+        margin-left: auto;
+        font-size: 11px;
+      }
+
+      .d-providers-models .def {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+        height: 33px;
+        padding: 0 10px 0 12px;
+        border: 0;
+        border-top: 1px solid var(--hairline);
+        background: transparent;
+        text-align: left;
+      }
+
+      .d-providers-models .def:hover,
+      .d-providers-models .def[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-providers-models .def-agent {
+        width: 64px;
+        color: var(--text-2);
+        font: 12px var(--mono);
+      }
+
+      .d-providers-models .def-model {
+        flex: 1;
+        overflow: hidden;
+        color: var(--text-1);
+        font-size: 12.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-providers-models .def svg {
+        flex: none;
+        color: var(--text-3);
+      }
+
+      .d-providers-models .def.is-flash {
+        animation: pv-flash 1.2s ease;
+      }
+
+      @keyframes pv-flash {
+        from {
+          background: rgba(182, 159, 247, 0.16);
+        }
+      }
+
+      /* ---------- Main ---------- */
+
+      .d-providers-models .pv-main {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .d-providers-models .pv-scroll {
+        flex: 1;
+        min-height: 0;
+        padding: 16px 20px 20px;
+      }
+
+      /* OpenRouter card */
+      .d-providers-models .or-card {
+        position: relative;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 14px 16px;
+        margin-bottom: 16px;
+        padding: 16px 18px;
+        overflow: hidden;
+        border: 1px solid var(--violet-line);
+        border-radius: 12px;
+        background: radial-gradient(420px 140px at 0% 0%, rgba(146, 116, 236, 0.16), transparent 70%), var(--card);
+      }
+
+      .d-providers-models .or-card::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(182, 159, 247, 0.55), transparent);
+      }
+
+      .d-providers-models .or-mark {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 11px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font: 600 13px/1 var(--font);
+      }
+
+      .d-providers-models .or-text h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 5px;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .d-providers-models .or-text p {
+        max-width: 560px;
+        margin: 0;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      .d-providers-models .or-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        align-self: start;
+      }
+
+      .d-providers-models .or-actions .btn {
+        height: 32px;
+        padding: 0 14px;
+      }
+
+      .d-providers-models .or-models {
+        display: flex;
+        grid-column: 2 / 4;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .d-providers-models .or-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 24px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.14);
+        color: var(--text-1);
+        font-size: 12px;
+      }
+
+      .d-providers-models .or-chip span {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-providers-models .or-key {
+        display: flex;
+        grid-column: 2 / 4;
+        gap: 8px;
+      }
+
+      .d-providers-models .or-key .input {
+        flex: 1;
+        max-width: 420px;
+      }
+
+      .d-providers-models .or-card.is-connected {
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        border-color: rgba(101, 199, 142, 0.26);
+        background: radial-gradient(420px 120px at 0% 0%, rgba(101, 199, 142, 0.08), transparent 70%), var(--card);
+      }
+
+      .d-providers-models .or-card.is-connected::before {
+        background: linear-gradient(90deg, transparent, rgba(101, 199, 142, 0.45), transparent);
+      }
+
+      .d-providers-models .or-card.is-connected .or-mark {
+        border-color: rgba(101, 199, 142, 0.3);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-providers-models .quota {
+        display: grid;
+        gap: 6px;
+        width: 220px;
+      }
+
+      .d-providers-models .quota-top {
+        display: flex;
+        justify-content: space-between;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-providers-models .quota-top .mono {
+        color: var(--text-1);
+      }
+
+      .d-providers-models .bar {
+        height: 5px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .d-providers-models .bar i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--green);
+      }
+
+      /* Provider header */
+      .d-providers-models .ph {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .d-providers-models .ph .row-text {
+        gap: 4px;
+      }
+
+      .d-providers-models .ph h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .d-providers-models .ph .row-sub {
+        font-size: 12px;
+      }
+
+      .d-providers-models .ph .row-sub .mono {
+        color: var(--text-2);
+        font-size: 11.5px;
+      }
+
+      .d-providers-models .ph-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-providers-models .key-edit {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: -2px 0 14px 50px;
+      }
+
+      .d-providers-models .key-edit .input {
+        width: 360px;
+      }
+
+      .d-providers-models .key-edit .input input {
+        font-family: var(--mono);
+      }
+
+      .d-providers-models .key-msg {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-providers-models .key-msg.is-ok {
+        color: var(--green);
+      }
+
+      /* Toolbar */
+      .d-providers-models .tb {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .d-providers-models .tb .input {
+        flex: 1;
+        min-width: 150px;
+        height: 28px;
+      }
+
+      .d-providers-models .cap-filter {
+        display: inline-flex;
+        flex: none;
+        white-space: nowrap;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-providers-models .cap-filter:hover {
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-1);
+      }
+
+      .d-providers-models .cap-filter[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-providers-models .tb .seg {
+        flex: none;
+        margin-left: 4px;
+      }
+
+      .d-providers-models .tb .seg button {
+        height: 22px;
+        padding: 0 9px;
+        font-size: 11.5px;
+      }
+
+      /* Table */
+      .d-providers-models .tbl {
+        display: grid;
+      }
+
+      .d-providers-models .tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 56px 66px 66px 96px 100px 92px;
+        align-items: center;
+        column-gap: 12px;
+        min-height: 42px;
+        padding: 6px 12px 6px 8px;
+        border-radius: 7px;
+      }
+
+      .d-providers-models .th {
+        min-height: 30px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-providers-models .th .num,
+      .d-providers-models .tr .num {
+        text-align: right;
+      }
+
+      .d-providers-models .th .num {
+        color: inherit;
+        font: inherit;
+      }
+
+      .d-providers-models .th button {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font-size: inherit;
+      }
+
+      .d-providers-models .th button[aria-pressed="true"] {
+        color: var(--text-1);
+      }
+
+      .d-providers-models .mrow {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-providers-models .mrow:hover,
+      .d-providers-models .mrow[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-providers-models .mrow.is-locked {
+        opacity: 0.5;
+      }
+
+      .d-providers-models .m-name {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-providers-models .m-name > svg {
+        flex: none;
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+
+      .d-providers-models .mrow[aria-expanded="true"] .m-name > svg {
+        transform: rotate(90deg);
+      }
+
+      .d-providers-models .m-name .row-text {
+        gap: 1px;
+      }
+
+      .d-providers-models .m-name .row-sub {
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .d-providers-models .num,
+      .d-providers-models .mono-cell {
+        color: var(--text-1);
+        font: 12px var(--mono);
+      }
+
+      .d-providers-models .num.is-dim {
+        color: var(--text-3);
+      }
+
+      .d-providers-models .free {
+        color: var(--green);
+        font: 12px var(--mono);
+      }
+
+      .d-providers-models .speed {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+      }
+
+      .d-providers-models .speed .bar {
+        flex: 1;
+        height: 4px;
+      }
+
+      .d-providers-models .speed .bar i {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.5), #b69ff7);
+      }
+
+      .d-providers-models .caps {
+        display: flex;
+        gap: 4px;
+      }
+
+      .d-providers-models .cap {
+        display: grid;
+        width: 22px;
+        height: 22px;
+        place-items: center;
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-2);
+      }
+
+      .d-providers-models .cap.is-no {
+        background: transparent;
+        color: rgba(255, 255, 255, 0.14);
+      }
+
+      .d-providers-models .used {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .d-providers-models .used .badge {
+        height: 18px;
+        padding: 0 6px;
+        font: 500 10.5px var(--mono);
+      }
+
+      .d-providers-models .t-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        padding: 12px 10px 4px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-providers-models .t-group .mono {
+        font-size: 11px;
+      }
+
+      .d-providers-models .t-group .dot {
+        width: 6px;
+        height: 6px;
+        box-shadow: none;
+      }
+
+      .d-providers-models .mdetail {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin: 2px 8px 10px 30px;
+        padding: 12px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        background: #141318;
+      }
+
+      .d-providers-models .kv-grid {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 6px 14px;
+        font-size: 12px;
+      }
+
+      .d-providers-models .kv-grid span:nth-child(odd) {
+        color: var(--text-3);
+      }
+
+      .d-providers-models .kv-grid span:nth-child(even) {
+        color: var(--text-1);
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+
+      .d-providers-models .set-default {
+        display: grid;
+        align-content: start;
+        gap: 8px;
+      }
+
+      .d-providers-models .set-default > span {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-providers-models .agent-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .d-providers-models .agent-chip {
+        height: 25px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+      }
+
+      .d-providers-models .agent-chip:hover {
+        color: var(--text-1);
+      }
+
+      .d-providers-models .agent-chip[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-providers-models .retention {
+        grid-column: 1 / 3;
+        display: flex;
+        gap: 8px;
+        padding-top: 10px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .d-providers-models .retention svg {
+        flex: none;
+        margin-top: 1px;
+        color: var(--text-3);
+      }
+
+      .d-providers-models .t-empty {
+        padding: 40px 10px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      .d-providers-models .locked-note {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 4px 0 10px;
+        padding: 10px 12px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 8px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-providers-models .locked-note .btn {
+        margin-left: auto;
+      }
+
+      /* Model picker popover */
+      .d-providers-models .picker {
+        position: absolute;
+        z-index: 25;
+        width: 360px;
+        padding: 8px;
+        animation: pv-pop 160ms var(--ease);
+      }
+
+      .d-providers-models .picker[hidden] {
+        display: none;
+      }
+
+      @keyframes pv-pop {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+      }
+
+      .d-providers-models .picker .input {
+        margin-bottom: 6px;
+      }
+
+      .d-providers-models .picker-list {
+        max-height: 360px;
+      }
+
+      .d-providers-models .picker-group {
+        margin: 0;
+        padding: 8px 8px 4px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-providers-models .pick {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+        height: 32px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-1);
+        font-size: 12.5px;
+        text-align: left;
+      }
+
+      .d-providers-models .pick:hover,
+      .d-providers-models .pick:focus-visible {
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .d-providers-models .pick span:nth-child(2) {
+        flex: 1;
+      }
+
+      .d-providers-models .pick .mono {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-providers-models .pick svg {
+        color: var(--violet-bright);
+      }
+
+      .d-providers-models .pick .sp {
+        width: 14px;
+      }
+
+      .d-providers-models .toast {
+        position: absolute;
+        bottom: 18px;
+        left: 50%;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        animation: pv-rise 220ms var(--ease);
+      }
+
+      .d-providers-models .toast[hidden] {
+        display: none;
+      }
+
+      .d-providers-models .toast svg {
+        color: var(--green);
+      }
+
+      @keyframes pv-rise {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 10px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="providers-models"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-providers-models">
+            <div class="app">
+              <nav data-lab-sidebar data-active="settings" data-workspace="Vector" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="model" data-size="15" class="muted"></i>
+                  <h2>Providers and models</h2>
+                  <span class="app-header-sub" data-head-sub></span>
+                  <div class="app-header-end">
+                    <button class="btn btn-ghost" type="button" data-act="refresh"><i data-icon="reload" data-size="14"></i>Refresh models</button>
+                    <button class="btn" type="button" data-act="add-provider"><i data-icon="plus" data-size="14"></i>Add provider</button>
+                  </div>
+                </header>
+                <div class="app-body">
+                  <aside class="pv-rail" aria-label="Providers">
+                    <p class="pv-sum" data-rail-sum></p>
+                    <div class="pv-rows scroll" role="listbox" aria-label="Providers" data-provs></div>
+                    <section class="defaults" aria-label="Default model per agent">
+                      <div class="defaults-head"><h4 class="section-title">Default model per agent</h4><span class="muted">vector.json</span></div>
+                      <div data-defaults></div>
+                    </section>
+                  </aside>
+                  <section class="pv-main" aria-label="Models">
+                    <div class="pv-scroll scroll" data-main></div>
+                  </section>
+                </div>
+                <div class="picker float" role="dialog" aria-label="Choose a model" hidden data-picker></div>
+                <div class="toast float" role="status" hidden data-toast></div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-providers-models")
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const icon = (name, size = 14, cls = "") => `<i data-icon="${name}" data-size="${size}"${cls ? ` class="${cls}"` : ""}></i>`
+        const svg = (d, size = 13) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="${d}" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+        const capIcon = {
+          tools: ["Calls tools", "M9.8 2.6a3 3 0 0 0-3.6 3.9L2.6 10.1a1.2 1.2 0 0 0 0 1.7l1.6 1.6a1.2 1.2 0 0 0 1.7 0l3.6-3.6a3 3 0 0 0 3.9-3.6l-1.9 1.9-1.8-.4-.4-1.8 1.9-1.9Z"],
+          reasoning: ["Reasoning", "M8 2.2 9.3 6.7 13.8 8 9.3 9.3 8 13.8 6.7 9.3 2.2 8 6.7 6.7 8 2.2Z"],
+          vision: ["Reads images", "M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8ZM8 9.9a1.9 1.9 0 1 0 0-3.8 1.9 1.9 0 0 0 0 3.8Z"],
+          pdf: ["Reads PDFs", "M4 2h5.2L12 4.8V14H4V2ZM9 2v3h3M6 9h4M6 11.2h3"],
+        }
+        const check = svg("M3.5 8.4 6.6 11.4 12.5 4.8", 14)
+        const shield = svg("M8 2 13 3.8V8c0 3-2.2 5.1-5 6-2.8-.9-5-3-5-6V3.8L8 2Z", 14)
+
+        // ---------- Data ----------
+
+        const providers = [
+          { id: "anthropic", name: "Anthropic", mark: "AN", connected: true, via: "env", key: "ANTHROPIC_API_KEY", hint: "sk-ant-api03-…Hq4A", spend: 18.42 },
+          { id: "openai", name: "OpenAI", mark: "OA", connected: true, via: "api", hint: "sk-proj-…Q4mA", spend: 14.9 },
+          { id: "google", name: "Google", mark: "GO", connected: true, via: "api", hint: "AIzaSy…7c2w", spend: 4.12 },
+          { id: "groq", name: "Groq", mark: "GQ", connected: true, via: "api", hint: "gsk_…Vn81", spend: 0.96 },
+          { id: "ollama", name: "Ollama", mark: "OL", connected: true, via: "local", hint: "127.0.0.1:11434", spend: 0 },
+          { id: "github-copilot", name: "GitHub Copilot", mark: "GC", connected: true, via: "oauth", hint: "Copilot Business · @vectordev", spend: 0 },
+          { id: "openrouter", name: "OpenRouter", mark: "OR", connected: false, via: "oauth", hint: "", spend: 0 },
+          { id: "xai", name: "xAI", mark: "XA", connected: false, via: "api", hint: "", spend: 0 },
+        ]
+
+        const M = (provider, id, name, ctx, inp, out, speed, caps, extra = {}) => ({ provider, id, name, ctx, in: inp, out, speed, caps, ...extra })
+        const all4 = ["tools", "reasoning", "vision", "pdf"]
+        const models = [
+          M("anthropic", "claude-opus-5", "Claude Opus 5", 1000000, 5, 25, 58, all4, { maxOut: "128K", cacheR: 0.5, cacheW: 6.25, released: "2026-05" }),
+          M("anthropic", "claude-sonnet-5", "Claude Sonnet 5", 1000000, 3, 15, 86, all4, { maxOut: "64K", cacheR: 0.3, cacheW: 3.75, released: "2026-05" }),
+          M("anthropic", "claude-haiku-4-5", "Claude Haiku 4.5", 200000, 1, 5, 162, all4, { maxOut: "64K", cacheR: 0.1, cacheW: 1.25, released: "2025-10" }),
+          M("openai", "gpt-5.6-sol", "GPT-5.6 Sol", 400000, 2, 16, 94, all4, { maxOut: "128K", cacheR: 0.2, released: "2026-08" }),
+          M("openai", "gpt-5.5", "GPT-5.5", 400000, 1.25, 10, 108, all4, { maxOut: "128K", cacheR: 0.125, released: "2026-03" }),
+          M("openai", "gpt-5.4-codex", "GPT-5.4 Codex", 400000, 1.25, 10, 131, ["tools", "reasoning", "vision"], { maxOut: "128K", cacheR: 0.125, released: "2026-01" }),
+          M("openai", "gpt-5-mini", "GPT-5 mini", 400000, 0.25, 2, 176, all4, { maxOut: "128K", cacheR: 0.025, released: "2025-08" }),
+          M("google", "gemini-3-pro", "Gemini 3 Pro", 1000000, 2, 12, 118, all4, { maxOut: "64K", cacheR: 0.2, released: "2025-11" }),
+          M("google", "gemini-3-flash", "Gemini 3 Flash", 1000000, 0.3, 2.5, 238, all4, { maxOut: "64K", cacheR: 0.03, released: "2025-12" }),
+          M("groq", "moonshotai/kimi-k2-instruct", "Kimi K2", 262144, 1, 3, 412, ["tools"], { maxOut: "16K", released: "2025-09" }),
+          M("groq", "openai/gpt-oss-120b", "GPT-OSS 120B", 131072, 0.15, 0.75, 508, ["tools", "reasoning"], { maxOut: "32K", released: "2025-08" }),
+          M("groq", "llama-4-maverick", "Llama 4 Maverick", 131072, 0.2, 0.6, 596, ["tools", "vision"], { maxOut: "8K", released: "2025-04" }),
+          M("ollama", "qwen3-coder:30b", "Qwen3 Coder 30B", 262144, 0, 0, 46, ["tools"], { local: true, size: "18 GB", released: "2025-07" }),
+          M("ollama", "gpt-oss:20b", "GPT-OSS 20B", 131072, 0, 0, 61, ["tools", "reasoning"], { local: true, size: "13 GB", released: "2025-08" }),
+          M("ollama", "devstral:24b", "Devstral 24B", 131072, 0, 0, 34, ["tools"], { local: true, size: "14 GB", released: "2025-07" }),
+          M("github-copilot", "claude-sonnet-5", "Claude Sonnet 5", 200000, 0, 0, 79, all4, { included: true, released: "2026-05" }),
+          M("github-copilot", "gpt-5.5", "GPT-5.5", 264000, 0, 0, 101, all4, { included: true, released: "2026-03" }),
+          M("github-copilot", "gemini-3-pro", "Gemini 3 Pro", 128000, 0, 0, 112, ["tools", "reasoning", "vision"], { included: true, released: "2025-11" }),
+          M("xai", "grok-4.6", "Grok 4.6", 2000000, 3, 15, 74, ["tools", "reasoning", "vision"], { released: "2026-06" }),
+          M("xai", "grok-code-fast-2", "Grok Code Fast 2", 256000, 0.2, 1.5, 190, ["tools", "reasoning"], { released: "2026-02" }),
+        ]
+        // Free models, from the server-approved catalog (packages/schema/src/free-model.ts).
+        const free = [
+          { id: "cohere/north-mini-code:free", name: "Cohere: North Mini Code", ctx: 256000, maxOut: "64K", speed: 140, caps: ["tools"], host: "Cohere", retention: "Up to 30 days; no training according to OpenRouter's provider policy." },
+          { id: "qwen/qwen3.8-27b:free", name: "Qwen: Qwen3.8 27B", ctx: 262144, maxOut: "32K", speed: 96, caps: ["tools", "reasoning"], host: "ModelRun", retention: "No prompt retention or training according to OpenRouter's provider policy." },
+          { id: "poolside/laguna-s-2.1:free", name: "Poolside: Laguna S 2.1", ctx: 262144, maxOut: "32K", speed: 88, caps: ["tools", "reasoning"], host: "Poolside", retention: "Prompts retained; duration not specified. No training according to OpenRouter's provider policy." },
+          { id: "poolside/laguna-xs-2.1:free", name: "Poolside: Laguna XS 2.1", ctx: 262144, maxOut: "32K", speed: 154, caps: ["tools"], host: "Poolside", retention: "Prompts retained; duration not specified. No training according to OpenRouter's provider policy." },
+          { id: "dots-studio/dots-3-note-preview:free", name: "Dots Studio: Dots3-Note Preview", ctx: 512000, maxOut: "32K", speed: 71, caps: ["tools", "reasoning"], host: "AtlasCloud", retention: "Prompts retained; duration not specified. No training according to OpenRouter's provider policy." },
+          { id: "inclusionai/ling-3.0-flash-sante:free", name: "inclusionAI: Ling 3.0 Flash", ctx: 262144, maxOut: "32K", speed: 182, caps: ["tools"], host: "NovitaAI", retention: "No prompt retention or training according to OpenRouter's provider policy." },
+        ].map((f) => ({ ...f, provider: "free", in: 0, out: 0, free: true }))
+
+        const agents = [
+          ["build", "anthropic/claude-sonnet-5"],
+          ["plan", "openai/gpt-5.6-sol"],
+          ["explore", "anthropic/claude-haiku-4-5"],
+          ["review", "anthropic/claude-opus-5"],
+          ["judge", "openai/gpt-5.6-sol"],
+          ["title", "google/gemini-3-flash"],
+        ]
+        const defaults = Object.fromEntries(agents)
+
+        const state = {
+          prov: "all",
+          q: "",
+          caps: new Set(),
+          sort: "default",
+          open: new Set(["anthropic/claude-sonnet-5"]),
+          or: "idle", // idle | waiting | key | connected
+          orUsed: 0,
+          keyEdit: null, // provider id being edited
+          keyState: "edit", // edit | verifying | ok
+          picker: null,
+        }
+
+        const keyOf = (m) => `${m.provider}/${m.id}`
+        const pname = (id) => (id === "free" ? "Free models" : providers.find((p) => p.id === id)?.name ?? id)
+        const ctxLabel = (t) => (t >= 1000000 ? `${Math.floor(t / 100000) / 10}M` : `${Math.round(t / 1000)}K`)
+        const price = (v) => (v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(v >= 0.1 ? 2 : 3)}`)
+        const findModel = (k) => [...models, ...free].find((m) => keyOf(m) === k)
+        const usedBy = (m) => Object.entries(defaults).filter(([, k]) => k === keyOf(m)).map(([a]) => a)
+        const provConnected = (id) => (id === "free" ? true : id === "openrouter" ? state.or === "connected" : providers.find((p) => p.id === id)?.connected)
+
+        // ---------- Rail ----------
+
+        function renderRail() {
+          const connected = providers.filter((p) => provConnected(p.id))
+          const spend = providers.reduce((n, p) => n + p.spend, 0)
+          root.querySelector("[data-rail-sum]").innerHTML = `<span>${connected.length} of ${providers.length} connected</span><span class="muted" style="font-size:11.5px">this month</span><span class="mono">$${spend.toFixed(2)}</span>`
+          root.querySelector("[data-head-sub]").textContent = `${connected.length} providers · ${models.filter((m) => provConnected(m.provider)).length + free.length} models you can use`
+          const row = (id, mark, name, sub, end, off = false, cls = "") =>
+            `<button type="button" class="row prov${off ? " is-off" : ""}" role="option" data-prov="${id}" aria-selected="${state.prov === id}">
+              <span class="tile${cls}">${mark}</span>
+              <span class="row-text"><span class="row-name">${name}</span><span class="row-sub">${sub}</span></span>
+              <span class="row-end">${end}</span>
+            </button>`
+          const sub = (p) => {
+            if (p.id === "openrouter") return state.or === "connected" ? "Signed in · your free account" : "Not connected · free models available"
+            if (!p.connected) return "Not connected"
+            if (p.via === "env") return `API key from <span class="mono">${p.key}</span>`
+            if (p.via === "local") return `Local · ${p.hint} · 3 pulled`
+            if (p.via === "oauth") return `Signed in · ${p.hint}`
+            return `API key · <span class="mono">${p.hint}</span>`
+          }
+          const count = (id) => models.filter((m) => m.provider === id).length
+          const end = (p) => {
+            if (p.id === "openrouter" && state.or !== "connected") return `<span class="badge badge-violet">Free</span>`
+            if (p.id === "openrouter") return `<span>${free.length}</span><span class="dot dot-green"></span>`
+            if (!p.connected) return `<span>Connect</span>`
+            return `<span>${count(p.id)}</span><span class="dot dot-green"></span>`
+          }
+          const el = root.querySelector("[data-provs]")
+          el.innerHTML =
+            row("all", svg("M2.8 2.8h4.1v4.1H2.8zM9.1 2.8h4.1v4.1H9.1zM2.8 9.1h4.1v4.1H2.8zM9.1 9.1h4.1v4.1H9.1z", 14), "All models", "Every provider you can use", `<span>${models.filter((m) => provConnected(m.provider)).length + free.length}</span>`) +
+            row("free", svg("M8 2.2 9.3 6.7 13.8 8 9.3 9.3 8 13.8 6.7 9.3 2.2 8 6.7 6.7 8 2.2Z", 14), "Free models", state.or === "connected" ? "Your OpenRouter account · 50 a day" : "Shared Vector allowance", `<span>${free.length}</span>`, false, " is-free") +
+            `<p class="pv-group">Connected</p>` +
+            providers.filter((p) => provConnected(p.id)).map((p) => row(p.id, p.mark, p.name, sub(p), end(p))).join("") +
+            (providers.some((p) => !provConnected(p.id)) ? `<p class="pv-group">Available</p>` + providers.filter((p) => !provConnected(p.id)).map((p) => row(p.id, p.mark, p.name, sub(p), end(p), true)).join("") : "")
+        }
+
+        function renderDefaults() {
+          root.querySelector("[data-defaults]").innerHTML = agents
+            .map(([a]) => {
+              const m = findModel(defaults[a])
+              return `<button type="button" class="def" data-def="${a}" aria-haspopup="dialog" aria-expanded="${state.picker === a}"><span class="def-agent">${a}</span><span class="def-model">${m ? esc(m.free ? m.name.replace(/^[^:]+: /, "") : m.name) : defaults[a]}</span><span class="muted" style="font-size:11px">${m ? pname(m.provider) : ""}</span>${LabUI.svg("chevron-down", 13)}</button>`
+            })
+            .join("")
+        }
+
+        // ---------- Main ----------
+
+        function orCard() {
+          const show = state.prov === "all" || state.prov === "free" || state.prov === "openrouter"
+          if (!show) return ""
+          if (state.or === "connected")
+            return `<div class="or-card is-connected">
+              <span class="or-mark">${check}</span>
+              <div class="or-text"><h3>OpenRouter connected <span class="badge badge-green">Free models on</span></h3><p>Free models now run on your own OpenRouter account. OpenRouter and its model providers process your prompts.</p></div>
+              <div class="quota"><div class="quota-top"><span>Free requests today</span><span class="mono">${state.orUsed} / 50</span></div><div class="bar"><i style="width:${(state.orUsed / 50) * 100}%"></i></div><div class="quota-top"><span>Resets at midnight UTC</span><button class="btn btn-ghost btn-sm" type="button" data-act="or-disconnect" style="height:20px;padding:0 4px">Disconnect</button></div></div>
+            </div>`
+          const chips = free
+            .slice(0, 4)
+            .map((f) => `<span class="or-chip">${esc(f.name.replace(/^[^:]+: /, ""))}<span>${ctxLabel(f.ctx)}</span></span>`)
+            .join("")
+          const actions =
+            state.or === "waiting"
+              ? `<button class="btn" type="button" data-act="or-cancel">Cancel</button><button class="btn btn-primary" type="button" disabled>${icon("ring", 13, "spin")}Waiting for openrouter.ai</button>`
+              : `<button class="btn" type="button" data-act="or-key" aria-expanded="${state.or === "key"}">Use an API key</button><button class="btn btn-primary" type="button" data-act="or-connect">Connect OpenRouter ${icon("external", 13)}</button>`
+          return `<div class="or-card">
+            <span class="or-mark">OR</span>
+            <div class="or-text">
+              <h3>Free models inside of Vector</h3>
+              <p>${state.or === "waiting" ? "Finish connecting in your browser on this computer, then come back. Vector is listening for the callback on localhost." : "Connect your own free OpenRouter account: up to 50 requests a day, subject to availability. No payment or credits needed."}</p>
+            </div>
+            <div class="or-actions">${actions}</div>
+            ${
+              state.or === "key"
+                ? `<div class="or-key"><label class="input"><input type="password" placeholder="sk-or-v1-…" aria-label="OpenRouter API key" data-or-key style="font-family:var(--mono)" /></label><button class="btn btn-primary" type="button" data-act="or-save-key">Save key</button><span class="muted" style="align-self:center;font-size:12px">Keep automatic top-ups off to stay on free models.</span></div>`
+                : `<div class="or-models">${chips}<span class="or-chip" style="color:var(--text-3)">+${free.length - 4} more</span></div>`
+            }
+          </div>`
+        }
+
+        function provHeader() {
+          if (state.prov === "all" || state.prov === "free") {
+            const title = state.prov === "all" ? "All models" : "Free models"
+            const sub =
+              state.prov === "all"
+                ? "Prices are per million tokens. Speed is the median output rate you got this week."
+                : state.or === "connected"
+                  ? "Running on your OpenRouter account. Prompts go to the host listed for each model."
+                  : "Shared Vector allowance while you are signed in. Connect OpenRouter for your own 50 a day."
+            return `<div class="ph"><div class="row-text"><h3>${title}</h3><span class="row-sub">${sub}</span></div></div>`
+          }
+          const p = providers.find((x) => x.id === state.prov)
+          const on = provConnected(p.id)
+          const line = !on
+            ? `Not connected. Add a key to use its ${models.filter((m) => m.provider === p.id).length || ""} models.`
+            : p.via === "env"
+              ? `Key from <span class="mono">$${p.key}</span> · <span class="mono">${p.hint}</span> · verified 2 min ago`
+              : p.via === "local"
+                ? `Running at <span class="mono">${p.hint}</span> · 3 models pulled · no data leaves this Mac`
+                : p.via === "oauth"
+                  ? p.id === "openrouter"
+                    ? "Signed in with OpenRouter · free account"
+                    : `Signed in with GitHub · <span class="mono">${p.hint}</span>`
+                  : `API key <span class="mono">${p.hint}</span> · stored in Vector's auth store · verified today`
+          const editing = state.keyEdit === p.id
+          const btns = !on
+            ? p.id === "openrouter"
+              ? ""
+              : `<button class="btn btn-primary" type="button" data-act="edit-key">${icon("plus", 13)}Add API key</button>`
+            : p.via === "local"
+              ? `<button class="btn" type="button" data-act="pull">Pull a model</button>`
+              : p.via === "oauth"
+                ? `<button class="btn btn-ghost btn-sm" type="button" data-act="disconnect">Sign out</button>`
+                : `<button class="btn" type="button" data-act="edit-key" aria-expanded="${editing}">${p.via === "env" ? "Override key" : "Replace key"}</button><button class="btn btn-ghost btn-sm" type="button" data-act="disconnect">Disconnect</button>`
+          return `<div class="ph">
+              <span class="tile tile-lg">${p.mark}</span>
+              <div class="row-text"><h3>${p.name}${on ? `<span class="badge badge-green"><span class="dot dot-green" style="width:6px;height:6px;box-shadow:none"></span>Connected</span>` : ""}${p.spend ? `<span class="badge mono" style="font-family:var(--mono)">$${p.spend.toFixed(2)} this month</span>` : ""}</h3><span class="row-sub">${line}</span></div>
+              <div class="ph-end" style="margin-left:auto">${btns}</div>
+            </div>
+            ${
+              editing
+                ? `<div class="key-edit">${
+                    state.keyState === "ok"
+                      ? `<span class="key-msg is-ok">${check}Key works · ${models.filter((m) => m.provider === p.id).length} models available</span>`
+                      : `<label class="input"><input type="password" placeholder="${p.id === "xai" ? "xai-…" : p.id === "anthropic" ? "sk-ant-…" : "Paste a key"}" aria-label="API key" data-key-input ${state.keyState === "verifying" ? "disabled" : ""}/></label>
+                         <button class="btn btn-primary" type="button" data-act="verify-key"${state.keyState === "verifying" ? " disabled" : ""}>${state.keyState === "verifying" ? `${icon("ring", 13, "spin")}Checking` : "Save and check"}</button>
+                         <button class="btn btn-ghost" type="button" data-act="cancel-key">Cancel</button>`
+                  }</div>`
+                : ""
+            }`
+        }
+
+        function visibleModels() {
+          const q = state.q.trim().toLowerCase()
+          let list = state.prov === "all" ? [...free, ...models.filter((m) => provConnected(m.provider))] : state.prov === "free" ? free : models.filter((m) => m.provider === state.prov)
+          if (state.prov === "openrouter") list = free
+          list = list.filter((m) => {
+            if (q && !`${m.name} ${m.id} ${pname(m.provider)}`.toLowerCase().includes(q)) return false
+            for (const c of state.caps) {
+              if (c === "free" && !(m.free || m.local || m.included)) return false
+              if (c === "long" && m.ctx < 1000000) return false
+              if (c !== "free" && c !== "long" && !m.caps.includes(c)) return false
+            }
+            return true
+          })
+          if (state.sort === "price") list = [...list].sort((a, b) => a.in + a.out - (b.in + b.out))
+          if (state.sort === "context") list = [...list].sort((a, b) => b.ctx - a.ctx)
+          if (state.sort === "speed") list = [...list].sort((a, b) => b.speed - a.speed)
+          return list
+        }
+
+        function modelRow(m) {
+          const k = keyOf(m)
+          const open = state.open.has(k)
+          const locked = !provConnected(m.provider)
+          const maxSpeed = 600
+          const priceCells = m.free
+            ? `<span class="free num">Free</span><span class="free num">Free</span>`
+            : m.local
+              ? `<span class="num is-dim">local</span><span class="num is-dim">local</span>`
+              : m.included
+                ? `<span class="num is-dim">plan</span><span class="num is-dim">plan</span>`
+                : `<span class="num">${price(m.in)}</span><span class="num">${price(m.out)}</span>`
+          const used = usedBy(m)
+          return `<button type="button" class="tr mrow${locked ? " is-locked" : ""}" aria-expanded="${open}" data-model="${esc(k)}">
+              <span class="m-name">${LabUI.svg("chevron-right", 13)}<span class="row-text"><span class="row-name">${esc(m.free ? m.name.replace(/^[^:]+: /, "") : m.name)}</span><span class="row-sub">${esc(m.id)}</span></span></span>
+              <span class="num">${ctxLabel(m.ctx)}</span>
+              ${priceCells}
+              <span class="speed"><span>${m.speed}</span><span class="bar"><i style="width:${Math.min(100, (m.speed / maxSpeed) * 100)}%"></i></span></span>
+              <span class="caps">${Object.entries(capIcon)
+                .map(([c, [label, d]]) => `<span class="cap${m.caps.includes(c) ? "" : " is-no"}" title="${m.caps.includes(c) ? label : `No: ${label.toLowerCase()}`}">${svg(d, 12)}</span>`)
+                .join("")}</span>
+              <span class="used">${used.map((a) => `<span class="badge badge-violet">${a}</span>`).join("") || `<span class="muted" style="font-size:11.5px">—</span>`}</span>
+            </button>
+            ${
+              open
+                ? `<div class="mdetail">
+                    <div class="kv-grid">
+                      <span>Provider</span><span>${m.free ? `OpenRouter → ${m.host}` : pname(m.provider)}</span>
+                      <span>Context window</span><span>${m.ctx.toLocaleString("en-US")} tokens</span>
+                      <span>Max output</span><span>${m.maxOut ?? "—"}</span>
+                      ${m.free ? `<span>Source</span><span>${state.or === "connected" ? "Your OpenRouter account" : "Shared Vector allowance"}</span>` : m.local ? `<span>On disk</span><span>${m.size}</span>` : m.included ? `<span>Billing</span><span>Included in Copilot Business</span>` : `<span>Cache read / write</span><span>${price(m.cacheR ?? 0)} / ${m.cacheW ? price(m.cacheW) : "free"}</span>`}
+                      <span>Released</span><span>${m.released ?? "—"}</span>
+                    </div>
+                    <div class="set-default"><span>Default for</span>
+                      <div class="agent-chips">${agents.map(([a]) => `<button type="button" class="agent-chip" data-set="${a}" data-for="${esc(k)}" aria-pressed="${defaults[a] === k}"${locked ? " disabled" : ""}>${a}</button>`).join("")}</div>
+                      <span style="font-size:11.5px">${locked ? `Connect ${pname(m.provider)} to use this model.` : "Agents without a model in their own config use these."}</span>
+                    </div>
+                    ${m.free ? `<div class="retention">${shield}<span><b style="font-weight:500;color:var(--text-1)">${m.host}</b> · ${esc(m.retention)}</span></div>` : ""}
+                  </div>`
+                : ""
+            }`
+        }
+
+        function renderMain() {
+          const list = visibleModels()
+          const caps = [
+            ["tools", "Tools"],
+            ["reasoning", "Reasoning"],
+            ["vision", "Images"],
+            ["long", "1M context"],
+            ["free", "Free or local"],
+          ]
+          const groups =
+            state.prov === "all" && state.sort === "default"
+              ? [["free", "Free models"], ...providers.filter((p) => provConnected(p.id) && p.id !== "openrouter").map((p) => [p.id, p.name])]
+              : [[null, null]]
+          const lockedNote =
+            !provConnected(state.prov) && state.prov !== "openrouter" && state.prov !== "all" && state.prov !== "free"
+              ? `<div class="locked-note">${svg("M4.5 7V5.2a3.5 3.5 0 0 1 7 0V7M3.5 7h9v6.5h-9z", 14)}<span>These models need a ${pname(state.prov)} key. Prices and limits are shown so you can compare first.</span></div>`
+              : ""
+          const el = root.querySelector("[data-main]")
+          el.innerHTML = `${orCard()}${provHeader()}${lockedNote}
+            <div class="tb">
+              <label class="input"><i data-icon="search" data-size="13" class="muted"></i><input type="search" placeholder="Filter models" aria-label="Filter models" data-q value="${esc(state.q)}" /></label>
+              ${caps.map(([c, l]) => `<button type="button" class="cap-filter" data-cap="${c}" aria-pressed="${state.caps.has(c)}">${l}</button>`).join("")}
+              <div class="seg" role="group" aria-label="Sort" data-sort>${[
+                ["default", "Provider"],
+                ["price", "Price"],
+                ["context", "Context"],
+                ["speed", "Speed"],
+              ]
+                .map(([v, l]) => `<button type="button" data-value="${v}" aria-pressed="${state.sort === v}">${l}</button>`)
+                .join("")}</div>
+            </div>
+            <div class="tbl" role="table" aria-label="Models">
+              <div class="tr th" role="row"><span style="padding-left:21px">Model · ${list.length}</span><span class="num">Context</span><span class="num">Input</span><span class="num">Output</span><span>Speed · tok/s</span><span>Capabilities</span><span>Default for</span></div>
+              ${
+                list.length
+                  ? groups
+                      .map(([id, label]) => {
+                        const g = id ? list.filter((m) => m.provider === id) : list
+                        if (!g.length) return ""
+                        const head = label ? `<p class="t-group">${id === "free" ? `<span class="dot dot-violet"></span>` : `<span class="dot dot-green"></span>`}<span>${label}</span><span class="mono">${g.length}</span>${id === "free" ? `<span class="muted" style="margin-left:auto">${state.or === "connected" ? "Your OpenRouter account" : "Shared Vector allowance"}</span>` : ""}</p>` : ""
+                        return head + g.map(modelRow).join("")
+                      })
+                      .join("")
+                  : `<p class="t-empty">No models match these filters.</p>`
+              }
+            </div>`
+          LabUI.renderIcons(el)
+        }
+
+        function renderAll() {
+          renderRail()
+          renderDefaults()
+          renderMain()
+        }
+
+        // ---------- Picker ----------
+
+        function openPicker(agent, btn) {
+          state.picker = agent
+          const p = root.querySelector("[data-picker]")
+          const main = root.querySelector(".app-main").getBoundingClientRect()
+          const r = btn.getBoundingClientRect()
+          const scale = main.width / root.querySelector(".app-main").offsetWidth
+          p.style.left = `${(r.right - main.left) / scale + 8}px`
+          p.hidden = false
+          renderPicker("")
+          p.style.top = `${Math.max(56, Math.min((r.top - main.top) / scale - 40, root.querySelector(".app-main").offsetHeight - p.offsetHeight - 12))}px`
+          renderDefaults()
+          p.querySelector("input").focus()
+        }
+
+        function renderPicker(q) {
+          const p = root.querySelector("[data-picker]")
+          const agent = state.picker
+          const ql = q.toLowerCase()
+          const usable = [...free, ...models.filter((m) => provConnected(m.provider))].filter((m) => !ql || `${m.name} ${m.id}`.toLowerCase().includes(ql))
+          const groups = ["free", ...providers.map((x) => x.id)]
+          const list = groups
+            .map((g) => {
+              const ms = usable.filter((m) => m.provider === g)
+              if (!ms.length) return ""
+              return `<p class="picker-group">${pname(g)}</p>${ms
+                .map((m) => `<button type="button" class="pick" data-pick="${esc(keyOf(m))}">${defaults[agent] === keyOf(m) ? check : `<span class="sp"></span>`}<span>${esc(m.free ? m.name.replace(/^[^:]+: /, "") : m.name)}</span><span class="mono">${m.free ? "free" : m.local ? "local" : m.included ? "plan" : `${price(m.in)} / ${price(m.out)}`}</span></button>`)
+                .join("")}`
+            })
+            .join("")
+          const listHtml = list || `<p class="picker-group">No models match.</p>`
+          if (p.querySelector("[data-plist]")) {
+            p.querySelector("[data-plist]").innerHTML = listHtml
+            return
+          }
+          p.innerHTML = `<label class="input"><i data-icon="search" data-size="13" class="muted"></i><input type="search" placeholder="Model for ${agent}" aria-label="Search models" data-pq /></label><div class="picker-list scroll" data-plist>${listHtml}</div>`
+          LabUI.renderIcons(p)
+        }
+
+        function closePicker() {
+          const p = root.querySelector("[data-picker]")
+          const agent = state.picker
+          state.picker = null
+          p.hidden = true
+          p.innerHTML = ""
+          renderDefaults()
+          if (agent) root.querySelector(`[data-def="${agent}"]`)?.focus()
+        }
+
+        function setDefault(agent, k) {
+          defaults[agent] = k
+          renderDefaults()
+          const btn = root.querySelector(`[data-def="${agent}"]`)
+          btn.classList.add("is-flash")
+          renderMain()
+          const m = findModel(k)
+          toast(`${agent} now uses ${m.free ? m.name.replace(/^[^:]+: /, "") : m.name}`)
+        }
+
+        let toastTimer
+        function toast(text) {
+          const t = root.querySelector("[data-toast]")
+          t.innerHTML = `${check}<span>${esc(text)}</span>`
+          t.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (t.hidden = true), 2600)
+        }
+
+        // ---------- Events ----------
+
+        root.addEventListener("click", (e) => {
+          const t = e.target
+          const picker = root.querySelector("[data-picker]")
+          if (state.picker && !picker.contains(t) && !t.closest("[data-def]")) closePicker()
+          const pick = t.closest("[data-pick]")
+          if (pick) {
+            const agent = state.picker
+            closePicker()
+            setDefault(agent, pick.dataset.pick)
+            return
+          }
+          const def = t.closest("[data-def]")
+          if (def) {
+            if (state.picker === def.dataset.def) return closePicker()
+            if (state.picker) closePicker()
+            openPicker(def.dataset.def, root.querySelector(`[data-def="${def.dataset.def}"]`))
+            return
+          }
+          const prov = t.closest("[data-prov]")
+          if (prov) {
+            state.prov = prov.dataset.prov
+            state.keyEdit = null
+            state.keyState = "edit"
+            renderRail()
+            renderMain()
+            return
+          }
+          const set = t.closest("[data-set]")
+          if (set) {
+            setDefault(set.dataset.set, set.dataset.for)
+            return
+          }
+          const row = t.closest("[data-model]")
+          if (row) {
+            const k = row.dataset.model
+            state.open.has(k) ? state.open.delete(k) : state.open.add(k)
+            renderMain()
+            root.querySelector(`[data-model="${CSS.escape(k)}"]`)?.focus()
+            return
+          }
+          const cap = t.closest("[data-cap]")
+          if (cap) {
+            const c = cap.dataset.cap
+            state.caps.has(c) ? state.caps.delete(c) : state.caps.add(c)
+            renderMain()
+            return
+          }
+          const act = t.closest("[data-act]")
+          if (!act) return
+          const a = act.dataset.act
+          if (a === "or-connect") {
+            state.or = "waiting"
+            renderMain()
+            setTimeout(() => {
+              if (state.or !== "waiting") return
+              state.or = "connected"
+              state.orUsed = 0
+              providers.find((p) => p.id === "openrouter").connected = true
+              renderAll()
+              toast("OpenRouter connected · 6 free models ready")
+            }, 2200)
+          }
+          if (a === "or-cancel") {
+            state.or = "idle"
+            renderMain()
+          }
+          if (a === "or-key") {
+            state.or = state.or === "key" ? "idle" : "key"
+            renderMain()
+            root.querySelector("[data-or-key]")?.focus()
+          }
+          if (a === "or-save-key") {
+            state.or = "connected"
+            providers.find((p) => p.id === "openrouter").connected = true
+            renderAll()
+            toast("OpenRouter key saved · 6 free models ready")
+          }
+          if (a === "or-disconnect") {
+            state.or = "idle"
+            providers.find((p) => p.id === "openrouter").connected = false
+            renderAll()
+          }
+          if (a === "edit-key") {
+            state.keyEdit = state.keyEdit === state.prov ? null : state.prov
+            state.keyState = "edit"
+            renderMain()
+            root.querySelector("[data-key-input]")?.focus()
+          }
+          if (a === "cancel-key") {
+            state.keyEdit = null
+            renderMain()
+          }
+          if (a === "verify-key") {
+            const p = providers.find((x) => x.id === state.prov)
+            const val = root.querySelector("[data-key-input]")?.value || "xai-9f8e7d6c5b4a"
+            state.keyState = "verifying"
+            renderMain()
+            setTimeout(() => {
+              state.keyState = "ok"
+              p.connected = true
+              p.via = p.via === "env" ? "api" : p.via
+              p.hint = `${val.slice(0, 4)}…${val.slice(-4)}`
+              renderAll()
+              setTimeout(() => {
+                if (state.keyEdit === p.id) {
+                  state.keyEdit = null
+                  renderMain()
+                }
+              }, 1800)
+            }, 1300)
+          }
+          if (a === "disconnect") {
+            const p = providers.find((x) => x.id === state.prov)
+            p.connected = false
+            renderAll()
+            toast(`${p.name} disconnected`)
+          }
+          if (a === "refresh") toast("Model list refreshed · prices from models.dev")
+          if (a === "add-provider") {
+            state.prov = "xai"
+            state.keyEdit = "xai"
+            state.keyState = "edit"
+            renderAll()
+            root.querySelector("[data-key-input]")?.focus()
+          }
+          if (a === "pull") toast("ollama pull qwen3-coder:30b started")
+        })
+
+        root.addEventListener("lab:seg", (e) => {
+          if (!e.target.matches("[data-sort]")) return
+          state.sort = e.detail
+          renderMain()
+        })
+
+        root.addEventListener("input", (e) => {
+          if (e.target.matches("[data-q]")) {
+            state.q = e.target.value
+            const pos = e.target.selectionStart
+            renderMain()
+            const again = root.querySelector("[data-q]")
+            again.focus()
+            again.setSelectionRange(pos, pos)
+          }
+          if (e.target.matches("[data-pq]")) renderPicker(e.target.value)
+        })
+
+        root.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && state.picker) closePicker()
+          if (e.key === "Enter" && e.target.matches("[data-key-input]")) root.querySelector('[data-act="verify-key"]')?.click()
+          if (e.key === "Enter" && e.target.matches("[data-or-key]")) root.querySelector('[data-act="or-save-key"]')?.click()
+        })
+
+        renderAll()
+      })()
+    </script>
+  </body>
+</html>

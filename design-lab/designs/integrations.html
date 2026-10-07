@@ -1,0 +1,1188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-integrations .app-main {
+        position: relative;
+      }
+
+      .d-integrations .app-body {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .d-integrations .btn:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+      .d-integrations .tile {
+        display: grid;
+        flex: none;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+        color: var(--text-2);
+        font: 600 10.5px/1 var(--font);
+        letter-spacing: 0.02em;
+      }
+
+      .d-integrations .tile-lg {
+        width: 42px;
+        height: 42px;
+        border-radius: 11px;
+        font-size: 13px;
+      }
+
+      .d-integrations .spin {
+        animation: in-spin 0.9s linear infinite;
+      }
+
+      @keyframes in-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ---------- Overview strip ---------- */
+
+      .d-integrations .strip {
+        display: grid;
+        flex: none;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 10px;
+        padding: 16px 20px 14px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-integrations .ic {
+        position: relative;
+        display: grid;
+        gap: 10px;
+        padding: 12px 13px 11px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+        color: var(--text-1);
+        text-align: left;
+        transition:
+          border-color 140ms ease,
+          background-color 140ms ease;
+      }
+
+      .d-integrations .ic:hover {
+        border-color: var(--line-strong);
+      }
+
+      .d-integrations .ic[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: radial-gradient(200px 80px at 0% 0%, rgba(146, 116, 236, 0.13), transparent 70%), var(--card);
+        box-shadow: 0 0 0 1px rgba(182, 159, 247, 0.08);
+      }
+
+      .d-integrations .ic[aria-pressed="true"] .tile {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-integrations .ic-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .d-integrations .ic-top .row-text {
+        gap: 2px;
+      }
+
+      .d-integrations .ic-state {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-integrations .ic-state .dot {
+        width: 6px;
+        height: 6px;
+        box-shadow: none;
+      }
+
+      .d-integrations .ic-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-integrations .ic-foot svg {
+        display: block;
+      }
+
+      .d-integrations .ic-foot span {
+        white-space: nowrap;
+      }
+
+      .d-integrations .ev.is-example {
+        opacity: 0.55;
+        cursor: default;
+      }
+
+      .d-integrations .ev.is-example:hover {
+        background: transparent;
+      }
+
+      .d-integrations .ic.is-off .ic-foot {
+        font-family: var(--font);
+      }
+
+      /* ---------- Detail ---------- */
+
+      .d-integrations .detail {
+        display: grid;
+        flex: 1;
+        grid-template-columns: 1fr 392px;
+        min-height: 0;
+      }
+
+      .d-integrations .left {
+        min-width: 0;
+        padding: 16px 20px 22px;
+      }
+
+      .d-integrations .dh {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        margin-bottom: 16px;
+      }
+
+      .d-integrations .dh .row-text {
+        gap: 4px;
+      }
+
+      .d-integrations .dh h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+      }
+
+      .d-integrations .dh .row-sub {
+        font-size: 12px;
+      }
+
+      .d-integrations .dh .row-sub b {
+        color: var(--text-2);
+        font-weight: 500;
+      }
+
+      .d-integrations .dh-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+
+      .d-integrations .badge .dot {
+        width: 6px;
+        height: 6px;
+        box-shadow: none;
+      }
+
+      .d-integrations .card + .card {
+        margin-top: 14px;
+      }
+
+      .d-integrations .card-head .muted {
+        margin-left: auto;
+        font-size: 12px;
+      }
+
+      .d-integrations .card-head .sum {
+        display: flex;
+        gap: 10px;
+        margin-left: auto;
+        font: 11.5px var(--mono);
+      }
+
+      .d-integrations .cap-group {
+        margin: 0;
+        padding: 10px 14px 4px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-integrations .cap {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 46px;
+        padding: 6px 14px;
+      }
+
+      .d-integrations .cap + .cap {
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-integrations .cap-icon {
+        display: grid;
+        flex: none;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-2);
+      }
+
+      .d-integrations .cap.is-write .cap-icon {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .d-integrations .cap.is-off .row-name {
+        color: var(--text-3);
+      }
+
+      .d-integrations .cap .row-sub .mono {
+        font-size: 11px;
+      }
+
+      .d-integrations .mode button {
+        height: 22px;
+        padding: 0 10px;
+        font-size: 11.5px;
+      }
+
+      .d-integrations .mode button[aria-pressed="true"][data-value="ask"] {
+        color: var(--amber);
+      }
+
+      .d-integrations .mode button[aria-pressed="true"][data-value="off"] {
+        color: var(--text-3);
+      }
+
+      .d-integrations .mode button:disabled {
+        cursor: default;
+        opacity: 0.4;
+      }
+
+      .d-integrations .scope-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-integrations .scope-head .seg {
+        margin-left: auto;
+      }
+
+      .d-integrations .scope-head .seg button {
+        height: 22px;
+        font-size: 11.5px;
+      }
+
+      .d-integrations .res {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        padding: 6px;
+      }
+
+      .d-integrations .res-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 36px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-integrations .res-item:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-integrations .res-item .box {
+        display: grid;
+        flex: none;
+        width: 15px;
+        height: 15px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 4px;
+        color: #fff;
+      }
+
+      .d-integrations .res-item[aria-checked="true"] .box {
+        border-color: var(--violet);
+        background: var(--violet);
+      }
+
+      .d-integrations .res-item[aria-checked="false"] .box svg {
+        display: none;
+      }
+
+      .d-integrations .res-item .nm {
+        flex: 1;
+        overflow: hidden;
+        font: 12px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-integrations .res-item[aria-checked="false"] .nm {
+        color: var(--text-3);
+      }
+
+      .d-integrations .res-item .meta {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-integrations .scope-note {
+        margin: 0;
+        padding: 0 16px 12px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* Connect flow */
+      .d-integrations .connect {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+        border: 1px solid var(--violet-line);
+        border-radius: 12px;
+        background: radial-gradient(420px 140px at 0% 0%, rgba(146, 116, 236, 0.12), transparent 70%), var(--card);
+      }
+
+      .d-integrations .connect h4 {
+        margin: 0 0 4px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .d-integrations .connect p {
+        margin: 0;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      .d-integrations .steps {
+        display: flex;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font-size: 12px;
+      }
+
+      .d-integrations .steps li {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+      }
+
+      .d-integrations .steps li + li::before {
+        content: "";
+        width: 22px;
+        height: 1px;
+        margin-right: 2px;
+        background: var(--line-strong);
+      }
+
+      .d-integrations .steps .n {
+        display: grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+        font: 10.5px var(--mono);
+      }
+
+      .d-integrations .steps .is-now {
+        color: var(--text-1);
+      }
+
+      .d-integrations .steps .is-now .n {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-integrations .steps .is-done .n {
+        border-color: rgba(101, 199, 142, 0.4);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-integrations .connect-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-integrations .connect-actions .btn {
+        height: 32px;
+        padding: 0 14px;
+      }
+
+      .d-integrations .connect .res {
+        padding: 4px 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.12);
+      }
+
+      /* ---------- Activity ---------- */
+
+      .d-integrations .feed {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-left: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .d-integrations .feed-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 16px 8px 18px;
+      }
+
+      .d-integrations .feed-head h4 {
+        flex: 1;
+        margin: 0;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-integrations .feed-head .seg button,
+      .d-integrations .feed-tools .seg button {
+        height: 22px;
+        padding: 0 9px;
+        font-size: 11.5px;
+      }
+
+      .d-integrations .feed-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 16px 8px 18px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-integrations .feed-tools .seg {
+        margin-left: auto;
+      }
+
+      .d-integrations .feed-list {
+        flex: 1;
+        min-height: 0;
+        padding: 0 8px 12px;
+      }
+
+      .d-integrations .day {
+        margin: 0;
+        padding: 10px 10px 4px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-integrations .ev {
+        display: flex;
+        width: 100%;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 8px 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-integrations .ev:hover,
+      .d-integrations .ev[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-integrations .ev-mark {
+        display: grid;
+        flex: none;
+        width: 22px;
+        height: 22px;
+        margin-top: 1px;
+        place-items: center;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-3);
+        font: 600 9px/1 var(--font);
+      }
+
+      .d-integrations .ev .row-text {
+        gap: 3px;
+      }
+
+      .d-integrations .ev .row-name {
+        font-size: 12.5px;
+        line-height: 1.4;
+        white-space: normal;
+      }
+
+      .d-integrations .ev-meta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-integrations .ev-meta .agent {
+        color: var(--violet-bright);
+        font-family: var(--mono);
+      }
+
+      .d-integrations .ev-meta .w {
+        color: var(--amber);
+      }
+
+      .d-integrations .ev-meta .x {
+        color: var(--red);
+      }
+
+      .d-integrations .ev-time {
+        flex: none;
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-integrations .ev-body {
+        display: grid;
+        margin: 2px 8px 8px 42px;
+        padding: 8px 0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 6px;
+        background: #121117;
+        font: 11px/17px var(--mono);
+      }
+
+      .d-integrations .ev-body code {
+        overflow: hidden;
+        padding: 0 10px;
+        color: var(--text-2);
+        text-overflow: ellipsis;
+        white-space: pre;
+      }
+
+      .d-integrations .ev-body .is-hunk {
+        color: #8a84c9;
+      }
+
+      .d-integrations .ev-body .is-more {
+        margin-top: 4px;
+        color: var(--text-3);
+        font-family: var(--font);
+        white-space: normal;
+      }
+
+      .d-integrations .feed-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px 13px 18px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-integrations .feed-foot .btn {
+        margin-left: auto;
+      }
+
+      .d-integrations .feed-foot .ok {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--green);
+      }
+
+      .d-integrations .empty {
+        padding: 40px 16px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      .d-integrations .confirm {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #f0b0b3;
+        font-size: 12.5px;
+      }
+
+      .d-integrations .toast {
+        position: absolute;
+        bottom: 18px;
+        left: 50%;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        animation: in-rise 220ms var(--ease);
+      }
+
+      .d-integrations .toast[hidden] {
+        display: none;
+      }
+
+      .d-integrations .toast svg {
+        color: var(--green);
+      }
+
+      @keyframes in-rise {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 10px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="integrations"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-integrations">
+            <div class="app">
+              <nav data-lab-sidebar data-active="workspace" data-workspace="Vector" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="branch" data-size="15" class="muted"></i>
+                  <h2>Integrations</h2>
+                  <span class="app-header-sub">Vector workspace · Vectordev.ai</span>
+                  <div class="app-header-end">
+                    <span class="muted" style="font-size: 12px" data-head-sum></span>
+                    <button class="btn btn-ghost" type="button" data-act="pause-all" aria-pressed="false"><i data-icon="stop" data-size="13"></i>Pause agent writes</button>
+                  </div>
+                </header>
+                <div class="app-body">
+                  <div class="strip" role="group" aria-label="Integrations" data-strip></div>
+                  <div class="detail">
+                    <section class="left scroll" aria-label="Integration settings" data-left></section>
+                    <aside class="feed" aria-label="Recent activity" data-feed></aside>
+                  </div>
+                </div>
+                <div class="toast float" role="status" hidden data-toast></div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-integrations")
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const icon = (name, size = 14, cls = "") => `<i data-icon="${name}" data-size="${size}"${cls ? ` class="${cls}"` : ""}></i>`
+        const svg = (d, size = 14) => `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="${d}" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+        const check = (size = 13) => svg("M3.5 8.4 6.6 11.4 12.5 4.8", size)
+        const g = {
+          read: "M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8ZM8 9.9a1.9 1.9 0 1 0 0-3.8 1.9 1.9 0 0 0 0 3.8Z",
+          comment: "M3 3.5h10v7H7.5L4.5 13v-2.5H3v-7Z",
+          pr: "M4.5 2.5v11M4.5 2.5a1.4 1.4 0 1 0 0 .1M11.5 13.5V6.5a2 2 0 0 0-2-2H7M8.5 3 7 4.5 8.5 6M11.5 13.5a1.4 1.4 0 1 0 0-.1",
+          push: "M8 13V3.5M4.5 7 8 3.5 11.5 7M3 13.5h10",
+          merge: "M4.5 2.5v11M4.5 5.5c0 3 7 2 7 6M4.5 2.5a1.4 1.4 0 1 0 0 .1M11.5 13.5a1.4 1.4 0 1 0 0-.1",
+          checks: "M3.5 8.4 6.6 11.4 12.5 4.8",
+          issue: "M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12ZM8 8.6a.6.6 0 1 0 0-1.2.6.6 0 0 0 0 1.2Z",
+          status: "M2.5 8h3l1.5-3 2 6 1.5-3h3",
+          post: "M2.5 7.5 13.5 2.5l-3 11-3-4.5-5-1.5ZM7.5 9l2.5-2.5",
+          dm: "M8 2.5a4 4 0 0 0-4 4v2.5L2.8 11h10.4L12 9V6.5a4 4 0 0 0-4-4ZM6.5 13a1.6 1.6 0 0 0 3 0",
+          deploy: "M8 2.5 13.5 12h-11L8 2.5Z",
+          redeploy: "M12.6 6.2A5 5 0 1 0 13 9M12.8 2.8v3.6H9.2",
+          promote: "M8 13V4M4.5 7.5 8 4l3.5 3.5M4 2.5h8",
+          resolve: "M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12ZM5.5 8.2 7.2 9.8 10.6 6.4",
+          link: "M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2-2a2.6 2.6 0 0 0-3.7-3.7l-.7.7M9.2 6.8a2.6 2.6 0 0 0-3.7 0l-2 2a2.6 2.6 0 0 0 3.7 3.7l.7-.7",
+          create: "M8 3.5v9M3.5 8h9",
+        }
+
+        // ---------- Data ----------
+
+        const C = (id, label, sub, kind, mode, glyph) => ({ id, label, sub, kind, mode, glyph })
+        const integrations = [
+          {
+            id: "github", name: "GitHub", mark: "GH", connected: true, account: "GitHub App on <b>vectordev</b> · acting as <b>vector-agent[bot]</b>", today: 38, spark: [3, 5, 2, 6, 8, 4, 9, 7, 5, 8, 11, 6],
+            resLabel: "Repositories", resNote: "Agents in this workspace can only see the repositories you tick. Pull requests from forks are always read-only.",
+            res: [["vectordev/vector", true, "main · 412 open issues"], ["vectordev/vector-web", true, "main"], ["vectordev/design-lab", true, "main"], ["vectordev/infra", false, "terraform"], ["vectordev/billing", false, "private"], ["vectordev/homebrew-tap", false, "formula"]],
+            caps: [
+              C("read", "Read code, issues and pull requests", "issues, pulls, contents · used by plan, explore, review", "read", "allow", "read"),
+              C("checks", "Read checks and workflow runs", "actions, checks · used by judge", "read", "allow", "checks"),
+              C("comment", "Comment on pull requests and issues", "Vectorscope reviews, /vector replies", "write", "allow", "comment"),
+              C("pr", "Open pull requests from a session", "creates a branch, then a draft PR", "write", "ask", "pr"),
+              C("push", "Push commits to session branches", "never to main or a protected branch", "write", "allow", "push"),
+              C("merge", "Merge pull requests", "even when every check passes", "write", "off", "merge"),
+            ],
+          },
+          {
+            id: "linear", name: "Linear", mark: "LN", connected: true, account: "Workspace <b>Vectordev</b> · signed in as <b>you</b>", today: 12, spark: [1, 2, 1, 3, 2, 4, 2, 3, 5, 2, 3, 4],
+            resLabel: "Teams", resNote: "Issues outside these teams stay invisible to agents in this workspace.",
+            res: [["VEC · Vector", true, "38 open"], ["WEB · Website", true, "12 open"], ["DES · Design", false, "9 open"], ["OPS · Operations", false, "21 open"]],
+            caps: [
+              C("read", "Read issues, projects and cycles", "used by plan and build to pick up context", "read", "allow", "read"),
+              C("create", "Create issues from a session", "e.g. follow-ups an agent finds", "write", "ask", "create"),
+              C("status", "Move issues when a PR opens or merges", "In Progress → In Review → Done", "write", "allow", "status"),
+              C("comment", "Comment with progress", "one summary per session, not per step", "write", "allow", "comment"),
+            ],
+          },
+          {
+            id: "slack", name: "Slack", mark: "SL", connected: true, account: "Workspace <b>vectordev.slack.com</b> · bot <b>@Vector</b>", today: 7, spark: [0, 1, 0, 2, 1, 0, 3, 1, 2, 1, 0, 2],
+            resLabel: "Channels", resNote: "The bot can only post in channels it has been added to.",
+            res: [["#eng-vector", true, "42 members"], ["#deploys", true, "18 members"], ["#reviews", true, "23 members"], ["#general", false, "180 members"], ["#incidents", false, "31 members"], ["#random", false, "176 members"]],
+            caps: [
+              C("post", "Post a summary when a session finishes", "to #eng-vector, with the diff stats and PR link", "write", "allow", "post"),
+              C("review", "Post when a Vectorscope review completes", "to #reviews, only when it finds issues", "write", "allow", "comment"),
+              C("dm", "DM me when an agent is waiting for approval", "so you can answer from your phone", "write", "allow", "dm"),
+              C("read", "Read threads linked in a prompt", "only messages you paste a link to", "read", "ask", "read"),
+            ],
+          },
+          {
+            id: "vercel", name: "Vercel", mark: "VC", connected: false, account: "", today: 0, spark: [],
+            resLabel: "Projects", resNote: "Preview deploys from these projects show up in the Browser tab next to their session.",
+            res: [["vector-web", true, "Next.js · Production"], ["design-lab", true, "Static · Preview"], ["docs", false, "Astro"], ["status-page", false, "Static"]],
+            caps: [
+              C("read", "Read deployments and build logs", "used by build and judge to check previews", "read", "allow", "deploy"),
+              C("checks", "Wait for a PR's preview to be ready", "then open it in the Browser tab", "read", "allow", "checks"),
+              C("redeploy", "Redeploy a preview", "after an agent fixes a failed build", "write", "ask", "redeploy"),
+              C("promote", "Promote a deployment to production", "", "write", "off", "promote"),
+            ],
+          },
+          {
+            id: "sentry", name: "Sentry", mark: "SE", connected: true, account: "Organization <b>vectordev</b> · read and triage", today: 5, spark: [2, 0, 1, 0, 3, 1, 0, 0, 2, 1, 0, 1],
+            resLabel: "Projects", resNote: "Stack traces from these projects can be pulled into a session with @sentry.",
+            res: [["vector-desktop", true, "Electron · 1.2k events/day"], ["vector-engine", true, "Bun · 340 events/day"], ["vector-web", false, "Next.js"], ["vector-cloud", false, "Go"]],
+            caps: [
+              C("read", "Read issues, events and stack traces", "used by debug and build", "read", "allow", "issue"),
+              C("link", "Link a session to the issue it fixes", "adds a comment with the PR", "write", "allow", "link"),
+              C("resolve", "Resolve issues after the fix is released", "in the next release, not on merge", "write", "ask", "resolve"),
+            ],
+          },
+          {
+            id: "jira", name: "Jira", mark: "JI", connected: false, account: "", today: 0, spark: [],
+            resLabel: "Projects", resNote: "Agents only see issues in the projects you pick.",
+            res: [["PLAT · Platform", true, "vectordev.atlassian.net"], ["MOB · Mobile", false, "vectordev.atlassian.net"], ["SEC · Security", false, "vectordev.atlassian.net"]],
+            caps: [
+              C("read", "Read issues, sprints and boards", "used by plan", "read", "allow", "read"),
+              C("comment", "Comment with progress", "", "write", "allow", "comment"),
+              C("status", "Transition issues when a PR merges", "", "write", "ask", "status"),
+            ],
+          },
+        ]
+
+        const E = (int, time, agent, text, kind, status, body) => ({ int, time, agent, text, kind, status, body })
+        const events = [
+          E("github", "2m", "review", "Commented on <b>#1482</b> fix(core): close symlinked config bypass", "write", "ok", ["@@ vectorscope review · 2 findings", "1. trust.ts:41 realpath can throw on a", "   dangling symlink; fall back to resolve()", "2. trust.test.ts misses the Windows junction case", "Posted as vector-agent[bot] · 214 words"]),
+          E("slack", "9m", "build", "Posted a session summary to <b>#eng-vector</b>", "write", "ok", ["@@ #eng-vector", "Session recovery after crash is ready for review", "6 files changed +174 −12 · PR #1484", "Posted as @Vector"]),
+          E("linear", "9m", "build", "Moved <b>VEC-212</b> Session recovery after crash to In Review", "write", "ok", ["@@ VEC-212", "In Progress → In Review", "Linked PR vectordev/vector#1484"]),
+          E("github", "11m", "build", "Opened draft <b>#1484</b> feat(core): recover sessions after a crash", "write", "asked", ["@@ asked first · you approved at 14:21", "base main ← session-recovery", "6 files changed +174 −12"]),
+          E("github", "14m", "explore", "Read 6 files in <b>vectordev/vector</b> at main", "read", "ok", ["@@ contents", "packages/engine/src/session/recovery.ts", "packages/engine/src/session/execution.ts", "… 4 more"]),
+          E("sentry", "22m", "debug", "Read <b>VECTOR-DESKTOP-4N</b> TypeError in session-side-panel.tsx", "read", "ok", ["@@ 1,284 events · first seen 2 days ago", "TypeError: Cannot read properties of undefined", "  (reading 'status') at SessionSidePanel", "release 1.17.14 · macOS 15.4"]),
+          E("sentry", "25m", "debug", "Linked this session to <b>VECTOR-DESKTOP-4N</b>", "write", "ok", null),
+          E("github", "31m", "build", "Pushed 3 commits to <b>session-recovery</b>", "write", "ok", ["@@ session-recovery", "a41f2c0 feat(core): persist drain checkpoints", "9be17d3 test(core): cover crash mid-turn", "02c4e8a fix(core): reload projected history"]),
+          E("linear", "40m", "build", "Commented on <b>VEC-208</b> with progress", "write", "ok", null),
+          E("github", "1h", "judge", "Read checks on <b>#1479</b>: 14 passed, 1 failed", "read", "ok", ["@@ checks", "typecheck ✓  unit ✓  e2e ✗ (trust prompt)", "…13 more"]),
+          E("slack", "1h", "Vector", "Sent you a DM: build is waiting to run <b>bun install</b>", "write", "ok", null),
+          E("github", "2h", "build", "Tried to merge <b>#1476</b>; blocked because merging is off", "write", "blocked", ["@@ blocked by your setting", "Merge pull requests is Off for this workspace.", "The agent asked you to merge instead."]),
+          E("sentry", "Yesterday", "build", "Resolve <b>VECTOR-ENGINE-2C</b> in release 1.17.14", "write", "asked", null),
+          E("linear", "Yesterday", "plan", "Created <b>VEC-215</b> Flaky trust.test.ts on Windows", "write", "asked", null),
+        ]
+
+        const examples = {
+          vercel: [
+            ["Preview for <b style=\"font-weight:500\">#1484</b> is ready in 41s; opened it in the Browser tab", "build", "read", "now"],
+            ["Read the build log for <b style=\"font-weight:500\">design-lab</b>: next build failed on a type error", "judge", "read", "3m"],
+            ["Redeploy the <b style=\"font-weight:500\">vector-web</b> preview after the fix", "build", "asks first", "5m"],
+          ],
+          jira: [
+            ["Read <b style=\"font-weight:500\">PLAT-88</b> Rate limit the export endpoint", "plan", "read", "now"],
+            ["Commented on <b style=\"font-weight:500\">PLAT-88</b> with the PR link", "build", "write", "12m"],
+            ["Move <b style=\"font-weight:500\">PLAT-88</b> to Done after merge", "build", "asks first", "1h"],
+          ],
+        }
+
+        const state = { sel: "github", feedScope: "one", feedFilter: "all", open: new Set([0]), connect: null, step: 0, confirm: false, paused: false, wsScope: "workspace", test: "idle" }
+        const sel = () => integrations.find((i) => i.id === state.sel)
+
+        // ---------- Strip ----------
+
+        function spark(values) {
+          if (!values.length) return ""
+          const w = 64
+          const h = 16
+          const max = Math.max(...values, 1)
+          const step = w / (values.length - 1)
+          const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - 1 - (v / max) * (h - 2)).toFixed(1)}`).join(" ")
+          return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="rgba(182,159,247,.75)" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"/></svg>`
+        }
+
+        function renderStrip() {
+          const el = root.querySelector("[data-strip]")
+          el.innerHTML = integrations
+            .map((it) => {
+              const connecting = state.connect === it.id
+              const st = it.connected
+                ? state.paused
+                  ? `<span class="dot dot-amber"></span>Writes paused`
+                  : `<span class="dot dot-green"></span>Connected`
+                : connecting
+                  ? `${icon("ring", 11, "spin")}Connecting`
+                  : `<span class="dot"></span>Not connected`
+              return `<button type="button" class="ic${it.connected ? "" : " is-off"}" data-int="${it.id}" aria-pressed="${state.sel === it.id}">
+                <span class="ic-top"><span class="tile">${it.mark}</span><span class="row-text"><span class="row-name">${it.name}</span><span class="ic-state">${st}</span></span></span>
+                <span class="ic-foot">${it.connected ? `<span>${it.today} today</span>${spark(it.spark)}` : `<span>${it.caps.length} things agents could do</span>`}</span>
+              </button>`
+            })
+            .join("")
+          LabUI.renderIcons(el)
+          const on = integrations.filter((i) => i.connected).length
+          root.querySelector("[data-head-sum]").textContent = `${on} of ${integrations.length} connected`
+        }
+
+        // ---------- Left ----------
+
+        function capsCard(it, preview) {
+          const counts = { allow: 0, ask: 0, off: 0 }
+          it.caps.forEach((c) => counts[c.mode]++)
+          const groups = [
+            ["Read", it.caps.filter((c) => c.kind === "read")],
+            ["Write", it.caps.filter((c) => c.kind === "write")],
+          ]
+          return `<div class="card">
+            <div class="card-head"><h4 class="card-title">${preview ? "Agents will be able to" : "What agents may do"}</h4>
+              <span class="sum"><span class="add">${counts.allow} allowed</span><span style="color:var(--amber)">${counts.ask} ask first</span><span class="muted">${counts.off} off</span></span></div>
+            ${groups
+              .filter(([, list]) => list.length)
+              .map(
+                ([label, list]) => `<p class="cap-group">${label}</p>${list
+                  .map(
+                    (c) => `<div class="cap${c.kind === "write" ? " is-write" : ""}${c.mode === "off" ? " is-off" : ""}">
+                      <span class="cap-icon">${svg(g[c.glyph], 13)}</span>
+                      <span class="row-text"><span class="row-name">${esc(c.label)}</span>${c.sub ? `<span class="row-sub">${esc(c.sub)}</span>` : ""}</span>
+                      <div class="seg mode" role="group" aria-label="${esc(c.label)}" data-cap="${c.id}">
+                        ${["allow", "ask", "off"].map((m) => `<button type="button" data-value="${m}" aria-pressed="${c.mode === m}"${state.paused && c.kind === "write" && m === "allow" ? " disabled" : ""}>${{ allow: "Allow", ask: "Ask", off: "Off" }[m]}</button>`).join("")}
+                      </div>
+                    </div>`,
+                  )
+                  .join("")}`,
+              )
+              .join("")}
+          </div>`
+        }
+
+        function scopeCard(it) {
+          const on = it.res.filter((r) => r[1]).length
+          return `<div class="card">
+            <div class="scope-head"><h4 class="card-title">${it.resLabel}</h4><span class="muted mono" style="font-size:11.5px">${on} of ${it.res.length}</span>
+              <div class="seg" role="group" aria-label="Applies to" data-wsscope>
+                <button type="button" data-value="workspace" aria-pressed="${state.wsScope === "workspace"}">This workspace</button>
+                <button type="button" data-value="all" aria-pressed="${state.wsScope === "all"}">All workspaces</button>
+              </div></div>
+            <div class="res">${it.res.map(([name, checked, meta], i) => `<button type="button" class="res-item" role="checkbox" aria-checked="${checked}" data-res="${i}"><span class="box">${check(11)}</span><span class="nm">${esc(name)}</span><span class="meta">${esc(meta)}</span></button>`).join("")}</div>
+            <p class="scope-note">${esc(it.resNote)}${state.wsScope === "workspace" ? " Other workspaces keep their own choice." : " Every workspace in Vectordev.ai uses this choice."}</p>
+          </div>`
+        }
+
+        function connectCard(it) {
+          const steps = ["Sign in", `Choose ${it.resLabel.toLowerCase()}`, "Review access"]
+          const st = state.connect === it.id ? state.step : -1
+          const body =
+            st === 1
+              ? `<div><h4>Choose ${it.resLabel.toLowerCase()} for this workspace</h4><p>Signed in to ${it.name}. Pick what agents in <b style="color:var(--text-1);font-weight:500">Vector</b> may see. You can change this later.</p></div>
+                 <div class="res">${it.res.map(([name, checked, meta], i) => `<button type="button" class="res-item" role="checkbox" aria-checked="${checked}" data-res="${i}"><span class="box">${check(11)}</span><span class="nm">${esc(name)}</span><span class="meta">${esc(meta)}</span></button>`).join("")}</div>
+                 <div class="connect-actions"><button class="btn btn-primary" type="button" data-act="connect-next">Continue</button><button class="btn btn-ghost" type="button" data-act="connect-cancel">Cancel</button></div>`
+              : st === 2
+                ? `<div><h4>Review what agents may do</h4><p>Write actions start as Ask, so nothing changes in ${it.name} without you seeing it first. Adjust below, then finish.</p></div>
+                   <div class="connect-actions"><button class="btn btn-primary" type="button" data-act="connect-finish">${check()}Finish connecting</button><button class="btn btn-ghost" type="button" data-act="connect-cancel">Cancel</button></div>`
+                : `<div><h4>Connect ${it.name}</h4><p>${it.id === "vercel" ? "Let agents check preview deploys, read build logs and open previews in the Browser tab. Vector opens vercel.com to sign in; the token stays in Vector's auth store." : "Let agents read issues and post progress where your team tracks work. Vector opens atlassian.com to sign in; the token stays in Vector's auth store."}</p></div>
+                   <div class="connect-actions">${
+                     st === 0
+                       ? `<button class="btn btn-primary" type="button" disabled>${icon("ring", 13, "spin")}Waiting for ${it.id === "vercel" ? "vercel.com" : "atlassian.com"}</button><button class="btn btn-ghost" type="button" data-act="connect-cancel">Cancel</button>`
+                       : `<button class="btn btn-primary" type="button" data-act="connect">${icon("external", 13)}Connect ${it.name}</button><span class="muted" style="font-size:12px">Takes about 30 seconds</span>`
+                   }</div>`
+          return `<div class="connect">
+            <ol class="steps">${steps.map((s, i) => `<li class="${i < st ? "is-done" : i === Math.max(st, 0) ? "is-now" : ""}"><span class="n">${i < st ? check(10) : i + 1}</span>${s}</li>`).join("")}</ol>
+            ${body}
+          </div>`
+        }
+
+        function renderLeft() {
+          const it = sel()
+          const el = root.querySelector("[data-left]")
+          const head = `<div class="dh">
+              <span class="tile tile-lg">${it.mark}</span>
+              <div class="row-text"><h3>${it.name}${it.connected ? `<span class="badge badge-green"><span class="dot dot-green"></span>Connected</span>` : `<span class="badge">Not connected</span>`}</h3>
+                <span class="row-sub">${it.connected ? it.account : `${it.caps.length} capabilities · scoped per workspace`}</span></div>
+              <div class="dh-end">${
+                it.connected
+                  ? state.confirm
+                    ? `<span class="confirm">Disconnect ${it.name} from every workspace?</span><button class="btn btn-sm" type="button" data-act="keep">Keep</button><button class="btn btn-sm btn-danger" type="button" data-act="disconnect">Disconnect</button>`
+                    : `<button class="btn btn-ghost btn-sm" type="button">${icon("external", 12)}Open ${it.name}</button><button class="btn btn-sm" type="button" data-act="ask-disconnect">Disconnect</button>`
+                  : ""
+              }</div>
+            </div>`
+          if (!it.connected) {
+            const st = state.connect === it.id ? state.step : -1
+            el.innerHTML = head + connectCard(it) + (st === 2 || st === -1 ? `<div style="height:14px"></div>${capsCard(it, true)}` : "")
+          } else {
+            el.innerHTML = head + capsCard(it) + scopeCard(it)
+          }
+          LabUI.renderIcons(el)
+        }
+
+        // ---------- Feed ----------
+
+        function renderFeed() {
+          const it = sel()
+          const list = events
+            .map((e, i) => ({ ...e, i }))
+            .filter((e) => (state.feedScope === "all" || e.int === it.id) && (state.feedFilter === "all" || (state.feedFilter === "writes" ? e.kind === "write" : e.status !== "ok")))
+          const markOf = (id) => integrations.find((x) => x.id === id).mark
+          const days = [
+            ["Today", list.filter((e) => e.time !== "Yesterday")],
+            ["Yesterday", list.filter((e) => e.time === "Yesterday")],
+          ]
+          const el = root.querySelector("[data-feed]")
+          const writes = events.filter((e) => e.int === it.id && e.kind === "write").length
+          el.innerHTML = `
+            <div class="feed-head"><h4>Recent activity</h4>
+              <div class="seg" role="group" aria-label="Show activity from" data-feedscope>
+                <button type="button" data-value="one" aria-pressed="${state.feedScope === "one"}">${it.name}</button>
+                <button type="button" data-value="all" aria-pressed="${state.feedScope === "all"}">All</button>
+              </div></div>
+            <div class="feed-tools"><span>${list.length} actions${state.feedScope === "one" && it.connected ? ` · ${writes} writes` : ""}</span>
+              <div class="seg" role="group" aria-label="Filter" data-feedfilter>
+                <button type="button" data-value="all" aria-pressed="${state.feedFilter === "all"}">Everything</button>
+                <button type="button" data-value="writes" aria-pressed="${state.feedFilter === "writes"}">Writes</button>
+                <button type="button" data-value="flagged" aria-pressed="${state.feedFilter === "flagged"}">Asked or blocked</button>
+              </div></div>
+            <div class="feed-list scroll">${
+              list.length
+                ? days
+                    .filter(([, d]) => d.length)
+                    .map(
+                      ([label, d]) => `<p class="day">${label}</p>${d
+                        .map((e) => {
+                          const open = state.open.has(e.i)
+                          const status = e.status === "blocked" ? `<span class="x">blocked</span>` : e.status === "asked" ? `<span class="w">asked, approved</span>` : e.kind === "write" ? `<span>write</span>` : `<span>read</span>`
+                          return `<button type="button" class="ev" data-ev="${e.i}" aria-expanded="${open}"${e.body ? "" : ' aria-disabled="true"'}>
+                            <span class="ev-mark">${markOf(e.int)}</span>
+                            <span class="row-text"><span class="row-name">${e.text.replace(/<b>/g, '<b style="font-weight:500">')}</span><span class="ev-meta"><span class="agent">${e.agent}</span><span>·</span>${status}</span></span>
+                            <span class="ev-time">${e.time === "Yesterday" ? "1d" : e.time}</span>
+                          </button>${open && e.body ? `<div class="ev-body">${e.body.map((l, j) => `<code class="${l.startsWith("@@") ? "is-hunk" : j === e.body.length - 1 && /Posted|…|asked/.test(l) ? "is-more" : ""}">${esc(l)}</code>`).join("")}</div>` : ""}`
+                        })
+                        .join("")}`,
+                    )
+                    .join("")
+                : it.connected || state.feedScope === "all" || !examples[it.id]
+                  ? `<p class="empty">Nothing here yet.</p>`
+                  : `<p class="day">What you will see here, for example</p>${examples[it.id]
+                      .map(([text, agent, kind, time]) => `<div class="ev is-example"><span class="ev-mark">${it.mark}</span><span class="row-text"><span class="row-name">${text}</span><span class="ev-meta"><span class="agent">${agent}</span><span>·</span><span${kind === "asks first" ? ' class="w"' : ""}>${kind}</span></span></span><span class="ev-time">${time}</span></div>`)
+                      .join("")}`
+            }</div>
+            <div class="feed-foot">${
+              it.id === "slack" && it.connected
+                ? state.test === "sent"
+                  ? `<span class="ok">${check()}Delivered to #eng-vector</span><button class="btn btn-sm" type="button" data-act="test">Send again</button>`
+                  : `<span>Check the bot can post</span><button class="btn btn-sm" type="button" data-act="test"${state.test === "sending" ? " disabled" : ""}>${state.test === "sending" ? `${icon("ring", 12, "spin")}Sending` : "Send test message"}</button>`
+                : it.connected
+                  ? `<span>Every action is also in the session that made it.</span><button class="btn btn-sm" type="button" data-act="export">Export log</button>`
+                  : `<span>Agents use ${it.name} only after you connect it.</span>`
+            }</div>`
+          LabUI.renderIcons(el)
+        }
+
+        function renderAll() {
+          renderStrip()
+          renderLeft()
+          renderFeed()
+        }
+
+        let toastTimer
+        function toast(text) {
+          const t = root.querySelector("[data-toast]")
+          t.innerHTML = `${check(14)}<span>${esc(text)}</span>`
+          t.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (t.hidden = true), 2600)
+        }
+
+        // ---------- Events ----------
+
+        root.addEventListener("click", (e) => {
+          const t = e.target
+          const int = t.closest("[data-int]")
+          if (int) {
+            state.sel = int.dataset.int
+            state.confirm = false
+            state.test = "idle"
+            state.open = new Set([events.findIndex((x) => x.int === state.sel && x.body)])
+            renderAll()
+            return
+          }
+          const res = t.closest("[data-res]")
+          if (res) {
+            const r = sel().res[Number(res.dataset.res)]
+            r[1] = !r[1]
+            res.setAttribute("aria-checked", String(r[1]))
+            const scopeHead = root.querySelector(".scope-head .mono")
+            if (scopeHead) scopeHead.textContent = `${sel().res.filter((x) => x[1]).length} of ${sel().res.length}`
+            return
+          }
+          const ev = t.closest("[data-ev]")
+          if (ev) {
+            const i = Number(ev.dataset.ev)
+            if (!events[i].body) return
+            state.open.has(i) ? state.open.delete(i) : state.open.add(i)
+            renderFeed()
+            root.querySelector(`[data-ev="${i}"]`)?.focus()
+            return
+          }
+          const act = t.closest("[data-act]")
+          if (!act) return
+          const it = sel()
+          const a = act.dataset.act
+          if (a === "connect") {
+            state.connect = it.id
+            state.step = 0
+            renderAll()
+            setTimeout(() => {
+              if (state.connect !== it.id) return
+              state.step = 1
+              renderAll()
+            }, 1600)
+          }
+          if (a === "connect-next") {
+            state.step = 2
+            renderLeft()
+          }
+          if (a === "connect-cancel") {
+            state.connect = null
+            renderAll()
+          }
+          if (a === "connect-finish") {
+            it.connected = true
+            it.account = it.id === "vercel" ? "Team <b>vectordev</b> · signed in as <b>you</b>" : "Site <b>vectordev.atlassian.net</b> · signed in as <b>you</b>"
+            it.spark = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+            it.today = 0
+            state.connect = null
+            renderAll()
+            toast(`${it.name} connected to this workspace`)
+          }
+          if (a === "ask-disconnect") {
+            state.confirm = true
+            renderLeft()
+          }
+          if (a === "keep") {
+            state.confirm = false
+            renderLeft()
+          }
+          if (a === "disconnect") {
+            it.connected = false
+            state.confirm = false
+            renderAll()
+            toast(`${it.name} disconnected`)
+          }
+          if (a === "test") {
+            state.test = "sending"
+            renderFeed()
+            setTimeout(() => {
+              state.test = "sent"
+              renderFeed()
+            }, 1100)
+          }
+          if (a === "export") toast("Saved integrations-activity.jsonl")
+          if (a === "pause-all") {
+            state.paused = !state.paused
+            act.setAttribute("aria-pressed", String(state.paused))
+            act.classList.toggle("btn-danger", state.paused)
+            act.lastChild.textContent = state.paused ? "Resume agent writes" : "Pause agent writes"
+            integrations.forEach((x) => x.caps.forEach((c) => c.kind === "write" && c.mode === "allow" && state.paused && ((c.was = "allow"), (c.mode = "ask"))))
+            if (!state.paused) integrations.forEach((x) => x.caps.forEach((c) => c.was && ((c.mode = c.was), delete c.was)))
+            renderAll()
+            toast(state.paused ? "Every write now asks first, in all integrations" : "Agent writes resumed")
+          }
+        })
+
+        root.addEventListener("lab:seg", (e) => {
+          const s = e.target
+          if (s.matches("[data-cap]")) {
+            const c = sel().caps.find((x) => x.id === s.dataset.cap)
+            c.mode = e.detail
+            delete c.was
+            renderLeft()
+          }
+          if (s.matches("[data-feedscope]")) {
+            state.feedScope = e.detail
+            renderFeed()
+          }
+          if (s.matches("[data-feedfilter]")) {
+            state.feedFilter = e.detail
+            renderFeed()
+          }
+          if (s.matches("[data-wsscope]")) {
+            state.wsScope = e.detail
+            renderLeft()
+          }
+        })
+
+        renderAll()
+      })()
+    </script>
+  </body>
+</html>

@@ -388,3 +388,7 @@
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.1);
 }
+
+/* One centered panel, for pages without the story column (the private /design door). */
+.auth-page-single { grid-template-columns: minmax(0, 520px); justify-content: center; }
+.auth-page-single .auth-panel { border-left: 0; justify-content: center; }

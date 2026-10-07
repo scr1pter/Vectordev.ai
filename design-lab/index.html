@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/lab.css" />
+    <style>
+      .lab-card-thumb {
+        overflow: hidden;
+        aspect-ratio: 16 / 10;
+        margin: -6px -6px 4px;
+        border: 1px solid var(--hairline);
+        border-radius: 9px;
+        background: var(--canvas);
+      }
+
+      .lab-card-thumb img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: top left;
+      }
+
+      .lab-filters .seg {
+        flex-wrap: wrap;
+      }
+
+      .lab-empty {
+        margin-top: 30px;
+        color: var(--text-3);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="lab-home">
+      <section class="lab-hero">
+        <span class="lab-kicker"><span class="dot dot-violet"></span>Vector Design Lab</span>
+        <h1>Design concepts for Vector</h1>
+        <p>
+          Interactive concepts for screens Vector has or could have, drawn in the same style as the redesigned Changes
+          panel. Click around inside each one. Tell Claude which numbers you like, for example “D05 and D14”, and what
+          to change.
+        </p>
+        <div class="lab-nav">
+          <a class="btn btn-primary" href="ideas.html">Ideas for Vector →</a>
+        </div>
+      </section>
+
+      <div class="lab-filters">
+        <div class="seg" data-filter role="group" aria-label="Filter by area"></div>
+      </div>
+      <div class="lab-grid" data-grid></div>
+    </main>
+
+    <script src="assets/icons.js"></script>
+    <script src="assets/registry/review.js"></script>
+    <script src="assets/registry/connections.js"></script>
+    <script src="assets/registry/settings.js"></script>
+    <script src="assets/registry/agents.js"></script>
+    <script src="assets/lab.js"></script>
+    <script>
+      const designs = (window.LAB_DESIGNS ?? []).toSorted((a, b) => a.number - b.number)
+      const areas = ["All", ...new Set(designs.map((d) => d.area))]
+      const filter = document.querySelector("[data-filter]")
+      const grid = document.querySelector("[data-grid]")
+      const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+      filter.innerHTML = areas
+        .map((a, i) => `<button type="button" data-value="${esc(a)}" aria-pressed="${i === 0}">${esc(a)}</button>`)
+        .join("")
+      function render(area) {
+        const shown = designs.filter((d) => area === "All" || d.area === area)
+        grid.innerHTML = shown
+          .map((d) => {
+            const num = `D${String(d.number).padStart(2, "0")}`
+            return `<a class="lab-card" href="designs/${d.slug}.html">
+              <div class="lab-card-thumb"><img src="assets/thumbs/${d.slug}.png" alt="" loading="lazy" onerror="this.parentElement.remove()" /></div>
+              <div class="lab-card-top"><span class="lab-num badge badge-violet mono">${num}</span><span class="badge">${esc(d.area)}</span></div>
+              <h2>${esc(d.title)}</h2>
+              <p>${esc(d.summary)}</p>
+              <p class="lab-card-idea">${esc(d.idea)}</p>
+            </a>`
+          })
+          .join("")
+      }
+      filter.addEventListener("lab:seg", (event) => render(event.detail))
+      render("All")
+    </script>
+  </body>
+</html>

@@ -1,0 +1,2270 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* D14 Subagents and follow-ups. Everything is scoped under .d-subagent-orchestration. */
+      .d-subagent-orchestration {
+        --so-run: #8b73d6;
+        --so-run-text: #cdbdf5;
+        --so-card: #221f27;
+        --so-well: #29252f;
+        --so-pane: #17151c;
+        --so-t2: #c9c3cd;
+        --so-t3: #a39dab;
+      }
+
+      .d-subagent-orchestration :is(h3, h4, p, ul, ol) {
+        margin: 0;
+        padding: 0;
+      }
+
+      .d-subagent-orchestration :is(ul, ol) {
+        list-style: none;
+      }
+
+      .d-subagent-orchestration svg {
+        flex: none;
+      }
+
+      .d-subagent-orchestration [hidden] {
+        display: none !important;
+      }
+
+      /* ---- session header ---- */
+      .d-subagent-orchestration .so-header {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 47px;
+        padding: 0 9px 0 18px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--header);
+      }
+
+      .d-subagent-orchestration .so-header h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .d-subagent-orchestration .so-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+      }
+
+      .d-subagent-orchestration .so-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 8px;
+        border: 1px solid rgba(255, 255, 255, 0.075);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-2);
+        font-size: 11.5px;
+      }
+
+      .d-subagent-orchestration .so-pill.mono {
+        font-size: 11px;
+      }
+
+      .d-subagent-orchestration .so-status {
+        color: var(--amber);
+      }
+
+      .d-subagent-orchestration .so-status i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 8px rgba(214, 169, 92, 0.5);
+        animation: so-working 1.15s ease-in-out infinite;
+      }
+
+      .d-subagent-orchestration .so-status[data-tone="violet"] {
+        color: var(--so-run-text);
+      }
+
+      .d-subagent-orchestration .so-status[data-tone="green"] {
+        color: var(--green);
+      }
+
+      .d-subagent-orchestration .so-status[data-tone="green"] i {
+        animation: none;
+      }
+
+      @keyframes so-working {
+        50% {
+          opacity: 0.38;
+          transform: scale(0.78);
+        }
+      }
+
+      .d-subagent-orchestration .so-tool {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 8px;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-subagent-orchestration .so-tool svg {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-tool:hover {
+        border-color: rgba(255, 255, 255, 0.06);
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+      }
+
+      .d-subagent-orchestration .so-tool[aria-pressed="true"] {
+        border-color: rgba(182, 159, 247, 0.28);
+        background: rgba(182, 159, 247, 0.11);
+        color: var(--violet-bright);
+      }
+
+      .d-subagent-orchestration .so-tool[aria-pressed="true"] svg {
+        color: inherit;
+      }
+
+      .d-subagent-orchestration .so-count {
+        min-width: 13px;
+        padding: 2px 3px;
+        border-radius: 4px;
+        background: rgba(182, 159, 247, 0.14);
+        color: var(--violet-bright);
+        font: 600 10px/1 var(--mono);
+        text-align: center;
+      }
+
+      /* ---- body ---- */
+      .d-subagent-orchestration .so-body {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .d-subagent-orchestration .so-conv {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        padding-bottom: 18px;
+        background: var(--canvas);
+      }
+
+      .d-subagent-orchestration .so-scroll {
+        display: flex;
+        flex: 1;
+        flex-direction: column-reverse;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        scrollbar-width: none;
+      }
+
+      .d-subagent-orchestration .so-column {
+        display: flex;
+        flex: none;
+        flex-direction: column;
+        width: min(628px, calc(100% - 48px));
+        margin: 0 auto;
+        padding: 24px 0 18px;
+      }
+
+      .d-subagent-orchestration .so-user {
+        align-self: flex-end;
+        max-width: 86%;
+        padding: 9px 13px;
+        border: 1px solid rgba(255, 255, 255, 0.035);
+        border-radius: 6px;
+        background: #2a2631;
+        color: var(--text-1);
+        font-size: 14px;
+        line-height: 21px;
+      }
+
+      .d-subagent-orchestration .so-user + * {
+        margin-top: 34px;
+      }
+
+      .d-subagent-orchestration .so-reason {
+        color: #b3b0b8;
+        font-size: 13.2px;
+        line-height: 18px;
+      }
+
+      .d-subagent-orchestration .so-prose {
+        margin-top: 20px;
+        color: #e6e4ea;
+        font-size: 14px;
+        line-height: 21.6px;
+      }
+
+      .d-subagent-orchestration .so-result code,
+      .d-subagent-orchestration .so-returned code {
+        padding: 0 3px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--so-t2);
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+
+      .d-subagent-orchestration .so-prose code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: #37343a;
+        color: #eceaf0;
+        font-family: var(--mono);
+        font-size: 12.5px;
+      }
+
+      .d-subagent-orchestration .so-new {
+        animation: so-in 420ms var(--ease);
+      }
+
+      @keyframes so-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+      }
+
+      /* the task chip, as .vector-task-chip */
+      .d-subagent-orchestration .so-chip {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 16px;
+        row-gap: 4px;
+        width: 100%;
+        margin-top: 14px;
+        padding: 11px 14px 12px 15px;
+        border: 0;
+        border-radius: 10px;
+        background: var(--so-card);
+        color: var(--text-1);
+        text-align: left;
+        transition: background-color 120ms ease;
+      }
+
+      .d-subagent-orchestration .so-chip:hover {
+        background: var(--so-well);
+      }
+
+      .d-subagent-orchestration .so-chip-title {
+        overflow: hidden;
+        font-size: 14px;
+        line-height: 21px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-chip > svg {
+        align-self: center;
+        color: var(--so-t3);
+      }
+
+      .d-subagent-orchestration .so-chip-meta {
+        display: flex;
+        grid-column: 1 / -1;
+        gap: 10px;
+        color: var(--so-t2);
+        font-size: 13px;
+        line-height: 19px;
+      }
+
+      .d-subagent-orchestration .so-dim {
+        color: var(--so-t3);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-subagent-orchestration .so-word {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-subagent-orchestration .so-word::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--so-t3);
+      }
+
+      .d-subagent-orchestration .so-word[data-status="failed"] {
+        color: var(--red);
+      }
+
+      .d-subagent-orchestration .so-word[data-status="failed"]::before {
+        background: var(--red);
+      }
+
+      .d-subagent-orchestration .so-word[data-status="stopped"]::before {
+        background: transparent;
+        box-shadow: inset 0 0 0 1px var(--so-t2);
+      }
+
+      .d-subagent-orchestration .so-squares {
+        display: flex;
+        flex-wrap: wrap;
+        grid-column: 1 / -1;
+        gap: 4px;
+        margin-top: 2px;
+      }
+
+      /* one 8px mark per agent: squares for Subagents, dots for specialists */
+      .d-subagent-orchestration .so-sq {
+        box-sizing: border-box;
+        width: 8px;
+        height: 8px;
+        flex: none;
+        border: 1px solid var(--so-mark, var(--so-t3));
+        border-radius: 2px;
+        background: var(--so-mark, transparent);
+      }
+
+      .d-subagent-orchestration .so-sq[data-kind="specialist"] {
+        border-radius: 50%;
+      }
+
+      .d-subagent-orchestration [data-status="running"].so-sq,
+      .d-subagent-orchestration [data-status="running"] > .so-sq {
+        --so-mark: var(--so-run);
+        animation: so-breathe 1.6s ease-in-out infinite;
+      }
+
+      .d-subagent-orchestration [data-status="done"].so-sq,
+      .d-subagent-orchestration [data-status="done"] > .so-sq {
+        --so-mark: var(--so-t3);
+      }
+
+      .d-subagent-orchestration [data-status="failed"].so-sq,
+      .d-subagent-orchestration [data-status="failed"] > .so-sq {
+        --so-mark: var(--red);
+      }
+
+      .d-subagent-orchestration [data-status="blocked"].so-sq,
+      .d-subagent-orchestration [data-status="blocked"] > .so-sq {
+        border-color: var(--amber);
+      }
+
+      .d-subagent-orchestration [data-status="stopped"].so-sq,
+      .d-subagent-orchestration [data-status="stopped"] > .so-sq {
+        border-color: var(--so-t2);
+        background: linear-gradient(var(--so-t2) 0 0) center / 4px 1px no-repeat;
+      }
+
+      @keyframes so-breathe {
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      /* ---- the return card and the main agent's follow-up ---- */
+      .d-subagent-orchestration .so-return {
+        margin-top: 28px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #1b191f;
+      }
+
+      .d-subagent-orchestration .so-return-head {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+        min-height: 42px;
+        padding: 8px 12px 8px 12px;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-subagent-orchestration .so-return-head:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+
+      .d-subagent-orchestration .so-return-icon {
+        display: grid;
+        width: 22px;
+        height: 22px;
+        flex: none;
+        place-items: center;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--so-t2);
+      }
+
+      .d-subagent-orchestration .so-return[data-status="failed"] .so-return-icon {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .d-subagent-orchestration .so-return[data-status="stopped"] .so-return-icon {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-return-title {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-return-title span {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-return-meta {
+        flex: none;
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-subagent-orchestration .so-return-head > .so-chev {
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+
+      .d-subagent-orchestration .so-return-head[aria-expanded="true"] > .so-chev {
+        transform: rotate(90deg);
+      }
+
+      .d-subagent-orchestration .so-result {
+        display: -webkit-box;
+        margin: 0 12px 11px 44px;
+        overflow: hidden;
+        color: var(--so-t3);
+        font-size: 12.5px;
+        line-height: 1.55;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .d-subagent-orchestration .so-return-head[aria-expanded="true"] + .so-result {
+        display: block;
+        color: var(--so-t2);
+      }
+
+      .d-subagent-orchestration .so-result-extra {
+        display: none;
+        margin: -2px 12px 12px 44px;
+        padding-top: 10px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font: 11px/1.7 var(--mono);
+      }
+
+      .d-subagent-orchestration .so-return-head[aria-expanded="true"] ~ .so-result-extra {
+        display: block;
+      }
+
+      .d-subagent-orchestration .so-result-extra b {
+        color: var(--text-2);
+        font-weight: 400;
+      }
+
+      .d-subagent-orchestration .so-follow {
+        position: relative;
+        margin-top: 14px;
+        padding-left: 18px;
+      }
+
+      .d-subagent-orchestration .so-follow::before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        bottom: 2px;
+        left: 0;
+        width: 2px;
+        border-radius: 2px;
+        background: linear-gradient(180deg, var(--violet-bright), rgba(146, 116, 236, 0.25));
+        box-shadow: 0 0 10px rgba(182, 159, 247, 0.25);
+      }
+
+      .d-subagent-orchestration .so-follow-label {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--violet-bright);
+        font-size: 12px;
+      }
+
+      .d-subagent-orchestration .so-follow-label span {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-follow .so-prose {
+        margin-top: 8px;
+      }
+
+      .d-subagent-orchestration .so-follow[data-mode="recorded"]::before {
+        background: none;
+        box-shadow: none;
+        border-left: 1px dashed var(--line-strong);
+      }
+
+      .d-subagent-orchestration .so-follow[data-mode="recorded"] .so-follow-label {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-reading {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 14px;
+        padding-left: 18px;
+        color: var(--violet-bright);
+        font-size: 12.5px;
+      }
+
+      .d-subagent-orchestration .so-reading span {
+        background: linear-gradient(90deg, var(--text-3) 0%, var(--violet-bright) 50%, var(--text-3) 100%) 0 0 / 200% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: so-shimmer 1.4s linear infinite;
+      }
+
+      @keyframes so-shimmer {
+        to {
+          background-position: -200% 0;
+        }
+      }
+
+      /* waiting row at the end of the transcript */
+      .d-subagent-orchestration .so-waiting {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 26px;
+        padding: 11px 14px;
+        border: 1px dashed rgba(182, 159, 247, 0.28);
+        border-radius: 10px;
+        color: var(--so-t2);
+        font-size: 13px;
+      }
+
+      .d-subagent-orchestration .so-waiting-text {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+      }
+
+      .d-subagent-orchestration .so-waiting-text span {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-subagent-orchestration .so-spinner {
+        width: 16px;
+        height: 16px;
+        flex: none;
+        border: 1.5px solid rgba(182, 159, 247, 0.25);
+        border-top-color: var(--violet-bright);
+        border-radius: 50%;
+        animation: so-spin 0.9s linear infinite;
+      }
+
+      @keyframes so-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .d-subagent-orchestration .so-waiting[data-idle] {
+        border-style: solid;
+        border-color: var(--line);
+      }
+
+      .d-subagent-orchestration .so-waiting[data-idle] .so-spinner {
+        display: none;
+      }
+
+      .d-subagent-orchestration .so-status[data-tone="muted"] {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-status[data-tone="muted"] i {
+        box-shadow: none;
+        animation: none;
+      }
+
+      .d-subagent-orchestration .so-done-note {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 18px;
+        padding: 11px 14px;
+        border: 1px solid rgba(101, 199, 142, 0.28);
+        border-radius: 10px;
+        background: rgba(101, 199, 142, 0.06);
+        color: var(--text-1);
+        font-size: 13px;
+      }
+
+      .d-subagent-orchestration .so-done-note svg {
+        color: var(--green);
+      }
+
+      .d-subagent-orchestration .so-done-note .btn {
+        margin-left: auto;
+      }
+
+      .d-subagent-orchestration .so-turn {
+        width: min(760px, calc(100% - 28px));
+        margin: 0 auto;
+        padding: 0 3px 6px;
+        color: #8d8a92;
+        font-size: 13px;
+        line-height: 20px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* composer, as a picture */
+      .d-subagent-orchestration .so-composer {
+        width: min(760px, calc(100% - 28px));
+        height: 92px;
+        margin: 0 auto;
+        padding: 14px 7px 0 14px;
+        border: 1px solid rgba(255, 255, 255, 0.055);
+        border-radius: 12px;
+        background: #1e1e20;
+      }
+
+      .d-subagent-orchestration .so-composer p {
+        color: #8b8a8e;
+        font-size: 14.5px;
+        line-height: 20px;
+      }
+
+      .d-subagent-orchestration .so-composer-row {
+        display: flex;
+        align-items: center;
+        height: 35px;
+        margin-top: 15px;
+        color: #c7c6ca;
+        font-size: 13px;
+      }
+
+      .d-subagent-orchestration .so-cc {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 7px;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-cc + .so-cc {
+        margin-left: 26px;
+      }
+
+      .d-subagent-orchestration .so-cc svg {
+        color: #7d7c80;
+      }
+
+      .d-subagent-orchestration .so-cc.is-strong {
+        color: #d2d1d5;
+        font-weight: 600;
+      }
+
+      .d-subagent-orchestration .so-cc.is-strong::before {
+        content: "";
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: #8d8c90;
+      }
+
+      .d-subagent-orchestration .so-cc.is-effort {
+        color: #a996f6;
+      }
+
+      .d-subagent-orchestration .so-cicon {
+        display: grid;
+        width: 28px;
+        place-items: center;
+        color: #8b8a8e;
+      }
+
+      .d-subagent-orchestration .so-cicon.is-first {
+        margin-left: auto;
+      }
+
+      .d-subagent-orchestration .so-stop {
+        display: grid;
+        width: 36px;
+        height: 35px;
+        margin-left: 5px;
+        place-items: center;
+        border-radius: 8px;
+        background: #b596ff;
+        color: #141217;
+      }
+
+      .d-subagent-orchestration .so-stop[data-idle] {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-3);
+      }
+
+      /* ---- the side panel ---- */
+      .d-subagent-orchestration .so-side {
+        position: relative;
+        display: flex;
+        flex: 0 0 456px;
+        flex-direction: column;
+        min-width: 0;
+        border-left: 1px solid rgba(226, 213, 237, 0.09);
+        background: var(--so-pane);
+      }
+
+      .d-subagent-orchestration .so-side::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 2;
+        height: 2px;
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.28), #9274ec, rgba(205, 190, 252, 0.24));
+      }
+
+      .d-subagent-orchestration .so-side-tabs {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 4px;
+        height: 43px;
+        padding: 0 8px 0 10px;
+        border-bottom: 1px solid rgba(226, 213, 237, 0.07);
+        background: #1b1921;
+      }
+
+      .d-subagent-orchestration .so-side-tab {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 26px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-subagent-orchestration .so-side-tab svg {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-side-tab:hover {
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-1);
+      }
+
+      .d-subagent-orchestration .so-side-tab[aria-selected="true"] {
+        background: #231f2a;
+        color: var(--text);
+      }
+
+      .d-subagent-orchestration .so-side-tab[aria-selected="true"] svg {
+        color: #b3a1f2;
+      }
+
+      .d-subagent-orchestration .so-side-tab[aria-selected="true"]::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        bottom: -9px;
+        left: 0;
+        height: 1.5px;
+        background: #e2dfe7;
+      }
+
+      .d-subagent-orchestration .so-side-tabs .icon-btn {
+        margin-left: auto;
+        color: var(--text-2);
+      }
+
+      .d-subagent-orchestration .so-panel {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .d-subagent-orchestration .so-summary {
+        flex: none;
+        display: grid;
+        gap: 10px;
+        padding: 14px 16px 12px 18px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-subagent-orchestration .so-summary-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .d-subagent-orchestration .so-summary-top b {
+        font-size: 13.5px;
+        font-weight: 500;
+      }
+
+      .d-subagent-orchestration .so-summary-top .seg {
+        margin-left: auto;
+      }
+
+      .d-subagent-orchestration .so-tally {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 14px;
+        color: var(--text-3);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-subagent-orchestration .so-tally > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-subagent-orchestration .so-tally b {
+        color: var(--so-t2);
+        font-weight: 400;
+      }
+
+      .d-subagent-orchestration .so-tally .so-spend {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 11.5px;
+      }
+
+      .d-subagent-orchestration .so-tree {
+        flex: 1;
+        min-height: 0;
+        padding: 10px 10px 16px 12px;
+      }
+
+      .d-subagent-orchestration .so-root {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .d-subagent-orchestration .so-root-icon {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 7px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-subagent-orchestration .so-root-text {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .d-subagent-orchestration .so-root-text b {
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-subagent-orchestration .so-root-text span {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-root-end {
+        display: grid;
+        justify-items: end;
+        gap: 2px;
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-subagent-orchestration .so-root-end span:last-child {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-subagent-orchestration .so-phases {
+        position: relative;
+        margin: 2px 0 0 22px;
+        padding-left: 12px;
+        border-left: 1px solid var(--line);
+      }
+
+      .d-subagent-orchestration .so-phase {
+        position: relative;
+        padding-top: 10px;
+      }
+
+      .d-subagent-orchestration .so-phase::before {
+        content: "";
+        position: absolute;
+        top: 22px;
+        left: -12px;
+        width: 9px;
+        height: 1px;
+        background: var(--line);
+      }
+
+      .d-subagent-orchestration .so-phase-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 24px;
+        padding: 0 6px 0 2px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-subagent-orchestration .so-phase-head b {
+        color: var(--so-t2);
+        font-weight: 500;
+      }
+
+      .d-subagent-orchestration .so-phase-head .so-squares {
+        margin: 0 0 0 auto;
+      }
+
+      .d-subagent-orchestration .so-phase[data-flash] .so-phase-head b {
+        color: var(--violet-bright);
+      }
+
+      .d-subagent-orchestration .so-agent {
+        border-radius: 8px;
+        transition: background-color 160ms ease;
+      }
+
+      .d-subagent-orchestration .so-agent[data-open] {
+        background: var(--so-card);
+      }
+
+      .d-subagent-orchestration .so-agent[data-flash] {
+        box-shadow: inset 0 0 0 1px var(--violet-line);
+      }
+
+      .d-subagent-orchestration .so-row {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+        min-height: 46px;
+        padding: 6px 10px 6px 8px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-subagent-orchestration .so-row:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-subagent-orchestration .so-agent[data-open] .so-row:hover {
+        background: transparent;
+      }
+
+      .d-subagent-orchestration .so-row .so-sq {
+        margin: 0 2px;
+      }
+
+      .d-subagent-orchestration .so-row-text {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        gap: 2px;
+      }
+
+      .d-subagent-orchestration .so-row-name {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        font-size: 13px;
+      }
+
+      .d-subagent-orchestration .so-row-name > span:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-id {
+        flex: none;
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-subagent-orchestration .so-row-sub {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-row-sub .so-fg {
+        color: var(--so-t2);
+      }
+
+      .d-subagent-orchestration [data-status="running"] .so-row-name {
+        color: var(--so-run-text);
+      }
+
+      .d-subagent-orchestration [data-status="failed"] .so-row-sub .so-state-word {
+        color: var(--red);
+      }
+
+      .d-subagent-orchestration [data-status="blocked"] .so-row-sub .so-state-word {
+        color: var(--amber);
+      }
+
+      .d-subagent-orchestration .so-row-end {
+        display: grid;
+        flex: none;
+        justify-items: end;
+        gap: 2px;
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-subagent-orchestration .so-row-end span:last-child {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-subagent-orchestration .so-detail {
+        display: grid;
+        gap: 12px;
+        padding: 2px 12px 14px 32px;
+        font-size: 12.5px;
+      }
+
+      .d-subagent-orchestration .so-dl {
+        display: grid;
+        gap: 5px;
+      }
+
+      .d-subagent-orchestration .so-dl > span:first-child {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-subagent-orchestration .so-brief {
+        color: var(--so-t2);
+        line-height: 1.55;
+      }
+
+      .d-subagent-orchestration .so-paths {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+
+      .d-subagent-orchestration .so-path {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 21px;
+        padding: 0 7px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text-2);
+        font: 11px var(--mono);
+      }
+
+      .d-subagent-orchestration .so-path svg {
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-path[data-ok] svg {
+        color: var(--green);
+      }
+
+      .d-subagent-orchestration .so-criteria {
+        display: grid;
+        gap: 5px;
+      }
+
+      .d-subagent-orchestration .so-criteria li {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        color: var(--so-t2);
+        line-height: 1.45;
+      }
+
+      .d-subagent-orchestration .so-box {
+        display: grid;
+        width: 14px;
+        height: 14px;
+        flex: none;
+        margin-top: 2px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 3px;
+        background: #141217;
+        color: transparent;
+      }
+
+      .d-subagent-orchestration .so-criteria li[data-ok] .so-box {
+        border-color: rgba(101, 199, 142, 0.45);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-subagent-orchestration .so-returned {
+        padding: 9px 11px;
+        border-radius: 7px;
+        background: #19171d;
+        color: var(--so-t2);
+        line-height: 1.55;
+      }
+
+      .d-subagent-orchestration .so-returned[data-status="failed"] {
+        box-shadow: inset 2px 0 0 var(--red);
+      }
+
+      .d-subagent-orchestration .so-meta-line {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 12px;
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-subagent-orchestration .so-meta-line b {
+        color: var(--text-2);
+        font-weight: 400;
+      }
+
+      .d-subagent-orchestration .so-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-subagent-orchestration .so-actions .btn-ghost {
+        margin-left: auto;
+      }
+
+      .d-subagent-orchestration .so-continue {
+        display: grid;
+        gap: 6px;
+      }
+
+      .d-subagent-orchestration .so-continue-box {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 4px 0 10px;
+        border: 1px solid rgba(182, 159, 247, 0.45);
+        border-radius: 8px;
+        background: #1e1e20;
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.1);
+      }
+
+      .d-subagent-orchestration .so-continue-box input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 12.5px;
+      }
+
+      .d-subagent-orchestration .so-continue p {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-subagent-orchestration .so-continue p code {
+        color: var(--text-2);
+        font: 11px var(--mono);
+      }
+
+      /* timeline (gantt) view */
+      .d-subagent-orchestration .so-gantt {
+        flex: 1;
+        min-height: 0;
+        padding: 14px 16px 16px 18px;
+      }
+
+      .d-subagent-orchestration .so-axis {
+        position: relative;
+        height: 18px;
+        margin-left: 150px;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+
+      .d-subagent-orchestration .so-axis span {
+        position: absolute;
+        transform: translateX(-50%);
+      }
+
+      .d-subagent-orchestration .so-grow {
+        display: grid;
+        grid-template-columns: 150px minmax(0, 1fr);
+        align-items: center;
+        min-height: 34px;
+      }
+
+      .d-subagent-orchestration .so-grow + .so-grow {
+        border-top: 1px solid rgba(255, 255, 255, 0.03);
+      }
+
+      .d-subagent-orchestration .so-glabel {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding-right: 10px;
+        color: var(--so-t2);
+        font-size: 12px;
+      }
+
+      .d-subagent-orchestration .so-glabel span:last-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-track {
+        position: relative;
+        height: 34px;
+        background: repeating-linear-gradient(90deg, transparent 0 calc(25% - 1px), rgba(255, 255, 255, 0.035) calc(25% - 1px) 25%);
+      }
+
+      .d-subagent-orchestration .so-bar {
+        position: absolute;
+        top: 11px;
+        height: 12px;
+        min-width: 3px;
+        border-radius: 3px;
+        background: rgba(163, 157, 171, 0.45);
+      }
+
+      .d-subagent-orchestration .so-bar[data-status="running"] {
+        background: var(--so-run);
+        box-shadow: 0 0 10px rgba(139, 115, 214, 0.35);
+      }
+
+      .d-subagent-orchestration .so-bar[data-status="failed"] {
+        background: rgba(230, 120, 125, 0.7);
+      }
+
+      .d-subagent-orchestration .so-bar[data-status="stopped"] {
+        background: transparent;
+        box-shadow: inset 0 0 0 1px var(--so-t3);
+      }
+
+      .d-subagent-orchestration .so-bar[data-status="queued"],
+      .d-subagent-orchestration .so-bar[data-status="blocked"] {
+        background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.13) 0 3px, transparent 3px 6px);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+      }
+
+      .d-subagent-orchestration .so-bar[data-status="blocked"] {
+        box-shadow: inset 0 0 0 1px rgba(214, 169, 92, 0.6);
+      }
+
+      .d-subagent-orchestration .so-bar[data-kind="main"] {
+        background: rgba(182, 159, 247, 0.32);
+      }
+
+      .d-subagent-orchestration .so-bar[data-kind="idle"] {
+        top: 16px;
+        height: 2px;
+        background: repeating-linear-gradient(90deg, rgba(182, 159, 247, 0.3) 0 3px, transparent 3px 6px);
+      }
+
+      .d-subagent-orchestration .so-glen {
+        position: absolute;
+        top: 10px;
+        margin-left: 6px;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-dep {
+        position: absolute;
+        top: 3px;
+        color: var(--text-3);
+        font: 10px var(--mono);
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-now {
+        position: absolute;
+        top: -18px;
+        bottom: 0;
+        width: 1px;
+        background: var(--violet-bright);
+        box-shadow: 0 0 8px rgba(182, 159, 247, 0.5);
+      }
+
+      .d-subagent-orchestration .so-now::before {
+        content: "now";
+        position: absolute;
+        bottom: -16px;
+        left: -10px;
+        color: var(--violet-bright);
+        font: 10px var(--mono);
+      }
+
+      .d-subagent-orchestration .so-gwrap {
+        position: relative;
+      }
+
+      .d-subagent-orchestration .so-gnow-layer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 150px;
+        pointer-events: none;
+      }
+
+      .d-subagent-orchestration .so-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        margin-top: 26px;
+        padding-top: 12px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-subagent-orchestration .so-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-subagent-orchestration .so-legend i {
+        position: static;
+        display: inline-block;
+        width: 16px;
+        height: 8px;
+      }
+
+      /* changes tab */
+      .d-subagent-orchestration .so-changes {
+        flex: 1;
+        min-height: 0;
+        padding: 12px 10px;
+      }
+
+      .d-subagent-orchestration .so-changes-sum {
+        display: flex;
+        gap: 10px;
+        padding: 0 8px 10px;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-subagent-orchestration .so-changes-sum span:first-child {
+        flex: 1;
+      }
+
+      .d-subagent-orchestration .so-changes .add,
+      .d-subagent-orchestration .so-changes .del {
+        font-size: 12px;
+      }
+
+      .d-subagent-orchestration .so-file {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 6px 10px 6px 8px;
+        border-radius: 6px;
+      }
+
+      .d-subagent-orchestration .so-file:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .d-subagent-orchestration .so-file-name {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+      }
+
+      .d-subagent-orchestration .so-file-name span {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-owner {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 19px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+        white-space: nowrap;
+      }
+
+      .d-subagent-orchestration .so-owner[data-status="running"] {
+        background: rgba(139, 115, 214, 0.15);
+        color: var(--so-run-text);
+      }
+
+      .d-subagent-orchestration .so-changes-note {
+        padding: 12px 8px 0;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .d-subagent-orchestration .so-side-empty {
+        display: grid;
+        flex: 1;
+        place-items: center;
+        color: var(--text-3);
+      }
+
+      .d-subagent-orchestration .so-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .d-subagent-orchestration *,
+        .d-subagent-orchestration *::before {
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="subagent-orchestration"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-subagent-orchestration">
+            <div class="app">
+              <nav data-lab-sidebar data-active="workspace" data-workspace="Harden workspace trust" data-branch="workspace-trust"></nav>
+              <main class="app-main">
+                <header class="so-header">
+                  <i data-icon="branch" data-size="16" class="muted"></i>
+                  <h2>Harden workspace trust</h2>
+                  <div class="so-controls">
+                    <span class="so-pill mono">workspace-trust <i data-icon="chevron-down" data-size="12" class="muted"></i></span>
+                    <span class="so-pill so-status" data-status-pill><i></i><span data-status-text>Waiting on 2</span></span>
+                    <button class="so-tool" type="button" aria-pressed="true" data-tool="subagents" aria-label="Subagents panel">
+                      <i data-icon="task" data-size="16"></i><span>Tasks</span><span class="so-count" data-running-count>2</span>
+                    </button>
+                    <button class="so-tool" type="button" aria-pressed="false" data-tool="changes">
+                      <i data-icon="review" data-size="16"></i><span>Changes</span>
+                    </button>
+                    <button class="so-tool" type="button" aria-pressed="false">
+                      <i data-icon="terminal" data-size="16"></i><span>Terminal</span>
+                    </button>
+                  </div>
+                </header>
+
+                <div class="so-body">
+                  <div class="so-conv">
+                    <div class="so-scroll" tabindex="0" role="region" aria-label="Transcript">
+                      <div class="so-column" data-column>
+                        <p class="so-user">Harden workspace trust: a project's executable config should only run once its folder is trusted, bound to the folder's fingerprint, and a project must never start its own MCP servers before that. Add tests and get an independent verdict before committing.</p>
+                        <p class="so-reason">Planning how to split the work</p>
+                        <p class="so-prose">This spans three engine areas and needs tests, so I'll split it. First Explore maps every place a project can make Vector run something; how I divide the rest depends on what it finds.</p>
+                        <div data-chip-slot="1"></div>
+                        <div data-return-slot="1"></div>
+                        <div class="so-follow" data-mode="foreground">
+                          <p class="so-follow-label"><span data-glyph="follow"></span>Main agent continued in the same step <span>· foreground result</span></p>
+                          <p class="so-prose">Two groups that share no files, so they can be built in parallel. Each goes to a Subagent in the background with its own owned paths. Debug reproduces the symlinked-config bypass meanwhile, and Test is queued with <code>depends_on</code> so it starts on its own once both Subagents are in. I keep integration and the final checks.</p>
+                          <div data-chip-slot="2"></div>
+                        </div>
+                        <div data-return-slot="4"></div>
+                        <div class="so-follow" data-mode="background">
+                          <p class="so-follow-label"><span data-glyph="follow"></span>Main agent woke on the result <span>· background notification</span></p>
+                          <p class="so-prose">Debug was refused a directory outside the workspace, so it couldn't build its second repository. I won't retry it blind; the symlinked-config case is in Test's brief as well, so it's covered either way.</p>
+                        </div>
+                        <div class="so-waiting" data-waiting>
+                          <span class="so-spinner" aria-hidden="true"></span>
+                          <span class="so-waiting-text"><b style="font-weight: 400" data-waiting-title>Waiting for 2 background Subagents</b><span data-waiting-sub>The main agent is idle until a result arrives. It never polls.</span></span>
+                          <span class="so-squares" data-waiting-squares style="margin: 0"></span>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="so-turn"><span data-turn-time>7m 40s</span> · <span data-turn-tokens>412K</span> tokens<span data-turn-note> · 2 running subagents</span></p>
+                    <div class="so-composer" role="img" aria-label="Prompt composer: GPT-6 Sol, Manual, Max effort, Normal speed">
+                      <p>Ask anything, / for commands, @ for context...</p>
+                      <div class="so-composer-row" aria-hidden="true">
+                        <span class="so-cc"><i data-icon="model" data-size="13"></i>GPT-6 Sol<i data-icon="caret" data-size="12"></i></span>
+                        <span class="so-cc is-strong">Manual<i data-icon="caret" data-size="12"></i></span>
+                        <span class="so-cc is-effort">Max<i data-icon="caret" data-size="12"></i></span>
+                        <span class="so-cicon is-first"><i data-icon="mic" data-size="14"></i></span>
+                        <span class="so-cicon"><i data-icon="clip" data-size="14"></i></span>
+                        <span class="so-stop" data-stop-btn><i data-icon="stop" data-size="18"></i></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <aside class="so-side" data-side aria-label="Subagents">
+                    <div class="so-side-tabs" role="tablist">
+                      <button class="so-side-tab" role="tab" type="button" aria-selected="true" data-side-tab="agents"><i data-icon="task" data-size="14"></i>Subagents <span class="so-count" data-agents-count>8</span></button>
+                      <button class="so-side-tab" role="tab" type="button" aria-selected="false" data-side-tab="changes"><i data-icon="review" data-size="14"></i>Changes <span class="so-count" data-files-count>4</span></button>
+                      <button class="icon-btn" type="button" data-side-close aria-label="Close panel"><i data-icon="close" data-size="16"></i></button>
+                    </div>
+
+                    <div class="so-panel" data-side-panel="agents">
+                      <div class="so-summary">
+                        <div class="so-summary-top">
+                          <b data-sum-title>8 subagents in 3 phases</b>
+                          <div class="seg" role="group" aria-label="View" data-view-seg>
+                            <button type="button" aria-pressed="true" data-value="tree">Tree</button>
+                            <button type="button" aria-pressed="false" data-value="timeline">Timeline</button>
+                          </div>
+                        </div>
+                        <div class="so-tally" data-tally></div>
+                      </div>
+                      <div class="so-tree scroll" data-tree></div>
+                      <div class="so-gantt scroll" data-gantt hidden></div>
+                    </div>
+
+                    <div class="so-panel" data-side-panel="changes" hidden>
+                      <div class="so-changes scroll" data-changes></div>
+                    </div>
+                  </aside>
+                </div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const stage = document.querySelector(".d-subagent-orchestration")
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+
+        const paths = {
+          follow: '<path d="M3.6 3.5v3.6a2.4 2.4 0 0 0 2.4 2.4h6.4"/><path d="m9.8 6.9 2.6 2.6-2.6 2.6"/>',
+          ret: '<path d="M12.4 4.2v3.4a2.4 2.4 0 0 1-2.4 2.4H3.6"/><path d="M6.2 7.4 3.6 10l2.6 2.6"/>',
+          fail: '<path d="m5.2 5.2 5.6 5.6m0-5.6-5.6 5.6"/>',
+          lock: '<rect x="4" y="7.2" width="8" height="5.8" rx="1.3"/><path d="M5.8 7.2V5.6a2.2 2.2 0 0 1 4.4 0v1.6"/>',
+          link: '<path d="M6.7 9.3 9.3 6.7"/><path d="M7.6 4.9 8.7 3.8a2.5 2.5 0 0 1 3.5 3.5l-1.1 1.1M8.4 11.1l-1.1 1.1a2.5 2.5 0 0 1-3.5-3.5l1.1-1.1"/>',
+          copy: '<rect x="5.5" y="5.5" width="7" height="7" rx="1.3"/><path d="M10.5 5.5V4.3A1.3 1.3 0 0 0 9.2 3H4.3A1.3 1.3 0 0 0 3 4.3v4.9a1.3 1.3 0 0 0 1.3 1.3h1.2"/>',
+          send: '<path d="M8 12.5v-9M4.6 6.9 8 3.5l3.4 3.4"/>',
+          check: '<path d="m3.8 8.3 2.7 2.7 5.7-6"/>',
+          main: '<circle cx="8" cy="8" r="2.2"/><path d="M8 2.5v1.6M8 11.9v1.6M2.5 8h1.6M11.9 8h1.6M4.1 4.1l1.1 1.1M10.8 10.8l1.1 1.1M4.1 11.9l1.1-1.1M10.8 5.2l1.1-1.1"/>',
+          continue: '<path d="M4.5 3.8v8.4L11 8Z"/>',
+          spark: '<path d="M8 2.8c.4 2.6 1.6 3.8 4.2 4.2-2.6.4-3.8 1.6-4.2 4.2-.4-2.6-1.6-3.8-4.2-4.2 2.6-.4 3.8-1.6 4.2-4.2Z"/>',
+        }
+        const glyph = (name, size = 16) =>
+          paths[name]
+            ? `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`
+            : LabUI.svg(name, size)
+        const fillGlyphs = (root) =>
+          root.querySelectorAll("[data-glyph]").forEach((el) => {
+            el.outerHTML = glyph(el.dataset.glyph, Number(el.dataset.size ?? 14))
+          })
+        const esc = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        const fmt = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`)
+        const plain = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`)
+        const tok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : `${(n / 1e3).toFixed(1)}k`)
+
+        // ---- the task tool's subagents in this session ----
+        // kind: "subagent" is the general Subagent (squares); everything else is a specialist (dots).
+        const agents = [
+          {
+            id: 1, sid: "ses_01JB4K2M7Q", title: "Map trust entry points", agent: "explore", kind: "specialist", bg: false, phase: 1,
+            status: "done", startAt: 22, secs: 161, tokens: 286400, cost: 0.11, tools: 41, model: "GPT-6 Luna", owned: [], depends: [],
+            brief: "Medium thoroughness. Find every place a project can make Vector run something: config files, MCP server definitions, hooks, commands and plugin manifests. Report paths grouped by subsystem and say which groups share files.",
+            criteria: ["Every entry point has a file path", "Groups that share files are called out"],
+            result: "7 entry points in two independent groups. Config: <code>vector.json</code>, <code>.vector/agents/*.md</code>, <code>.vector/commands/*.md</code>, <code>.vector/hooks/*</code>. MCP: <code>vector.json#mcp</code>, <code>.mcp.json</code>, plugin manifests. The groups share no files.",
+          },
+          {
+            id: 2, sid: "ses_01JB4N8R2C", title: "Fingerprint-bound trust", agent: "general", kind: "subagent", bg: true, phase: 2,
+            status: "running", startAt: 192, secs: 268, dur: 7, tokens: 1020000, cost: 0.41, tools: 58, model: "GPT-6 Sol", depends: [],
+            owned: ["packages/engine/src/project/", "packages/engine/src/config/"],
+            brief: "Bind folder trust to a fingerprint of the folder's real path and its executable config, so a moved or edited folder reads as untrusted. Untrusted project policy may narrow permissions but never widen them. Stay inside your owned paths.",
+            criteria: ["A moved or edited folder loses trust", "Untrusted project policy can only narrow permissions", "bun typecheck passes in packages/engine"],
+            result: "Trust records now store a SHA-256 fingerprint of the folder's realpath and executable config; <code>trusted()</code> compares it, so a moved or edited folder is untrusted. <code>resolvePolicy</code> narrows instead of merging for untrusted projects. Typecheck passes. Stayed inside owned paths.",
+            files: [["trust.ts", "packages/engine/src/project/", 64, 9], ["project-policy.ts", "packages/engine/src/config/", 31, 12]],
+          },
+          {
+            id: 3, sid: "ses_01JB4N8T5V", title: "Gate project MCP launch", agent: "general", kind: "subagent", bg: true, phase: 2,
+            status: "running", startAt: 192, secs: 251, dur: 14, tokens: 880200, cost: 0.36, tools: 49, model: "GPT-6 Sol", depends: [],
+            owned: ["packages/engine/src/mcp/", "packages/engine/src/permission/"],
+            brief: "Refuse to launch MCP servers declared by a project until that project is trusted, and make project executable config ask first. User-declared servers must be unaffected. Stay inside your owned paths.",
+            criteria: ["Project MCP servers wait for trust", "User-declared servers are unaffected", "bun typecheck passes in packages/engine"],
+            result: "<code>launch()</code> refuses project-declared servers until the project is trusted and returns the message the app shows. Executable config from an untrusted project now asks first. Added <code>source</code> to <code>McpServer</code>. Typecheck passes.",
+            files: [["launch.ts", "packages/engine/src/mcp/", 18, 6], ["executable.ts", "packages/engine/src/permission/", 22, 4]],
+          },
+          {
+            id: 4, sid: "ses_01JB4N8W0K", title: "Reproduce the symlink bypass", agent: "debug", kind: "specialist", bg: true, phase: 2,
+            status: "failed", startAt: 192, secs: 118, tokens: 133500, cost: 0.05, tools: 12, model: "GPT-6 Sol", owned: [], depends: [],
+            brief: "Reproduce the trust bypass through a symlinked vector.json: a trusted folder whose config is a symlink into an untrusted one. Report the exact steps and whether the staged change closes it.",
+            criteria: ["A failing reproduction on the current tree", "Steps another agent can rerun"],
+            result: "Permission denied: <code>external_directory</code> for <code>/tmp/vector-fixture-2</code>. The second repository has to live outside the workspace, so the fixture could not be created.",
+            continueResult: "Reproduced it with both repositories under <code>.vector/tmp/</code>: before the patch the symlinked config ran untrusted; with the staged patch it asks first. Steps are in the session.",
+          },
+          {
+            id: 5, sid: "ses_01JB4N8Y3H", title: "Write trust tests", agent: "test", kind: "specialist", bg: true, phase: 2,
+            status: "queued", startAt: null, secs: 0, dur: 13, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", depends: [2, 3],
+            owned: ["packages/engine/test/project/", "packages/engine/test/mcp/"],
+            brief: "Once both Subagents are in, cover workspace trust: first open, a changed fingerprint, a declined prompt and a symlinked config, plus project MCP servers waiting for trust. Run the suite in packages/engine.",
+            criteria: ["Covers first open, changed fingerprint, declined prompt, symlinked config", "Project MCP servers wait for trust", "bun test passes in packages/engine"],
+            result: "14 tests across <code>trust.test.ts</code> and <code>launch.test.ts</code>, all passing, including the symlinked config. Slowest 2.91 ms. No changes outside owned paths.",
+            files: [["trust.test.ts", "packages/engine/test/project/", 96, 0], ["launch.test.ts", "packages/engine/test/mcp/", 58, 0]],
+          },
+          {
+            id: 6, sid: "ses_01JB4R1A9D", title: "Security review of the patch", agent: "security", kind: "specialist", bg: true, phase: 3,
+            status: "pending", startAt: null, secs: 0, dur: 16, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", owned: [], depends: [],
+            brief: "Read-only review of the staged diff against HEAD: fingerprint-bound trust, narrowing-only project policy, and the MCP launch gate. Report bypasses by severity.",
+            criteria: ["No Critical or High bypass", "Each finding names a file and line"],
+            result: "No Critical or High findings. Untrusted policy can only narrow permissions; project MCP servers wait for trust. Medium: a trust record for a deleted folder lingers in settings; suggest pruning on load.",
+          },
+          {
+            id: 7, sid: "ses_01JB4R1C2F", title: "Code review", agent: "review", kind: "specialist", bg: true, phase: 3,
+            status: "pending", startAt: null, secs: 0, dur: 11, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Sol", owned: [], depends: [],
+            brief: "Read-only review of the staged diff for correctness, regressions and missing tests.",
+            criteria: ["Findings are actionable", "Missing tests are listed"],
+            result: "No blocking issues. One suggestion: rename <code>fingerprint()</code> to <code>folderFingerprint()</code>, since <code>fingerprint</code> is also a field on the trust record.",
+          },
+          {
+            id: 8, sid: "ses_01JB4R1E6M", title: "Independent verdict", agent: "judge", kind: "specialist", bg: false, phase: 3,
+            status: "pending", startAt: null, secs: 0, dur: 11, tokens: 0, cost: 0, tools: 0, model: "GPT-6 Astra", owned: [], depends: [6, 7],
+            brief: "Judge the staged change against the original request and its success criteria. Score requirement coverage, correctness, regression safety, evidence and security; return PASS, FAIL or INCONCLUSIVE.",
+            criteria: ["Verdict with a score per rubric line", "Evidence cited for each"],
+            result: "<b>PASS</b>. Requirement coverage 5/5, correctness 5/5, regression safety 4/5, evidence 5/5, security 5/5. Ready to commit.",
+          },
+        ]
+        const NAME = { explore: "Explore", debug: "Debug", test: "Test", security: "Security", review: "Review", judge: "Judge" }
+        const kindLabel = (a) => (a.kind === "subagent" ? "Subagent" : `Specialist · ${NAME[a.agent]}`)
+        const byId = (id) => agents.find((a) => a.id === id)
+        const WORD = { running: "Running", done: "Done", failed: "Failed", stopped: "Cancelled", queued: "Queued", blocked: "Blocked", pending: "Not launched" }
+
+        const turn = { secs: 460, tokens: 412000, mainCost: 0.38, mainState: "waiting", mainSegments: [[0, 22], [183, 192], [312, 318]] }
+        let view = "tree"
+        let sideTab = "agents"
+        const open = new Set([2])
+        const continuing = new Set()
+
+        const column = stage.querySelector("[data-column]")
+        const waiting = stage.querySelector("[data-waiting]")
+        const tree = stage.querySelector("[data-tree]")
+        const gantt = stage.querySelector("[data-gantt]")
+
+        // ---- chips and return cards in the transcript ----
+        function chipHtml(phase) {
+          const list = agents.filter((a) => a.phase === phase && a.status !== "pending")
+          if (list.length === 0) return ""
+          const kinds = new Set(list.map((a) => a.kind))
+          const kind = list.length === 1 ? kindLabel(list[0]) : kinds.size === 2 ? "Subagents and specialists" : kinds.has("subagent") ? "Subagent" : "Subagent specialists"
+          const title = list.map((a) => a.title).join(", ")
+          const running = list.some((a) => a.status === "running" || a.status === "queued")
+          const failed = list.some((a) => a.status === "failed")
+          const stopped = list.every((a) => a.status === "stopped")
+          const word = running ? "" : stopped ? "Cancelled" : failed && list.length === 1 ? "Failed" : "Done"
+          const start = Math.min(...list.filter((a) => a.startAt !== null).map((a) => a.startAt).concat([turn.secs]))
+          const end = running ? turn.secs : Math.max(...list.map((a) => (a.startAt ?? 0) + a.secs))
+          return `<button class="so-chip" type="button" data-chip="${phase}" aria-label="${esc(title)}. Show in the Subagents panel">
+            <span class="so-chip-title">${esc(title)}</span>${glyph("chevron-right", 16)}
+            <span class="so-chip-meta"><span>${kind}</span>${phase > 1 ? `<span>Phase ${phase}</span>` : ""}<span class="so-dim">${list.length} agent${list.length > 1 ? "s" : ""}</span>${word ? `<span class="so-word" data-status="${stopped ? "stopped" : failed && list.length === 1 ? "failed" : "done"}">${word}</span>` : ""}<span class="so-dim" data-chip-time="${phase}">${fmt(Math.max(0, end - start))}</span></span>
+            <span class="so-squares">${list.map((a) => `<span class="so-sq" data-kind="${a.kind}" data-status="${a.status === "queued" ? "" : a.status}"></span>`).join("")}</span>
+          </button>`
+        }
+        // A task_id continuation is its own chip: one agent, its second run.
+        function runChipHtml(a) {
+          const live = a.status === "running"
+          return `<button class="so-chip" type="button" data-chip="${a.phase}" aria-label="${esc(a.title)}, run 2. Show in the Subagents panel">
+            <span class="so-chip-title">${esc(a.title)}</span>${glyph("chevron-right", 16)}
+            <span class="so-chip-meta"><span>${kindLabel(a)}</span><span>Run 2</span><span class="so-dim">task_id ${a.sid}</span>${live ? "" : `<span class="so-word" data-status="${a.status === "failed" ? "failed" : "done"}">${a.status === "failed" ? "Failed" : "Done"}</span>`}</span>
+            <span class="so-squares"><span class="so-sq" data-kind="${a.kind}" data-status="${a.status}"></span></span>
+          </button>`
+        }
+        function refreshChips() {
+          stage.querySelectorAll("[data-chip-slot]").forEach((slot) => {
+            slot.innerHTML = chipHtml(Number(slot.dataset.chipSlot))
+          })
+          stage.querySelectorAll("[data-run-chip]").forEach((slot) => {
+            slot.innerHTML = runChipHtml(byId(Number(slot.dataset.runChip)))
+          })
+        }
+
+        function returnHtml(a, opts = {}) {
+          const status = a.status === "stopped" ? "stopped" : a.status === "failed" ? "failed" : "done"
+          const verb = status === "failed" ? "failed" : status === "stopped" ? "was cancelled" : opts.run2 ? "reported back again" : "reported back"
+          const files = (a.files ?? []).map(([n, , add, del]) => `${n} <span class="add">+${add}</span> <span class="del">−${del}</span>`).join(" · ")
+          return `<div class="so-return" data-status="${status}" data-return-for="${a.id}">
+            <button class="so-return-head" type="button" aria-expanded="false">
+              <span class="so-return-icon">${glyph(status === "failed" ? "fail" : status === "stopped" ? "stop" : "ret", 13)}</span>
+              <span class="so-return-title">${esc(a.title)} <span>${verb}</span></span>
+              <span class="so-return-meta">${kindLabel(a).replace("Specialist · ", "")} · ${fmt(a.secs)} · ${tok(a.tokens)}</span>
+              <span class="so-chev">${glyph("chevron-right", 14)}</span>
+            </button>
+            <p class="so-result">${status === "stopped" ? "You stopped it before it reported back, so its work may be partial." : opts.run2 ? a.continueResult : a.result}</p>
+            <p class="so-result-extra">task_id <b>${a.sid}</b> · ${a.bg ? "background" : "foreground"} · ${a.tools} tool calls · $${a.cost.toFixed(2)}${files ? `<br />${files}` : ""}</p>
+          </div>`
+        }
+
+        column.addEventListener("click", (event) => {
+          const head = event.target.closest(".so-return-head")
+          if (head) {
+            head.setAttribute("aria-expanded", String(head.getAttribute("aria-expanded") !== "true"))
+            return
+          }
+          const chip = event.target.closest("[data-chip]")
+          if (chip) revealPhase(Number(chip.dataset.chip))
+          const goto = event.target.closest("[data-goto-changes]")
+          if (goto) showSide("changes")
+        })
+
+        function append(html) {
+          const holder = document.createElement("div")
+          holder.innerHTML = html
+          const nodes = [...holder.children]
+          nodes.forEach((node) => {
+            node.classList.add("so-new")
+            column.insertBefore(node, waiting)
+          })
+          fillGlyphs(column)
+          return nodes
+        }
+
+        function followHtml(a, text, extra = "") {
+          const fg = !a.bg
+          return `<div class="so-follow" data-mode="${fg ? "foreground" : "background"}">
+            <p class="so-follow-label">${glyph("follow", 14)}${fg ? "Main agent continued in the same step" : "Main agent woke on the result"} <span>· ${fg ? "foreground result" : "background notification"}</span></p>
+            <p class="so-prose">${text}</p>${extra}
+          </div>`
+        }
+
+        // ---- what happens when a subagent settles ----
+        const followups = {
+          2: () => "The trust diff stays inside <code>project/</code> and <code>config/</code>, as owned. Test is still queued behind Gate project MCP launch, so nothing else to do until that lands.",
+          3: () => "Both implementation parts are in and their diffs don't overlap. I integrated them and typecheck passes on the combined tree. Test has started on its own now that its <code>depends_on</code> are met.",
+          5: () => ({ text: "14 tests pass, the symlinked config included. Now two read-only reviews in parallel, Security and Code review, and the Judge queued behind both.", launch: 3 }),
+          6: () => "No blockers from Security. The lingering record for a deleted folder is a one-line prune in <code>trust.ts</code>, so I made that change myself rather than starting another subagent.",
+          7: () => "Taking the rename to <code>folderFingerprint()</code>. Small and in one file, so I did it here.",
+          8: () => ({ text: "The Judge returned <b>PASS</b>. Fingerprint-bound trust, narrowing-only project policy and the MCP launch gate are in, with 14 tests. 7 files changed, +289 −31. Ready to commit when you are.", final: true }),
+          4: () => "Debug reproduced the bypass under <code>.vector/tmp/</code> and confirmed the staged patch closes it. That matches Test's symlink case, so I'm confident in the fix.",
+        }
+
+        function settle(a, status) {
+          a.status = status
+          if (status !== "stopped") a.cost += 0.02
+          renderAll()
+          const run2 = continuing.has(a.id)
+          continuing.delete(a.id)
+          append(returnHtml(a, { run2 }))
+          if (status === "stopped") {
+            append(`<div class="so-follow" data-mode="recorded"><p class="so-follow-label">${glyph("lock", 14)}Recorded for the main agent's next turn <span>· no automatic follow-up</span></p><p class="so-prose" style="color:var(--so-t3);font-size:13px">Stopping work never makes the agent carry on alone. ${dependents(a).length ? `${dependents(a).map((d) => `#${d.id}`).join(", ")} can't start until this is continued.` : ""}</p></div>`)
+            dependents(a).forEach((d) => (d.status = "blocked"))
+            updateWaiting()
+            renderAll()
+            return
+          }
+          // The main agent reads the result, then continues on its own.
+          turn.mainState = "reading"
+          updateWaiting()
+          const reading = append(`<p class="so-reading">${glyph("spark", 14)}<span>Reading the result from ${esc(a.title)}…</span></p>`)[0]
+          setTimeout(() => {
+            reading.remove()
+            const out = followups[a.id]?.()
+            const text = typeof out === "string" ? out : out?.text ?? "Read the result. Nothing else depends on it."
+            if (out?.launch) launchPhase(out.launch)
+            const extra = out?.launch ? `<div data-chip-slot="${out.launch}"></div>` : ""
+            append(followHtml(a, text, extra))
+            turn.mainSegments.push([Math.max(0, turn.secs - 6), turn.secs + 16])
+            turn.mainState = out?.final ? "done" : "waiting"
+            if (out?.final) finish()
+            refreshChips()
+            updateWaiting()
+            renderAll()
+          }, reduced ? 0 : 1500)
+        }
+
+        const dependents = (a) => agents.filter((d) => d.depends.includes(a.id))
+
+        function launchPhase(phase) {
+          agents.filter((a) => a.phase === phase && a.status === "pending").forEach((a) => {
+            a.status = a.depends.length ? "queued" : "running"
+            if (a.status === "running") a.startAt = turn.secs
+          })
+          open.clear()
+        }
+
+        function startReady() {
+          agents
+            .filter((a) => a.status === "queued" && a.depends.every((id) => byId(id).status === "done"))
+            .forEach((a) => {
+              a.status = "running"
+              a.startAt = turn.secs
+            })
+        }
+
+        function finish() {
+          stage.querySelector("[data-stop-btn]").toggleAttribute("data-idle", true)
+          append(`<div class="so-done-note">${glyph("check", 16)}<span>Turn finished in ${plain(turn.secs)}. Every subagent's result was read and acted on.</span><button class="btn btn-sm" type="button" data-goto-changes>Review 7 changes</button></div>`)
+        }
+
+        function updateWaiting() {
+          const out = agents.filter((a) => a.status === "running" || a.status === "queued")
+          const bgOut = out.filter((a) => a.bg)
+          const fgOut = out.filter((a) => !a.bg)
+          const blocked = agents.filter((a) => a.status === "blocked")
+          const pill = stage.querySelector("[data-status-pill]")
+          const text = stage.querySelector("[data-status-text]")
+          if (turn.mainState === "done") {
+            waiting.hidden = true
+            pill.dataset.tone = "green"
+            text.textContent = "Ready"
+          } else if (turn.mainState === "reading") {
+            pill.dataset.tone = "violet"
+            text.textContent = "Following up"
+          } else {
+            pill.removeAttribute("data-tone")
+            text.textContent = out.length ? `Waiting on ${out.length}` : blocked.length ? "Needs you" : "Working"
+          }
+          const title = stage.querySelector("[data-waiting-title]")
+          const sub = stage.querySelector("[data-waiting-sub]")
+          if (fgOut.length) {
+            title.textContent = `Waiting for ${fgOut.map((a) => a.title).join(", ")}`
+            sub.textContent = "A foreground call: the main agent's step resumes when it returns."
+          } else if (out.length) {
+            title.textContent = `Waiting for ${out.length} background ${out.length === 1 ? (out[0].kind === "subagent" ? "Subagent" : "specialist") : "subagents"}`
+            sub.textContent = "The main agent is idle until a result arrives. It never polls."
+          } else if (blocked.length && turn.mainState !== "reading") {
+            turn.mainState = "idle"
+            title.textContent = `${blocked.map((a) => a.title).join(", ")} can't start`
+            sub.textContent = "A subagent it depends on was cancelled. Continue it from the panel."
+          } else if (turn.mainState === "reading") {
+            title.textContent = "Following up on a result"
+            sub.textContent = "The main agent read what came back and is deciding what's next."
+          } else {
+            // Nothing left to wait for and nothing to follow up: the turn ends.
+            turn.mainState = "idle"
+            title.textContent = "Turn ended, nothing running"
+            sub.textContent = "The cancellation reaches the main agent with your next message."
+          }
+          waiting.toggleAttribute("data-idle", turn.mainState === "idle")
+          stage.querySelector("[data-stop-btn]").toggleAttribute("data-idle", turn.mainState === "idle" || turn.mainState === "done")
+          if (turn.mainState === "idle") {
+            pill.dataset.tone = blocked.length ? "" : "muted"
+            text.textContent = blocked.length ? "Needs you" : "Idle"
+          }
+          stage.querySelector("[data-waiting-squares]").innerHTML = out
+            .concat(blocked)
+            .map((a) => `<span class="so-sq" data-kind="${a.kind}" data-status="${a.status === "queued" ? "" : a.status}"></span>`)
+            .join("")
+          const running = agents.filter((a) => a.status === "running").length
+          const count = stage.querySelector("[data-running-count]")
+          count.textContent = running
+          count.hidden = running === 0
+          stage.querySelector("[data-turn-note]").textContent = running ? ` · ${running} running subagent${running > 1 ? "s" : ""}` : ""
+          // Keep the waiting row last.
+          column.appendChild(waiting)
+        }
+
+        // ---- the panel ----
+        function tallyHtml() {
+          const n = (s) => agents.filter((a) => a.status === s).length
+          const launched = agents.filter((a) => a.status !== "pending")
+          const cost = agents.reduce((sum, a) => sum + a.cost, 0) + turn.mainCost
+          const tokens = agents.reduce((sum, a) => sum + a.tokens, 0) + turn.tokens
+          const item = (status, count, word) =>
+            count ? `<span><span class="so-sq" data-kind="subagent" data-status="${status}" style="border-radius:50%"></span><b>${count}</b> ${word}</span>` : ""
+          stage.querySelector("[data-sum-title]").textContent = `${launched.length} subagents in ${new Set(launched.map((a) => a.phase)).size} phases`
+          stage.querySelector("[data-agents-count]").textContent = launched.length
+          return `${item("running", n("running"), "running")}${item("", n("queued"), "queued")}${item("blocked", n("blocked"), "blocked")}${item("done", n("done"), "done")}${item("failed", n("failed"), "failed")}${item("stopped", n("stopped"), "cancelled")}<span class="so-spend">$${cost.toFixed(2)} · ${tok(tokens)}</span>`
+        }
+
+        function rowSub(a) {
+          const mode = a.bg ? "background" : `<span class="so-fg">foreground</span>`
+          if (a.status === "queued") return `<span class="so-state-word">Queued</span> · after ${a.depends.map((id) => `#${id}`).join(" ")} · ${mode}`
+          if (a.status === "blocked") return `<span class="so-state-word">Blocked</span> · #${a.depends.find((id) => byId(id).status !== "done")} was cancelled`
+          if (a.status === "failed") return `<span class="so-state-word">Failed</span> · ${kindLabel(a)}`
+          if (a.status === "stopped") return `<span class="so-state-word">Cancelled</span> · ${kindLabel(a)}`
+          return `${kindLabel(a)} · ${mode}`
+        }
+
+        function detailHtml(a) {
+          const canCancel = a.status === "running" || a.status === "queued" || a.status === "blocked"
+          const canContinue = ["done", "failed", "stopped"].includes(a.status)
+          const owned = a.owned.length
+            ? a.owned.map((p) => `<span class="so-path">${glyph("lock", 11)}${p}</span>`).join("")
+            : `<span class="so-path">${glyph("lock", 11)}Read-only, owns no paths</span>`
+          const deps = a.depends.length
+            ? `<div class="so-dl"><span>Depends on</span><div class="so-paths">${a.depends
+                .map((id) => {
+                  const d = byId(id)
+                  return `<span class="so-path" ${d.status === "done" ? "data-ok" : ""}>${glyph(d.status === "done" ? "check" : "link", 11)}#${id} ${esc(d.title)}</span>`
+                })
+                .join("")}</div></div>`
+            : ""
+          const ok = a.status === "done"
+          return `<div class="so-detail">
+            <div class="so-dl"><span>Brief</span><p class="so-brief">${a.brief}</p></div>
+            <div class="so-dl"><span>${a.owned.length ? "Owns, exclusive among running siblings" : "Owned paths"}</span><div class="so-paths">${owned}</div></div>
+            ${deps}
+            <div class="so-dl"><span>Success criteria</span><ul class="so-criteria">${a.criteria.map((c) => `<li ${ok ? "data-ok" : ""}><span class="so-box">${glyph("check", 10)}</span>${esc(c)}</li>`).join("")}</ul></div>
+            ${["done", "failed"].includes(a.status) ? `<div class="so-dl"><span>${a.status === "failed" ? "Error it returned" : "What it returned"}</span><p class="so-returned" data-status="${a.status}">${continuing.has(a.id) ? a.continueResult : a.result}</p></div>` : ""}
+            <p class="so-meta-line"><span>task_id <b>${a.sid}</b></span><span>${a.model}</span><span>${a.tools} tools</span><span>$${a.cost.toFixed(2)}</span></p>
+            ${
+              continuing.has(a.id) && a.status !== "running"
+                ? ""
+                : a.composing
+                  ? `<form class="so-continue" data-continue-form="${a.id}">
+                    <span class="so-continue-box">${glyph("continue", 13)}<input data-continue-input placeholder="What should it do next?" value="${a.id === 4 ? "Create both repositories under .vector/tmp instead" : ""}" aria-label="Note for the main agent to pass on" /><button class="btn btn-primary btn-sm" type="submit">Continue</button></span>
+                    <p>The main agent resumes <code>${a.sid}</code> with task_id, so it keeps its messages and tool output.</p>
+                  </form>`
+                  : `<div class="so-actions">
+                    ${canCancel ? `<button class="btn btn-sm btn-danger" type="button" data-cancel="${a.id}">${glyph("stop", 13)}Cancel</button>` : ""}
+                    ${canContinue ? `<button class="btn btn-sm" type="button" data-compose="${a.id}">${glyph("continue", 12)}Continue with task_id</button>` : ""}
+                    <button class="btn btn-sm btn-ghost" type="button">${glyph("external", 13)}Open session</button>
+                  </div>`
+            }
+          </div>`
+        }
+
+        function renderTree() {
+          const keep = tree.scrollTop
+          const phases = [...new Set(agents.filter((a) => a.status !== "pending").map((a) => a.phase))]
+          const mainSub =
+            turn.mainState === "done" ? "Finished the turn" : turn.mainState === "idle" ? "Turn ended, cancellation recorded" : turn.mainState === "reading" ? "Reading a result and following up" : "Idle, waiting for results"
+          tree.innerHTML = `
+            <div class="so-root">
+              <span class="so-root-icon">${glyph("main", 15)}</span>
+              <span class="so-root-text"><b>Main agent</b><span>${mainSub}</span></span>
+              <span class="so-root-end"><span data-root-time>${fmt(turn.secs)}</span><span>GPT-6 Sol</span></span>
+            </div>
+            <div class="so-phases">${phases
+              .map((phase) => {
+                const list = agents.filter((a) => a.phase === phase && a.status !== "pending")
+                const done = list.filter((a) => a.status === "done").length
+                return `<section class="so-phase" data-phase="${phase}">
+                  <p class="so-phase-head"><b>Phase ${phase}</b><span>${done}/${list.length} done</span><span class="so-squares">${list.map((a) => `<span class="so-sq" data-kind="${a.kind}" data-status="${a.status === "queued" ? "" : a.status}"></span>`).join("")}</span></p>
+                  ${list
+                    .map(
+                      (a) => `<div class="so-agent" data-agent="${a.id}" data-status="${a.status}" ${open.has(a.id) ? "data-open" : ""}>
+                        <button class="so-row" type="button" aria-expanded="${open.has(a.id)}" data-toggle="${a.id}">
+                          <span class="so-sq" data-kind="${a.kind}" data-status="${a.status === "queued" ? "" : a.status}"></span>
+                          <span class="so-row-text"><span class="so-row-name"><span>${esc(a.title)}</span><span class="so-id">#${a.id}</span></span><span class="so-row-sub">${rowSub(a)}</span></span>
+                          <span class="so-row-end"><span data-agent-time="${a.id}">${a.status === "queued" || a.status === "blocked" ? "–" : fmt(a.secs)}</span><span data-agent-tok="${a.id}">${a.tokens ? tok(a.tokens) : ""}</span></span>
+                        </button>
+                        ${open.has(a.id) ? detailHtml(a) : ""}
+                      </div>`,
+                    )
+                    .join("")}
+                </section>`
+              })
+              .join("")}</div>`
+          tree.scrollTop = keep
+        }
+
+        function renderGantt() {
+          const span = Math.max(840, Math.ceil((turn.secs + 90) / 120) * 120)
+          const pct = (s) => `${(s / span) * 100}%`
+          const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span style="left:${f * 100}%">${Math.round((span * f) / 60)}m</span>`).join("")
+          const rows = agents
+            .filter((a) => a.status !== "pending")
+            .map((a) => {
+              const bar =
+                a.startAt === null
+                  ? `<span class="so-bar" data-status="${a.status}" style="left:${pct(turn.secs)};width:${pct(60)}"></span><span class="so-dep" style="left:calc(${pct(turn.secs + 60)} + 6px)">after ${a.depends.map((id) => `#${id}`).join(" ")}</span>`
+                  : `<span class="so-bar" data-status="${a.status}" style="left:${pct(a.startAt)};width:${pct(Math.max(a.secs, 4))}"></span><span class="so-glen" style="left:${pct(a.startAt + Math.max(a.secs, 4))}">${fmt(a.secs)}</span>`
+              return `<div class="so-grow"><span class="so-glabel"><span class="so-id">#${a.id}</span><span>${esc(a.title)}</span></span><span class="so-track">${bar}</span></div>`
+            })
+            .join("")
+          const main = turn.mainSegments
+            .map(([s, e]) => `<span class="so-bar" data-kind="main" style="left:${pct(s)};width:${pct(e - s)}"></span>`)
+            .join("")
+          gantt.innerHTML = `<div class="so-axis">${ticks}</div>
+            <div class="so-gwrap">
+              <div class="so-grow"><span class="so-glabel"><span class="so-id">◆</span><span>Main agent</span></span><span class="so-track"><span class="so-bar" data-kind="idle" style="left:0;width:${pct(turn.secs)}"></span>${main}</span></div>
+              ${rows}
+              <div class="so-gnow-layer"><span class="so-now" style="left:${pct(turn.secs)}"></span></div>
+            </div>
+            <div class="so-legend">
+              <span><i class="so-bar" data-kind="main" style="position:static"></i>Main agent working</span>
+              <span><i class="so-bar" data-kind="idle" style="position:static;height:2px"></i>Idle, waiting</span>
+              <span><i class="so-bar" data-status="running" style="position:static"></i>Running</span>
+              <span><i class="so-bar" data-status="done" style="position:static"></i>Done</span>
+              <span><i class="so-bar" data-status="queued" style="position:static"></i>Queued by depends_on</span>
+            </div>`
+        }
+
+        function renderChanges() {
+          const files = agents.flatMap((a) =>
+            (a.status === "done" || a.status === "running") && a.files ? a.files.map((f) => ({ f, a })) : [],
+          )
+          if (turn.mainState === "done" || agents.find((a) => a.id === 6).status === "done")
+            files.push({ f: ["trust.ts", "packages/engine/src/project/", 6, 1], a: null })
+          const add = files.reduce((s, x) => s + x.f[2], 0)
+          const del = files.reduce((s, x) => s + x.f[3], 0)
+          stage.querySelector("[data-files-count]").textContent = files.length
+          stage.querySelector("[data-changes]").innerHTML = `
+            <p class="so-changes-sum"><span>${files.length} changes on workspace-trust</span><span class="add">+${add}</span><span class="del">−${del}</span></p>
+            ${files
+              .map(
+                ({ f, a }) => `<div class="so-file">
+                  <span class="muted">${glyph("chevron-right", 14)}</span>
+                  <span class="so-file-name">${f[0]}<span>${f[1]}</span></span>
+                  <span class="so-owner" data-status="${a?.status ?? ""}">${a ? `#${a.id} ${a.kind === "subagent" ? "Subagent" : NAME[a.agent]}` : "Main agent"}${a?.status === "running" ? " · writing" : ""}</span>
+                  <span class="add">+${f[2]}</span><span class="del">−${f[3]}</span>
+                </div>`,
+              )
+              .join("")}
+            <p class="so-changes-note">Each file is labelled with the agent that owns its path. Vector refuses a launch whose owned paths overlap a running sibling's, so two agents never write the same file.</p>`
+        }
+
+        function renderAll() {
+          stage.querySelector("[data-tally]").innerHTML = tallyHtml()
+          renderTree()
+          if (view === "timeline") renderGantt()
+          renderChanges()
+          refreshChips()
+        }
+
+        tree.addEventListener("click", (event) => {
+          const toggle = event.target.closest("[data-toggle]")
+          if (toggle) {
+            const id = Number(toggle.dataset.toggle)
+            const was = open.has(id)
+            open.clear()
+            if (!was) open.add(id)
+            renderTree()
+            tree.querySelector(`[data-toggle="${id}"]`)?.focus({ preventScroll: true })
+            return
+          }
+          const cancel = event.target.closest("[data-cancel]")
+          if (cancel) {
+            const a = byId(Number(cancel.dataset.cancel))
+            if (a.status === "running") return settle(a, "stopped")
+            a.status = "stopped"
+            a.startAt = turn.secs
+            renderAll()
+            updateWaiting()
+            return
+          }
+          const compose = event.target.closest("[data-compose]")
+          if (compose) {
+            const a = byId(Number(compose.dataset.compose))
+            a.composing = true
+            renderTree()
+            tree.querySelector("[data-continue-input]")?.focus({ preventScroll: true })
+          }
+        })
+        tree.addEventListener("submit", (event) => {
+          event.preventDefault()
+          const form = event.target.closest("[data-continue-form]")
+          const a = byId(Number(form.dataset.continueForm))
+          const note = form.querySelector("input").value.trim() || "Pick up where you left off."
+          a.composing = false
+          continueAgent(a, note)
+        })
+        tree.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && event.target.matches("[data-continue-input]")) {
+            agents.forEach((a) => (a.composing = false))
+            renderTree()
+          }
+        })
+
+        // Continuing goes through the main agent: it calls task with task_id.
+        function continueAgent(a, note) {
+          append(`<p class="so-user" style="margin-top:28px">Continue ${esc(a.title)}: ${esc(note)}</p>`)
+          append(`<p class="so-prose">Resuming ${esc(a.title)} in its own session with <code>task_id ${a.sid}</code>, so it keeps everything it already read, plus your note.</p>`)
+          continuing.add(a.id)
+          a.status = "running"
+          a.dur = a.id === 4 ? 8 : 6
+          a.bg = true
+          if (!a.continueResult) a.continueResult = `Done: ${esc(note)} Stayed within its owned paths.`
+          dependents(a).forEach((d) => d.status === "blocked" && (d.status = "queued"))
+          append(`<div data-run-chip="${a.id}"></div>`)
+          turn.mainState = "waiting"
+          stage.querySelector("[data-stop-btn]").toggleAttribute("data-idle", false)
+          waiting.hidden = false
+          renderAll()
+          updateWaiting()
+          if (reduced) setTimeout(() => settle(a, "done"), 0)
+        }
+
+        function revealPhase(phase) {
+          showSide("agents")
+          setView("tree")
+          agents.filter((a) => a.phase === phase).forEach((a) => open.delete(a.id))
+          const first = agents.find((a) => a.phase === phase && a.status !== "pending")
+          if (first) open.add(first.id)
+          renderTree()
+          const section = tree.querySelector(`[data-phase="${phase}"]`)
+          if (!section) return
+          tree.scrollTo({ top: section.offsetTop - 70, behavior: reduced ? "auto" : "smooth" })
+          section.toggleAttribute("data-flash", true)
+          const card = section.querySelector(".so-agent")
+          card?.toggleAttribute("data-flash", true)
+          setTimeout(() => {
+            section.removeAttribute("data-flash")
+            card?.removeAttribute("data-flash")
+          }, 1600)
+        }
+
+        // ---- side panel and header tools ----
+        const side = stage.querySelector("[data-side]")
+        function showSide(tab) {
+          side.hidden = false
+          sideTab = tab
+          stage.querySelectorAll("[data-side-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.sideTab === tab)))
+          stage.querySelectorAll("[data-side-panel]").forEach((p) => (p.hidden = p.dataset.sidePanel !== tab))
+          stage.querySelector('[data-tool="subagents"]').setAttribute("aria-pressed", String(tab === "agents"))
+          stage.querySelector('[data-tool="changes"]').setAttribute("aria-pressed", String(tab === "changes"))
+        }
+        function hideSide() {
+          side.hidden = true
+          stage.querySelectorAll("[data-tool]").forEach((b) => b.setAttribute("aria-pressed", "false"))
+        }
+        stage.querySelectorAll("[data-side-tab]").forEach((b) => b.addEventListener("click", () => showSide(b.dataset.sideTab)))
+        stage.querySelector("[data-side-close]").addEventListener("click", hideSide)
+        stage.querySelector('[data-tool="subagents"]').addEventListener("click", (e) =>
+          e.currentTarget.getAttribute("aria-pressed") === "true" ? hideSide() : showSide("agents"),
+        )
+        stage.querySelector('[data-tool="changes"]').addEventListener("click", (e) =>
+          e.currentTarget.getAttribute("aria-pressed") === "true" ? hideSide() : showSide("changes"),
+        )
+        function setView(next) {
+          view = next
+          stage.querySelectorAll("[data-view-seg] button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === next)))
+          tree.hidden = next !== "tree"
+          gantt.hidden = next !== "timeline"
+          if (next === "timeline") renderGantt()
+        }
+        stage.querySelector("[data-view-seg]").addEventListener("lab:seg", (event) => setView(event.detail))
+
+        // ---- the clock ----
+        // The concept plays at four times real speed, so a whole turn fits in about a minute.
+        const SPEED = 4
+        function tick() {
+          if (turn.mainState !== "done" && turn.mainState !== "idle") {
+            turn.secs += SPEED
+            turn.tokens += turn.mainState === "reading" ? 2400 * SPEED : 0
+          }
+          let changed = false
+          agents
+            .filter((a) => a.status === "running")
+            .forEach((a) => {
+              a.secs += SPEED
+              a.tokens += (2600 + Math.floor(Math.random() * 3200)) * SPEED
+              a.cost += 0.0011 * SPEED
+              a.tools += Math.random() < 0.3 ? 1 : 0
+              a.dur -= 1
+              tree.querySelector(`[data-agent-time="${a.id}"]`)?.replaceChildren(fmt(a.secs))
+              tree.querySelector(`[data-agent-tok="${a.id}"]`)?.replaceChildren(tok(a.tokens))
+              if (a.dur <= 0) {
+                settle(a, "done")
+                changed = true
+              }
+            })
+          const before = agents.filter((a) => a.status === "running").length
+          startReady()
+          if (agents.filter((a) => a.status === "running").length !== before) changed = true
+          if (changed) {
+            renderAll()
+            updateWaiting()
+          }
+          stage.querySelector("[data-turn-time]").textContent = plain(turn.secs)
+          stage.querySelector("[data-turn-tokens]").textContent = `${Math.round(turn.tokens / 1000)}K`
+          tree.querySelector("[data-root-time]")?.replaceChildren(fmt(turn.secs))
+          stage.querySelector("[data-tally]").innerHTML = tallyHtml()
+          stage.querySelectorAll("[data-chip-time]").forEach((el) => {
+            const list = agents.filter((a) => a.phase === Number(el.dataset.chipTime) && a.status !== "pending")
+            if (list.some((a) => a.status === "running" || a.status === "queued")) {
+              const start = Math.min(...list.filter((a) => a.startAt !== null).map((a) => a.startAt))
+              el.textContent = fmt(turn.secs - start)
+            }
+          })
+          if (view === "timeline" && !gantt.hidden) renderGantt()
+        }
+        if (!reduced) setInterval(() => !document.hidden && tick(), 1000)
+
+        // ---- first paint: the transcript's earlier returns ----
+        stage.querySelector('[data-return-slot="1"]').outerHTML = returnHtml(byId(1))
+        stage.querySelector('[data-return-slot="4"]').outerHTML = returnHtml(byId(4))
+        fillGlyphs(stage)
+        renderAll()
+        updateWaiting()
+      })
+    </script>
+  </body>
+</html>

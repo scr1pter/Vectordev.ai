@@ -1,0 +1,2066 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* D15 Agent Dashboard: live board. Everything is scoped under .d-agent-board. */
+      .d-agent-board {
+        --ab-run: #8b73d6;
+        --ab-run-text: #cdbdf5;
+        --ab-col: #1a181f;
+        --ab-card: #221f27;
+        --ab-card-hover: #262230;
+      }
+
+      .d-agent-board :is(h3, h4, p, ul, ol) {
+        margin: 0;
+        padding: 0;
+      }
+
+      .d-agent-board :is(ul, ol) {
+        list-style: none;
+      }
+
+      .d-agent-board svg {
+        flex: none;
+      }
+
+      .d-agent-board [hidden] {
+        display: none !important;
+      }
+
+      /* ---- header ---- */
+      .d-agent-board .ab-mark {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 7px;
+        background: #383347;
+        color: #b5a3e6;
+      }
+
+      .d-agent-board .ab-heading {
+        display: grid;
+        gap: 3px;
+      }
+
+      .d-agent-board .ab-heading h2 {
+        line-height: 16px;
+      }
+
+      .d-agent-board .ab-heading span {
+        color: #86828c;
+        font-size: 10.5px;
+      }
+
+      .d-agent-board .ab-counts {
+        display: flex;
+        gap: 14px;
+        margin-right: 6px;
+        color: #86828c;
+        font-size: 11.5px;
+      }
+
+      .d-agent-board .ab-counts span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-agent-board .ab-counts strong {
+        color: #d6d2da;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-agent-board .ab-spend {
+        padding-left: 14px;
+        border-left: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      /* ---- toolbar ---- */
+      .d-agent-board .ab-main {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 0;
+        padding: 18px 20px 0 22px;
+        background: #18171f;
+      }
+
+      .d-agent-board .ab-controls {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .d-agent-board .ab-search {
+        display: flex;
+        flex: 0 1 380px;
+        min-width: 0;
+        height: 30px;
+        align-items: center;
+        gap: 9px;
+        padding: 0 8px 0 12px;
+        border: 1px solid #39383f;
+        border-radius: 8px;
+        background: #2a2631;
+        color: #86828c;
+      }
+
+      .d-agent-board .ab-search:focus-within {
+        border-color: rgba(146, 116, 236, 0.55);
+      }
+
+      .d-agent-board .ab-search input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 12.5px;
+      }
+
+      .d-agent-board .ab-search input::placeholder {
+        color: #86828c;
+      }
+
+      .d-agent-board .ab-filters {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .d-agent-board .ab-filter {
+        position: relative;
+      }
+
+      .d-agent-board .ab-filter-button {
+        display: inline-flex;
+        height: 28px;
+        align-items: center;
+        gap: 5px;
+        padding: 0 9px 0 10px;
+        border: 1px solid #323138;
+        border-radius: 7px;
+        background: #2a2631;
+        color: #9a96a0;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-filter-button:hover {
+        background: #332e3a;
+        color: #ebe7ee;
+      }
+
+      .d-agent-board .ab-filter-button[data-on] {
+        border-color: rgba(146, 116, 236, 0.45);
+        background: rgba(182, 159, 247, 0.14);
+        color: #ebe7ee;
+      }
+
+      .d-agent-board .ab-filter-value {
+        max-width: 110px;
+        overflow: hidden;
+        color: #c9c3cd;
+        text-overflow: ellipsis;
+      }
+
+      .d-agent-board .ab-filter-value:empty {
+        display: none;
+      }
+
+      .d-agent-board .ab-filter-button svg {
+        color: #6a6570;
+      }
+
+      .d-agent-board .ab-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        z-index: 12;
+        min-width: 200px;
+        padding: 6px 0;
+        border: 1px solid rgba(226, 213, 237, 0.09);
+        border-radius: 10px;
+        background: #29252f;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+      }
+
+      .d-agent-board .ab-menu-label {
+        padding: 4px 12px;
+        color: #837c8a;
+        font-size: 10.5px;
+        font-weight: 500;
+      }
+
+      .d-agent-board .ab-menu button {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 12px;
+        border: 0;
+        background: transparent;
+        color: #b9b2bf;
+        font-size: 12.5px;
+        text-align: left;
+      }
+
+      .d-agent-board .ab-menu button:hover,
+      .d-agent-board .ab-menu button:focus-visible {
+        background: #332e3a;
+        color: #ebe7ee;
+        outline: none;
+      }
+
+      .d-agent-board .ab-menu button > span:first-child {
+        flex: 1;
+      }
+
+      .d-agent-board .ab-menu .ab-tick {
+        color: #b69ff7;
+        opacity: 0;
+      }
+
+      .d-agent-board .ab-menu button[aria-checked="true"] .ab-tick {
+        opacity: 1;
+      }
+
+      .d-agent-board .ab-menu .ab-menu-count {
+        color: #6f6a75;
+        font: 11px var(--mono);
+      }
+
+      .d-agent-board .ab-clear {
+        height: 28px;
+        padding: 0 8px;
+        border: 0;
+        background: transparent;
+        color: #86828c;
+        font-size: 11.5px;
+      }
+
+      .d-agent-board .ab-clear:hover {
+        color: #ebe7ee;
+      }
+
+      .d-agent-board .ab-views {
+        display: flex;
+        height: 30px;
+        align-items: center;
+        margin-left: auto;
+        padding: 2px;
+        border: 1px solid #39383f;
+        border-radius: 8px;
+        background: #2a2631;
+      }
+
+      .d-agent-board .ab-views button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 11px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: #86828c;
+        font-size: 12px;
+      }
+
+      .d-agent-board .ab-views button[aria-pressed="true"] {
+        background: #3e394b;
+        color: #ebe7ee;
+      }
+
+      .d-agent-board .ab-summary {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 16px;
+        margin: 12px 0 12px;
+        color: #86828c;
+        font-size: 11.5px;
+      }
+
+      .d-agent-board .ab-summary b {
+        color: #c9c3cd;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-agent-board .ab-live {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+        color: var(--violet-bright);
+      }
+
+      /* ---- board ---- */
+      .d-agent-board .ab-board {
+        display: grid;
+        flex: 1;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        min-height: 0;
+        padding-bottom: 16px;
+      }
+
+      .d-agent-board .ab-col {
+        display: flex;
+        min-height: 0;
+        flex-direction: column;
+        border: 1px solid rgba(226, 213, 237, 0.06);
+        border-radius: 12px;
+        background: var(--ab-col);
+      }
+
+      .d-agent-board .ab-col-head {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+        height: 42px;
+        padding: 0 10px 0 14px;
+        color: #d6d2da;
+        font-size: 12.5px;
+        font-weight: 500;
+      }
+
+      .d-agent-board .ab-col-head .ab-col-count {
+        color: #86828c;
+        font: 400 11.5px var(--mono);
+      }
+
+      .d-agent-board .ab-col-head .ab-col-note {
+        margin-left: auto;
+        color: #6f6a75;
+        font-size: 11px;
+        font-weight: 400;
+      }
+
+      .d-agent-board .ab-col-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+
+      .d-agent-board .ab-col[data-col="working"] .ab-col-dot {
+        background: var(--ab-run);
+        box-shadow: 0 0 8px rgba(139, 115, 214, 0.6);
+      }
+
+      .d-agent-board .ab-col[data-col="needs"] .ab-col-dot {
+        background: var(--amber);
+        box-shadow: 0 0 8px rgba(214, 169, 92, 0.5);
+      }
+
+      .d-agent-board .ab-col[data-col="ready"] .ab-col-dot {
+        background: var(--green);
+        box-shadow: 0 0 8px rgba(101, 199, 142, 0.45);
+      }
+
+      .d-agent-board .ab-col[data-col="done"] .ab-col-dot {
+        background: #6f6a75;
+      }
+
+      .d-agent-board .ab-col-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+        gap: 8px;
+        padding: 0 8px 10px;
+      }
+
+      .d-agent-board .ab-empty {
+        display: grid;
+        flex: 1;
+        min-height: 90px;
+        place-items: center;
+        border-radius: 10px;
+        background:
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' rx='10' fill='none' stroke='%233b3942' stroke-width='2' stroke-dasharray='3 2'/%3E%3C/svg%3E")
+            0 0 / 100% 100%;
+        color: #6f6a75;
+        font-size: 11.5px;
+        text-align: center;
+      }
+
+      /* ---- card ---- */
+      .d-agent-board .ab-card {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        min-width: 0;
+        flex: none;
+        gap: 9px;
+        width: 100%;
+        padding: 12px 12px 11px 13px;
+        border: 1px solid rgba(255, 255, 255, 0.045);
+        border-radius: 10px;
+        background: var(--ab-card);
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+        transition:
+          background-color 120ms ease,
+          border-color 120ms ease,
+          transform 160ms var(--ease);
+      }
+
+      .d-agent-board .ab-card:hover {
+        border-color: rgba(255, 255, 255, 0.09);
+        background: var(--ab-card-hover);
+      }
+
+      .d-agent-board .ab-card:focus-visible {
+        outline: 2px solid #9d84ee;
+        outline-offset: 2px;
+      }
+
+      .d-agent-board .ab-card[aria-current="true"] {
+        border-color: rgba(182, 159, 247, 0.5);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.1);
+      }
+
+      .d-agent-board .ab-card[data-arrive] {
+        animation: ab-arrive 600ms var(--ease);
+      }
+
+      @keyframes ab-arrive {
+        0% {
+          opacity: 0;
+          transform: translateY(-8px) scale(0.98);
+          box-shadow: 0 0 0 1px var(--violet-line);
+        }
+        60% {
+          box-shadow: 0 0 0 3px rgba(182, 159, 247, 0.25);
+        }
+      }
+
+      .d-agent-board .ab-card-top {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        color: #9a96a0;
+        font-size: 11.5px;
+      }
+
+      .d-agent-board .ab-card-top > span:nth-child(2) {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-time {
+        margin-left: auto;
+        color: #9a96a0;
+        font: 11px var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* runtime tiles: plain letter marks, not logos */
+      .d-agent-board .ab-rt {
+        display: inline-grid;
+        width: 16px;
+        height: 16px;
+        flex: none;
+        place-items: center;
+        border-radius: 4px;
+        font: 600 8.5px/1 var(--mono);
+        letter-spacing: -0.02em;
+      }
+
+      .d-agent-board .ab-rt[data-rt="vector"] {
+        background: rgba(182, 159, 247, 0.18);
+        color: var(--violet-bright);
+      }
+
+      .d-agent-board .ab-rt[data-rt="claude"] {
+        background: rgba(222, 142, 102, 0.17);
+        color: #e3a283;
+      }
+
+      .d-agent-board .ab-rt[data-rt="codex"] {
+        background: rgba(120, 196, 186, 0.15);
+        color: #8fd0c4;
+      }
+
+      .d-agent-board .ab-rt[data-rt="cursor"] {
+        background: rgba(107, 166, 221, 0.16);
+        color: #8cbbe8;
+      }
+
+      .d-agent-board .ab-title {
+        font-size: 13.5px;
+        font-weight: 500;
+        line-height: 1.35;
+      }
+
+      .d-agent-board .ab-open {
+        padding: 0;
+        border: 0;
+        background: none;
+        font: inherit;
+        line-height: inherit;
+        text-align: left;
+      }
+
+      .d-agent-board .ab-open:focus-visible {
+        outline: none;
+      }
+
+      .d-agent-board .ab-card:has(.ab-open:focus-visible) {
+        outline: 2px solid #9d84ee;
+        outline-offset: 2px;
+      }
+
+      .d-agent-board .ab-branch {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: -4px;
+        color: #86828c;
+        font: 11px var(--mono);
+      }
+
+      .d-agent-board .ab-step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 7px 9px;
+        border-radius: 7px;
+        background: rgba(0, 0, 0, 0.18);
+        color: #c9c3cd;
+        font-size: 12px;
+      }
+
+      .d-agent-board .ab-step > span:last-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-step code {
+        font: 11.5px var(--mono);
+      }
+
+      .d-agent-board .ab-step[data-swap] > span:last-child {
+        animation: ab-swap 380ms var(--ease);
+      }
+
+      @keyframes ab-swap {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+      }
+
+      .d-agent-board .ab-spin {
+        width: 11px;
+        height: 11px;
+        flex: none;
+        border: 1.4px solid rgba(182, 159, 247, 0.25);
+        border-top-color: var(--violet-bright);
+        border-radius: 50%;
+        animation: ab-spin 0.9s linear infinite;
+      }
+
+      @keyframes ab-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .d-agent-board .ab-progress {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        color: #86828c;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-agent-board .ab-bar {
+        position: relative;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .d-agent-board .ab-bar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: inherit;
+        background: var(--violet);
+        transition: width 500ms var(--ease);
+      }
+
+      .d-agent-board .ab-card[data-col="ready"] .ab-bar i {
+        background: var(--green);
+      }
+
+      .d-agent-board .ab-card[data-col="needs"] .ab-bar i {
+        background: var(--amber);
+      }
+
+      .d-agent-board .ab-foot {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-top: 9px;
+        border-top: 1px solid rgba(255, 255, 255, 0.045);
+        color: #86828c;
+        font-size: 11px;
+      }
+
+      .d-agent-board .ab-foot .add,
+      .d-agent-board .ab-foot .del {
+        font-size: 11px;
+      }
+
+      .d-agent-board .ab-files {
+        display: inline-flex;
+        gap: 5px;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-files b {
+        color: #c9c3cd;
+        font-weight: 400;
+      }
+
+      .d-agent-board .ab-checks {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+      }
+
+      .d-agent-board .ab-ck {
+        display: inline-grid;
+        width: 13px;
+        height: 13px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 50%;
+        color: transparent;
+      }
+
+      .d-agent-board .ab-ck[data-s="pass"] {
+        border-color: rgba(101, 199, 142, 0.45);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-agent-board .ab-ck[data-s="fail"] {
+        border-color: rgba(230, 120, 125, 0.5);
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .d-agent-board .ab-ck[data-s="run"] {
+        border-color: rgba(182, 159, 247, 0.25);
+        border-top-color: var(--violet-bright);
+        animation: ab-spin 0.9s linear infinite;
+      }
+
+      .d-agent-board .ab-cost {
+        margin-left: auto;
+        color: #c9c3cd;
+        font: 11px var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-agent-board .ab-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: -2px;
+      }
+
+      .d-agent-board .ab-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 20px;
+        padding: 0 7px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.05);
+        color: #a8a3ae;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-tag svg {
+        color: #86828c;
+      }
+
+      .d-agent-board .ab-tag[data-tone="green"] {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-agent-board .ab-tag[data-tone="green"] svg {
+        color: var(--green);
+      }
+
+      .d-agent-board .ab-tag[data-tone="violet"] {
+        background: rgba(139, 115, 214, 0.15);
+        color: var(--ab-run-text);
+      }
+
+      .d-agent-board .ab-tag .ab-sqs {
+        display: inline-flex;
+        gap: 3px;
+      }
+
+      .d-agent-board .ab-tag .ab-sqs i {
+        width: 6px;
+        height: 6px;
+        border-radius: 1.5px;
+        background: var(--ab-run);
+        animation: ab-breathe 1.6s ease-in-out infinite;
+      }
+
+      @keyframes ab-breathe {
+        50% {
+          opacity: 0.45;
+        }
+      }
+
+      /* the ask on a Needs you card */
+      .d-agent-board .ab-ask {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+        padding: 9px 10px 10px;
+        border: 1px solid rgba(214, 169, 92, 0.28);
+        border-radius: 8px;
+        background: rgba(214, 169, 92, 0.06);
+        font-size: 12px;
+        cursor: default;
+      }
+
+      .d-agent-board .ab-ask-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--amber);
+        font-size: 11.5px;
+        font-weight: 500;
+      }
+
+      .d-agent-board .ab-ask p {
+        color: #d6d2da;
+        line-height: 1.45;
+      }
+
+      .d-agent-board .ab-ask code {
+        display: block;
+        overflow: hidden;
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.3);
+        color: #eceaf0;
+        font: 11px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-ask-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .d-agent-board .ab-ask-actions .btn {
+        height: 24px;
+        padding: 0 9px;
+        font-size: 11.5px;
+      }
+
+      .d-agent-board .ab-ask-actions .btn:last-child {
+        margin-left: auto;
+      }
+
+      .d-agent-board .ab-card[data-col="needs"]::before {
+        content: "";
+        position: absolute;
+        inset: 12px auto 12px -1px;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--amber);
+      }
+
+      .d-agent-board .ab-merge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-agent-board .ab-merge .btn {
+        height: 26px;
+        font-size: 12px;
+      }
+
+      .d-agent-board .ab-review {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        color: #9a96a0;
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+
+      .d-agent-board .ab-review svg {
+        margin-top: 1px;
+        color: var(--green);
+      }
+
+      .d-agent-board .ab-foot .btn {
+        height: 26px;
+        margin-left: 4px;
+        font-size: 12px;
+      }
+
+      .d-agent-board .ab-subs {
+        display: grid;
+        gap: 2px;
+      }
+
+      .d-agent-board .ab-sub {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 36px;
+        padding: 0 6px;
+        border-radius: 6px;
+        font-size: 12.5px;
+      }
+
+      .d-agent-board .ab-sub:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .d-agent-board .ab-sub > span:nth-child(2) {
+        display: grid;
+        flex: 1;
+        gap: 1px;
+      }
+
+      .d-agent-board .ab-sub small {
+        color: #86828c;
+        font-size: 11px;
+      }
+
+      .d-agent-board .ab-sub > span:last-child {
+        color: #9a96a0;
+        font: 11px var(--mono);
+      }
+
+      .d-agent-board .ab-sq {
+        width: 8px;
+        height: 8px;
+        flex: none;
+        border-radius: 2px;
+        background: var(--ab-run);
+        animation: ab-breathe 1.6s ease-in-out infinite;
+      }
+
+      .d-agent-board .ab-sq[data-kind="specialist"] {
+        border-radius: 50%;
+      }
+
+      .d-agent-board .ab-card[data-col="done"] {
+        gap: 6px;
+        padding: 10px 12px 10px 13px;
+        background: #1f1c24;
+      }
+
+      .d-agent-board .ab-card[data-col="done"] .ab-title {
+        color: #c9c3cd;
+        font-size: 13px;
+        font-weight: 400;
+      }
+
+      .d-agent-board .ab-done-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #86828c;
+        font-size: 11px;
+      }
+
+      .d-agent-board .ab-done-line .ab-files {
+        margin-left: auto;
+      }
+
+      .d-agent-board .ab-merged {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: #b5a3e6;
+      }
+
+      .d-agent-board .ab-closed {
+        color: #86828c;
+      }
+
+      /* ---- list view ---- */
+      .d-agent-board .ab-list {
+        flex: 1;
+        min-height: 0;
+        padding-bottom: 16px;
+      }
+
+      .d-agent-board .ab-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        table-layout: fixed;
+        font-size: 12.5px;
+      }
+
+      .d-agent-board .ab-table th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        height: 32px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--line);
+        background: #18171f;
+        color: #86828c;
+        font-size: 11.5px;
+        font-weight: 500;
+        text-align: left;
+      }
+
+      .d-agent-board .ab-table td {
+        height: 52px;
+        padding: 0 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+        color: #c9c3cd;
+        vertical-align: middle;
+      }
+
+      .d-agent-board .ab-table tbody tr {
+        cursor: pointer;
+      }
+
+      .d-agent-board .ab-table tbody tr:hover td {
+        background: rgba(255, 255, 255, 0.025);
+      }
+
+      .d-agent-board .ab-table tbody tr[aria-current="true"] td {
+        background: rgba(182, 159, 247, 0.07);
+      }
+
+      .d-agent-board .ab-table .ab-group td {
+        height: 34px;
+        padding-top: 10px;
+        border-bottom: 0;
+        color: #9a96a0;
+        font-size: 12px;
+        cursor: default;
+      }
+
+      .d-agent-board .ab-table .ab-group:hover td {
+        background: none;
+      }
+
+      .d-agent-board .ab-cell-name {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .d-agent-board .ab-cell-name b {
+        overflow: hidden;
+        color: var(--text-1);
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-cell-name span {
+        color: #86828c;
+        font: 11px var(--mono);
+      }
+
+      .d-agent-board .ab-cell-ellipsis {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-status i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #6f6a75;
+      }
+
+      .d-agent-board .ab-status[data-col="working"] i {
+        background: var(--ab-run);
+      }
+
+      .d-agent-board .ab-status[data-col="needs"] {
+        color: var(--amber);
+      }
+
+      .d-agent-board .ab-status[data-col="needs"] i {
+        background: var(--amber);
+      }
+
+      .d-agent-board .ab-status[data-col="ready"] i {
+        background: var(--green);
+      }
+
+      .d-agent-board .mono-cell {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---- drawer ---- */
+      .d-agent-board .ab-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        background: rgba(10, 8, 13, 0.38);
+        animation: ab-fade 160ms ease-out;
+      }
+
+      @keyframes ab-fade {
+        from {
+          opacity: 0;
+        }
+      }
+
+      .d-agent-board .ab-drawer {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 21;
+        display: flex;
+        width: 476px;
+        flex-direction: column;
+        border-left: 1px solid var(--line-strong);
+        background: #1b1920;
+        box-shadow: -30px 0 80px rgba(0, 0, 0, 0.45);
+        animation: ab-slide 240ms var(--ease);
+      }
+
+      @keyframes ab-slide {
+        from {
+          opacity: 0;
+          transform: translateX(36px);
+        }
+      }
+
+      .d-agent-board .ab-dhead {
+        flex: none;
+        padding: 16px 14px 14px 22px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-agent-board .ab-dtop {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #9a96a0;
+        font-size: 12px;
+      }
+
+      .d-agent-board .ab-dtop .icon-btn {
+        margin-left: auto;
+      }
+
+      .d-agent-board .ab-dhead h3 {
+        margin-top: 8px;
+        font-size: 16px;
+        font-weight: 550;
+        line-height: 1.35;
+      }
+
+      .d-agent-board .ab-dmeta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        margin-top: 8px;
+        color: #86828c;
+        font-size: 11.5px;
+      }
+
+      .d-agent-board .ab-dmeta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .d-agent-board .ab-dmeta .mono {
+        font-size: 11px;
+      }
+
+      .d-agent-board .ab-dstats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--card);
+      }
+
+      .d-agent-board .ab-dstats > div {
+        display: grid;
+        gap: 4px;
+        padding: 9px 11px;
+      }
+
+      .d-agent-board .ab-dstats > div + div {
+        border-left: 1px solid var(--hairline);
+      }
+
+      .d-agent-board .ab-dstats span {
+        color: #86828c;
+        font-size: 11px;
+      }
+
+      .d-agent-board .ab-dstats b {
+        font: 400 13.5px var(--mono);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-drawer .tabs {
+        flex: none;
+        padding: 0 14px;
+      }
+
+      .d-agent-board .ab-drawer .tab .count {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-2);
+      }
+
+      .d-agent-board .ab-drawer .tab[aria-selected="true"] .count {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-agent-board .ab-dbody {
+        flex: 1;
+        min-height: 0;
+        padding: 12px 16px 16px 20px;
+      }
+
+      .d-agent-board .ab-dsection + .ab-dsection {
+        margin-top: 18px;
+      }
+
+      .d-agent-board .ab-dlabel {
+        margin-bottom: 8px;
+        color: #86828c;
+        font-size: 11.5px;
+      }
+
+      .d-agent-board .ab-todos {
+        display: grid;
+        gap: 7px;
+      }
+
+      .d-agent-board .ab-todos li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #e0dce4;
+        font-size: 13px;
+      }
+
+      .d-agent-board .ab-todos li[data-s="done"] {
+        color: #86828c;
+        text-decoration: line-through;
+        text-decoration-color: rgba(255, 255, 255, 0.2);
+      }
+
+      .d-agent-board .ab-box {
+        position: relative;
+        width: 14px;
+        height: 14px;
+        flex: none;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 3px;
+        background: #141414;
+        color: transparent;
+      }
+
+      .d-agent-board li[data-s="done"] .ab-box {
+        border-color: rgba(101, 199, 142, 0.4);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-agent-board li[data-s="doing"] .ab-box::after {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #8a8a8d;
+      }
+
+      .d-agent-board .ab-acts {
+        display: grid;
+      }
+
+      .d-agent-board .ab-act {
+        display: grid;
+        grid-template-columns: 56px minmax(0, 1fr);
+        gap: 10px;
+        padding: 6px 0;
+        font-size: 12.5px;
+      }
+
+      .d-agent-board .ab-act time {
+        color: #6f6a75;
+        font: 11px/18px var(--mono);
+      }
+
+      .d-agent-board .ab-act span {
+        color: #c9c3cd;
+        line-height: 18px;
+      }
+
+      .d-agent-board .ab-act code {
+        font: 11.5px var(--mono);
+        color: #e0dce4;
+      }
+
+      .d-agent-board .ab-act[data-new] {
+        animation: ab-swap 380ms var(--ease);
+      }
+
+      .d-agent-board .ab-dfile {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 6px 8px 6px 4px;
+        border-radius: 6px;
+      }
+
+      .d-agent-board .ab-dfile:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .d-agent-board .ab-dfile svg {
+        color: #6f6a75;
+      }
+
+      .d-agent-board .ab-dfile-name {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+      }
+
+      .d-agent-board .ab-dfile-name span {
+        overflow: hidden;
+        color: #86828c;
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-agent-board .ab-dfile .add,
+      .d-agent-board .ab-dfile .del,
+      .d-agent-board .ab-dsum .add,
+      .d-agent-board .ab-dsum .del {
+        font-size: 12px;
+      }
+
+      .d-agent-board .ab-dsum {
+        display: flex;
+        gap: 10px;
+        padding: 2px 4px 8px;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-agent-board .ab-dsum span:first-child {
+        flex: 1;
+      }
+
+      .d-agent-board .ab-dcheck {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 40px;
+        padding: 0 6px;
+        font-size: 13px;
+      }
+
+      .d-agent-board .ab-dcheck > span:nth-child(2) {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+      }
+
+      .d-agent-board .ab-dcheck small {
+        color: #86828c;
+        font: 11px var(--mono);
+      }
+
+      .d-agent-board .ab-dcheck .ab-ck {
+        width: 15px;
+        height: 15px;
+      }
+
+      .d-agent-board .ab-dcheck > span:last-child {
+        color: #86828c;
+        font: 11px var(--mono);
+      }
+
+      .d-agent-board .ab-dfoot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px 14px 20px;
+        border-top: 1px solid var(--hairline);
+        background: #19171d;
+      }
+
+      .d-agent-board .ab-dfoot .btn-ghost {
+        margin-right: auto;
+      }
+
+      .d-agent-board .ab-toast {
+        position: absolute;
+        right: 22px;
+        bottom: 22px;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 10px 12px;
+        font-size: 12.5px;
+        animation: ab-swap 220ms var(--ease);
+      }
+
+      .d-agent-board .ab-toast svg {
+        color: var(--violet-bright);
+      }
+
+      .d-agent-board .ab-toast span {
+        color: #86828c;
+      }
+
+      .d-agent-board .ab-sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .d-agent-board *,
+        .d-agent-board *::before {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="agent-board"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-agent-board">
+            <div class="app">
+              <nav data-lab-sidebar data-active="dashboard" data-workspace="Vector" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <span class="ab-mark" aria-hidden="true">
+                    <svg viewBox="0 0 18 18" width="15" height="15"><rect x="2.5" y="3" width="4.3" height="5" rx="1" fill="currentColor" opacity=".7"></rect><rect x="6.9" y="3" width="4.3" height="7.5" rx="1" fill="currentColor"></rect><rect x="11.3" y="3" width="4.3" height="11" rx="1" fill="currentColor" opacity=".75"></rect></svg>
+                  </span>
+                  <div class="ab-heading">
+                    <h2>Agent Dashboard</h2>
+                    <span>Every workspace, agent, and review in one place</span>
+                  </div>
+                  <div class="app-header-end">
+                    <p class="ab-counts" data-counts></p>
+                    <button class="btn btn-primary" type="button" data-new><i data-icon="plus" data-size="14"></i>New workspace</button>
+                  </div>
+                </header>
+                <div class="app-body" style="overflow: hidden">
+                  <div class="ab-main">
+                    <div class="ab-controls">
+                      <label class="ab-search">
+                        <i data-icon="magnifier" data-size="12"></i>
+                        <input type="search" data-search placeholder="Search agents, tasks, branches, or files" autocomplete="off" aria-label="Search agents" />
+                        <kbd>/</kbd>
+                      </label>
+                      <div class="ab-filters" data-filters></div>
+                      <button class="ab-clear" type="button" data-clear hidden>Clear</button>
+                      <div class="ab-views" role="group" aria-label="View">
+                        <button type="button" aria-pressed="true" data-view="board"><i data-icon="dashboard" data-size="13"></i>Board</button>
+                        <button type="button" aria-pressed="false" data-view="list"><i data-icon="menu" data-size="13"></i>List</button>
+                      </div>
+                    </div>
+                    <p class="ab-summary" data-summary></p>
+                    <div class="ab-board" data-board></div>
+                    <div class="ab-list scroll" data-list hidden></div>
+                  </div>
+                </div>
+              </main>
+            </div>
+            <div class="ab-scrim" data-scrim hidden></div>
+            <aside class="ab-drawer" data-drawer role="dialog" aria-modal="false" aria-label="Workspace details" hidden></aside>
+            <div class="ab-toast float" data-toast role="status" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const stage = document.querySelector(".d-agent-board")
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+
+        const paths = {
+          check: '<path d="m3.8 8.3 2.7 2.7 5.7-6"/>',
+          x: '<path d="m5.2 5.2 5.6 5.6m0-5.6-5.6 5.6"/>',
+          ask: '<circle cx="8" cy="8" r="5.6"/><path d="M6.5 6.5a1.6 1.6 0 1 1 2.2 1.5c-.5.2-.7.6-.7 1.1M8 11v.01"/>',
+          shield: '<path d="M8 2.6 12.6 4.3v3.6c0 2.8-1.9 4.7-4.6 5.6-2.7-.9-4.6-2.8-4.6-5.6V4.3Z"/>',
+          merge: '<circle cx="4.6" cy="3.8" r="1.3"/><circle cx="4.6" cy="12.2" r="1.3"/><circle cx="11.4" cy="9.6" r="1.3"/><path d="M4.6 5.1v5.8M4.6 5.6c0 2.5 1.9 4 5.5 4"/>',
+          pr: '<circle cx="4.6" cy="3.8" r="1.3"/><circle cx="4.6" cy="12.2" r="1.3"/><circle cx="11.4" cy="12.2" r="1.3"/><path d="M4.6 5.1v5.8M11.4 10.9V6.6a2 2 0 0 0-2-2H7.2M8.6 3.4 7.2 4.6l1.4 1.2"/>',
+          folder: '<path d="M2.6 4.6A1.2 1.2 0 0 1 3.8 3.4h2.6l1.3 1.4h4.5a1.2 1.2 0 0 1 1.2 1.2v5.6a1.2 1.2 0 0 1-1.2 1.2H3.8a1.2 1.2 0 0 1-1.2-1.2Z"/>',
+          clock: '<circle cx="8" cy="8" r="5.6"/><path d="M8 5.1v3.1l2 1.3"/>',
+          sub: '<rect x="2.8" y="2.8" width="4" height="4" rx="1"/><rect x="9.2" y="9.2" width="4" height="4" rx="1"/><path d="M4.8 6.8v2.4a2 2 0 0 0 2 2h2.4"/>',
+          list: '<path d="M5.5 4.5h7M5.5 8h7M5.5 11.5h7M3 4.5h.01M3 8h.01M3 11.5h.01"/>',
+        }
+        const glyph = (name, size = 14) =>
+          paths[name]
+            ? `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`
+            : LabUI.svg(name, size)
+        const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        const fmt = (s) =>
+          s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`
+        const money = (n) => `$${n.toFixed(2)}`
+
+        const RT = {
+          vector: { name: "Vector", tile: "V" },
+          claude: { name: "Claude Code", tile: "CC" },
+          codex: { name: "Codex", tile: "Cx" },
+          cursor: { name: "Cursor Agent", tile: "Cu" },
+        }
+        const COLS = [
+          { key: "working", name: "Working", note: "agents on it" },
+          { key: "needs", name: "Needs you", note: "waiting on you" },
+          { key: "ready", name: "Ready to merge", note: "checks green" },
+          { key: "done", name: "Done", note: "today" },
+        ]
+        const CHECKS = ["Typecheck", "Tests", "Build", "Vectorscope"]
+
+        // ---- every Parallel Workspace and its agent ----
+        const ws = [
+          {
+            id: "w1", col: "working", title: "Fingerprint-bound workspace trust", rt: "vector", model: "GPT-6 Sol", branch: "workspace-trust",
+            secs: 724, cost: 1.42, todos: ["Map trust entry points", "Bind trust to a fingerprint", "Gate project MCP launch", "Write trust tests", "Get a judge verdict"], done: 2,
+            files: [["trust.ts", "packages/engine/src/project/", 64, 9], ["project-policy.ts", "packages/engine/src/config/", 31, 12], ["launch.ts", "packages/engine/src/mcp/", 18, 6], ["executable.ts", "packages/engine/src/permission/", 22, 4], ["trust.test.ts", "packages/engine/test/project/", 39, 0]],
+            checks: ["pass", "run", "wait", "wait"], subagents: 2, subs: [["Fingerprint-bound trust", "Subagent", "subagent", "4m 12s"], ["Gate project MCP launch", "Subagent", "subagent", "3m 55s"]],
+            steps: ["Running <code>bun test test/project</code>", "Waiting for 2 subagents", "Reading <code>mcp/launch.ts</code>", "Editing <code>project/trust.ts</code>"],
+            log: [["18:14", "Launched Fingerprint-bound trust and Gate project MCP launch"], ["18:15", "Explore reported back: 7 entry points"], ["18:19", "Typecheck passed in packages/engine"]],
+          },
+          {
+            id: "w2", col: "working", title: "Keep transcript scroll on card expand", rt: "claude", model: "Claude Code", branch: "fix-scroll-state",
+            secs: 386, cost: 0.63, todos: ["Reproduce the jump", "Anchor the list while a card grows", "Cover it with a test", "Check the Changes panel"], done: 1,
+            files: [["timeline.tsx", "packages/app/src/pages/session/", 31, 14], ["subagent-task-chip.tsx", "packages/app/src/features/background-tasks/", 6, 2], ["timeline.test.ts", "packages/app/test/session/", 4, 2]],
+            checks: ["run", "wait", "wait", "wait"],
+            steps: ["Editing <code>session/timeline.tsx</code>", "Running <code>bun typecheck</code> in packages/app", "Reading <code>virtual-list.ts</code>"],
+            log: [["18:11", "Reproduced the jump with a 40-part transcript"], ["18:14", "Edited timeline.tsx +31 −14"]],
+          },
+          {
+            id: "w3", col: "working", title: "Regenerate SDK after protocol change", rt: "codex", model: "Codex", branch: "regenerate-sdk",
+            secs: 241, cost: 0.38, todos: ["Run bun run generate", "Rebuild the legacy SDK", "Typecheck packages/client"], done: 1,
+            files: [["types.gen.ts", "packages/client/src/generated/", 418, 377], ["sdk.gen.ts", "packages/client/src/generated/", 377, 372], ["index.ts", "packages/sdk/js/", 4, 1]],
+            checks: ["wait", "wait", "wait", "wait"],
+            steps: ["Running <code>bun run generate</code> in packages/client", "Running <code>./packages/sdk/js/script/build.ts</code>", "Running <code>bun typecheck</code> in packages/client"],
+            log: [["18:16", "Started from a protocol change on main"]],
+            finishAt: 26, pr: 2491,
+          },
+          {
+            id: "w4", col: "working", title: "Session recovery after a crash", rt: "vector", model: "GPT-6 Astra", branch: "session-recovery",
+            secs: 1530, cost: 2.06, todos: ["Find where the drain stops", "Commit inbox rows before waking", "Recover admitted inputs on start", "Test with a killed process", "Typecheck", "Review", "Open a pull request"], done: 4,
+            files: [["execution.ts", "packages/engine/src/session/", 38, 11], ["run-coordinator.ts", "packages/engine/src/session/", 22, 4], ["recovery.test.ts", "packages/engine/test/session/", 96, 0], ["clock.ts", "packages/engine/test/fixture/", 17, 0], ["inbox.ts", "packages/engine/src/session/", 39, 33]],
+            checks: ["pass", "pass", "run", "wait"], subagents: 3, subs: [["Write recovery tests", "Specialist · Test", "specialist", "6m 40s"], ["Code review", "Specialist · Review", "specialist", "2m 18s"], ["Security review", "Specialist · Security", "specialist", "2m 18s"]],
+            steps: ["Waiting for 3 subagents", "Running <code>bun test test/session --rerun-each 50</code>", "Reading <code>session/inbox.ts</code>"],
+            log: [["17:52", "Found the race between wake and admit"], ["18:03", "Launched Test, Review and Security"]],
+          },
+          {
+            id: "w5", col: "needs", title: "Refresh the free model list", rt: "vector", model: "GPT-6 Luna", branch: "openrouter-free",
+            secs: 905, cost: 0.88, todos: ["Fetch OpenRouter's models", "Filter to zero-price, tool-capable, ZDR", "Write free.json", "Provider tests", "Open a pull request"], done: 2,
+            files: [["openrouter.ts", "packages/engine/src/provider/", 44, 18], ["free.json", "packages/engine/src/provider/models/", 212, 97]],
+            checks: ["pass", "wait", "wait", "wait"],
+            ask: { type: "permission", label: "Asks to run a command", text: "Writes the regenerated model list into the repository.", cmd: "bun run script/models.ts --write" },
+            steps: ["Running <code>bun run script/models.ts --write</code>", "Running <code>bun test test/provider</code>"],
+            log: [["17:58", "41 zero-price models, 19 eligible"], ["18:02", "Paused for permission"]],
+          },
+          {
+            id: "w6", col: "needs", title: "Comment threads in the Changes panel", rt: "cursor", model: "Cursor Agent", branch: "changes-comments",
+            secs: 1104, cost: 0.97, todos: ["Store comments per line", "Show threads in the diff", "Handle a rebase", "Tests"], done: 2,
+            files: [["changes-comments.tsx", "packages/app/src/features/changes/", 88, 4], ["comments.ts", "packages/app/src/features/changes/", 41, 9], ["comment-store.ts", "packages/app/src/features/changes/", 3, 7], ["diff-view.tsx", "packages/app/src/features/changes/", 1, 0]],
+            checks: ["pass", "pass", "wait", "wait"],
+            ask: { type: "question", label: "Has a question", text: "After a rebase moves a commented line, should the comment follow the line, or move to the file's thread?", options: ["Follow the line", "Move to the file"] },
+            steps: ["Handling a rebase in <code>comment-store.ts</code>", "Running <code>bun test</code> in packages/app"],
+            log: [["17:49", "Threads render in the diff"], ["18:05", "Asked how comments survive a rebase"]],
+          },
+          {
+            id: "w7", col: "ready", title: "Background tasks clear button", rt: "vector", model: "GPT-6 Sol", branch: "bgt-clear",
+            secs: 812, cost: 0.41, todos: ["Hide finished cards", "Remember per session", "Tests"], done: 3,
+            files: [["background-tasks-pane.tsx", "packages/app/src/features/background-tasks/", 32, 4], ["background-tasks-state.ts", "packages/app/src/features/background-tasks/", 18, 2], ["background-tasks-state.test.ts", "packages/app/src/features/background-tasks/", 8, 0]],
+            checks: ["pass", "pass", "pass", "pass"], pr: 2486, review: "Vectorscope: no blocking issues",
+            log: [["17:31", "Opened pull request #2486"], ["17:38", "Vectorscope reviewed: no blocking issues"]],
+          },
+          {
+            id: "w8", col: "ready", title: "MCP launch policy for project servers", rt: "claude", model: "Claude Code", branch: "mcp-launch-policy",
+            secs: 1990, cost: 1.12, todos: ["Mark project servers", "Refuse until trusted", "Message in the app", "Tests"], done: 4,
+            files: [["launch.ts", "packages/engine/src/mcp/", 46, 11], ["mcp-servers.tsx", "packages/app/src/pages/settings/", 28, 6], ["launch.test.ts", "packages/engine/test/mcp/", 22, 4], ["schema.ts", "packages/engine/src/mcp/", 0, 0]],
+            checks: ["pass", "pass", "pass", "pass"], pr: 2484, review: "Vectorscope: 1 suggestion, not blocking",
+            log: [["16:58", "Opened pull request #2484"], ["17:20", "Applied Vectorscope's rename"]],
+          },
+          {
+            id: "w9", col: "done", title: "Fix scroll jump in Changes list", rt: "vector", model: "GPT-6 Sol", branch: "fix-changes-scroll",
+            secs: 640, cost: 0.22, todos: ["Fix", "Test"], done: 2, files: [["changes-list.tsx", "packages/app/src/features/changes/", 18, 7], ["changes-list.test.ts", "packages/app/test/changes/", 12, 0]],
+            checks: ["pass", "pass", "pass", "pass"], pr: 2479, merged: "2h ago",
+          },
+          {
+            id: "w10", col: "done", title: "Bump Bun to 1.3.14", rt: "codex", model: "Codex", branch: "bun-1-3-14",
+            secs: 300, cost: 0.09, todos: ["Bump", "Typecheck"], done: 2, files: [["package.json", "", 2, 2], ["bun.lock", "", 3, 3], ["ci.yml", ".github/workflows/", 1, 1]],
+            checks: ["pass", "pass", "pass", "pass"], pr: 2477, merged: "5h ago",
+          },
+          {
+            id: "w11", col: "done", title: "Trusted folders docs page", rt: "cursor", model: "Cursor Agent", branch: "trusted-docs",
+            secs: 182, cost: 0.08, todos: ["Draft"], done: 0, files: [["trusted-folders.astro", "packages/web/src/pages/docs/", 40, 0]],
+            checks: ["wait", "wait", "wait", "wait"], closed: "Stopped, no pull request",
+          },
+        ]
+
+        let view = "board"
+        let current = null
+        let drawerTab = "activity"
+        const chosen = { status: [], runtime: [], pr: [] }
+        const FILTERS = [
+          { key: "status", label: "Status", options: COLS.map((c) => [c.key, c.name]) },
+          { key: "runtime", label: "Runtime", options: Object.entries(RT).map(([k, v]) => [k, v.name]) },
+          { key: "pr", label: "Pull request", options: [["open", "Open"], ["merged", "Merged"], ["none", "No pull request"]] },
+        ]
+        const prState = (w) => (w.merged ? "merged" : w.pr && w.col !== "working" ? "open" : "none")
+
+        const board = stage.querySelector("[data-board]")
+        const list = stage.querySelector("[data-list]")
+        const search = stage.querySelector("[data-search]")
+
+        const totalFiles = (w) => w.files.length
+        const adds = (w) => w.files.reduce((s, f) => s + f[2], 0)
+        const dels = (w) => w.files.reduce((s, f) => s + f[3], 0)
+
+        function visible(w) {
+          const q = search.value.trim().toLowerCase()
+          if (q) {
+            const hay = [w.title, w.branch, w.model, RT[w.rt].name, ...(w.steps ?? []), ...w.files.map((f) => f[1] + f[0])].join(" ").toLowerCase().replace(/<[^>]+>/g, "")
+            if (!q.split(/\s+/).every((part) => hay.includes(part))) return false
+          }
+          if (chosen.status.length && !chosen.status.includes(w.col)) return false
+          if (chosen.runtime.length && !chosen.runtime.includes(w.rt)) return false
+          if (chosen.pr.length && !chosen.pr.includes(prState(w))) return false
+          return true
+        }
+
+        // ---- cards ----
+        function checksHtml(w) {
+          return `<span class="ab-checks" title="${CHECKS.map((c, i) => `${c}: ${w.checks[i]}`).join(", ")}">${w.checks
+            .map((s) => `<span class="ab-ck" data-s="${s}">${s === "pass" ? glyph("check", 9) : s === "fail" ? glyph("x", 9) : ""}</span>`)
+            .join("")}</span>`
+        }
+        function filesHtml(w) {
+          return `<span class="ab-files"><b>${totalFiles(w)} files</b><span class="add">+${adds(w)}</span><span class="del">−${dels(w)}</span></span>`
+        }
+        function topHtml(w) {
+          const time = w.col === "done" ? "" : `<span class="ab-time" data-time="${w.id}">${fmt(w.secs)}</span>`
+          return `<div class="ab-card-top"><span class="ab-rt" data-rt="${w.rt}">${RT[w.rt].tile}</span><span>${w.rt === "vector" ? `Vector · ${w.model}` : RT[w.rt].name}</span>${time}</div>`
+        }
+
+        function cardHtml(w) {
+          const pct = Math.round((w.done / w.todos.length) * 100)
+          const progress = `<div class="ab-progress"><span class="ab-bar"><i style="width:${pct}%" data-bar="${w.id}"></i></span><span data-todo="${w.id}">${w.done} of ${w.todos.length} todos</span></div>`
+          const foot = `<div class="ab-foot">${filesHtml(w)}${checksHtml(w)}<span class="ab-cost" data-cost="${w.id}">${money(w.cost)}</span></div>`
+          const base = `class="ab-card" data-card="${w.id}" data-col="${w.col}" aria-current="${current === w.id}" ${w.arrive ? "data-arrive" : ""}`
+          const title = `<h3 class="ab-title"><button class="ab-open" type="button" data-open="${w.id}">${esc(w.title)}</button></h3>`
+          if (w.col === "done")
+            return `<article ${base}>
+              ${topHtml(w)}
+              ${title}
+              <p class="ab-done-line">${w.merged ? `<span class="ab-merged">${glyph("merge", 12)}Merged #${w.pr}</span><span>${w.merged}</span>` : `<span class="ab-closed">${w.closed}</span>`}${filesHtml(w)}</p>
+            </article>`
+          let middle = ""
+          if (w.col === "working") {
+            middle = `<div class="ab-step" data-step="${w.id}"><span class="ab-spin" aria-hidden="true"></span><span>${w.steps[w.stepAt ?? 0]}</span></div>${progress}`
+          }
+          if (w.col === "needs") {
+            const a = w.ask
+            middle = `<div class="ab-ask" data-ask>
+              <span class="ab-ask-label">${glyph(a.type === "permission" ? "shield" : "ask", 13)}${a.label}</span>
+              ${a.cmd ? `<code>$ ${esc(a.cmd)}</code>` : ""}
+              <p>${esc(a.text)}</p>
+              <div class="ab-ask-actions">${
+                a.type === "permission"
+                  ? `<button class="btn btn-primary" type="button" data-allow="${w.id}">Allow once</button><button class="btn" type="button" data-allow-always="${w.id}" title="Save as a permission rule for Vectordev.ai">Always allow</button><button class="btn btn-ghost" type="button" data-deny="${w.id}">Deny</button>`
+                  : `${a.options.map((o, i) => `<button class="btn ${i === 0 ? "btn-primary" : ""}" type="button" data-answer="${w.id}" data-option="${esc(o)}">${esc(o)}</button>`).join("")}`
+              }</div>
+            </div>${progress}`
+          }
+          if (w.col === "ready") {
+            middle = `<div class="ab-tags"><span class="ab-tag" data-tone="green">${glyph("pr", 12)}#${w.pr} open</span><span class="ab-tag">${glyph("check", 12)}4 of 4 checks</span></div>
+              <p class="ab-review">${glyph("shield", 12)}<span>${esc(w.review)}</span></p>`
+          }
+          const tags =
+            w.col === "working" && (w.subagents || w.pr)
+              ? `<div class="ab-tags">${w.subagents ? `<span class="ab-tag" data-tone="violet"><span class="ab-sqs">${"<i></i>".repeat(w.subagents)}</span>${w.subagents} subagents</span>` : ""}${w.pr ? `<span class="ab-tag">${glyph("pr", 12)}#${w.pr} draft</span>` : ""}</div>`
+              : ""
+          return `<article ${base}>
+            ${topHtml(w)}
+            ${title}
+            <p class="ab-branch">${glyph("branch", 11)}${w.branch}</p>
+            ${middle}
+            ${tags}
+            ${w.col === "ready" ? "" : foot}
+            ${w.col === "ready" ? `<div class="ab-foot">${filesHtml(w)}<span class="ab-cost">${money(w.cost)}</span><button class="btn btn-primary" type="button" data-merge="${w.id}">${glyph("merge", 13)}Merge</button></div>` : ""}
+          </article>`
+        }
+
+        function renderBoard() {
+          board.innerHTML = COLS.map((col) => {
+            const items = ws.filter((w) => w.col === col.key && visible(w))
+            const all = ws.filter((w) => w.col === col.key).length
+            return `<section class="ab-col" data-col="${col.key}" aria-label="${col.name}">
+              <header class="ab-col-head"><span class="ab-col-dot"></span>${col.name}<span class="ab-col-count">${items.length === all ? all : `${items.length}/${all}`}</span><span class="ab-col-note">${col.note}</span></header>
+              <div class="ab-col-body scroll">${items.length ? items.map(cardHtml).join("") : `<p class="ab-empty">${all ? "No matches here" : col.key === "needs" ? "Nothing needs you" : "Nothing here yet"}</p>`}</div>
+            </section>`
+          }).join("")
+          ws.forEach((w) => delete w.arrive)
+        }
+
+        function renderList() {
+          const rows = COLS.map((col) => {
+            const items = ws.filter((w) => w.col === col.key && visible(w))
+            if (!items.length) return ""
+            return `<tr class="ab-group"><td colspan="8"><span class="ab-status" data-col="${col.key}"><i></i>${col.name} · ${items.length}</span></td></tr>${items
+              .map(
+                (w) => `<tr data-card="${w.id}" aria-current="${current === w.id}" tabindex="0">
+                  <td><span class="ab-cell-name"><b>${esc(w.title)}</b><span>${w.branch}</span></span></td>
+                  <td><span style="display:inline-flex;align-items:center;gap:7px"><span class="ab-rt" data-rt="${w.rt}">${RT[w.rt].tile}</span>${w.rt === "vector" ? w.model : RT[w.rt].name}</span></td>
+                  <td class="ab-cell-ellipsis">${w.col === "working" ? `<span data-step-text="${w.id}">${w.steps[w.stepAt ?? 0]}</span>` : w.col === "needs" ? `<span style="color:var(--amber)">${w.ask.label}</span>` : w.col === "ready" ? esc(w.review) : w.merged ? `Merged ${w.merged}` : w.closed}</td>
+                  <td class="mono-cell">${w.done}/${w.todos.length}</td>
+                  <td class="mono-cell">${totalFiles(w)} <span class="add">+${adds(w)}</span> <span class="del">−${dels(w)}</span></td>
+                  <td>${checksHtml(w)}</td>
+                  <td class="mono-cell" data-cost="${w.id}">${money(w.cost)}</td>
+                  <td class="mono-cell">${w.pr ? `#${w.pr}` : "–"}</td>
+                </tr>`,
+              )
+              .join("")}`
+          }).join("")
+          list.innerHTML = `<table class="ab-table"><colgroup><col style="width:27%"/><col style="width:13%"/><col style="width:24%"/><col style="width:6%"/><col style="width:11%"/><col style="width:8%"/><col style="width:6%"/><col style="width:5%"/></colgroup>
+            <thead><tr><th>Workspace</th><th>Agent</th><th>Now</th><th>Todos</th><th>Changes</th><th>Checks</th><th>Cost</th><th>PR</th></tr></thead>
+            <tbody>${rows || `<tr><td colspan="8" style="color:#86828c;text-align:center;height:90px">No workspaces match</td></tr>`}</tbody></table>`
+        }
+
+        function renderSummary() {
+          const n = (c) => ws.filter((w) => w.col === c).length
+          const spend = ws.reduce((s, w) => s + w.cost, 0)
+          stage.querySelector("[data-counts]").innerHTML = `<span><span class="dot dot-violet"></span><strong>${n("working")}</strong> working</span><span><span class="dot dot-amber"></span><strong>${n("needs")}</strong> need you</span><span><span class="dot dot-green"></span><strong>${n("ready")}</strong> ready</span><span><strong>${n("done")}</strong> done</span><span class="ab-spend" data-spend>${money(spend)} today</span>`
+          const shown = ws.filter(visible)
+          stage.querySelector("[data-summary]").innerHTML = `<span><b>${shown.length}</b> of ${ws.length} workspaces</span><span><b>${shown.reduce((s, w) => s + totalFiles(w), 0)}</b> files touched</span><span><b>${ws.filter((w) => w.col === "working").reduce((s, w) => s + (w.subagents ?? 0), 0)}</b> subagents running</span><span class="ab-live"><span class="dot dot-violet"></span>Live</span>`
+        }
+
+        function render() {
+          renderSummary()
+          if (view === "board") renderBoard()
+          else renderList()
+          const any = search.value.trim() !== "" || Object.values(chosen).some((v) => v.length)
+          stage.querySelector("[data-clear]").hidden = !any
+        }
+
+        // ---- filters ----
+        const filtersEl = stage.querySelector("[data-filters]")
+        filtersEl.innerHTML = FILTERS.map(
+          (f) => `<div class="ab-filter" data-filter="${f.key}">
+            <button class="ab-filter-button" type="button" aria-haspopup="menu" aria-expanded="false"><span>${f.label}</span><span class="ab-filter-value"></span>${glyph("caret", 11)}</button>
+            <div class="ab-menu" role="menu" aria-label="${f.label}" hidden>
+              <p class="ab-menu-label">${f.label}</p>
+              ${f.options.map(([value, name]) => `<button type="button" role="menuitemcheckbox" aria-checked="false" data-value="${value}"><span>${name}</span><span class="ab-menu-count" data-mcount="${f.key}:${value}"></span><span class="ab-tick">${glyph("check", 12)}</span></button>`).join("")}
+            </div>
+          </div>`,
+        ).join("")
+        const closeMenus = (except) =>
+          filtersEl.querySelectorAll(".ab-filter").forEach((f) => {
+            if (f === except) return
+            f.querySelector(".ab-menu").hidden = true
+            f.querySelector(".ab-filter-button").setAttribute("aria-expanded", "false")
+          })
+        function paintFilters() {
+          FILTERS.forEach((f) => {
+            const el = filtersEl.querySelector(`[data-filter="${f.key}"]`)
+            const values = chosen[f.key]
+            el.querySelectorAll("[data-value]").forEach((b) => b.setAttribute("aria-checked", String(values.includes(b.dataset.value))))
+            const names = values.map((v) => f.options.find((o) => o[0] === v)[1])
+            el.querySelector(".ab-filter-value").textContent = names.length > 1 ? `${names[0]} +${names.length - 1}` : (names[0] ?? "")
+            el.querySelector(".ab-filter-button").toggleAttribute("data-on", values.length > 0)
+            f.options.forEach(([value]) => {
+              const count = ws.filter((w) => (f.key === "status" ? w.col : f.key === "runtime" ? w.rt : prState(w)) === value).length
+              el.querySelector(`[data-mcount="${f.key}:${value}"]`).textContent = count
+            })
+          })
+        }
+        filtersEl.addEventListener("click", (event) => {
+          const button = event.target.closest(".ab-filter-button")
+          const filter = event.target.closest(".ab-filter")
+          if (button) {
+            const menu = filter.querySelector(".ab-menu")
+            const opening = menu.hidden
+            closeMenus(filter)
+            menu.hidden = !opening
+            button.setAttribute("aria-expanded", String(opening))
+            if (opening) menu.querySelector("[data-value]").focus({ preventScroll: true })
+            return
+          }
+          const option = event.target.closest("[data-value]")
+          if (option) {
+            const key = filter.dataset.filter
+            const value = option.dataset.value
+            chosen[key] = chosen[key].includes(value) ? chosen[key].filter((v) => v !== value) : [...chosen[key], value]
+            paintFilters()
+            render()
+          }
+        })
+        filtersEl.addEventListener("keydown", (event) => {
+          const menu = event.target.closest(".ab-menu")
+          if (!menu) return
+          const options = [...menu.querySelectorAll("[data-value]")]
+          const at = options.indexOf(document.activeElement)
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault()
+            options[(at + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length].focus()
+          }
+          if (event.key === "Escape") {
+            event.preventDefault()
+            event.stopPropagation()
+            closeMenus()
+            menu.parentElement.querySelector(".ab-filter-button").focus()
+          }
+        })
+        document.addEventListener("pointerdown", (event) => {
+          if (!event.target.closest?.(".ab-filter")) closeMenus()
+        })
+        stage.querySelector("[data-clear]").addEventListener("click", () => {
+          search.value = ""
+          Object.keys(chosen).forEach((k) => (chosen[k] = []))
+          paintFilters()
+          render()
+          search.focus()
+        })
+        search.addEventListener("input", render)
+        stage.querySelectorAll("[data-view]").forEach((b) =>
+          b.addEventListener("click", () => {
+            view = b.dataset.view
+            stage.querySelectorAll("[data-view]").forEach((o) => o.setAttribute("aria-pressed", String(o === b)))
+            board.hidden = view !== "board"
+            list.hidden = view !== "list"
+            render()
+          }),
+        )
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "/" && !event.target.closest("input, textarea")) {
+            event.preventDefault()
+            search.focus()
+          }
+          if (event.key === "Escape" && current && !event.defaultPrevented) closeDrawer()
+        })
+
+        // ---- card actions and the drawer ----
+        function move(w, col, note) {
+          // Arrivals go to the top of their column, where they are seen.
+          ws.splice(ws.indexOf(w), 1)
+          ws.unshift(w)
+          w.col = col
+          w.arrive = true
+          render()
+          if (current === w.id) renderDrawer()
+          if (note) toast(note[0], note[1], note[2])
+        }
+
+        stage.addEventListener("click", (event) => {
+          const t = event.target
+          const allow = t.closest("[data-allow], [data-allow-always]")
+          if (allow) {
+            const w = ws.find((x) => x.id === (allow.dataset.allow ?? allow.dataset.allowAlways))
+            w.log.push([now(), allow.dataset.allowAlways ? "You allowed it for this repository" : "You allowed it once"])
+            w.stepAt = 0
+            delete w.ask
+            return move(w, "working", ["check", `${w.title} is working again`, allow.dataset.allowAlways ? "Saved as a permission rule for Vectordev.ai" : "Allowed once"])
+          }
+          const deny = t.closest("[data-deny]")
+          if (deny) {
+            const w = ws.find((x) => x.id === deny.dataset.deny)
+            w.log.push([now(), "You denied the command"])
+            w.steps = ["Finding another way to write <code>free.json</code>", ...w.steps.slice(1)]
+            w.stepAt = 0
+            delete w.ask
+            return move(w, "working", ["x", "Denied", "The agent was told and keeps going without it"])
+          }
+          const answer = t.closest("[data-answer]")
+          if (answer) {
+            const w = ws.find((x) => x.id === answer.dataset.answer)
+            w.log.push([now(), `You answered: ${answer.dataset.option}`])
+            w.stepAt = 0
+            delete w.ask
+            return move(w, "working", ["check", "Answer sent", `${w.title} picked it up`])
+          }
+          const merge = t.closest("[data-merge]")
+          if (merge) {
+            const w = ws.find((x) => x.id === merge.dataset.merge)
+            merge.disabled = true
+            merge.textContent = "Merging…"
+            setTimeout(() => {
+              w.merged = "just now"
+              w.log.push([now(), `Merged #${w.pr} into main`])
+              move(w, "done", ["merge", `Merged #${w.pr}`, `${w.branch} → main · workspace cleaned up`])
+            }, reduced ? 0 : 700)
+            return
+          }
+          const opener = t.closest("[data-open]")
+          if (opener) return openDrawer(opener.dataset.open)
+          const card = t.closest("[data-card]")
+          if (card && !t.closest("button, .ab-ask, [data-drawer]")) openDrawer(card.dataset.card)
+        })
+        stage.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && event.target.matches("tr[data-card]")) {
+            event.preventDefault()
+            openDrawer(event.target.dataset.card)
+          }
+        })
+
+        const drawer = stage.querySelector("[data-drawer]")
+        const scrim = stage.querySelector("[data-scrim]")
+        function openDrawer(id) {
+          current = id
+          drawerTab = "activity"
+          drawer.hidden = false
+          scrim.hidden = false
+          renderDrawer()
+          stage.querySelectorAll("[data-card]").forEach((c) => c.setAttribute("aria-current", String(c.dataset.card === id)))
+          drawer.querySelector("[data-close]").focus({ preventScroll: true })
+        }
+        function closeDrawer() {
+          const id = current
+          current = null
+          drawer.hidden = true
+          scrim.hidden = true
+          stage.querySelectorAll("[data-card]").forEach((c) => c.setAttribute("aria-current", "false"))
+          stage.querySelector(`[data-open="${id}"], tr[data-card="${id}"]`)?.focus({ preventScroll: true })
+        }
+        scrim.addEventListener("click", closeDrawer)
+
+        function renderDrawer() {
+          const w = ws.find((x) => x.id === current)
+          if (!w) return
+          const col = COLS.find((c) => c.key === w.col)
+          const todoState = (i) => (i < w.done ? "done" : i === w.done && w.col !== "done" ? "doing" : "")
+          const panel =
+            drawerTab === "activity"
+              ? `<div class="ab-dsection"><p class="ab-dlabel">Todos · ${w.done} of ${w.todos.length}</p><ul class="ab-todos">${w.todos.map((t, i) => `<li data-s="${todoState(i)}"><span class="ab-box">${glyph("check", 10)}</span>${esc(t)}</li>`).join("")}</ul></div>
+                 ${w.subs && w.col === "working" ? `<div class="ab-dsection"><p class="ab-dlabel">Subagents running · ${w.subs.length}</p><div class="ab-subs">${w.subs.map(([n, k, kind, t]) => `<div class="ab-sub"><span class="ab-sq" data-kind="${kind}"></span><span>${esc(n)}<small>${k} · background</small></span><span>${t}</span></div>`).join("")}</div></div>` : ""}
+                 <div class="ab-dsection"><p class="ab-dlabel">Activity</p><div class="ab-acts" data-acts>${(w.log ?? [["–", "No activity recorded"]])
+                   .slice()
+                   .reverse()
+                   .map(([time, text], i) => `<p class="ab-act" ${i === 0 && w.freshLog ? "data-new" : ""}><time>${time}</time><span>${text}</span></p>`)
+                   .join("")}</div></div>`
+              : drawerTab === "changes"
+                ? `<p class="ab-dsum"><span>${w.files.length} files changed</span><span class="add">+${adds(w)}</span><span class="del">−${dels(w)}</span></p>${w.files
+                    .map((f) => `<div class="ab-dfile">${glyph("chevron-right", 14)}<span class="ab-dfile-name">${f[0]}<span>${f[1] || "repository root"}</span></span><span class="add">+${f[2]}</span><span class="del">−${f[3]}</span></div>`)
+                    .join("")}`
+                : CHECKS.map(
+                    (c, i) => `<div class="ab-dcheck"><span class="ab-ck" data-s="${w.checks[i]}">${w.checks[i] === "pass" ? glyph("check", 10) : ""}</span><span>${c}<small>${["bun typecheck", "bun test", "bun run build", "review on the pull request"][i]}</small></span><span>${{ pass: "Passed", run: "Running", wait: "Waiting", fail: "Failed" }[w.checks[i]]}</span></div>`,
+                  ).join("")
+          w.freshLog = false
+          const passed = w.checks.filter((c) => c === "pass").length
+          drawer.innerHTML = `
+            <div class="ab-dhead">
+              <div class="ab-dtop"><span class="ab-rt" data-rt="${w.rt}">${RT[w.rt].tile}</span>${RT[w.rt].name}${w.rt === "vector" ? ` · ${w.model}` : ""}<span class="ab-status" data-col="${w.col}" style="margin-left:8px"><i></i>${col.name}</span><button class="icon-btn" type="button" data-close aria-label="Close details">${glyph("close", 16)}</button></div>
+              <h3>${esc(w.title)}</h3>
+              <p class="ab-dmeta"><span class="mono">${glyph("branch", 12)}${w.branch}</span><span class="mono">${glyph("folder", 12)}.vector/workspaces/${w.branch}</span>${w.pr ? `<span>${glyph("pr", 12)}#${w.pr}</span>` : ""}</p>
+              <div class="ab-dstats">
+                <div><span>Running for</span><b data-dtime>${fmt(w.secs)}</b></div>
+                <div><span>Cost</span><b data-dcost>${money(w.cost)}</b></div>
+                <div><span>Changes</span><b>${w.files.length} <span class="add" style="font-size:11px">+${adds(w)}</span></b></div>
+                <div><span>Checks</span><b>${passed}/4</b></div>
+              </div>
+            </div>
+            <div class="tabs" role="tablist">
+              ${[["activity", "Activity", null], ["changes", "Changes", w.files.length], ["checks", "Checks", `${passed}/4`]]
+                .map(([k, l, n]) => `<button class="tab" role="tab" type="button" aria-selected="${drawerTab === k}" data-dtab="${k}">${l}${n !== null ? ` <span class="count">${n}</span>` : ""}</button>`)
+                .join("")}
+            </div>
+            <div class="ab-dbody scroll">${panel}</div>
+            <div class="ab-dfoot">
+              ${w.col === "working" ? `<button class="btn btn-ghost" type="button" data-stop="${w.id}">${glyph("stop", 13)}Stop</button>` : `<span style="margin-right:auto"></span>`}
+              ${w.pr ? `<button class="btn" type="button">${glyph("external", 13)}Pull request #${w.pr}</button>` : ""}
+              ${w.col === "ready" ? `<button class="btn btn-primary" type="button" data-merge="${w.id}">${glyph("merge", 13)}Merge</button>` : `<button class="btn btn-primary" type="button" data-openws>${glyph("arrow", 13)}Open workspace</button>`}
+            </div>`
+        }
+        drawer.addEventListener("click", (event) => {
+          if (event.target.closest("[data-close]")) return closeDrawer()
+          const tab = event.target.closest("[data-dtab]")
+          if (tab) {
+            drawerTab = tab.dataset.dtab
+            renderDrawer()
+            drawer.querySelector(`[data-dtab="${drawerTab}"]`).focus({ preventScroll: true })
+            return
+          }
+          const stop = event.target.closest("[data-stop]")
+          if (stop) {
+            const w = ws.find((x) => x.id === stop.dataset.stop)
+            w.closed = "Stopped by you"
+            w.log.push([now(), "Stopped by you"])
+            move(w, "done", ["stop", `Stopped ${w.title}`, "Its branch keeps the work so far"])
+            return
+          }
+          if (event.target.closest("[data-openws]")) {
+            const w = ws.find((x) => x.id === current)
+            toast("arrow", `Opening ${w.branch}`, "The workspace's session opens in this window")
+          }
+        })
+
+        // ---- toast ----
+        const toastEl = stage.querySelector("[data-toast]")
+        let toastTimer = 0
+        function toast(icon, title, sub) {
+          toastEl.innerHTML = `${glyph(icon, 15)}<b style="font-weight:500">${esc(title)}</b><span>${esc(sub)}</span>`
+          toastEl.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (toastEl.hidden = true), 3800)
+        }
+
+        // ---- live ----
+        let clockSecs = 18 * 3600 + 21 * 60
+        const now = () => `${String(Math.floor(clockSecs / 3600)).padStart(2, "0")}:${String(Math.floor((clockSecs % 3600) / 60)).padStart(2, "0")}`
+        let beat = 0
+        function tick() {
+          beat += 1
+          clockSecs += 1
+          let moved = false
+          ws.filter((w) => w.col === "working").forEach((w, index) => {
+            w.secs += 1
+            w.cost += 0.0009 + Math.random() * 0.0012
+            stage.querySelectorAll(`[data-time="${w.id}"]`).forEach((el) => (el.textContent = fmt(w.secs)))
+            stage.querySelectorAll(`[data-cost="${w.id}"]`).forEach((el) => (el.textContent = money(w.cost)))
+            if (current === w.id) {
+              drawer.querySelector("[data-dtime]")?.replaceChildren(fmt(w.secs))
+              drawer.querySelector("[data-dcost]")?.replaceChildren(money(w.cost))
+            }
+            // Each agent moves on to its next step at its own pace.
+            if ((beat + index * 2) % (5 + index) === 0) {
+              w.stepAt = ((w.stepAt ?? 0) + 1) % w.steps.length
+              const step = stage.querySelector(`[data-step="${w.id}"]`)
+              if (step) {
+                step.querySelector("span:last-child").innerHTML = w.steps[w.stepAt]
+                step.removeAttribute("data-swap")
+                void step.offsetWidth
+                step.setAttribute("data-swap", "")
+              }
+              const cell = stage.querySelector(`[data-step-text="${w.id}"]`)
+              if (cell) cell.innerHTML = w.steps[w.stepAt]
+            }
+            // The SDK workspace finishes during the visit and moves to Ready to merge.
+            if (w.finishAt) {
+              w.finishAt -= 1
+              if (w.finishAt === 12) {
+                w.done = 2
+                w.checks = ["run", "wait", "wait", "wait"]
+                w.log.push([now(), "Legacy SDK rebuilt"])
+                w.freshLog = true
+                moved = true
+              }
+              if (w.finishAt <= 0) {
+                delete w.finishAt
+                w.done = 3
+                w.checks = ["pass", "pass", "pass", "pass"]
+                w.review = "Vectorscope: no blocking issues"
+                w.log.push([now(), `Opened pull request #${w.pr}`])
+                w.freshLog = true
+                move(w, "ready", ["pr", `${w.title} is ready to merge`, `Pull request #${w.pr} · 4 of 4 checks passed`])
+              }
+            }
+          })
+          stage.querySelector("[data-spend]").textContent = `${money(ws.reduce((s, w) => s + w.cost, 0))} today`
+          if (moved) {
+            render()
+            if (current) renderDrawer()
+          }
+        }
+        if (!reduced) setInterval(() => !document.hidden && tick(), 1000)
+
+        stage.querySelector("[data-new]").addEventListener("click", () => toast("plus", "New workspace", "Opens the launcher: task, branch and agent"))
+
+        paintFilters()
+        render()
+      })
+    </script>
+  </body>
+</html>

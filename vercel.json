@@ -6,9 +6,19 @@
     }
   },
   "installCommand": "bun install",
+  "functions": {
+    "api/design-lab/serve.ts": {
+      "includeFiles": "design-lab/**"
+    }
+  },
   "buildCommand": "bun --cwd packages/web build && node script/prune-vector-site.mjs",
   "outputDirectory": "packages/web/dist",
   "redirects": [
+    {
+      "source": "/design-lab",
+      "destination": "/design-lab/index.html",
+      "permanent": false
+    },
     {
       "source": "/docs/open-repository",
       "destination": "/docs/first-task#open-repository",
@@ -380,6 +390,10 @@
     }
   ],
   "rewrites": [
+    {
+      "source": "/design-lab/:path*",
+      "destination": "/api/design-lab/serve?path=:path*"
+    },
     {
       "source": "/s/:id([a-f0-9]{32})",
       "destination": "/s/index.html"

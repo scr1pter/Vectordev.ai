@@ -1,0 +1,1893 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-settings-permissions [hidden] {
+        display: none !important;
+      }
+
+      /* ---------- Settings navigation (same shape as D09) ---------- */
+      .d-settings-permissions .sn {
+        display: flex;
+        flex: 0 0 248px;
+        flex-direction: column;
+        width: 248px;
+        height: 100%;
+        border-right: 1px solid rgba(255, 255, 255, 0.035);
+        background: var(--sidebar);
+        color: var(--text-2);
+        user-select: none;
+      }
+      .d-settings-permissions .sn-top {
+        display: flex;
+        flex: none;
+        align-items: center;
+        height: 47px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--sidebar-top);
+      }
+      .d-settings-permissions .sn-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 9px 0 6px;
+        border-radius: 6px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        text-decoration: none;
+      }
+      .d-settings-permissions .sn-back:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+      }
+      .d-settings-permissions .sn-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 14px 12px;
+      }
+      .d-settings-permissions .sn-mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 8px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 18px rgba(146, 116, 236, 0.18);
+      }
+      .d-settings-permissions .sn-brand b {
+        display: block;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .d-settings-permissions .sn-brand span {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+      .d-settings-permissions .sn-search {
+        margin: 0 10px 8px;
+        background: rgba(0, 0, 0, 0.16);
+      }
+      .d-settings-permissions .sn-search svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-settings-permissions .sn-search input::placeholder {
+        color: var(--text-3);
+      }
+      .d-settings-permissions .sn-search input::-webkit-search-cancel-button {
+        display: none;
+      }
+      .d-settings-permissions .sn-groups {
+        flex: 1;
+        min-height: 0;
+        padding: 2px 8px 12px;
+      }
+      .d-settings-permissions .sn-group {
+        padding: 8px 0 4px;
+      }
+      .d-settings-permissions .sn-label {
+        margin: 0;
+        padding: 4px 8px 5px;
+        color: #9a96a0;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .d-settings-permissions .sn-item {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        height: 31px;
+        padding: 0 8px;
+        border-radius: 5px;
+        color: #c4c1c8;
+        font-size: 13px;
+        text-decoration: none;
+        white-space: nowrap;
+        transition:
+          background-color 120ms ease,
+          color 120ms ease;
+      }
+      .d-settings-permissions .sn-item svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-settings-permissions .sn-item:hover {
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+      }
+      .d-settings-permissions .sn-item[aria-current="page"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.12), transparent 72%), rgba(255, 255, 255, 0.068);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+      }
+      .d-settings-permissions .sn-item[aria-current="page"] svg {
+        color: var(--violet-bright);
+      }
+      .d-settings-permissions .sn-end {
+        margin-left: auto;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-settings-permissions .sn-empty {
+        margin: 10px 8px;
+        padding: 12px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 8px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .d-settings-permissions .sn-empty strong {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-settings-permissions .sn-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: space-between;
+        height: 46px;
+        padding: 0 14px;
+        border-top: 1px solid var(--hairline);
+        background: var(--sidebar-foot);
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* ---------- Header ---------- */
+      .d-settings-permissions .crumbs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 13px;
+      }
+      .d-settings-permissions .scope-note {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      /* ---------- Layout ---------- */
+      .d-settings-permissions .pm-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      .d-settings-permissions .pm-main {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        border-right: 1px solid var(--hairline);
+      }
+      .d-settings-permissions .pm-side {
+        flex: 0 0 384px;
+        width: 384px;
+        padding: 16px 18px 24px;
+        background: var(--panel);
+      }
+      .d-settings-permissions .tabs {
+        flex: none;
+        padding: 0 14px;
+      }
+      .d-settings-permissions .tabs .count {
+        margin-left: 1px;
+      }
+      .d-settings-permissions .tabs-end {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-left: auto;
+        padding-bottom: 7px;
+        align-self: center;
+      }
+      .d-settings-permissions .panel {
+        flex: 1;
+        min-height: 0;
+        padding: 16px 18px 90px;
+      }
+      .d-settings-permissions .lede {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 12px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+      .d-settings-permissions .lede b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-settings-permissions .lede .btn {
+        margin-left: auto;
+      }
+
+      /* ---------- Tool rows ---------- */
+      .d-settings-permissions .tools {
+        overflow: hidden;
+      }
+      .d-settings-permissions .tool {
+        border-top: 1px solid var(--hairline);
+      }
+      .d-settings-permissions .tool:first-child {
+        border-top: 0;
+      }
+      .d-settings-permissions .tool-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 54px;
+        padding: 8px 12px 8px 10px;
+        transition: background-color 140ms ease;
+      }
+      .d-settings-permissions .tool-row:hover {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .d-settings-permissions .tool.is-flash .tool-row {
+        animation: flash 1.4s var(--ease);
+      }
+      @keyframes flash {
+        0%,
+        30% {
+          background: rgba(182, 159, 247, 0.12);
+        }
+      }
+      .d-settings-permissions .expander {
+        display: grid;
+        width: 22px;
+        height: 22px;
+        flex: none;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-3);
+      }
+      .d-settings-permissions .expander:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+      }
+      .d-settings-permissions .expander svg {
+        transition: transform 160ms ease;
+      }
+      .d-settings-permissions .expander[aria-expanded="true"] svg {
+        transform: rotate(90deg);
+      }
+      .d-settings-permissions .expander.is-blank {
+        visibility: hidden;
+      }
+      .d-settings-permissions .tool-ico {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        flex: none;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--raised);
+        color: var(--text-2);
+      }
+      .d-settings-permissions .tool-text {
+        display: grid;
+        flex: 1;
+        gap: 3px;
+        min-width: 0;
+      }
+      .d-settings-permissions .tool-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-1);
+        font-size: 13px;
+      }
+      .d-settings-permissions .tool-name code {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-settings-permissions .tool-desc {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-settings-permissions .tool-meta {
+        flex: none;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-settings-permissions .tool-meta.is-link {
+        padding: 0;
+        border: 0;
+        background: none;
+        color: var(--text-2);
+        text-decoration: underline;
+        text-decoration-color: rgba(255, 255, 255, 0.2);
+        text-underline-offset: 3px;
+      }
+      .d-settings-permissions .tool-meta.is-link:hover {
+        color: var(--text-1);
+      }
+      .d-settings-permissions .changed {
+        width: 6px;
+        height: 6px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--violet-bright);
+        box-shadow: 0 0 8px rgba(182, 159, 247, 0.6);
+      }
+
+      /* Ask / Allow / Deny */
+      .d-settings-permissions .aad {
+        display: inline-flex;
+        flex: none;
+        padding: 2px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.025);
+      }
+      .d-settings-permissions .aad button {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-settings-permissions .aad button:hover:not(:disabled) {
+        color: var(--text-1);
+      }
+      .d-settings-permissions .aad button:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .d-settings-permissions .aad button[aria-pressed="true"][data-v="allow"] {
+        background: var(--green-soft);
+        box-shadow: inset 0 0 0 1px rgba(101, 199, 142, 0.32);
+        color: var(--green);
+      }
+      .d-settings-permissions .aad button[aria-pressed="true"][data-v="ask"] {
+        background: var(--amber-soft);
+        box-shadow: inset 0 0 0 1px rgba(214, 169, 92, 0.32);
+        color: var(--amber);
+      }
+      .d-settings-permissions .aad button[aria-pressed="true"][data-v="deny"] {
+        background: var(--red-soft);
+        box-shadow: inset 0 0 0 1px rgba(230, 120, 125, 0.32);
+        color: var(--red);
+      }
+      .d-settings-permissions .aad.is-sm button {
+        height: 22px;
+        padding: 0 8px;
+        font-size: 11.5px;
+      }
+
+      /* Expanded detail: the Changes panel's snippet well */
+      .d-settings-permissions .well {
+        margin: 0 12px 12px 74px;
+        padding: 6px 0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 7px;
+        background: #121117;
+        font-size: 12px;
+      }
+      .d-settings-permissions .well-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 26px;
+        padding: 0 12px;
+        color: var(--text-2);
+      }
+      .d-settings-permissions .well-line code {
+        flex: 1;
+        overflow: hidden;
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-settings-permissions .well-line .src {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-settings-permissions .well-line.is-server {
+        min-height: 38px;
+      }
+      .d-settings-permissions .well-line.is-server code {
+        font-family: var(--font);
+        font-size: 12.5px;
+      }
+      .d-settings-permissions .well-line.is-server code span {
+        margin-left: 8px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-settings-permissions .well-note {
+        padding: 6px 12px 4px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-settings-permissions .act {
+        font: 11px var(--mono);
+      }
+      .d-settings-permissions .act-allow {
+        color: var(--green);
+      }
+      .d-settings-permissions .act-ask {
+        color: var(--amber);
+      }
+      .d-settings-permissions .act-deny {
+        color: var(--red);
+      }
+
+      /* ---------- Rule lists (commands, folders) ---------- */
+      .d-settings-permissions .adder {
+        display: flex;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .d-settings-permissions .adder .input {
+        flex: 1;
+      }
+      .d-settings-permissions .adder .input input {
+        font: 12px var(--mono);
+      }
+      .d-settings-permissions .adder .input input::placeholder {
+        color: var(--text-3);
+      }
+      .d-settings-permissions .adder .input.is-bad {
+        border-color: rgba(230, 120, 125, 0.6);
+      }
+      .d-settings-permissions .rules {
+        margin: 0;
+        padding: 6px;
+        list-style: none;
+      }
+      .d-settings-permissions .rule {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 42px;
+        padding: 4px 6px 4px 10px;
+        border-radius: 7px;
+      }
+      .d-settings-permissions .rule:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .d-settings-permissions .rule.is-match {
+        background: rgba(182, 159, 247, 0.09);
+        box-shadow: inset 0 0 0 1px rgba(182, 159, 247, 0.28);
+      }
+      .d-settings-permissions .rule.is-new {
+        animation: flash 1.6s var(--ease);
+      }
+      .d-settings-permissions .rule-idx {
+        width: 18px;
+        flex: none;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+        text-align: right;
+      }
+      .d-settings-permissions .rule-text {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+        min-width: 0;
+      }
+      .d-settings-permissions .rule-text code {
+        overflow: hidden;
+        color: var(--text-1);
+        font: 12px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-settings-permissions .rule-text span {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-settings-permissions .rule .icon-btn {
+        width: 24px;
+        height: 24px;
+      }
+      .d-settings-permissions .rule .icon-btn:disabled {
+        opacity: 0.25;
+        cursor: not-allowed;
+      }
+      .d-settings-permissions .cmd-top {
+        position: sticky;
+        top: -16px;
+        z-index: 2;
+        border-radius: 10px 10px 0 0;
+        background: var(--card);
+      }
+      .d-settings-permissions .tester {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--hairline);
+        background: rgba(0, 0, 0, 0.12);
+      }
+      .d-settings-permissions .tester-label {
+        color: var(--text-3);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+      .d-settings-permissions .tester .input {
+        width: 280px;
+      }
+      .d-settings-permissions .tester .input input {
+        font: 12px var(--mono);
+      }
+      .d-settings-permissions .verdict {
+        display: flex;
+        flex: 1;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-settings-permissions .verdict code {
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+      .d-settings-permissions .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        align-items: start;
+      }
+      .d-settings-permissions .card + .card,
+      .d-settings-permissions .stack > .card + .card {
+        margin-top: 14px;
+      }
+      .d-settings-permissions .card-head p {
+        margin: 2px 0 0;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-settings-permissions .setrow {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: 54px;
+        padding: 9px 14px;
+        border-top: 1px solid var(--hairline);
+      }
+      .d-settings-permissions .setrow:first-of-type {
+        border-top: 0;
+      }
+      .d-settings-permissions .setrow .tool-text b {
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 400;
+      }
+      .d-settings-permissions .setrow .tool-text span {
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+      .d-settings-permissions .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 12px 14px 4px;
+      }
+      .d-settings-permissions .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 4px 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+      .d-settings-permissions .chip button {
+        display: grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-3);
+      }
+      .d-settings-permissions .chip button:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+      }
+
+      /* ---------- Decisions ---------- */
+      .d-settings-permissions .filters {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      .d-settings-permissions .filter {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-settings-permissions .filter:hover {
+        color: var(--text-1);
+      }
+      .d-settings-permissions .filter[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+      .d-settings-permissions .filter .n {
+        color: inherit;
+        font: 10.5px var(--mono);
+        opacity: 0.75;
+      }
+      .d-settings-permissions .filters .input {
+        width: 220px;
+        height: 28px;
+        margin-left: auto;
+      }
+      .d-settings-permissions .log {
+        overflow: hidden;
+      }
+      .d-settings-permissions .log-head,
+      .d-settings-permissions .log-row {
+        display: grid;
+        grid-template-columns: 22px 54px 148px minmax(0, 1fr) 168px;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px 0 8px;
+      }
+      .d-settings-permissions .log-head {
+        height: 34px;
+        border-bottom: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .d-settings-permissions .log-item {
+        border-top: 1px solid var(--hairline);
+      }
+      .d-settings-permissions .log-item:first-child {
+        border-top: 0;
+      }
+      .d-settings-permissions .log-row {
+        width: 100%;
+        min-height: 46px;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+      .d-settings-permissions .log-row:hover,
+      .d-settings-permissions .log-row[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .d-settings-permissions .log-row svg.chev {
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+      .d-settings-permissions .log-row[aria-expanded="true"] svg.chev {
+        transform: rotate(90deg);
+      }
+      .d-settings-permissions .log-row time {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+      .d-settings-permissions .who {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+      .d-settings-permissions .who b {
+        overflow: hidden;
+        font-size: 12.5px;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-settings-permissions .who span {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-settings-permissions .req {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+      .d-settings-permissions .req code {
+        overflow: hidden;
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-settings-permissions .req span {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-settings-permissions .dec {
+        display: grid;
+        gap: 2px;
+        justify-items: start;
+      }
+      .d-settings-permissions .dec span {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-settings-permissions .log-detail {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        margin: 0 12px 12px 92px;
+        padding: 12px 14px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 7px;
+        background: #121117;
+        font-size: 12px;
+      }
+      .d-settings-permissions .log-detail dl {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 6px 10px;
+        margin: 0;
+      }
+      .d-settings-permissions .log-detail dt {
+        color: var(--text-3);
+      }
+      .d-settings-permissions .log-detail dd {
+        margin: 0;
+        color: var(--text-1);
+      }
+      .d-settings-permissions .log-detail dd code {
+        font: 11.5px var(--mono);
+      }
+      .d-settings-permissions .log-detail .quote {
+        color: var(--text-2);
+        font-style: italic;
+      }
+      .d-settings-permissions .log-actions {
+        display: grid;
+        gap: 6px;
+        align-content: start;
+      }
+      .d-settings-permissions .empty {
+        padding: 36px 20px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        text-align: center;
+      }
+
+      /* ---------- Save bar ---------- */
+      .d-settings-permissions .savebar {
+        position: absolute;
+        bottom: 16px;
+        left: 50%;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 8px 8px 14px;
+        border-radius: 11px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        animation: pop 220ms var(--ease);
+        white-space: nowrap;
+      }
+      .d-settings-permissions .savebar .muted {
+        font-size: 12px;
+      }
+      @keyframes pop {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 8px);
+        }
+      }
+
+      /* ---------- Side column ---------- */
+      .d-settings-permissions .side-card {
+        margin-bottom: 14px;
+        overflow: hidden;
+      }
+      .d-settings-permissions .risk {
+        padding: 14px;
+      }
+      .d-settings-permissions .risk-top {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .d-settings-permissions .risk-level {
+        margin: 2px 0 2px;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .d-settings-permissions .risk-sub {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-settings-permissions .risk-next {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 8px;
+        color: var(--text-2);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .d-settings-permissions .risk-ico {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        flex: none;
+        place-items: center;
+        border-radius: 10px;
+      }
+      .d-settings-permissions .lv-low {
+        color: var(--green);
+      }
+      .d-settings-permissions .lv-moderate {
+        color: var(--blue);
+      }
+      .d-settings-permissions .lv-elevated {
+        color: var(--amber);
+      }
+      .d-settings-permissions .lv-high {
+        color: var(--red);
+      }
+      .d-settings-permissions .risk-ico.lv-low {
+        background: var(--green-soft);
+      }
+      .d-settings-permissions .risk-ico.lv-moderate {
+        background: var(--blue-soft);
+      }
+      .d-settings-permissions .risk-ico.lv-elevated {
+        background: var(--amber-soft);
+      }
+      .d-settings-permissions .risk-ico.lv-high {
+        background: var(--red-soft);
+      }
+      .d-settings-permissions .meter {
+        position: relative;
+        display: grid;
+        grid-template-columns: 4fr 5fr 4fr 3fr;
+        gap: 3px;
+        margin: 16px 0 6px;
+      }
+      .d-settings-permissions .meter i {
+        height: 6px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.08);
+        transition: background-color 240ms ease;
+      }
+      .d-settings-permissions .meter i.on-low {
+        background: var(--green);
+      }
+      .d-settings-permissions .meter i.on-moderate {
+        background: var(--blue);
+      }
+      .d-settings-permissions .meter i.on-elevated {
+        background: var(--amber);
+      }
+      .d-settings-permissions .meter i.on-high {
+        background: var(--red);
+      }
+      .d-settings-permissions .needle {
+        position: absolute;
+        top: -4px;
+        width: 2px;
+        height: 14px;
+        margin-left: -1px;
+        border-radius: 2px;
+        background: #fff;
+        box-shadow:
+          0 0 0 2px var(--card),
+          0 0 8px rgba(255, 255, 255, 0.5);
+        transition: left 320ms var(--ease);
+      }
+      .d-settings-permissions .meter-labels {
+        display: grid;
+        grid-template-columns: 4fr 5fr 4fr 3fr;
+        color: var(--text-3);
+        font-size: 10.5px;
+      }
+      .d-settings-permissions .factors {
+        margin: 12px -14px -14px;
+        padding: 6px;
+        border-top: 1px solid var(--hairline);
+        list-style: none;
+      }
+      .d-settings-permissions .factor {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+        min-height: 36px;
+        padding: 4px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-1);
+        font-size: 12.5px;
+        text-align: left;
+      }
+      .d-settings-permissions .factor:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .d-settings-permissions .factor span {
+        flex: 1;
+        min-width: 0;
+      }
+      .d-settings-permissions .factor b {
+        color: var(--text-3);
+        font: 500 11px var(--mono);
+      }
+      .d-settings-permissions .factor svg {
+        color: var(--text-3);
+      }
+      .d-settings-permissions .presets {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .d-settings-permissions .presets .seg {
+        flex: 1;
+      }
+      .d-settings-permissions .presets .seg button {
+        flex: 1;
+      }
+      .d-settings-permissions .presets > span {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-settings-permissions .inherit {
+        padding: 12px 14px 14px;
+      }
+      .d-settings-permissions .flow {
+        display: grid;
+        gap: 0;
+        justify-items: start;
+      }
+      .d-settings-permissions .node {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--raised);
+        color: var(--text-1);
+        font-size: 12px;
+      }
+      .d-settings-permissions .node small {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-settings-permissions .node.is-you {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+      .d-settings-permissions .link {
+        width: 1px;
+        height: 12px;
+        margin-left: 18px;
+        background: var(--line-strong);
+      }
+      .d-settings-permissions .branches {
+        display: grid;
+        gap: 8px;
+        margin-left: 18px;
+        padding: 10px 0 0 14px;
+        border-left: 1px solid var(--line-strong);
+      }
+      .d-settings-permissions .branch {
+        position: relative;
+        display: grid;
+        gap: 3px;
+      }
+      .d-settings-permissions .branch::before {
+        content: "";
+        position: absolute;
+        top: 15px;
+        left: -14px;
+        width: 12px;
+        height: 1px;
+        background: var(--line-strong);
+      }
+      .d-settings-permissions .branch p {
+        margin: 0;
+        padding-left: 2px;
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+      .d-settings-permissions .mini {
+        margin: 0;
+        padding: 4px 6px 6px;
+        list-style: none;
+      }
+      .d-settings-permissions .mini .row {
+        min-height: 40px;
+        padding: 4px 8px;
+      }
+      .d-settings-permissions .mini .row-name {
+        font: 11.5px var(--mono);
+      }
+      .d-settings-permissions .toast {
+        position: absolute;
+        bottom: 72px;
+        left: calc(248px + 404px);
+        z-index: 30;
+        padding: 9px 14px;
+        border-radius: 10px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        animation: pop 220ms var(--ease);
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="settings-permissions"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-settings-permissions">
+            <div class="app">
+              <aside class="sn" id="sn" aria-label="Settings sections"></aside>
+              <main class="app-main">
+                <header class="app-header">
+                  <span class="crumbs"><span>Settings</span><i data-icon="chevron-right" data-size="13"></i></span>
+                  <h2>Permissions &amp; safety</h2>
+                  <div class="app-header-end">
+                    <span class="scope-note" id="scope-note">Rules for every project</span>
+                    <span class="seg" id="scope" role="group" aria-label="Where these rules apply">
+                      <button type="button" data-value="user" aria-pressed="true">Everywhere</button>
+                      <button type="button" data-value="project" aria-pressed="false">Vectordev.ai</button>
+                    </span>
+                  </div>
+                </header>
+                <div class="pm-body">
+                  <section class="pm-main">
+                    <div class="tabs" data-tabs="pm" role="tablist" aria-label="Permissions">
+                      <button class="tab" type="button" role="tab" data-tab="tools" aria-selected="true">Tools <span class="count" id="n-tools">13</span></button>
+                      <button class="tab" type="button" role="tab" data-tab="commands" aria-selected="false">Commands <span class="count" id="n-commands">16</span></button>
+                      <button class="tab" type="button" role="tab" data-tab="folders" aria-selected="false">Folders &amp; network</button>
+                      <button class="tab" type="button" role="tab" data-tab="decisions" aria-selected="false">Decisions <span class="count" id="n-decisions">14</span></button>
+                    </div>
+
+                    <div class="panel scroll" data-panel="tools" data-tabs-for="pm" role="tabpanel">
+                      <p class="lede" id="tools-lede"></p>
+                      <div class="card tools" id="tools"></div>
+                    </div>
+
+                    <div class="panel scroll" data-panel="commands" data-tabs-for="pm" role="tabpanel" hidden>
+                      <p class="lede">Shell rules are checked top to bottom and <b>the last match wins</b>, so put broad rules first and exceptions after them.</p>
+                      <div class="card">
+                        <div class="cmd-top">
+                        <form class="adder" id="cmd-add" autocomplete="off">
+                          <label class="input"><i data-icon="terminal" data-size="14" class="muted"></i><input id="cmd-pattern" placeholder="bun run lint*" aria-label="Command pattern" spellcheck="false" /></label>
+                          <span class="aad" id="cmd-action" role="group" aria-label="Action for the new rule">
+                            <button type="button" data-v="allow" aria-pressed="true">Allow</button>
+                            <button type="button" data-v="ask" aria-pressed="false">Ask</button>
+                            <button type="button" data-v="deny" aria-pressed="false">Deny</button>
+                          </span>
+                          <button class="btn btn-primary" type="submit"><i data-icon="plus" data-size="14"></i>Add rule</button>
+                        </form>
+                        <div class="tester">
+                          <span class="tester-label">Try a command</span>
+                          <label class="input"><span class="muted mono" style="font-size:12px">$</span><input id="cmd-test" value="git push --force origin main" aria-label="Try a command" spellcheck="false" /></label>
+                          <span class="verdict" id="cmd-verdict" aria-live="polite"></span>
+                        </div>
+                        </div>
+                        <ol class="rules" id="cmd-list"></ol>
+                      </div>
+                    </div>
+
+                    <div class="panel scroll" data-panel="folders" data-tabs-for="pm" role="tabpanel" hidden>
+                      <div class="two">
+                        <div class="stack">
+                          <section class="card">
+                            <div class="card-head"><div><h3 class="card-title">Folders outside the project</h3><p>Everything else outside Vectordev.ai asks first.</p></div></div>
+                            <form class="adder" id="dir-add" autocomplete="off">
+                              <label class="input"><input id="dir-pattern" placeholder="~/code/design-tokens/*" aria-label="Folder pattern" spellcheck="false" /></label>
+                              <button class="btn" type="submit"><i data-icon="plus" data-size="14"></i>Add</button>
+                            </form>
+                            <ol class="rules" id="dir-list"></ol>
+                          </section>
+                          <section class="card">
+                            <div class="card-head"><div><h3 class="card-title">Secret files</h3><p>Reads that always ask, even inside the project.</p></div></div>
+                            <ol class="rules" id="secret-list"></ol>
+                          </section>
+                        </div>
+                        <div class="stack">
+                          <section class="card">
+                            <div class="card-head"><div><h3 class="card-title">Network</h3><p>What agents can reach while they work.</p></div></div>
+                            <div class="setrow">
+                              <span class="tool-text"><b>Sandbox shell commands</b><span>Run commands in a macOS Seatbelt sandbox that cannot read ~/.ssh, ~/.aws or Vector's own keys.</span></span>
+                              <button type="button" class="switch" role="switch" aria-checked="true" data-flag="sandbox" aria-label="Sandbox shell commands"></button>
+                            </div>
+                            <div class="setrow">
+                              <span class="tool-text"><b>Network inside the sandbox</b><span>Package registries and downloads need it. Off blocks everything but local sockets.</span></span>
+                              <button type="button" class="switch" role="switch" aria-checked="true" data-flag="network" aria-label="Network inside the sandbox"></button>
+                            </div>
+                            <div class="setrow">
+                              <span class="tool-text"><b>Ask before other domains</b><span>Web fetch to a domain not listed below asks first.</span></span>
+                              <button type="button" class="switch" role="switch" aria-checked="true" data-flag="askDomains" aria-label="Ask before other domains"></button>
+                            </div>
+                          </section>
+                          <section class="card">
+                            <div class="card-head"><div><h3 class="card-title">Allowed domains</h3><p>Web fetch reaches these without asking.</p></div><span class="count" id="n-domains" style="margin-left:auto">5</span></div>
+                            <div class="chips" id="domains"></div>
+                            <form class="adder" id="dom-add" autocomplete="off" style="border:0">
+                              <label class="input"><input id="dom-input" placeholder="api.github.com" aria-label="Domain" spellcheck="false" /></label>
+                              <button class="btn" type="submit">Add domain</button>
+                            </form>
+                          </section>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="panel scroll" data-panel="decisions" data-tabs-for="pm" role="tabpanel" hidden>
+                      <div class="filters" id="filters" role="group" aria-label="Filter decisions"></div>
+                      <div class="card log">
+                        <div class="log-head"><span></span><span>Time</span><span>Agent</span><span>What was asked</span><span>Decision</span></div>
+                        <ul class="rules" id="log" style="padding:0"></ul>
+                      </div>
+                    </div>
+
+                    <div class="float savebar" id="savebar" role="region" aria-label="Unsaved changes" hidden>
+                      <span><b id="save-count">0 changes</b> <span class="muted">· saved to ~/.config/vector/vector.json</span></span>
+                      <button class="btn btn-sm btn-ghost" type="button" id="discard">Discard</button>
+                      <button class="btn btn-sm btn-primary" type="button" id="save">Save rules</button>
+                    </div>
+                  </section>
+
+                  <aside class="pm-side scroll" aria-label="Summary">
+                    <section class="card side-card">
+                      <div class="risk">
+                        <div class="risk-top">
+                          <span class="risk-ico" id="risk-ico"></span>
+                          <div style="flex:1">
+                            <span class="section-title" style="margin:0">Risk level</span>
+                            <p class="risk-level" id="risk-level">Moderate</p>
+                            <span class="risk-sub" id="risk-sub"></span>
+                          </div>
+                        </div>
+                        <div class="meter" id="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><span class="needle" id="needle"></span></div>
+                        <div class="meter-labels" aria-hidden="true"><span>Low</span><span>Moderate</span><span>Elevated</span><span>High</span></div>
+                        <div class="presets">
+                          <span>Preset</span>
+                          <span class="seg" id="presets" role="group" aria-label="Apply a preset">
+                            <button type="button" data-value="cautious" aria-pressed="false">Cautious</button>
+                            <button type="button" data-value="balanced" aria-pressed="false">Balanced</button>
+                            <button type="button" data-value="autonomous" aria-pressed="false">Autonomous</button>
+                          </span>
+                        </div>
+                        <ul class="factors" id="factors"></ul>
+                      </div>
+                    </section>
+
+                    <section class="card side-card">
+                      <div class="card-head"><h3 class="card-title">How subagents inherit</h3></div>
+                      <div class="inherit">
+                        <div class="flow">
+                          <span class="node is-you"><i data-icon="settings" data-size="13"></i>Your rules</span>
+                          <span class="link"></span>
+                          <span class="node">Build <small>main agent · gets every rule</small></span>
+                          <div class="branches">
+                            <div class="branch"><span class="node">Debug, Test, Performance, Migration</span><p>Inherit your deny and folder rules. No subagents or todos of their own.</p></div>
+                            <div class="branch"><span class="node">Explore, Review, Judge, Security</span><p>Always read-only. Your rules can narrow them, never widen them.</p></div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section class="card side-card">
+                      <div class="card-head"><h3 class="card-title">Recent decisions</h3><button type="button" class="btn btn-sm btn-ghost" id="view-all" style="margin-left:auto">View all</button></div>
+                      <ul class="mini" id="mini"></ul>
+                    </section>
+                  </aside>
+                </div>
+              </main>
+            </div>
+            <div class="float toast" id="toast" role="status" aria-live="polite" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-settings-permissions")
+        const $ = (sel) => root.querySelector(sel)
+        const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const stroke = (body, size = 15) =>
+          `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+        const ICONS = {
+          sliders: '<path d="M2.75 5h6.5M12 5h1.25M2.75 11h1.5M7 11h6.25"/><circle cx="10.6" cy="5" r="1.35"/><circle cx="5.6" cy="11" r="1.35"/>',
+          palette: '<circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none" opacity=".45"/>',
+          code: '<path d="m5.75 4.75-3.25 3.25 3.25 3.25M10.25 4.75l3.25 3.25-3.25 3.25"/>',
+          bell: '<path d="M4.4 10.6V7.4a3.6 3.6 0 0 1 7.2 0v3.2l1.1 1.4H3.3l1.1-1.4ZM6.7 13.4a1.4 1.4 0 0 0 2.6 0"/>',
+          shield: '<path d="M8 2.25 3.25 4v3.55c0 2.9 1.95 5.15 4.75 6.2 2.8-1.05 4.75-3.3 4.75-6.2V4L8 2.25Z"/><path d="m6 8 1.4 1.4L10.2 6.6"/>',
+          key: '<circle cx="5.4" cy="10.6" r="2.6"/><path d="m7.3 8.7 5.4-5.4M10.6 5.4l1.6 1.6M12 4l1.1 1.1"/>',
+          bars: '<path d="M2.75 13.25h10.5M4.6 13.25V9M8 13.25V3.5M11.4 13.25V6.75"/>',
+          team: '<circle cx="6" cy="5.6" r="2.3"/><path d="M2.4 13.1c.4-2.2 1.8-3.4 3.6-3.4s3.2 1.2 3.6 3.4M10.6 3.4a2.25 2.25 0 0 1 0 4.4M11.7 9.8c1 .45 1.65 1.5 1.9 3.3"/>',
+          keyboard: '<rect x="2" y="4.25" width="12" height="7.5" rx="1.6"/><path d="M4.6 6.8h.01M6.8 6.8h.01M9.2 6.8h.01M11.4 6.8h.01M5.4 9.3h5.2"/>',
+          access: '<circle cx="8" cy="3.5" r="1.15"/><path d="M3.25 6.1h9.5M8 6.1v3.6M8 9.7l-2 3.7M8 9.7l2 3.7"/>',
+          download: '<path d="M8 2.75v7.5M5 7.4l3 3 3-3M3 13.25h10"/>',
+          pencil: '<path d="M10.4 3.1a1.5 1.5 0 0 1 2.1 2.1L6 11.7l-2.8.7.7-2.8 6.5-6.5Z"/><path d="m9.4 4.1 2.1 2.1"/>',
+          file: '<path d="M4.25 2.25h4.6l2.9 2.9v8.6h-7.5V2.25Z"/><path d="M8.75 2.4v2.85h2.85"/>',
+          folder: '<path d="M2.25 4.25h4l1.3 1.5h6.2v7.5H2.25V4.25Z"/>',
+          globe: '<circle cx="8" cy="8" r="5.6"/><path d="M2.6 8h10.8M8 2.4c1.6 1.6 2.3 3.5 2.3 5.6S9.6 12 8 13.6M8 2.4C6.4 4 5.7 5.9 5.7 8S6.4 12 8 13.6"/>',
+          cursor: '<path d="m4 3 8 3.4-3.4 1.2L7.4 11 4 3Z"/><path d="m8.6 7.6 3 3"/>',
+          lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.4"/><path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7"/>',
+          loop: '<path d="M12.6 6.2A4.8 4.8 0 0 0 3.6 6M3.4 9.8a4.8 4.8 0 0 0 9 .2"/><path d="M12.75 3.5v2.75H10M3.25 12.5V9.75H6"/>',
+          sandbox: '<rect x="2.5" y="3" width="11" height="10" rx="1.6"/><path d="M5 6.5 6.75 8 5 9.5M8 9.75h3"/>',
+          warn: '<path d="M8 2.6 14 13H2L8 2.6Z"/><path d="M8 6.6v3M8 11.3h.01"/>',
+          check: '<path d="m3.5 8.4 2.8 2.8 6.2-6.4"/>',
+          out: '<path d="M6.25 4.25h5.5v5.5M11.5 4.5 4.25 11.75"/>',
+          gauge: '<path d="M2.75 11.5a5.25 5.25 0 1 1 10.5 0"/><path d="m8 11.5 2.6-3.4"/>',
+        }
+        const icon = (name, size = 15) => (ICONS[name] ? stroke(ICONS[name], size) : LabUI.svg(name, size))
+
+        // ---------- Settings navigation ----------
+        const NAV = [
+          { group: "Personal", items: [["general", "General", "sliders", "startup judge routing diagnostics"], ["appearance", "Appearance", "palette", "theme dark light accent font density"], ["editor", "Editor", "code", "font wrap autocomplete"], ["notifications", "Notifications", "bell", "alerts sound"]] },
+          { group: "Agents", items: [["models", "Models", "model", "default model effort"], ["agents", "Agents", "task", "subagents specialists"], ["permissions", "Permissions", "shield", "approval ask allow deny shell commands folders network safety risk"], ["providers", "Providers & keys", "key", "api key openai anthropic"]] },
+          { group: "Account", items: [["usage", "Usage & spend", "bars", "tokens cost spend budget tokenomics", "$412"], ["team", "Vector Team", "team", "members seats roles invite policies"]] },
+          { group: "App", items: [["keyboard", "Keyboard", "keyboard", "shortcuts keybinds"], ["accessibility", "Accessibility", "access", "contrast scale focus"], ["about", "Updates & about", "download", "version update"]] },
+        ]
+        const HREF = { permissions: "settings-permissions.html", usage: "tokenomics.html", team: "team-admin.html" }
+        const ACTIVE = "permissions"
+        const sn = $("#sn")
+        sn.innerHTML = `
+          <div class="sn-top"><a class="sn-back" href="first-run.html">${icon("back", 14)}Back to app</a></div>
+          <div class="sn-brand"><span class="sn-mark">${LabUI.svg("chip", 15)}</span><div><b>Settings</b><span>Vector 1.99.102</span></div></div>
+          <label class="input sn-search">${icon("search", 14)}<input type="search" id="nav-search" placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false" /><kbd>⌘F</kbd></label>
+          <nav class="sn-groups scroll" aria-label="Settings">${NAV.map((g) => `<div class="sn-group"><p class="sn-label">${g.group}</p>${g.items.map((it) => `<a class="sn-item" href="${HREF[it[0]] ?? `settings-general.html#${it[0]}`}" data-words="${it[1]} ${it[3]}" aria-current="${it[0] === ACTIVE ? "page" : "false"}">${icon(it[2])}<span>${it[1]}</span>${it[4] ? `<span class="sn-end">${it[4]}</span>` : ""}</a>`).join("")}</div>`).join("")}
+          <div class="sn-empty" id="nav-empty" hidden><strong>No settings found</strong>Try a feature name such as model, memory, update or notifications.</div></nav>
+          <div class="sn-foot"><span>Vector 1.99.102</span><span>Desktop</span></div>`
+        $("#nav-search").addEventListener("input", (event) => {
+          const q = event.target.value.trim().toLowerCase()
+          let any = 0
+          sn.querySelectorAll(".sn-group").forEach((group) => {
+            let shown = 0
+            group.querySelectorAll(".sn-item").forEach((item) => {
+              item.hidden = Boolean(q) && !item.dataset.words.toLowerCase().includes(q)
+              if (!item.hidden) shown++
+            })
+            group.hidden = shown === 0
+            any += shown
+          })
+          $("#nav-empty").hidden = any > 0
+        })
+
+        // ---------- Rules (keys and defaults from packages/engine/src/agent/agent.ts) ----------
+        const TOOLS = [
+          { key: "edit", name: "Edit files", icon: "pencil", desc: "Edits, writes and patches inside the project." },
+          { key: "bash", name: "Shell commands", icon: "terminal", desc: "Commands in the project's terminal. Command rules decide each one.", detail: "commands" },
+          { key: "unsandboxed_shell", name: "Leave the sandbox", icon: "sandbox", desc: "A command that needs more than the sandbox allows." },
+          { key: "read", name: "Read files", icon: "file", desc: "Reads inside the project. Secret files always ask.", detail: "read" },
+          { key: "external_directory", name: "Files outside the project", icon: "folder", desc: "Reading or writing beyond Vectordev.ai.", detail: "folders" },
+          { key: "webfetch", name: "Web fetch", icon: "globe", desc: "Fetch a page or an API response by URL.", detail: "domains" },
+          { key: "websearch", name: "Web search", icon: "search", desc: "Search the web for docs and answers." },
+          { key: "browser_external", name: "Browser: open sites", icon: "browser", desc: "Open external sites in Vector's browser." },
+          { key: "browser_interact", name: "Browser: click and type", icon: "cursor", desc: "Click, type and submit forms on a page." },
+          { key: "browser_sensitive", name: "Browser: sensitive pages", icon: "lock", desc: "Pages with passwords, payments or personal data." },
+          { key: "mcp", name: "MCP tools", icon: "mcp", desc: "Tools from your connected MCP servers, per server.", detail: "mcp" },
+          { key: "task", name: "Subagents", icon: "task", desc: "Start subagents and specialists that work in parallel." },
+          { key: "doom_loop", name: "Repeated tool calls", icon: "loop", desc: "Stop and ask when an agent repeats an identical call." },
+        ]
+        const SERVERS = [
+          ["github", "14 tools", "allow"],
+          ["linear", "9 tools", "ask"],
+          ["postgres-prod", "6 tools · writes", "deny"],
+          ["figma", "4 tools", "ask"],
+        ]
+        const PRESETS = {
+          cautious: { edit: "ask", bash: "ask", unsandboxed_shell: "deny", read: "allow", external_directory: "ask", webfetch: "ask", websearch: "ask", browser_external: "ask", browser_interact: "ask", browser_sensitive: "deny", mcp: "ask", task: "allow", doom_loop: "ask" },
+          balanced: { edit: "allow", bash: "ask", unsandboxed_shell: "ask", read: "allow", external_directory: "ask", webfetch: "ask", websearch: "allow", browser_external: "ask", browser_interact: "ask", browser_sensitive: "deny", mcp: "ask", task: "allow", doom_loop: "ask" },
+          autonomous: { edit: "allow", bash: "allow", unsandboxed_shell: "ask", read: "allow", external_directory: "ask", webfetch: "allow", websearch: "allow", browser_external: "allow", browser_interact: "allow", browser_sensitive: "ask", mcp: "allow", task: "allow", doom_loop: "ask" },
+        }
+        const initial = {
+          modes: Object.assign({}, PRESETS.balanced, { webfetch: "allow", browser_interact: "allow" }),
+          servers: Object.fromEntries(SERVERS.map((s) => [s[0], s[2]])),
+          project: {},
+          commands: [
+            ["*", "ask", "Vector default", 0],
+            ["git status*", "allow", "Vector default", 112],
+            ["git diff*", "allow", "Vector default", 86],
+            ["git log*", "allow", "Vector default", 31],
+            ["bun test*", "allow", "You", 64],
+            ["bun typecheck*", "allow", "You", 22],
+            ["bun run build*", "allow", "You", 9],
+            ["bun install*", "ask", "You", 4],
+            ["gh pr view*", "allow", "You", 17],
+            ["gh pr create*", "ask", "You", 3],
+            ["git push*", "ask", "You", 6],
+            ["git push --force*", "deny", "You", 1],
+            ["rm -rf*", "deny", "You", 2],
+            ["sudo *", "deny", "Vectordev.ai project", 0],
+            ["curl * | sh*", "deny", "You", 0],
+            ["npm publish*", "deny", "Vectordev.ai project", 0],
+          ],
+          folders: [
+            ["~/.cache/vector/tmp/*", "allow", "Vector default"],
+            ["~/.vector/skills/*", "allow", "Vector default"],
+            ["~/code/shared-ui/*", "allow", "You"],
+            ["~/Documents/*", "deny", "You"],
+          ],
+          secrets: [
+            ["*.env, *.env.*", "ask", "Vector default"],
+            ["*.env.example", "allow", "Vector default"],
+            ["*.pem, *.key", "ask", "Vector default"],
+            [".ssh/*, .aws/*, .kube/*", "ask", "Vector default"],
+            [".docker/config.json", "ask", "Vector default"],
+          ],
+          flags: { sandbox: true, network: true, askDomains: true },
+          domains: ["github.com", "registry.npmjs.org", "vectordev.ai", "developer.mozilla.org", "bun.sh"],
+        }
+        const clone = (v) => JSON.parse(JSON.stringify(v))
+        let saved = clone(initial)
+        let state = clone(initial)
+        let scope = "user"
+
+        // ---------- Risk: a small, explainable score ----------
+        // Points when a tool runs without asking. Asking and denying add nothing.
+        const WEIGHT = {
+          edit: 2,
+          bash: 4,
+          unsandboxed_shell: 3,
+          read: 0.5,
+          external_directory: 2.5,
+          webfetch: 1,
+          websearch: 0.5,
+          browser_external: 1,
+          browser_interact: 1.5,
+          browser_sensitive: 3,
+          mcp: 0,
+          task: 0.5,
+          doom_loop: 1,
+        }
+        const LEVELS = [
+          ["low", "Low", 0],
+          ["moderate", "Moderate", 4],
+          ["elevated", "Elevated", 9],
+          ["high", "High", 13],
+        ]
+        const idx = { allow: 0, ask: 1, deny: 2 }
+        function risk(s) {
+          const factors = []
+          TOOLS.forEach((t) => {
+            if (s.modes[t.key] === "allow" && WEIGHT[t.key] > 0) factors.push({ points: WEIGHT[t.key], text: `${t.name}, without asking`, go: ["tools", t.key] })
+          })
+          const servers = Object.entries(s.servers).filter((e) => e[1] === "allow")
+          if (s.modes.mcp !== "deny" && servers.length) factors.push({ points: servers.length * 0.75 + (servers.some((e) => e[0] === "postgres-prod") ? 2 : 0), text: `${servers.length} MCP server${servers.length === 1 ? "" : "s"} allowed: ${servers.map((e) => e[0]).join(", ")}`, go: ["tools", "mcp"] })
+          const allowed = s.commands.filter((c) => c[1] === "allow" && c[0] !== "*").length
+          if (s.modes.bash !== "deny" && allowed > 6) factors.push({ points: (allowed - 6) * 0.3, text: `${allowed} shell commands run without asking`, go: ["commands"] })
+          const guards = ["rm -rf*", "git push --force*", "sudo *"].filter((g) => !s.commands.some((c) => c[0] === g && c[1] === "deny"))
+          if (guards.length && s.modes.bash !== "deny") factors.push({ points: guards.length * 1.25, text: `No deny rule for ${guards.map((g) => g.replace(/\*$/, "").trim()).join(", ")}`, go: ["commands"] })
+          if (!s.flags.sandbox) factors.push({ points: 2.5, text: "Shell commands run outside the sandbox", go: ["folders"] })
+          if (s.flags.sandbox && s.flags.network) factors.push({ points: 0.75, text: "Network is on inside the sandbox", go: ["folders"] })
+          if (!s.flags.askDomains) factors.push({ points: 1, text: "Web fetch reaches any domain", go: ["folders"] })
+          const external = s.folders.filter((f) => f[1] === "allow" && f[2] === "You").length
+          if (external) factors.push({ points: external * 0.5, text: `${external} folder${external === 1 ? "" : "s"} outside the project allowed`, go: ["folders"] })
+          const score = Math.min(16, factors.reduce((n, f) => n + f.points, 0))
+          const level = [...LEVELS].reverse().find((l) => score >= l[2])
+          return { score, level, factors: factors.sort((a, b) => b.points - a.points) }
+        }
+
+        // ---------- Tools ----------
+        const aad = (name, value, opts = {}) =>
+          `<span class="aad${opts.sm ? " is-sm" : ""}" role="group" aria-label="${esc(name)}" ${opts.attr ?? ""}>${["ask", "allow", "deny"]
+            .map((v) => `<button type="button" data-v="${v}" aria-pressed="${v === value}"${opts.lockAllow && v === "allow" && value !== "allow" ? ' disabled title="A project can narrow your rules, never widen them"' : ""}>${v[0].toUpperCase() + v.slice(1)}</button>`)
+            .join("")}</span>`
+        const open = new Set()
+        const modeOf = (key) => (scope === "project" ? state.project[key] ?? state.modes[key] : state.modes[key])
+
+        function detail(t) {
+          if (t.detail === "commands") {
+            const top = state.commands.slice(-5)
+            return `<div class="well">${top.map((c) => `<div class="well-line"><code>${esc(c[0])}</code><span class="act act-${c[1]}">${c[1]}</span></div>`).join("")}<div class="well-note">${state.commands.length} rules, last match wins. <button type="button" class="tool-meta is-link" data-go="commands">Edit commands</button></div></div>`
+          }
+          if (t.detail === "read") return `<div class="well">${state.secrets.map((c) => `<div class="well-line"><code>${esc(c[0])}</code><span class="act act-${c[1]}">${c[1]}</span></div>`).join("")}</div>`
+          if (t.detail === "folders") return `<div class="well">${state.folders.map((c) => `<div class="well-line"><code>${esc(c[0])}</code><span class="src">${c[2]}</span><span class="act act-${c[1]}">${c[1]}</span></div>`).join("")}<div class="well-note"><button type="button" class="tool-meta is-link" data-go="folders">Edit folders</button></div></div>`
+          if (t.detail === "domains") return `<div class="well">${state.domains.map((d) => `<div class="well-line"><code>${esc(d)}</code><span class="act act-allow">allow</span></div>`).join("")}<div class="well-note">${state.flags.askDomains ? "Other domains ask first." : "Any other domain is allowed."} <button type="button" class="tool-meta is-link" data-go="folders">Edit domains</button></div></div>`
+          if (t.detail === "mcp")
+            return `<div class="well">${SERVERS.map((s) => `<div class="well-line is-server"><code>${s[0]}<span>${s[1]}</span></code>${aad(`${s[0]} tools`, state.servers[s[0]], { sm: true, attr: `data-server="${s[0]}"` })}</div>`).join("")}<div class="well-note">Rules match tool names like <span class="mono">github_*</span>. A server set to Deny is not offered to agents at all.</div></div>`
+          return ""
+        }
+        function meta(t) {
+          if (t.detail === "commands") return `<button type="button" class="tool-meta is-link" data-go="commands">${state.commands.length} rules</button>`
+          if (t.detail === "folders") return `<span class="tool-meta">${state.folders.filter((f) => f[1] === "allow").length} allowed</span>`
+          if (t.detail === "domains") return `<span class="tool-meta">${state.domains.length} domains</span>`
+          if (t.detail === "read") return `<span class="tool-meta">${state.secrets.filter((f) => f[1] === "ask").length} always ask</span>`
+          if (t.detail === "mcp") return `<span class="tool-meta">${Object.values(state.servers).filter((v) => v === "allow").length} of ${SERVERS.length} allowed</span>`
+          return ""
+        }
+        function renderTools() {
+          $("#tools-lede").innerHTML =
+            scope === "project"
+              ? `${icon("folder", 15)}<span><b>Vectordev.ai</b> can narrow what you allow everywhere, never widen it. These rules live in the project's <span class="mono">.vector/vector.json</span>.</span>`
+              : `${icon("shield", 15)}<span>What agents may do without asking, in every project and chat. <b>Full access</b> in the composer skips the asks for one chat.</span>`
+          $("#tools").innerHTML = TOOLS.map((t) => {
+            const value = modeOf(t.key)
+            const changed = scope === "user" ? saved.modes[t.key] !== value : (saved.project[t.key] ?? saved.modes[t.key]) !== value
+            const lock = scope === "project" && state.modes[t.key] !== "allow"
+            const isOpen = open.has(t.key)
+            return `<div class="tool" data-tool="${t.key}"><div class="tool-row">
+              <button type="button" class="expander${t.detail ? "" : " is-blank"}" aria-expanded="${isOpen}" aria-label="Show ${esc(t.name)} rules" data-expand="${t.key}"${t.detail ? "" : ' tabindex="-1"'}>${LabUI.svg("chevron-right", 14)}</button>
+              <span class="tool-ico">${icon(t.icon, 15)}</span>
+              <span class="tool-text"><span class="tool-name">${t.name}<code>${t.key === "mcp" ? "&lt;server&gt;_*" : t.key}</code>${changed ? '<span class="changed" title="Changed, not saved"></span>' : ""}</span><span class="tool-desc">${t.desc}</span></span>
+              ${meta(t)}
+              ${aad(t.name, value, { attr: `data-mode="${t.key}"`, lockAllow: lock })}
+            </div>${isOpen ? detail(t) : ""}</div>`
+          }).join("")
+        }
+        $("#tools").addEventListener("click", (event) => {
+          const exp = event.target.closest("[data-expand]")
+          if (exp && !exp.classList.contains("is-blank")) {
+            const key = exp.dataset.expand
+            open.has(key) ? open.delete(key) : open.add(key)
+            renderTools()
+            $(`[data-expand="${key}"]`)?.focus()
+            return
+          }
+          const b = event.target.closest(".aad button")
+          if (b && !b.disabled) {
+            const group = b.parentElement
+            if (group.dataset.mode) {
+              if (scope === "project") state.project[group.dataset.mode] = b.dataset.v
+              else state.modes[group.dataset.mode] = b.dataset.v
+            }
+            if (group.dataset.server) state.servers[group.dataset.server] = b.dataset.v
+            const focusKey = group.dataset.mode ? `[data-mode="${group.dataset.mode}"]` : `[data-server="${group.dataset.server}"]`
+            update()
+            $(`${focusKey} button[data-v="${b.dataset.v}"]`)?.focus()
+            return
+          }
+        })
+
+        // ---------- Commands (evaluate: the last matching rule wins, else ask) ----------
+        const glob = (pattern) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`)
+        function evaluate(command) {
+          const rules = state.commands
+          for (let i = rules.length - 1; i >= 0; i--) if (glob(rules[i][0]).test(command)) return i
+          return -1
+        }
+        let fresh = null
+        function renderCommands() {
+          const test = $("#cmd-test").value.trim()
+          const hit = test ? evaluate(test) : -2
+          $("#cmd-list").innerHTML = state.commands
+            .map(
+              (c, i) => `<li class="rule${i === hit ? " is-match" : ""}${c[0] === fresh ? " is-new" : ""}" data-i="${i}">
+                <span class="rule-idx">${i + 1}</span>
+                <span class="rule-text"><code>${esc(c[0])}</code><span>${c[2]}${c[3] ? ` · matched ${c[3] === 1 ? "once" : `${c[3]} times`} this month` : ""}</span></span>
+                ${aad(`Action for ${c[0]}`, c[1], { sm: true, attr: `data-cmd="${i}"` })}
+                <button type="button" class="icon-btn" data-remove-cmd="${i}" aria-label="Remove ${esc(c[0])}"${c[0] === "*" ? " disabled" : ""}>${LabUI.svg("close-small", 15)}</button>
+              </li>`,
+            )
+            .join("")
+          const verdict = $("#cmd-verdict")
+          if (!test) verdict.innerHTML = `<span class="muted">Type a command to see which rule decides it.</span>`
+          else if (hit < 0) verdict.innerHTML = `<span class="badge badge-amber">Asks</span><span>No rule matches</span>`
+          else {
+            const rule = state.commands[hit]
+            const name = { allow: ["green", "Runs without asking"], ask: ["amber", "Asks first"], deny: ["red", "Refused"] }[rule[1]]
+            verdict.innerHTML = `<span class="badge badge-${name[0]}">${name[1]}</span><span>rule ${hit + 1}, <code>${esc(rule[0])}</code></span>`
+          }
+          $("#n-commands").textContent = state.commands.length
+        }
+        $("#cmd-test").addEventListener("input", () => {
+          renderCommands()
+          $("#cmd-list .is-match")?.scrollIntoView({ block: "nearest" })
+        })
+        $("#cmd-action").addEventListener("click", (event) => {
+          const b = event.target.closest("button")
+          if (!b) return
+          $("#cmd-action").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)))
+        })
+        $("#cmd-add").addEventListener("submit", (event) => {
+          event.preventDefault()
+          const input = $("#cmd-pattern")
+          const pattern = input.value.trim()
+          if (!pattern) {
+            input.parentElement.classList.add("is-bad")
+            input.focus()
+            return
+          }
+          input.parentElement.classList.remove("is-bad")
+          const action = $('#cmd-action [aria-pressed="true"]').dataset.v
+          state.commands = state.commands.filter((c) => c[0] !== pattern).concat([[pattern, action, "You", 0]])
+          fresh = pattern
+          input.value = ""
+          update()
+          $("#cmd-list .is-new")?.scrollIntoView({ block: "center" })
+          toast(`Added ${pattern} as rule ${state.commands.length}. It wins over every rule above it.`)
+        })
+        $("#cmd-list").addEventListener("click", (event) => {
+          const rm = event.target.closest("[data-remove-cmd]")
+          if (rm) {
+            const rule = state.commands[Number(rm.dataset.removeCmd)]
+            state.commands.splice(Number(rm.dataset.removeCmd), 1)
+            update()
+            toast(`Removed ${rule[0]}`)
+            return
+          }
+          const b = event.target.closest(".aad button")
+          if (b) {
+            state.commands[Number(b.parentElement.dataset.cmd)][1] = b.dataset.v
+            update()
+          }
+        })
+
+        // ---------- Folders, secrets, network ----------
+        function ruleList(list, name) {
+          return list
+            .map(
+              (c, i) => `<li class="rule${c[0] === fresh ? " is-new" : ""}"><span class="rule-text"><code>${esc(c[0])}</code><span>${c[2]}</span></span>${aad(`Action for ${c[0]}`, c[1], { sm: true, attr: `data-${name}="${i}"` })}${name === "dir" ? `<button type="button" class="icon-btn" data-remove-dir="${i}" aria-label="Remove ${esc(c[0])}"${c[2] === "Vector default" ? " disabled" : ""}>${LabUI.svg("close-small", 15)}</button>` : ""}</li>`,
+            )
+            .join("")
+        }
+        function renderFolders() {
+          $("#dir-list").innerHTML = ruleList(state.folders, "dir")
+          $("#secret-list").innerHTML = ruleList(state.secrets, "secret")
+          $("#domains").innerHTML = state.domains.map((d) => `<span class="chip">${esc(d)}<button type="button" data-remove-dom="${esc(d)}" aria-label="Remove ${esc(d)}">${LabUI.svg("close-small", 13)}</button></span>`).join("")
+          $("#n-domains").textContent = state.domains.length
+          root.querySelectorAll("[data-flag]").forEach((sw) => sw.setAttribute("aria-checked", String(state.flags[sw.dataset.flag])))
+        }
+        $("#dir-add").addEventListener("submit", (event) => {
+          event.preventDefault()
+          const input = $("#dir-pattern")
+          const raw = input.value.trim()
+          if (!raw) return input.focus()
+          const pattern = raw.endsWith("*") ? raw : `${raw.replace(/\/$/, "")}/*`
+          state.folders = state.folders.filter((f) => f[0] !== pattern).concat([[pattern, "allow", "You"]])
+          fresh = pattern
+          input.value = ""
+          update()
+        })
+        root.addEventListener("click", (event) => {
+          const t = event.target
+          const rmDir = t.closest("[data-remove-dir]")
+          if (rmDir) {
+            state.folders.splice(Number(rmDir.dataset.removeDir), 1)
+            return update()
+          }
+          const rmDom = t.closest("[data-remove-dom]")
+          if (rmDom) {
+            state.domains = state.domains.filter((d) => d !== rmDom.dataset.removeDom)
+            return update()
+          }
+          const b = t.closest("#dir-list .aad button, #secret-list .aad button")
+          if (b) {
+            const g = b.parentElement
+            if (g.dataset.dir) state.folders[Number(g.dataset.dir)][1] = b.dataset.v
+            if (g.dataset.secret) state.secrets[Number(g.dataset.secret)][1] = b.dataset.v
+            return update()
+          }
+          const go = t.closest("[data-go]")
+          if (go) return goTo(go.dataset.go, go.dataset.key)
+        })
+        $("#dom-add").addEventListener("submit", (event) => {
+          event.preventDefault()
+          const input = $("#dom-input")
+          const value = input.value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "")
+          if (!value) return input.focus()
+          if (!state.domains.includes(value)) state.domains.push(value)
+          input.value = ""
+          update()
+        })
+        root.addEventListener("lab:switch", (event) => {
+          const flag = event.target.dataset.flag
+          if (!flag) return
+          state.flags[flag] = event.detail
+          update()
+        })
+
+        // ---------- Decisions ----------
+        const LOG = [
+          { t: "14:32", agent: "Build", kind: "main", perm: "bash", req: "bun add zod@4.1.5", dec: "once", by: "You", session: "Validate settings input with zod" },
+          { t: "14:31", agent: "Test", kind: "subagent", perm: "bash", req: "bun test packages/engine/test/permission", dec: "rule-allow", by: "bun test*", session: "Validate settings input with zod" },
+          { t: "14:27", agent: "Security", kind: "subagent", perm: "read", req: "packages/desktop/.env.local", dec: "feedback", by: "You", note: "Use .env.example. The local file has real keys.", session: "Audit the desktop updater" },
+          { t: "14:20", agent: "Build", kind: "main", perm: "webfetch", req: "https://registry.npmjs.org/zod", dec: "always", by: "You", session: "Validate settings input with zod" },
+          { t: "14:12", agent: "Build", kind: "main", perm: "edit", req: "packages/engine/src/project/trust.ts", dec: "rule-allow", by: "edit: allow", session: "Review the workspace trust changes" },
+          { t: "14:05", agent: "Explore", kind: "subagent", perm: "bash", req: "rm -rf node_modules/.cache", dec: "rule-deny", by: "rm -rf*", session: "Review the workspace trust changes" },
+          { t: "13:58", agent: "Build", kind: "main", perm: "external_directory", req: "~/code/shared-ui/src/tokens.ts", dec: "always", by: "You", session: "Match the design tokens" },
+          { t: "13:41", agent: "Debug", kind: "subagent", perm: "browser_interact", req: "localhost:4600 · click “Commit to main”", dec: "once", by: "You", session: "Fix scroll state" },
+          { t: "13:30", agent: "Build", kind: "main", perm: "mcp", req: "github_create_pull_request", dec: "rule-allow", by: "github_*", session: "Regenerate the SDK" },
+          { t: "13:12", agent: "Migration", kind: "subagent", perm: "bash", req: "git push --force-with-lease origin sdk-v2", dec: "rule-deny", by: "git push --force*", session: "Regenerate the SDK" },
+          { t: "12:55", agent: "Build", kind: "main", perm: "doom_loop", req: "edit trust.ts, third identical call", dec: "feedback", by: "You", note: "Stop and re-read the failing test output first.", session: "Review the workspace trust changes" },
+          { t: "12:40", agent: "Judge", kind: "subagent", perm: "browser_external", req: "https://vectordev.ai/docs/permissions", dec: "once", by: "You", session: "Review the workspace trust changes" },
+          { t: "12:22", agent: "Build", kind: "main", perm: "bash", req: "gh pr create --fill --base main", dec: "once", by: "You", session: "Regenerate the SDK" },
+          { t: "11:58", agent: "Performance", kind: "subagent", perm: "bash", req: "sudo powermetrics --samplers cpu_power", dec: "rule-deny", by: "sudo *", session: "Profile the terminal renderer" },
+        ]
+        const DEC = {
+          once: ["blue", "Allowed once"],
+          always: ["green", "Always allowed"],
+          "rule-allow": ["green", "Allowed by rule"],
+          "rule-deny": ["red", "Denied by rule"],
+          feedback: ["amber", "Rejected with a note"],
+        }
+        const FILTERS = [
+          ["all", "All", () => true],
+          ["you", "Asked you", (d) => d.by === "You"],
+          ["denied", "Denied", (d) => d.dec === "rule-deny" || d.dec === "feedback"],
+          ["subagents", "Subagents", (d) => d.kind === "subagent"],
+          ["shell", "Shell", (d) => d.perm === "bash"],
+        ]
+        let filter = "all"
+        let logQuery = ""
+        const openLog = new Set([2])
+        const suggestion = (d) => {
+          if (d.perm === "bash") {
+            const words = d.req.split(" ")
+            return `${words.slice(0, Math.min(2, words.length)).join(" ")}*`
+          }
+          if (d.perm === "webfetch") return new URL(d.req).hostname
+          if (d.perm === "external_directory") return `${d.req.split("/").slice(0, -2).join("/")}/*`
+          return null
+        }
+        function renderLog() {
+          $("#filters").innerHTML =
+            FILTERS.map((f) => `<button type="button" class="filter" data-filter="${f[0]}" aria-pressed="${f[0] === filter}">${f[1]} <span class="n">${LOG.filter(f[2]).length}</span></button>`).join("") +
+            `<label class="input">${icon("search", 13)}<input id="log-search" placeholder="Search requests" value="${esc(logQuery)}" aria-label="Search decisions" /></label>`
+          const fn = FILTERS.find((f) => f[0] === filter)[2]
+          const q = logQuery.trim().toLowerCase()
+          const rows = LOG.map((d, i) => [d, i]).filter(([d]) => fn(d) && (!q || `${d.req} ${d.agent} ${d.perm} ${d.session}`.toLowerCase().includes(q)))
+          $("#log").innerHTML = rows.length
+            ? rows
+                .map(([d, i]) => {
+                  const dec = DEC[d.dec]
+                  const isOpen = openLog.has(i)
+                  const rule = suggestion(d)
+                  return `<li class="log-item"><button type="button" class="log-row" data-log="${i}" aria-expanded="${isOpen}">
+                    ${LabUI.svg("chevron-right", 14).replace("<svg", '<svg class="chev"')}
+                    <time>${d.t}</time>
+                    <span class="who"><b>${d.agent}</b><span>${d.kind === "main" ? "main agent" : "subagent"}</span></span>
+                    <span class="req"><code>${esc(d.req)}</code><span>${d.perm}</span></span>
+                    <span class="dec"><span class="badge badge-${dec[0]}">${dec[1]}</span><span>${d.by === "You" ? "by you" : `rule <span class="mono">${esc(d.by)}</span>`}</span></span>
+                  </button>${
+                    isOpen
+                      ? `<div class="log-detail"><dl><dt>Chat</dt><dd>${esc(d.session)}</dd><dt>Permission</dt><dd><code>${d.perm}</code></dd><dt>Request</dt><dd><code>${esc(d.req)}</code></dd>${d.note ? `<dt>Your note</dt><dd class="quote">“${esc(d.note)}”</dd>` : ""}<dt>Decided</dt><dd>${d.by === "You" ? "By you, in the permission prompt" : `Automatically, by rule <code>${esc(d.by)}</code>`}</dd></dl>${
+                          d.dec === "rule-deny" && d.perm === "bash"
+                            ? `<div class="log-actions"><button type="button" class="btn btn-sm" data-trycmd="${i}">Test in Commands ${LabUI.svg("chevron-right", 12)}</button></div>`
+                            : rule
+                            ? `<div class="log-actions"><button type="button" class="btn btn-sm" data-make="${i}" data-action="allow">Always allow <span class="mono">${esc(rule)}</span></button><button type="button" class="btn btn-sm btn-danger" data-make="${i}" data-action="deny">Always deny</button></div>`
+                            : ""
+                        }</div>`
+                      : ""
+                  }</li>`
+                })
+                .join("")
+            : `<li class="empty">No decisions match. Try another filter.</li>`
+          $("#mini").innerHTML = LOG.slice(0, 3)
+            .map((d) => `<li class="row"><span class="row-text"><span class="row-name">${esc(d.req)}</span><span class="row-sub">${d.agent} · ${d.t}</span></span><span class="row-end"><span class="badge badge-${DEC[d.dec][0]}">${DEC[d.dec][1]}</span></span></li>`)
+            .join("")
+        }
+        $("#filters").addEventListener("click", (event) => {
+          const f = event.target.closest("[data-filter]")
+          if (!f) return
+          filter = f.dataset.filter
+          renderLog()
+          $(`[data-filter="${filter}"]`).focus()
+        })
+        $("#filters").addEventListener("input", (event) => {
+          if (event.target.id !== "log-search") return
+          logQuery = event.target.value
+          renderLog()
+          const input = $("#log-search")
+          input.focus()
+          input.setSelectionRange(input.value.length, input.value.length)
+        })
+        $("#log").addEventListener("click", (event) => {
+          const tryCmd = event.target.closest("[data-trycmd]")
+          if (tryCmd) {
+            $("#cmd-test").value = LOG[Number(tryCmd.dataset.trycmd)].req
+            goTo("commands")
+            renderCommands()
+            $("#cmd-list .is-match")?.scrollIntoView({ block: "center" })
+            return
+          }
+          const make = event.target.closest("[data-make]")
+          if (make) {
+            const d = LOG[Number(make.dataset.make)]
+            const rule = suggestion(d)
+            const action = make.dataset.action
+            if (d.perm === "bash") state.commands = state.commands.filter((c) => c[0] !== rule).concat([[rule, action, "You", 0]])
+            if (d.perm === "external_directory") state.folders = state.folders.filter((c) => c[0] !== rule).concat([[rule, action, "You"]])
+            if (d.perm === "webfetch") state.domains = action === "allow" ? [...new Set([...state.domains, rule])] : state.domains.filter((x) => x !== rule)
+            fresh = rule
+            update()
+            toast(`${action === "allow" ? "Always allow" : "Always deny"} ${rule}, added. Save to apply it.`)
+            return
+          }
+          const row = event.target.closest("[data-log]")
+          if (!row) return
+          const i = Number(row.dataset.log)
+          openLog.has(i) ? openLog.delete(i) : openLog.add(i)
+          renderLog()
+          $(`[data-log="${i}"]`)?.focus()
+        })
+        $("#view-all").addEventListener("click", () => goTo("decisions"))
+
+        // ---------- Summary, presets, save ----------
+        function renderRisk() {
+          const now = risk(state)
+          const before = risk(saved)
+          const lv = now.level
+          $("#risk-ico").className = `risk-ico lv-${lv[0]}`
+          $("#risk-ico").innerHTML = icon(lv[0] === "low" ? "shield" : lv[0] === "moderate" ? "gauge" : "warn", 19)
+          $("#risk-level").className = `risk-level lv-${lv[0]}`
+          $("#risk-level").innerHTML = before.level[0] !== lv[0] ? `<span class="lv-${before.level[0]}" style="opacity:.55">${before.level[1]}</span><span class="risk-next">${LabUI.svg("arrow", 13)}</span> ${lv[1]}` : lv[1]
+          $("#risk-sub").textContent = `Score ${now.score.toFixed(1)} of 16 · ${now.factors.length} contributing rule${now.factors.length === 1 ? "" : "s"}${before.score.toFixed(1) !== now.score.toFixed(1) ? ` · was ${before.score.toFixed(1)}` : ""}`
+          const filled = LEVELS.findIndex((l) => l === lv)
+          $("#meter").querySelectorAll("i").forEach((el, i) => (el.className = i <= filled ? `on-${lv[0]}` : ""))
+          $("#needle").style.left = `${Math.min(99, (now.score / 16) * 100)}%`
+          $("#factors").innerHTML = now.factors
+            .slice(0, 4)
+            .map((f) => `<li><button type="button" class="factor" data-go="${f.go[0]}" data-key="${f.go[1] ?? ""}"><span>${esc(f.text)}</span><b>+${f.points.toFixed(1)}</b>${LabUI.svg("chevron-right", 13)}</button></li>`)
+            .join("")
+          const preset = Object.entries(PRESETS).find(([, p]) => TOOLS.every((t) => p[t.key] === state.modes[t.key]))
+          $("#presets").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(preset?.[0] === b.dataset.value)))
+        }
+        function changes() {
+          const n = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])).length
+          const byKey = (list) => Object.fromEntries(list.map((c) => [c[0], c[1]]))
+          return (
+            n(state.modes, saved.modes) +
+            n(state.servers, saved.servers) +
+            n(state.project, saved.project) +
+            n(byKey(state.commands), byKey(saved.commands)) +
+            (JSON.stringify(state.commands.map((c) => c[0])) !== JSON.stringify(saved.commands.map((c) => c[0])) && n(byKey(state.commands), byKey(saved.commands)) === 0 ? 1 : 0) +
+            n(byKey(state.folders), byKey(saved.folders)) +
+            n(byKey(state.secrets), byKey(saved.secrets)) +
+            n(state.flags, saved.flags) +
+            state.domains.filter((d) => !saved.domains.includes(d)).length +
+            saved.domains.filter((d) => !state.domains.includes(d)).length
+          )
+        }
+        function update() {
+          renderTools()
+          renderCommands()
+          renderFolders()
+          renderRisk()
+          const count = changes()
+          $("#savebar").hidden = count === 0
+          $("#save-count").textContent = `${count} unsaved change${count === 1 ? "" : "s"}`
+          fresh = null
+        }
+        root.addEventListener("lab:seg", (event) => {
+          if (event.target.id === "presets") {
+            const preset = PRESETS[event.detail]
+            Object.assign(state.modes, preset)
+            update()
+            toast(`${event.detail[0].toUpperCase() + event.detail.slice(1)} preset applied to every tool. Review, then save.`)
+          }
+          if (event.target.id === "scope") {
+            scope = event.detail
+            $("#scope-note").textContent = scope === "project" ? "Narrows the rules for this project only" : "Rules for every project"
+            goTo("tools")
+            renderTools()
+          }
+        })
+        $("#save").addEventListener("click", () => {
+          saved = clone(state)
+          update()
+          toast("Saved to ~/.config/vector/vector.json. New rules apply from the next tool call.")
+        })
+        $("#discard").addEventListener("click", () => {
+          state = clone(saved)
+          update()
+          toast("Changes discarded")
+        })
+
+        function goTo(tab, key) {
+          const tabEl = root.querySelector(`[data-tabs="pm"] [data-tab="${tab}"]`)
+          tabEl?.click()
+          if (tab === "tools" && key) {
+            if (TOOLS.find((t) => t.key === key)?.detail) open.add(key)
+            renderTools()
+            const el = $(`[data-tool="${key}"]`)
+            el?.scrollIntoView({ block: "center" })
+            el?.classList.add("is-flash")
+          }
+        }
+
+        let toastTimer
+        function toast(text) {
+          const el = $("#toast")
+          el.textContent = text
+          el.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (el.hidden = true), 3200)
+        }
+
+        update()
+        renderLog()
+      })()
+    </script>
+  </body>
+</html>
