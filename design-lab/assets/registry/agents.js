@@ -1,0 +1,8 @@
+// Group: Cloud, agents and workspace (D13-D17)
+window.LAB_DESIGNS = (window.LAB_DESIGNS ?? []).concat([
+  { slug: "vector-cloud", number: 13, area: "Cloud", title: "Vector Cloud runs", summary: "Agents that keep working in the cloud with your laptop closed: live runs, logs, cost, and continue-on-laptop.", idea: "Background agents that run on GitHub Actions or Vector Cloud, a future Pro feature, shown as one clear screen.", height: 900 },
+  { slug: "subagent-orchestration", number: 14, area: "Agents", title: "Subagents and follow-ups", summary: "A session's subagents as a live tree: what each is doing, what came back, and the main agent's follow-up after each one finishes.", idea: "Makes multi-agent work visible and trustworthy, on par with Claude Code's subagents.", height: 900 },
+  { slug: "agent-board", number: 15, area: "Agents", title: "Agent Dashboard: live board", summary: "Every workspace and agent as a live card with progress, files touched, checks and cost, grouped by status.", idea: "A next version of the Agent Dashboard built for running many agents at once.", height: 900 },
+  { slug: "first-run", number: 16, area: "Onboarding", title: "Welcome and first run", summary: "A first-run screen that gets a new user from install to a first finished task: pick a project, connect a model, try a starter task.", idea: "Shortens the first hour, which decides whether someone keeps using Vector.", height: 900 },
+  { slug: "command-palette", number: 17, area: "Workspace", title: "Command palette", summary: "One keyboard-first palette for files, sessions, commands, agents and settings, with previews.", idea: "Speed for power users, the kind of polish that makes Vector feel professional.", height: 900 },
+])

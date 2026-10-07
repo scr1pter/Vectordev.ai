@@ -1,0 +1,7 @@
+// Group: Connections (D05-D08)
+window.LAB_DESIGNS = (window.LAB_DESIGNS ?? []).concat([
+  { slug: "mcp-servers", number: 5, area: "Connections", title: "MCP servers", summary: "Connected MCP servers with live health, the tools each one exposes and their permissions, plus a catalog to add new ones in one click.", idea: "Replaces config-file editing with a screen that shows what every MCP server can do and lets you switch tools on and off.", height: 900 },
+  { slug: "plugins-marketplace", number: 6, area: "Connections", title: "Plugins and skills", summary: "Browse, install and manage plugins, skills and custom agents, with the permissions each one asks for shown before you install.", idea: "A marketplace that makes Vector extensible for non-experts, like Claude Code's plugins and skills.", height: 900 },
+  { slug: "providers-models", number: 7, area: "Connections", title: "Providers and models", summary: "Your model providers and keys, every model with context size and price, and one-click OpenRouter sign-in for free models.", idea: "Makes choosing and paying for models transparent, and puts free models one click away.", height: 900 },
+  { slug: "integrations", number: 8, area: "Connections", title: "Integrations", summary: "GitHub, Linear, Slack, Vercel and Sentry in one place: connect once, then let agents read issues, post updates and check deploys.", idea: "Lets agents work with the tools a team already uses, which is what makes Vector useful at work.", height: 900 },
+])
