@@ -540,6 +540,10 @@ a.sb-item:hover {
     color 120ms ease;
 }
 
+a.btn {
+  text-decoration: none;
+}
+
 .btn:hover {
   background: var(--control-hover);
 }
@@ -794,6 +798,7 @@ kbd,
 }
 
 .seg button {
+  white-space: nowrap;
   height: 24px;
   padding: 0 10px;
   border: 0;

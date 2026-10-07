@@ -1570,6 +1570,12 @@
         justify-content: flex-end;
         gap: 8px;
       }
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 6px);
+        }
+      }
       .d-settings-general .sg-toast {
         position: absolute;
         bottom: 22px;
@@ -1583,7 +1589,7 @@
         color: var(--text-1);
         font-size: 12.5px;
         transform: translateX(-50%);
-        animation: sg-pop 220ms var(--ease);
+        animation: toast-in 220ms var(--ease);
       }
       .d-settings-general .sg-toast[hidden] {
         display: none;

@@ -1036,6 +1036,14 @@
         prs.forEach((p) => {
           const names = p.checks ?? CHECKS
           p.checkList = [...names.map((name) => ({ name, state: p.ci.fail?.includes(name) ? "fail" : p.ci.run?.includes(name) ? "run" : "ok", secs: 40 + ((name.length * 37) % 200) })), { name: "Vectorscope", state: p.vs.risk === "run" ? "run" : "vs" }]
+          // Running checks start partway through and finish a few seconds after the page opens, at staggered times.
+          const finish = p.live ? 9 : p.n === 2324 ? 15 : p.n === 57 ? 20 : null
+          p.checkList
+            .filter((c) => c.state === "run")
+            .forEach((c, i) => {
+              c.secs = 18 + ((c.name.length * 13) % 60)
+              c.until = finish === null ? Infinity : c.secs + finish + i * 3
+            })
         })
 
         const GROUPS = [
@@ -1353,7 +1361,7 @@
                 if (c.state === "fail") {
                   c.state = "run"
                   c.secs = 0
-                  c.after = "ok"
+                  c.until = 6
                 }
               })
               p.ci = { run: p.checkList.filter((c) => c.state === "run").map((c) => c.name) }
@@ -1430,7 +1438,7 @@
               c.secs += 1
               changed = true
               if (p.n === state.current && state.tab === "checks") touched = true
-              const done = c.after ? c.secs >= 6 : p.live ? c.secs >= (c.name.startsWith("e2e") ? 7 : 11) : p.n === 2324 ? c.secs >= 13 + c.name.length / 4 : p.n === 57 ? c.secs >= 16 : false
+              const done = c.secs >= c.until
               if (!done) return
               if (p.n === state.current) touched = true
               c.state = c.name === "Vectorscope" ? "vs" : "ok"

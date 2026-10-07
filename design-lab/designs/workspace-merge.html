@@ -1,0 +1,1637 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* D04 Merge a Parallel Workspace into main. Scoped under .d-workspace-merge. */
+      .d-workspace-merge {
+        --rail: #1b1920;
+        --reader: #17151c;
+        --code: #131117;
+        --gutter: #17151c;
+      }
+
+      .d-workspace-merge button {
+        font: inherit;
+      }
+
+      .d-workspace-merge .btn svg {
+        flex: none;
+      }
+
+      .d-workspace-merge .btn[disabled] {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-3);
+        cursor: not-allowed;
+      }
+
+      .d-workspace-merge .mono {
+        font-family: var(--mono);
+      }
+
+      .d-workspace-merge code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-1);
+        font: 0.92em var(--mono);
+      }
+
+      .d-workspace-merge .ref {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 6px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+
+      .d-workspace-merge .wm {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      /* ---- compare strip ---- */
+      .d-workspace-merge .strip {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 12px;
+        height: 76px;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(182, 159, 247, 0.035), transparent 80%), var(--stage);
+      }
+
+      .d-workspace-merge .side-card {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        height: 50px;
+        padding: 0 14px 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+      }
+
+      .d-workspace-merge .side-card.ws {
+        border-color: var(--violet-line);
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.09), transparent 85%), var(--card);
+      }
+
+      .d-workspace-merge .side-card .mark {
+        display: grid;
+        flex: none;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-2);
+      }
+
+      .d-workspace-merge .side-card.ws .mark {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-workspace-merge .side-card .row-text {
+        gap: 2px;
+      }
+
+      .d-workspace-merge .side-card .row-name {
+        font-weight: 500;
+      }
+
+      .d-workspace-merge .flow {
+        display: grid;
+        place-items: center;
+        color: var(--text-3);
+      }
+
+      .d-workspace-merge .stats {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+
+      .d-workspace-merge .stat {
+        display: grid;
+        gap: 3px;
+        min-width: 92px;
+        padding: 0 14px;
+        border-left: 1px solid var(--line);
+      }
+
+      .d-workspace-merge .stat small {
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .d-workspace-merge .stat b {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .d-workspace-merge .stat b .muted {
+        font-weight: 400;
+      }
+
+      /* ---- split ---- */
+      .d-workspace-merge .split {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .d-workspace-merge .rail {
+        display: flex;
+        flex: 0 0 340px;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--line);
+        background: var(--rail);
+      }
+
+      .d-workspace-merge .rail .tabs {
+        flex: none;
+        background: #1e1b24;
+      }
+
+      .d-workspace-merge .tab .count {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-2);
+      }
+
+      .d-workspace-merge .tab[aria-selected="true"] .count {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-workspace-merge .rail-panel {
+        flex: 1;
+        min-height: 0;
+        padding: 4px 8px 12px;
+      }
+
+      .d-workspace-merge .rail-panel[hidden] {
+        display: none;
+      }
+
+      .d-workspace-merge .grp {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 12px 8px 4px;
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .d-workspace-merge .grp .n {
+        font: 500 10.5px var(--mono);
+        letter-spacing: 0;
+      }
+
+      .d-workspace-merge .f {
+        position: relative;
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        min-height: 44px;
+        padding: 5px 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-workspace-merge .f:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-workspace-merge .f[aria-current="true"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.1), transparent 75%), rgba(255, 255, 255, 0.055);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+      }
+
+      .d-workspace-merge .f[aria-current="true"]::before {
+        content: "";
+        position: absolute;
+        inset: 9px auto 9px 0;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--violet-bright);
+        box-shadow: 0 0 12px rgba(182, 159, 247, 0.42);
+      }
+
+      .d-workspace-merge .f .row-text {
+        gap: 1px;
+      }
+
+      .d-workspace-merge .f.out .row-name {
+        color: var(--text-3);
+        text-decoration: line-through;
+        text-decoration-color: rgba(255, 255, 255, 0.25);
+      }
+
+      .d-workspace-merge .f-ic {
+        display: grid;
+        flex: none;
+        width: 16px;
+        place-items: center;
+      }
+
+      .d-workspace-merge .f .prog {
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+
+      .d-workspace-merge .add,
+      .d-workspace-merge .del {
+        font-size: 12px;
+      }
+
+      .d-workspace-merge .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 999px;
+        font-size: 10.5px;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .d-workspace-merge .pill.red {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .d-workspace-merge .pill.green {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-workspace-merge .pill.amber {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .d-workspace-merge .pill.violet {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-workspace-merge .pill.dim {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-3);
+      }
+
+      .d-workspace-merge .commit {
+        display: grid;
+        grid-template-columns: 14px minmax(0, 1fr) auto;
+        gap: 2px 10px;
+        align-items: center;
+        min-height: 46px;
+        padding: 6px 10px;
+        border-radius: 7px;
+      }
+
+      .d-workspace-merge .commit:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .d-workspace-merge .commit .msg {
+        overflow: hidden;
+        font-size: 12.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-workspace-merge .commit .sub {
+        grid-column: 2;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-workspace-merge .commit .when {
+        grid-row: 1;
+        grid-column: 3;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-workspace-merge .commit .dotc {
+        width: 9px;
+        height: 9px;
+        border: 1.5px solid var(--text-3);
+        border-radius: 50%;
+      }
+
+      .d-workspace-merge .commit.ws .dotc {
+        border-color: var(--violet-bright);
+      }
+
+      .d-workspace-merge .commit.hit .dotc {
+        border-color: var(--red);
+      }
+
+      /* merge plan */
+      .d-workspace-merge .plan {
+        flex: none;
+        padding: 12px 14px 14px;
+        border-top: 1px solid var(--line);
+        background: #1d1a22;
+      }
+
+      .d-workspace-merge .plan-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 32px;
+        font-size: 12.5px;
+      }
+
+      .d-workspace-merge .plan-row span:first-child {
+        flex: 1;
+        color: var(--text-1);
+      }
+
+      .d-workspace-merge .plan-row .seg button {
+        height: 22px;
+        padding: 0 8px;
+        font-size: 11.5px;
+      }
+
+      .d-workspace-merge .meter {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 8px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-workspace-merge .meter-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-workspace-merge .meter-line b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      .d-workspace-merge .bar {
+        display: flex;
+        gap: 2px;
+        height: 4px;
+      }
+
+      .d-workspace-merge .bar i {
+        flex: 1;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.08);
+        transition: background-color 200ms ease;
+      }
+
+      .d-workspace-merge .bar i.ok {
+        background: var(--green);
+      }
+
+      .d-workspace-merge .bar i.no {
+        background: rgba(230, 120, 125, 0.45);
+      }
+
+      .d-workspace-merge .bar i.cf {
+        background: var(--red);
+      }
+
+      /* ---- reader ---- */
+      .d-workspace-merge .reader {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        background: var(--reader);
+      }
+
+      .d-workspace-merge .filebar {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 54px;
+        padding: 0 12px 0 20px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-workspace-merge .filebar .row-text {
+        gap: 1px;
+      }
+
+      .d-workspace-merge .filebar .row-name {
+        font-weight: 500;
+      }
+
+      .d-workspace-merge .nav {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+      }
+
+      .d-workspace-merge .nav .icon-btn {
+        width: 24px;
+        height: 24px;
+      }
+
+      .d-workspace-merge .body {
+        flex: 1;
+        min-height: 0;
+        padding: 14px 18px 40px;
+      }
+
+      .d-workspace-merge .hunk {
+        overflow: hidden;
+        margin-bottom: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 9px;
+        background: var(--code);
+        transition: border-color 160ms ease;
+      }
+
+      .d-workspace-merge .hunk[data-d="accept"] {
+        border-color: rgba(101, 199, 142, 0.35);
+      }
+
+      .d-workspace-merge .hunk[data-d="reject"] .dl {
+        opacity: 0.45;
+      }
+
+      .d-workspace-merge .hunk-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 38px;
+        padding: 0 8px 0 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(146, 116, 236, 0.05);
+      }
+
+      .d-workspace-merge .hunk-head .h {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        color: #8f88cc;
+        font: 11.5px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-workspace-merge .hunk-head .from {
+        color: var(--text-3);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .d-workspace-merge .decide {
+        display: inline-flex;
+        padding: 2px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .d-workspace-merge .decide button {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-workspace-merge .decide button:hover {
+        color: var(--text-1);
+      }
+
+      .d-workspace-merge .decide [data-act="accept"][aria-pressed="true"] {
+        background: var(--green-soft);
+        box-shadow: inset 0 0 0 1px rgba(101, 199, 142, 0.4);
+        color: var(--green);
+      }
+
+      .d-workspace-merge .decide [data-act="reject"][aria-pressed="true"] {
+        background: var(--red-soft);
+        box-shadow: inset 0 0 0 1px rgba(230, 120, 125, 0.4);
+        color: var(--red);
+      }
+
+      .d-workspace-merge .why {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        background: rgba(146, 116, 236, 0.06);
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .d-workspace-merge .why.warn {
+        background: rgba(214, 169, 92, 0.07);
+        color: #e7c891;
+      }
+
+      .d-workspace-merge .why svg {
+        flex: none;
+        margin-top: 2px;
+      }
+
+      .d-workspace-merge .dl {
+        display: grid;
+        grid-template-columns: 44px 18px minmax(0, 1fr);
+        color: #d9d5de;
+        font: 11.5px/19px var(--mono);
+        transition: opacity 160ms ease;
+      }
+
+      .d-workspace-merge .dl-n {
+        padding-right: 9px;
+        background: var(--gutter);
+        color: #6f6b78;
+        text-align: right;
+        user-select: none;
+      }
+
+      .d-workspace-merge .dl-s {
+        color: #6f6b78;
+        text-align: center;
+      }
+
+      .d-workspace-merge .dl-c {
+        padding-right: 12px;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .d-workspace-merge .dl.add {
+        background: rgba(101, 199, 142, 0.075);
+      }
+
+      .d-workspace-merge .dl.add .dl-n {
+        background: rgba(101, 199, 142, 0.12);
+        box-shadow: inset 2px 0 0 rgba(101, 199, 142, 0.7);
+        color: #8fcfa9;
+      }
+
+      .d-workspace-merge .dl.add .dl-s {
+        color: var(--green);
+      }
+
+      .d-workspace-merge .dl.del {
+        background: rgba(230, 120, 125, 0.075);
+      }
+
+      .d-workspace-merge .dl.del .dl-n {
+        background: rgba(230, 120, 125, 0.12);
+        box-shadow: inset 2px 0 0 rgba(230, 120, 125, 0.7);
+      }
+
+      .d-workspace-merge .dl.del .dl-s {
+        color: var(--red);
+      }
+
+      .d-workspace-merge .dl.rs {
+        background: rgba(146, 116, 236, 0.09);
+      }
+
+      .d-workspace-merge .dl.rs .dl-n {
+        background: rgba(146, 116, 236, 0.16);
+        box-shadow: inset 2px 0 0 var(--violet-bright);
+        color: #d1c4fb;
+      }
+
+      .d-workspace-merge .dl.rs .dl-s {
+        color: var(--violet-bright);
+      }
+
+      .d-workspace-merge .dl-more {
+        padding: 4px 12px 6px 62px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .tk-k {
+        color: #c6aefc;
+      }
+
+      .tk-s {
+        color: #e3c597;
+      }
+
+      .tk-c {
+        color: #85818e;
+      }
+
+      .tk-n {
+        color: #9cc3ee;
+      }
+
+      /* conflict */
+      .d-workspace-merge .cf {
+        overflow: hidden;
+        margin-bottom: 14px;
+        border: 1px solid rgba(230, 120, 125, 0.32);
+        border-radius: 10px;
+        background: #19161d;
+      }
+
+      .d-workspace-merge .cf[data-resolved="true"] {
+        border-color: rgba(101, 199, 142, 0.35);
+      }
+
+      .d-workspace-merge .cf-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 12px 10px 14px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-workspace-merge .cf-head h4 {
+        margin: 0;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .d-workspace-merge .cf-head .h {
+        margin-left: auto;
+        color: #8f88cc;
+        font: 11px var(--mono);
+      }
+
+      .d-workspace-merge .sides {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 0;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-workspace-merge .sides > div + div {
+        border-left: 1px solid var(--hairline);
+      }
+
+      .d-workspace-merge .side-head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 34px;
+        padding: 0 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-workspace-merge .side-head b {
+        color: var(--text-1);
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .d-workspace-merge .side-head > * {
+        flex: none;
+      }
+
+      .d-workspace-merge .side-head .msg {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .d-workspace-merge .side-head .msg {
+        overflow: hidden;
+        color: var(--text-3);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-workspace-merge .sides .dl {
+        grid-template-columns: 34px 16px minmax(0, 1fr);
+        font-size: 11px;
+        line-height: 18px;
+        background-color: var(--code);
+      }
+
+      .d-workspace-merge .sides .dl.add {
+        background: rgba(101, 199, 142, 0.075);
+      }
+
+      .d-workspace-merge .pick {
+        opacity: 1;
+      }
+
+      .d-workspace-merge .cf[data-choice="main"] .sides > div:last-child .dl,
+      .d-workspace-merge .cf[data-choice="workspace"] .sides > div:first-child .dl {
+        opacity: 0.4;
+      }
+
+      .d-workspace-merge .res {
+        padding: 12px 14px 14px;
+      }
+
+      .d-workspace-merge .res-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-size: 12.5px;
+      }
+
+      .d-workspace-merge .res-head b {
+        color: var(--text-1);
+        font-weight: 600;
+      }
+
+      .d-workspace-merge .res-head .seg {
+        margin-left: auto;
+      }
+
+      .d-workspace-merge .res-head .seg button {
+        height: 22px;
+        padding: 0 9px;
+        font-size: 11.5px;
+      }
+
+      .d-workspace-merge .res p {
+        margin: 0 0 10px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+
+      .d-workspace-merge .res-code {
+        overflow: hidden;
+        border: 1px solid rgba(182, 159, 247, 0.3);
+        border-radius: 8px;
+        background: var(--code);
+      }
+
+      .d-workspace-merge .res-code.busy {
+        opacity: 0.45;
+      }
+
+      .d-workspace-merge .ask {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .d-workspace-merge .ask .input {
+        flex: 1;
+      }
+
+      .d-workspace-merge .ask .input svg {
+        flex: none;
+        color: var(--violet-bright);
+      }
+
+      .d-workspace-merge .ask .input input::placeholder {
+        color: var(--text-3);
+      }
+
+      .d-workspace-merge .res-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .d-workspace-merge .res-actions .grow {
+        flex: 1;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-workspace-merge .thinking {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        color: var(--violet-bright);
+        font-size: 12px;
+      }
+
+      .spin {
+        animation: wm-spin 0.9s linear infinite;
+      }
+
+      @keyframes wm-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .d-workspace-merge .fresh {
+        animation: wm-fresh 1.4s var(--ease);
+      }
+
+      @keyframes wm-fresh {
+        0% {
+          background: rgba(182, 159, 247, 0.35);
+        }
+      }
+
+      /* merging */
+      .d-workspace-merge .sheet {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        z-index: 20;
+        width: 440px;
+        transform: translate(-50%, -50%);
+        animation: wm-pop 200ms var(--ease);
+      }
+
+      .d-workspace-merge .sheet[hidden] {
+        display: none;
+      }
+
+      @keyframes wm-pop {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -48%) scale(0.985);
+        }
+      }
+
+      .d-workspace-merge .scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 19;
+        background: rgba(12, 10, 15, 0.5);
+      }
+
+      .d-workspace-merge .scrim[hidden] {
+        display: none;
+      }
+
+      .d-workspace-merge .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 16px 12px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-workspace-merge .sheet-head h3 {
+        margin: 0;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+
+      .d-workspace-merge .steps {
+        display: grid;
+        gap: 2px;
+        padding: 10px 12px 12px;
+      }
+
+      .d-workspace-merge .stp {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 32px;
+        padding: 0 6px;
+        color: var(--text-3);
+        font-size: 12.5px;
+      }
+
+      .d-workspace-merge .stp[data-s="done"] {
+        color: var(--text-2);
+      }
+
+      .d-workspace-merge .stp[data-s="run"] {
+        color: var(--text-1);
+      }
+
+      .d-workspace-merge .stp .mono {
+        margin-left: auto;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-workspace-merge .done {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        margin: 40px auto 0;
+        max-width: 560px;
+        padding: 30px 24px;
+        border: 1px solid var(--violet-line);
+        border-radius: 14px;
+        background: radial-gradient(300px 140px at 50% 0%, rgba(182, 159, 247, 0.13), transparent 70%), var(--card);
+        text-align: center;
+      }
+
+      .d-workspace-merge .done .big {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 12px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 24px rgba(182, 159, 247, 0.25);
+      }
+
+      .d-workspace-merge .done h4 {
+        margin: 0;
+        color: var(--text-1);
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .d-workspace-merge .done p {
+        margin: 0;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+
+      .d-workspace-merge .done ul {
+        display: grid;
+        gap: 6px;
+        width: 100%;
+        margin: 8px 0 4px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: rgba(0, 0, 0, 0.12);
+        list-style: none;
+        text-align: left;
+      }
+
+      .d-workspace-merge .done li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-workspace-merge .toast {
+        position: absolute;
+        right: 18px;
+        bottom: 18px;
+        z-index: 21;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        max-width: 460px;
+        padding: 11px 14px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        animation: wm-pop2 180ms var(--ease);
+      }
+
+      .d-workspace-merge .toast[hidden] {
+        display: none;
+      }
+
+      @keyframes wm-pop2 {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+      }
+
+      .d-workspace-merge .sr {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="workspace-merge"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-workspace-merge">
+            <div class="app">
+              <nav data-lab-sidebar data-active="workspace" data-workspace="Resume interrupted sessions" data-branch="vector-parallel/session-recovery"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="branch" data-size="15" class="muted"></i>
+                  <h2>Merge <span class="mono" style="font-size: 13px">session-recovery</span> into main</h2>
+                  <span class="app-header-sub" data-hd-sub>Parallel Workspace · review each hunk, then merge</span>
+                  <div class="app-header-end">
+                    <button class="chip-tool" type="button" data-safe title="Accept every hunk Vector checked against its task"><span data-spark></span>Accept all safe</button>
+                    <button class="chip-tool" type="button"><i data-icon="terminal" data-size="15"></i>Terminal</button>
+                    <button class="btn btn-primary" type="button" data-merge></button>
+                  </div>
+                </header>
+
+                <div class="wm">
+                  <section class="strip" aria-label="Compare">
+                    <div class="side-card ws">
+                      <span class="mark"><i data-icon="chip" data-size="16"></i></span>
+                      <span class="row-text"><span class="row-name">session-recovery</span><span class="row-sub mono" style="font-size: 11px">vector-parallel/session-recovery</span></span>
+                    </div>
+                    <span class="flow" aria-label="merges into"><svg width="40" height="14" viewBox="0 0 40 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 7h34M31 2.5 36 7l-5 4.5" /></svg></span>
+                    <div class="side-card">
+                      <span class="mark"><i data-icon="branch" data-size="15"></i></span>
+                      <span class="row-text"><span class="row-name">main</span><span class="row-sub">+3 commits since <span class="mono">4d2e8a1</span></span></span>
+                    </div>
+                    <div class="stats">
+                      <div class="stat"><small>Workspace</small><b>7 commits <span class="muted">· 1h 48m</span></b></div>
+                      <div class="stat"><small>Tests</small><b><span data-ic="ok"></span>214 pass</b></div>
+                      <div class="stat"><small>Risk</small><b><span class="dot dot-amber"></span>Medium</b></div>
+                      <div class="stat"><small>Conflicts</small><b data-stat-conflicts></b></div>
+                    </div>
+                  </section>
+
+                  <div class="split">
+                    <aside class="rail" aria-label="Workspace changes">
+                      <div class="tabs" role="tablist" data-tabs="rail">
+                        <button class="tab" role="tab" type="button" data-tab="files" aria-selected="true">Files <span class="count">8</span></button>
+                        <button class="tab" role="tab" type="button" data-tab="commits" aria-selected="false">Commits <span class="count">7</span></button>
+                        <button class="tab" role="tab" type="button" data-tab="main" aria-selected="false">On main <span class="count">3</span></button>
+                      </div>
+                      <div class="rail-panel scroll" role="tabpanel" data-panel="files" data-tabs-for="rail" data-files></div>
+                      <div class="rail-panel scroll" role="tabpanel" data-panel="commits" data-tabs-for="rail" data-commits hidden></div>
+                      <div class="rail-panel scroll" role="tabpanel" data-panel="main" data-tabs-for="rail" data-onmain hidden></div>
+                      <div class="plan" aria-label="Merge plan">
+                        <div class="meter" data-meter></div>
+                        <div class="plan-row"><span>Strategy</span><div class="seg" role="group" aria-label="Merge strategy" data-strategy><button type="button" data-value="merge" aria-pressed="true">Merge commit</button><button type="button" data-value="squash" aria-pressed="false">Squash</button></div></div>
+                        <div class="plan-row"><span>Run engine tests after merging</span><button class="switch" role="switch" type="button" aria-checked="true" data-tests aria-label="Run engine tests after merging"></button></div>
+                        <div class="plan-row"><span>Remove the workspace when done</span><button class="switch" role="switch" type="button" aria-checked="true" data-cleanup aria-label="Remove the workspace when done"></button></div>
+                      </div>
+                    </aside>
+
+                    <section class="reader" aria-label="Review">
+                      <div class="filebar" data-filebar></div>
+                      <div class="body scroll" data-body></div>
+                    </section>
+                  </div>
+
+                  <div class="scrim" data-scrim hidden></div>
+                  <div class="sheet float" role="dialog" aria-modal="true" aria-labelledby="wm-sheet-title" data-sheet hidden></div>
+                  <div class="toast float" role="status" data-toast hidden></div>
+                </div>
+                <p class="sr" aria-live="polite" data-live></p>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const root = document.querySelector(".d-workspace-merge")
+        const $ = (sel) => root.querySelector(sel)
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const svg = (body, size = 14, cls = "") =>
+          `<svg class="${cls}" width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+        const tint = (c, h) => `<span style="color:${c};display:inline-grid">${h}</span>`
+        const IC = {
+          ok: (s = 14) => tint("var(--green)", svg('<circle cx="8" cy="8" r="5.9"/><path d="m5.6 8.1 1.7 1.7 3.1-3.4"/>', s)),
+          no: (s = 14) => tint("var(--red)", svg('<circle cx="8" cy="8" r="5.9"/><path d="m6 6 4 4m0-4-4 4"/>', s)),
+          part: (s = 14) => tint("var(--amber)", svg('<circle cx="8" cy="8" r="5.9"/><path d="M8 2.1a5.9 5.9 0 0 1 0 11.8Z" fill="currentColor" stroke="none" opacity=".55"/>', s)),
+          pending: (s = 14) => tint("var(--text-3)", svg('<circle cx="8" cy="8" r="5.6" stroke-dasharray="2 2.2"/>', s)),
+          conflict: (s = 14) => tint("var(--red)", svg('<path d="M4 2.5v4.2a3 3 0 0 0 3 3h2a3 3 0 0 1 3 3v.8M12 2.5v4.2a3 3 0 0 1-3 3"/><circle cx="4" cy="2.5" r=".2"/><path d="M2.5 13.5h3"/>', s)),
+          run: (s = 14) => tint("var(--violet-bright)", svg('<circle cx="8" cy="8" r="5.9" opacity=".3"/><path d="M8 2.1a5.9 5.9 0 0 1 5.9 5.9"/>', s, "spin")),
+          spark: (s = 13) => svg('<path d="M8 2.2c.45 2.85 1.9 4.3 4.75 4.75C9.9 7.4 8.45 8.85 8 11.7c-.45-2.85-1.9-4.3-4.75-4.75C6.1 6.5 7.55 5.05 8 2.2Z"/><path d="M12.4 10.6c.15.95.6 1.4 1.55 1.55-.95.15-1.4.6-1.55 1.55-.15-.95-.6-1.4-1.55-1.55.95-.15 1.4-.6 1.55-1.55Z"/>', s),
+          warn: (s = 13) => svg('<path d="M7.1 2.9a1 1 0 0 1 1.8 0l5 9.1a1 1 0 0 1-.9 1.5H3a1 1 0 0 1-.9-1.5l5-9.1Z"/><path d="M8 6.4v2.8M8 11.1v.1" stroke-width="1.35"/>', s),
+          merge: (s = 14) => svg('<circle cx="4.2" cy="3.6" r="1.5"/><circle cx="4.2" cy="12.4" r="1.5"/><circle cx="11.8" cy="8.4" r="1.5"/><path d="M4.2 5.1v5.8M4.2 5.6c0 2 1.8 2.8 6.1 2.8"/>', s),
+          check: (s = 11) => svg('<path d="m3.5 8.4 2.9 2.8 6-6.4" stroke-width="1.9"/>', s),
+          x: (s = 11) => svg('<path d="m4.5 4.5 7 7m0-7-7 7" stroke-width="1.7"/>', s),
+          send: (s = 13) => svg('<path d="M8 13V3.5M4.2 7.2 8 3.4l3.8 3.8" stroke-width="1.4"/>', s),
+          prev: (s = 14) => svg('<path d="m10 4-4 4 4 4"/>', s),
+          next: (s = 14) => svg('<path d="m6 4 4 4-4 4"/>', s),
+          lock: (s = 13) => svg('<rect x="3.5" y="7" width="9" height="6.5" rx="1.4"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/>', s),
+        }
+        root.querySelectorAll("[data-ic]").forEach((el) => (el.outerHTML = IC[el.dataset.ic]()))
+        $("[data-spark]").outerHTML = IC.spark(14)
+
+        // ---------- data ----------
+        const files = [
+          {
+            id: "coord", name: "run-coordinator.ts", dir: "packages/core/src/session/", add: 41, del: 6,
+            conflict: {
+              title: "Both sides changed SessionRunCoordinator.drain()",
+              head: "@@ -58,6 +58,9 @@",
+              at: 58,
+              main: { who: "mira-lund", sha: "3f9c210", msg: "feat(core): let an interrupt stop a drain between inputs", lines: [" export const drain = Effect.fn(\"SessionRunCoordinator.drain\")(function* (", "   sessionID: SessionID,", "+  interrupt: Deferred.Deferred<void>,", " ) {", "   const store = yield* SessionStore.Service", "+  if (yield* Deferred.isDone(interrupt)) return", "   const pending = yield* store.pendingInputs(sessionID)"] },
+              ws: { sha: "81b0c4e", msg: "feat(core): resume a drain from the last durable turn", lines: [" export const drain = Effect.fn(\"SessionRunCoordinator.drain\")(function* (", "   sessionID: SessionID,", " ) {", "   const store = yield* SessionStore.Service", "+  // Resume after the last durable turn, never from a half-written one.", "+  const from = yield* store.lastDurableTurn(sessionID)", "-  const pending = yield* store.pendingInputs(sessionID)", "+  const pending = yield* store.pendingInputs(sessionID, { after: from })"] },
+              resolutions: [
+                {
+                  why: "main added an interrupt check to <code>drain()</code>; the workspace added a resume point. They touch the same lines but do different jobs, so this keeps both: the interrupt is checked first, then the drain resumes after the last durable turn.",
+                  lines: [" export const drain = Effect.fn(\"SessionRunCoordinator.drain\")(function* (", "   sessionID: SessionID,", "*  interrupt: Deferred.Deferred<void>,", " ) {", "   const store = yield* SessionStore.Service", "*  if (yield* Deferred.isDone(interrupt)) return", "*  // Resume after the last durable turn, never from a half-written one.", "*  const from = yield* store.lastDurableTurn(sessionID)", "*  const pending = yield* store.pendingInputs(sessionID, { after: from })"],
+                },
+                {
+                  why: "Updated as asked: the interrupt is checked again after the recovery read, so a long history read can still be stopped before any input is promoted.",
+                  lines: [" export const drain = Effect.fn(\"SessionRunCoordinator.drain\")(function* (", "   sessionID: SessionID,", "*  interrupt: Deferred.Deferred<void>,", " ) {", "   const store = yield* SessionStore.Service", "*  if (yield* Deferred.isDone(interrupt)) return", "*  // Resume after the last durable turn, never from a half-written one.", "*  const from = yield* store.lastDurableTurn(sessionID)", "*  if (yield* Deferred.isDone(interrupt)) return", "*  const pending = yield* store.pendingInputs(sessionID, { after: from })"],
+                },
+              ],
+            },
+            hunks: [
+              { head: "@@ -112,4 +115,12 @@ export const layer = Layer.effect(", at: 115, from: "81b0c4e", why: "Exposes an explicit resume, so recovery only runs when someone asks for it.", lines: ["   wake,", "+  // Explicit only: recovery never retries provider work on its own.", "+  resume: Effect.fn(\"SessionRunCoordinator.resume\")(function* (sessionID: SessionID) {", "+    yield* drain(sessionID, yield* Deferred.make<void>())", "+  }),"], more: 4 },
+            ],
+          },
+          {
+            id: "schema", name: "schema.ts", dir: "packages/core/src/session/", add: 1, del: 0,
+            conflict: {
+              title: "Both sides added a field to RunInfo",
+              head: "@@ -24,5 +24,6 @@",
+              at: 24,
+              main: { who: "devon-ash", sha: "7a2e9d1", msg: "feat(core): record when a session was interrupted", lines: [" export const RunInfo = Schema.Struct({", "   session_id: SessionID,", "   turns: Schema.Number,", "+  interrupted_at: Schema.optional(Schema.Number),", " })"] },
+              ws: { sha: "c52d7f8", msg: "feat(core): store the last durable turn", lines: [" export const RunInfo = Schema.Struct({", "   session_id: SessionID,", "   turns: Schema.Number,", "+  last_durable_turn: Schema.optional(MessageID),", " })"] },
+              resolutions: [
+                {
+                  why: "Two independent optional fields. Nothing reads one to decide the other, so the resolution keeps both, in the order the columns were added.",
+                  lines: [" export const RunInfo = Schema.Struct({", "   session_id: SessionID,", "   turns: Schema.Number,", "*  interrupted_at: Schema.optional(Schema.Number),", "*  last_durable_turn: Schema.optional(MessageID),", " })"],
+                },
+              ],
+            },
+            hunks: [],
+          },
+          {
+            id: "recovery", name: "recovery.ts", dir: "packages/core/src/session/", add: 142, del: 0,
+            hunks: [
+              { head: "@@ -0,0 +1,142 @@", at: 1, from: "81b0c4e", lines: ["+// Finds where an interrupted session can continue: the last turn whose", "+// messages and tool results were all written. Nothing here calls a provider.", "+export const lastDurableTurn = Effect.fn(\"SessionRecovery.lastDurableTurn\")(function* (sessionID: SessionID) {", "+  const history = yield* SessionHistory.Service", "+  const turns = yield* history.turns(sessionID)", "+  return turns.findLast((turn) => turn.complete)?.id", "+})"], more: 135 },
+            ],
+          },
+          {
+            id: "store", name: "store.ts", dir: "packages/core/src/session/", add: 31, del: 4,
+            hunks: [
+              { head: "@@ -77,6 +77,15 @@ export interface Interface {", at: 77, from: "c52d7f8", lines: ["   readonly pendingInputs: (sessionID: SessionID) => Effect.Effect<SessionInput[]>", "+  readonly lastDurableTurn: (sessionID: SessionID) => Effect.Effect<MessageID | undefined>"], more: 7 },
+              { head: "@@ -201,9 +210,31 @@ export const layer = Layer.effect(", at: 210, from: "81b0c4e", lines: ["-    pendingInputs: (sessionID) => select(inbox).where(eq(inbox.session_id, sessionID)),", "+    pendingInputs: (sessionID, options) =>", "+      select(inbox).where(and(eq(inbox.session_id, sessionID), after(inbox.turn_id, options?.after))),"], more: 19 },
+            ],
+          },
+          {
+            id: "retry", name: "retry.ts", dir: "packages/engine/src/session/", add: 6, del: 2,
+            hunks: [
+              { head: "@@ -18,6 +18,10 @@ export namespace SessionRetry {", at: 18, from: "e07b3aa", warn: "Not part of the recovery task: the agent changed the retry backoff while reproducing a crash. Vector suggests leaving it out.", lines: ["-  const delay = Schedule.exponential(\"500 millis\")", "+  const delay = Schedule.exponential(\"50 millis\")", "+  // TEMP: faster retries while reproducing the crash"] },
+            ],
+          },
+          {
+            id: "test", name: "recovery.test.ts", dir: "packages/core/test/session/", add: 96, del: 0,
+            hunks: [
+              { head: "@@ -0,0 +1,96 @@", at: 1, from: "d91f3b2", lines: ["+test(\"a crash after a tool result resumes from that turn\", async () => {", "+  const session = await fixture({ crashAfter: \"tool-result\" })", "+  expect(await lastDurableTurn(session.id)).toBe(session.turns[2].id)", "+})"], more: 92 },
+            ],
+          },
+          {
+            id: "header", name: "session-header.tsx", dir: "packages/app/src/components/session/", add: 18, del: 3,
+            hunks: [
+              { head: "@@ -44,6 +44,9 @@ export function SessionHeader(props: SessionHeaderProps) {", at: 44, from: "a40e6c9", lines: ["   const status = useSessionStatus(props.sessionID)", "+  const interrupted = () => status().kind === \"interrupted\"", "+  const resume = () => sdk.session.resume({ sessionID: props.sessionID })"] },
+              { head: "@@ -96,7 +99,22 @@ export function SessionHeader(props: SessionHeaderProps) {", at: 99, from: "a40e6c9", lines: ["+      <Show when={interrupted()}>", "+        <Button size=\"small\" onClick={resume}>Resume from last turn</Button>", "+      </Show>"], more: 12 },
+            ],
+          },
+          {
+            id: "sql", name: "sql.ts", dir: "packages/core/src/session/", add: 9, del: 1,
+            hunks: [
+              { head: "@@ -33,6 +33,14 @@ export const session_run = sqliteTable(\"session_run\", {", at: 33, from: "c52d7f8", lines: ["   turns: integer().notNull(),", "+  last_durable_turn: text(),"], more: 7 },
+            ],
+          },
+        ]
+        // Vector's starting point: what it checked against the task is accepted, the debugging hunk is not.
+        const start = { recovery: ["accept"], test: ["accept"], sql: ["accept"], store: ["accept", "pending"], retry: ["reject"], header: ["pending", "pending"], coord: ["pending"] }
+        files.forEach((f) => {
+          f.hunks.forEach((h, i) => (h.d = start[f.id]?.[i] ?? "pending"))
+          if (f.conflict) {
+            f.conflict.choice = null
+            f.conflict.v = 0
+          }
+        })
+        files.find((f) => f.id === "header").hunks.forEach((h) => (h.safe = true))
+        files.find((f) => f.id === "coord").hunks[0].safe = true
+        files.find((f) => f.id === "store").hunks[1].safe = true
+
+        const commits = [
+          ["81b0c4e", "feat(core): resume a drain from the last durable turn", "38m", true],
+          ["a40e6c9", "feat(app): offer Resume in the session header", "44m", false],
+          ["d91f3b2", "test(core): cover crashes after tool results", "51m", false],
+          ["c52d7f8", "feat(core): store the last durable turn", "1h", true],
+          ["e07b3aa", "chore: faster retries while reproducing the crash", "1h", false],
+          ["5f61a0b", "refactor(core): read turns through SessionHistory", "1h", false],
+          ["9b3c2de", "docs: note that recovery never retries provider work", "1h", false],
+        ]
+        const onMain = [
+          ["3f9c210", "feat(core): let an interrupt stop a drain between inputs", "mira-lund · 52m", true],
+          ["7a2e9d1", "feat(core): record when a session was interrupted", "devon-ash · 1h", true],
+          ["b18e44f", "fix(app): keep scroll position when switching session tabs", "Vector · 25m", false],
+        ]
+
+        const state = { file: "coord", merged: false, merging: false, strategy: "merge", tests: true, cleanup: true, asking: false, scroll: false }
+
+        // ---------- helpers ----------
+        const KW = "import|from|export|const|let|return|if|else|for|of|await|async|function|type|interface|new|true|false|null|undefined|yield|test|expect"
+        const TOKEN = new RegExp(`(\\/\\/.*$)|("(?:[^"\\\\]|\\\\.)*")|\\b(${KW})\\b|\\b(\\d+)\\b`, "g")
+        const hl = (code) =>
+          code
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(TOKEN, (m, c, s, k, n) => (c ? `<span class="tk-c">${c}</span>` : s ? `<span class="tk-s">${s}</span>` : k ? `<span class="tk-k">${k}</span>` : `<span class="tk-n">${n}</span>`))
+        function lines(list, at, more) {
+          let n = at
+          return (
+            list
+              .map((l) => {
+                const sign = l[0]
+                const t = sign === "+" ? "add" : sign === "-" ? "del" : sign === "*" ? "rs" : "ctx"
+                const num = t === "del" ? "" : n++
+                return `<div class="dl ${t}"><span class="dl-n">${num}</span><span class="dl-s">${t === "add" || t === "rs" ? "+" : t === "del" ? "−" : ""}</span><span class="dl-c">${hl(l.slice(1)) || " "}</span></div>`
+              })
+              .join("") + (more ? `<div class="dl-more">⋯ ${more} more lines</div>` : "")
+          )
+        }
+        const fileOf = (id) => files.find((f) => f.id === id)
+        const totals = () => {
+          const hunks = files.flatMap((f) => f.hunks)
+          const conflicts = files.filter((f) => f.conflict).map((f) => f.conflict)
+          return {
+            hunks: hunks.length,
+            accepted: hunks.filter((h) => h.d === "accept").length,
+            rejected: hunks.filter((h) => h.d === "reject").length,
+            pending: hunks.filter((h) => h.d === "pending").length,
+            conflicts: conflicts.length,
+            resolved: conflicts.filter((c) => c.choice).length,
+          }
+        }
+        function fileStatus(f) {
+          if (f.conflict && !f.conflict.choice) return { icon: IC.conflict(14), pill: '<span class="pill red">Conflict</span>' }
+          const ds = f.hunks.map((h) => h.d)
+          if (f.conflict) {
+            if (ds.some((d) => d === "pending")) return { icon: IC.part(14), pill: '<span class="pill green">Resolved</span>' }
+            return { icon: IC.ok(14), pill: '<span class="pill green">Resolved</span>' }
+          }
+          if (ds.every((d) => d === "accept")) return { icon: IC.ok(14) }
+          if (ds.every((d) => d === "reject")) return { icon: IC.no(14), out: true, pill: '<span class="pill dim">Left out</span>' }
+          if (ds.every((d) => d === "pending")) return { icon: IC.pending(14) }
+          return { icon: IC.part(14) }
+        }
+
+        // ---------- render ----------
+        function renderStats() {
+          const t = totals()
+          $("[data-stat-conflicts]").innerHTML = t.resolved === t.conflicts ? `${IC.ok()}All resolved` : `${IC.conflict()}${t.conflicts - t.resolved} of ${t.conflicts} open`
+          const btn = $("[data-merge]")
+          const blocked = t.resolved < t.conflicts
+          if (state.merged) {
+            btn.disabled = true
+            btn.innerHTML = `${IC.check()}Merged`
+            return
+          }
+          btn.disabled = blocked || !t.accepted
+          btn.innerHTML = blocked ? `${IC.lock()}Resolve ${t.conflicts - t.resolved} conflict${t.conflicts - t.resolved === 1 ? "" : "s"} to merge` : `${IC.merge()}Merge ${t.accepted + t.conflicts} changes`
+          btn.title = blocked ? "Every conflict needs a resolution before merging" : `${t.accepted} hunks and ${t.conflicts} resolved conflicts`
+        }
+
+        function renderMeter() {
+          const t = totals()
+          const cells = [
+            ...files.filter((f) => f.conflict).map((f) => (f.conflict.choice ? "ok" : "cf")),
+            ...files.flatMap((f) => f.hunks.map((h) => (h.d === "accept" ? "ok" : h.d === "reject" ? "no" : ""))),
+          ]
+          $("[data-meter]").innerHTML = `
+            <div class="meter-line"><span><b>${t.accepted + t.resolved}</b> of ${t.hunks + t.conflicts} ready to merge</span><span style="font-size:11.5px;color:var(--text-3)" title="Pending hunks stay in the workspace">${t.pending ? `${t.pending} pending` : "nothing pending"}</span></div>
+            <div class="bar" aria-hidden="true">${cells.map((c) => `<i class="${c}"></i>`).join("")}</div>`
+        }
+
+        function renderFiles() {
+          const row = (f) => {
+            const st = fileStatus(f)
+            const n = f.hunks.length + (f.conflict ? 1 : 0)
+            const done = f.hunks.filter((h) => h.d !== "pending").length + (f.conflict?.choice ? 1 : 0)
+            return `<button type="button" class="f${st.out ? " out" : ""}" data-file="${f.id}" aria-current="${state.file === f.id}">
+              <span class="f-ic">${st.icon}</span>
+              <span class="row-text"><span class="row-name">${f.name}</span><span class="row-sub">${f.dir}</span></span>
+              ${st.pill ?? `<span class="prog">${done}/${n}</span>`}
+              <span class="add">+${f.add}</span><span class="del">−${f.del}</span>
+            </button>`
+          }
+          const conflicts = files.filter((f) => f.conflict)
+          const rest = files.filter((f) => !f.conflict)
+          $("[data-files]").innerHTML = `<p class="grp">Conflicts<span class="n">${conflicts.length}</span></p>${conflicts.map(row).join("")}<p class="grp">Changes<span class="n">${rest.length}</span></p>${rest.map(row).join("")}`
+        }
+
+        function renderCommits() {
+          $("[data-commits]").innerHTML =
+            `<p class="grp">On vector-parallel/session-recovery</p>` +
+            commits
+              .map(([sha, msg, when, hit]) => `<div class="commit ws${hit ? " hit" : ""}"><span class="dotc"></span><span class="msg">${esc(msg)}</span><span class="when">${when}</span><span class="sub"><span class="mono">${sha}</span> · Vector${hit ? ' · <span style="color:var(--red)">touches a conflict</span>' : ""}</span></div>`)
+              .join("")
+          $("[data-onmain]").innerHTML =
+            `<p class="grp">New on main since 4d2e8a1</p>` +
+            onMain
+              .map(([sha, msg, who, hit]) => `<div class="commit${hit ? " hit" : ""}"><span class="dotc"></span><span class="msg">${esc(msg)}</span><span class="when"></span><span class="sub"><span class="mono">${sha}</span> · ${who}${hit ? ' · <span style="color:var(--red)">conflicts</span>' : ""}</span></div>`)
+              .join("") +
+            `<p class="muted" style="margin:12px 10px;font-size:12px;line-height:1.5">Vector rebuilt the workspace's diff on top of these, so every hunk you accept applies to today's main.</p>`
+        }
+
+        function renderFilebar() {
+          if (state.merged) {
+            $("[data-filebar]").innerHTML = `<span class="f-ic">${IC.merge(15)}</span><span class="row-text"><span class="row-name">main</span><span class="row-sub">at <span class="mono">8c41d07</span> · ${state.strategy === "squash" ? "squash" : "merge commit"} from session-recovery</span></span><span class="pill violet">Merged</span>`
+            return
+          }
+          const f = fileOf(state.file)
+          const i = files.indexOf(f)
+          const st = fileStatus(f)
+          $("[data-filebar]").innerHTML = `
+            <span class="f-ic">${st.icon}</span>
+            <span class="row-text"><span class="row-name">${f.name}</span><span class="row-sub">${f.dir}</span></span>
+            <span class="add">+${f.add}</span><span class="del">−${f.del}</span>
+            ${f.hunks.length ? `<button class="btn btn-sm" type="button" data-all="accept">${IC.check()}Accept file</button><button class="btn btn-sm btn-ghost" type="button" data-all="reject">Leave out</button>` : ""}
+            <span class="nav"><button class="icon-btn" type="button" data-step="-1" aria-label="Previous file">${IC.prev()}</button>${i + 1}/${files.length}<button class="icon-btn" type="button" data-step="1" aria-label="Next file">${IC.next()}</button></span>`
+        }
+
+        function renderBody(scrollTop = 0) {
+          const body = $("[data-body]")
+          if (state.merged) {
+            body.innerHTML = doneHtml()
+            return
+          }
+          const f = fileOf(state.file)
+          const conflict = f.conflict ? conflictHtml(f) : ""
+          const hunks = f.hunks
+            .map(
+              (h, j) => `<article class="hunk" data-d="${h.d}" aria-label="Hunk ${j + 1}">
+                <div class="hunk-head"><span class="h">${esc(h.head)}</span><span class="from">from <span class="mono">${h.from}</span></span>
+                  <span class="decide" role="group" aria-label="Decision for hunk ${j + 1}">
+                    <button type="button" data-act="accept" data-h="${j}" aria-pressed="${h.d === "accept"}">${IC.check()}Accept</button>
+                    <button type="button" data-act="reject" data-h="${j}" aria-pressed="${h.d === "reject"}">${IC.x()}Leave out</button>
+                  </span></div>
+                ${h.warn ? `<div class="why warn">${IC.warn()}<span>${h.warn}</span></div>` : h.why ? `<div class="why">${tint("var(--violet-bright)", IC.spark(12))}<span>${h.why}</span></div>` : ""}
+                ${lines(h.lines, h.at, h.more)}
+              </article>`,
+            )
+            .join("")
+          body.innerHTML = conflict + hunks
+          body.scrollTop = scrollTop
+        }
+
+        function conflictHtml(f) {
+          const c = f.conflict
+          const r = c.resolutions[c.v]
+          const choice = c.choice
+          const view = choice === "main" ? c.main.lines.map((l) => (l[0] === "+" ? "*" + l.slice(1) : l)) : choice === "workspace" ? c.ws.lines.filter((l) => l[0] !== "-").map((l) => (l[0] === "+" ? "*" + l.slice(1) : l)) : r.lines
+          const label = choice === "main" ? "Taking main's side" : choice === "workspace" ? "Taking the workspace's side" : "Resolution proposed by Vector"
+          return `<section class="cf" data-resolved="${!!choice}" data-choice="${choice ?? "agent"}" aria-label="Conflict">
+            <div class="cf-head">${choice ? IC.ok(15) : IC.conflict(15)}<h4>${c.title}</h4>${choice ? '<span class="pill green">Resolved</span>' : '<span class="pill red">Needs a decision</span>'}<span class="h">${c.head}</span></div>
+            <div class="sides">
+              <div><div class="side-head">${LabUI.svg("branch", 13)}<b>main</b><span class="mono" style="font-size:11px">${c.main.sha}</span><span class="msg">${c.main.who} · ${esc(c.main.msg)}</span></div>${lines(c.main.lines, c.at)}</div>
+              <div><div class="side-head">${tint("var(--violet-bright)", LabUI.svg("chip", 13))}<b>session-recovery</b><span class="mono" style="font-size:11px">${c.ws.sha}</span><span class="msg">${esc(c.ws.msg)}</span></div>${lines(c.ws.lines, c.at)}</div>
+            </div>
+            <div class="res">
+              <div class="res-head">${tint("var(--violet-bright)", IC.spark(14))}<b>${label}</b>${c.v && !choice ? '<span class="pill violet">Revised</span>' : ""}
+                <div class="seg" role="group" aria-label="Use" data-use><button type="button" data-value="agent" aria-pressed="${choice === "agent" || !choice}">Both (Vector)</button><button type="button" data-value="main" aria-pressed="${choice === "main"}">main</button><button type="button" data-value="workspace" aria-pressed="${choice === "workspace"}">Workspace</button></div></div>
+              ${choice === "main" ? `<p>Keeps main's interrupt handling and drops the workspace's change here. The workspace's other hunks may no longer compile.</p>` : choice === "workspace" ? `<p>Keeps the workspace's version and drops main's change at this spot.</p>` : `<p>${r.why}</p>`}
+              <div class="res-code${state.asking ? " busy" : ""}" data-rescode>${lines(view, c.at)}</div>
+              ${
+                state.asking
+                  ? `<div class="thinking">${IC.run(13)}Vector is revising the resolution…</div>`
+                  : !choice || choice === "agent"
+                    ? `<form class="ask" data-ask><label class="input">${IC.spark(13)}<input data-ask-input placeholder="Ask Vector to change this resolution" aria-label="Ask Vector to change this resolution" value="${c.v === 0 && f.id === "coord" ? "check the interrupt again after the recovery read" : ""}" /></label><button class="btn btn-sm" type="submit">${IC.send()}Ask</button></form>`
+                    : ""
+              }
+              <div class="res-actions">
+                <span class="grow">${choice ? `Resolved ${choice === "agent" ? "with Vector's version" : `with ${choice === "main" ? "main" : "the workspace"}`}.` : "Accept the resolution, or pick a side above."}</span>
+                ${choice ? `<button class="btn btn-sm btn-ghost" type="button" data-unresolve>Undo</button>` : `<button class="btn btn-sm btn-primary" type="button" data-resolve>${IC.check()}Accept resolution</button>`}
+              </div>
+            </div>
+          </section>`
+        }
+
+        function doneHtml() {
+          const t = totals()
+          const left = files.flatMap((f) => f.hunks.filter((h) => h.d !== "accept").map(() => f.name))
+          return `<div class="done"><span class="big">${IC.merge(20)}</span><h4>session-recovery is in main</h4>
+            <p>${state.strategy === "squash" ? "Squashed" : "Merged"} as <span class="ref">8c41d07</span> · ${t.accepted} hunks and ${t.conflicts} resolved conflicts</p>
+            <ul>
+              <li>${IC.ok()}<span>${t.conflicts} conflicts resolved, ${files.filter((f) => f.conflict?.choice === "agent").length} with Vector's version</span></li>
+              ${state.tests ? `<li>${IC.ok()}<span><span class="mono">bun test</span> in packages/core and packages/engine · 214 pass</span></li>` : ""}
+              <li>${left.length ? IC.pending() : IC.ok()}<span>${left.length ? `${left.length} hunk${left.length === 1 ? "" : "s"} left out (${[...new Set(left)].join(", ")})` : "Nothing left out"}</span></li>
+              <li>${state.cleanup ? IC.ok() : IC.pending()}<span>${state.cleanup ? "Workspace removed; its branch is kept for 7 days" : "Workspace kept for more work"}</span></li>
+            </ul>
+            <div class="row-end" style="justify-content:center"><button class="btn" type="button" data-reopen>Back to the review</button><a class="btn btn-primary" style="text-decoration:none" href="${LabUI.page("designs/ship-panel")}">${LabUI.svg("pulls", 14)}Open a pull request instead</a></div></div>`
+        }
+
+        function render(keepScroll = false) {
+          const top = keepScroll ? $("[data-body]").scrollTop : 0
+          const safe = $("[data-safe]")
+          safe.disabled = state.merged || !files.some((f) => f.hunks.some((h) => h.safe && h.d === "pending"))
+          safe.style.opacity = safe.disabled ? "0.5" : ""
+          const sub = document.querySelector(".sb-row.is-active .sb-row-sub")
+          if (sub) sub.textContent = state.merged ? "merged into main" : "vector-parallel/session-recovery · Ready"
+          renderStats()
+          renderMeter()
+          renderFiles()
+          renderFilebar()
+          renderBody(top)
+        }
+
+        let toastTimer
+        function toast(html) {
+          const t = $("[data-toast]")
+          t.innerHTML = html
+          t.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (t.hidden = true), 3400)
+        }
+        const live = (text) => ($("[data-live]").textContent = text)
+
+        // ---------- merging ----------
+        function merge() {
+          const t = totals()
+          const steps = [
+            [`Apply ${t.accepted} accepted hunks to main`, "0.4s"],
+            [`Write ${t.conflicts} resolved conflicts`, "0.1s"],
+            ...(state.tests ? [["bun test · packages/core, packages/engine", "214 pass"]] : []),
+            [`${state.strategy === "squash" ? "Squash" : "Merge"} commit 8c41d07 on main`, ""],
+            ...(state.cleanup ? [["Remove the session-recovery worktree", ""]] : []),
+          ]
+          let at = 0
+          const sheet = $("[data-sheet]")
+          const draw = () => {
+            sheet.innerHTML = `<div class="sheet-head">${IC.merge(16)}<h3 id="wm-sheet-title">Merging session-recovery into main</h3></div>
+              <div class="steps">${steps.map(([label, note], i) => `<div class="stp" data-s="${i < at ? "done" : i === at ? "run" : "todo"}">${i < at ? IC.ok() : i === at ? IC.run() : IC.pending()}<span>${esc(label)}</span><span class="mono">${i < at ? note : ""}</span></div>`).join("")}</div>`
+          }
+          $("[data-scrim]").hidden = false
+          sheet.hidden = false
+          state.merging = true
+          draw()
+          const tick = () => {
+            at += 1
+            draw()
+            if (at < steps.length) return setTimeout(tick, steps[at][0].startsWith("bun test") ? 1300 : 650)
+            setTimeout(() => {
+              sheet.hidden = true
+              $("[data-scrim]").hidden = true
+              state.merging = false
+              state.merged = true
+              $("[data-hd-sub]").textContent = "Parallel Workspace · merged into main"
+              render()
+              live("Merged session-recovery into main as 8c41d07")
+              toast(`${IC.merge(15)}<span>Merged into main as <span class="mono" style="color:var(--violet-bright)">8c41d07</span></span>`)
+            }, 500)
+          }
+          setTimeout(tick, 650)
+        }
+
+        // ---------- events ----------
+        root.addEventListener("click", (event) => {
+          const t = event.target.closest("button")
+          if (!t || state.merging) return
+          const d = t.dataset
+          const f = fileOf(state.file)
+          if (d.file) {
+            state.file = d.file
+            renderFiles()
+            renderFilebar()
+            return renderBody()
+          }
+          if (d.step) {
+            const i = (files.indexOf(f) + Number(d.step) + files.length) % files.length
+            state.file = files[i].id
+            renderFiles()
+            renderFilebar()
+            return renderBody()
+          }
+          if (d.act) {
+            const h = f.hunks[Number(d.h)]
+            h.d = h.d === d.act ? "pending" : d.act
+            live(`Hunk ${Number(d.h) + 1} ${h.d === "accept" ? "accepted" : h.d === "reject" ? "left out" : "back to pending"}`)
+            return render(true)
+          }
+          if (d.all) {
+            f.hunks.forEach((h) => (h.d = d.all))
+            return render(true)
+          }
+          if (d.value && t.closest("[data-use]")) {
+            f.conflict.choice = d.value
+            render(true)
+            return toast(`${IC.ok(15)}<span>${f.name}: ${d.value === "agent" ? "using Vector's resolution" : `taking ${d.value === "main" ? "main" : "the workspace"}`}</span>`)
+          }
+          if ("resolve" in d) {
+            f.conflict.choice = "agent"
+            render(true)
+            const next = files.find((x) => x.conflict && !x.conflict.choice)
+            return toast(`${IC.ok(15)}<span>Conflict in ${f.name} resolved.${next ? ` ${next.name} still needs a decision.` : " Every conflict is resolved."}</span>`)
+          }
+          if ("unresolve" in d) {
+            f.conflict.choice = null
+            return render(true)
+          }
+          if ("safe" in d) {
+            const n = files.flatMap((x) => x.hunks).filter((h) => h.safe && h.d === "pending").length
+            files.forEach((x) => x.hunks.forEach((h) => h.safe && h.d === "pending" && (h.d = "accept")))
+            render(true)
+            return toast(`${tint("var(--violet-bright)", IC.spark(15))}<span>Accepted ${n} hunk${n === 1 ? "" : "s"} Vector checked against the task. retry.ts stays left out.</span>`)
+          }
+          if (t.matches("[data-merge]")) return merge()
+          if (d.value && t.closest("[data-strategy]")) return (state.strategy = d.value)
+          if ("reopen" in d) {
+            state.merged = false
+            $("[data-hd-sub]").textContent = "Parallel Workspace · review each hunk, then merge"
+            return render()
+          }
+        })
+
+        root.addEventListener("submit", (event) => {
+          if (!event.target.matches("[data-ask]")) return
+          event.preventDefault()
+          const f = fileOf(state.file)
+          const q = $("[data-ask-input]").value.trim()
+          if (!q) return
+          state.asking = true
+          render(true)
+          setTimeout(() => {
+            state.asking = false
+            f.conflict.v = Math.min(f.conflict.v + 1, f.conflict.resolutions.length - 1)
+            render(true)
+            $("[data-rescode]")?.classList.add("fresh")
+            live("Vector revised the resolution")
+          }, 1500)
+        })
+
+        root.addEventListener("lab:switch", (event) => {
+          if (event.target.matches("[data-tests]")) state.tests = event.detail
+          if (event.target.matches("[data-cleanup]")) state.cleanup = event.detail
+        })
+
+        root.addEventListener("keydown", (event) => {
+          if (event.target.closest("input")) return
+          const f = fileOf(state.file)
+          const at = files.indexOf(f)
+          if (event.key === "j" || event.key === "k") {
+            state.file = files[(at + (event.key === "j" ? 1 : -1) + files.length) % files.length].id
+            render()
+            root.querySelector(`[data-file="${state.file}"]`)?.focus()
+          }
+        })
+
+        renderCommits()
+        render()
+      })
+    </script>
+  </body>
+</html>

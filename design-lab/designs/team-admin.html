@@ -1,0 +1,1993 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-team-admin [hidden] {
+        display: none !important;
+      }
+
+      /* ---------- Settings navigation (same shape as D09) ---------- */
+      .d-team-admin .sn {
+        display: flex;
+        flex: 0 0 248px;
+        flex-direction: column;
+        width: 248px;
+        height: 100%;
+        border-right: 1px solid rgba(255, 255, 255, 0.035);
+        background: var(--sidebar);
+        color: var(--text-2);
+        user-select: none;
+      }
+      .d-team-admin .sn-top {
+        display: flex;
+        flex: none;
+        align-items: center;
+        height: 47px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--sidebar-top);
+      }
+      .d-team-admin .sn-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 9px 0 6px;
+        border-radius: 6px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        text-decoration: none;
+      }
+      .d-team-admin .sn-back:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+      }
+      .d-team-admin .sn-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 14px 12px;
+      }
+      .d-team-admin .sn-mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 8px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 18px rgba(146, 116, 236, 0.18);
+      }
+      .d-team-admin .sn-brand b {
+        display: block;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .d-team-admin .sn-brand span {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+      .d-team-admin .sn-search {
+        margin: 0 10px 8px;
+        background: rgba(0, 0, 0, 0.16);
+      }
+      .d-team-admin .sn-search svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-team-admin .sn-search input::placeholder {
+        color: var(--text-3);
+      }
+      .d-team-admin .sn-search input::-webkit-search-cancel-button {
+        display: none;
+      }
+      .d-team-admin .sn-groups {
+        flex: 1;
+        min-height: 0;
+        padding: 2px 8px 12px;
+      }
+      .d-team-admin .sn-group {
+        padding: 8px 0 4px;
+      }
+      .d-team-admin .sn-label {
+        margin: 0;
+        padding: 4px 8px 5px;
+        color: #9a96a0;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .d-team-admin .sn-item {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        height: 31px;
+        padding: 0 8px;
+        border-radius: 5px;
+        color: #c4c1c8;
+        font-size: 13px;
+        text-decoration: none;
+        white-space: nowrap;
+        transition:
+          background-color 120ms ease,
+          color 120ms ease;
+      }
+      .d-team-admin .sn-item svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-team-admin .sn-item:hover {
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+      }
+      .d-team-admin .sn-item[aria-current="page"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.12), transparent 72%), rgba(255, 255, 255, 0.068);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+      }
+      .d-team-admin .sn-item[aria-current="page"] svg {
+        color: var(--violet-bright);
+      }
+      .d-team-admin .sn-end {
+        margin-left: auto;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-team-admin .sn-empty {
+        margin: 10px 8px;
+        padding: 12px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 8px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .d-team-admin .sn-empty strong {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-team-admin .sn-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: space-between;
+        height: 46px;
+        padding: 0 14px;
+        border-top: 1px solid var(--hairline);
+        background: var(--sidebar-foot);
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* ---------- Header and team band ---------- */
+      .d-team-admin .crumbs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 13px;
+      }
+      .d-team-admin .plan {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 9px;
+        border: 1px solid var(--violet-line);
+        border-radius: 999px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font-size: 11.5px;
+        font-weight: 500;
+      }
+      .d-team-admin .band {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 22px;
+        padding: 16px 22px;
+        border-bottom: 1px solid var(--hairline);
+        background: linear-gradient(180deg, rgba(182, 159, 247, 0.04), transparent);
+      }
+      .d-team-admin .team-id {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+      }
+      .d-team-admin .team-logo {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        flex: none;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 11px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font: 650 15px var(--font);
+        letter-spacing: 0.02em;
+      }
+      .d-team-admin .team-id h3 {
+        margin: 0 0 3px;
+        color: var(--text-1);
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .d-team-admin .team-id p {
+        margin: 0;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-team-admin .stats {
+        display: flex;
+        gap: 0;
+        margin-left: auto;
+      }
+      .d-team-admin .stat {
+        display: grid;
+        gap: 4px;
+        min-width: 150px;
+        padding: 2px 18px;
+        border-left: 1px solid var(--hairline);
+      }
+      .d-team-admin .stat span {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-team-admin .stat b {
+        color: var(--text-1);
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .d-team-admin .stat b small {
+        margin-left: 3px;
+        color: var(--text-3);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .d-team-admin .meter {
+        position: relative;
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .d-team-admin .meter i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 2px;
+        background: var(--violet);
+        transition: width 300ms var(--ease);
+      }
+      .d-team-admin .meter i.is-warn {
+        background: var(--amber);
+      }
+      .d-team-admin .meter i.is-over {
+        background: var(--red);
+      }
+
+      /* ---------- Tabs and panels ---------- */
+      .d-team-admin .tabs {
+        flex: none;
+        padding: 0 16px;
+      }
+      .d-team-admin .panel {
+        flex: 1;
+        min-height: 0;
+        padding: 14px 22px 80px;
+      }
+      .d-team-admin .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .d-team-admin .toolbar .input {
+        width: 240px;
+        height: 28px;
+      }
+      .d-team-admin .toolbar .end {
+        margin-left: auto;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-team-admin .filter {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-team-admin .filter:hover {
+        color: var(--text-1);
+      }
+      .d-team-admin .filter[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+      .d-team-admin .filter .n {
+        font: 10.5px var(--mono);
+        opacity: 0.75;
+      }
+
+      /* Members table */
+      .d-team-admin .tbl {
+        overflow: visible;
+      }
+      .d-team-admin .t-head,
+      .d-team-admin .t-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 130px 96px 108px 200px 104px 30px;
+        gap: 14px;
+        align-items: center;
+        padding: 0 10px 0 14px;
+      }
+      .d-team-admin .t-head {
+        height: 34px;
+        border-bottom: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .d-team-admin .t-list {
+        margin: 0;
+        padding: 4px 0;
+        list-style: none;
+      }
+      .d-team-admin .t-row {
+        position: relative;
+        min-height: 50px;
+      }
+      .d-team-admin .t-row:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+      .d-team-admin .t-row.is-new {
+        animation: flash 1.6s var(--ease);
+      }
+      @keyframes flash {
+        0%,
+        30% {
+          background: rgba(182, 159, 247, 0.12);
+        }
+      }
+      .d-team-admin .t-row.is-muted .who,
+      .d-team-admin .t-row.is-muted .spendcell {
+        opacity: 0.55;
+      }
+      .d-team-admin .who {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-width: 0;
+      }
+      .d-team-admin .av {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        flex: none;
+        place-items: center;
+        border-radius: 50%;
+        background: hsl(var(--h) 30% 26%);
+        box-shadow: inset 0 0 0 1px hsl(var(--h) 40% 45% / 0.45);
+        color: hsl(var(--h) 70% 84%);
+        font: 600 11px var(--font);
+      }
+      .d-team-admin .av.is-pending {
+        border: 1px dashed var(--line-strong);
+        background: transparent;
+        box-shadow: none;
+        color: var(--text-3);
+      }
+      .d-team-admin .who-text {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .d-team-admin .who-text b {
+        overflow: hidden;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-team-admin .who-text b small {
+        margin-left: 6px;
+        color: var(--text-3);
+        font-size: 11.5px;
+        font-weight: 400;
+      }
+      .d-team-admin .who-text span {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-team-admin .sel {
+        position: relative;
+        display: inline-flex;
+      }
+      .d-team-admin .sel select {
+        width: 100%;
+        height: 26px;
+        padding: 0 26px 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-1);
+        font-size: 12px;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .d-team-admin .sel select:hover:not(:disabled) {
+        border-color: var(--line-strong);
+        background: var(--control);
+      }
+      .d-team-admin .sel select:disabled {
+        color: var(--text-2);
+        opacity: 0.8;
+      }
+      .d-team-admin .sel svg {
+        position: absolute;
+        top: 7px;
+        right: 8px;
+        color: var(--text-3);
+        pointer-events: none;
+      }
+      .d-team-admin .running {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-team-admin .spendcell {
+        display: grid;
+        gap: 5px;
+      }
+      .d-team-admin .spendcell span {
+        display: flex;
+        justify-content: space-between;
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+      .d-team-admin .spendcell span b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-team-admin .last {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-team-admin .menu-btn {
+        width: 26px;
+        height: 26px;
+      }
+      .d-team-admin .menu {
+        position: absolute;
+        top: 42px;
+        right: 10px;
+        z-index: 8;
+        display: grid;
+        min-width: 210px;
+        padding: 5px;
+        animation: pop 160ms var(--ease);
+      }
+      @keyframes pop {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+      }
+      .d-team-admin .menu button {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        height: 30px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-1);
+        font-size: 12.5px;
+        text-align: left;
+      }
+      .d-team-admin .menu button:hover,
+      .d-team-admin .menu button:focus-visible {
+        background: rgba(255, 255, 255, 0.06);
+        outline: none;
+      }
+      .d-team-admin .menu button svg {
+        color: var(--text-3);
+      }
+      .d-team-admin .menu .danger {
+        color: #f0b0b3;
+      }
+      .d-team-admin .menu .danger svg {
+        color: var(--red);
+      }
+      .d-team-admin .menu hr {
+        height: 1px;
+        margin: 4px 2px;
+        border: 0;
+        background: var(--hairline);
+      }
+
+      /* Invites */
+      .d-team-admin .two {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 14px;
+        align-items: start;
+      }
+      .d-team-admin .card-head p {
+        margin: 2px 0 0;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-team-admin .rows {
+        margin: 0;
+        padding: 6px;
+        list-style: none;
+      }
+      .d-team-admin .rows .row {
+        min-height: 50px;
+      }
+      .d-team-admin .rows .row.is-new {
+        animation: flash 1.6s var(--ease);
+      }
+      .d-team-admin .link-box {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 14px 12px;
+      }
+      .d-team-admin .link-box .input {
+        flex: 1;
+      }
+      .d-team-admin .link-box input {
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+      }
+      .d-team-admin .setrow {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: 56px;
+        padding: 10px 14px;
+        border-top: 1px solid var(--hairline);
+      }
+      .d-team-admin .setrow .txt {
+        display: grid;
+        flex: 1;
+        gap: 3px;
+      }
+      .d-team-admin .setrow .txt b {
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 400;
+      }
+      .d-team-admin .setrow .txt span {
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+
+      /* Policies */
+      .d-team-admin .pol-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        align-items: start;
+      }
+      .d-team-admin .pol-grid .card + .card {
+        margin-top: 14px;
+      }
+      .d-team-admin .prov-mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        flex: none;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--raised);
+        color: var(--text-2);
+        font: 600 10.5px var(--mono);
+      }
+      .d-team-admin .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 12px 14px 14px;
+        border-top: 1px solid var(--hairline);
+      }
+      .d-team-admin .mchip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 10px 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-team-admin .mchip svg {
+        opacity: 0;
+      }
+      .d-team-admin .mchip[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--text-1);
+      }
+      .d-team-admin .mchip[aria-pressed="true"] svg {
+        color: var(--violet-bright);
+        opacity: 1;
+      }
+      .d-team-admin .mchip:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .d-team-admin .chips-label {
+        width: 100%;
+        margin-bottom: 2px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-team-admin .aad {
+        display: inline-flex;
+        flex: none;
+        padding: 2px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.025);
+      }
+      .d-team-admin .aad button {
+        height: 22px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-team-admin .aad button:hover {
+        color: var(--text-1);
+      }
+      .d-team-admin .aad button[aria-pressed="true"][data-v="allow"] {
+        background: var(--green-soft);
+        box-shadow: inset 0 0 0 1px rgba(101, 199, 142, 0.32);
+        color: var(--green);
+      }
+      .d-team-admin .aad button[aria-pressed="true"][data-v="ask"] {
+        background: var(--amber-soft);
+        box-shadow: inset 0 0 0 1px rgba(214, 169, 92, 0.32);
+        color: var(--amber);
+      }
+      .d-team-admin .aad button[aria-pressed="true"][data-v="deny"] {
+        background: var(--red-soft);
+        box-shadow: inset 0 0 0 1px rgba(230, 120, 125, 0.32);
+        color: var(--red);
+      }
+      .d-team-admin .lock {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 26px;
+        padding: 0 8px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-team-admin .lock:hover {
+        color: var(--text-1);
+      }
+      .d-team-admin .lock[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+      .d-team-admin .changed {
+        width: 6px;
+        height: 6px;
+        flex: none;
+        border-radius: 50%;
+        background: var(--violet-bright);
+        box-shadow: 0 0 8px rgba(182, 159, 247, 0.6);
+      }
+      .d-team-admin .money {
+        width: 112px;
+        height: 28px;
+      }
+      .d-team-admin .money input {
+        font: 12.5px var(--mono);
+        text-align: right;
+      }
+      .d-team-admin .note {
+        display: flex;
+        gap: 9px;
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .d-team-admin .note svg {
+        flex: none;
+        margin-top: 2px;
+        color: var(--violet-bright);
+      }
+      .d-team-admin .publish {
+        position: absolute;
+        bottom: 16px;
+        left: 50%;
+        z-index: 6;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 8px 8px 14px;
+        border-radius: 11px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        white-space: nowrap;
+        transform: translateX(-50%);
+        animation: rise 220ms var(--ease);
+      }
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 8px);
+        }
+      }
+
+      /* Spend */
+      .d-team-admin .sp-head {
+        display: flex;
+        align-items: flex-end;
+        gap: 18px;
+        padding: 14px;
+      }
+      .d-team-admin .sp-total b {
+        display: block;
+        color: var(--text-1);
+        font-size: 26px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .d-team-admin .sp-total span {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-team-admin .sp-head .meter {
+        flex: 1;
+        height: 6px;
+        margin-bottom: 8px;
+      }
+      .d-team-admin .sp-head .meter b {
+        position: absolute;
+        top: -4px;
+        width: 2px;
+        height: 14px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background: var(--text-3);
+      }
+      .d-team-admin .bars {
+        position: relative;
+        margin: 0;
+        padding: 4px 14px 14px;
+        list-style: none;
+      }
+      .d-team-admin .bar-row {
+        display: grid;
+        grid-template-columns: 170px minmax(0, 1fr) 128px;
+        gap: 14px;
+        align-items: center;
+        min-height: 34px;
+        border-radius: 6px;
+      }
+      .d-team-admin .bar-row:hover,
+      .d-team-admin .bar-row:focus-visible {
+        background: rgba(255, 255, 255, 0.03);
+        outline: none;
+      }
+      .d-team-admin .bar-row .who {
+        gap: 9px;
+        padding-left: 6px;
+        font-size: 12.5px;
+      }
+      .d-team-admin .bar-row .av {
+        width: 22px;
+        height: 22px;
+        font-size: 9px;
+      }
+      .d-team-admin .track {
+        position: relative;
+        height: 12px;
+      }
+      .d-team-admin .track i {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        border-radius: 0 3px 3px 0;
+        background: var(--violet);
+        transition: width 300ms var(--ease);
+      }
+      .d-team-admin .track i.is-warn {
+        background: var(--amber);
+      }
+      .d-team-admin .track b {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 2px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background: rgba(255, 255, 255, 0.45);
+      }
+      .d-team-admin .bar-row .val {
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+        text-align: right;
+      }
+      .d-team-admin .bar-row .val b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-team-admin .legend {
+        display: flex;
+        gap: 14px;
+        padding: 0 14px 10px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-team-admin .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .d-team-admin .legend i {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        background: var(--violet);
+      }
+      .d-team-admin .legend i.tick {
+        width: 2px;
+        height: 12px;
+        background: rgba(255, 255, 255, 0.45);
+      }
+      .d-team-admin .legend i.warn {
+        background: var(--amber);
+      }
+      .d-team-admin .tip {
+        position: absolute;
+        z-index: 6;
+        min-width: 210px;
+        padding: 10px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        background: rgba(30, 27, 35, 0.97);
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+        color: var(--text-1);
+        font-size: 12px;
+        pointer-events: none;
+      }
+      .d-team-admin .tip-title {
+        margin-bottom: 6px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-team-admin .tip-big {
+        margin-bottom: 7px;
+        font: 600 16px var(--font);
+      }
+      .d-team-admin .tip-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--text-2);
+        line-height: 1.7;
+      }
+      .d-team-admin .tip-row b {
+        color: var(--text-1);
+        font: 500 11.5px var(--mono);
+      }
+
+      /* Activity */
+      .d-team-admin .act {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        min-height: 52px;
+        padding: 6px 12px;
+        border-top: 1px solid var(--hairline);
+      }
+      .d-team-admin .act:first-child {
+        border-top: 0;
+      }
+      .d-team-admin .act.is-new {
+        animation: flash 1.6s var(--ease);
+      }
+      .d-team-admin .act .av {
+        width: 28px;
+        height: 28px;
+        font-size: 10px;
+      }
+      .d-team-admin .act-text {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+      .d-team-admin .act-text b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-team-admin .act-text code {
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+      .d-team-admin .act-text span {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-team-admin .act time {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      /* Dialog, toast */
+      .d-team-admin .scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: start center;
+        padding-top: 120px;
+        background: rgba(8, 6, 12, 0.55);
+        animation: fade 160ms ease;
+      }
+      @keyframes fade {
+        from {
+          opacity: 0;
+        }
+      }
+      .d-team-admin .dialog {
+        width: 480px;
+        padding: 18px;
+        animation: pop 200ms var(--ease);
+      }
+      .d-team-admin .dialog h3 {
+        margin: 0 0 4px;
+        color: var(--text-1);
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .d-team-admin .dialog > p {
+        margin: 0 0 16px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+      .d-team-admin .field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 14px;
+      }
+      .d-team-admin .field > span {
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-team-admin .emails {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        min-height: 72px;
+        padding: 7px;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        background: rgba(0, 0, 0, 0.18);
+        align-content: flex-start;
+        cursor: text;
+      }
+      .d-team-admin .emails:focus-within {
+        border-color: rgba(182, 159, 247, 0.6);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.14);
+      }
+      .d-team-admin .emails input {
+        flex: 1;
+        min-width: 160px;
+        height: 24px;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        font-size: 12.5px;
+      }
+      .d-team-admin .echip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 24px;
+        padding: 0 3px 0 8px;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        background: var(--raised);
+        color: var(--text-1);
+        font-size: 12px;
+      }
+      .d-team-admin .echip.is-bad {
+        border-color: rgba(230, 120, 125, 0.5);
+        background: var(--red-soft);
+        color: #f0b0b3;
+      }
+      .d-team-admin .echip button {
+        display: grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-3);
+      }
+      .d-team-admin .echip button:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+      }
+      .d-team-admin .field .seg {
+        display: flex;
+      }
+      .d-team-admin .field .seg button {
+        flex: 1;
+      }
+      .d-team-admin .seat-note {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 2px 0 16px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-team-admin .seat-note .meter {
+        width: 90px;
+      }
+      .d-team-admin .seat-note b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-team-admin .seat-note.is-over {
+        border-color: rgba(214, 169, 92, 0.4);
+        background: var(--amber-soft);
+      }
+      .d-team-admin .actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .d-team-admin .toast {
+        position: absolute;
+        bottom: 22px;
+        left: calc(248px + 596px);
+        z-index: 30;
+        padding: 9px 14px;
+        border-radius: 10px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        animation: rise 220ms var(--ease);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="team-admin"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="940">
+          <div class="lab-stage d-team-admin">
+            <div class="app">
+              <aside class="sn" id="sn" aria-label="Settings sections"></aside>
+              <main class="app-main" style="position:relative">
+                <header class="app-header">
+                  <span class="crumbs"><span>Settings</span><i data-icon="chevron-right" data-size="13"></i></span>
+                  <h2>Vector Team</h2>
+                  <div class="app-header-end">
+                    <span class="plan"><i data-icon="chip" data-size="12"></i>Team plan</span>
+                    <button class="btn btn-primary" type="button" id="invite-open"><i data-icon="plus" data-size="14"></i>Invite people</button>
+                  </div>
+                </header>
+
+                <section class="band" aria-label="Team summary">
+                  <div class="team-id">
+                    <span class="team-logo" aria-hidden="true">HL</span>
+                    <div>
+                      <h3>Halcyon Labs</h3>
+                      <p>halcyon.dev · billed monthly, renews Nov 1 · you are the owner</p>
+                    </div>
+                  </div>
+                  <div class="stats" id="stats"></div>
+                </section>
+
+                <div class="tabs" data-tabs="team" role="tablist" aria-label="Team">
+                  <button class="tab" type="button" role="tab" data-tab="members" aria-selected="true">Members <span class="count" id="n-members">12</span></button>
+                  <button class="tab" type="button" role="tab" data-tab="invites" aria-selected="false">Invites <span class="count" id="n-invites">2</span></button>
+                  <button class="tab" type="button" role="tab" data-tab="policies" aria-selected="false">Policies</button>
+                  <button class="tab" type="button" role="tab" data-tab="spend" aria-selected="false">Spend</button>
+                  <button class="tab" type="button" role="tab" data-tab="activity" aria-selected="false">Activity</button>
+                </div>
+
+                <!-- Members -->
+                <div class="panel scroll" data-panel="members" data-tabs-for="team" role="tabpanel">
+                  <div class="toolbar">
+                    <label class="input"><i data-icon="search" data-size="13" class="muted"></i><input id="m-search" placeholder="Search name or email" aria-label="Search members" /></label>
+                    <span id="m-filters" role="group" aria-label="Filter by role" style="display:flex;gap:6px"></span>
+                    <span class="end" id="m-count"></span>
+                  </div>
+                  <div class="card tbl">
+                    <div class="t-head"><span>Member</span><span>Role</span><span>Seat</span><span>Running now</span><span>Spend this month</span><span>Last active</span><span></span></div>
+                    <ul class="t-list" id="members"></ul>
+                  </div>
+                </div>
+
+                <!-- Invites -->
+                <div class="panel scroll" data-panel="invites" data-tabs-for="team" role="tabpanel" hidden>
+                  <div class="two">
+                    <section class="card">
+                      <div class="card-head"><div><h3 class="card-title">Pending invites</h3><p>Each pending invite holds a seat until it is accepted or revoked. Invites expire after 14 days.</p></div></div>
+                      <ul class="rows" id="invites"></ul>
+                    </section>
+                    <section class="card">
+                      <div class="card-head"><div><h3 class="card-title">Invite link</h3><p>Anyone with the link can ask to join. You approve each request.</p></div></div>
+                      <div class="link-box">
+                        <label class="input"><input id="link" value="https://vectordev.ai/join/halcyon-7Kq2" readonly aria-label="Invite link" /></label>
+                        <button class="btn btn-sm" type="button" id="copy-link">Copy</button>
+                      </div>
+                      <div class="setrow">
+                        <span class="txt"><b>Join with a halcyon.dev email</b><span>People who sign in with a verified halcyon.dev address join as Members without an invite.</span></span>
+                        <button type="button" class="switch" role="switch" aria-checked="false" id="domain-join" aria-label="Join with a halcyon.dev email"></button>
+                      </div>
+                      <div class="setrow">
+                        <span class="txt"><b>Require SSO</b><span>Members sign in through Okta. Available on the Enterprise plan.</span></span>
+                        <span class="badge">Enterprise</span>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+
+                <!-- Policies -->
+                <div class="panel scroll" data-panel="policies" data-tabs-for="team" role="tabpanel" hidden>
+                  <p class="note"><i data-icon="check" data-size="14"></i><span>Team policies apply to every member's Vector when their workspace reloads. A <b>locked</b> policy is enforced: members and projects can narrow it, never loosen it. Unlocked policies are defaults that personal settings can change.</span></p>
+                  <div class="pol-grid">
+                    <div>
+                      <section class="card">
+                        <div class="card-head"><div><h3 class="card-title">Providers</h3><p>Which providers members can connect.</p></div></div>
+                        <div id="providers"></div>
+                        <div class="chips" id="models"></div>
+                      </section>
+                      <section class="card">
+                        <div class="card-head"><div><h3 class="card-title">Keys</h3><p>Whose provider account pays for runs.</p></div></div>
+                        <div class="setrow" style="border-top:0">
+                          <span class="txt"><b>Billing</b><span>Team keys put every run on Halcyon's provider accounts; members never see the keys.</span></span>
+                          <span class="seg" id="keys" role="group" aria-label="Which keys pay">
+                            <button type="button" data-value="team" aria-pressed="true">Team keys</button>
+                            <button type="button" data-value="own" aria-pressed="false">Members' own</button>
+                          </span>
+                        </div>
+                      </section>
+                    </div>
+                    <div>
+                      <section class="card">
+                        <div class="card-head"><div><h3 class="card-title">Permission defaults</h3><p>What agents may do without asking, for every member.</p></div></div>
+                        <div id="perms"></div>
+                      </section>
+                      <section class="card">
+                        <div class="card-head"><div><h3 class="card-title">Spend</h3><p>Measured spend at catalog prices, per member.</p></div></div>
+                        <div id="spendpol"></div>
+                      </section>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Spend -->
+                <div class="panel scroll" data-panel="spend" data-tabs-for="team" role="tabpanel" hidden>
+                  <section class="card" style="position:relative" id="spend-card">
+                    <div class="card-head">
+                      <div><h3 class="card-title">Spend by member, October</h3><p>Measured from provider-reported tokens. Sessions include what their subagents spent.</p></div>
+                      <span class="seg" id="spend-sort" role="group" aria-label="Sort by" style="margin-left:auto">
+                        <button type="button" data-value="spend" aria-pressed="true">Spend</button>
+                        <button type="button" data-value="ratio" aria-pressed="false">% of budget</button>
+                      </span>
+                    </div>
+                    <div class="sp-head" id="sp-head"></div>
+                    <div class="legend"><span><i></i>Spent</span><span><i class="warn"></i>Past the 80% alert</span><span><i class="tick"></i>Member budget</span></div>
+                    <ul class="bars" id="bars"></ul>
+                    <div class="tip" id="tip" hidden></div>
+                  </section>
+                </div>
+
+                <!-- Activity -->
+                <div class="panel scroll" data-panel="activity" data-tabs-for="team" role="tabpanel" hidden>
+                  <div class="toolbar"><span id="a-filters" role="group" aria-label="Filter activity" style="display:flex;gap:6px"></span><span class="end">Kept for 400 days · exportable as JSON</span></div>
+                  <section class="card"><ul class="rows" id="activity" style="padding:0"></ul></section>
+                </div>
+
+                <div class="float publish" id="publish" role="region" aria-label="Unpublished policy changes" hidden>
+                  <span><b id="pub-count">0 changes</b> <span class="muted">· members get them when their workspace reloads</span></span>
+                  <button class="btn btn-sm btn-ghost" type="button" id="pub-discard">Discard</button>
+                  <button class="btn btn-sm btn-primary" type="button" id="pub-save">Publish to team</button>
+                </div>
+              </main>
+            </div>
+
+            <div class="scrim" id="invite" hidden>
+              <div class="float dialog" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+                <h3 id="invite-title">Invite people to Halcyon Labs</h3>
+                <p>They get an email with a link that expires in 14 days. Team policies apply from their first session.</p>
+                <div class="field">
+                  <span>Email addresses</span>
+                  <div class="emails" id="emails"><input id="email-input" placeholder="name@halcyon.dev, then Enter" aria-label="Email address" autocomplete="off" spellcheck="false" /></div>
+                </div>
+                <div class="field">
+                  <span>Role</span>
+                  <span class="seg" id="invite-role" role="group" aria-label="Role">
+                    <button type="button" data-value="Member" aria-pressed="true">Member</button>
+                    <button type="button" data-value="Admin" aria-pressed="false">Admin</button>
+                    <button type="button" data-value="Billing" aria-pressed="false">Billing viewer</button>
+                  </span>
+                </div>
+                <div class="seat-note" id="seat-note"></div>
+                <div class="actions">
+                  <button class="btn" type="button" data-close>Cancel</button>
+                  <button class="btn btn-primary" type="button" id="invite-send" disabled>Send invites</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="scrim" id="limit" hidden>
+              <div class="float dialog" role="dialog" aria-modal="true" aria-labelledby="limit-title" style="width:400px">
+                <h3 id="limit-title">Spend limit</h3>
+                <p id="limit-desc"></p>
+                <div class="field">
+                  <span>Monthly budget</span>
+                  <label class="input money" style="width:100%"><span class="muted mono">$</span><input id="limit-amount" inputmode="decimal" aria-label="Monthly budget in dollars" /></label>
+                </div>
+                <div class="actions">
+                  <button class="btn" type="button" data-close>Cancel</button>
+                  <button class="btn btn-primary" type="button" id="limit-save">Save limit</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="scrim" id="confirm" hidden>
+              <div class="float dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" style="width:400px">
+                <h3 id="confirm-title"></h3>
+                <p id="confirm-desc"></p>
+                <div class="actions">
+                  <button class="btn" type="button" data-close>Cancel</button>
+                  <button class="btn btn-danger" type="button" id="confirm-ok">Remove</button>
+                </div>
+              </div>
+            </div>
+            <div class="float toast" id="toast" role="status" aria-live="polite" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-team-admin")
+        const $ = (sel) => root.querySelector(sel)
+        const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const stroke = (body, size = 15) =>
+          `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+        const ICONS = {
+          sliders: '<path d="M2.75 5h6.5M12 5h1.25M2.75 11h1.5M7 11h6.25"/><circle cx="10.6" cy="5" r="1.35"/><circle cx="5.6" cy="11" r="1.35"/>',
+          palette: '<circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none" opacity=".45"/>',
+          code: '<path d="m5.75 4.75-3.25 3.25 3.25 3.25M10.25 4.75l3.25 3.25-3.25 3.25"/>',
+          bell: '<path d="M4.4 10.6V7.4a3.6 3.6 0 0 1 7.2 0v3.2l1.1 1.4H3.3l1.1-1.4ZM6.7 13.4a1.4 1.4 0 0 0 2.6 0"/>',
+          shield: '<path d="M8 2.25 3.25 4v3.55c0 2.9 1.95 5.15 4.75 6.2 2.8-1.05 4.75-3.3 4.75-6.2V4L8 2.25Z"/><path d="m6 8 1.4 1.4L10.2 6.6"/>',
+          key: '<circle cx="5.4" cy="10.6" r="2.6"/><path d="m7.3 8.7 5.4-5.4M10.6 5.4l1.6 1.6M12 4l1.1 1.1"/>',
+          bars: '<path d="M2.75 13.25h10.5M4.6 13.25V9M8 13.25V3.5M11.4 13.25V6.75"/>',
+          team: '<circle cx="6" cy="5.6" r="2.3"/><path d="M2.4 13.1c.4-2.2 1.8-3.4 3.6-3.4s3.2 1.2 3.6 3.4M10.6 3.4a2.25 2.25 0 0 1 0 4.4M11.7 9.8c1 .45 1.65 1.5 1.9 3.3"/>',
+          keyboard: '<rect x="2" y="4.25" width="12" height="7.5" rx="1.6"/><path d="M4.6 6.8h.01M6.8 6.8h.01M9.2 6.8h.01M11.4 6.8h.01M5.4 9.3h5.2"/>',
+          access: '<circle cx="8" cy="3.5" r="1.15"/><path d="M3.25 6.1h9.5M8 6.1v3.6M8 9.7l-2 3.7M8 9.7l2 3.7"/>',
+          download: '<path d="M8 2.75v7.5M5 7.4l3 3 3-3M3 13.25h10"/>',
+          lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.4"/><path d="M5.5 7V5.25a2.5 2.5 0 0 1 5 0V7"/>',
+          unlock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.4"/><path d="M5.5 7V5.25a2.5 2.5 0 0 1 4.9-.7"/>',
+          dollar: '<path d="M8 2.5v11M10.6 5.2c-.4-.9-1.4-1.45-2.6-1.45-1.5 0-2.6.8-2.6 2s1 1.7 2.6 2.05c1.7.35 2.75.95 2.75 2.2s-1.2 2.15-2.75 2.15c-1.35 0-2.4-.6-2.8-1.6"/>',
+          pause: '<path d="M6 4v8M10 4v8"/>',
+          play: '<path d="M5.5 3.9v8.2L12 8 5.5 3.9Z"/>',
+          remove: '<path d="M3.5 4.5h9M6.5 4.5V3h3v1.5M5 4.5l.6 8.5h4.8l.6-8.5"/>',
+          mail: '<rect x="2.25" y="3.75" width="11.5" height="8.5" rx="1.5"/><path d="m2.75 4.5 5.25 4 5.25-4"/>',
+          check: '<path d="m3.5 8.4 2.8 2.8 6.2-6.4"/>',
+        }
+        const icon = (name, size = 15) => (ICONS[name] ? stroke(ICONS[name], size) : LabUI.svg(name, size))
+
+        // ---------- Settings navigation ----------
+        const NAV = [
+          { group: "Personal", items: [["general", "General", "sliders", "startup judge routing diagnostics"], ["appearance", "Appearance", "palette", "theme dark light accent font density"], ["editor", "Editor", "code", "font wrap autocomplete"], ["notifications", "Notifications", "bell", "alerts sound"]] },
+          { group: "Agents", items: [["models", "Models", "model", "default model effort"], ["agents", "Agents", "task", "subagents specialists"], ["permissions", "Permissions", "shield", "approval ask allow deny shell commands folders network safety risk"], ["providers", "Providers & keys", "key", "api key openai anthropic"]] },
+          { group: "Account", items: [["usage", "Usage & spend", "bars", "tokens cost spend budget tokenomics", "$412"], ["team", "Vector Team", "team", "members seats roles invite policies"]] },
+          { group: "App", items: [["keyboard", "Keyboard", "keyboard", "shortcuts keybinds"], ["accessibility", "Accessibility", "access", "contrast scale focus"], ["about", "Updates & about", "download", "version update"]] },
+        ]
+        const HREF = { permissions: "settings-permissions.html", usage: "tokenomics.html", team: "team-admin.html" }
+        const sn = $("#sn")
+        sn.innerHTML = `
+          <div class="sn-top"><a class="sn-back" href="first-run.html">${icon("back", 14)}Back to app</a></div>
+          <div class="sn-brand"><span class="sn-mark">${LabUI.svg("chip", 15)}</span><div><b>Settings</b><span>Vector 1.99.102</span></div></div>
+          <label class="input sn-search">${icon("search", 14)}<input type="search" id="nav-search" placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false" /><kbd>⌘F</kbd></label>
+          <nav class="sn-groups scroll" aria-label="Settings">${NAV.map((g) => `<div class="sn-group"><p class="sn-label">${g.group}</p>${g.items.map((it) => `<a class="sn-item" href="${HREF[it[0]] ?? `settings-general.html#${it[0]}`}" data-words="${it[1]} ${it[3]}" aria-current="${it[0] === "team" ? "page" : "false"}">${icon(it[2])}<span>${it[1]}</span>${it[4] ? `<span class="sn-end">${it[4]}</span>` : ""}</a>`).join("")}</div>`).join("")}
+          <div class="sn-empty" id="nav-empty" hidden><strong>No settings found</strong>Try a feature name such as model, memory, update or notifications.</div></nav>
+          <div class="sn-foot"><span>Vector 1.99.102</span><span>Desktop</span></div>`
+        $("#nav-search").addEventListener("input", (event) => {
+          const q = event.target.value.trim().toLowerCase()
+          let any = 0
+          sn.querySelectorAll(".sn-group").forEach((group) => {
+            let shown = 0
+            group.querySelectorAll(".sn-item").forEach((item) => {
+              item.hidden = Boolean(q) && !item.dataset.words.toLowerCase().includes(q)
+              if (!item.hidden) shown++
+            })
+            group.hidden = shown === 0
+            any += shown
+          })
+          $("#nav-empty").hidden = any > 0
+        })
+
+        // ---------- Team data ----------
+        const SEATS = 20
+        const TEAM_BUDGET = 3000
+        const hue = (name) => Array.from(name).reduce((n, c) => n + c.charCodeAt(0), 0) % 360
+        const initials = (name) =>
+          name
+            .split(" ")
+            .map((p) => p[0])
+            .slice(0, 2)
+            .join("")
+            .toUpperCase()
+        let members = [
+          { id: 1, name: "Ava Martinez", email: "ava@halcyon.dev", role: "Owner", status: "Active", running: 2, spend: 412.38, budget: 500, last: "now", you: true, top: "GPT-6 Sol" },
+          { id: 2, name: "Maya Chen", email: "maya@halcyon.dev", role: "Admin", status: "Active", running: 3, spend: 356.1, budget: 400, last: "now", top: "Claude Sonnet 4.5" },
+          { id: 3, name: "Theo Park", email: "theo@halcyon.dev", role: "Member", status: "Active", running: 1, spend: 231.4, budget: 250, last: "4 min ago", top: "GPT-6 Astra" },
+          { id: 4, name: "Lena Ortiz", email: "lena@halcyon.dev", role: "Member", status: "Active", running: 0, spend: 198.75, budget: 250, last: "38 min ago", top: "GPT-6 Sol" },
+          { id: 5, name: "Jonah Weiss", email: "jonah@halcyon.dev", role: "Member", status: "Active", running: 2, spend: 176.2, budget: 250, last: "now", top: "GPT-6.1 Sol" },
+          { id: 6, name: "Priya Nair", email: "priya@halcyon.dev", role: "Admin", status: "Active", running: 1, spend: 164.9, budget: 400, last: "12 min ago", top: "Claude Sonnet 4.5" },
+          { id: 7, name: "Sam Okafor", email: "sam@halcyon.dev", role: "Member", status: "Active", running: 0, spend: 142.35, budget: 250, last: "2 h ago", top: "GPT-6 Sol" },
+          { id: 8, name: "Elena Rossi", email: "elena@halcyon.dev", role: "Member", status: "Active", running: 0, spend: 121.8, budget: 250, last: "yesterday", top: "GPT-6 Luna" },
+          { id: 9, name: "Marcus Lee", email: "marcus@halcyon.dev", role: "Member", status: "Active", running: 0, spend: 97.4, budget: 250, last: "3 h ago", top: "GPT-6 Sol" },
+          { id: 10, name: "Hana Suzuki", email: "hana@halcyon.dev", role: "Member", status: "Active", running: 0, spend: 88.12, budget: 250, last: "Mon", top: "GPT-6 Astra" },
+          { id: 11, name: "Noah Kim", email: "noah@halcyon.dev", role: "Member", status: "Suspended", running: 0, spend: 47.1, budget: 250, last: "Sep 22", top: "GPT-6 Luna" },
+          { id: 12, name: "Diego Alvarez", email: "diego@halcyon.dev", role: "Billing", status: "Active", running: 0, spend: 0, budget: 0, last: "Oct 1", top: "" },
+        ]
+        let invites = [
+          { id: 101, email: "ines@halcyon.dev", role: "Member", by: "Maya Chen", sent: "2 days ago", expires: "in 12 days" },
+          { id: 102, email: "ravi@halcyon.dev", role: "Admin", by: "Ava Martinez", sent: "today", expires: "in 14 days" },
+        ]
+        const ROLES = ["Owner", "Admin", "Member", "Billing"]
+        const ROLE_LABEL = { Owner: "Owner", Admin: "Admin", Member: "Member", Billing: "Billing viewer" }
+        const seatsUsed = () => members.filter((m) => m.role !== "Billing").length + invites.filter((i) => i.role !== "Billing").length
+        const money = (v, d = 2) => `$${v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d })}`
+        let fresh = null
+
+        function renderStats() {
+          const used = seatsUsed()
+          const spend = members.reduce((n, m) => n + m.spend, 0)
+          const running = members.reduce((n, m) => n + (m.status === "Active" ? m.running : 0), 0)
+          const locked = Object.values(policy.perms).filter((p) => p.lock).length + (policy.lockSpend ? 1 : 0) + 1
+          $("#stats").innerHTML = `
+            <div class="stat"><span>Seats</span><b>${used}<small>of ${SEATS}</small></b><div class="meter"><i style="width:${(used / SEATS) * 100}%"></i></div></div>
+            <div class="stat"><span>Spend this month</span><b>${money(spend, 0)}<small>of ${money(TEAM_BUDGET, 0)}</small></b><div class="meter"><i class="${spend / TEAM_BUDGET > 0.8 ? "is-warn" : ""}" style="width:${(spend / TEAM_BUDGET) * 100}%"></i></div></div>
+            <div class="stat"><span>Agents running now</span><b>${running}<small>across ${members.filter((m) => m.running && m.status === "Active").length} people</small></b><span>&nbsp;</span></div>
+            <div class="stat"><span>Locked policies</span><b>${locked}<small>enforced</small></b><span>&nbsp;</span></div>`
+          $("#n-members").textContent = members.length
+          $("#n-invites").textContent = invites.length
+        }
+
+        // ---------- Members ----------
+        let roleFilter = "all"
+        let mQuery = ""
+        let openMenu = null
+        const FILTERS = [
+          ["all", "All", () => true],
+          ["admins", "Owners and admins", (m) => m.role === "Owner" || m.role === "Admin"],
+          ["members", "Members", (m) => m.role === "Member"],
+          ["running", "Running now", (m) => m.running > 0 && m.status === "Active"],
+          ["near", "Near budget", (m) => m.budget && m.spend / m.budget >= 0.8],
+        ]
+        const avatar = (name, size) => `<span class="av" style="--h:${hue(name)}"${size ? ` data-size="${size}"` : ""} aria-hidden="true">${initials(name)}</span>`
+        function renderMembers() {
+          $("#m-filters").innerHTML = FILTERS.map((f) => `<button type="button" class="filter" data-filter="${f[0]}" aria-pressed="${roleFilter === f[0]}">${f[1]} <span class="n">${members.filter(f[2]).length}</span></button>`).join("")
+          const fn = FILTERS.find((f) => f[0] === roleFilter)[2]
+          const q = mQuery.trim().toLowerCase()
+          const list = members.filter((m) => fn(m) && (!q || `${m.name} ${m.email}`.toLowerCase().includes(q)))
+          const pending = roleFilter === "all" ? invites.filter((i) => !q || i.email.includes(q)) : []
+          $("#m-count").textContent = `${list.length + pending.length} shown`
+          $("#members").innerHTML =
+            list
+              .map((m) => {
+                const ratio = m.budget ? m.spend / m.budget : 0
+                const lockedRole = m.role === "Owner"
+                return `<li class="t-row${m.status === "Suspended" ? " is-muted" : ""}${fresh === m.id ? " is-new" : ""}" data-member="${m.id}">
+                  <span class="who">${avatar(m.name)}<span class="who-text"><b>${esc(m.name)}${m.you ? "<small>you</small>" : ""}</b><span>${esc(m.email)}</span></span></span>
+                  <span class="sel"><select data-role="${m.id}" aria-label="Role for ${esc(m.name)}"${lockedRole ? " disabled" : ""}>${ROLES.filter((r) => r !== "Owner" || lockedRole).map((r) => `<option value="${r}"${r === m.role ? " selected" : ""}>${ROLE_LABEL[r]}</option>`).join("")}</select>${LabUI.svg("chevron-down", 12)}</span>
+                  <span>${m.status === "Suspended" ? '<span class="badge badge-amber">Suspended</span>' : m.role === "Billing" ? '<span class="badge">No seat</span>' : '<span class="badge badge-green">Active</span>'}</span>
+                  <span class="running">${m.running && m.status === "Active" ? `<span class="dot dot-green"></span>${m.running} agent${m.running === 1 ? "" : "s"}` : '<span class="muted">—</span>'}</span>
+                  <span class="spendcell">${m.budget ? `<span><b>${money(m.spend)}</b>of ${money(m.budget, 0)}</span><span class="meter"><i class="${ratio >= 1 ? "is-over" : ratio >= 0.8 ? "is-warn" : ""}" style="width:${Math.min(100, ratio * 100)}%"></i></span>` : `<span class="muted" style="font-family:var(--font)">Billing access only</span>`}</span>
+                  <span class="last">${m.last === "now" ? '<span style="color:var(--green)">Active now</span>' : m.last}</span>
+                  <span style="position:relative"><button type="button" class="icon-btn menu-btn" data-menu="${m.id}" aria-haspopup="menu" aria-expanded="${openMenu === m.id}" aria-label="More for ${esc(m.name)}">${LabUI.svg("dots", 15)}</button></span>
+                  ${openMenu === m.id ? menuHTML(m) : ""}
+                </li>`
+              })
+              .join("") +
+            pending
+              .map(
+                (i) => `<li class="t-row${fresh === i.id ? " is-new" : ""}">
+                  <span class="who"><span class="av is-pending" aria-hidden="true">${icon("mail", 13)}</span><span class="who-text"><b>${esc(i.email)}</b><span>Invited by ${esc(i.by)} · ${i.sent}</span></span></span>
+                  <span class="muted" style="font-size:12px">${ROLE_LABEL[i.role]}</span>
+                  <span><span class="badge badge-violet">Invited</span></span>
+                  <span class="muted">—</span><span class="muted" style="font-size:12px">Expires ${i.expires}</span><span></span>
+                  <span><button type="button" class="icon-btn menu-btn" data-goinvites aria-label="Manage invite for ${esc(i.email)}">${LabUI.svg("chevron-right", 15)}</button></span>
+                </li>`,
+              )
+              .join("") || `<li class="t-row" style="justify-content:center;color:var(--text-3)">No members match.</li>`
+        }
+        function menuHTML(m) {
+          return `<div class="float menu" role="menu" aria-label="Actions for ${esc(m.name)}">
+            <button type="button" role="menuitem" data-act="limit" data-id="${m.id}">${icon("dollar", 14)}Set spend limit…</button>
+            <button type="button" role="menuitem" data-act="activity" data-id="${m.id}">${icon("bars", 14)}See their activity</button>
+            ${m.you ? "" : `<hr /><button type="button" role="menuitem" data-act="suspend" data-id="${m.id}">${icon(m.status === "Suspended" ? "play" : "pause", 14)}${m.status === "Suspended" ? "Restore seat" : "Suspend seat"}</button><button type="button" role="menuitem" class="danger" data-act="remove" data-id="${m.id}">${icon("remove", 14)}Remove from team</button>`}
+          </div>`
+        }
+        $("#m-search").addEventListener("input", (event) => {
+          mQuery = event.target.value
+          renderMembers()
+        })
+        $("#m-filters").addEventListener("click", (event) => {
+          const f = event.target.closest("[data-filter]")
+          if (!f) return
+          roleFilter = f.dataset.filter
+          renderMembers()
+          $(`[data-filter="${roleFilter}"]`)?.focus()
+        })
+        $("#members").addEventListener("change", (event) => {
+          const sel = event.target.closest("[data-role]")
+          if (!sel) return
+          const m = members.find((x) => x.id === Number(sel.dataset.role))
+          const from = m.role
+          m.role = sel.value
+          if (m.role === "Billing") Object.assign(m, { running: 0, budget: 0 })
+          if (from === "Billing" && m.role !== "Billing") m.budget = policy.memberBudget
+          log({ who: "Ava Martinez", kind: "members", text: `changed <b>${esc(m.name)}</b> from ${ROLE_LABEL[from]} to <b>${ROLE_LABEL[m.role]}</b>` })
+          fresh = m.id
+          renderAll()
+          toast(`${m.name} is now ${m.role === "Admin" ? "an" : "a"} ${ROLE_LABEL[m.role]}${m.role === "Admin" ? ". Admins can invite people and edit policies." : "."}`)
+        })
+        $("#members").addEventListener("click", (event) => {
+          const t = event.target
+          const menuBtn = t.closest("[data-menu]")
+          if (menuBtn) {
+            const id = Number(menuBtn.dataset.menu)
+            openMenu = openMenu === id ? null : id
+            renderMembers()
+            $(`[data-member="${id}"] .menu button`)?.focus()
+            return
+          }
+          if (t.closest("[data-goinvites]")) return root.querySelector('[data-tab="invites"]').click()
+          const act = t.closest("[data-act]")
+          if (!act) return
+          const m = members.find((x) => x.id === Number(act.dataset.id))
+          openMenu = null
+          if (act.dataset.act === "limit") return openLimit(m)
+          if (act.dataset.act === "activity") {
+            aFilter = "all"
+            aWho = m.name
+            root.querySelector('[data-tab="activity"]').click()
+            return renderActivity()
+          }
+          if (act.dataset.act === "suspend") {
+            m.status = m.status === "Suspended" ? "Active" : "Suspended"
+            if (m.status === "Suspended") m.running = 0
+            log({ who: "Ava Martinez", kind: "members", text: `${m.status === "Suspended" ? "suspended" : "restored"} <b>${esc(m.name)}</b>'s seat` })
+            fresh = m.id
+            renderAll()
+            return toast(m.status === "Suspended" ? `${m.name} is suspended. Running agents were stopped; the seat stays reserved.` : `${m.name}'s seat is restored.`)
+          }
+          if (act.dataset.act === "remove") return confirmRemove(m)
+        })
+        document.addEventListener("click", (event) => {
+          if (openMenu === null) return
+          if (event.target.closest(".menu") || event.target.closest("[data-menu]")) return
+          openMenu = null
+          renderMembers()
+        })
+        root.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return
+          if (openMenu !== null) {
+            const id = openMenu
+            openMenu = null
+            renderMembers()
+            $(`[data-menu="${id}"]`)?.focus()
+            return
+          }
+          root.querySelectorAll(".scrim").forEach((s) => (s.hidden = true))
+        })
+
+        // ---------- Dialogs: invite, limit, remove ----------
+        let emails = []
+        let inviteRole = "Member"
+        const emailOk = (e) => /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(e)
+        function renderEmails() {
+          const box = $("#emails")
+          box.querySelectorAll(".echip").forEach((c) => c.remove())
+          const input = $("#email-input")
+          emails.forEach((e, i) => input.insertAdjacentHTML("beforebegin", `<span class="echip${emailOk(e) ? "" : " is-bad"}" title="${emailOk(e) ? "" : "Not a valid email"}">${esc(e)}<button type="button" data-rm="${i}" aria-label="Remove ${esc(e)}">${LabUI.svg("close-small", 13)}</button></span>`))
+          const valid = emails.filter(emailOk)
+          const needs = inviteRole === "Billing" ? 0 : valid.length
+          const left = SEATS - seatsUsed()
+          const note = $("#seat-note")
+          note.classList.toggle("is-over", needs > left)
+          note.innerHTML =
+            needs > left
+              ? `${icon("bars", 14)}<span><b>${needs} seats needed, ${left} free.</b> Sending adds ${needs - left} seat${needs - left === 1 ? "" : "s"} at $30 per month each.</span>`
+              : `<span class="meter"><i style="width:${((seatsUsed() + needs) / SEATS) * 100}%"></i></span><span>${inviteRole === "Billing" ? "Billing viewers don't use a seat." : `Uses <b>${needs}</b> of ${left} free seats.`} ${seatsUsed() + needs} of ${SEATS} after sending.</span>`
+          $("#invite-send").disabled = valid.length === 0 || valid.length !== emails.length
+          $("#invite-send").textContent = valid.length > 1 ? `Send ${valid.length} invites` : "Send invite"
+        }
+        function addEmail(raw) {
+          raw
+            .split(/[\s,;]+/)
+            .map((e) => e.trim().toLowerCase())
+            .filter(Boolean)
+            .forEach((e) => {
+              if (!emails.includes(e) && !members.some((m) => m.email === e) && !invites.some((i) => i.email === e)) emails.push(e)
+            })
+          renderEmails()
+        }
+        $("#invite-open").addEventListener("click", () => {
+          emails = []
+          $("#email-input").value = ""
+          renderEmails()
+          $("#invite").hidden = false
+          setTimeout(() => $("#email-input").focus(), 20)
+        })
+        $("#emails").addEventListener("click", (event) => {
+          const rm = event.target.closest("[data-rm]")
+          if (rm) {
+            emails.splice(Number(rm.dataset.rm), 1)
+            renderEmails()
+          }
+          $("#email-input").focus()
+        })
+        $("#email-input").addEventListener("keydown", (event) => {
+          const input = event.target
+          if (["Enter", ",", " ", "Tab"].includes(event.key) && input.value.trim()) {
+            event.preventDefault()
+            addEmail(input.value)
+            input.value = ""
+          }
+          if (event.key === "Backspace" && !input.value && emails.length) {
+            emails.pop()
+            renderEmails()
+          }
+        })
+        $("#email-input").addEventListener("paste", (event) => {
+          const text = event.clipboardData?.getData("text") ?? ""
+          if (!/[,\s;]/.test(text)) return
+          event.preventDefault()
+          addEmail(text)
+        })
+        $("#email-input").addEventListener("blur", (event) => {
+          if (event.target.value.trim()) {
+            addEmail(event.target.value)
+            event.target.value = ""
+          }
+        })
+        root.addEventListener("lab:seg", (event) => {
+          const id = event.target.id
+          if (id === "invite-role") {
+            inviteRole = event.detail
+            renderEmails()
+          }
+          if (id === "spend-sort") {
+            spendSort = event.detail
+            renderSpend()
+          }
+          if (id === "keys") {
+            policy.keys = event.detail
+            renderPolicies()
+          }
+        })
+        $("#invite-send").addEventListener("click", () => {
+          const valid = emails.filter(emailOk)
+          const added = valid.map((email, k) => ({ id: Date.now() + k, email, role: inviteRole, by: "Ava Martinez", sent: "just now", expires: "in 14 days" }))
+          invites = added.concat(invites)
+          fresh = added[0]?.id
+          log({ who: "Ava Martinez", kind: "members", text: `invited ${added.map((a) => `<b>${esc(a.email)}</b>`).join(", ")} as ${ROLE_LABEL[inviteRole]}` })
+          $("#invite").hidden = true
+          renderAll()
+          toast(`${added.length} invite${added.length === 1 ? "" : "s"} sent. ${added.length === 1 ? "It holds" : "They hold"} a seat until accepted.`)
+        })
+
+        let limitFor = null
+        function openLimit(m) {
+          limitFor = m
+          $("#limit-title").textContent = `Spend limit for ${m.name}`
+          $("#limit-desc").textContent = `${m.name.split(" ")[0]} has spent ${money(m.spend)} this month. At the limit Vector refuses new runs and stops running ones; you get an alert at 80%.`
+          $("#limit-amount").value = m.budget
+          $("#limit").hidden = false
+          renderMembers()
+          setTimeout(() => $("#limit-amount").select(), 20)
+        }
+        $("#limit-save").addEventListener("click", () => {
+          const v = Number(String($("#limit-amount").value).replace(/[$,\s]/g, ""))
+          if (!(v > 0)) return $("#limit-amount").focus()
+          const from = limitFor.budget
+          limitFor.budget = v
+          log({ who: "Ava Martinez", kind: "spend", text: `set <b>${esc(limitFor.name)}</b>'s monthly budget from ${money(from, 0)} to <b>${money(v, 0)}</b>` })
+          fresh = limitFor.id
+          $("#limit").hidden = true
+          renderAll()
+          toast(`${limitFor.name}'s budget is ${money(v, 0)} a month`)
+        })
+        $("#limit-amount").addEventListener("keydown", (event) => event.key === "Enter" && $("#limit-save").click())
+
+        let removing = null
+        function confirmRemove(m) {
+          removing = m
+          $("#confirm-title").textContent = `Remove ${m.name}?`
+          $("#confirm-desc").textContent = `${m.name.split(" ")[0]} loses access to team keys and policies at once, and their running agents stop. Their sessions stay on their own machine. This frees a seat.`
+          $("#confirm").hidden = false
+          renderMembers()
+          setTimeout(() => $("#confirm-ok").focus(), 20)
+        }
+        $("#confirm-ok").addEventListener("click", () => {
+          members = members.filter((m) => m !== removing)
+          log({ who: "Ava Martinez", kind: "members", text: `removed <b>${esc(removing.name)}</b> from the team` })
+          $("#confirm").hidden = true
+          renderAll()
+          toast(`${removing.name} was removed. ${SEATS - seatsUsed()} seats are free.`)
+        })
+        root.querySelectorAll(".scrim").forEach((s) =>
+          s.addEventListener("click", (event) => {
+            if (event.target === s || event.target.closest("[data-close]")) s.hidden = true
+          }),
+        )
+
+        // ---------- Invites ----------
+        function renderInvites() {
+          $("#invites").innerHTML = invites.length
+            ? invites
+                .map(
+                  (i) => `<li class="row${fresh === i.id ? " is-new" : ""}"><span class="av is-pending" aria-hidden="true">${icon("mail", 13)}</span><span class="row-text"><span class="row-name">${esc(i.email)}</span><span class="row-sub">${ROLE_LABEL[i.role]} · invited by ${esc(i.by)} ${i.sent} · expires ${i.expires}</span></span><span class="row-end"><button type="button" class="btn btn-sm btn-ghost" data-resend="${i.id}">Resend</button><button type="button" class="btn btn-sm" data-revoke="${i.id}">Revoke</button></span></li>`,
+                )
+                .join("")
+            : `<li class="row" style="justify-content:center;color:var(--text-3);min-height:80px">No pending invites.</li>`
+        }
+        $("#invites").addEventListener("click", (event) => {
+          const r = event.target.closest("[data-revoke]")
+          if (r) {
+            const i = invites.find((x) => x.id === Number(r.dataset.revoke))
+            invites = invites.filter((x) => x !== i)
+            log({ who: "Ava Martinez", kind: "members", text: `revoked the invite for <b>${esc(i.email)}</b>` })
+            renderAll()
+            return toast(`Invite for ${i.email} revoked. The seat is free again.`)
+          }
+          const s = event.target.closest("[data-resend]")
+          if (s) {
+            const i = invites.find((x) => x.id === Number(s.dataset.resend))
+            Object.assign(i, { sent: "just now", expires: "in 14 days" })
+            fresh = i.id
+            renderInvites()
+            toast(`Sent ${i.email} a fresh link`)
+          }
+        })
+        $("#copy-link").addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText($("#link").value)
+          } catch {
+            $("#link").select()
+          }
+          $("#copy-link").textContent = "Copied"
+          setTimeout(() => ($("#copy-link").textContent = "Copy"), 1600)
+        })
+        root.addEventListener("lab:switch", (event) => {
+          if (event.target.id === "domain-join") {
+            log({ who: "Ava Martinez", kind: "security", text: `${event.detail ? "turned on" : "turned off"} joining with a verified <b>halcyon.dev</b> email` })
+            renderActivity()
+            return toast(event.detail ? "People with a verified halcyon.dev email can now join as Members" : "Joining by email domain is off")
+          }
+          const key = event.target.dataset.prov
+          if (key) {
+            policy.providers[key] = event.detail
+            renderPolicies()
+          }
+          if (event.target.id === "stop-at") {
+            policy.stop = event.detail
+            renderPolicies()
+          }
+        })
+
+        // ---------- Policies ----------
+        const PROVIDERS = [
+          ["openai", "OpenAI", "AI", "ChatGPT sign-in or API key"],
+          ["anthropic", "Anthropic", "A", "API key"],
+          ["openrouter", "OpenRouter", "OR", "Members' own accounts, free models only"],
+          ["google", "Google AI", "G", "Gemini with an API key"],
+          ["local", "Local models", "LM", "Ollama and LM Studio on a member's machine"],
+        ]
+        const MODELS = [
+          ["GPT-6 Sol", "openai"],
+          ["GPT-6.1 Sol", "openai"],
+          ["GPT-6 Astra", "openai"],
+          ["GPT-6 Luna", "openai"],
+          ["GPT-5.6 Sol", "openai"],
+          ["Claude Sonnet 4.5", "anthropic"],
+          ["Qwen3 Coder (free)", "openrouter"],
+          ["Gemini 3 Pro", "google"],
+        ]
+        const PERMS = [
+          ["edit", "Edit files"],
+          ["bash", "Shell commands"],
+          ["webfetch", "Web fetch"],
+          ["browser", "Browser"],
+          ["mcp", "MCP tools"],
+        ]
+        const clone = (v) => JSON.parse(JSON.stringify(v))
+        let published = {
+          providers: { openai: true, anthropic: true, openrouter: false, google: false, local: true },
+          models: { "GPT-6 Sol": true, "GPT-6.1 Sol": true, "GPT-6 Astra": true, "GPT-6 Luna": true, "GPT-5.6 Sol": false, "Claude Sonnet 4.5": true, "Qwen3 Coder (free)": false, "Gemini 3 Pro": false },
+          perms: { edit: { v: "allow", lock: false }, bash: { v: "ask", lock: true }, webfetch: { v: "ask", lock: false }, browser: { v: "ask", lock: true }, mcp: { v: "ask", lock: true } },
+          memberBudget: 250,
+          unattended: 25,
+          stop: true,
+          lockSpend: true,
+          keys: "team",
+        }
+        let policy = clone(published)
+        function policyChanges() {
+          let n = 0
+          Object.keys(policy.providers).forEach((k) => (n += policy.providers[k] !== published.providers[k]))
+          Object.keys(policy.models).forEach((k) => (n += policy.models[k] !== published.models[k]))
+          Object.keys(policy.perms).forEach((k) => (n += policy.perms[k].v !== published.perms[k].v) + (policy.perms[k].lock !== published.perms[k].lock))
+          ;["memberBudget", "unattended", "stop", "lockSpend", "keys"].forEach((k) => (n += policy[k] !== published[k]))
+          return n
+        }
+        function renderPolicies() {
+          $("#providers").innerHTML = PROVIDERS.map(
+            (p) => `<div class="setrow"><span class="prov-mark">${p[2]}</span><span class="txt"><b>${p[1]}</b><span>${p[3]}</span></span>${policy.providers[p[0]] !== published.providers[p[0]] ? '<span class="changed" title="Not published yet"></span>' : ""}<button type="button" class="switch" role="switch" aria-checked="${policy.providers[p[0]]}" data-prov="${p[0]}" aria-label="Allow ${p[1]}"></button></div>`,
+          ).join("")
+          $("#models").innerHTML =
+            `<span class="chips-label">Allowed models. Members only see these in the model picker.</span>` +
+            MODELS.map((m) => {
+              const off = !policy.providers[m[1]]
+              return `<button type="button" class="mchip" data-model="${esc(m[0])}" aria-pressed="${!off && policy.models[m[0]]}"${off ? ' disabled title="Allow its provider first"' : ""}>${icon("check", 13)}${m[0]}</button>`
+            }).join("")
+          $("#perms").innerHTML = PERMS.map((p, i) => {
+            const v = policy.perms[p[0]]
+            const changed = v.v !== published.perms[p[0]].v || v.lock !== published.perms[p[0]].lock
+            return `<div class="setrow"${i === 0 ? ' style="border-top:0"' : ""}><span class="txt"><b>${p[1]}</b><span class="mono" style="font-size:10.5px">${p[0]}</span></span>${changed ? '<span class="changed" title="Not published yet"></span>' : ""}<span class="aad" role="group" aria-label="${p[1]} default" data-perm="${p[0]}">${["ask", "allow", "deny"].map((x) => `<button type="button" data-v="${x}" aria-pressed="${v.v === x}">${x[0].toUpperCase() + x.slice(1)}</button>`).join("")}</span><button type="button" class="lock" data-lock="${p[0]}" aria-pressed="${v.lock}" aria-label="Lock ${p[1]}">${icon(v.lock ? "lock" : "unlock", 13)}${v.lock ? "Locked" : "Default"}</button></div>`
+          }).join("")
+          $("#spendpol").innerHTML = `
+            <div class="setrow" style="border-top:0"><span class="txt"><b>Monthly budget per member</b><span>Admins can raise it for one person from Members.</span></span><label class="input money"><span class="muted mono">$</span><input data-num="memberBudget" value="${policy.memberBudget}" inputmode="decimal" aria-label="Monthly budget per member" /></label></div>
+            <div class="setrow"><span class="txt"><b>Unattended work, per day</b><span>Scheduled runs and parallel agents, per member.</span></span><label class="input money"><span class="muted mono">$</span><input data-num="unattended" value="${policy.unattended}" inputmode="decimal" aria-label="Unattended per day" /></label></div>
+            <div class="setrow"><span class="txt"><b>Stop at the limit</b><span>Refuse new runs and stop running ones. Off sends alerts only.</span></span><button type="button" class="switch" role="switch" aria-checked="${policy.stop}" id="stop-at" aria-label="Stop at the limit"></button></div>
+            <div class="setrow"><span class="txt"><b>Lock spend limits</b><span>Members can set lower personal limits, never higher ones.</span></span><button type="button" class="lock" data-lockspend aria-pressed="${policy.lockSpend}">${icon(policy.lockSpend ? "lock" : "unlock", 13)}${policy.lockSpend ? "Locked" : "Default"}</button></div>`
+          const n = policyChanges()
+          $("#publish").hidden = n === 0
+          $("#pub-count").textContent = `${n} unpublished change${n === 1 ? "" : "s"}`
+          renderStats()
+        }
+        $('[data-panel="policies"]').addEventListener("click", (event) => {
+          const t = event.target
+          const chip = t.closest("[data-model]")
+          if (chip && !chip.disabled) {
+            policy.models[chip.dataset.model] = !policy.models[chip.dataset.model]
+            renderPolicies()
+            return $(`[data-model="${CSS.escape(chip.dataset.model)}"]`)?.focus()
+          }
+          const b = t.closest("[data-perm] button")
+          if (b) {
+            const key = b.parentElement.dataset.perm
+            policy.perms[key].v = b.dataset.v
+            renderPolicies()
+            return $(`[data-perm="${key}"] [data-v="${b.dataset.v}"]`)?.focus()
+          }
+          const lock = t.closest("[data-lock]")
+          if (lock) {
+            policy.perms[lock.dataset.lock].lock = !policy.perms[lock.dataset.lock].lock
+            renderPolicies()
+            return $(`[data-lock="${lock.dataset.lock}"]`)?.focus()
+          }
+          if (t.closest("[data-lockspend]")) {
+            policy.lockSpend = !policy.lockSpend
+            renderPolicies()
+            return $("[data-lockspend]")?.focus()
+          }
+        })
+        $('[data-panel="policies"]').addEventListener("change", (event) => {
+          const input = event.target.closest("[data-num]")
+          if (!input) return
+          const v = Number(input.value.replace(/[$,\s]/g, ""))
+          if (v > 0) policy[input.dataset.num] = v
+          renderPolicies()
+        })
+        $("#pub-discard").addEventListener("click", () => {
+          policy = clone(published)
+          renderPolicies()
+          toast("Policy changes discarded")
+        })
+        $("#pub-save").addEventListener("click", () => {
+          const n = policyChanges()
+          const lines = []
+          PERMS.forEach((p) => {
+            const a = published.perms[p[0]]
+            const b = policy.perms[p[0]]
+            if (a.v !== b.v) lines.push(`${p[1]} default from ${a.v} to <b>${b.v}</b>`)
+            if (a.lock !== b.lock) lines.push(`${b.lock ? "locked" : "unlocked"} <b>${p[1].toLowerCase()}</b>`)
+          })
+          PROVIDERS.forEach((p) => policy.providers[p[0]] !== published.providers[p[0]] && lines.push(`${policy.providers[p[0]] ? "allowed" : "blocked"} <b>${p[1]}</b>`))
+          if (policy.memberBudget !== published.memberBudget) lines.push(`member budget to <b>${money(policy.memberBudget, 0)}</b>`)
+          const extra = n - lines.length
+          published = clone(policy)
+          members.forEach((m) => m.role !== "Billing" && m.budget === 250 && (m.budget = policy.memberBudget))
+          log({ who: "Ava Martinez", kind: "policies", text: `published ${n} policy change${n === 1 ? "" : "s"}: ${lines.slice(0, 2).join("; ") || "model and spend settings"}${lines.length > 2 || extra > 0 ? "; and more" : ""}` })
+          renderAll()
+          toast(`Published to Halcyon Labs. Members get it when their workspace reloads.`)
+        })
+
+        // ---------- Spend ----------
+        let spendSort = "spend"
+        function renderSpend() {
+          const people = members.filter((m) => m.budget)
+          const total = members.reduce((n, m) => n + m.spend, 0)
+          $("#sp-head").innerHTML = `<div class="sp-total"><b>${money(total)}</b><span>of the ${money(TEAM_BUDGET, 0)} team budget · 7 days into October</span></div><div class="meter" style="position:relative"><i class="${total / TEAM_BUDGET >= 0.8 ? "is-warn" : ""}" style="width:${(total / TEAM_BUDGET) * 100}%"></i><b style="left:80%" title="Alert at 80%"></b></div><div class="sp-total" style="text-align:right"><b style="font-size:17px">${money(total / 7 * 31, 0)}</b><span>on pace for October</span></div>`
+          const list = [...people].sort((a, b) => (spendSort === "spend" ? b.spend - a.spend : b.spend / b.budget - a.spend / a.budget))
+          const max = Math.max(...people.map((m) => Math.max(m.spend, m.budget)))
+          $("#bars").innerHTML = list
+            .map((m) => {
+              const ratio = m.spend / m.budget
+              return `<li class="bar-row" tabindex="0" data-bar="${m.id}"><span class="who">${avatar(m.name)}<span>${esc(m.name)}</span></span><span class="track"><i class="${ratio >= 0.8 ? "is-warn" : ""}" style="width:${(m.spend / max) * 100}%"></i><b style="left:${(m.budget / max) * 100}%"></b></span><span class="val"><b>${money(m.spend)}</b> · ${Math.round(ratio * 100)}%</span></li>`
+            })
+            .join("")
+        }
+        function barTip(row) {
+          const tip = $("#tip")
+          if (!row) return (tip.hidden = true)
+          const m = members.find((x) => x.id === Number(row.dataset.bar))
+          tip.innerHTML = `<div class="tip-title">${esc(m.name)} · ${ROLE_LABEL[m.role]}</div><div class="tip-big">${money(m.spend)}</div><div class="tip-row">Budget<b>${money(m.budget, 0)}</b></div><div class="tip-row">Left this month<b>${money(Math.max(0, m.budget - m.spend))}</b></div><div class="tip-row">Most used model<b style="font-family:var(--font)">${esc(m.top)}</b></div><div class="tip-row">Running now<b>${m.running}</b></div>`
+          tip.hidden = false
+          const card = $("#spend-card")
+          const k = card.getBoundingClientRect().width / card.offsetWidth
+          const r = row.getBoundingClientRect()
+          const c = card.getBoundingClientRect()
+          const track = row.querySelector(".track i").getBoundingClientRect()
+          tip.style.left = `${Math.min((track.right - c.left) / k + 12, card.offsetWidth - tip.offsetWidth - 12)}px`
+          tip.style.top = `${(r.top - c.top) / k - 6}px`
+        }
+        $("#bars").addEventListener("pointerover", (event) => barTip(event.target.closest("[data-bar]")))
+        $("#bars").addEventListener("pointerleave", () => barTip(null))
+        $("#bars").addEventListener("focusin", (event) => barTip(event.target.closest("[data-bar]")))
+        $("#bars").addEventListener("focusout", () => barTip(null))
+
+        // ---------- Activity ----------
+        let activity = [
+          { who: "Theo Park", kind: "spend", text: "reached <b>80%</b> of his $250 monthly budget", time: "14:06" },
+          { who: "Maya Chen", kind: "policies", text: "locked <b>shell commands</b> to Ask for every member", time: "11:42" },
+          { who: "Maya Chen", kind: "members", text: "invited <b>ines@halcyon.dev</b> as Member", time: "Mon" },
+          { who: "Jonah Weiss", kind: "security", text: "connected the <b>linear</b> MCP server; team policy set it to Ask", time: "Mon" },
+          { who: "Ava Martinez", kind: "policies", text: "blocked <b>OpenRouter</b> and removed Qwen3 Coder (free) from allowed models", time: "Oct 3" },
+          { who: "Priya Nair", kind: "spend", text: "raised <b>Maya Chen</b>'s monthly budget from $250 to <b>$400</b>", time: "Oct 2" },
+          { who: "Ava Martinez", kind: "members", text: "suspended <b>Noah Kim</b>'s seat", time: "Sep 30" },
+          { who: "Lena Ortiz", kind: "security", text: "signed in from a new device, MacBook Pro in Lisbon", time: "Sep 29" },
+          { who: "Ava Martinez", kind: "policies", text: "published <b>3 policy changes</b>: locked browser, locked MCP tools, member budget $250", time: "Sep 26" },
+        ]
+        const A_FILTERS = [
+          ["all", "All"],
+          ["members", "Members"],
+          ["policies", "Policies"],
+          ["spend", "Spend"],
+          ["security", "Security"],
+        ]
+        let aFilter = "all"
+        let aWho = null
+        let freshAct = false
+        function log(entry) {
+          const now = new Date()
+          activity.unshift(Object.assign(entry, { time: `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}` }))
+          freshAct = true
+        }
+        function renderActivity() {
+          $("#a-filters").innerHTML =
+            A_FILTERS.map((f) => `<button type="button" class="filter" data-afilter="${f[0]}" aria-pressed="${aFilter === f[0] && !aWho}">${f[1]} <span class="n">${f[0] === "all" ? activity.length : activity.filter((a) => a.kind === f[0]).length}</span></button>`).join("") +
+            (aWho ? `<button type="button" class="filter" data-clearwho aria-pressed="true">${esc(aWho)} ${LabUI.svg("close-small", 13)}</button>` : "")
+          const list = activity.filter((a) => (aFilter === "all" || a.kind === aFilter) && (!aWho || a.who === aWho || a.text.includes(aWho)))
+          $("#activity").innerHTML = list.length
+            ? list.map((a, i) => `<li class="act${freshAct && i === 0 && a === activity[0] ? " is-new" : ""}">${avatar(a.who)}<span class="act-text"><span><b>${esc(a.who)}</b> ${a.text}</span><span>${{ members: "Members", policies: "Policies", spend: "Spend", security: "Security" }[a.kind]}</span></span><time>${a.time}</time></li>`).join("")
+            : `<li class="act" style="display:block;text-align:center;color:var(--text-3)">Nothing here yet.</li>`
+          freshAct = false
+        }
+        $("#a-filters").addEventListener("click", (event) => {
+          if (event.target.closest("[data-clearwho]")) {
+            aWho = null
+            return renderActivity()
+          }
+          const f = event.target.closest("[data-afilter]")
+          if (!f) return
+          aFilter = f.dataset.afilter
+          aWho = null
+          renderActivity()
+        })
+
+        // ---------- Toast and start ----------
+        let toastTimer
+        function toast(text) {
+          const el = $("#toast")
+          el.textContent = text
+          el.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (el.hidden = true), 3400)
+        }
+        function renderAll() {
+          renderStats()
+          renderMembers()
+          renderInvites()
+          renderPolicies()
+          renderSpend()
+          renderActivity()
+          fresh = null
+        }
+        renderAll()
+      })()
+    </script>
+  </body>
+</html>
