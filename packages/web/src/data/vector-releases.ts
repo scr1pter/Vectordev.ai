@@ -21,7 +21,7 @@ export const upcomingRelease = {
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.101"
+export const publishedDesktopVersion = "1.99.102"
 
 export const releaseSeries: VectorRelease[] = [
   {
@@ -638,8 +638,6 @@ export const release199: VectorRelease[] = [
   {
     version: "1.99.102",
     title: "A redesigned Changes panel",
-    availability:
-      "Upcoming, not published: 1.99.102 is prepared as an unsigned desktop release. Desktop downloads remain at 1.99.101 until its installers are published, and the npm CLI and plugin SDK stay at 1.99.99.",
     summary:
       "The Changes panel is redesigned. Each changed file is now one row with its name over its folder and its added and removed line counts, under a summary of every file's totals, and a row expands into a short preview of its first change. Opening a file fills the panel with a focused reader instead of a side-by-side diff next to a file tree: one column of line numbers, a + or − beside each changed line, word-level highlights, your line comments inline, and a header with Back, the file's counts, a pager across the changed files, Open in editor, and a menu for the full file, split view (when the panel is wide enough), the previous or next change and Copy path. Back or Esc returns to the list, and a second Esc closes the panel; < and > move between files, [ and ] between changes, and Cmd+F (Ctrl+F on Windows and Linux) finds within the diff. Diffs in the conversation and in file tabs look as before. Background tasks now opens as a floating window by default, beside the Changes panel when there is room; its dock button still docks it, and Esc closes it either way. The terminal agent stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
   },
