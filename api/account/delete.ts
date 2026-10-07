@@ -30,9 +30,12 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     requireTrustedJsonRequest(request, 4_096)
     const body = await readJson<{ confirm?: unknown }>(request, 4_096)
     const user = await requireAccountUser(request)
-    await enforceRateLimit(request, response, { scope: "account-delete", limit: 5, windowSeconds: 60 * 60 }).catch(
-      () => undefined,
-    )
+    await enforceRateLimit(request, response, {
+      scope: "account-delete",
+      limit: 5,
+      windowSeconds: 60 * 60,
+      identifier: user.id,
+    })
 
     const confirm = typeof body.confirm === "string" ? body.confirm.trim().toLowerCase() : ""
     if (!confirm || confirm !== user.email.trim().toLowerCase()) {
@@ -52,13 +55,26 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       )
     }
 
-    const tokensRevoked = await revokeAccountTokens(user.id)
+    if (!revocationConfigured()) {
+      throw new ApiError(
+        503,
+        "REVOCATION_NOT_CONFIGURED",
+        "Account deletion is temporarily unavailable because existing sessions cannot be revoked safely.",
+      )
+    }
+    if (!(await revokeAccountTokens(user.id))) {
+      throw new ApiError(
+        503,
+        "REVOCATION_FAILED",
+        "Account deletion is temporarily unavailable because existing sessions could not be revoked.",
+      )
+    }
     await deleteAccountUser(admin, user.id)
 
     json(response, 200, {
       deleted: true,
       email: user.email,
-      cliTokens: tokensRevoked ? "revoked" : revocationConfigured() ? "revocation-failed" : "expire-within-90-days",
+      cliTokens: "revoked",
     })
   } catch (error) {
     handleApiError(response, error)

@@ -51,13 +51,21 @@ describe("deleting the identity", () => {
 
   test("treats an already-missing user as deleted", async () => {
     await expect(
-      __test.deleteAccountUser(admin, "gone", (async () => new Response("", { status: 404 })) as unknown as typeof fetch),
+      __test.deleteAccountUser(
+        admin,
+        "gone",
+        (async () => new Response("", { status: 404 })) as unknown as typeof fetch,
+      ),
     ).resolves.toBeUndefined()
   })
 
   test("reports a refusal rather than claiming success", async () => {
     await expect(
-      __test.deleteAccountUser(admin, "user", (async () => new Response("", { status: 500 })) as unknown as typeof fetch),
+      __test.deleteAccountUser(
+        admin,
+        "user",
+        (async () => new Response("", { status: 500 })) as unknown as typeof fetch,
+      ),
     ).rejects.toThrow(/could not delete/i)
   })
 })
@@ -79,7 +87,7 @@ describe("CLI token revocation", () => {
     let seen = ""
     const ok = await revokeAccountTokens("user-1", (async (url: string) => {
       seen = url
-      return new Response("{}", { status: 200 })
+      return Response.json({ result: "OK" })
     }) as unknown as typeof fetch)
     expect(ok).toBe(true)
     expect(seen).toContain("/set/vector%3Acli-revoked%3Auser-1/1")
@@ -87,11 +95,21 @@ describe("CLI token revocation", () => {
     expect(expiry).toBeGreaterThan(90 * 24 * 60 * 60)
   })
 
+  test("rejects a Redis error returned with a successful HTTP status", async () => {
+    process.env.KV_REST_API_URL = "https://kv.example.com"
+    process.env.KV_REST_API_TOKEN = "kv-token"
+    expect(
+      await revokeAccountTokens("user-1", (async () => Response.json({ error: "write failed" })) as typeof fetch),
+    ).toBe(false)
+  })
+
   test("reads a revoked account back", async () => {
     process.env.KV_REST_API_URL = "https://kv.example.com"
     process.env.KV_REST_API_TOKEN = "kv-token"
-    const revoked = await accountTokensRevoked("user-1", (async () =>
-      new Response(JSON.stringify({ result: "1" }), { status: 200 })) as unknown as typeof fetch)
+    const revoked = await accountTokensRevoked(
+      "user-1",
+      (async () => new Response(JSON.stringify({ result: "1" }), { status: 200 })) as unknown as typeof fetch,
+    )
     expect(revoked).toBe(true)
   })
 

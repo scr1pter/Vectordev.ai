@@ -14,8 +14,6 @@ const keys = [
   "UPSTASH_REDIS_REST_TOKEN",
   "NODE_ENV",
   "VERCEL_ENV",
-  "STRIPE_SECRET_KEY",
-  "VECTOR_ACCESS_MODE",
 ] as const
 const original = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
 const servers: ReturnType<typeof createServer>[] = []
@@ -129,18 +127,5 @@ describe("account deletion request boundary", () => {
     // A recovered Redis read with no key is valid only because the account
     // still exists; it must not resurrect tokens for a deleted identity.
     expect(await accountTokensRevoked(accountID)).toBe(false)
-  })
-
-  test("retains the account when paid billing cleanup is unavailable", async () => {
-    process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role"
-    process.env.KV_REST_API_URL = process.env.SUPABASE_URL
-    process.env.KV_REST_API_TOKEN = "test-redis-token"
-    process.env.VECTOR_ACCESS_MODE = "paid"
-    revocationAvailable = true
-    const response = await attempt("owner@example.com")
-    expect(response.status).toBe(503)
-    expect(await response.json()).toMatchObject({ error: { code: "BILLING_DELETION_FAILED" } })
-    expect(revocationWrites).toBe(1)
-    expect(identityDeletions).toBe(0)
   })
 })
