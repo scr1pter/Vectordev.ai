@@ -19,6 +19,14 @@
         font: inherit;
       }
 
+      .d-pull-requests a.btn {
+        text-decoration: none;
+      }
+
+      .d-pull-requests .seg button {
+        white-space: nowrap;
+      }
+
       .d-pull-requests .hd-sub {
         color: var(--text-3);
         font-size: 12.5px;
@@ -636,6 +644,13 @@
         font-size: 12px;
       }
 
+      .d-pull-requests .files-card {
+        padding: 12px 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #19171e;
+      }
+
       .d-pull-requests .sum {
         display: flex;
         gap: 10px;
@@ -829,7 +844,7 @@
                   <span class="hd-sub" data-hd-sub></span>
                   <div class="app-header-end">
                     <span class="live" title="Synced with GitHub"><span class="dot dot-green"></span>Live<span class="mono" data-synced>synced 2s ago</span></span>
-                    <label class="input search"><i data-icon="magnifier" data-size="14"></i><input type="search" placeholder="Search by title, number, branch or author" aria-label="Search pull requests" data-search /><kbd>/</kbd></label>
+                    <label class="input search"><i data-icon="magnifier" data-size="14"></i><input type="search" placeholder="Search pull requests" aria-label="Search pull requests" data-search /><kbd>/</kbd></label>
                     <button class="btn btn-primary" type="button" data-new><i data-icon="plus" data-size="13"></i>New pull request</button>
                   </div>
                 </header>
@@ -902,7 +917,7 @@
         }
         const avatar = (who, cls = "") =>
           who.startsWith("agent:") ? `<span class="avatar agent ${cls}" title="Vector agent">${IC.chip(cls ? 12 : 11)}</span>` : `<span class="avatar ${cls}" title="${who}" style="background:${PEOPLE[who][1]};color:${PEOPLE[who][2]}">${PEOPLE[who][0]}</span>`
-        const authorName = (who) => (who.startsWith("agent:") ? `Vector · ${who.slice(6)}` : who === ME ? "you" : who)
+        const authorName = (who) => (who.startsWith("agent:") ? who.slice(6) : who === ME ? "you" : who)
 
         // ---------- data ----------
         const CHECKS = ["typecheck · engine", "typecheck · app", "test · engine", "test · app", "e2e · desktop smoke", "build · desktop (macOS arm64)", "generate · sdk is current"]
@@ -1068,9 +1083,9 @@
 
         function renderRepos() {
           const open = prs.filter((p) => !state.merged.has(p.n) && (state.drafts || !p.draft))
-          const repos = [["all", "All"], ["Vectordev.ai", "Vectordev.ai"], ["vectorscope-action", "vectorscope-action"], ["homebrew-vector", "homebrew"]]
+          const repos = [["all", "All"], ["Vectordev.ai", "Vectordev.ai"], ["vectorscope-action", "vectorscope"], ["homebrew-vector", "homebrew"]]
           $("[data-repos]").innerHTML = repos
-            .map(([id, label]) => `<button type="button" data-value="${id}" aria-pressed="${state.repo === id}">${label}<span class="n">${open.filter((p) => id === "all" || p.repo === id).length}</span></button>`)
+            .map(([id, label]) => `<button type="button" data-value="${id}" title="${id === "all" ? "All repositories" : id}" aria-pressed="${state.repo === id}">${label}<span class="n">${open.filter((p) => id === "all" || p.repo === id).length}</span></button>`)
             .join("")
           const all = prs.filter((p) => !state.merged.has(p.n))
           $("[data-hd-sub]").textContent = `${all.length} open across 3 repositories`
@@ -1169,7 +1184,8 @@
                   ? `<div class="agent-note">${tint("var(--violet-bright)", IC.chip(15))}<span>Opened by the <b>${esc(p.author.slice(6))}</b> workspace from the session “${esc(p.session)}”.</span><button class="btn btn-sm" type="button">Open session</button></div>`
                   : ""
             }
-            <div class="desc"><h4>Description</h4>${p.body.map((t) => `<p>${t}</p>`).join("")}${p.bullets.length ? `<ul>${p.bullets.map((b) => `<li>${b}</li>`).join("")}</ul>` : ""}</div>`
+            <div class="desc"><h4>Description</h4>${p.body.map((t) => `<p>${t}</p>`).join("")}${p.bullets.length ? `<ul>${p.bullets.map((b) => `<li>${b}</li>`).join("")}</ul>` : ""}</div>
+            <div class="desc"><h4>Changes</h4><div class="files-card">${filesHtml(p, 4)}</div></div>`
         }
 
         function mergeBlock(p) {
@@ -1195,10 +1211,12 @@
         }
         const fmt = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`)
 
-        function filesHtml(p) {
-          return `<p class="sum"><span>${p.files.length} files changed</span><span class="add">+${p.add}</span><span class="del">−${p.del}</span></p>${p.files
+        function filesHtml(p, limit = 99) {
+          const more = p.files.length - limit
+          return `<p class="sum"><span>${p.files.length} ${p.files.length === 1 ? "file" : "files"} changed</span><span class="add">+${p.add}</span><span class="del">−${p.del}</span></p>${p.files
+            .slice(0, limit)
             .map(([name, dir, a, d]) => `<div class="file"><span class="row-text"><span class="row-name">${name}</span><span class="row-sub">${dir || "repository root"}</span></span><span class="add">+${a}</span><span class="del">−${d}</span></div>`)
-            .join("")}`
+            .join("")}${more > 0 ? `<button class="btn btn-sm btn-ghost" type="button" data-dtab="files" style="margin:4px 4px 0">Show all ${p.files.length} files</button>` : ""}`
         }
 
         function activityHtml(p) {

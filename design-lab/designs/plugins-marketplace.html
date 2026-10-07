@@ -1135,7 +1135,7 @@
             <div class="seg" role="group" aria-label="Kind" data-kinds>${kinds.map(([id, l]) => `<button type="button" data-value="${id}" aria-pressed="${state.kind === id}">${l}</button>`).join("")}</div>`
           const el = root.querySelector("[data-list]")
           if (!list.length) {
-            el.innerHTML = `<div class="p-empty">${glyph.plugin(18)}<strong>${state.view === "updates" ? "Everything is up to date" : "Nothing matches"}</strong><span>${state.view === "updates" ? "Vector checks for new versions when it starts." : "Try another category or search."}</span></div>`
+            el.innerHTML = `<div class="p-empty">${glyph.plugin(18)}<strong>${state.view === "updates" ? "Everything is up to date" : "Nothing matches"}</strong><span>${state.view === "updates" ? "Vector checks for new versions when it starts." : state.cat !== "all" ? `Nothing in ${cats.find((c) => c[0] === state.cat)[1]}${state.q ? ` for “${esc(state.q)}”` : ""}.` : "Try another search."}</span>${state.cat !== "all" && state.view !== "updates" ? `<button class="btn btn-sm" type="button" data-cat="all" style="margin-top:6px">Search all categories</button>` : ""}</div>`
             return
           }
           const showFeatured = state.view === "discover" && state.cat === "all" && state.kind === "all" && !state.q
