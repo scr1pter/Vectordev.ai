@@ -540,6 +540,13 @@
         opacity: 0.25;
         cursor: not-allowed;
       }
+      .d-settings-permissions .cmd-top {
+        position: sticky;
+        top: -16px;
+        z-index: 2;
+        border-radius: 10px 10px 0 0;
+        background: var(--card);
+      }
       .d-settings-permissions .tester {
         display: flex;
         align-items: center;
@@ -1128,6 +1135,7 @@
                     <div class="panel scroll" data-panel="commands" data-tabs-for="pm" role="tabpanel" hidden>
                       <p class="lede">Shell rules are checked top to bottom and <b>the last match wins</b>, so put broad rules first and exceptions after them.</p>
                       <div class="card">
+                        <div class="cmd-top">
                         <form class="adder" id="cmd-add" autocomplete="off">
                           <label class="input"><i data-icon="terminal" data-size="14" class="muted"></i><input id="cmd-pattern" placeholder="bun run lint*" aria-label="Command pattern" spellcheck="false" /></label>
                           <span class="aad" id="cmd-action" role="group" aria-label="Action for the new rule">
@@ -1141,6 +1149,7 @@
                           <span class="tester-label">Try a command</span>
                           <label class="input"><span class="muted mono" style="font-size:12px">$</span><input id="cmd-test" value="git push --force origin main" aria-label="Try a command" spellcheck="false" /></label>
                           <span class="verdict" id="cmd-verdict" aria-live="polite"></span>
+                        </div>
                         </div>
                         <ol class="rules" id="cmd-list"></ol>
                       </div>
