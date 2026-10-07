@@ -1154,7 +1154,7 @@
             p.review === "requested"
               ? `Review requested from you${p.approvals.length ? ` · approved by ${p.approvals.join(", ")}` : ""}`
               : p.review === "approved"
-                ? `Approved by ${p.approvals.join(", ")}`
+                ? `Approved by ${p.approvals.map((x) => (x === ME ? "you" : x)).join(" and ")}`
                 : p.reviewers
                   ? `Waiting on ${p.reviewers.join(", ")}`
                   : p.author.startsWith("agent:")
@@ -1224,7 +1224,7 @@
             [avatar(p.author), `<b>${esc(authorName(p.author))}</b> opened this pull request`, `${p.age} ago`],
             [IC.commit(13), `<b>${p.commits} commit${p.commits === 1 ? "" : "s"}</b> pushed to <span class="mono">${esc(p.head)}</span>`, `${p.age} ago`],
             [IC.vs(12), p.vs.risk === "run" ? `<b>Vectorscope</b> is reviewing the head commit` : `<b>Vectorscope</b> reviewed · Risk ${p.vs.risk} · ${p.vs.text}`, p.vs.risk === "run" ? "now" : "8m ago"],
-            ...p.approvals.map((a) => [avatar(a), `<b>${a}</b> approved these changes`, "6m ago"]),
+            ...p.approvals.map((a) => [avatar(a), `<b>${a === ME ? "You" : a}</b> approved these changes`, a === ME ? "just now" : "6m ago"]),
             ...(p.review === "requested" ? [[IC.eye(13), `<b>${p.author === ME ? "You" : esc(authorName(p.author))}</b> requested a review from <b>you</b>`, "5m ago"]] : []),
           ]
           return `<ul class="tl">${items.map(([n, t, w]) => `<li><span class="node">${n}</span><span>${t}</span><span class="when">${w}</span></li>`).join("")}</ul>`
@@ -1247,6 +1247,8 @@
               : `<span class="note">Approved, green, and no blocking findings.</span><button class="btn btn-merge" type="button" data-merge-ask="${p.n}">${IC.merged(14)}${label}</button>`
           }
           if (p.draft) return `<span class="note">${blocked}</span><button class="btn" type="button" data-ready="${p.n}">Ready for review</button>`
+          if (p.author.startsWith("agent:") && p.review !== "approved" && !ci.run)
+            return `<span class="note">Your agent opened this from a Parallel Workspace. Approve it to merge.</span><button class="btn" type="button" data-checkout="${p.n}">Check out</button><button class="btn btn-primary" type="button" data-approve="${p.n}">${IC.check(11)}Approve</button>`
           return `<span class="note">${blocked}</span><button class="btn" type="button" data-checkout="${p.n}">Check out</button><button class="btn btn-merge" type="button" disabled>${IC.merged(14)}Squash and merge</button>`
         }
 
@@ -1255,7 +1257,14 @@
             <div class="desc"><h4>What's next</h4><p>Vectorscope will watch main for follow-ups. ${p.author.startsWith("agent:") ? "The agent's Parallel Workspace was cleaned up." : ""}</p></div>`
         }
 
+        // When the selected pull request moves to a folded group, unfold it so the selection stays in view.
+        function follow() {
+          const p = prs.find((x) => x.n === state.current)
+          if (p) state.collapsed.delete(groupOf(p))
+        }
+
         function renderAll() {
+          follow()
           renderRepos()
           renderList()
           renderDetail()
@@ -1456,7 +1465,7 @@
           if (key && !root.contains(focused)) root.querySelector(`[data-${key[0].replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}="${key[1]}"]`)?.focus()
           if (moved) {
             const g = GROUPS.find((x) => x.id === groupOf(moved))
-            if (g.id === "ready") state.collapsed.delete("ready")
+            follow()
             renderList()
             toast(`${IC.ok(15)}<span><span class="mono">#${moved.n}</span> ${g.id === "ready" ? "is green and approved: moved to <b>Ready to merge</b>" : `moved to <b>${g.label}</b>`}</span>`)
           }

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Vector Design Lab</title>
-    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/assets/lab.css" />
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
     <style>
       .d-settings-general [hidden] {
         display: none !important;
@@ -1767,13 +1767,13 @@
       <p class="lab-note" data-lab-note></p>
     </div>
 
-    <script src="/assets/icons.js"></script>
-    <script src="/assets/links.js"></script>
-    <script src="/assets/registry/review.js"></script>
-    <script src="/assets/registry/connections.js"></script>
-    <script src="/assets/registry/settings.js"></script>
-    <script src="/assets/registry/agents.js"></script>
-    <script src="/assets/lab.js"></script>
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
     <script>
       ;(function () {
         const root = document.querySelector(".d-settings-general")
@@ -2216,12 +2216,12 @@
         // ---------- Navigation ----------
         const NAV = [
           { group: "Personal", items: ["general", "appearance", "editor", "notifications"] },
-          { group: "Agents", items: ["models", "agents", { id: "permissions", label: "Permissions", icon: "shield", href: "/designs/settings-permissions", keywords: "approval ask allow deny shell commands folders network safety risk" }, "providers"] },
+          { group: "Agents", items: ["models", "agents", { id: "permissions", label: "Permissions", icon: "shield", href: "settings-permissions.html", keywords: "approval ask allow deny shell commands folders network safety risk" }, "providers"] },
           {
             group: "Account",
             items: [
-              { id: "usage", label: "Usage & spend", icon: "bars", href: "/designs/tokenomics", keywords: "tokens cost spend budget cache tokenomics", end: "$412" },
-              { id: "team", label: "Vector Team", icon: "team", href: "/designs/team-admin", keywords: "members seats roles invite policies admin" },
+              { id: "usage", label: "Usage & spend", icon: "bars", href: "tokenomics.html", keywords: "tokens cost spend budget cache tokenomics", end: "$412" },
+              { id: "team", label: "Vector Team", icon: "team", href: "team-admin.html", keywords: "members seats roles invite policies admin" },
             ],
           },
           { group: "App", items: ["keyboard", "accessibility", "about"] },
@@ -2231,7 +2231,7 @@
 
         const sn = $("#sn")
         sn.innerHTML = `
-          <div class="sn-top"><a class="sn-back" href="/designs/first-run">${icon("back", 14)}Back to app</a></div>
+          <div class="sn-top"><a class="sn-back" href="first-run.html">${icon("back", 14)}Back to app</a></div>
           <div class="sn-brand"><span class="sn-mark">${LabUI.svg("chip", 15)}</span><div><b>Settings</b><span>Vector 1.99.102</span></div></div>
           <label class="input sn-search">${icon("search", 14)}<input type="search" id="search" placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false" /><button type="button" class="sn-clear" id="search-clear" aria-label="Clear settings search" hidden>${LabUI.svg("close-small", 14)}</button><kbd id="search-kbd">⌘F</kbd></label>
           <nav class="sn-groups scroll" aria-label="Settings">
