@@ -787,6 +787,12 @@
           0 0 0 3px rgba(182, 159, 247, 0.16),
           0 18px 50px rgba(0, 0, 0, 0.45);
       }
+      .d-settings-general .pv-frame.is-target {
+        border-color: rgba(182, 159, 247, 0.85);
+        box-shadow:
+          0 0 0 4px rgba(182, 159, 247, 0.16),
+          0 18px 50px rgba(0, 0, 0, 0.45);
+      }
       .d-settings-general .pv-frame.is-flash {
         animation: frame-flash 1.1s var(--ease);
       }
@@ -2496,13 +2502,15 @@
         content.addEventListener("pointerover", (event) => {
           const row = event.target.closest("[data-affects]")
           pv.querySelectorAll(".is-target").forEach((el) => el.classList.remove("is-target"))
+          frame.classList.remove("is-target")
           pv.classList.toggle("is-pointing", Boolean(row))
           if (!row) return
           const list = targets(row.dataset.affects)
           list.forEach((el) => el !== pv && el.classList.add("is-target"))
-          if (list.includes(pv)) pv.querySelectorAll("[data-pv]").forEach((el) => el.classList.add("is-target"))
+          frame.classList.toggle("is-target", list.includes(pv))
         })
         content.addEventListener("pointerleave", () => {
+          frame.classList.remove("is-target")
           pv.classList.remove("is-pointing")
           pv.querySelectorAll(".is-target").forEach((el) => el.classList.remove("is-target"))
         })
@@ -2633,7 +2641,14 @@
             const id = el.dataset.set
             const from = rangeFrom[id] ?? state[id]
             delete rangeFrom[id]
-            if (from !== state[id]) {
+            // Arrow-key nudges within a few seconds read as one change.
+            const last = log[0]
+            if (last && last.changes.length === 1 && last.changes[0].id === id && Date.now() - last.at.getTime() < 5000) {
+              last.changes[0].to = state[id]
+              last.at = new Date()
+              if (last.changes[0].from === last.changes[0].to) log.shift()
+              renderLog()
+            } else if (from !== state[id]) {
               log.unshift({ changes: [{ id, from, to: state[id] }], at: new Date() })
               renderLog()
             }

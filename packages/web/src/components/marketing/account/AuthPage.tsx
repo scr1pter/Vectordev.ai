@@ -11,7 +11,7 @@ import "./account.css"
 
 type Mode = "signin" | "register"
 
-function GoogleMark() {
+export function GoogleMark() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path

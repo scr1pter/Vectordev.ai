@@ -10,6 +10,7 @@ const keep = new Set([
   "_astro",
   "account",
   "auth",
+  "design",
   "docs",
   "download",
   "legal",

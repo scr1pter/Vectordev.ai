@@ -1,0 +1,24 @@
+---
+import { DesignGate } from "../components/marketing/design/DesignGate"
+import MatrixRain from "../components/marketing/account/MatrixRain.astro"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import "../components/marketing/account/account.css"
+
+// Not linked from the site. The lab itself is served only to the owner (api/design-lab).
+export const prerender = true
+---
+
+<MarketingLayout title="Vector" description="Private." noindex>
+  <div class="account-environment auth-environment">
+    <MatrixRain />
+    <main class="auth-page auth-page-single">
+      <div class="auth-panel">
+        <div class="auth-panel-content">
+          <DesignGate client:only="react">
+            <div slot="fallback" class="auth-loading" role="status">Checking your session…</div>
+          </DesignGate>
+        </div>
+      </div>
+    </main>
+  </div>
+</MarketingLayout>
