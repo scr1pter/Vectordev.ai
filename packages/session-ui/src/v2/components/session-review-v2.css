@@ -1,375 +1,825 @@
+/* Changes panel: a list of changed files (the landing page replica) and a reader for
+   one file. Tokens live on the root so they also inherit into pierre's shadow DOM. */
+
 [data-component="session-review-v2"] {
+  --vcx-panel: #17151c;
+  --vcx-diff: #121117;
+  --vcx-raised: #1b1922;
+  --vcx-text: #ebe7ee;
+  --vcx-text-1: #e8e8ea;
+  --vcx-text-2: #a8a6ad;
+  --vcx-text-3: #878590;
+  --vcx-code: #d6d3db;
+  --vcx-violet: #b69ff7;
+  --vcx-violet-icon: #b3a1f2;
+  --vcx-hunk: #8a84c9;
+  --vcx-purple: #9274ec;
+  --vcx-focus: #9d84ee;
+  --vcx-green: #65c78e;
+  --vcx-red: #e6787d;
+  --vcx-add-text: #a8e2bf;
+  --vcx-del-text: #f0b0b3;
+  --vcx-line: rgba(226, 213, 237, 0.07);
+  --vcx-border: rgba(255, 255, 255, 0.06);
+  --vcx-hover: rgba(255, 255, 255, 0.04);
+  --vcx-opened: rgba(182, 159, 247, 0.08);
+  /* "Vector Review Inter" is the bundled Inter at 95% (app index.css), as the replica
+     sets it: off a Mac it matches SF Pro's width, so text sets as it does on a Mac. */
+  --vcx-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Vector Review Inter", Inter, "Segoe UI", system-ui, sans-serif;
+  --vcx-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "JetBrainsMono Nerd Font Mono", Consolas, monospace;
+  /* Bold digits for badges: only the regular face of the bundled mono ships, so off
+     a Mac they come from Inter rather than a synthesized bold. */
+  --vcx-digits: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Vector Review Inter", Inter, sans-serif;
+
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: var(--background-stronger, var(--v2-background-bg-base));
+  background: var(--vcx-panel);
+  color: var(--vcx-text-1);
+  font: 13px/1.35 var(--vcx-font);
+}
+
+/* TextInputV2 rings its own field. */
+[data-component="session-review-v2"]
+  :is(button, input, [tabindex]):not([data-slot="text-input-v2-input"]):focus-visible {
+  outline: 2px solid var(--vcx-focus);
+  outline-offset: 2px;
+}
+
+[data-component="session-review-v2"]
+  :is([data-slot="session-review-v2-list"], [data-slot="session-review-v2-diff-scroll"]):focus-visible {
+  outline-offset: -2px;
 }
 
 [data-component="session-review-v2"] [data-slot="session-review-v2-body"] {
   display: flex;
   flex: 1;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-[data-component="session-review-v2-sidebar-root"] {
+/* Counts, in the summary, the rows and the reader header. The minus is U+2212. */
+[data-component="session-review-v2"] [data-slot="session-review-v2-add"] {
+  flex: none;
+  color: var(--vcx-green);
+  font: 12px var(--vcx-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-component="session-review-v2"] [data-slot="session-review-v2-del"] {
+  flex: none;
+  color: var(--vcx-red);
+  font: 12px var(--vcx-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------------------------
+   List
+   ------------------------------------------------------------------------------------ */
+
+[data-slot="session-review-v2-list"] {
   position: relative;
   display: flex;
-  flex-shrink: 0;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar"] {
-  display: flex;
+  flex: 1;
   flex-direction: column;
-  flex-shrink: 0;
   min-height: 0;
-  overflow: hidden;
-  border-right: 1px solid var(--border-weaker-base, var(--v2-border-border-weak));
-  background: var(--background-stronger, var(--v2-background-bg-base));
+  overflow-y: auto;
+  padding: 12px 10px 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar"][aria-hidden="true"] {
-  border-right-width: 0;
-}
-
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar"]:not([data-resizing]) {
-  transition:
-    width 200ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-right-width 200ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-resize"] {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 0;
-  z-index: 20;
-  width: 0;
-  overflow: visible;
-}
-
-[data-component="session-review-v2-sidebar-root"] [data-component="resize-handle"]::after {
-  background: var(--v2-border-border-muted, var(--border-weak-base));
-}
-
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-header"] {
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-summary"] {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px 8px;
-  padding: 12px 16px 8px 8px;
-  flex-shrink: 0;
+  gap: 10px;
+  margin: 0;
+  padding: 0 8px 10px;
+  color: var(--vcx-text-2);
 }
 
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-title"] {
-  display: flex;
-  flex: 1 1 100%;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+/* One 16px line, as the replica's plain text sets, so the rows start where its do. */
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-summary"] > :first-child {
+  flex: 1;
   min-width: 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-strong, var(--v2-text-text-base));
+  line-height: 16px;
 }
 
-[data-component="session-review-v2-sidebar-root"]
-  [data-slot="session-review-v2-sidebar-header"]
-  > [data-component="diff-changes"] {
-  flex: none;
-  margin-inline-start: auto;
-  padding-inline: 4px;
-}
-
-[data-component="session-review-v2-sidebar-root"] .session-review-commit-main {
-  flex: none;
-  max-width: 100%;
+[data-slot="session-review-v2-list"]
+  [data-slot="session-review-v2-summary"]
+  > :first-child:not(:has(.session-review-v2-mode)) {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-[data-component="session-review-v2-sidebar-root"]
-  [data-slot="session-review-v2-sidebar-title"]
-  [data-component="select-v2-root"] {
-  width: fit-content;
+/* The mode menu reads as the summary text, not as a control. Its 24px hover pill
+   overhangs the 16px line by 4px each way instead of making the line taller. */
+[data-component="session-review-v2"]
+  [data-slot="session-review-v2-summary"]
+  [data-component="select-v2"][data-appearance="inline"].session-review-v2-mode:not([data-disabled]) {
+  height: 24px;
   max-width: 100%;
-  min-width: 0;
+  margin: -4px 0 -4px -4px;
+  padding: 0 4px;
+  gap: 2px;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  color: var(--vcx-text-2);
+  cursor: default;
 }
 
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-filter"] {
-  padding: 0 8px 8px;
-  flex-shrink: 0;
-  min-width: 0;
-  box-sizing: border-box;
+[data-component="session-review-v2"]
+  [data-slot="session-review-v2-summary"]
+  .session-review-v2-mode
+  [data-slot="select-v2-value-text"] {
+  color: inherit;
+  font: 400 13px/16px var(--vcx-font);
+  letter-spacing: normal;
 }
 
-[data-component="session-review-v2-sidebar-root"]
-  [data-slot="session-review-v2-sidebar-filter"]
-  [data-component="text-input-v2"] {
+[data-component="session-review-v2"]
+  [data-slot="session-review-v2-summary"]
+  [data-component="select-v2"].session-review-v2-mode:is(:hover, [data-expanded]) {
+  color: var(--vcx-text);
+}
+
+[data-component="session-review-v2"]
+  [data-slot="session-review-v2-summary"]
+  .session-review-v2-mode
+  [data-slot="select-v2-chevron"] {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  color: var(--vcx-text-3);
+}
+
+[data-component="session-review-v2"]
+  [data-slot="session-review-v2-summary"]
+  .session-review-v2-mode
+  [data-slot="select-v2-chevron"]
+  svg {
+  width: 14px;
+  height: 14px;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-filter"] {
+  flex: none;
+  min-width: 0;
+  padding: 0 0 8px;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-filter"] [data-component="text-input-v2"] {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  margin-top: 2px;
 }
 
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-tree"] {
-  flex: 1;
-  min-height: 0;
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-files"] {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-tree"] .scroll-view__viewport {
-  padding: 0 8px 12px;
-}
-
-[data-component="session-review-v2-sidebar-root"] [data-slot="session-review-v2-sidebar-tree"] .scroll-view__thumb {
-  width: 16px;
-}
-
-[data-component="session-review-v2-sidebar-root"]
-  [data-slot="session-review-v2-sidebar-tree"]
-  .scroll-view__thumb::after {
-  width: 6px;
-  background-color: var(--v2-border-border-muted, var(--border-weak-base));
-}
-
-[data-component="session-review-v2-sidebar-root"]
-  [data-slot="session-review-v2-sidebar-tree"]
-  .scroll-view__thumb:hover::after,
-[data-component="session-review-v2-sidebar-root"]
-  [data-slot="session-review-v2-sidebar-tree"]
-  .scroll-view__thumb[data-dragging="true"]::after {
-  background-color: var(--v2-border-border-strong, var(--border-strong-base));
-}
-
-[data-component="session-review-v2"] [data-slot="session-review-v2-preview"] {
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-file-row"] {
   display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-[data-component="session-review-v2"] [data-slot="session-review-v2-toolbar"] {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  padding-left: 8px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border-weaker-base, var(--v2-border-border-weak));
-}
-
-[data-component="session-review-v2"] [data-slot="session-review-v2-toolbar-group"] {
-  display: flex;
-  align-items: center;
-  gap: 0px;
-}
-
-[data-component="session-review-v2"] .session-review-v2-toolbar-group--start {
-  min-width: 0;
-}
-
-[data-component="session-review-v2"] [data-slot="session-review-v2-toolbar-collapsed-meta"] {
-  display: flex;
+  width: 100%;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  padding-right: 8px;
+  min-height: 38px;
+  padding: 6px 10px 6px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vcx-text-1);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-toolbar-title"] {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-strong, var(--v2-text-text-base));
+[data-slot="session-review-v2-list"]
+  [data-slot="session-review-v2-file-row"]:is(:hover, [aria-expanded="true"], [data-highlighted]) {
+  background: var(--vcx-hover);
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-toolbar-title"] [data-component="select-v2-root"] {
-  width: fit-content;
-  max-width: 100%;
-  min-width: 0;
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-file-row"][data-opened] {
+  background: var(--vcx-opened);
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-position"] {
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-file-row"] > [data-component="icon"] {
+  width: 14px;
+  height: 14px;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-file-chevron"] {
   flex: none;
-  flex-grow: 0;
-  font-family: var(--v2-font-family-sans);
-  font-style: normal;
-  font-weight: 440;
-  font-size: 11px;
-  line-height: 100%;
-  letter-spacing: 0.05px;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums lining-nums;
-  font-feature-settings:
-    "tnum" on,
-    "lnum" on;
-  font-variation-settings: "slnt" 0;
-  color: var(--v2-grey-600);
+  width: 100%;
+  height: 100%;
+  color: var(--vcx-text-3);
+  transition: transform 160ms ease;
+}
+
+[data-slot="session-review-v2-list"]
+  [data-slot="session-review-v2-file-row"][aria-expanded="true"]
+  [data-slot="session-review-v2-file-chevron"] {
+  transform: rotate(90deg);
+}
+
+[data-slot="session-review-v2-list"]
+  [data-slot="session-review-v2-file-row"][data-opened]
+  [data-slot="session-review-v2-file-chevron"] {
+  color: var(--vcx-violet);
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-file-name"] {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 15px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-[data-component="session-review-v2"] .session-review-v2-file-nav-button {
-  width: 36px;
-  height: 28px;
-  min-width: 36px;
-  min-height: 28px;
+[data-slot="session-review-v2-list"]
+  [data-slot="session-review-v2-file-row"][data-opened]
+  [data-slot="session-review-v2-file-name"] {
+  color: var(--vcx-text);
+}
+
+/* 15px + 13px lines make the replica's 40px rows. */
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-file-name"] > span {
+  overflow: hidden;
+  color: var(--vcx-text-3);
+  font-size: 11.5px;
+  line-height: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-comment-count"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(182, 159, 247, 0.12);
+  color: var(--vcx-violet);
+  font: 600 10px/1 var(--vcx-digits);
+  font-variant-numeric: tabular-nums;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-comment-count"] [data-component="icon"] {
+  width: 11px;
+  height: 11px;
+  color: inherit;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"] {
+  display: grid;
+  width: calc(100% - 28px);
+  margin: 2px 0 8px 28px;
+  padding: 8px 0;
+  overflow: hidden;
+  border: 1px solid var(--vcx-border);
+  border-radius: 6px;
+  background: var(--vcx-diff);
+  color: var(--vcx-text-2);
+  font: 11px/17px var(--vcx-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"]:hover {
+  border-color: rgba(182, 159, 247, 0.28);
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"] > code {
+  padding: 0 10px;
+  overflow: hidden;
+  color: var(--vcx-text-2);
+  text-overflow: ellipsis;
+  white-space: pre;
+  font: inherit;
+  font-variant-ligatures: none;
+  tab-size: 2;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"] > .is-hunk {
+  color: var(--vcx-hunk);
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"] > .is-add {
+  background: rgba(101, 199, 142, 0.1);
+  color: var(--vcx-add-text);
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"] > .is-del {
+  background: rgba(230, 120, 125, 0.1);
+  color: var(--vcx-del-text);
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"] .is-more {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 0 10px;
+  color: var(--vcx-text-3);
+  font: 11px/17px var(--vcx-font);
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-snippet"] .is-open {
+  flex: none;
+  color: var(--vcx-violet);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+[data-slot="session-review-v2-list"]
+  [data-slot="session-review-v2-snippet"]:is(:hover, :focus-visible)
+  :is(.is-more, .is-open) {
+  color: var(--vcx-violet);
+  opacity: 1;
+}
+
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-list-empty"] {
+  padding: 48px 16px 0;
+  color: var(--vcx-text-2);
+  font-size: 13px;
+  text-align: center;
+}
+
+[data-slot="session-review-v2-list"]
+  [data-slot="session-review-v2-list-empty"]
+  > :is([data-slot="session-review-v2-empty-changes"], [data-slot="session-review-v2-empty-no-git"]) {
   padding: 0;
 }
 
-[data-component="session-review-v2"]
-  [data-slot="session-review-v2-toolbar-group"]
-  [data-component="tooltip-v2-trigger"] {
-  display: inline-flex;
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-footer"] {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 10px 8px 12px;
+  border-top: 1px solid var(--vcx-line);
+  background: var(--vcx-panel);
+  color: var(--vcx-text-3);
+  font-size: 12px;
 }
 
-[data-component="session-review-v2"] .session-review-v2-segmented-control [data-component="tooltip-v2-trigger"] {
-  display: flex;
-  flex: 0 0 auto;
+[data-slot="session-review-v2-list"] [data-slot="session-review-v2-footer"] > :first-child {
+  flex: 1;
   min-width: 0;
 }
 
 [data-component="session-review-v2"]
-  .session-review-v2-segmented-control
-  [data-component="tooltip-v2-trigger"]
-  [data-slot="segmented-control-v2-item"] {
-  width: 100%;
-}
-
-[data-component="icon-button-v2"].session-review-v2-sidebar-toggle {
-  width: 36px;
+  [data-slot="session-review-v2-footer"]
+  [data-component="button"].session-review-commit-main:not(:disabled) {
+  flex: none;
   height: 28px;
-  min-width: 36px;
-  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(182, 159, 247, 0.28);
   border-radius: 6px;
-  color: var(--v2-icon-icon-base);
+  background: rgba(182, 159, 247, 0.11);
+  color: var(--vcx-violet);
+  font: 500 12px/1 var(--vcx-font);
+  white-space: nowrap;
 }
 
-[data-component="icon-button-v2"][data-variant="ghost"].session-review-v2-sidebar-toggle[aria-expanded="true"]:not(
-    :disabled
-  ),
-[data-component="icon-button-v2"][data-variant="ghost"].session-review-v2-sidebar-toggle[aria-expanded="true"]:is(
-    :hover,
-    [data-state="hover"],
-    :active,
-    [data-state="pressed"]
-  ):not(:disabled) {
-  background-color: var(--v2-overlay-simple-overlay-pressed);
+[data-component="session-review-v2"]
+  [data-slot="session-review-v2-footer"]
+  [data-component="button"].session-review-commit-main:is(:hover, :focus-visible):not(:disabled) {
+  background: rgba(182, 159, 247, 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="session-review-v2-list"] :is([data-slot="session-review-v2-file-chevron"], .is-open) {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------------------------
+   Reader (the opened file)
+   ------------------------------------------------------------------------------------ */
+
+[data-component="session-review-v2"] [data-slot="session-review-v2-preview"] {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 [data-component="session-review-v2"] [data-slot="session-review-v2-file-header"] {
+  position: relative;
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border-weaker-base, var(--v2-border-border-weak));
+  height: 48px;
+  padding: 0 8px 0 6px;
+  border-bottom: 1px solid var(--vcx-line);
+  background: var(--vcx-panel);
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-title"] {
+[data-component="session-review-v2"] [data-slot="session-review-v2-file-header"][data-scrolled] {
+  z-index: 2;
+  box-shadow: 0 10px 18px -14px rgba(0, 0, 0, 0.9);
+}
+
+/* Reading progress, filled as the diff scrolls. */
+[data-component="session-review-v2"] [data-slot="session-review-v2-file-header"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 100%;
+  height: 1px;
+  transform-origin: 0 50%;
+  transform: scaleX(var(--vcx-progress, 0));
+  background: linear-gradient(90deg, rgba(182, 159, 247, 0.2), rgba(146, 116, 236, 0.85));
+  pointer-events: none;
+}
+
+[data-slot="session-review-v2-file-header"] > [data-component="tooltip-v2-trigger"] {
+  flex: none;
+}
+
+[data-slot="session-review-v2-file-header"] button {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vcx-text-2);
+  cursor: pointer;
+}
+
+[data-slot="session-review-v2-file-header"] button:is(:hover, [aria-expanded="true"]) {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+[data-slot="session-review-v2-file-header"] button:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Icons follow their control's colour. */
+:is([data-slot="session-review-v2-file-header"], [data-slot="session-review-v2-next"]) [data-component="icon"] {
+  color: inherit;
+}
+
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-title"] {
+  display: grid;
+  flex: 1;
+  align-content: center;
+  min-width: 0;
+}
+
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-heading"] {
   display: flex;
-  flex-direction: row;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex: 1;
+  height: 15px;
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-header"] [data-component="diff-changes"] {
-  flex-shrink: 0;
-  margin-left: auto;
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-name"] {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vcx-text);
+  font: 500 13px/15px var(--vcx-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-status"] {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-path"] {
+  overflow: hidden;
+  color: var(--vcx-text-3);
+  font-size: 11.5px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-status"] {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font: 500 10.5px/13px var(--vcx-font);
+}
+
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-status"][data-type="added"] {
+  background: rgba(101, 199, 142, 0.12);
+  color: var(--vcx-add-text);
+}
+
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-status"][data-type="deleted"] {
+  background: rgba(230, 120, 125, 0.12);
+  color: var(--vcx-del-text);
+}
+
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-divider"] {
+  flex: none;
+  width: 1px;
   height: 16px;
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 530;
-  line-height: 1;
-  letter-spacing: -0.04px;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums lining-nums;
+  background: var(--vcx-border);
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-status"][data-type="added"] {
-  color: var(--icon-diff-add-base, var(--v2-state-fg-success));
-}
-
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-status"][data-type="deleted"] {
-  color: var(--icon-diff-delete-base, var(--v2-state-fg-danger));
-}
-
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-status"][data-type="modified"] {
-  color: var(--v2-state-fg-info);
-}
-
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-name"] {
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-pager"] {
+  display: flex;
   flex: none;
-  font-size: 13px;
-  font-weight: 530;
-  line-height: 1;
-  letter-spacing: -0.04px;
-  font-variant-numeric: tabular-nums lining-nums;
-  color: var(--v2-text-text-base);
-  white-space: nowrap;
+  align-items: center;
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-file-path"] {
-  flex: none;
-  font-size: 13px;
-  font-weight: 440;
-  line-height: 1;
-  letter-spacing: -0.04px;
-  font-variant-numeric: tabular-nums lining-nums;
-  color: var(--v2-text-text-muted);
-  white-space: nowrap;
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-pager"] button {
+  width: 24px;
+}
+
+[data-slot="session-review-v2-file-header"] [data-slot="session-review-v2-file-position"] {
+  min-width: 30px;
+  color: var(--vcx-text-3);
+  font: 11px var(--vcx-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 [data-component="session-review-v2"] [data-slot="session-review-v2-diff-scroll"] {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  padding: 10px 10px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
   --line-comment-z: 5;
   --line-comment-popover-z: 30;
   --line-comment-open-z: 6;
 }
 
-[data-component="session-review-v2"] .session-review-v2-toolbar-group--segments {
-  gap: 12px;
+/* `clip`, not `hidden`: the card must not become the virtualizer's scroll root or
+   break sticky positioning inside the diff. */
+[data-slot="session-review-v2-diff-scroll"] [data-slot="session-review-v2-diff-card"] {
+  overflow: clip;
+  border: 1px solid var(--vcx-border);
+  border-radius: 8px;
+  background: var(--vcx-diff);
 }
 
-[data-component="session-review-v2"] .session-review-v2-toolbar-group--segments .session-review-v2-segmented-control {
+[data-slot="session-review-v2-diff-scroll"] [data-slot="session-review-v2-diff-card"]:focus-within {
+  border-color: rgba(182, 159, 247, 0.16);
+}
+
+[data-slot="session-review-v2-diff-card"] [data-slot="session-review-v2-binary"] {
+  padding: 14px 12px;
+  color: var(--vcx-text-3);
+  font-size: 12px;
+}
+
+[data-slot="session-review-v2-diff-scroll"] [data-slot="session-review-v2-next-label"] {
+  margin: 16px 4px 0;
+  color: var(--vcx-text-3);
+  font-size: 11.5px;
+}
+
+[data-slot="session-review-v2-diff-scroll"] [data-slot="session-review-v2-next"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--vcx-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--vcx-text-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-slot="session-review-v2-diff-scroll"] [data-slot="session-review-v2-next"][data-done] {
+  margin-top: 16px;
+}
+
+[data-slot="session-review-v2-diff-scroll"] [data-slot="session-review-v2-next"]:hover {
+  border-color: rgba(182, 159, 247, 0.28);
+  background: rgba(182, 159, 247, 0.05);
+}
+
+[data-slot="session-review-v2-next"] > [data-component="icon"] {
+  color: var(--vcx-text-3);
+}
+
+[data-slot="session-review-v2-next"][data-done] > [data-component="icon"] {
+  color: var(--vcx-violet);
+}
+
+[data-slot="session-review-v2-next"] [data-slot="session-review-v2-next-name"] {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-slot="session-review-v2-next"] [data-slot="session-review-v2-next-name"] > span {
+  overflow: hidden;
+  color: var(--vcx-text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-slot="session-review-v2-next"] [data-slot="session-review-v2-next-done"] {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+
+[data-slot="session-review-v2-next"] [data-slot="session-review-v2-next-done"] > span {
+  color: var(--vcx-violet);
+}
+
+/* The "More" menu is portalled, outside the panel. */
+.session-review-v2-menu [data-slot="session-review-v2-menu-hint"] {
+  max-width: 220px;
+  margin: -2px 0 0;
+  padding: 0 12px 6px;
+  color: var(--v2-text-text-faint);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+/* ------------------------------------------------------------------------------------
+   Diff skin (light DOM). The shadow-DOM half is `reviewUnsafeCSS` in pierre/index.ts.
+   ------------------------------------------------------------------------------------ */
+
+/* ViewerShell sets styleVariables inline, so these overrides need !important. Custom
+   properties inherit into pierre's shadow DOM. */
+[data-component="session-review-v2"] .vector-review-diff {
+  --diffs-font-family: var(--vcx-mono) !important;
+  --diffs-font-size: 12px !important;
+  --diffs-line-height: 20px !important;
+  --diffs-font-features: "liga" 0, "calt" 0 !important;
+  --diffs-header-font-family: var(--vcx-font) !important;
+  --diffs-min-number-column-width: 3ch !important;
+  /* The Vector theme's background and foreground. */
+  --color-background-stronger: #121117;
+  --text-base: var(--vcx-code);
+  --syntax-keyword: #b69ff7;
+  --syntax-type: #a9b7f2;
+  --syntax-string: #d6a95c;
+  --syntax-regexp: #d6a95c;
+  --syntax-constant: #6ba6dd;
+  --syntax-comment: #878590;
+  --syntax-punctuation: #8f8c97;
+  --syntax-operator: #a8a6ad;
+  --syntax-primitive: #cdbefc;
+  --syntax-variable: #d6d3db;
+  --syntax-property: #d6d3db;
+  --syntax-object: #d6d3db;
+  --syntax-info: #8a84c9;
+  --syntax-unknown: #a8a6ad;
+  --syntax-critical: #e6787d;
+}
+
+/* A deleted file keeps its old line numbers; elsewhere a deleted row's shows on hover. */
+[data-component="session-review-v2"] .vector-review-diff.vector-review-deleted {
+  --vr-deleted-numbers: 1;
+}
+
+/* The card clips an outset ring. */
+[data-component="session-review-v2"] .vector-review-diff:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The gutter "+" (styled inline in comment-hover.ts), centred over the number column. */
+[data-component="session-review-v2"] .vector-review-diff [data-slot="line-comment-add"] {
+  top: 2px !important;
+  left: 0 !important;
+  width: 16px !important;
+  height: 16px !important;
+  border-radius: 4px !important;
+  background: #9274ec !important;
+  color: #fff !important;
+  box-shadow: 0 1px 6px rgba(146, 116, 236, 0.45) !important;
+  font: 600 12px/1 var(--vcx-font) !important;
+}
+
+/* Comment threads (slotted light DOM). */
+[data-component="session-review-v2"] .vector-review-diff [data-component="line-comment-v2"] {
   width: auto;
+  max-width: 560px;
+  margin: 6px 10px 8px 12px;
+  font-family: var(--vcx-font);
 }
 
 [data-component="session-review-v2"]
-  .session-review-v2-toolbar-group--segments
-  .session-review-v2-segmented-control--icon
-  [data-slot="segmented-control-v2-item"] {
-  flex: 0 0 auto;
+  .vector-review-diff
+  [data-component="line-comment-v2"]
+  [data-slot="line-comment-v2-shell"] {
+  padding: 10px 12px;
+  border: 1px solid rgba(182, 159, 247, 0.18);
+  border-radius: 8px;
+  background: var(--vcx-raised);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
 }
 
-[data-component="session-review-v2"] [data-slot="session-review-v2-empty"] {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  padding-bottom: 160px;
+[data-component="session-review-v2"]
+  .vector-review-diff
+  [data-component="line-comment-v2"][data-variant="editor"]
+  [data-slot="line-comment-v2-shell"] {
+  border-color: rgba(157, 132, 238, 0.55);
+  box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.12);
 }
+
+[data-component="session-review-v2"]
+  .vector-review-diff
+  [data-component="line-comment-v2"]
+  [data-slot="line-comment-v2-text"] {
+  color: #d6d3db;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+[data-component="session-review-v2"]
+  .vector-review-diff
+  [data-component="line-comment-v2"]
+  :is([data-slot="line-comment-v2-meta"], [data-slot="line-comment-v2-footer-meta"]) {
+  color: var(--vcx-text-3);
+  font: 11px var(--vcx-mono);
+}
+
+[data-component="session-review-v2"]
+  .vector-review-diff
+  [data-component="line-comment-v2"]
+  [data-slot="line-comment-v2-textarea"] {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: #141218;
+  color: var(--vcx-text);
+  font: 13px/19px var(--vcx-font);
+  caret-color: var(--vcx-violet);
+}
+
+/* The editor card's violet border already marks the focused editor; the field keeps
+   its quiet border instead of adding a third, blue frame. */
+[data-component="session-review-v2"]
+  .vector-review-diff
+  [data-component="line-comment-v2"]
+  [data-slot="line-comment-v2-textarea"]:focus {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-component="session-review-v2"]
+  .vector-review-diff
+  [data-slot="line-comment-v2-footer-actions"]
+  [data-component="button-v2"][data-variant="contrast"] {
+  height: 26px;
+  border-radius: 6px;
+  background: #9274ec;
+  box-shadow: none;
+  color: #fff;
+  text-shadow: none;
+}
+
+[data-component="session-review-v2"]
+  .vector-review-diff
+  [data-slot="line-comment-v2-footer-actions"]
+  [data-component="button-v2"][data-variant="contrast"]:hover:not(:disabled) {
+  background: #8466e0;
+}
+
+/* ------------------------------------------------------------------------------------
+   Empty states (no git, no changes)
+   ------------------------------------------------------------------------------------ */
 
 [data-slot="session-review-v2-empty-no-git"] {
   flex: 1;

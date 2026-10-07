@@ -165,12 +165,15 @@ html[data-vector-density="compact"] :is(.vector-bg-tasks, .vector-task-chip, .ve
    220px and overlaps the composer rather than vanish. Like the narrow sheet
    below, it is portalled to the body, where z-index 40 clears the sidebar
    and stays under dialogs and toasts. Only this floating frame casts a
-   shadow. */
+   shadow. With the Changes panel open it stands 16px left of it when the
+   conversation has room (the pane measures that into --bgt-float-right) and
+   glides with the panel once placed (data-settled), never in from the edge. */
 .vector-bg-tasks[data-floating] {
   position: fixed;
   top: calc(var(--bgt-float-top, 50px) + 10px);
-  right: 16px;
+  right: var(--bgt-float-right, 16px);
   z-index: 40;
+  max-width: calc(100vw - var(--bgt-float-right, 16px) - 16px);
   height: clamp(220px, calc(100vh - var(--bgt-float-top, 50px) - 190px), 640px);
   background: color-mix(in srgb, var(--bgt-pane) 92%, transparent);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
@@ -178,6 +181,12 @@ html[data-vector-density="compact"] :is(.vector-bg-tasks, .vector-task-chip, .ve
   box-shadow: var(--vx-shadow-float);
   transform-origin: 100% 0;
   animation: vector-bg-tasks-pop 160ms ease-out;
+}
+
+.vector-bg-tasks[data-floating][data-settled] {
+  transition:
+    right 240ms var(--vx-ease),
+    width 240ms var(--vx-ease);
 }
 
 html[data-vector-glass="false"] .vector-bg-tasks[data-floating] {
@@ -215,6 +224,7 @@ html[data-vector-glass="false"] .vector-bg-tasks[data-floating] {
     left: 8px;
     z-index: 40;
     width: auto;
+    max-width: none;
     height: min(72vh, 600px);
     margin: 0;
     border: 1px solid var(--vx-line-strong);
@@ -1206,6 +1216,7 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-card-toggle {
 @media (prefers-reduced-motion: reduce) {
   .vector-bg-tasks,
   .vector-bg-tasks[data-floating],
+  .vector-bg-tasks[data-floating][data-settled],
   .vector-bg-tasks-card,
   .vector-bg-tasks-card[data-new],
   :is(.vector-bg-tasks-square, .vector-task-chip-square)[data-status="running"],

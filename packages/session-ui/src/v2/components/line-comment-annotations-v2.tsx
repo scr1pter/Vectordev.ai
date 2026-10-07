@@ -23,6 +23,8 @@ type LineCommentControllerV2Props<T extends LineCommentShape> = {
   onDelete?: (comment: T) => void
   renderCommentActions?: (comment: T, controls: { edit: VoidFunction; remove: VoidFunction }) => JSX.Element
   editSubmitLabel?: string
+  /** After a draft or an edit is submitted or cancelled; its textarea has unmounted. */
+  onEditorClose?: VoidFunction
 }
 
 type CommentProps = {
@@ -95,6 +97,10 @@ function lineCommentDraftElementV2(view: Accessor<DraftProps>) {
 export function createLineCommentControllerV2<T extends LineCommentShape>(props: LineCommentControllerV2Props<T>) {
   const i18n = useI18n()
   const note = createLineCommentState<string>(props.state)
+  const closeEditor = () => {
+    note.cancelDraft()
+    props.onEditorClose?.()
+  }
 
   const annotations = createLineCommentAnnotations({
     comments: props.comments,
@@ -131,14 +137,14 @@ export function createLineCommentControllerV2<T extends LineCommentShape>(props:
                 },
                 selection: formatSelectedLineLabel(comment.selection, i18n.t),
                 onInput: note.setDraft,
-                onCancel: note.cancelDraft,
+                onCancel: closeEditor,
                 onSubmit: (value: string) => {
                   props.onUpdate?.({
                     id: comment.id,
                     comment: value,
                     selection: cloneSelectedLineRange(comment.selection),
                   })
-                  note.cancelDraft()
+                  closeEditor()
                 },
                 cancelLabel: i18n.t("ui.lineComment.cancel"),
                 submitLabel: props.editSubmitLabel,
@@ -158,10 +164,15 @@ export function createLineCommentControllerV2<T extends LineCommentShape>(props:
       },
       selection: formatSelectedLineLabel(range, i18n.t),
       onInput: note.setDraft,
-      onCancel: note.cancelDraft,
+      // A cancelled draft leaves nothing on its lines, so its selection goes too;
+      // left, it would read as a comment range.
+      onCancel: () => {
+        note.select(null)
+        closeEditor()
+      },
       onSubmit: (comment) => {
         props.onSubmit({ comment, selection: cloneSelectedLineRange(range) })
-        note.cancelDraft()
+        closeEditor()
       },
       cancelLabel: i18n.t("ui.lineComment.cancel"),
       submitLabel: i18n.t("ui.lineComment.submit"),

@@ -108,24 +108,44 @@ function Pane(props: { tasks: BackgroundTasks }) {
   // titlebar pushes it down by shrinking the stage that holds it, so both are
   // watched. Another root session can mount a new header, so it is looked up
   // again then (rootID is always set while the pane is shown).
-  const [floatTop, setFloatTop] = createSignal<number>()
+  //
+  // It hangs below the conversation's title bar too, when there is one, so it
+  // never covers the title's controls at the conversation's top right.
+  //
+  // It also stands clear of an open Changes panel (#review-panel): 16px left
+  // of the panel while the conversation leaves room for that and the 16px gap
+  // on its other side, else 16px from the window edge, over the panel. Its
+  // right edge glides as the panel opens, closes or resizes, but only once
+  // placed (`settled`), so it never slides in from the window edge.
+  const [float, setFloat] = createStore<{ top?: number; right?: number; settled: boolean }>({ settled: false })
   createEffect(() => {
     if (!pane.floating() || !tasks.rootID()) return
     const find = () => document.querySelector<HTMLElement>("[data-vector-session-header]")
     const place = () => {
       const header = find()
-      setFloatTop(header ? Math.round(header.getBoundingClientRect().bottom) : undefined)
+      const title = document.querySelector("[data-vector-session-conversation] [data-session-title]")
+      const bottom = Math.max(header?.getBoundingClientRect().bottom ?? 0, title?.getBoundingClientRect().bottom ?? 0)
+      const panel = document.getElementById("review-panel")
+      const edge = panel?.getAttribute("aria-hidden") === "true" ? undefined : panel?.getBoundingClientRect()
+      const start = document.querySelector("[data-vector-session-conversation]")?.getBoundingClientRect().left ?? 0
+      const clear = edge !== undefined && edge.width > 0 && edge.left - 32 - (aside?.offsetWidth ?? 0) >= start
+      setFloat({
+        top: bottom > 0 ? Math.round(bottom) : undefined,
+        right: clear ? Math.round(window.innerWidth - edge.left + 16) : 16,
+      })
     }
     let observer: ResizeObserver | undefined
     // A frame later, once a new session's header has rendered.
     const frame = requestAnimationFrame(() => {
       place()
+      setFloat("settled", true)
+      if (typeof ResizeObserver === "undefined") return
+      const resize = new ResizeObserver(place)
+      observer = resize
       const header = find()
-      if (!header || typeof ResizeObserver === "undefined") return
-      observer = new ResizeObserver(place)
-      observer.observe(header)
-      const stage = header.closest<HTMLElement>("[data-vector-main-stage]")
-      if (stage) observer.observe(stage)
+      const stage = header?.closest<HTMLElement>("[data-vector-main-stage]")
+      const panel = document.getElementById("review-panel")
+      for (const element of [header, stage, panel, aside]) if (element) resize.observe(element)
     })
     place()
     window.addEventListener("resize", place)
@@ -133,6 +153,7 @@ function Pane(props: { tasks: BackgroundTasks }) {
       cancelAnimationFrame(frame)
       observer?.disconnect()
       window.removeEventListener("resize", place)
+      setFloat("settled", false)
     })
   })
 
@@ -141,15 +162,11 @@ function Pane(props: { tasks: BackgroundTasks }) {
     focusLauncher()
   }
 
+  // Esc closes in both modes; the dock button is the way to dock.
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || event.defaultPrevented) return
     event.preventDefault()
     event.stopPropagation()
-    if (pane.floating()) {
-      pane.setFloating(false)
-      focusLauncher()
-      return
-    }
     close()
   }
 
@@ -252,7 +269,11 @@ function Pane(props: { tasks: BackgroundTasks }) {
       data-docked={pane.floating() ? undefined : ""}
       data-floating={pane.floating() ? "" : undefined}
       data-expanded={pane.expanded() ? "" : undefined}
-      style={{ "--bgt-float-top": floatTop() === undefined ? undefined : `${floatTop()}px` }}
+      data-settled={float.settled ? "" : undefined}
+      style={{
+        "--bgt-float-top": float.top === undefined ? undefined : `${float.top}px`,
+        "--bgt-float-right": float.right === undefined ? undefined : `${float.right}px`,
+      }}
       aria-labelledby="vector-bg-tasks-title"
       onKeyDown={onKeyDown}
     >

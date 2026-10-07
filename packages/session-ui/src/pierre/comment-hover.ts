@@ -12,6 +12,7 @@ export function createHoverCommentUtility(props: {
 
   const button = document.createElement("button")
   button.type = "button"
+  button.dataset.slot = "line-comment-add"
   button.ariaLabel = props.label
   button.textContent = "+"
   button.style.width = "20px"

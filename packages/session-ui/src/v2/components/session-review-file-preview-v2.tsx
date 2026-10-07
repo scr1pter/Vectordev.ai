@@ -1,13 +1,16 @@
 import { getDirectory, getFilename } from "@vectordevai/core/util/path"
 import type { SelectedLineRange } from "@pierre/diffs"
-import { DiffChanges } from "@vectordevai/ui/v2/diff-changes-v2"
-import { FileIcon } from "@vectordevai/ui/file-icon"
+import { makeEventListener } from "@solid-primitives/event-listener"
+import { createResizeObserver } from "@solid-primitives/resize-observer"
+import type { FileContent, SnapshotFileDiff, VcsFileDiff } from "@vectordevai/sdk/v2"
 import { useFileComponent } from "@vectordevai/ui/context/file"
 import { useI18n } from "@vectordevai/ui/context/i18n"
-import { mediaKindFromPath } from "../../pierre/media"
-import { cloneSelectedLineRange, previewSelectedLines } from "../../pierre/selection-bridge"
-import type { FileContent, SnapshotFileDiff, VcsFileDiff } from "@vectordevai/sdk/v2"
-import { createEffect, createMemo, onCleanup, Show, untrack } from "solid-js"
+import { Icon } from "@vectordevai/ui/icon"
+import { KeybindV2 } from "@vectordevai/ui/v2/keybind-v2"
+import { LineCommentV2OverflowIcon } from "@vectordevai/ui/v2/line-comment-v2"
+import { MenuV2 } from "@vectordevai/ui/v2/menu-v2"
+import { TooltipV2 } from "@vectordevai/ui/v2/tooltip-v2"
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { Dynamic } from "solid-js/web"
 import { normalize, text, type ViewDiff } from "../../components/session-diff"
@@ -20,10 +23,17 @@ import type {
   SessionReviewFocus,
   SessionReviewLineComment,
 } from "../../components/session-review"
-import type { SessionReviewExpandMode } from "./session-review-v2"
+import { reviewDiffOptions, reviewVirtualMetrics } from "../../pierre"
+import { mediaKindFromPath } from "../../pierre/media"
+import { cloneSelectedLineRange, previewSelectedLines } from "../../pierre/selection-bridge"
 import { createLineCommentControllerV2 } from "./line-comment-annotations-v2"
-import { LineCommentV2OverflowIcon } from "@vectordevai/ui/v2/line-comment-v2"
-import { MenuV2 } from "@vectordevai/ui/v2/menu-v2"
+import {
+  editable,
+  overlay,
+  reviewChangeStarts,
+  scrollToReviewChange,
+  type SessionReviewExpandMode,
+} from "./session-review-v2"
 import "./session-review-v2.css"
 
 type ReviewDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff
@@ -31,8 +41,18 @@ type ReviewDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff
 export type SessionReviewFilePreviewV2Props = {
   file: string
   diff: ReviewDiff
+  /** The reviewable diffs in list order; the pager and the "Next in Changes" card step through them. */
+  diffs?: ReviewDiff[]
+  /** The chosen style. Below `SPLIT_MIN_WIDTH` the reader renders unified whatever it is. */
   diffStyle: SessionReviewDiffStyle
+  onDiffStyleChange?: (style: SessionReviewDiffStyle) => void
   expandMode?: SessionReviewExpandMode
+  onExpandModeChange?: (mode: SessionReviewExpandMode) => void
+  onSelectFile?: (file: string) => void
+  /** Back to the list: the header's Back button and the last file's "All reviewed" card. */
+  onCloseFile?: () => void
+  /** Opens the file in the editor. */
+  onOpenFile?: (file: string) => void
   readFile?: (path: string) => Promise<FileContent | undefined>
   onLineComment?: (comment: SessionReviewLineComment) => void
   onLineCommentUpdate?: (comment: SessionReviewCommentUpdate) => void
@@ -43,17 +63,13 @@ export type SessionReviewFilePreviewV2Props = {
   onFocusedCommentChange?: (focus: SessionReviewFocus | null) => void
 }
 
-function statusLabel(status: ViewDiff["status"]) {
-  if (status === "added") return "A"
-  if (status === "deleted") return "D"
-  return "M"
-}
+/** Split view needs a reader this wide (its full width, as an 840px panel gives it); a narrower one renders unified. */
+const SPLIT_MIN_WIDTH = 820
 
-function statusType(status: ViewDiff["status"]) {
-  if (status === "added") return "added"
-  if (status === "deleted") return "deleted"
-  return "modified"
-}
+const STATUS_KEY = {
+  added: "ui.sessionReviewV2.newFile",
+  deleted: "ui.sessionReviewV2.deletedFile",
+} as const
 
 function selectionSide(range: SelectedLineRange) {
   return range.endSide ?? range.side ?? "additions"
@@ -97,7 +113,12 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
   const i18n = useI18n()
   const fileComponent = useFileComponent()
   let scrollRef: HTMLDivElement | undefined
+  let headerRef: HTMLDivElement | undefined
+  let backRef: HTMLButtonElement | undefined
   let focusToken = 0
+  let scrollFrame = 0
+  // Undefined until mounted, so the diff renders once in the right style.
+  const [width, setWidth] = createSignal<number>()
 
   const [store, setStore] = createStore({
     selection: null as SelectedLineRange | null,
@@ -114,6 +135,14 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
   const comments = createMemo(() => (props.comments ?? []).filter((comment) => comment.file === props.file))
   const commentedLines = createMemo(() => comments().map((comment) => comment.selection))
   const lineCommentsEnabled = () => props.onLineComment != null
+  const position = createMemo(() => (props.diffs ?? []).findIndex((diff) => diff.file === props.file))
+  const sibling = (offset: -1 | 1) => (position() < 0 ? undefined : props.diffs?.[position() + offset])
+  const wide = () => (width() ?? 0) >= SPLIT_MIN_WIDTH
+  const changeStarts = createMemo(() => reviewChangeStarts(view().fileDiff))
+  const status = () => {
+    const value = view().status
+    if (value === "added" || value === "deleted") return value
+  }
 
   const commentsUi = createLineCommentControllerV2<SessionReviewComment>({
     comments,
@@ -151,6 +180,14 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
         file: props.file,
       })
     },
+    // Closing an editor unmounts its textarea and drops focus on the body, where the
+    // reader's keys still work but mod+F would search the chat: hand it to the diff.
+    onEditorClose: () =>
+      requestAnimationFrame(() => {
+        const active = document.activeElement
+        if (active && active !== document.body) return
+        scrollRef?.querySelector<HTMLElement>('[data-component="file"]')?.focus({ preventScroll: true })
+      }),
     editSubmitLabel: props.lineCommentActions?.saveLabel,
     renderCommentActions: props.lineCommentActions
       ? (comment, controls) => (
@@ -161,7 +198,53 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
 
   onCleanup(() => {
     focusToken++
+    cancelAnimationFrame(scrollFrame)
   })
+
+  onMount(() => {
+    if (!scrollRef) return
+    const scroll = scrollRef
+    setWidth(scroll.offsetWidth)
+    createResizeObserver(scroll, () => setWidth(scroll.offsetWidth))
+    // Take focus only from the view this reader replaced: unmounting the list or the
+    // previous file leaves focus on the body. A file opened from elsewhere (the
+    // timeline, the tree) must not pull focus out of the composer.
+    const active = document.activeElement
+    const root = scrollRef.closest('[data-component="session-review-v2"]')
+    if (active && active !== document.body && !root?.contains(active)) return
+    backRef?.focus({ preventScroll: true })
+  })
+
+  // The header lifts off the body and fills its progress rule as the diff scrolls.
+  const onScroll = () => {
+    if (scrollFrame) return
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0
+      if (!scrollRef || !headerRef) return
+      const max = scrollRef.scrollHeight - scrollRef.clientHeight
+      headerRef.toggleAttribute("data-scrolled", scrollRef.scrollTop > 0)
+      headerRef.style.setProperty("--vcx-progress", `${max > 0 ? Math.min(scrollRef.scrollTop / max, 1) : 0}`)
+    })
+  }
+
+  const seekChange = (direction: -1 | 1) => {
+    if (scrollRef) scrollToReviewChange(scrollRef, direction, changeStarts())
+  }
+
+  // [ and ] jump between changes (the menu advertises them). Capture phase, like the
+  // panel's < and >, so the session's type-to-focus never takes the key to the composer.
+  makeEventListener(
+    document,
+    "keydown",
+    (event) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.key !== "[" && event.key !== "]") return
+      if (editable(event.target) || overlay(event.target)) return
+      event.preventDefault()
+      seekChange(event.key === "[" ? -1 : 1)
+    },
+    { capture: true },
+  )
 
   createEffect(() => {
     const focus = props.focusedComment
@@ -194,8 +277,12 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
       const scrollTo = (attempt: number) => {
         if (token !== focusToken) return
         const anchor = scrollRef?.querySelector(`[data-comment-id="${focus.id}"]`)
-        if (anchor instanceof HTMLElement) {
-          anchor.scrollIntoView({ block: "center" })
+        if (scrollRef && anchor instanceof HTMLElement) {
+          // Centre it in the reader only: scrollIntoView would also scroll every
+          // scrollable ancestor, and the session route (overflow hidden, taller than
+          // the window while the terminal is mounted) would shift up off-screen.
+          const top = anchor.getBoundingClientRect().top - scrollRef.getBoundingClientRect().top
+          scrollRef.scrollTop += top + anchor.offsetHeight / 2 - scrollRef.clientHeight / 2
           return
         }
         if (attempt >= 120) return
@@ -215,9 +302,13 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
     <Dynamic
       component={fileComponent}
       mode="diff"
+      {...reviewDiffOptions}
+      class="vector-review-diff"
+      classList={{ "vector-review-deleted": view().status === "deleted" }}
+      virtualMetrics={reviewVirtualMetrics}
       fileDiff={view().fileDiff}
       preloadedDiff={view().preloaded}
-      diffStyle={props.diffStyle}
+      diffStyle={wide() && props.diffStyle === "split" ? "split" : "unified"}
       expandUnchanged={expandUnchanged()}
       hunkSeparators={view().fileDiff.isPartial ? "simple" : "line-info-basic"}
       enableLineSelection={lineCommentsEnabled()}
@@ -247,36 +338,200 @@ export function SessionReviewFilePreviewV2(props: SessionReviewFilePreviewV2Prop
 
   return (
     <>
-      <div data-slot="session-review-v2-file-header">
+      <div ref={headerRef} data-slot="session-review-v2-file-header">
+        <Show when={props.onCloseFile}>
+          <TooltipV2 value={withKey(i18n.t("ui.sessionReviewV2.backToChanges"), "Esc")}>
+            <button
+              ref={backRef}
+              type="button"
+              data-slot="session-review-v2-back"
+              aria-label={i18n.t("ui.sessionReviewV2.backToChanges")}
+              onClick={() => props.onCloseFile?.()}
+            >
+              <Icon name="arrow-left" size="small" />
+            </button>
+          </TooltipV2>
+        </Show>
         <div data-slot="session-review-v2-file-title">
-          <div data-slot="session-review-v2-file-status" data-type={statusType(view().status)}>
-            {statusLabel(view().status)}
+          <div data-slot="session-review-v2-file-heading">
+            <span data-slot="session-review-v2-file-name">{getFilename(props.file)}</span>
+            <Show when={status()}>
+              {(value) => (
+                <span data-slot="session-review-v2-file-status" data-type={value()}>
+                  {i18n.t(STATUS_KEY[value()])}
+                </span>
+              )}
+            </Show>
           </div>
-          <FileIcon node={{ path: props.file, type: "file" }} />
-          <span data-slot="session-review-v2-file-name">{getFilename(props.file)}</span>
           <Show when={props.file.includes("/")}>
             <span data-slot="session-review-v2-file-path">{getDirectory(props.file)}</span>
           </Show>
         </div>
-        <DiffChanges changes={view()} />
+        {/* A new or deleted file has only one side to count. */}
+        <Show when={status() !== "deleted"}>
+          <span data-slot="session-review-v2-add">+{view().additions}</span>
+        </Show>
+        <Show when={status() !== "added"}>
+          <span data-slot="session-review-v2-del">−{view().deletions}</span>
+        </Show>
+        <Show when={position() >= 0}>
+          <span data-slot="session-review-v2-file-divider" aria-hidden="true" />
+          <div
+            data-slot="session-review-v2-file-pager"
+            role="group"
+            aria-label={i18n.t("ui.sessionReviewV2.filesInChanges")}
+          >
+            <TooltipV2 value={withKey(i18n.t("ui.sessionReviewV2.previousFile"), "<")}>
+              <button
+                type="button"
+                aria-label={i18n.t("ui.sessionReviewV2.previousFile")}
+                disabled={!sibling(-1)}
+                onClick={() => {
+                  const previous = sibling(-1)
+                  if (previous) props.onSelectFile?.(previous.file)
+                }}
+              >
+                <Icon name="chevron-down" size="small" style={{ transform: "rotate(180deg)" }} />
+              </button>
+            </TooltipV2>
+            <span data-slot="session-review-v2-file-position">
+              {position() + 1}/{props.diffs?.length ?? 0}
+            </span>
+            <TooltipV2 value={withKey(i18n.t("ui.sessionReviewV2.nextFile"), ">")}>
+              <button
+                type="button"
+                aria-label={i18n.t("ui.sessionReviewV2.nextFile")}
+                disabled={!sibling(1)}
+                onClick={() => {
+                  const next = sibling(1)
+                  if (next) props.onSelectFile?.(next.file)
+                }}
+              >
+                <Icon name="chevron-down" size="small" />
+              </button>
+            </TooltipV2>
+          </div>
+        </Show>
+        <Show when={props.onOpenFile}>
+          <TooltipV2 value={i18n.t("ui.sessionReviewV2.openInEditor")}>
+            <button
+              type="button"
+              aria-label={i18n.t("ui.sessionReviewV2.openInEditor")}
+              onClick={() => props.onOpenFile?.(props.file)}
+            >
+              <Icon name="open-file" size="small" />
+            </button>
+          </TooltipV2>
+        </Show>
+        <MenuV2 gutter={4} placement="bottom-end">
+          <TooltipV2 value={i18n.t("ui.sessionReviewV2.moreActions")}>
+            <MenuV2.Trigger as="button" type="button" aria-label={i18n.t("ui.sessionReviewV2.moreActions")}>
+              <Icon name="dot-grid" size="small" />
+            </MenuV2.Trigger>
+          </TooltipV2>
+          <MenuV2.Portal>
+            <MenuV2.Content class="session-review-v2-menu">
+              <Show when={props.onExpandModeChange}>
+                <MenuV2.CheckboxItem
+                  checked={expandUnchanged()}
+                  onChange={(checked) => props.onExpandModeChange?.(checked ? "expand" : "collapse")}
+                >
+                  {i18n.t("ui.sessionReviewV2.showFullFile")}
+                </MenuV2.CheckboxItem>
+              </Show>
+              <Show when={props.onDiffStyleChange}>
+                {/* Checked only when it shows: a persisted split stays unified below the width. */}
+                <MenuV2.CheckboxItem
+                  checked={wide() && props.diffStyle === "split"}
+                  disabled={!wide()}
+                  onChange={(checked) => props.onDiffStyleChange?.(checked ? "split" : "unified")}
+                >
+                  {i18n.t("ui.sessionReviewV2.splitView")}
+                </MenuV2.CheckboxItem>
+                <Show when={!wide()}>
+                  <p data-slot="session-review-v2-menu-hint">{i18n.t("ui.sessionReviewV2.splitNeedsWidth")}</p>
+                </Show>
+              </Show>
+              <Show when={props.onExpandModeChange || props.onDiffStyleChange}>
+                <MenuV2.Separator />
+              </Show>
+              <MenuV2.Item shortcut="[" onSelect={() => seekChange(-1)}>
+                {i18n.t("ui.sessionReviewV2.previousChange")}
+              </MenuV2.Item>
+              <MenuV2.Item shortcut="]" onSelect={() => seekChange(1)}>
+                {i18n.t("ui.sessionReviewV2.nextChange")}
+              </MenuV2.Item>
+              <MenuV2.Separator />
+              <MenuV2.Item onSelect={() => navigator.clipboard?.writeText(props.file).catch(() => {})}>
+                {i18n.t("ui.sessionReviewV2.copyPath")}
+              </MenuV2.Item>
+            </MenuV2.Content>
+          </MenuV2.Portal>
+        </MenuV2>
       </div>
-      <div
-        ref={(el) => {
-          scrollRef = el
-        }}
-        data-slot="session-review-v2-diff-scroll"
-      >
-        <Show
-          when={diffCanRender() || mediaKind()}
-          fallback={
-            <div data-slot="session-review-v2-empty">
-              <span class="text-12-regular text-text-weak">{i18n.t("ui.fileMedia.binary.title")}</span>
-            </div>
-          }
-        >
-          {diffViewer()}
+      <div ref={scrollRef} data-slot="session-review-v2-diff-scroll" onScroll={onScroll}>
+        <div data-slot="session-review-v2-diff-card">
+          <Show when={width() !== undefined}>
+            <Show
+              when={diffCanRender() || mediaKind()}
+              fallback={<div data-slot="session-review-v2-binary">{i18n.t("ui.fileMedia.binary.title")}</div>}
+            >
+              {diffViewer()}
+            </Show>
+          </Show>
+        </div>
+        <Show when={position() >= 0}>
+          <Show
+            when={sibling(1)}
+            fallback={
+              <Show when={props.onCloseFile}>
+                <button
+                  type="button"
+                  data-slot="session-review-v2-next"
+                  data-done=""
+                  onClick={() => props.onCloseFile?.()}
+                >
+                  <Icon name="check" size="small" />
+                  <span data-slot="session-review-v2-next-done">
+                    {i18n.t("ui.sessionReviewV2.endOfChanges")}
+                    <span> · {i18n.t("ui.sessionReviewV2.backToChanges")}</span>
+                  </span>
+                </button>
+              </Show>
+            }
+          >
+            {(next) => (
+              <>
+                <p data-slot="session-review-v2-next-label">{i18n.t("ui.sessionReviewV2.nextInChanges")}</p>
+                <button
+                  type="button"
+                  data-slot="session-review-v2-next"
+                  onClick={() => props.onSelectFile?.(next().file)}
+                >
+                  <span data-slot="session-review-v2-next-name">
+                    {getFilename(next().file)}
+                    <Show when={next().file.includes("/")}>
+                      <span>{getDirectory(next().file)}</span>
+                    </Show>
+                  </span>
+                  <span data-slot="session-review-v2-add">+{next().additions}</span>
+                  <span data-slot="session-review-v2-del">−{next().deletions}</span>
+                  <Icon name="arrow-right" size="small" />
+                </button>
+              </>
+            )}
+          </Show>
         </Show>
       </div>
+    </>
+  )
+}
+
+function withKey(label: string, key: string): JSX.Element {
+  return (
+    <>
+      {label}
+      <KeybindV2 keys={[key]} variant="neutral" />
     </>
   )
 }

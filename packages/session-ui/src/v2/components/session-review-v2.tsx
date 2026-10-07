@@ -1,322 +1,211 @@
-import { IconButton } from "@vectordevai/ui/icon-button"
-import { useI18n } from "@vectordevai/ui/context/i18n"
-import { SegmentedControlItemV2, SegmentedControlV2 } from "@vectordevai/ui/v2/segmented-control-v2"
-import { TextInputV2 } from "@vectordevai/ui/v2/text-input-v2"
-import { KeybindV2 } from "@vectordevai/ui/v2/keybind-v2"
-import { Icon } from "@vectordevai/ui/v2/icon"
-import { IconButtonV2 } from "@vectordevai/ui/v2/icon-button-v2"
-import { TooltipV2 } from "@vectordevai/ui/v2/tooltip-v2"
-import type { SessionReviewDiffStyle } from "../../components/session-review"
-import { ResizeHandle } from "@vectordevai/ui/resize-handle"
-import { ScrollView } from "@vectordevai/ui/scroll-view"
+import type { FileDiffMetadata } from "@pierre/diffs"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js"
+import { Show, createEffect, on, type JSX } from "solid-js"
+import { getViewerRoot } from "../../pierre/file-runtime"
+import { sessionReviewRowID } from "./session-review-list-v2"
 import "./session-review-v2.css"
-
-export const SESSION_REVIEW_V2_SIDEBAR_WIDTH_DEFAULT = 240
-export const SESSION_REVIEW_V2_SIDEBAR_WIDTH_MIN = 200
-export const SESSION_REVIEW_V2_SIDEBAR_WIDTH_MAX = 480
 
 export type SessionReviewExpandMode = "expand" | "collapse"
 
 export type SessionReviewV2Props = {
-  title?: JSX.Element
-  stats?: JSX.Element
-  empty?: JSX.Element
-  sidebarOpen?: boolean
-  sidebar?: JSX.Element
-  sidebarToggle?: JSX.Element
+  /** The Changes list (`SessionReviewListV2`), shown while no file is open. */
+  list?: JSX.Element
+  /** The reader for `activeFile` (`SessionReviewFilePreviewV2`). */
+  preview?: JSX.Element
+  /** The open file. The panel shows the reader exactly when this is set. */
   activeFile?: string
+  /** The file the reader showed last; `<` / `>` in the list step from it. */
+  lastOpened?: string
+  /** Files in list order, for `<` / `>`. */
   files: string[]
   onSelectFile: (file: string) => void
-  diffStyle: SessionReviewDiffStyle
-  onDiffStyleChange?: (style: SessionReviewDiffStyle) => void
-  expandMode: SessionReviewExpandMode
-  onExpandModeChange: (mode: SessionReviewExpandMode) => void
-  preview?: JSX.Element
+  /** Back to the list (button or Esc). */
+  onCloseFile?: () => void
   hasDiffs: boolean
 }
 
-export type SessionReviewV2SidebarProps = {
-  open: boolean
-  title?: JSX.Element
-  stats?: JSX.Element
-  filter: string
-  onFilterChange: (value: string) => void
-  onFilterKeyDown?: JSX.EventHandlerUnion<HTMLInputElement, KeyboardEvent>
-  width?: number
-  onWidthChange?: (width: number) => void
-  minWidth?: number
-  maxWidth?: number
-  children?: JSX.Element
-}
-
-export function SessionReviewV2Sidebar(props: SessionReviewV2SidebarProps) {
-  const i18n = useI18n()
-  const [resizing, setResizing] = createSignal(false)
-  const width = () => props.width ?? SESSION_REVIEW_V2_SIDEBAR_WIDTH_DEFAULT
-  const minWidth = () => props.minWidth ?? SESSION_REVIEW_V2_SIDEBAR_WIDTH_MIN
-  const maxWidth = () => props.maxWidth ?? SESSION_REVIEW_V2_SIDEBAR_WIDTH_MAX
-
-  createEffect(() => {
-    if (!resizing()) return
-    const stop = () => setResizing(false)
-    makeEventListener(document, "pointerup", stop)
-    makeEventListener(document, "pointercancel", stop)
-  })
-
-  return (
-    <div data-component="session-review-v2-sidebar-root">
-      <aside
-        data-slot="session-review-v2-sidebar"
-        data-resizing={resizing() ? "" : undefined}
-        aria-hidden={!props.open}
-        inert={!props.open}
-        style={{ width: props.open ? `${width()}px` : "0px" }}
-      >
-        <Show when={props.open}>
-          <div data-slot="session-review-v2-sidebar-header">
-            <div data-slot="session-review-v2-sidebar-title">{props.title}</div>
-            {props.stats}
-          </div>
-          <div data-slot="session-review-v2-sidebar-filter">
-            <TextInputV2
-              type="search"
-              value={props.filter}
-              onInput={(event) => props.onFilterChange(event.currentTarget.value)}
-              onKeyDown={props.onFilterKeyDown}
-              showClearButton={props.filter.length > 0}
-              clearLabel={i18n.t("ui.list.clearFilter")}
-              onClearClick={() => props.onFilterChange("")}
-              placeholder={i18n.t("ui.sessionReviewV2.filterFiles")}
-              aria-label={i18n.t("ui.sessionReviewV2.filterFiles")}
-              leadingIcon={
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 14 14"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M12.25 12.25L10.0625 10.0625M11.0833 6.41667C11.0833 8.994 8.994 11.0833 6.41667 11.0833C3.83934 11.0833 1.75 8.994 1.75 6.41667C1.75 3.83934 3.83934 1.75 6.41667 1.75C8.994 1.75 11.0833 3.83934 11.0833 6.41667Z"
-                    stroke="currentColor"
-                    stroke-linecap="square"
-                  />
-                </svg>
-              }
-            />
-          </div>
-          <ScrollView data-slot="session-review-v2-sidebar-tree" class="group/file-tree-v2" thumbVisibility="scroll">
-            {props.children}
-          </ScrollView>
-        </Show>
-      </aside>
-      <Show when={props.open && props.onWidthChange}>
-        <div data-slot="session-review-v2-sidebar-resize" onPointerDown={() => setResizing(true)}>
-          <ResizeHandle
-            direction="horizontal"
-            size={width()}
-            min={minWidth()}
-            max={maxWidth()}
-            onResize={(next) => props.onWidthChange?.(next)}
-          />
-        </div>
-      </Show>
-    </div>
-  )
-}
-
 export function SessionReviewV2(props: SessionReviewV2Props) {
-  const i18n = useI18n()
+  let root: HTMLDivElement | undefined
 
-  const fileIndex = () => {
-    const files = props.files
-    if (files.length === 0) return -1
-
-    const active = props.activeFile
-    const i = active ? files.indexOf(active) : -1
-    if (i >= 0) return i
-    return 0
-  }
-
-  const prev = () => {
+  // From the reader `<` / `>` step from the open file; from the list they open the
+  // file before or after the last one read, or the last or first file.
+  const neighbor = (direction: -1 | 1) => {
     const files = props.files
     if (files.length === 0) return
-    return files[(fileIndex() - 1 + files.length) % files.length]
+    const anchor = props.activeFile ?? props.lastOpened
+    const index = anchor ? files.indexOf(anchor) : -1
+    if (index < 0) return direction > 0 ? files[0] : files.at(-1)
+    return files[(index + direction + files.length) % files.length]
   }
 
-  const next = () => {
-    const files = props.files
-    if (files.length === 0) return
-    return files[(fileIndex() + 1) % files.length]
-  }
+  // The pager tooltips advertise < and >; keep them working while the panel is
+  // mounted, but never while typing or in a menu or dialog. The capture phase puts
+  // this ahead of the session's type-to-focus, which skips a handled key; in the
+  // bubble phase the first key would page and move focus to the composer, and the
+  // second would be typed there. The reader handles [ and ] the same way.
+  makeEventListener(
+    document,
+    "keydown",
+    (event) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.key !== "<" && event.key !== ">") return
+      if (editable(event.target) || overlay(event.target) || !props.hasDiffs) return
+      const file = neighbor(event.key === "<" ? -1 : 1)
+      if (!file) return
+      event.preventDefault()
+      props.onSelectFile(file)
+    },
+    { capture: true },
+  )
 
-  const canCycle = () => props.files.length > 0
-  const showCollapsedMeta = () => props.sidebarOpen === false
-  // Memoize slot getters so Show conditions do not instantiate throwaway elements.
-  const title = createMemo(() => props.title)
-  const stats = createMemo(() => props.stats)
-
-  const cycle = (file: string | undefined) => {
-    if (!file) return
-    props.onSelectFile(file)
-  }
-
-  // The prev/next tooltips advertise < and >; keep the keys working while the
-  // pane is mounted, but never while typing in an input or comment editor.
+  // Esc goes Back from the reader. Bubble phase, so the find bar, comment editors
+  // and menus handle their own Esc first; preventDefault tells the side panel this
+  // Esc is spent, so only a second Esc closes the panel. Listening on the document
+  // also catches the Esc that follows a click on something unfocusable in the
+  // reader, which leaves focus on the body.
   makeEventListener(document, "keydown", (event) => {
-    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return
-    if (event.key !== "<" && event.key !== ">") return
+    if (event.key !== "Escape" || event.defaultPrevented || !props.activeFile || !props.onCloseFile) return
     const target = event.target
-    if (target instanceof HTMLElement && (target.isContentEditable || target.closest("input, textarea, select"))) return
-    if (!props.hasDiffs || !canCycle()) return
+    if (target !== document.body && !(target instanceof Node && root?.contains(target))) return
+    if (editable(target)) return
+    if (target instanceof Element && target.closest('[data-component="line-comment-v2"]')) return
+    if (document.querySelector('[data-component="file-search"], [role="menu"], [role="listbox"], [role="dialog"]'))
+      return
+    // An open comment editor takes the Esc first, as it does from its textarea.
+    const editor = root?.querySelector('[data-component="line-comment-v2"][data-variant="editor"]')
+    if (editor) {
+      event.preventDefault()
+      editor
+        .querySelector<HTMLElement>('[data-slot="line-comment-v2-footer-actions"] [data-variant="neutral"]')
+        ?.click()
+      return
+    }
     event.preventDefault()
-    cycle(event.key === "<" ? prev() : next())
+    props.onCloseFile()
   })
 
-  return (
-    <div data-component="session-review-v2">
-      <div data-slot="session-review-v2-body">
-        {props.sidebar}
+  // Back unmounts the reader and with it the focused control: hand focus to the row
+  // of the file just read, unless the user has moved focus elsewhere meanwhile. Not
+  // deferred: `on` records the previous file only from its first run, and a panel that
+  // mounts on a file must still know which row to focus on the first Back.
+  createEffect(
+    on(
+      () => props.activeFile,
+      (file, previous) => {
+        if (file || !previous) return
+        const active = document.activeElement
+        if (active && active !== document.body && !root?.contains(active)) return
+        requestAnimationFrame(() => {
+          const row = root?.querySelector<HTMLElement>(
+            `#${sessionReviewRowID(previous)} > [data-slot="session-review-v2-file-row"]`,
+          )
+          row?.focus({ preventScroll: true })
+          row?.scrollIntoView({ block: "nearest" })
+        })
+      },
+    ),
+  )
 
-        <div data-slot="session-review-v2-preview">
-          <Show when={props.hasDiffs} fallback={props.empty}>
-            <div data-slot="session-review-v2-toolbar">
-              <div data-slot="session-review-v2-toolbar-group" class="session-review-v2-toolbar-group--start">
-                {props.sidebarToggle}
-                <Show when={showCollapsedMeta()}>
-                  <div data-slot="session-review-v2-toolbar-collapsed-meta">
-                    <Show when={title()}>
-                      <div data-slot="session-review-v2-toolbar-title">{title()}</div>
-                    </Show>
-                    {stats()}
-                    <Show when={canCycle()}>
-                      <span data-slot="session-review-v2-file-position">
-                        {fileIndex() + 1}/{props.files.length}
-                      </span>
-                    </Show>
-                  </div>
-                </Show>
-                <div data-slot="session-review-v2-toolbar-group">
-                  <TooltipV2
-                    openDelay={2000}
-                    value={
-                      <>
-                        {i18n.t("ui.sessionReviewV2.previousFile")}
-                        <KeybindV2 keys={["<"]} variant="neutral" />
-                      </>
-                    }
-                  >
-                    <IconButton
-                      icon="arrow-left"
-                      variant="ghost"
-                      size="small"
-                      class="session-review-v2-file-nav-button"
-                      disabled={!canCycle()}
-                      onClick={() => {
-                        const file = prev()
-                        if (!file) return
-                        props.onSelectFile(file)
-                      }}
-                      aria-label={i18n.t("ui.sessionReviewV2.previousFile")}
-                    />
-                  </TooltipV2>
-                  <TooltipV2
-                    openDelay={2000}
-                    value={
-                      <>
-                        {i18n.t("ui.sessionReviewV2.nextFile")}
-                        <KeybindV2 keys={[">"]} variant="neutral" />
-                      </>
-                    }
-                  >
-                    <IconButton
-                      icon="arrow-right"
-                      variant="ghost"
-                      size="small"
-                      class="session-review-v2-file-nav-button"
-                      disabled={!canCycle()}
-                      onClick={() => {
-                        const file = next()
-                        if (!file) return
-                        props.onSelectFile(file)
-                      }}
-                      aria-label={i18n.t("ui.sessionReviewV2.nextFile")}
-                    />
-                  </TooltipV2>
-                </div>
-              </div>
-              <div data-slot="session-review-v2-toolbar-group" class="session-review-v2-toolbar-group--segments">
-                <SegmentedControlV2
-                  value={props.expandMode}
-                  onChange={(value) => {
-                    if (value !== "expand" && value !== "collapse") return
-                    props.onExpandModeChange(value)
-                  }}
-                  class="session-review-v2-segmented-control session-review-v2-segmented-control--icon"
-                  aria-label={i18n.t("ui.sessionReviewV2.expandMode")}
-                >
-                  <TooltipV2 openDelay={2000} value={i18n.t("ui.sessionReviewV2.showAllLines")}>
-                    <SegmentedControlItemV2 value="expand" aria-label={i18n.t("ui.sessionReviewV2.showAllLines")}>
-                      <Icon name="expand" />
-                    </SegmentedControlItemV2>
-                  </TooltipV2>
-                  <TooltipV2 openDelay={2000} value={i18n.t("ui.sessionReviewV2.hideNonDiffLines")}>
-                    <SegmentedControlItemV2 value="collapse" aria-label={i18n.t("ui.sessionReviewV2.hideNonDiffLines")}>
-                      <Icon name="collapse" />
-                    </SegmentedControlItemV2>
-                  </TooltipV2>
-                </SegmentedControlV2>
-                <Show when={props.onDiffStyleChange}>
-                  <SegmentedControlV2
-                    value={props.diffStyle}
-                    onChange={(value) => {
-                      if (value !== "unified" && value !== "split") return
-                      props.onDiffStyleChange?.(value)
-                    }}
-                    class="session-review-v2-segmented-control session-review-v2-segmented-control--icon"
-                    aria-label={i18n.t("ui.sessionReviewV2.diffView")}
-                  >
-                    <TooltipV2 openDelay={2000} value={i18n.t("ui.sessionReviewV2.unifiedDiff")}>
-                      <SegmentedControlItemV2 value="unified" aria-label={i18n.t("ui.sessionReviewV2.unifiedDiff")}>
-                        <Icon name="unified" />
-                      </SegmentedControlItemV2>
-                    </TooltipV2>
-                    <TooltipV2 openDelay={2000} value={i18n.t("ui.sessionReviewV2.splitDiff")}>
-                      <SegmentedControlItemV2 value="split" aria-label={i18n.t("ui.sessionReviewV2.splitDiff")}>
-                        <Icon name="split" />
-                      </SegmentedControlItemV2>
-                    </TooltipV2>
-                  </SegmentedControlV2>
-                </Show>
-              </div>
-            </div>
-            <Show when={props.activeFile} fallback={<div data-slot="session-review-v2-empty">{props.empty}</div>}>
-              {props.preview}
-            </Show>
-          </Show>
-        </div>
+  return (
+    <div ref={root} data-component="session-review-v2" data-view={props.activeFile ? "file" : "list"}>
+      <div data-slot="session-review-v2-body">
+        <Show when={props.activeFile} fallback={props.list}>
+          {/* mod+F anywhere in the reader (Back, the header) finds in its diff. */}
+          <div data-slot="session-review-v2-preview" data-find-scope>
+            {props.preview}
+          </div>
+        </Show>
       </div>
     </div>
   )
 }
 
-export function SessionReviewV2SidebarToggle(props: { opened: boolean; onToggle: () => void }) {
-  const i18n = useI18n()
+const CHANGE_OFFSET = 8
+// Pierre renders 1000px beyond each edge of the viewport, so a page this long leaves
+// no unrendered gap between two looks.
+const CHANGE_PAGE_OVERLAP = 600
+const CHANGE_PAGES = 100
+// A newer `[` / `]` takes over from a search still paging.
+let changeSeek = 0
 
-  return (
-    <TooltipV2 value={i18n.t("ui.sessionReviewV2.toggleSidebar")}>
-      <IconButtonV2
-        variant="ghost"
-        size="small"
-        class="session-review-v2-sidebar-toggle"
-        aria-label={i18n.t("ui.sessionReviewV2.toggleSidebar")}
-        aria-expanded={props.opened}
-        onClick={props.onToggle}
-        icon={<Icon name="filetree" />}
-      />
-    </TooltipV2>
+/**
+ * Scrolls the reader to the start of the previous or next change block (`[` / `]`).
+ * A block starts at a changed line whose previous line is not a change. Pierre
+ * virtualizes long diffs, so when no block is rendered in that direction this pages
+ * toward it and looks again, and puts the scroll back if there is none. `starts` are
+ * the unified line indexes of every change block (`reviewChangeStarts`): paging
+ * happens only while one lies beyond the rendered rows, so the last change does not
+ * scroll through the rest of the file and back.
+ */
+export function scrollToReviewChange(scroll: HTMLElement, direction: -1 | 1, starts: readonly number[]) {
+  const origin = scroll.scrollTop
+  const token = ++changeSeek
+  const seek = (page: number) => {
+    if (token !== changeSeek) return
+    const top = scroll.getBoundingClientRect().top - scroll.scrollTop
+    const target = changeStarts(scroll)
+      .map((line) => line.getBoundingClientRect().top - top - CHANGE_OFFSET)
+      .toSorted((a, b) => a - b)
+      .filter((y) => (direction > 0 ? y > origin + 1 : y < origin - 1))
+      .at(direction > 0 ? 0 : -1)
+    if (target !== undefined) {
+      scroll.scrollTop = target
+      return
+    }
+    const room = direction > 0 ? scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop : scroll.scrollTop
+    if (room <= 0 || page >= CHANGE_PAGES || !beyond(scroll, direction, starts)) {
+      scroll.scrollTop = origin
+      return
+    }
+    scroll.scrollTop += direction * (scroll.clientHeight + CHANGE_PAGE_OVERLAP)
+    // The virtualizer renders on the frame after the scroll event; look on the one after.
+    requestAnimationFrame(() => requestAnimationFrame(() => seek(page + 1)))
+  }
+  seek(0)
+}
+
+/** The unified line index where each change block starts, as pierre numbers rows. */
+export function reviewChangeStarts(diff: FileDiffMetadata) {
+  return diff.hunks.flatMap((hunk) => {
+    let index = hunk.unifiedLineStart
+    return hunk.hunkContent.flatMap((block) => {
+      const start = index
+      index += block.type === "context" ? block.lines : block.deletions + block.additions
+      return block.type === "change" ? [start] : []
+    })
+  })
+}
+
+// Whether a change block starts past the rendered rows in this direction. Rows carry
+// `data-line-index="<unified>,<split>"`; with none rendered yet, assume there is.
+function beyond(scroll: HTMLElement, direction: -1 | 1, starts: readonly number[]) {
+  const indexes = Array.from(getViewerRoot(scroll)?.querySelectorAll("[data-line-index]") ?? [])
+    .map((row) => Number.parseInt(row.getAttribute("data-line-index") ?? "", 10))
+    .filter((index) => !Number.isNaN(index))
+  if (indexes.length === 0) return true
+  const edge = direction > 0 ? Math.max(...indexes) : Math.min(...indexes)
+  return starts.some((start) => (direction > 0 ? start > edge : start < edge))
+}
+
+function changeStarts(scroll: HTMLElement) {
+  const root = getViewerRoot(scroll)
+  if (!root) return []
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-line][data-line-type^="change"]')).filter(
+    (line) => !previousLine(line)?.dataset.lineType?.startsWith("change"),
   )
+}
+
+function previousLine(line: HTMLElement) {
+  for (let el = line.previousElementSibling; el; el = el.previousElementSibling) {
+    if (el instanceof HTMLElement && el.hasAttribute("data-line")) return el
+  }
+}
+
+export function editable(target: EventTarget | null) {
+  return target instanceof HTMLElement && (target.isContentEditable || !!target.closest("input, textarea, select"))
+}
+
+/** Inside a menu, listbox or dialog, whose keys are its own. */
+export function overlay(target: EventTarget | null) {
+  return target instanceof Element && !!target.closest('[role="menu"], [role="listbox"], [role="dialog"]')
 }

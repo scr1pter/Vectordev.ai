@@ -7,7 +7,7 @@ import {
   textPartID,
 } from "./session-timeline-benchmark.fixture"
 import { startTimelineProfile } from "./session-timeline-profile"
-import { createReviewDiffs } from "./timeline-test-helpers"
+import { createReviewDiffs, expandReviewFile } from "./timeline-test-helpers"
 import {
   collectTimelineStreamMetrics,
   installTimelineStreamProbe,
@@ -23,6 +23,7 @@ type TimelineStreamOptions = {
 type ReviewPaneSample = {
   observedAtMs: number
   panelVisible: boolean
+  list: boolean
   header: string
   diffViewers: number
   diffLines: number
@@ -185,22 +186,31 @@ async function runTimelineStreamBenchmark(page: Page, options: TimelineStreamOpt
 
 async function measureReviewPaneLoad(page: Page, file: string) {
   // Default git mode reads the mocked /vcs/diff data, so opening the pane is enough
-  // and the flow works across review pane implementations.
+  // to show the Changes list.
   await installReviewPaneProbe(page, { file })
   await startReviewPaneProbe(page)
   await page.getByRole("button", { name: "Toggle review" }).click()
   await expect(page.locator("#review-panel")).toBeVisible()
-  return collectReviewPaneProbe(page)
+  const list = await collectReviewPaneProbe(page)
+
+  // The list opens a file from its row's snippet: expand the row, then time the
+  // snippet click until the reader shows the diff.
+  const snippet = await expandReviewFile(page, file)
+  await installReviewPaneProbe(page, { file, reader: true })
+  await startReviewPaneProbe(page)
+  await snippet.click()
+  const reader = await collectReviewPaneProbe(page)
+  return { list, reader }
 }
 
 async function measureReviewNextFile(page: Page, file: string) {
-  await installReviewPaneProbe(page, { file })
+  await installReviewPaneProbe(page, { file, reader: true })
   await startReviewPaneProbe(page)
   await page.getByRole("button", { name: "Next file" }).click()
   return collectReviewPaneProbe(page)
 }
 
-async function installReviewPaneProbe(page: Page, input: { file: string }) {
+async function installReviewPaneProbe(page: Page, input: { file: string; reader?: boolean }) {
   await page.evaluate((input) => {
     const samples: ReviewPaneSample[] = []
     const basename = input.file.split(/[\\/]/).at(-1) ?? input.file
@@ -216,6 +226,7 @@ async function installReviewPaneProbe(page: Page, input: { file: string }) {
         '[data-slot="session-review-v2-file-header"]',
       )?.textContent
       const header = previewHeader ?? text
+      const list = !!panel?.querySelector('[data-slot="session-review-v2-list"]')
       const viewers = panel ? [...panel.querySelectorAll<HTMLElement>('[data-component="file"][data-mode="diff"]')] : []
       const codeBlocks = panel?.querySelectorAll("code").length ?? 0
       const diffLines = viewers.reduce(
@@ -228,12 +239,15 @@ async function installReviewPaneProbe(page: Page, input: { file: string }) {
         !!panel && panel.getAttribute("aria-hidden") !== "true" && !!rect && rect.width > 0 && rect.height > 0
       return {
         panelVisible,
+        list,
         header: header.slice(0, 500),
         diffViewers: viewers.length,
         diffLines,
         codeBlocks,
         ready:
           panelVisible &&
+          // The list also names the file, so a reader measurement waits for its header.
+          (!input.reader || previewHeader !== undefined) &&
           header.includes(basename) &&
           (viewers.length > 0 || text.includes("+3") || diffLines > 0 || codeBlocks > 0),
       }

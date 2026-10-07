@@ -79,6 +79,8 @@ benchmark.describe("performance: home and task navigation", () => {
     report(result)
     expect(result.contentBeforeReview).toBe(true)
     await expect(page.locator('[data-component="session-review-v2"]')).toBeVisible()
+    // No file is open yet, so the review body is the Changes list.
+    await expect(page.locator('#review-panel [data-slot="session-review-v2-list"]')).toBeVisible()
   })
 
   benchmark("closes the only task and paints home", async ({ page, report }) => {

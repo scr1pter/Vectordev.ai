@@ -27,7 +27,6 @@ import { createStore } from "solid-js/store"
 import type { SessionReviewLineComment } from "@vectordevai/session-ui/session-review"
 import { ResizeHandle } from "@vectordevai/ui/resize-handle"
 import { Select } from "@vectordevai/ui/select"
-import { SelectV2 } from "@vectordevai/ui/v2/select-v2"
 import { isScrollKeyTarget, scrollKey, scrollKeyOwner } from "@vectordevai/ui/scroll-view"
 import { Tabs } from "@vectordevai/ui/tabs"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
@@ -1071,9 +1070,13 @@ export default function Page() {
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
+    // A key another handler took (the Changes panel's < > [ ]) is spent, and the
+    // Changes panel keeps typed keys to itself rather than sending them to the composer.
+    if (event.defaultPrevented) return
     const path = event.composedPath()
     const target = path.find((item): item is HTMLElement => item instanceof HTMLElement)
     const activeElement = deepActiveElement()
+    if ([target, activeElement].some((item) => item?.closest("#review-panel"))) return
 
     const protectedTarget = path.some(
       (item) => item instanceof HTMLElement && item.closest("[data-prevent-autofocus]") !== null,
@@ -1208,24 +1211,20 @@ export default function Page() {
     )
   }
 
-  const changesTitleV2 = () => {
-    if (!canReview()) {
-      return null
+  // The Changes list's footer: what the list compares, and the commit action.
+  const reviewFooterV2 = () => {
+    if (!hasReview()) return null
+    const note = () => {
+      if (store.changes === "git") return language.t("ui.sessionReviewV2.note.git")
+      if (store.changes === "branch")
+        return language.t("ui.sessionReviewV2.note.branch", { branch: sync().data.vcs?.default_branch ?? "" })
+      return language.t("ui.sessionReviewV2.note.turn")
     }
-
     return (
-      <div class="flex min-w-0 max-w-full flex-wrap items-center gap-1">
-        <SelectV2
-          appearance="inline"
-          options={changesOptions()}
-          current={store.changes}
-          label={changesLabel}
-          placement="bottom-start"
-          gutter={6}
-          onSelect={(option) => option && setStore("changes", option)}
-        />
+      <>
+        <span>{note()}</span>
         {commitAction()}
-      </div>
+      </>
     )
   }
 
@@ -1276,8 +1275,9 @@ export default function Page() {
   }
 
   const reviewEmptyV2 = () => {
+    // The list styles its empty slot; the loading text needs no classes of its own.
     if ((store.changes === "git" || store.changes === "branch") && !reviewReady()) {
-      return <div class="px-6 py-4 text-text-weak">{language.t("session.review.loadingChanges")}</div>
+      return language.t("session.review.loadingChanges")
     }
     if (store.changes === "turn" && nogit()) {
       return <SessionReviewEmptyNoGitV2 pending={gitMutation.isPending} onInitGit={initGit} />
@@ -1319,16 +1319,26 @@ export default function Page() {
   )
 
   const reviewV2State = createReviewPanelV2State()
+  // Session tabs share this route instance; the list's filter, expanded rows, scroll
+  // and last-read file belong to the session they were set in.
+  createEffect(on(sessionKey, () => reviewV2State.reset(), { defer: true }))
 
   // Getters defer reactive reads to the consuming scope. Eager reads here ran inside
   // the side panel's Show children and remounted the whole review panel on unrelated
   // updates such as session switches.
   const reviewPanelV2Props = () => ({
-    get title() {
-      return changesTitleV2()
+    get mode() {
+      return store.changes
     },
+    get modes() {
+      return changesOptions()
+    },
+    onModeChange: (mode: ChangeMode) => setStore("changes", mode),
     get empty() {
       return reviewEmptyV2()
+    },
+    get footer() {
+      return reviewFooterV2()
     },
     diffs: reviewDiffs,
     diffsReady: reviewReady,
@@ -1336,6 +1346,8 @@ export default function Page() {
       return tree.activeDiff
     },
     onSelectFile: focusReviewDiff,
+    onCloseFile: () => setTree({ activeDiff: undefined, pendingDiff: undefined }),
+    onOpenFile: openReviewFile,
     get diffStyle() {
       return layout.review.diffStyle()
     },

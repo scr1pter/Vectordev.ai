@@ -764,6 +764,14 @@
     outline-offset: 2px;
   }
 
+  /* The Changes panel's fields are framed already: the filter by its TextInputV2,
+     the comment textarea by the editor card around it. */
+  [data-vector-shell]
+    [data-component="session-review-v2"]
+    :is([data-slot="text-input-v2-input"], [data-slot="line-comment-v2-textarea"]):focus-visible {
+    outline: none !important;
+  }
+
   html[data-vector-density="compact"] [data-vector-shell] [data-component="session-prompt-dock"] {
     max-width: min(960px, calc(100vw - 184px));
     border-radius: 0 !important;
@@ -943,6 +951,17 @@
   src: url("/assets/Inter.ttf") format("truetype");
   font-weight: 100 900;
   font-style: normal;
+}
+
+/* Inter set to SF Pro's width, as the landing page's replica of the Changes panel
+   sets it: where the panel falls back from SF Pro, its text breaks and lines up as
+   it does on a Mac. */
+@font-face {
+  font-family: "Vector Review Inter";
+  src: url("/assets/Inter.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  size-adjust: 95%;
 }
 
 @media (display-mode: standalone) {

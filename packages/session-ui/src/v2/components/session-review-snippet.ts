@@ -9,54 +9,55 @@ export type ReviewSnippet = {
   more?: { unit: "hunks" | "lines"; count: number }
 }
 
+type HunkBlock = FileDiffMetadata["hunks"][number]["hunkContent"][number]
+
 const MAX_ROWS = 6
 const LEADING_CONTEXT = 2
 
 /**
- * The short preview a Changes row expands to: the first hunk's header, up to two
- * context lines before its first change block, that block, and trailing context,
- * capped at six rows. Rows carry the " ", "+" or "-" prefix as text, like the
- * landing page replica. Undefined when the diff has no hunks.
+ * The short preview a Changes row expands to: the first hunk's header (with its
+ * function context when the patch has one), up to two context lines before its
+ * first change block, then that block and whatever follows it in the hunk, capped
+ * at six rows, without blank trailing context. Rows carry the " ", "+" or "-"
+ * prefix as text, like the landing page replica. Undefined when the diff has no hunks.
  */
 export function reviewSnippet(diff: FileDiffMetadata): ReviewSnippet | undefined {
   const hunk = diff.hunks[0]
   if (!hunk) return
 
   const blocks = hunk.hunkContent
-  const first = blocks.findIndex((block) => block.type === "change")
-  const change = blocks[first]
+  // A hunk without a change block (context only) previews its first lines.
+  const first = Math.max(
+    0,
+    blocks.findIndex((block) => block.type === "change"),
+  )
   const before = blocks[first - 1]
-  const after = blocks[first + 1]
-
-  const leading =
-    before?.type === "context"
-      ? range(Math.max(0, before.lines - LEADING_CONTEXT), before.lines).map((i) =>
-          row("ctx", diff.additionLines[before.additionLineIndex + i]),
-        )
-      : []
-  const changed =
-    change?.type === "change"
-      ? [
-          ...range(0, change.deletions).map((i) => row("del", diff.deletionLines[change.deletionLineIndex + i])),
-          ...range(0, change.additions).map((i) => row("add", diff.additionLines[change.additionLineIndex + i])),
-        ]
-      : []
-  const trailing =
-    after?.type === "context"
-      ? range(0, after.lines).map((i) => row("ctx", diff.additionLines[after.additionLineIndex + i]))
-      : []
-  // A hunk without a change block (context only) still previews its first lines.
-  const context =
-    first < 0 && blocks[0]?.type === "context"
-      ? range(0, blocks[0].lines).map((i) => row("ctx", diff.additionLines[blocks[0]!.additionLineIndex + i]))
-      : []
-  const rows = [...leading, ...changed, ...trailing, ...context].slice(0, MAX_ROWS)
+  const leading = before?.type === "context" ? blockRows(diff, before, before.lines - LEADING_CONTEXT) : []
+  const shown = blocks
+    .slice(first)
+    .reduce((rows, block) => (rows.length >= MAX_ROWS ? rows : [...rows, ...blockRows(diff, block)]), leading)
+    .slice(0, MAX_ROWS)
+  // Blank trailing context only pads a six-row preview.
+  const rows = shown.slice(0, shown.findLastIndex((row) => row.kind !== "ctx" || row.text.trim() !== "") + 1)
+  const specs = `@@ -${hunk.deletionStart},${hunk.deletionCount} +${hunk.additionStart},${hunk.additionCount} @@`
 
   return {
-    header: `@@ -${hunk.deletionStart},${hunk.deletionCount} +${hunk.additionStart},${hunk.additionCount} @@`,
+    header: hunk.hunkContext ? `${specs} ${hunk.hunkContext}` : specs,
     rows,
     more: more(diff, rows.length),
   }
+}
+
+/** A block's rows from `start` on; a change block lists its deletions before its additions. */
+function blockRows(diff: FileDiffMetadata, block: HunkBlock, start = 0): ReviewSnippetRow[] {
+  if (block.type === "context")
+    return range(Math.max(0, start), block.lines).map((i) =>
+      row("ctx", diff.additionLines[block.additionLineIndex + i]),
+    )
+  return [
+    ...range(0, block.deletions).map((i) => row("del", diff.deletionLines[block.deletionLineIndex + i])),
+    ...range(0, block.additions).map((i) => row("add", diff.additionLines[block.additionLineIndex + i])),
+  ]
 }
 
 function more(diff: FileDiffMetadata, shown: number): ReviewSnippet["more"] {
