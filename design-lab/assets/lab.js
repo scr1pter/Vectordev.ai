@@ -7,6 +7,10 @@
 // Designs add their own behaviour in a <script> at the end of their page.
 
 ;(function () {
+  // The site's root, found from this script's own address, so every link works from a
+  // folder on disk (file://) as well as on Vercel (where .html links redirect to clean URLs).
+  const root = new URL("../", document.currentScript.src).href
+  const page = (path) => (path === "" ? `${root}index.html` : `${root}${path}.html`)
   const icons = () => window.LAB_ICONS ?? {}
 
   function svg(name, size) {
@@ -51,7 +55,7 @@
     const branch = nav.dataset.branch ?? "main"
     const links = (window.LAB_LINKS ?? {})
     const item = (it) => {
-      const href = links[it.id]
+      const href = links[it.id] ? page(links[it.id]) : undefined
       const tag = href ? "a" : "p"
       const cls = `sb-item${it.id === active ? " is-active" : ""}`
       return `<${tag} class="${cls}"${href ? ` href="${href}"` : ""}>${svg(it.icon, 13)}<span>${it.name}</span>${it.kbd ? `<kbd>${it.kbd}</kbd>` : ""}</${tag}>`
@@ -64,7 +68,7 @@
     nav.outerHTML = `<aside class="sb" aria-label="Vector sidebar">
       <div class="sb-top"><div class="sb-mode" aria-hidden="true"><span class="is-on">Agent</span><span>Editor</span></div><span class="sb-icon-btn">${svg("sidebar-hide", 15)}</span></div>
       ${groups.replace("</div>", `</div><div class="sb-projects"><p class="sb-label" style="padding-left:4px">Projects</p><p class="sb-project">${svg("caret", 13)}<span class="sb-project-mark">${svg("project", 11)}</span><span style="flex:1">Vectordev.ai</span><span class="muted" style="font-size:11px">3</span></p><div class="sb-row${active === "workspace" ? " is-active" : ""}"><span class="muted">${svg("branch", 15)}</span><span class="sb-row-text"><span class="sb-row-name">${workspace}</span><span class="sb-row-sub">${branch} · Ready</span></span></div></div>`)}
-      <div class="sb-foot"><span>Vector workspace</span><span class="sb-icon-btn">${svg("help", 13)}</span><a class="sb-icon-btn${active === "settings" ? " is-active" : ""}" ${links.settings ? `href="${links.settings}"` : ""} style="${active === "settings" ? "color:var(--violet-bright)" : ""}">${svg("settings", 13)}</a></div>
+      <div class="sb-foot"><span>Vector workspace</span><span class="sb-icon-btn">${svg("help", 13)}</span><a class="sb-icon-btn${active === "settings" ? " is-active" : ""}" ${links.settings ? `href="${page(links.settings)}"` : ""} style="${active === "settings" ? "color:var(--violet-bright)" : ""}">${svg("settings", 13)}</a></div>
     </aside>`
   }
 
@@ -120,14 +124,14 @@
     const prev = list[index - 1]
     const next = list[index + 1]
     bar.className = "lab-topbar"
-    bar.innerHTML = `<a href="../">← All designs</a><span class="lab-num">${num}</span><h1>${design.title}</h1><span class="badge">${design.area}</span><span class="lab-spacer"></span><span class="lab-pager">${prev ? `<a class="btn btn-sm" href="./${prev.slug}">← D${String(prev.number).padStart(2, "0")}</a>` : ""}${next ? `<a class="btn btn-sm" href="./${next.slug}">D${String(next.number).padStart(2, "0")} →</a>` : ""}</span>`
+    bar.innerHTML = `<a href="${page("")}">← All designs</a><span class="lab-num">${num}</span><h1>${design.title}</h1><span class="badge">${design.area}</span><span class="lab-spacer"></span><span class="lab-pager">${prev ? `<a class="btn btn-sm" href="${page(`designs/${prev.slug}`)}">← D${String(prev.number).padStart(2, "0")}</a>` : ""}${next ? `<a class="btn btn-sm" href="${page(`designs/${next.slug}`)}">D${String(next.number).padStart(2, "0")} →</a>` : ""}</span>`
     const note = document.querySelector("[data-lab-note]")
     if (note) note.innerHTML = `<strong>The idea:</strong> ${design.idea}`
     const title = document.querySelector(".lab-bar-title")
     if (title) title.textContent = `Vector — ${design.title}`
   }
 
-  window.LabUI = { svg, renderIcons, fit, wire }
+  window.LabUI = { svg, renderIcons, fit, wire, page }
 
   document.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll("nav[data-lab-sidebar]").forEach(renderSidebar)

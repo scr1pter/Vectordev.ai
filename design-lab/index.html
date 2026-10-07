@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Vector Design Lab</title>
-    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/assets/lab.css" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/lab.css" />
     <style>
       .lab-card-thumb {
         overflow: hidden;
@@ -46,7 +46,7 @@
           to change.
         </p>
         <div class="lab-nav">
-          <a class="btn btn-primary" href="/ideas">Ideas for Vector →</a>
+          <a class="btn btn-primary" href="ideas.html">Ideas for Vector →</a>
         </div>
       </section>
 
@@ -56,12 +56,12 @@
       <div class="lab-grid" data-grid></div>
     </main>
 
-    <script src="/assets/icons.js"></script>
-    <script src="/assets/registry/review.js"></script>
-    <script src="/assets/registry/connections.js"></script>
-    <script src="/assets/registry/settings.js"></script>
-    <script src="/assets/registry/agents.js"></script>
-    <script src="/assets/lab.js"></script>
+    <script src="assets/icons.js"></script>
+    <script src="assets/registry/review.js"></script>
+    <script src="assets/registry/connections.js"></script>
+    <script src="assets/registry/settings.js"></script>
+    <script src="assets/registry/agents.js"></script>
+    <script src="assets/lab.js"></script>
     <script>
       const designs = (window.LAB_DESIGNS ?? []).toSorted((a, b) => a.number - b.number)
       const areas = ["All", ...new Set(designs.map((d) => d.area))]
@@ -76,8 +76,8 @@
         grid.innerHTML = shown
           .map((d) => {
             const num = `D${String(d.number).padStart(2, "0")}`
-            return `<a class="lab-card" href="/designs/${d.slug}">
-              <div class="lab-card-thumb"><img src="/assets/thumbs/${d.slug}.png" alt="" loading="lazy" onerror="this.parentElement.remove()" /></div>
+            return `<a class="lab-card" href="designs/${d.slug}.html">
+              <div class="lab-card-thumb"><img src="assets/thumbs/${d.slug}.png" alt="" loading="lazy" onerror="this.parentElement.remove()" /></div>
               <div class="lab-card-top"><span class="lab-num badge badge-violet mono">${num}</span><span class="badge">${esc(d.area)}</span></div>
               <h2>${esc(d.title)}</h2>
               <p>${esc(d.summary)}</p>
