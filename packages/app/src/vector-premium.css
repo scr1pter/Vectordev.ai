@@ -2944,10 +2944,6 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
   background: var(--vx-stage);
 }
 
-[data-vector-session-conversation]:has(+ [data-vector-review-panel][aria-hidden="false"]) {
-  border-right-color: var(--vx-line);
-}
-
 [data-vector-session-panel] {
   background: var(--vx-stage) !important;
 }
@@ -3031,6 +3027,12 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
 }
 
 [data-vector-review-panel] {
+  /* The replica's sans stack: SF on a Mac, else the bundled Inter at 95% (index.css). */
+  --vx-review-tab-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Vector Review Inter", Inter, "Segoe UI", system-ui, sans-serif;
+  /* Bold digits for the count badge: SF Mono on a Mac; elsewhere Inter, since only the
+     regular face of the bundled mono ships and a synthesized bold reads thin. */
+  --vx-review-digits: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Vector Review Inter", Inter, sans-serif;
   border-left: 1px solid var(--vx-line) !important;
   border-radius: 0 !important;
   background: #17151c !important;
@@ -3056,6 +3058,187 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
 [data-vector-review-panel] [data-slot="tabs-list"] {
   border-bottom-color: var(--vx-line) !important;
   background: #211e28 !important;
+}
+
+/* The side panel's tab strip (the landing page replica): the tabs and the panel's
+ * close sit on a darker block at the strip's start, the rest of the strip is
+ * lighter, and the active tab is a filled chip underlined flush with the strip's
+ * bottom edge. Every tab of the strip (Changes, Browser, files) takes the chip; the
+ * file-tree column's pill tabs keep their own look.
+ *
+ * The strip clips its overflow, and a border sits outside the clip, where the
+ * chip's underline could never cover it. So the bottom rule is an inset shadow on
+ * the strip and on each full-height block in it, which the underline paints over. */
+[data-vector-review-panel] [data-component="tabs"][data-variant="normal"] [data-slot="tabs-list"] {
+  --vx-review-strip-rule: inset 0 -1px 0 rgba(226, 213, 237, 0.07);
+  height: 43px;
+  gap: 8px;
+  padding-left: 12px;
+  border-bottom: 0 !important;
+  background: #16151c !important;
+  box-shadow: var(--vx-review-strip-rule);
+}
+
+/* The lighter rest of the strip; the negative margin takes back the gap after the
+ * panel's close, whose own padding already ends the darker block. */
+[data-vector-review-panel] [data-component="tabs"][data-variant="normal"] [data-slot="tabs-list"]::after {
+  content: "";
+  display: block;
+  flex: 1 0 0;
+  align-self: stretch;
+  height: auto;
+  margin-left: -8px;
+  border: 0;
+  background: #221e29;
+  box-shadow: var(--vx-review-strip-rule);
+}
+
+[data-vector-review-panel] [data-component="tabs"][data-variant="normal"] [data-slot="tabs-trigger-wrapper"] {
+  position: relative;
+  gap: 7px;
+  height: 24px;
+  margin: 0;
+  padding: 0 3px 0 5px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #a8a6ad;
+  font: 400 14px var(--vx-review-tab-font);
+}
+
+/* A tab without a close button keeps the chip's padding even on both sides. */
+[data-vector-review-panel]
+  [data-component="tabs"][data-variant="normal"]
+  [data-slot="tabs-trigger-wrapper"]:not(:has([data-slot="tabs-trigger-close-button"])) {
+  padding-right: 5px;
+}
+
+[data-vector-review-panel]
+  [data-component="tabs"][data-variant="normal"]
+  [data-slot="tabs-trigger-wrapper"]:hover:not(:has([data-slot="tabs-trigger"][data-selected])) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-vector-review-panel]
+  [data-component="tabs"][data-variant="normal"]
+  [data-slot="tabs-trigger-wrapper"]:has([data-slot="tabs-trigger"][data-selected]) {
+  background: #231f2a;
+}
+
+/* The 24px chip centres 9.5px above the strip's bottom edge, so the underline lands
+ * on that edge and covers the rule under the chip. */
+[data-vector-review-panel] [data-component="tabs"][data-variant="normal"] [data-slot="tabs-trigger-wrapper"]::after {
+  right: 0;
+  bottom: -9.5px;
+  left: 0;
+  height: 1.5px;
+  background: #e2dfe7;
+}
+
+[data-vector-review-panel] [data-component="tabs"][data-variant="normal"] [data-slot="tabs-trigger"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  color: #a8a6ad;
+  font: 400 14px var(--vx-review-tab-font);
+}
+
+[data-vector-review-panel]
+  [data-component="tabs"][data-variant="normal"]
+  [data-slot="tabs-trigger"]:is([data-selected], :hover) {
+  color: #ebe7ee;
+}
+
+[data-vector-review-panel]
+  [data-component="tabs"][data-variant="normal"]
+  [data-slot="tabs-trigger-wrapper"]:has([data-slot="tabs-trigger"]:focus-visible) {
+  outline: 2px solid #9d84ee;
+  outline-offset: 1px;
+}
+
+[data-vector-review-panel] [data-component="icon"]:has(> [data-slot="review-tab-icon"]) {
+  width: 14px;
+  height: 14px;
+}
+
+[data-vector-review-panel] [data-slot="review-tab-icon"] {
+  width: 100%;
+  height: 100%;
+  color: #b3a1f2;
+}
+
+[data-vector-review-panel] [data-slot="review-tab-count"] {
+  min-width: 13px;
+  margin-left: 2px;
+  padding: 2px 3px;
+  border-radius: 4px;
+  background: rgba(182, 159, 247, 0.14);
+  color: #b69ff7;
+  font: 600 10px/1 var(--vx-review-digits);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+[data-vector-review-panel] [data-slot="review-panel-close"] {
+  align-self: stretch;
+  padding: 0 8px 0 5px;
+  background: #16151c !important;
+  box-shadow: var(--vx-review-strip-rule);
+}
+
+/* The shared strip fades tabs under the sticky close over 16px; with the 8px gap
+ * here that fade would wash out the end of the chip and its underline. */
+[data-vector-review-panel] [data-slot="review-panel-close"]::before {
+  display: none;
+}
+
+[data-vector-review-panel]
+  [data-component="tabs"][data-variant="normal"]
+  [data-slot="tabs-trigger-close-button"]
+  [data-component="icon-button"] {
+  width: 16px;
+  height: 16px;
+  margin: 0 0 0 -2px;
+  border-radius: 6px;
+  color: #878590;
+}
+
+[data-vector-review-panel]
+  [data-component="tabs"][data-variant="normal"]
+  [data-slot="tabs-trigger-close-button"]
+  [data-component="icon"] {
+  width: 14px;
+  height: 14px;
+}
+
+[data-vector-review-panel] [data-slot="review-panel-close"] [data-component="icon-button"] {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: #a8a6ad;
+}
+
+[data-vector-review-panel]
+  :is(
+    [data-component="tabs"][data-variant="normal"] [data-slot="tabs-trigger-close-button"],
+    [data-slot="review-panel-close"]
+  )
+  [data-component="icon-button"]
+  [data-slot="icon-svg"] {
+  color: inherit;
+}
+
+[data-vector-review-panel]
+  :is(
+    [data-component="tabs"][data-variant="normal"] [data-slot="tabs-trigger-close-button"],
+    [data-slot="review-panel-close"]
+  )
+  [data-component="icon-button"]:is(:hover, :focus-visible):not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
 }
 
 #terminal-panel {

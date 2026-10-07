@@ -150,6 +150,10 @@ async function openReview(page: Page) {
   await page.getByRole("button", { name: "Toggle review" }).click()
   expect(await (await diffResponse).json()).toHaveLength(1)
 
+  // The panel opens on the Changes list: expand the file's row, then open its snippet.
   const review = page.locator('[data-component="session-review-v2"]')
   await expectAppVisible(review)
+  await review.locator('[data-slot="session-review-v2-file-row"]', { hasText: "review.ts" }).click()
+  await review.locator('[data-slot="session-review-v2-snippet"]').click()
+  await expectAppVisible(review.locator('[data-component="file"][data-mode="diff"]'))
 }

@@ -4949,13 +4949,29 @@ export function SessionSidePanel(props: {
   }
 
   const handleKeydown = (event: KeyboardEvent) => {
-    if (event.key !== "Escape" || !open()) return
+    if (event.key !== "Escape" || !open() || event.defaultPrevented) return
     if (
       document.querySelector(
         '[data-dialog-layer], [role="dialog"], [aria-modal="true"], [role="menu"], [role="listbox"]',
       )
     )
       return
+    // This capture listener runs before everything else's Esc. Leave it to the
+    // surfaces that close on their own: the diff find bar (portalled to the body),
+    // the Background tasks pane, and a field in the panel (the Changes filter clears
+    // first; once it is empty, Esc there leaves the field and the next one closes).
+    const target = event.target
+    if (target instanceof Element && target.closest('[data-component="file-search"], .vector-bg-tasks')) return
+    if (
+      target instanceof HTMLElement &&
+      target.closest("#review-panel") &&
+      (target.isContentEditable || target.closest("input, textarea, select"))
+    )
+      return
+    // A file open in Changes takes this Esc and goes Back to the list (SessionReviewV2
+    // listens in the bubble phase, after this capture listener); the next Esc closes.
+    const reader = document.querySelector('#review-panel [data-component="session-review-v2"][data-view="file"]')
+    if (reader && (target === document.body || (target instanceof Node && reader.contains(target)))) return
     event.preventDefault()
     closePanel()
   }
@@ -5134,13 +5150,22 @@ export function SessionSidePanel(props: {
                                 </Tabs.Trigger>
                               </Show>
                               <Show when={activeTab() !== "preview" && reviewTab() && props.canReview()}>
-                                <Tabs.Trigger value="review">
-                                  <div class="flex items-center gap-1.5">
-                                    <div>Changes</div>
-                                    <Show when={props.hasReview()}>
-                                      <div>{props.reviewCount()}</div>
-                                    </Show>
-                                  </div>
+                                <Tabs.Trigger
+                                  value="review"
+                                  closeButton={
+                                    <IconButton
+                                      icon="close-small"
+                                      variant="ghost"
+                                      onClick={closePanel}
+                                      aria-label="Close the Changes tab"
+                                    />
+                                  }
+                                >
+                                  <Icon name="review" size="small" data-slot="review-tab-icon" />
+                                  <span>Changes</span>
+                                  <Show when={props.hasReview()}>
+                                    <span data-slot="review-tab-count">{props.reviewCount()}</span>
+                                  </Show>
                                 </Tabs.Trigger>
                               </Show>
                               <Show when={activeTab() !== "preview"}>
@@ -5150,13 +5175,15 @@ export function SessionSidePanel(props: {
                                   </For>
                                 </SortableProvider>
                               </Show>
-                              <div class="bg-background-stronger h-full shrink-0 sticky right-0 z-10 flex items-center justify-center pr-3">
+                              <div
+                                data-slot="review-panel-close"
+                                class="h-full shrink-0 sticky right-0 z-10 flex items-center justify-center"
+                              >
                                 <TooltipKeybind title="Close panel" keybind="Esc" placement="bottom" gutter={10}>
                                   <IconButton
-                                    icon="close-small"
+                                    icon="close"
                                     variant="ghost"
-                                    iconSize="large"
-                                    class="!rounded-md"
+                                    iconSize="small"
                                     onClick={closePanel}
                                     aria-label="Close review panel"
                                   />

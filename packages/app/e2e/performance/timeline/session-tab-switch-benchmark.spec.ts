@@ -4,6 +4,7 @@ import { benchmark, expect, withBenchmarkPage } from "../benchmark"
 import { fixture } from "./session-timeline-stress.fixture"
 import {
   createReviewDiffs,
+  expandReviewFile,
   installStressTasks,
   installTimelineSettings,
   mockStressTimeline,
@@ -70,8 +71,8 @@ async function trial(
     await expectSessionTitle(page, fixture.expected.sourceTitle)
   }
   await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)
-  if (options?.reviewPane === "open") {
-    await openReviewPane(page)
+  if (options?.reviewPane === "open" && reviewDiffs) {
+    await openReviewPane(page, reviewDiffs[0]!.file)
     await waitForStableTimeline(page, fixture.expected.sourceMessageIDs.at(-1)!)
   }
 
@@ -126,15 +127,18 @@ async function switchSession(page: Page, sessionID: string, title: string) {
   await expectSessionTitle(page, title)
 }
 
-async function openReviewPane(page: Page) {
+async function openReviewPane(page: Page, file: string) {
   await page.getByRole("button", { name: "Toggle review" }).click()
   const panel = page.locator("#review-panel")
   await expect(panel).toBeVisible()
-  // Text-based readiness works across review implementations; the legacy list mounts
-  // diff viewers lazily while V2 mounts the active preview eagerly.
+  // Text-based readiness works across review implementations; V2 opens on the Changes
+  // list, which names each file with its counts.
   await page.waitForFunction(() => {
     const panel = document.querySelector<HTMLElement>("#review-panel")
     const text = panel?.textContent ?? ""
     return text.includes("generated-000.ts") && text.includes("+3")
   })
+  // Measure the switch with the reader mounted, as the review-level probe expects.
+  await (await expandReviewFile(page, file)).click()
+  await expect(panel.locator('[data-component="file"][data-mode="diff"]')).toBeVisible()
 }

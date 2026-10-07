@@ -10,7 +10,9 @@ import { createStore } from "solid-js/store"
 
 export const BACKGROUND_TASKS_COMMAND = "backgroundTasks.toggle"
 
-const LAYOUT_KEY = "vector.backgroundTasks.pane.v1"
+const LAYOUT_KEY = "vector.backgroundTasks.pane.v2"
+/** v1 docked by default and persisted `floating: false` for everyone who ever opened the pane. */
+const LEGACY_LAYOUT_KEY = "vector.backgroundTasks.pane.v1"
 const DISMISSED_KEY = "vector.backgroundTasks.dismissed.v1:"
 const DISMISSED_LIMIT = 200
 
@@ -30,19 +32,33 @@ function storage() {
   }
 }
 
-function loadLayout(): Layout {
-  const fallback: Layout = { open: false, floating: false, expanded: false }
+/**
+ * The pane floats by default. A v1 layout carries over only `open` and
+ * `expanded`: its `floating: false` was written for everyone who ever opened
+ * the pane, not chosen, so the move to v2 drops it and v1 is removed.
+ */
+export function loadLayout(): Layout {
+  const fallback: Layout = { open: false, floating: true, expanded: false }
   try {
     const raw = storage()?.getItem(LAYOUT_KEY)
-    if (!raw) return fallback
-    const value = JSON.parse(raw) as Partial<Layout>
-    return {
-      open: value.open === true,
-      floating: value.floating === true,
-      expanded: value.expanded === true,
-    }
+    if (raw) return parseLayout(raw)
+    const legacy = storage()?.getItem(LEGACY_LAYOUT_KEY)
+    if (!legacy) return fallback
+    storage()?.removeItem(LEGACY_LAYOUT_KEY)
+    const layout = { ...parseLayout(legacy), floating: true }
+    storage()?.setItem(LAYOUT_KEY, JSON.stringify(layout))
+    return layout
   } catch {
     return fallback
+  }
+}
+
+function parseLayout(raw: string): Layout {
+  const value = JSON.parse(raw) as Partial<Layout> | null
+  return {
+    open: value?.open === true,
+    floating: value?.floating !== false,
+    expanded: value?.expanded === true,
   }
 }
 

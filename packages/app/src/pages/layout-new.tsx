@@ -3251,8 +3251,15 @@ export default function NewLayout(props: ParentProps) {
 
   const handleGlobalKeyDown = (event: KeyboardEvent) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
-      // Chat search only exists on task routes; elsewhere pages own mod+f.
+      // Chat search only exists on task routes; elsewhere pages own mod+f. So does
+      // a find scope (the Changes reader), whose diff has its own find bar.
       if (!taskRoute()) return
+      if (
+        [document.activeElement, event.target].some(
+          (node) => node instanceof Element && node.closest("[data-find-scope]"),
+        )
+      )
+        return
       event.preventDefault()
       setChatSearchOpen(true)
       return

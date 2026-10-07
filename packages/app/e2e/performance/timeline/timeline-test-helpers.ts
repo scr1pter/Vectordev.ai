@@ -141,3 +141,14 @@ function reviewWords(seed: number, length: number) {
   const words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet"]
   return Array.from({ length: Math.ceil(length / 7) }, (_, index) => words[(seed + index * 3) % words.length]).join(" ")
 }
+
+// The review pane opens on the Changes list. Expands a file's row and returns its
+// snippet, which opens the reader on that file.
+export async function expandReviewFile(page: Page, file: string) {
+  const name = file.split(/[\\/]/).at(-1) ?? file
+  const panel = page.locator("#review-panel")
+  await panel.locator('[data-slot="session-review-v2-file-row"]', { hasText: name }).click()
+  const snippet = panel.getByRole("button", { name: `Open diff for ${name}`, exact: true })
+  await snippet.waitFor()
+  return snippet
+}

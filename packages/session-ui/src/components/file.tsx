@@ -91,6 +91,8 @@ type DiffBaseProps<T> = FileDiffOptions<T> &
     annotations?: DiffLineAnnotation<T>[]
     preloadedDiff?: DiffPreload<T>
     virtualize?: boolean
+    /** Row heights for the virtualizer when the caller restyles lines or separators. */
+    virtualMetrics?: Partial<VirtualFileMetrics>
   }
 
 type DiffPairProps<T> = DiffBaseProps<T> & {
@@ -126,7 +128,7 @@ const sharedKeys = [
 ] as const
 
 const textKeys = ["file", ...sharedKeys] as const
-const diffKeys = ["fileDiff", "before", "after", "virtualize", ...sharedKeys] as const
+const diffKeys = ["fileDiff", "before", "after", "virtualize", "virtualMetrics", ...sharedKeys] as const
 
 // ---------------------------------------------------------------------------
 // Shared viewer hook
@@ -945,7 +947,12 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
 
   const setSelectedLines = (range: SelectedLineRange | null, preserve?: { root: ShadowRoot; text: Range }) => {
     const active = instance
-    if (!active) return
+    // A selection passed in before the first render (a comment focused as the viewer
+    // mounts) is kept for the first render to apply, as the text viewer does.
+    if (!active) {
+      viewer.lastSelection = range
+      return
+    }
 
     const fixed = fixDiffSelection(viewer.getRoot(), range)
     if (fixed === undefined) {
@@ -1083,7 +1090,10 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
 
   createEffect(() => {
     const opts = options()
-    const workerPool = large() ? getWorkerPool("unified") : getWorkerPool(props.diffStyle)
+    // The pools differ only in their line diff type, which overrides the instance's, so
+    // pick the pool that word-diffs whenever the options ask for it (the review does in
+    // unified view too). Defaults map split to "word-alt" and everything else to "none".
+    const workerPool = getWorkerPool(opts.lineDiffType === "word-alt" ? "split" : "unified")
     const virtualizer = virtuals.get()
     const beforeContents = typeof local.before?.contents === "string" ? local.before.contents : ""
     const afterContents = typeof local.after?.contents === "string" ? local.after.contents : ""
@@ -1127,7 +1137,7 @@ function DiffViewer<T>(props: DiffFileProps<T>) {
       reset,
       create: () =>
         virtualizer
-          ? new VirtualizedFileDiff<T>(opts, virtualizer, virtualMetrics, workerPool)
+          ? new VirtualizedFileDiff<T>(opts, virtualizer, local.virtualMetrics ?? virtualMetrics, workerPool)
           : new FileDiff<T>(opts, workerPool),
       update: (value) => value.setOptions(opts),
       assign: (value) => {

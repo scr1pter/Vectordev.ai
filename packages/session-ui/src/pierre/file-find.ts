@@ -20,15 +20,19 @@ function isEditable(node: unknown): boolean {
   if (!(node instanceof HTMLElement)) return false
   if (node.closest("[data-prevent-autofocus]")) return true
   if (node.isContentEditable) return true
+  // A button inside a find scope (the Changes reader's header) still finds in its diff.
+  if (node.tagName === "BUTTON" && node.closest("[data-find-scope]")) return false
   return /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(node.tagName)
 }
 
+/** The host holding `node`, or the one inside the `[data-find-scope]` that holds it. */
 function hostForNode(node: unknown) {
   if (!(node instanceof Node)) return
-  for (const host of hosts) {
-    const el = host.element()
-    if (el && el.isConnected && el.contains(node)) return host
-  }
+  const live = Array.from(hosts).filter((host) => host.element()?.isConnected)
+  const own = live.find((host) => host.element()!.contains(node))
+  if (own) return own
+  const scope = node instanceof Element ? node.closest("[data-find-scope]") : null
+  if (scope) return live.find((host) => scope.contains(host.element()!))
 }
 
 function installShortcuts() {

@@ -172,7 +172,7 @@ async function installReviewFlashProbe(page: Page) {
       "click",
       (event) => {
         const target = event.target instanceof Element ? event.target : undefined
-        if (!target?.closest('[data-slot="file-tree-v2-row"]')) return
+        if (!target?.closest('[data-slot="session-review-v2-file-row"]')) return
         requestAnimationFrame(sample)
       },
       { capture: true, once: true },

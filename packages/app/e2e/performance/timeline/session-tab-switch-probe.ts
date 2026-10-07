@@ -21,6 +21,7 @@ async function installSessionSwitchProbe(
       tabs: '#review-panel [data-component="tabs"]',
       body: '#review-panel [data-slot="session-review-v2-body"]',
       review: '#review-panel [data-component="session-review-v2"]',
+      list: '#review-panel [data-slot="session-review-v2-list"]',
       preview: '#review-panel [data-slot="session-review-v2-preview"]',
       scroll: '#review-panel [data-slot="session-review-v2-diff-scroll"]',
       file: '#review-panel [data-component="file"][data-mode="diff"]',

@@ -23,6 +23,20 @@ describe("reviewSnippet", () => {
     expect(snippet?.more).toEqual({ unit: "lines", count: 4 })
   })
 
+  test("drops blank trailing context", () => {
+    const before = "one\ntwo\n\n\n\n\n\nthree\n"
+    const after = before.replace("two\n", "TWO\n")
+    const snippet = reviewSnippet(resolveFileDiff({ file: "a.ts", before, after }))
+
+    expect(snippet?.rows).toEqual([
+      { kind: "ctx", text: " one" },
+      { kind: "del", text: "-two" },
+      { kind: "add", text: "+TWO" },
+    ])
+    // Pierre keeps four lines of trailing context: seven lines, three shown.
+    expect(snippet?.more).toEqual({ unit: "lines", count: 4 })
+  })
+
   test("caps a long change block at six rows", () => {
     const before = lines(4)
     const after = before.replace("line 2\n", lines(20, "new"))
@@ -33,9 +47,39 @@ describe("reviewSnippet", () => {
     expect(snippet?.more).toEqual({ unit: "lines", count: 18 })
   })
 
+  test("fills six rows from the change blocks that follow the first", () => {
+    const before = lines(12)
+    const after = before.replace("line 4\n", "edit 4\n").replace("line 6\n", "edit 6\n")
+    const snippet = reviewSnippet(resolveFileDiff({ file: "a.ts", before, after }))
+
+    expect(snippet?.rows).toEqual([
+      { kind: "ctx", text: " line 2" },
+      { kind: "ctx", text: " line 3" },
+      { kind: "del", text: "-line 4" },
+      { kind: "add", text: "+edit 4" },
+      { kind: "ctx", text: " line 5" },
+      { kind: "del", text: "-line 6" },
+    ])
+  })
+
+  test("appends the hunk's function context to the header", () => {
+    const snippet = reviewSnippet(
+      resolveFileDiff({
+        file: "trust.ts",
+        patch:
+          "diff --git a/trust.ts b/trust.ts\n--- a/trust.ts\n+++ b/trust.ts\n@@ -41,3 +41,4 @@ export function trusted(project: Project) {\n   const a = 1\n+  const b = 2\n   return a\n }\n",
+      }),
+    )
+
+    expect(snippet?.header).toBe("@@ -41,3 +41,4 @@ export function trusted(project: Project) {")
+  })
+
   test("counts the hunks after the first", () => {
     const before = lines(60)
-    const after = before.replace("line 5\n", "edit 5\n").replace("line 30\n", "edit 30\n").replace("line 55\n", "edit 55\n")
+    const after = before
+      .replace("line 5\n", "edit 5\n")
+      .replace("line 30\n", "edit 30\n")
+      .replace("line 55\n", "edit 55\n")
     const snippet = reviewSnippet(resolveFileDiff({ file: "a.ts", before, after }))
 
     expect(snippet?.header.startsWith("@@ -1,")).toBe(true)
@@ -47,7 +91,8 @@ describe("reviewSnippet", () => {
     const snippet = reviewSnippet(
       resolveFileDiff({
         file: "new.ts",
-        patch: "diff --git a/new.ts b/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/new.ts\t\n@@ -0,0 +1,3 @@\n+one\n+two\n+three\n",
+        patch:
+          "diff --git a/new.ts b/new.ts\nnew file mode 100644\n--- /dev/null\n+++ b/new.ts\t\n@@ -0,0 +1,3 @@\n+one\n+two\n+three\n",
       }),
     )
 
