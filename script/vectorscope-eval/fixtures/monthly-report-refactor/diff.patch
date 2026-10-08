@@ -1,0 +1,120 @@
+diff --git a/app/reports/monthly.py b/app/reports/monthly.py
+index 4000122..5070e52 100644
+--- a/app/reports/monthly.py
++++ b/app/reports/monthly.py
+@@ -1,36 +1,54 @@
++from collections import defaultdict
++from dataclasses import dataclass
+ from datetime import date
+ 
+ 
+-def monthly_summary(transactions, month: date):
+-    """Totals per category for one calendar month, largest spend first."""
+-    totals = {}
+-    counts = {}
++@dataclass(frozen=True)
++class CategoryTotal:
++    category: str
++    total_cents: int
++    count: int
++
++    @property
++    def average_cents(self) -> int:
++        return self.total_cents // self.count
++
++    def as_dict(self) -> dict:
++        return {
++            "category": self.category,
++            "total_cents": self.total_cents,
++            "count": self.count,
++            "average_cents": self.average_cents,
++        }
++
++
++def in_month(day: date, month: date) -> bool:
++    return day.year == month.year and day.month == month.month
++
++
++def category_totals(transactions, month: date) -> list[CategoryTotal]:
++    """Totals per category for one calendar month, largest spend first, then by name."""
++    totals: defaultdict[str, int] = defaultdict(int)
++    counts: defaultdict[str, int] = defaultdict(int)
+     for tx in transactions:
+-        if tx["date"].year != month.year or tx["date"].month != month.month:
++        if not in_month(tx["date"], month):
+             continue
+         category = tx.get("category") or "uncategorized"
+-        if category not in totals:
+-            totals[category] = 0
+-            counts[category] = 0
+         totals[category] += tx["amount_cents"]
+         counts[category] += 1
+-    summary = []
+-    for category in totals:
+-        summary.append(
+-            {
+-                "category": category,
+-                "total_cents": totals[category],
+-                "count": counts[category],
+-                "average_cents": totals[category] // counts[category],
+-            }
+-        )
+-    summary.sort(key=lambda item: (-item["total_cents"], item["category"]))
+-    return summary
+-
+-
+-def format_summary(summary):
+-    lines = []
+-    for item in summary:
+-        dollars = item["total_cents"] / 100
+-        lines.append(f"{item['category']:<20} {item['count']:>5} {dollars:>12,.2f}")
+-    return "\n".join(lines)
++    summary = [CategoryTotal(category, totals[category], counts[category]) for category in totals]
++    return sorted(summary, key=lambda item: (-item.total_cents, item.category))
++
++
++def monthly_summary(transactions, month: date) -> list[dict]:
++    """The dict form that the /reports/monthly endpoint and the CSV export return."""
++    return [item.as_dict() for item in category_totals(transactions, month)]
++
++
++def format_summary(summary: list[dict]) -> str:
++    return "\n".join(format_line(item) for item in summary)
++
++
++def format_line(item: dict) -> str:
++    dollars = item["total_cents"] / 100
++    return f"{item['category']:<20} {item['count']:>5} {dollars:>12,.2f}"
+diff --git a/tests/reports/test_monthly.py b/tests/reports/test_monthly.py
+index cc708a5..582b796 100644
+--- a/tests/reports/test_monthly.py
++++ b/tests/reports/test_monthly.py
+@@ -1,6 +1,6 @@
+ from datetime import date
+ 
+-from app.reports.monthly import format_summary, monthly_summary
++from app.reports.monthly import CategoryTotal, category_totals, format_summary, monthly_summary
+ 
+ 
+ def test_monthly_summary_groups_by_category():
+@@ -16,6 +16,20 @@ def test_monthly_summary_groups_by_category():
+     ]
+ 
+ 
++def test_category_totals_breaks_ties_by_name():
++    transactions = [
++        {"date": date(2026, 3, 2), "category": "travel", "amount_cents": 1200},
++        {"date": date(2026, 3, 9), "category": "food", "amount_cents": 1200},
++        {"date": date(2026, 3, 9), "category": None, "amount_cents": 500},
++        {"date": date(2026, 4, 1), "category": "food", "amount_cents": 9900},
++    ]
++    assert category_totals(transactions, date(2026, 3, 1)) == [
++        CategoryTotal("food", 1200, 1),
++        CategoryTotal("travel", 1200, 1),
++        CategoryTotal("uncategorized", 500, 1),
++    ]
++
++
+ def test_format_summary_aligns_columns():
+     summary = [{"category": "rent", "total_cents": 150000, "count": 1, "average_cents": 150000}]
+     assert format_summary(summary) == "rent" + " " * 21 + "1" + " " * 5 + "1,500.00"

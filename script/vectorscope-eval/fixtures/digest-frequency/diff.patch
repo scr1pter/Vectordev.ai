@@ -1,0 +1,82 @@
+diff --git a/src/jobs/send-digests.js b/src/jobs/send-digests.js
+index 8216bc2..713b1e1 100644
+--- a/src/jobs/send-digests.js
++++ b/src/jobs/send-digests.js
+@@ -1,17 +1,26 @@
+ import { buildDigests } from "../notifications/digest.js"
+ import { renderDigestEmail } from "../notifications/templates.js"
+ 
+-// Runs from cron every Monday at 08:00 UTC.
+-export async function sendDigests({ workspaces, mailer, store }) {
++const DAY_MS = 24 * 60 * 60 * 1000
++
++// Runs from cron every day at 08:00 UTC. Daily digests go out every run, weekly ones on Mondays.
++export async function sendDigests({ workspaces, mailer, store, now = new Date() }) {
++  const frequencies = now.getUTCDay() === 1 ? ["daily", "weekly"] : ["daily"]
++  let sent = 0
+   for (const workspace of workspaces) {
+     const members = await store.members(workspace.id)
+-    const activity = await store.activity(workspace.id)
+-    for (const digest of buildDigests(members, activity)) {
+-      await mailer.send({
+-        to: digest.to,
+-        subject: `Your ${workspace.name} digest`,
+-        html: renderDigestEmail(digest),
+-      })
++    for (const frequency of frequencies) {
++      const since = new Date(now.getTime() - (frequency === "daily" ? DAY_MS : 7 * DAY_MS))
++      const activity = await store.activity(workspace.id, { since })
++      for (const digest of buildDigests(members, activity, frequency, since)) {
++        await mailer.send({
++          to: digest.to,
++          subject: `Your ${frequency} ${workspace.name} digest`,
++          html: renderDigestEmail(digest),
++        })
++        sent++
++      }
+     }
+   }
++  return { sent }
+ }
+diff --git a/src/notifications/digest.js b/src/notifications/digest.js
+index 67bebdc..101f14c 100644
+--- a/src/notifications/digest.js
++++ b/src/notifications/digest.js
+@@ -15,15 +15,30 @@
+  * @property {Date} at
+  */
+ 
++const MAX_ITEMS = 25
++
+ /**
+- * One digest per member: what everyone else in the workspace did.
++ * One digest per member who wants one at this frequency: what everyone else in the workspace did since `since`.
++ * Members who have not saved their settings yet get the weekly digest, as before this change. Members with nothing
++ * to read get no digest.
+  * @param {Member[]} members
+  * @param {Activity[]} activity
++ * @param {"daily" | "weekly"} frequency
++ * @param {Date} since
+  */
+-export function buildDigests(members, activity) {
+-  return members.map((member) => ({
+-    to: member.preferences?.email ?? member.email,
+-    name: member.name,
+-    items: activity.filter((item) => item.memberId !== member.id),
+-  }))
++export function buildDigests(members, activity, frequency, since) {
++  const recent = activity.filter((item) => item.at >= since).sort((a, b) => b.at.getTime() - a.at.getTime())
++  return members
++    .filter((member) => member.preferences.digest === frequency)
++    .map((member) => {
++      const items = recent.filter((item) => item.memberId !== member.id)
++      return {
++        to: member.preferences?.email ?? member.email,
++        name: member.name,
++        frequency,
++        items: items.slice(0, MAX_ITEMS),
++        more: Math.max(0, items.length - MAX_ITEMS),
++      }
++    })
++    .filter((digest) => digest.items.length > 0)
+ }

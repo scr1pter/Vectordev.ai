@@ -1,0 +1,4 @@
+{
+  "title": "Type the monthly report totals",
+  "body": "The budget forecast (next PR) needs the monthly category totals as typed values, not the dicts the endpoint returns.\n\n- `category_totals()` returns `CategoryTotal` dataclasses; `monthly_summary()` keeps returning the same dicts, built from them.\n- The month check and the line formatting are pulled out into `in_month()` and `format_line()`.\n- No output changes: same grouping, same \"uncategorized\" fallback, same order (largest spend first, then by name), same integer average.\n\nAdds a test for the tie-break order, which was not covered."
+}

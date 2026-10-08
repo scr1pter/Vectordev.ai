@@ -1,0 +1,4 @@
+{
+  "title": "Share one retry loop between the HTTP helpers",
+  "body": "`getJson`, `putJson` and `deleteResource` each had their own copy of the same retry loop. They now share `send()`. No behaviour change: the same requests are sent with the same headers, 429 and 5xx are retried with the same backoff (200 ms, then 400 ms, 3 attempts), errors carry the same status and message, and a 404 still counts as a successful delete."
+}

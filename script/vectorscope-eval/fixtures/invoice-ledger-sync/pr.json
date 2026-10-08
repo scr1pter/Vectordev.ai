@@ -1,0 +1,4 @@
+{
+  "title": "Add tax to ledger entries and stop re-posting synced invoices",
+  "body": "The ledger now wants the tax amount on every entry, so the sync asks the tax service for a quote first.\n\nThe sync also used to post every invoice finalized in the window on every run and relied on the ledger deduplicating by `externalId`, which it stopped doing last week. Each invoice now gets `syncedAt` once it is posted and later runs skip it. Failed invoices stay unsynced and are picked up again by the next run."
+}

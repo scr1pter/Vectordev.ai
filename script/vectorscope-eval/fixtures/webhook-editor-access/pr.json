@@ -1,0 +1,4 @@
+{
+  "title": "Let editors manage webhooks",
+  "body": "Editors set up most integrations but had to ask an admin every time they needed a webhook.\n\n- Replaces the hard-coded admin check with a role ranking (`viewer < editor < admin < owner`) and a `requireRole(member, minimum)` helper; `requireAdmin` is now `requireRole(member, \"admin\")`.\n- Editors can list and create webhooks. Deleting stays admin-only.\n- Creating a webhook now validates the URL (https only) and drops unknown event names.\n\nDeliveries already go through the egress proxy, which refuses private and link-local addresses."
+}

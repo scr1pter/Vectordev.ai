@@ -1,0 +1,89 @@
+diff --git a/src/admin/audit-log.ts b/src/admin/audit-log.ts
+index 0ed7fd8..4c96646 100644
+--- a/src/admin/audit-log.ts
++++ b/src/admin/audit-log.ts
+@@ -14,11 +14,45 @@ export interface AuditFilter {
+   since?: Date
+ }
+ 
++export interface AuditPage {
++  entries: AuditEntry[]
++  page: number
++  pageSize: number
++  totalPages: number
++  totalEntries: number
++}
++
++export const DEFAULT_PAGE_SIZE = 50
++export const MAX_PAGE_SIZE = 200
++
+ export async function listAuditEntries(db: Database, orgId: string, filter: AuditFilter = {}): Promise<AuditEntry[]> {
+   const rows = await db.auditEntries.findMany({ where: { orgId }, orderBy: { createdAt: "desc" } })
+   return rows.filter((row) => matches(row, filter))
+ }
+ 
++// `page` is 1-based: it is the number the admin console shows under the table. The filters already run in memory
++// (orgs keep 90 days of entries), so paging does too.
++export async function pageAuditEntries(
++  db: Database,
++  orgId: string,
++  filter: AuditFilter,
++  page: number,
++  pageSize = DEFAULT_PAGE_SIZE,
++): Promise<AuditPage> {
++  if (!Number.isInteger(page) || page < 1) throw new RangeError(`page must be a positive integer, got ${page}`)
++  const size = Math.min(Math.max(1, pageSize), MAX_PAGE_SIZE)
++  const entries = await listAuditEntries(db, orgId, filter)
++  const totalPages = Math.max(1, Math.ceil(entries.length / size))
++  const start = page * size
++  return {
++    entries: entries.slice(start, start + size),
++    page,
++    pageSize: size,
++    totalPages,
++    totalEntries: entries.length,
++  }
++}
++
+ export function describeEntry(entry: AuditEntry): string {
+   return `${entry.actorId} ${entry.action} ${entry.target}`
+ }
+diff --git a/src/admin/routes.ts b/src/admin/routes.ts
+index b75e4e9..1d1db01 100644
+--- a/src/admin/routes.ts
++++ b/src/admin/routes.ts
+@@ -1,18 +1,28 @@
+ import { Hono } from "hono"
+ import { requireAdmin } from "../auth/require-admin"
+ import type { AppEnv } from "../env"
+-import { listAuditEntries } from "./audit-log"
++import { DEFAULT_PAGE_SIZE, pageAuditEntries } from "./audit-log"
+ 
+ export const adminRoutes = new Hono<AppEnv>()
+ 
+ adminRoutes.use("*", requireAdmin)
+ 
+ adminRoutes.get("/audit", async (c) => {
+-  const entries = await listAuditEntries(c.var.db, c.var.orgId, {
+-    actorId: c.req.query("actor") || undefined,
+-    action: c.req.query("action") || undefined,
+-  })
+-  return c.json({ entries })
++  const page = Number(c.req.query("page") ?? "1")
++  const pageSize = Number(c.req.query("pageSize") ?? DEFAULT_PAGE_SIZE)
++  if (!Number.isInteger(page) || page < 1) return c.json({ error: "page must be a positive integer" }, 400)
++  if (!Number.isInteger(pageSize)) return c.json({ error: "pageSize must be an integer" }, 400)
++  const result = await pageAuditEntries(
++    c.var.db,
++    c.var.orgId,
++    {
++      actorId: c.req.query("actor") || undefined,
++      action: c.req.query("action") || undefined,
++    },
++    page,
++    pageSize,
++  )
++  return c.json(result)
+ })
+ 
+ adminRoutes.get("/members", async (c) => {

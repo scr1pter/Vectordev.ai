@@ -1,0 +1,10 @@
+[
+  {
+    "id": "inverted-rank-check",
+    "path": "src/auth/roles.ts",
+    "line": 22,
+    "severity": "blocking",
+    "category": "security",
+    "description": "The comparison is inverted: it passes when the member's rank is at or below the minimum, so a viewer passes every check (including requireAdmin, which every admin route now goes through) while owners fail editor and admin checks. It must be ROLE_RANK[member.role] >= ROLE_RANK[minimum]."
+  }
+]
