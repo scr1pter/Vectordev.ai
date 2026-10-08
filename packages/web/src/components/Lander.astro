@@ -37,7 +37,6 @@ import LanderMotion from "./marketing/LanderMotion.astro"
 import LanderMaterials from "./marketing/LanderMaterials.astro"
 import SiteFooter from "./marketing/SiteFooter.astro"
 import { wordmarkCells } from "../lib/wordmark"
-import ScrollTicks from "./marketing/ScrollTicks.astro"
 
 // The landing page is the whole product tour: the hero and its one interactive
 // picture, the workspace in one screen, and the card shelf of what Vector does,
@@ -406,7 +405,6 @@ const trustCards = [
   </main>
 
   <SiteFooter />
-  <ScrollTicks />
 </div>
 
 <script>
@@ -1594,14 +1592,6 @@ const trustCards = [
   }
 
   /* ---- landing breakpoints ---- */
-
-  /* Where the tick rail shows, the row's peeking card fades out before it. */
-  @media (min-width: 1360px) and (hover: hover) and (pointer: fine) {
-    .trust-row {
-      -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 112px), transparent calc(100% - 40px));
-      mask-image: linear-gradient(90deg, #000 calc(100% - 112px), transparent calc(100% - 40px));
-    }
-  }
 
   /* Very wide screens: line the sections up with the product window. */
   @media (min-width: 1800px) {
