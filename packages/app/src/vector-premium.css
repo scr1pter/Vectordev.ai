@@ -93,6 +93,16 @@ html {
   background: var(--vx-canvas);
 }
 
+/* A progress bar for work of unknown length: one segment sweeping across. */
+@keyframes vx-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
 html,
 body,
 #root {

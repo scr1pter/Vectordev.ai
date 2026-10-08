@@ -63,6 +63,15 @@ test("Pull Requests signs in to GitHub in Vector and then lists pull requests", 
                 }
               : { authenticated: false, configured: true, detail: "Sign in to GitHub to load pull requests." },
           list: async () => (state.signedIn ? [pullRequest] : []),
+          view: async () => ({
+            ...pullRequest,
+            body: "Trust follows the folder's fingerprint instead of its path.",
+            files: [{ path: "packages/engine/src/project/trust.ts", additions: 94, deletions: 12 }],
+            comments: [{ author: "devon", body: "Does this cover hooks?", createdAt: "2026-10-08T10:30:00Z" }],
+            headRefOid: "a".repeat(40),
+            baseRefOid: "b".repeat(40),
+            isCrossRepository: false,
+          }),
         },
         ci: { runs: async () => ({ ok: true, repo: {}, runs: [] }) },
         github: {
@@ -108,8 +117,19 @@ test("Pull Requests signs in to GitHub in Vector and then lists pull requests", 
   await testInfo.attach("device-code", { path: testInfo.outputPath("device-code.png"), contentType: "image/png" })
 
   await expect(panel.getByText("Bind workspace trust to a folder fingerprint")).toBeVisible()
-  await expect(panel).toContainText("Signed in to GitHub as mira.")
+  await expect(panel).toContainText("@mira")
   await expect(panel.getByRole("button", { name: "Sign out of GitHub" })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath("signed-in.png") })
   await testInfo.attach("signed-in", { path: testInfo.outputPath("signed-in.png"), contentType: "image/png" })
+
+  // Opening a pull request shows what it changes and offers a Vectorscope review; nothing is posted from here.
+  await panel.getByText("Bind workspace trust to a folder fingerprint").click()
+  const vectorscope = panel.getByRole("region", { name: "Vectorscope" })
+  await expect(vectorscope).toContainText("Not reviewed yet")
+  await expect(vectorscope.getByRole("button", { name: "Review with Vector" })).toBeEnabled()
+  await expect(panel).toContainText("packages/engine/src/project/trust.ts")
+  await expect(panel).toContainText("Does this cover hooks?")
+  await expect(panel.getByRole("button", { name: "Merge…" })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("pull-request.png") })
+  await testInfo.attach("pull-request", { path: testInfo.outputPath("pull-request.png"), contentType: "image/png" })
 })
