@@ -32,6 +32,14 @@ export interface HumanComment {
   body: string
 }
 
+// One CI check of the reviewed commit, from GitHub. The excerpt is the end of the failing step's log, which code
+// the pull request controls writes, so it is untrusted.
+export interface CheckResult {
+  name: string
+  conclusion: string // success, failure, timed_out, cancelled, skipped, neutral; "" while it runs
+  excerpt?: string
+}
+
 export interface HeadFile {
   path: string
   text: string
@@ -52,7 +60,9 @@ export interface PromptInput {
   headFiles?: HeadFile[]
   related?: RelatedCode[]
   history?: HistoryEntry[]
-  instructions?: string // AGENTS.md (or CLAUDE.md) and .vector/RULES.md from the base; CI only
+  instructions?: string // AGENTS.md (or CLAUDE.md) and .vector/RULES.md
+  instructionsSource?: "base branch" | "working tree"
+  checks?: CheckResult[]
   rules?: string // rulesForPaths plus config.paths
   rulesSource?: "base branch" | "working tree"
   teamDismissed?: TeamPattern[]
@@ -78,6 +88,8 @@ const MAX_HITS = 15
 const MAX_HISTORY_FILES = 10
 const MAX_TRUSTED_CHARS = 16_000
 const MAX_TEAM_PATTERNS = 30
+const MAX_CHECKS = 20
+const MAX_CHECK_CHARS = 4_000
 
 const TOOLS = "You can use read, grep, glob and list. You cannot edit files, run commands or browse the web."
 
@@ -98,7 +110,7 @@ const SECURITY_TASK = [
 // Every tag the prompt is built from. Untrusted text can mention none of them, so it cannot close its own block
 // or open a trusted one.
 const STRUCTURE_TAG =
-  /<(?=\s*\/?\s*(?:untrusted_\w*|related_code|history|focus|open_findings|team_dismissed|review_rules|repository_instructions)\b)/gi
+  /<(?=\s*\/?\s*(?:untrusted_\w*|related_code|history|focus|open_findings|team_dismissed|review_rules|repository_instructions|ci_checks)\b)/gi
 
 export function wrapUntrusted(
   tag: string,
@@ -149,6 +161,10 @@ function build(input: PromptInput, kind: "review" | "security"): string {
     TOOLS,
   ]
   if (input.trust === "untrusted") work.push(UNTRUSTED_WORKTREE)
+  if (input.checks?.length)
+    work.push(
+      "`<ci_checks>` holds this commit's CI results. A failing check is evidence: when the change causes it, report the defect behind it at the code that causes it. Do not report failures the change did not cause.",
+    )
   if (notInlined.length)
     work.push(
       input.trust === "untrusted"
@@ -265,6 +281,21 @@ function data(input: PromptInput, open: PriorFinding[], notInlined: NonNullable<
         ),
       ),
     )
+  const checks = (input.checks ?? []).slice(0, MAX_CHECKS)
+  if (checks.length)
+    out.push(
+      block(
+        "ci_checks",
+        checks.map((check) =>
+          check.excerpt?.trim()
+            ? wrapUntrusted("ci_log", clipEnd(check.excerpt.trim(), MAX_CHECK_CHARS), {
+                check: check.name,
+                conclusion: check.conclusion || "running",
+              })
+            : `- ${inline(check.name)}: ${check.conclusion || "running"}`,
+        ),
+      ),
+    )
   const history = (input.history ?? []).filter((entry) => entry.text.trim()).slice(0, MAX_HISTORY_FILES)
   if (history.length)
     out.push(
@@ -309,7 +340,7 @@ function trusted(input: PromptInput): string[] {
   const out: string[] = []
   if (input.instructions?.trim())
     out.push(
-      `<repository_instructions source="base branch">\n${clip(input.instructions.trim(), MAX_TRUSTED_CHARS)}\n</repository_instructions>`,
+      `<repository_instructions source="${input.instructionsSource ?? "base branch"}">\n${clip(input.instructions.trim(), MAX_TRUSTED_CHARS)}\n</repository_instructions>`,
     )
   if (input.rules?.trim())
     out.push(
@@ -360,6 +391,11 @@ function attribute(value: string): string {
 
 function clip(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max) + "\n…(truncated)"
+}
+
+// A log's cause is at its end, so a long one keeps its last characters.
+function clipEnd(text: string, max: number): string {
+  return text.length <= max ? text : "(earlier output cut)…\n" + text.slice(-max)
 }
 
 function short(sha: string): string {

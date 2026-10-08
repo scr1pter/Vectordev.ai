@@ -418,6 +418,15 @@ describe("the summary comment", () => {
   })
 })
 
+describe("the desktop form with line comments", () => {
+  test("does not list the findings that went out as line comments", () => {
+    const body = buildSummaryBody({ ...FULL, form: "desktop", inlinePosted: true })
+    expect(body).not.toContain("**Blocking** · `src/auth/refresh.ts:52` · Refresh can restore a session after logout")
+    expect(body).toContain("## Vectorscope review")
+    expect(body).not.toContain("vector-review:")
+  })
+})
+
 describe("running and note bodies", () => {
   test("the first run shows only the Reviewing line", () => {
     const body = buildRunningBody({ head: HEAD, startedAt: STARTED, state: STATE })
@@ -560,6 +569,12 @@ describe("inline comments", () => {
         "<!-- vector-finding v1 id=3f9a1c07be21 sev=b cat=bug sha=d4e5f6a st=o t=logout,refresh,restore,session -->",
       ].join("\n"),
     )
+  })
+
+  test("a comment posted from the desktop does not offer the /vector fix command", () => {
+    const body = buildInlineBody(blocking, { head: HEAD, trust: "trusted", repo: REPO, commands: false })
+    expect(body).not.toContain("/vector fix")
+    expect(body).toContain("```suggestion")
   })
 
   test("untrusted mode has no /vector fix line, and an unconfirmed fix is a diff block", () => {
