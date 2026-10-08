@@ -38,6 +38,7 @@ import {
   listPullRequests,
   mergePullRequest,
   pullRequestAccessStatus,
+  pullRequestChecks,
   pullRequestDiff,
   submitPullRequestReview,
   viewPullRequest,
@@ -331,6 +332,7 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("pr-view", (_event, cwd: string, number: number) => viewPullRequest(cwd, number))
   handle("pr-diff", (_event, cwd: string, number: number, head?: string) => pullRequestDiff(cwd, number, head))
+  handle("pr-checks", (_event, cwd: string, number: number, head: string) => pullRequestChecks(cwd, number, head))
   handle("pr-create", (_event, input: { cwd: string; title: string; body: string; base?: string; draft?: boolean }) =>
     createPullRequest(input),
   )
