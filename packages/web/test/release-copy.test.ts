@@ -33,7 +33,7 @@ test("the site marks the latest shipped desktop release as published", () => {
       .filter((release) => release.availability && Bun.semver.order(release.version, publishedDesktopVersion) <= 0)
       .map((release) => release.version),
   ).toEqual([])
-  // The unversioned Upcoming card leads /releases and the docs changelog; a version number there reads as upcoming.
+  // The unversioned Upcoming entry leads the docs changelog; a version number there reads as upcoming.
   expect(upcomingRelease.summary).not.toMatch(/\b\d+\.\d+\.\d+\b/)
 })
 

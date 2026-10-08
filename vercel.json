@@ -240,6 +240,16 @@
       "permanent": true
     },
     {
+      "source": "/releases",
+      "destination": "/docs/changelog",
+      "permanent": false
+    },
+    {
+      "source": "/about",
+      "destination": "/",
+      "permanent": false
+    },
+    {
       "source": "/billing",
       "destination": "/account",
       "permanent": false

@@ -6,7 +6,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const dist = path.join(root, "packages", "web", "dist")
 
 const keep = new Set([
-  "about",
   "_astro",
   "account",
   "auth",
@@ -15,7 +14,6 @@ const keep = new Set([
   "download",
   "legal",
   "login",
-  "releases",
   "s",
   "support",
   "install",

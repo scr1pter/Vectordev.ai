@@ -127,7 +127,6 @@ export function AccountPage(props: { preview?: AccountState }) {
           <nav aria-label="Account navigation">
             {account?.user.email === DESIGN_LAB_OWNER && <a href="/design">Design</a>}
             <a href="/docs">Docs</a>
-            <a href="/releases">Releases</a>
             <button type="button" onClick={signOut} disabled={Boolean(action)}>
               Sign out
             </button>
