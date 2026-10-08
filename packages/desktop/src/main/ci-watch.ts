@@ -66,7 +66,7 @@ const MAX_STEPS = 6
 // most of a job log Vector ever holds in memory. Keeping the tail loses the
 // "##[group]Run" header of a step bigger than this, which only costs us the
 // echoed command.
-const MAX_LOG_BYTES = 4 * 1024 * 1024
+export const MAX_LOG_BYTES = 4 * 1024 * 1024
 const MAX_FAILED_JOBS = 4
 const CONTEXT_LINES = 3
 const TRIM_MARKER_BYTES = 48
@@ -163,13 +163,14 @@ export async function viewCiFailure(
 // parseFailureLog reads it.
 export function failedStepLog(log: string, job: RawJob) {
   const lines = log.split(/\r?\n/)
-  const strip = (line: string) => stripAnsi(line).replace(TIMESTAMP, "")
-  const exitLine = lines.findLastIndex((line) => /^##\[error\]Process completed with exit code/.test(strip(line)))
-  const errorLine = exitLine >= 0 ? exitLine : lines.findLastIndex((line) => /^##\[error\]/.test(strip(line)))
+  const exitLine = lines.findLastIndex((line) =>
+    /^##\[error\]Process completed with exit code/.test(cleanLogLine(line)),
+  )
+  const errorLine = exitLine >= 0 ? exitLine : lines.findLastIndex((line) => /^##\[error\]/.test(cleanLogLine(line)))
   const end = errorLine >= 0 ? errorLine + 1 : lines.length
   const start = Math.max(
     0,
-    lines.slice(0, end).findLastIndex((line) => /^##\[group\]Run\s/.test(strip(line))),
+    lines.slice(0, end).findLastIndex((line) => /^##\[group\]Run\s/.test(cleanLogLine(line))),
   )
   const step = (job.steps ?? []).find((candidate) => candidate.conclusion === "failure")?.name ?? ""
   const name = (job.name ?? "").replaceAll("\t", " ")
@@ -234,7 +235,7 @@ export function parseFailureLog(log: string, options?: { maxExcerptBytes?: numbe
     const step = prefixed ? columns[1].trim() : ""
     const key = `${job}\u0000${step}`
     const group = groups.get(key) ?? { job, step, lines: [] }
-    group.lines.push(stripAnsi(prefixed ? columns.slice(2).join("\t") : raw).replace(TIMESTAMP, ""))
+    group.lines.push(cleanLogLine(prefixed ? columns.slice(2).join("\t") : raw))
     groups.set(key, group)
   }
   return Array.from(groups.values())
@@ -420,8 +421,9 @@ const ANSI = /\u001B\[[0-?]*[ -\/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?/
 const EXIT_CODE = /Process completed with exit code (\d+)/
 
-function stripAnsi(line: string) {
-  return line.replace(ANSI, "")
+// One raw Actions log line without its ANSI colouring or leading timestamp.
+export function cleanLogLine(line: string) {
+  return line.replace(ANSI, "").replace(TIMESTAMP, "")
 }
 
 // Ordered by how much each one narrows the problem down: a type error names the

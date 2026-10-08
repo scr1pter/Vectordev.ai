@@ -7,11 +7,13 @@ import { afterAll, describe, expect, test } from "bun:test"
 import type { GithubAccess } from "./github-api"
 import {
   fetchPullRequest,
+  fetchPullRequestChecks,
   fetchPullRequestDiff,
   fetchPullRequests,
   postPullRequestReview,
   pushedHead,
   putPullRequestMerge,
+  submitPullRequestReview,
 } from "./github-pr"
 
 // A small stand-in for api.github.com that answers the calls the Pull Requests panel makes, so the real request,
@@ -39,6 +41,58 @@ const node = (number: number) => ({
   baseRefOid: "b".repeat(40),
   isCrossRepository: false,
 })
+
+// The check runs of HEAD. A GitHub Actions run's id is its job's id; a run from another app has no Actions job.
+const checkRun = (id: number, name: string, status: string, conclusion: string | null, slug = "github-actions") => ({
+  id,
+  name,
+  status,
+  conclusion,
+  html_url: `https://github.com/acme/app/actions/runs/1/job/${id}`,
+  app: { slug },
+})
+const CHECK_RUNS = [
+  checkRun(11, "typecheck", "completed", "failure"),
+  checkRun(12, "lint", "completed", "failure"),
+  checkRun(13, "build", "in_progress", null),
+  checkRun(14, "Vercel", "completed", "failure", "vercel"),
+  checkRun(15, "unit", "completed", "success"),
+  checkRun(16, "e2e", "completed", "timed_out"),
+]
+// Each job's steps and its whole log as GitHub serves it: every step in a row, each line timestamped. The lint
+// job's log has expired.
+const JOBS: Record<string, { steps: { name: string; conclusion: string }[]; log?: string }> = {
+  "11": {
+    steps: [
+      { name: "Checkout", conclusion: "success" },
+      { name: "Typecheck", conclusion: "failure" },
+    ],
+    log: [
+      "2026-10-08T10:00:00.0000000Z ##[group]Run actions/checkout@v4",
+      "2026-10-08T10:00:01.0000000Z ##[endgroup]",
+      "2026-10-08T10:00:02.0000000Z ##[group]Run bun typecheck",
+      "2026-10-08T10:00:02.1000000Z ##[endgroup]",
+      "2026-10-08T10:00:03.0000000Z $ echo ghp_0123456789abcdefghijklmnopqrstuvwx",
+      "2026-10-08T10:00:09.0000000Z src/a.ts(4,7): error TS2322: Type 'string' is not assignable to type 'number'.",
+      "2026-10-08T10:00:10.0000000Z ##[error]Process completed with exit code 2.",
+      "2026-10-08T10:00:11.0000000Z Post job cleanup.",
+    ].join("\n"),
+  },
+  "12": { steps: [{ name: "Lint", conclusion: "failure" }] },
+  "16": {
+    steps: [
+      { name: "Set up job", conclusion: "success" },
+      { name: "End to end", conclusion: "cancelled" },
+    ],
+    log: [
+      "2026-10-08T10:00:00.0000000Z ##[group]Run bun test:e2e",
+      "2026-10-08T10:00:00.1000000Z ##[endgroup]",
+      ...Array.from({ length: 400 }, (_, index) => `2026-10-08T10:00:01.0000000Z (pass) e2e case ${index}`),
+      "2026-10-08T10:30:00.0000000Z ##[error]The job has exceeded the maximum execution time of 30m0s",
+      "2026-10-08T10:30:00.1000000Z ##[error]The operation was canceled.",
+    ].join("\n"),
+  },
+}
 
 const server = Bun.serve({
   port: 0,
@@ -91,7 +145,23 @@ const server = Bun.serve({
     }
     if (url.pathname === "/repos/acme/app/pulls/7" && request.method === "GET")
       return Response.json({ head: { sha: live.head } })
-    if (url.pathname === "/repos/acme/app/pulls/7/reviews") return Response.json({ id: 1 })
+    if (url.pathname === "/repos/acme/app/pulls/7/reviews") {
+      // GitHub refuses the whole review when any line comment falls outside the diff, here past line 100.
+      const comments = (body?.comments ?? []) as { line: number }[]
+      if (comments.some((comment) => comment.line > 100))
+        return Response.json(
+          { message: "Unprocessable Entity", errors: ["Line could not be resolved"] },
+          { status: 422 },
+        )
+      if (!body?.body) return Response.json({ message: "Body is required" }, { status: 422 })
+      return Response.json({ id: 1 })
+    }
+    if (url.pathname === `/repos/acme/app/commits/${HEAD}/check-runs`) {
+      return Response.json({ total_count: CHECK_RUNS.length, check_runs: CHECK_RUNS })
+    }
+    const job = JOBS[url.pathname.match(/^\/repos\/acme\/app\/actions\/jobs\/(\d+)/)?.[1] ?? ""]
+    if (job && url.pathname.endsWith("/logs") && job.log) return new Response(job.log)
+    if (job && !url.pathname.endsWith("/logs")) return Response.json(job)
     if (url.pathname === "/repos/acme/app/pulls/7/merge") {
       if (body?.sha && body.sha !== live.head)
         return Response.json({ message: "Head branch was modified. Review and try the merge again." }, { status: 409 })
@@ -137,6 +207,141 @@ describe("pull requests over GitHub's API", () => {
       postPullRequestReview(access, repo, 7, { body: "LGTM", event: "approve", head: stale }),
     ).rejects.toThrow("changed after the review started")
     expect(requests.some((request) => request.path.endsWith("/reviews"))).toBe(false)
+  })
+
+  test("posts line comments with the review, as ranges when they start on an earlier line", async () => {
+    requests.length = 0
+    const comments = [
+      { path: "a.ts", line: 4, side: "RIGHT" as const, body: "Off by one" },
+      { path: "a.ts", line: 9, side: "RIGHT" as const, startLine: 6, body: "This block leaks the handle" },
+      { path: "b.ts", line: 2, side: "LEFT" as const, startLine: 2, body: "The removed guard was needed" },
+    ]
+    expect(
+      await postPullRequestReview(access, repo, 7, { body: "Three findings", event: "comment", head: HEAD, comments }),
+    ).toEqual({ posted: true, inline: 3 })
+    expect(requests.find((request) => request.path.endsWith("/reviews"))?.body).toEqual({
+      body: "Three findings",
+      event: "COMMENT",
+      commit_id: HEAD,
+      comments: [
+        { path: "a.ts", line: 4, side: "RIGHT", body: "Off by one" },
+        {
+          path: "a.ts",
+          line: 9,
+          side: "RIGHT",
+          start_line: 6,
+          start_side: "RIGHT",
+          body: "This block leaks the handle",
+        },
+        { path: "b.ts", line: 2, side: "LEFT", body: "The removed guard was needed" },
+      ],
+    })
+
+    // Without the commit they were read on, line numbers could point anywhere, so the comments are left out.
+    requests.length = 0
+    expect(
+      await postPullRequestReview(access, repo, 7, { body: "Three findings", event: "comment", comments }),
+    ).toEqual({ posted: true, inline: 0 })
+    expect(requests.find((request) => request.path.endsWith("/reviews"))?.body).toEqual({
+      body: "Three findings",
+      event: "COMMENT",
+    })
+  })
+
+  test("posts the review once more without line comments when GitHub refuses one of them", async () => {
+    requests.length = 0
+    const comments = [
+      { path: "a.ts", line: 4, side: "RIGHT" as const, body: "Off by one" },
+      { path: "a.ts", line: 900, side: "RIGHT" as const, body: "Outside the diff" },
+    ]
+    const fallbackBody = "Two findings\n\n- a.ts:4 Off by one\n- a.ts:900 Outside the diff"
+    expect(
+      await postPullRequestReview(access, repo, 7, {
+        body: "Two findings",
+        event: "comment",
+        head: HEAD,
+        comments,
+        fallbackBody,
+      }),
+    ).toEqual({ posted: true, inline: 0 })
+    const posts = requests.filter((request) => request.path.endsWith("/reviews"))
+    expect(posts).toHaveLength(2)
+    expect(posts[0].body?.comments).toHaveLength(2)
+    expect(posts[1].body).toEqual({ body: fallbackBody, event: "COMMENT", commit_id: HEAD })
+
+    // Only once: a fallback GitHub refuses too is reported, not retried.
+    requests.length = 0
+    await expect(
+      postPullRequestReview(access, repo, 7, {
+        body: "Two findings",
+        event: "comment",
+        head: HEAD,
+        comments,
+        fallbackBody: "",
+      }),
+    ).rejects.toThrow("Body is required")
+    expect(requests.filter((request) => request.path.endsWith("/reviews"))).toHaveLength(2)
+  })
+
+  test("refuses malformed line comments before calling GitHub", async () => {
+    requests.length = 0
+    await expect(
+      submitPullRequestReview({
+        cwd: "/tmp/project",
+        number: 7,
+        head: HEAD,
+        body: "One finding",
+        event: "comment",
+        comments: [{ path: "a.ts", line: 4, side: "right" as "RIGHT", body: "Off by one" }],
+      }),
+    ).rejects.toThrow("side must be LEFT or RIGHT")
+    expect(requests).toHaveLength(0)
+  })
+
+  test("lists the commit's check runs with the failing step of each failed Actions job", async () => {
+    requests.length = 0
+    const checks = await fetchPullRequestChecks(access, repo, HEAD)
+    expect(checks.head).toBe(HEAD)
+    expect(checks.runs).toEqual(
+      CHECK_RUNS.map((run) => ({
+        name: run.name,
+        status: run.status,
+        // A check that is still running has no conclusion yet.
+        conclusion: run.conclusion ?? "",
+        url: run.html_url,
+      })),
+    )
+    // Vercel's failure is not an Actions job, so it has no job log to read.
+    expect(checks.failures.map((failure) => failure.name)).toEqual(["typecheck", "lint", "e2e"])
+    expect(requests.some((request) => request.path.includes("/actions/jobs/14"))).toBe(false)
+
+    const typecheck = checks.failures[0]
+    expect(typecheck.step).toBe("Typecheck")
+    expect(typecheck.excerpt).toContain("##[group]Run bun typecheck")
+    expect(typecheck.excerpt).toContain("error TS2322: Type 'string' is not assignable to type 'number'.")
+    expect(typecheck.excerpt.endsWith("##[error]Process completed with exit code 2.")).toBe(true)
+    // Only the failing step, without timestamps, and with a token-shaped string redacted.
+    expect(typecheck.excerpt).not.toContain("actions/checkout")
+    expect(typecheck.excerpt).not.toContain("Post job cleanup")
+    expect(typecheck.excerpt).not.toContain("2026-10-08T")
+    expect(typecheck.excerpt).not.toContain("ghp_0123456789abcdefghijklmnopqrstuvwx")
+
+    // A timed-out job's long step keeps its end, where the error is, within the cap.
+    const e2e = checks.failures[2]
+    expect(e2e.step).toBe("End to end")
+    expect(e2e.excerpt.length).toBeLessThanOrEqual(4_000)
+    expect(e2e.excerpt.endsWith("##[error]The operation was canceled.")).toBe(true)
+    expect(e2e.excerpt).toContain("(pass) e2e case 399")
+    expect(e2e.excerpt).not.toContain("(pass) e2e case 0\n")
+  })
+
+  test("a job whose log GitHub no longer has still lists as a failure, without an excerpt", async () => {
+    const checks = await fetchPullRequestChecks(access, repo, HEAD)
+    expect(checks.failures[1]).toEqual({ name: "lint", step: "", excerpt: "" })
+  })
+
+  test("a commit GitHub has not seen has no checks", async () => {
+    expect(await fetchPullRequestChecks(access, repo, PUSHED)).toEqual({ head: PUSHED, runs: [], failures: [] })
   })
 
   test("reads the diff of the commit the panel saw", async () => {
