@@ -914,8 +914,8 @@ export function PullRequests(props: {
                 <div>
                   <h2 class="text-[17px] font-semibold">Review pull requests with Vectorscope</h2>
                   <p class="mt-1.5 text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
-                    Specialist reviewers read each change and the code around it, every finding is double-checked, and
-                    nothing is posted until you choose to.
+                    A reviewer reads each change and the code around it, a security reviewer joins when sensitive files
+                    change, and nothing is posted until you choose to.
                   </p>
                 </div>
               </div>
@@ -1334,8 +1334,8 @@ export function PullRequests(props: {
 
                       <Show when={!reviewing() && !review()}>
                         <p class="px-4 py-4 text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
-                          Specialist reviewers read the diff and the code around it, a verifier checks every finding,
-                          and nothing is posted to GitHub until you choose to.
+                          A reviewer reads the diff and the code around it, a security reviewer joins when sensitive
+                          files change, and nothing is posted to GitHub until you choose to.
                         </p>
                       </Show>
 
