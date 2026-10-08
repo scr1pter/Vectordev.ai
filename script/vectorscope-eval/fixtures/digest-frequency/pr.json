@@ -1,0 +1,4 @@
+{
+  "title": "Daily digests",
+  "body": "Members can now pick a daily digest in their notification settings (the settings page shipped in #1482). The digest job runs every day; weekly digests still go out on Mondays.\n\n- Each digest covers only the activity since the previous one of its kind, newest first, capped at 25 items with a \"and N more\" line.\n- Members with nothing new get no email.\n- Members who chose \"off\" get nothing."
+}

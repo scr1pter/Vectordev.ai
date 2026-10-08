@@ -1,0 +1,79 @@
+diff --git a/src/auth/roles.ts b/src/auth/roles.ts
+index bac39f8..e282d20 100644
+--- a/src/auth/roles.ts
++++ b/src/auth/roles.ts
+@@ -10,11 +10,27 @@ export class ForbiddenError extends Error {
+   readonly status = 403
+ }
+ 
++// Each role can do everything the roles ranked below it can.
++const ROLE_RANK: Record<Role, number> = {
++  viewer: 0,
++  editor: 1,
++  admin: 2,
++  owner: 3,
++}
++
++export function hasRole(member: Member, minimum: Role) {
++  return ROLE_RANK[minimum] >= ROLE_RANK[member.role]
++}
++
++export function requireRole(member: Member | undefined, minimum: Role): Member {
++  if (!member || !hasRole(member, minimum)) throw new ForbiddenError(`This action needs the ${minimum} role`)
++  return member
++}
++
+ export function isAdmin(member: Member) {
+-  return member.role === "admin" || member.role === "owner"
++  return hasRole(member, "admin")
+ }
+ 
+ export function requireAdmin(member: Member | undefined): Member {
+-  if (!member || !isAdmin(member)) throw new ForbiddenError("This action needs an admin")
+-  return member
++  return requireRole(member, "admin")
+ }
+diff --git a/src/routes/webhooks.ts b/src/routes/webhooks.ts
+index a61aaeb..3a2e93c 100644
+--- a/src/routes/webhooks.ts
++++ b/src/routes/webhooks.ts
+@@ -1,24 +1,33 @@
+ import { Hono } from "hono"
+-import { requireAdmin } from "../auth/roles"
++import { requireAdmin, requireRole } from "../auth/roles"
+ import type { AppEnv } from "../env"
+-import { createWebhook, deleteWebhook, listWebhooks } from "../webhooks/store"
++import { createWebhook, deleteWebhook, listWebhooks, WEBHOOK_EVENTS } from "../webhooks/store"
+ 
+ export const webhookRoutes = new Hono<AppEnv>()
+ 
+ webhookRoutes.get("/", async (c) => {
+-  requireAdmin(c.var.member)
++  requireRole(c.var.member, "editor")
+   return c.json({ webhooks: await listWebhooks(c.var.db, c.var.workspaceId) })
+ })
+ 
+ webhookRoutes.post("/", async (c) => {
+-  requireAdmin(c.var.member)
+-  const body = await c.req.json<{ url: string; events: string[] }>()
+-  const webhook = await createWebhook(c.var.db, c.var.workspaceId, body)
++  requireRole(c.var.member, "editor")
++  const body = await c.req.json<{ url?: unknown; events?: unknown }>()
++  if (typeof body.url !== "string" || !isHttpsUrl(body.url))
++    return c.json({ error: "Webhook URLs must start with https://" }, 400)
++  const events = Array.isArray(body.events) ? body.events.filter((event) => WEBHOOK_EVENTS.includes(event)) : []
++  if (events.length === 0) return c.json({ error: "Pick at least one event" }, 400)
++  const webhook = await createWebhook(c.var.db, c.var.workspaceId, { url: body.url, events })
+   return c.json({ webhook }, 201)
+ })
+ 
++// Deleting stays admin-only: other integrations may depend on a webhook its creator no longer needs.
+ webhookRoutes.delete("/:id", async (c) => {
+   requireAdmin(c.var.member)
+   await deleteWebhook(c.var.db, c.var.workspaceId, c.req.param("id"))
+   return c.body(null, 204)
+ })
++
++function isHttpsUrl(value: string) {
++  return URL.canParse(value) && new URL(value).protocol === "https:"
++}

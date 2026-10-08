@@ -1,0 +1,10 @@
+[
+  {
+    "id": "preferences-undefined",
+    "path": "src/notifications/digest.js",
+    "line": 32,
+    "severity": "blocking",
+    "category": "bug",
+    "description": "preferences is undefined for every member who has never saved their notification settings, so member.preferences.digest throws a TypeError and the job sends no digests for the whole workspace (and every workspace after it). Those members should fall back to weekly: (member.preferences?.digest ?? \"weekly\") === frequency."
+  }
+]

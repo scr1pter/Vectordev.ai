@@ -1,0 +1,11 @@
+[
+  {
+    "id": "handle-leak",
+    "path": "src/plugins/manifest.ts",
+    "line": 20,
+    "endLine": 31,
+    "severity": "concern",
+    "category": "reliability",
+    "description": "The file handle is closed only on the success path: every InvalidBundleError thrown between open() and close() (wrong magic, wrong version, bad length), and any read error, leaves the descriptor open. Discovery runs on every watcher change and skips invalid bundles, so a directory with a foreign or half-copied file leaks a descriptor per run until the process hits EMFILE. The reads need a try/finally that closes the handle."
+  }
+]

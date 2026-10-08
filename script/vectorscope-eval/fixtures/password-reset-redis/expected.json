@@ -1,0 +1,10 @@
+[
+  {
+    "id": "ttl-milliseconds-as-seconds",
+    "path": "src/auth/password-reset.ts",
+    "line": 16,
+    "severity": "blocking",
+    "category": "security",
+    "description": "EX takes seconds but RESET_TOKEN_TTL_MS is in milliseconds, so a reset token stays valid for 1,800,000 seconds (about 21 days) instead of 30 minutes, while the email still says 30 minutes. A leaked reset link stays usable for weeks. Use \"PX\" or divide by 1000."
+  }
+]

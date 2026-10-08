@@ -1,0 +1,4 @@
+{
+  "title": "Search orders by customer email",
+  "body": "Support keeps asking engineering to look up a customer's orders by email. This adds `GET /api/orders/search?q=<part of an email>&status=<status>&limit=<n>` for shop staff.\n\n- Results are scoped to the signed-in shop and capped at 200.\n- `status` is checked against the statuses we actually store.\n- The match is case-insensitive (`ILIKE`), so `Jane@` finds `jane@example.com`."
+}

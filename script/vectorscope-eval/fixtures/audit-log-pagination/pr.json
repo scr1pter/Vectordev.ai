@@ -1,0 +1,4 @@
+{
+  "title": "Paginate the admin audit log",
+  "body": "Large orgs have tens of thousands of audit entries and the admin console's audit tab was rendering all of them at once, which locked up the browser.\n\n- `GET /admin/audit` now takes `page` (1-based, the number shown under the table) and `pageSize` (default 50, capped at 200).\n- The response keeps `entries` and adds `page`, `pageSize`, `totalPages` and `totalEntries` so the console can draw the pager.\n\nThe console change is in a separate PR."
+}

@@ -1,0 +1,73 @@
+diff --git a/src/auth/password-reset.ts b/src/auth/password-reset.ts
+index 3a1e1de..0a6f872 100644
+--- a/src/auth/password-reset.ts
++++ b/src/auth/password-reset.ts
+@@ -1,29 +1,29 @@
+ import { createHash, randomBytes } from "node:crypto"
++import type { Redis } from "ioredis"
+ import type { Database } from "../db"
+ import type { Mailer } from "../mail"
+ 
+ const RESET_TOKEN_TTL_MS = 30 * 60 * 1000
++const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/ // 32 random bytes in base64url
+ 
+-export async function requestPasswordReset(db: Database, mailer: Mailer, email: string): Promise<void> {
++// Reset tokens live in Redis instead of the passwordResets table. GETDEL makes a token single-use without a
++// transaction, and Redis expires unused tokens, so the nightly purge of the table can go.
++export async function requestPasswordReset(db: Database, redis: Redis, mailer: Mailer, email: string): Promise<void> {
+   const user = await db.users.findByEmail(email.trim().toLowerCase())
+   // Answer the same way whether or not the account exists, so the form cannot be used to find accounts.
+   if (!user) return
+   const token = randomBytes(32).toString("base64url")
+-  await db.passwordResets.insert({
+-    tokenHash: hash(token),
+-    userId: user.id,
+-    expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+-  })
++  await redis.set(key(token), user.id, "EX", RESET_TOKEN_TTL_MS)
+   await mailer.send(user.email, "reset-password", { token, minutes: RESET_TOKEN_TTL_MS / 60_000 })
+ }
+ 
+-export async function consumePasswordReset(db: Database, token: string): Promise<string | undefined> {
+-  const row = await db.passwordResets.findByHash(hash(token))
+-  if (!row || row.expiresAt.getTime() < Date.now()) return undefined
+-  await db.passwordResets.delete(row.tokenHash)
+-  return row.userId
++export async function consumePasswordReset(redis: Redis, token: string): Promise<string | undefined> {
++  if (!TOKEN_PATTERN.test(token)) return undefined
++  const userId = await redis.getdel(key(token))
++  return userId ?? undefined
+ }
+ 
+-function hash(token: string) {
+-  return createHash("sha256").update(token).digest("hex")
++// Only the hash is stored, so a Redis snapshot does not hand out working reset links.
++function key(token: string) {
++  return `password-reset:${createHash("sha256").update(token).digest("hex")}`
+ }
+diff --git a/src/routes/auth.ts b/src/routes/auth.ts
+index 56eb540..2ca1522 100644
+--- a/src/routes/auth.ts
++++ b/src/routes/auth.ts
+@@ -9,7 +9,7 @@ authRoutes.post("/password-reset", async (c) => {
+   const body = await c.req.json<{ email?: unknown }>()
+   if (typeof body.email !== "string" || !body.email.includes("@"))
+     return c.json({ error: "Enter an email address" }, 400)
+-  await requestPasswordReset(c.var.db, c.var.mailer, body.email)
++  await requestPasswordReset(c.var.db, c.var.redis, c.var.mailer, body.email)
+   return c.json({ ok: true })
+ })
+ 
+@@ -18,8 +18,10 @@ authRoutes.post("/password-reset/confirm", async (c) => {
+   if (typeof body.token !== "string" || typeof body.password !== "string")
+     return c.json({ error: "Missing token or password" }, 400)
+   if (body.password.length < 12) return c.json({ error: "Use at least 12 characters" }, 400)
+-  const userId = await consumePasswordReset(c.var.db, body.token)
+-  if (!userId) return c.json({ error: "This reset link has expired" }, 400)
++  const userId = await consumePasswordReset(c.var.redis, body.token)
++  if (!userId) return c.json({ error: "This reset link has expired or was already used" }, 400)
+   await c.var.db.users.update(userId, { passwordHash: await hashPassword(body.password) })
++  // Anyone who had the old password, or a stolen session, is signed out everywhere.
++  await c.var.sessions.revokeAll(userId)
+   return c.json({ ok: true })
+ })
