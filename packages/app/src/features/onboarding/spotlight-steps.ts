@@ -293,8 +293,8 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
     workspace({
       id: "conn-pull-requests",
       section: "Connections",
-      title: "Pull Requests.",
-      body: "Review with Vector reads the pull request, then shows its findings by severity, with the model and what the review cost. Nothing is posted to GitHub until you choose Comment, Approve or Request changes.",
+      title: "Vectorscope.",
+      body: "Your repository's pull requests, reviewed by Vector. It reads each change, then shows its findings by severity, with the model and what the review cost. Nothing is posted to GitHub until you choose Comment, Approve or Request changes.",
       target: '[data-tour="nav-pull-requests"]',
       placement: "right",
     }),

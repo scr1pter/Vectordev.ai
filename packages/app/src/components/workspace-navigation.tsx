@@ -509,7 +509,7 @@ export function WorkspaceNavigation(props: {
                 stroke-linejoin="round"
               />
             </svg>
-            <span>Pull Requests</span>
+            <span>Vectorscope</span>
           </button>
           <button type="button" data-vector-nav-item data-tour="nav-mcp" onClick={props.onMcp}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
