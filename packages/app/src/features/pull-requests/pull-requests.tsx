@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
   buildDesktopSummary,
@@ -546,27 +546,32 @@ export function PullRequests(props: {
 
   // Refresh on open or repository change rather than polling. A revision and
   // request counter prevent a slow response from repo A from populating repo B.
-  createEffect(() => {
-    const open = props.open
-    const projectPath = props.projectPath
-    if (observedProjectPath !== projectPath) {
-      observedProjectPath = projectPath
-      projectRevision++
-      refreshRequest++
-      clearProjectState()
-    }
-    if (!open) {
-      projectRevision++
-      refreshRequest++
-      selectionRequests.invalidate()
-      ciRequests.invalidate()
-      discardReview()
-      setCiLoading(undefined)
-      setBusy(undefined)
-      return
-    }
-    void refresh(projectPath)
-  })
+  // The project path is derived from state that is rebuilt every few seconds (the
+  // workspace poll), so only a real change of its value may reload the panel;
+  // reloading on every rebuild refetched GitHub constantly and flickered the panel.
+  const open = createMemo(() => props.open)
+  const project = createMemo(() => props.projectPath)
+  createEffect(
+    on([open, project], ([open, projectPath]) => {
+      if (observedProjectPath !== projectPath) {
+        observedProjectPath = projectPath
+        projectRevision++
+        refreshRequest++
+        clearProjectState()
+      }
+      if (!open) {
+        projectRevision++
+        refreshRequest++
+        selectionRequests.invalidate()
+        ciRequests.invalidate()
+        discardReview()
+        setCiLoading(undefined)
+        setBusy(undefined)
+        return
+      }
+      void refresh(projectPath)
+    }),
+  )
 
   const openPr = async (number: number) => {
     const bridge = api()
@@ -802,7 +807,8 @@ export function PullRequests(props: {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Pull Requests"
+        aria-label="Vectorscope"
+        data-vector-pull-requests
         class="fixed inset-0 z-[90] flex flex-col bg-[color:var(--vx-canvas)] text-[color:var(--vx-text)]"
         onKeyDown={(event) => {
           if (event.key !== "Escape" || event.defaultPrevented) return
@@ -820,10 +826,10 @@ export function PullRequests(props: {
             <Icon name="pull" class="size-4" />
           </span>
           <div class="min-w-0 flex-1">
-            <div class="text-[14px] font-semibold">Pull Requests</div>
+            <div class="text-[14px] font-semibold">Vectorscope</div>
             <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
               {status()?.authenticated
-                ? `${repoName() ?? "This repository"} · ${list().length} open`
+                ? `${repoName() ?? "This repository"} · ${list().length} open ${list().length === 1 ? "pull request" : "pull requests"}`
                 : "Create, review with Vectorscope, and merge without leaving Vector"}
             </div>
           </div>
@@ -873,7 +879,7 @@ export function PullRequests(props: {
           </Show>
           <button
             type="button"
-            aria-label="Close Pull Requests"
+            aria-label="Close Vectorscope"
             class="grid size-8 shrink-0 place-items-center rounded-[6px] text-[color:var(--vx-text-muted)] transition hover:bg-[color:var(--vx-control)] hover:text-[color:var(--vx-text)]"
             onClick={props.onClose}
           >
@@ -1249,7 +1255,7 @@ export function PullRequests(props: {
                     </div>
 
                     <section
-                      aria-label="Vectorscope"
+                      aria-label="AI review"
                       class="mt-5 overflow-hidden rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)]"
                     >
                       <header class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[color:var(--vx-line)] px-4 py-3">
@@ -1257,7 +1263,7 @@ export function PullRequests(props: {
                           <Icon name="scope" />
                         </span>
                         <div class="min-w-0 flex-1">
-                          <div class="text-[13px] font-semibold">Vectorscope</div>
+                          <div class="text-[13px] font-semibold">AI review</div>
                           <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
                             {reviewing()
                               ? "Reviewing…"

@@ -104,7 +104,7 @@ test("Pull Requests signs in to GitHub in Vector and then lists pull requests", 
   await expectSessionTitle(page, "Pull requests sign-in")
   await page.locator('[data-tour="nav-pull-requests"]').click()
 
-  const panel = page.getByRole("dialog", { name: "Pull Requests" })
+  const panel = page.getByRole("dialog", { name: "Vectorscope" })
   await expect(panel.getByText("Connect GitHub", { exact: true }).first()).toBeVisible()
   await expect(panel).not.toContainText("GitHub CLI")
   await expect(panel).not.toContainText("gh auth login")
@@ -124,7 +124,7 @@ test("Pull Requests signs in to GitHub in Vector and then lists pull requests", 
 
   // Opening a pull request shows what it changes and offers a Vectorscope review; nothing is posted from here.
   await panel.getByText("Bind workspace trust to a folder fingerprint").click()
-  const vectorscope = panel.getByRole("region", { name: "Vectorscope" })
+  const vectorscope = panel.getByRole("region", { name: "AI review" })
   await expect(vectorscope).toContainText("Not reviewed yet")
   await expect(vectorscope.getByRole("button", { name: "Review with Vector" })).toBeEnabled()
   await expect(panel).toContainText("packages/engine/src/project/trust.ts")
