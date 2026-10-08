@@ -10,6 +10,8 @@ export type PullRequestMergeInput = {
   cwd: string
   number: number
   strategy: "merge" | "squash" | "rebase"
+  // The commit the user last saw; GitHub refuses the merge if anything was pushed since.
+  head?: string
 }
 
 export function buildPullRequestCreateInput(input: {
@@ -38,6 +40,19 @@ export function pullRequestProjectIsCurrent(
   current: { path?: string; revision: number },
 ) {
   return request.path === current.path && request.revision === current.revision
+}
+
+// Each selection owns its asynchronous response, including when two requests target the same repository.
+export function createPullRequestRequestScope(project: () => { path?: string; revision: number }) {
+  let revision = 0
+  return {
+    invalidate: () => revision++,
+    start: () => {
+      const request = ++revision
+      const target = project()
+      return () => request === revision && pullRequestProjectIsCurrent(target, project())
+    },
+  }
 }
 
 export function pullRequestMergeAction(confirming: boolean) {

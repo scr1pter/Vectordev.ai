@@ -5,12 +5,22 @@ import { join } from "node:path"
 import { afterAll, describe, expect, test } from "bun:test"
 
 import type { GithubAccess } from "./github-api"
-import { fetchPullRequest, fetchPullRequests, postPullRequestReview, pushedHead } from "./github-pr"
+import {
+  fetchPullRequest,
+  fetchPullRequestDiff,
+  fetchPullRequests,
+  postPullRequestReview,
+  pushedHead,
+  putPullRequestMerge,
+} from "./github-pr"
 
 // A small stand-in for api.github.com that answers the calls the Pull Requests panel makes, so the real request,
 // pagination and error code runs end to end without a network or a token.
 const HEAD = "a".repeat(40)
+const PUSHED = "c".repeat(40)
 const requests: { method: string; path: string; body?: Record<string, unknown> }[] = []
+// The pull request's newest commit as the stand-in reports it, and a push that lands while its diff is being read.
+const live = { head: HEAD, pushDuringDiff: false }
 const node = (number: number) => ({
   number,
   title: `Change ${number}`,
@@ -75,9 +85,18 @@ const server = Bun.serve({
         },
       })
     }
+    if (url.pathname === "/repos/acme/app/pulls/7" && request.headers.get("accept") === "application/vnd.github.diff") {
+      if (live.pushDuringDiff) live.head = PUSHED
+      return new Response("diff --git a/a.ts b/a.ts\n")
+    }
     if (url.pathname === "/repos/acme/app/pulls/7" && request.method === "GET")
-      return Response.json({ head: { sha: HEAD } })
+      return Response.json({ head: { sha: live.head } })
     if (url.pathname === "/repos/acme/app/pulls/7/reviews") return Response.json({ id: 1 })
+    if (url.pathname === "/repos/acme/app/pulls/7/merge") {
+      if (body?.sha && body.sha !== live.head)
+        return Response.json({ message: "Head branch was modified. Review and try the merge again." }, { status: 409 })
+      return Response.json({ merged: true })
+    }
     return Response.json({ message: "Not Found" }, { status: 404 })
   },
 })
@@ -118,6 +137,31 @@ describe("pull requests over GitHub's API", () => {
       postPullRequestReview(access, repo, 7, { body: "LGTM", event: "approve", head: stale }),
     ).rejects.toThrow("changed after the review started")
     expect(requests.some((request) => request.path.endsWith("/reviews"))).toBe(false)
+  })
+
+  test("reads the diff of the commit the panel saw", async () => {
+    expect(await fetchPullRequestDiff(access, repo, 7, HEAD)).toBe("diff --git a/a.ts b/a.ts\n")
+  })
+
+  test("refuses a diff when a push lands while it is read, so a newer commit is never reviewed as the old one", async () => {
+    live.pushDuringDiff = true
+    await expect(fetchPullRequestDiff(access, repo, 7, HEAD)).rejects.toThrow("changed while Vector was reading it")
+    live.pushDuringDiff = false
+    live.head = HEAD
+  })
+
+  test("merges only the commit the user saw", async () => {
+    requests.length = 0
+    expect(await putPullRequestMerge(access, repo, 7, { strategy: "squash", head: HEAD })).toEqual({ merged: true })
+    expect(requests.find((request) => request.path.endsWith("/merge"))?.body).toEqual({
+      merge_method: "squash",
+      sha: HEAD,
+    })
+    live.head = PUSHED
+    await expect(putPullRequestMerge(access, repo, 7, { strategy: "squash", head: HEAD })).rejects.toThrow(
+      "New commits were pushed to this pull request",
+    )
+    live.head = HEAD
   })
 
   test("an expired token says to sign in again", async () => {

@@ -373,7 +373,7 @@ describe("the summary comment", () => {
       "<sub>Reviewed `d4e5f6a` against `main` · full review · openai/gpt-5 · subscription sign-in, no per-token price (48.2k in / 3.1k out) · 48s · this pull request: 1 review · [workflow run](https://github.com/o/r/actions/runs/42)</sub>",
     )
     expect(footer(unknown)).toContain(
-      "· provider/model · cost unknown: no price is listed for this model (48.2k in / 3.1k out) ·",
+      "· provider/model · cost unknown: pricing or complete usage is unavailable (48.2k in / 3.1k out) ·",
     )
   })
 
@@ -816,7 +816,7 @@ describe("numbers and cost", () => {
     expect(costWording(zeroCost)).toBe("openai/gpt-4.1 · $0.00 (48.2k in / 3.1k out)")
     expect(costWording(plan)).toBe("openai/gpt-5 · subscription sign-in, no per-token price (48.2k in / 3.1k out)")
     expect(costWording(unknown)).toBe(
-      "provider/model · cost unknown: no price is listed for this model (48.2k in / 3.1k out)",
+      "provider/model · cost unknown: pricing or complete usage is unavailable (48.2k in / 3.1k out)",
     )
   })
 

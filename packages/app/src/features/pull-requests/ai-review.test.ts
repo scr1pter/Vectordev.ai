@@ -14,6 +14,7 @@ import {
   pickReviewModel,
   reviewCatalog,
   reviewEvents,
+  reviewFooter,
   runPullRequestReview,
   type ReviewClient,
   type ReviewEstimate,
@@ -257,6 +258,50 @@ describe("runPullRequestReview", () => {
     expect(outcome?.selection.inline).toHaveLength(1)
   })
 
+  test("does not present a priced review as free when usage cannot be loaded", async () => {
+    const { client } = fakeClient({ files: { "src/list.ts": HEAD } })
+    client.session.messages = async () => {
+      throw new Error("Usage could not be loaded")
+    }
+    const outcome = (await run(client))!
+    expect(outcome.cost?.kind).toBe("unknown")
+    expect(reviewFooter(outcome)).toContain("cost and token usage unavailable")
+    expect(reviewFooter(outcome)).not.toContain("$0")
+  })
+
+  test("keeps unpriced and invalid charges unknown while retaining measured tokens", async () => {
+    for (const extra of [{ unpriced: true }, { cost: Number.NaN }, { cost: -1 }, { cost: undefined }]) {
+      const { client } = fakeClient({
+        files: { "src/list.ts": HEAD },
+        reply: () => {
+          const message = answer(report())
+          return { ...message, info: { ...message.info, ...extra } }
+        },
+      })
+      const outcome = (await run(client))!
+      expect(outcome.cost?.kind).toBe("unknown")
+      expect(outcome.cost?.input).toBe(1_000)
+      expect(reviewFooter(outcome)).toContain("cost unknown")
+      expect(reviewFooter(outcome)).not.toContain("$0")
+    }
+  })
+
+  test("labels mixed-model specialist usage without attributing all spend to the first model", async () => {
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD },
+      reply: (input) => {
+        const message = answer(report())
+        return input.agent === "security"
+          ? { ...message, info: { ...message.info, providerID: "openai", modelID: "gpt-5.5" } }
+          : message
+      },
+    })
+    const outcome = (await run(client, { diff: join(listDiff, authDiff) }))!
+    expect(outcome.cost?.model).toBe("Multiple models")
+    expect(outcome.cost?.costUsd).toBeCloseTo(0.02)
+    expect(outcome.cost?.input).toBe(2_000)
+  })
+
   test("Stop aborts the session, then finalizes it with only StructuredOutput left", async () => {
     const controller = new AbortController()
     let release = (_message: ReviewMessage) => {}
@@ -298,6 +343,28 @@ describe("runPullRequestReview", () => {
     const outcome = await run(client, { timeoutMs: 5 })
     expect(calls.abort).toEqual(["ses_1"])
     expect(outcome?.specialists[0]!.status).toBe("timeout")
+  })
+
+  test("does not finalize with tools still enabled when permission updates fail", async () => {
+    const { client, calls } = fakeClient({
+      files: { "src/list.ts": HEAD },
+      reply: () => ({ info: { role: "assistant" }, parts: [] }),
+    })
+    client.session.update = async () => {
+      throw new Error("Review permissions could not be saved")
+    }
+    await expect(run(client)).rejects.toThrow("Review permissions could not be saved")
+    expect(calls.prompt).toHaveLength(1)
+  })
+
+  test("requires acknowledgment before starting the restricted finalize prompt", async () => {
+    const { client, calls } = fakeClient({
+      files: { "src/list.ts": HEAD },
+      reply: () => ({ info: { role: "assistant" }, parts: [] }),
+    })
+    client.session.update = async () => ({})
+    await expect(run(client)).rejects.toThrow("confirm review permissions")
+    expect(calls.prompt).toHaveLength(1)
   })
 
   test("shows the estimate before reviewing more than 50 files, and does nothing when declined", async () => {

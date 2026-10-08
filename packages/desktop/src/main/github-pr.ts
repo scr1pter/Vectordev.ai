@@ -224,9 +224,16 @@ export async function fetchPullRequest(access: GithubAccess, repo: GithubRepoRef
   } satisfies PullRequestDetail
 }
 
-export async function pullRequestDiff(cwd: string, number: number) {
+// With the commit the panel last saw, a diff of anything newer is refused: the review reads, anchors and posts
+// against that one commit, so it must not review a later push under its name.
+export async function pullRequestDiff(cwd: string, number: number, head?: string) {
+  const expected = head === undefined ? undefined : requirePullRequestHead(head)
   const { access, repo } = await pullRequestContext(cwd)
-  const response = await githubFetch(access, `${repoPath(repo)}/pulls/${requirePullRequestNumber(number)}`, {
+  return fetchPullRequestDiff(access, repo, requirePullRequestNumber(number), expected)
+}
+
+export async function fetchPullRequestDiff(access: GithubAccess, repo: GithubRepoRef, number: number, head?: string) {
+  const response = await githubFetch(access, `${repoPath(repo)}/pulls/${number}`, {
     accept: "application/vnd.github.diff",
     timeoutMs: 90_000,
   }).catch((error: unknown) => {
@@ -236,7 +243,12 @@ export async function pullRequestDiff(cwd: string, number: number) {
     }
     throw error
   })
-  return response.text()
+  const diff = await response.text()
+  // GitHub always renders the newest commit, so a head that still matches after the read is the commit this diff is.
+  if (head && (await currentHead(access, repo, number)) !== head) {
+    throw new Error("This pull request changed while Vector was reading it. Run Review with Vector again.")
+  }
+  return diff
 }
 
 export async function createPullRequest(input: {
@@ -287,13 +299,8 @@ export async function postPullRequestReview(
   review: { body: string; event: "comment" | "approve" | "request-changes"; head?: string },
 ) {
   const head = review.head
-  if (head) {
-    const current = await githubJson<{ head?: { sha?: string } }>(access, `${repoPath(repo)}/pulls/${number}`)
-    if (current.head?.sha?.toLowerCase() !== head) {
-      throw new Error(
-        "This pull request changed after the review started. Reload it and run Review with Vector again before posting.",
-      )
-    }
+  if (head && (await currentHead(access, repo, number)) !== head) {
+    throw new Error("This pull request changed after the review started. Run Review with Vector again before posting.")
   }
   await githubJson(access, `${repoPath(repo)}/pulls/${number}/reviews`, {
     method: "POST",
@@ -307,20 +314,43 @@ export async function postPullRequestReview(
   return { posted: true }
 }
 
+// With the commit the user last saw, GitHub refuses the merge if anything was pushed since, so a commit nobody
+// looked at is never merged by this button.
 export async function mergePullRequest(input: {
   cwd: string
   number: number
   strategy: "merge" | "squash" | "rebase"
+  head?: string
 }) {
   const number = requirePullRequestNumber(input.number)
   const strategy = requireMergeStrategy(input.strategy)
+  const head = input.head === undefined ? undefined : requirePullRequestHead(input.head)
   const { access, repo } = await pullRequestContext(requirePullRequestDirectory(input.cwd))
+  return putPullRequestMerge(access, repo, number, { strategy, head })
+}
+
+export async function putPullRequestMerge(
+  access: GithubAccess,
+  repo: GithubRepoRef,
+  number: number,
+  merge: { strategy: "merge" | "squash" | "rebase"; head?: string },
+) {
   await githubJson(access, `${repoPath(repo)}/pulls/${number}/merge`, {
     method: "PUT",
-    body: { merge_method: strategy },
+    body: { merge_method: merge.strategy, ...(merge.head ? { sha: merge.head } : {}) },
     timeoutMs: 90_000,
+  }).catch((error: unknown) => {
+    if (error instanceof GithubRequestError && error.status === 409 && merge.head) {
+      throw new Error("New commits were pushed to this pull request. Look them over, then merge again.")
+    }
+    throw error
   })
   return { merged: true }
+}
+
+async function currentHead(access: GithubAccess, repo: GithubRepoRef, number: number) {
+  const pull = await githubJson<{ head?: { sha?: string } }>(access, `${repoPath(repo)}/pulls/${number}`)
+  return pull.head?.sha?.toLowerCase()
 }
 
 async function pullRequestContext(cwd: string) {

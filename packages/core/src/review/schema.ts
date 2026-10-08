@@ -110,20 +110,27 @@ export interface VerifyResult {
   reason: string
 }
 
-// Models wrap JSON in prose or fences despite instructions. Tries each fenced block, then the outermost {…},
-// then the whole text, and returns the first candidate that parses to an object or array.
-export function extractJson(text: string): unknown {
-  const candidates: string[] = []
-  for (const match of text.matchAll(/```[^\n`]*\n([\s\S]*?)```/g)) candidates.push(match[1] ?? "")
-  const start = text.indexOf("{")
-  const end = text.lastIndexOf("}")
-  if (start !== -1 && end > start) candidates.push(text.slice(start, end + 1))
-  candidates.push(text)
+// Models wrap JSON in prose or fences despite instructions, and sometimes quote other JSON first: a file they read,
+// an example, the report of an earlier run. Every fenced block, every balanced {…} or […], the first { to the last
+// } and the whole text are candidates, and the one that ends latest and passes `accept` wins, because a model's
+// answer comes after whatever it quoted on the way.
+export function extractJson(text: string, accept: (value: unknown) => boolean = () => true): unknown {
+  const candidates = [
+    ...Array.from(text.matchAll(/```[^\n`]*\n([\s\S]*?)```/g), (match) => ({
+      source: match[1] ?? "",
+      end: (match.index ?? 0) + match[0].length,
+    })),
+    ...balancedSpans(text).map((span) => ({ source: text.slice(span.start, span.end), end: span.end })),
+    ...(text.indexOf("{") !== -1 && text.lastIndexOf("}") > text.indexOf("{")
+      ? [{ source: text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1), end: text.lastIndexOf("}") + 1 }]
+      : []),
+    { source: text, end: text.length },
+  ].toSorted((a, b) => b.end - a.end || b.source.length - a.source.length)
   for (const candidate of candidates) {
-    if (!candidate.trim()) continue
+    if (!candidate.source.trim()) continue
     try {
-      const value: unknown = JSON.parse(candidate)
-      if (value && typeof value === "object") return value
+      const value: unknown = JSON.parse(candidate.source)
+      if (value && typeof value === "object" && accept(value)) return value
     } catch {
       continue
     }
@@ -131,11 +138,42 @@ export function extractJson(text: string): unknown {
   return undefined
 }
 
+// Every matched {…} or […] pair, nested ones included, in one pass. Quotes are tracked only inside a bracket, so
+// prose before the JSON (an apostrophe, a stray "[0, n)") cannot hide the report behind it.
+function balancedSpans(text: string) {
+  const spans: { start: number; end: number }[] = []
+  const open: number[] = []
+  let quoted = false
+  let escaped = false
+  for (let position = 0; position < text.length; position++) {
+    const char = text[position]
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (char === "\\") escaped = true
+      else if (char === '"') quoted = false
+      continue
+    }
+    if (char === '"' && open.length) quoted = true
+    else if (char === "{" || char === "[") open.push(position)
+    else if (char === "}" || char === "]") {
+      const start = open.findLastIndex((index) => (text[index] === "{") === (char === "}"))
+      if (start === -1) continue
+      spans.push({ start: open[start], end: position + 1 })
+      open.length = start
+    }
+  }
+  return spans
+}
+
 // Accepts `info.structured`, or the text of the last message. A missing side becomes RIGHT, an unknown severity
 // concern and an unknown category bug; numbers given as strings are converted and every value is clamped.
 // Findings without a path or a title are dropped. Returns undefined when there is no report at all.
 export function decodeReport(input: unknown): ModelReport | undefined {
-  const value = typeof input === "string" ? extractJson(input) : input
+  const value =
+    typeof input === "string"
+      ? (extractJson(input, (candidate) => isRecord(candidate) && Array.isArray(candidate.findings)) ??
+        extractJson(input, (candidate) => isRecord(candidate) && !!text(candidate.summary)))
+      : input
   if (!isRecord(value)) return undefined
   const summary = text(value.summary).slice(0, MAX_SUMMARY_CHARS)
   if (!Array.isArray(value.findings) && !summary) return undefined
@@ -166,7 +204,20 @@ export function decodeReport(input: unknown): ModelReport | undefined {
 }
 
 export function decodeVerify(input: unknown): VerifyResult[] | undefined {
-  const value = typeof input === "string" ? extractJson(input) : input
+  const value =
+    typeof input === "string"
+      ? extractJson(input, (candidate) => {
+          // Only results that name a finding and a verdict count, so unrelated JSON cannot read as "no findings
+          // confirmed".
+          const entries = isRecord(candidate) ? candidate.results : candidate
+          return (
+            Array.isArray(entries) &&
+            entries.some(
+              (entry) => isRecord(entry) && !!text(entry.id) && /^(confirm|reject)/.test(lower(entry.verdict)),
+            )
+          )
+        })
+      : input
   const entries = Array.isArray(value)
     ? value
     : isRecord(value) && Array.isArray(value.results)
