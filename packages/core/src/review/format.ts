@@ -296,6 +296,8 @@ export interface InlineOptions {
   suggestion?: "commit" | "diff" | "none"
   lead?: string // "Returned after being fixed in …" or "Raised to Blocking (…)"
   repo?: RepoRef
+  // false: no "/vector fix" hint, for reviews posted from the desktop, where that command needs the GitHub Action.
+  commands?: boolean
 }
 
 export function buildInlineBody(finding: Finding | PlacedFinding, options: InlineOptions): string {
@@ -315,7 +317,8 @@ export function buildInlineBody(finding: Finding | PlacedFinding, options: Inlin
     const rule = inlineText(clip(oneLine(finding.rule), MAX_RULE), options.repo).replace(/"/g, "'")
     meta.push(`rule from .vector/review.md: "${rule}"`)
   }
-  if (options.trust === "trusted") meta.push("reply `/vector fix` to have Vector apply this")
+  if (options.trust === "trusted" && options.commands !== false)
+    meta.push("reply `/vector fix` to have Vector apply this")
   lines.push(
     `<sub>${meta.join(" · ")}</sub>`,
     findingMarker({
@@ -536,6 +539,7 @@ export function noteVerifySkipped(): string {
 
 export interface SummaryInput {
   form?: "ci" | "desktop" // desktop: no markers or commands, and every finding listed with its fix as a diff
+  inlinePosted?: boolean // desktop: the findings on changed lines went out as line comments, so they are not listed
   repo?: RepoRef
   pr?: number
   head: string
@@ -624,7 +628,8 @@ function render(input: SummaryInput, limits: Limits): string {
     lines.push(note, "")
   const table = fileTable(input, limits.table)
   if (table.length) lines.push(...table, "")
-  if (selection && input.form === "desktop") lines.push(...desktopFindings(selection, input.repo))
+  if (selection && input.form === "desktop" && !input.inlinePosted)
+    lines.push(...desktopFindings(selection, input.repo))
   if (selection) lines.push(...detailSections(input, selection, limits))
   const skipped = skippedSection(input.skipped ?? [], limits.skipped)
   if (skipped.length) lines.push(...skipped, "")
@@ -811,10 +816,6 @@ function desktopFindings(selection: Selection, repo?: RepoRef): string[] {
     if (body) out.push(body, "")
     if (finding.suggestion) out.push(diffBlock(finding.suggestion), "")
   }
-  out.push(
-    "_Inline comments with committable suggestions are not posted from the desktop yet, so each fix is shown as a diff._",
-    "",
-  )
   return out
 }
 
