@@ -5,21 +5,13 @@
 // a page. The pages are small drawings of this site, so the address bar has
 // somewhere real to go and "open in your browser" opens the same page here.
 import { docsNav } from "../../../data/docs-nav"
-import { publishedDesktopVersion, release199 } from "../../../data/vector-releases"
 import { wordmarkCells } from "../../../lib/wordmark"
 import ShotIcon from "./ShotIcon.astro"
-
-const releases = release199
-  .slice(0, release199.findIndex((release) => release.version === publishedDesktopVersion) + 1)
-  .reverse()
-  .slice(0, 4)
 
 // The site's mobile menu (MarketingNav) and the docs page's "Get going" steps
 // (pages/docs/index.astro), so the drawing reads like the pages it opens.
 const menu = [
   { name: "Documentation", path: "/docs" },
-  { name: "Releases", path: "/releases" },
-  { name: "About", path: "/about" },
   { name: "Login", path: "/login" },
 ]
 const steps = [
@@ -172,35 +164,16 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
       </div>
     </section>
 
-    <section class="bp-page bp-doc" data-page="/releases" aria-label="vectordev.ai releases page" hidden>
-      <p class="bp-eyebrow">Vector releases</p>
-      <p class="bp-title">Every version. One evolving workspace.</p>
-      <ol class="bp-releases">
-        {
-          releases.map((release, index) => (
-            <li class={index === 0 ? "is-latest" : undefined}>
-              <span class="bp-version">
-                {release.version}
-                {index === 0 ? <em>Latest</em> : null}
-              </span>
-              <span class="bp-release-title">{release.title}</span>
-            </li>
-          ))
-        }
-      </ol>
-    </section>
-
     <section class="bp-page bp-doc" data-page="missing" aria-label="Page not in this preview" hidden>
       <p class="bp-eyebrow">Not in this preview</p>
-      <p class="bp-title">This browser only has three pages.</p>
+      <p class="bp-title">This browser only has two pages.</p>
       <p class="bp-lead">
-        It is a drawing of Vector's browser, so it can open the home page, the docs and the releases. The desktop app
+        It is a drawing of Vector's browser, so it can open the home page and the docs. The desktop app
         opens anything, starting with the app you are building on localhost.
       </p>
       <div class="bp-links">
         <a href="https://vectordev.ai/" data-browser-link="/">vectordev.ai</a>
         <a href="https://vectordev.ai/docs" data-browser-link="/docs">/docs</a>
-        <a href="https://vectordev.ai/releases" data-browser-link="/releases">/releases</a>
       </div>
       <a class="bp-real" href="https://vectordev.ai/" target="_blank" rel="noopener" data-browser-real hidden>
         Open <span data-browser-real-label></span> in your browser <ShotIcon name="external" size={13} />
@@ -219,7 +192,7 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
 </div>
 
 <script>
-  const pages = ["/", "/docs", "/releases"]
+  const pages = ["/", "/docs"]
   const reducedMotion = () => globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
 
   // "vectordev.ai/docs", "https://vectordev.ai/docs/", "docs" and "/docs" all
@@ -861,7 +834,7 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
     background: #1f1e28;
   }
 
-  /* The docs, releases and missing pages: one reading column, which
+  /* The docs and missing pages: one reading column, which
      scrolls under the nav when the panel is too short for it. */
   .bp-doc {
     padding-bottom: 28px;
@@ -993,52 +966,6 @@ const rain = `url("data:image/svg+xml,${encodeURIComponent(
   .bp-guide-count {
     color: rgba(255, 255, 255, 0.38);
     font-size: 11px;
-  }
-
-  .bp-releases {
-    display: grid;
-    gap: 8px;
-    margin: 22px 0 0 4px;
-    list-style: none;
-  }
-
-  .bp-releases li {
-    display: grid;
-    gap: 4px;
-    padding: 13px 15px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 14px;
-    background: rgba(20, 16, 30, 0.82);
-  }
-
-  .bp-releases li.is-latest {
-    border-color: rgba(170, 140, 255, 0.4);
-    background: linear-gradient(120deg, rgba(143, 82, 255, 0.16), rgba(20, 16, 30, 0.85) 60%);
-  }
-
-  .bp-version {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: rgba(255, 255, 255, 0.55);
-    font-family: var(--as-mono);
-    font-size: 11.5px;
-  }
-
-  .bp-version em {
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: rgba(170, 140, 255, 0.18);
-    color: #cdbdfb;
-    font-family: var(--as-font);
-    font-size: 10.5px;
-    font-style: normal;
-  }
-
-  .bp-release-title {
-    color: #f1ecfb;
-    font-size: 14px;
-    font-weight: 500;
   }
 
   .bp-links {

@@ -609,7 +609,7 @@ export function WorkspaceNavigation(props: {
               type="button"
               class="vector-help-menu-item"
               data-help-menu-sub
-              onClick={() => openLink("https://vectordev.ai/releases")}
+              onClick={() => openLink("https://vectordev.ai/docs/changelog")}
             >
               <span class="min-w-0 flex-1">Changelog</span>
               <span aria-hidden="true" data-help-menu-external>

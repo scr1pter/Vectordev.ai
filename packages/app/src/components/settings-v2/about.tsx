@@ -66,7 +66,7 @@ export function SettingsAboutV2() {
           <ButtonV2 variant="outline" icon="download" onClick={() => open("/download")}>
             Latest installers
           </ButtonV2>
-          <ButtonV2 variant="outline" icon="link" onClick={() => open("/releases")}>
+          <ButtonV2 variant="outline" icon="link" onClick={() => open("/docs/changelog")}>
             Release notes
           </ButtonV2>
         </div>
