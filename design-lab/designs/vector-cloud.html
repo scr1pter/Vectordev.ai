@@ -8,7 +8,7 @@
     <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="../assets/lab.css" />
     <style>
-      /* D13 Vector Cloud runs. Everything is scoped under .d-vector-cloud. */
+      /* D13 Cloud Services: agent runs. Everything is scoped under .d-vector-cloud. */
       .d-vector-cloud {
         --vc-run: #8b73d6;
         --vc-run-text: #cdbdf5;
@@ -1577,6 +1577,762 @@
           animation: none !important;
         }
       }
+      /* ---- Cloud Services surface: its own window content, outside any workspace ---- */
+      .d-vector-cloud .cs {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: var(--canvas);
+      }
+
+      .d-vector-cloud .cs-head {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 54px;
+        padding: 0 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        background: #1b191f;
+      }
+
+      .d-vector-cloud .cs-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 30px;
+        padding: 0 11px 0 8px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.035);
+        color: rgba(255, 255, 255, 0.68);
+        font-size: 12px;
+        font-weight: 500;
+        text-decoration: none;
+        white-space: nowrap;
+        cursor: pointer;
+        transition:
+          background-color 160ms var(--ease),
+          border-color 160ms var(--ease),
+          color 160ms var(--ease);
+      }
+
+      .d-vector-cloud .cs-back:hover {
+        border-color: rgba(194, 172, 255, 0.22);
+        background: rgba(155, 126, 238, 0.1);
+        color: #fff;
+      }
+
+      .d-vector-cloud .cs-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        margin-left: 4px;
+        color: rgba(255, 255, 255, 0.88);
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .cs-brand img {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+      }
+
+      .d-vector-cloud .cs-slash {
+        color: rgba(255, 255, 255, 0.16);
+        font-size: 18px;
+        font-weight: 300;
+      }
+
+      .d-vector-cloud .cs-repo {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        height: 38px;
+        padding: 0 9px 0 7px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .d-vector-cloud .cs-repo:hover {
+        border-color: rgba(255, 255, 255, 0.07);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .d-vector-cloud .cs-repo-mark {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border: 1px solid rgba(171, 142, 250, 0.18);
+        border-radius: 7px;
+        background: rgba(148, 116, 236, 0.08);
+        color: #aa91ef;
+      }
+
+      .d-vector-cloud .cs-repo b {
+        display: block;
+        font-size: 12.5px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-repo small {
+        display: block;
+        margin-top: 1px;
+        color: var(--text-3);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+
+      .d-vector-cloud .cs-repo > svg:last-child {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .cs-head-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+
+      .d-vector-cloud .cs-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 26px;
+        padding: 0 10px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 999px;
+        color: var(--text-2);
+        font-size: 11.5px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .cs-pill i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green, #5fcf8f);
+      }
+
+      .d-vector-cloud .cs-scope {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .cs-shell {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      /* ---- section nav: the console's own list, not the workspace sidebar ---- */
+      .d-vector-cloud .cs-nav {
+        display: flex;
+        flex: 0 0 226px;
+        flex-direction: column;
+        gap: 9px;
+        min-height: 0;
+        padding: 10px 9px 12px;
+        overflow-y: auto;
+        border-right: 1px solid rgba(255, 255, 255, 0.06);
+        background: #1f1c23;
+      }
+
+      .d-vector-cloud .cs-nav-group {
+        display: grid;
+        gap: 1px;
+      }
+
+      .d-vector-cloud .cs-nav-group + .cs-nav-group {
+        padding-top: 8px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .d-vector-cloud .cs-nav-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 9px 4px;
+        color: rgba(255, 255, 255, 0.32);
+        font-size: 9.5px;
+        font-weight: 600;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .d-vector-cloud .cs-nav-label em {
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font-size: 8.5px;
+        font-style: normal;
+        letter-spacing: 0.05em;
+      }
+
+      .d-vector-cloud .cs-nav-item {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        height: 30px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12.5px;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          background-color 140ms var(--ease),
+          color 140ms var(--ease);
+      }
+
+      .d-vector-cloud .cs-nav-item svg {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .cs-nav-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: #fff;
+      }
+
+      .d-vector-cloud .cs-nav-item[aria-current="page"] {
+        background: rgba(255, 255, 255, 0.075);
+        color: #fff;
+      }
+
+      .d-vector-cloud .cs-nav-item[aria-current="page"] svg {
+        color: var(--violet-bright);
+      }
+
+      .d-vector-cloud .cs-nav-item .cs-nav-count {
+        margin-left: auto;
+        min-width: 18px;
+        padding: 1px 6px;
+        border-radius: 99px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-align: center;
+      }
+
+      .d-vector-cloud .cs-nav-item .cs-nav-count[data-tone="amber"] {
+        background: rgba(232, 178, 92, 0.14);
+        color: var(--amber);
+      }
+
+      .d-vector-cloud .cs-main {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        background: var(--stage);
+      }
+
+      .d-vector-cloud .cs-section {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .d-vector-cloud .cs-section[hidden] {
+        display: none;
+      }
+
+      .d-vector-cloud .cs-sec-head .cs-sec-icon {
+        color: var(--violet-bright);
+      }
+
+      /* ---- written sections (overview, deployments, the rest) ---- */
+      .d-vector-cloud .cs-page {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+
+      .d-vector-cloud .cs-inner {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 30px 32px 48px;
+      }
+
+      .d-vector-cloud .cs-kicker {
+        color: var(--violet-bright);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+      }
+
+      .d-vector-cloud .cs-inner h1 {
+        margin: 6px 0 0;
+        color: var(--text-1);
+        font-size: 24px;
+        font-weight: 560;
+        letter-spacing: -0.01em;
+      }
+
+      .d-vector-cloud .cs-lede {
+        max-width: 640px;
+        margin-top: 8px;
+        color: var(--text-3);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .d-vector-cloud .cs-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 24px;
+      }
+
+      .d-vector-cloud .cs-metric {
+        display: grid;
+        gap: 3px;
+        padding: 14px 15px 13px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+        transition:
+          border-color 160ms var(--ease),
+          background-color 160ms var(--ease);
+      }
+
+      .d-vector-cloud .cs-metric:hover {
+        border-color: var(--violet-line);
+        background: rgba(182, 159, 247, 0.05);
+      }
+
+      .d-vector-cloud .cs-metric-value {
+        background: linear-gradient(135deg, #8c6de8, #c4b2fb);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        font-size: 26px;
+        font-weight: 560;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-vector-cloud .cs-metric strong {
+        font-size: 12.5px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-metric small {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vector-cloud .cs-panel {
+        margin-top: 12px;
+        padding: 15px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .d-vector-cloud .cs-panel-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .d-vector-cloud .cs-panel-head > div {
+        flex: 1;
+      }
+
+      .d-vector-cloud .cs-panel-title {
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-panel-sub {
+        margin-top: 3px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .d-vector-cloud .cs-runs-strip {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .d-vector-cloud .cs-run-chip {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 2px 9px;
+        padding: 9px 11px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.12);
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .d-vector-cloud .cs-run-chip:hover {
+        border-color: var(--violet-line);
+      }
+
+      .d-vector-cloud .cs-run-chip i {
+        grid-row: span 2;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--violet);
+      }
+
+      .d-vector-cloud .cs-run-chip i[data-tone="amber"] {
+        background: var(--amber);
+      }
+
+      .d-vector-cloud .cs-run-chip b {
+        overflow: hidden;
+        font-size: 12px;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .cs-run-chip span {
+        color: var(--text-3);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+
+      .d-vector-cloud .cs-rows {
+        display: grid;
+        margin-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .d-vector-cloud .cs-row {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: 11px;
+        min-height: 50px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+        font-size: 12.5px;
+      }
+
+      .d-vector-cloud .cs-row:last-child {
+        border-bottom: 0;
+      }
+
+      .d-vector-cloud .cs-row-mark {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-2);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .d-vector-cloud .cs-row b {
+        display: block;
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-row small {
+        display: block;
+        margin-top: 2px;
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .cs-row .mono {
+        font-size: 11px;
+      }
+
+      .d-vector-cloud .cs-state {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-2);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .cs-state::before {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--text-3);
+        content: "";
+      }
+
+      .d-vector-cloud .cs-state[data-tone="green"]::before {
+        background: var(--green, #5fcf8f);
+      }
+
+      .d-vector-cloud .cs-state[data-tone="violet"]::before {
+        background: var(--violet);
+      }
+
+      .d-vector-cloud .cs-state[data-tone="amber"]::before {
+        background: var(--amber);
+      }
+
+      .d-vector-cloud .cs-two {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+      }
+
+      .d-vector-cloud .cs-unchanged {
+        display: grid;
+        justify-items: start;
+        gap: 10px;
+        margin-top: 22px;
+        padding: 18px;
+        border: 1px dashed rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+
+      .d-vector-cloud .cs-unchanged b {
+        color: var(--text-2);
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-runs-empty {
+        display: grid;
+        flex: 1;
+        place-content: center;
+        justify-items: center;
+        gap: 8px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        text-align: center;
+      }
+
+      .d-vector-cloud .cs-runs-empty[hidden] {
+        display: none;
+      }
+
+      .d-vector-cloud .cs-runs-empty b {
+        color: var(--text-1);
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-runs-empty .btn {
+        margin-top: 6px;
+      }
+
+      /* ---- repository chooser: where a plain Cloud Services entry starts ---- */
+      .d-vector-cloud .cs-home {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: #19181c;
+      }
+
+      .d-vector-cloud .cs-home[hidden] {
+        display: none;
+      }
+
+      .d-vector-cloud .cs-field {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        overflow: hidden;
+        color: rgba(182, 159, 247, 0.16);
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 15px;
+        letter-spacing: 2px;
+        white-space: pre;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .d-vector-cloud .cs-veil {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(21, 20, 24, 0.25), rgba(21, 20, 24, 0.85) 62%, #19181c 100%);
+        pointer-events: none;
+      }
+
+      .d-vector-cloud .cs-home-shell {
+        position: relative;
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        width: min(1180px, calc(100% - 48px));
+        margin: 0 auto;
+        padding: 22px 0;
+      }
+
+      .d-vector-cloud .cs-home-head {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+      }
+
+      .d-vector-cloud .cs-home-head .cs-back {
+        justify-self: start;
+      }
+
+      .d-vector-cloud .cs-home-intro {
+        margin: auto auto 28px;
+        text-align: center;
+      }
+
+      .d-vector-cloud .cs-home-intro > span {
+        color: var(--violet-bright);
+        font-size: 11.5px;
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .d-vector-cloud .cs-home-intro h1 {
+        margin: 10px 0 0;
+        color: #fff;
+        font-size: 48px;
+        font-weight: 620;
+        letter-spacing: -0.02em;
+        line-height: 1.05;
+      }
+
+      .d-vector-cloud .cs-home-intro p {
+        max-width: 640px;
+        margin: 14px auto 0;
+        color: rgba(255, 255, 255, 0.45);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .d-vector-cloud .cs-repos {
+        width: min(900px, 100%);
+        margin: 0 auto auto;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 10px;
+        background: rgba(25, 24, 28, 0.92);
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+
+      .d-vector-cloud .cs-repos-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 44px;
+        padding: 0 16px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        color: rgba(255, 255, 255, 0.55);
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .d-vector-cloud .cs-repos-head small {
+        color: rgba(255, 255, 255, 0.25);
+      }
+
+      .d-vector-cloud .cs-repos > button {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr) auto auto 16px;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        min-height: 62px;
+        padding: 8px 16px;
+        border: 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .d-vector-cloud .cs-repos > button:first-of-type {
+        border-top: 0;
+      }
+
+      .d-vector-cloud .cs-repos > button:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-vector-cloud .cs-repos > button > svg:last-child {
+        color: var(--text-3);
+      }
+
+      .d-vector-cloud .cs-repos b {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-repos small {
+        display: block;
+        margin-top: 3px;
+        color: rgba(255, 255, 255, 0.3);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+
+      .d-vector-cloud .cs-repos .cs-repo-mark {
+        width: 32px;
+        height: 32px;
+      }
+
+      .d-vector-cloud .cs-repo-note {
+        color: var(--text-3);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+
+      .d-vector-cloud .cs-repo-note b {
+        display: inline;
+        color: var(--violet-bright);
+        font-size: inherit;
+        font-weight: 500;
+      }
+
+      .d-vector-cloud .cs-repos em {
+        padding: 3px 7px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 5px;
+        color: rgba(255, 255, 255, 0.38);
+        font-size: 10px;
+        font-style: normal;
+      }
     </style>
   </head>
   <body>
@@ -1591,53 +2347,189 @@
         </div>
         <div class="lab-viewport" data-height="900">
           <div class="lab-stage d-vector-cloud">
-            <div class="app">
-              <nav data-lab-sidebar data-active="cloud" data-workspace="Vector" data-branch="main"></nav>
-              <main class="app-main">
-                <header class="app-header">
-                  <i data-icon="chip" data-size="15" class="muted"></i>
-                  <h2>Vector Cloud</h2>
-                  <span class="app-header-sub">Agents that keep working with your laptop closed</span>
-                  <div class="app-header-end">
-                    <span class="vc-usage" title="Vector Cloud usage this month">
-                      <span>October</span>
-                      <b data-usage>$23.18</b>
-                      <span class="muted">of $60</span>
-                      <span class="vc-meter" aria-hidden="true"><i data-usage-bar style="width: 38%"></i></span>
-                    </span>
-                    <button class="btn btn-primary" type="button" data-open-sheet>
-                      <i data-icon="plus" data-size="14"></i>Start a cloud run
-                    </button>
-                  </div>
-                </header>
-                <div class="app-body vc-body">
-                  <section class="vc-list" aria-label="Cloud runs">
-                    <div class="tabs" role="tablist" aria-label="Filter runs" data-filters>
-                      <button class="tab" role="tab" type="button" aria-selected="true" data-filter="all">All <span class="count" data-count="all">7</span></button>
-                      <button class="tab" role="tab" type="button" aria-selected="false" data-filter="running">Running <span class="count" data-count="running">3</span></button>
-                      <button class="tab" role="tab" type="button" aria-selected="false" data-filter="needs">Needs you <span class="count" data-count="needs">1</span></button>
-                      <button class="tab" role="tab" type="button" aria-selected="false" data-filter="finished">Finished <span class="count" data-count="finished">3</span></button>
-                    </div>
-                    <div class="vc-runs scroll" data-runs></div>
-                    <div class="vc-runners" aria-label="Runners">
-                      <div class="vc-runner">
-                        <span data-glyph="cloud"></span>
-                        <span>Vector Cloud <span class="muted">· us-east</span></span>
-                        <span class="vc-runner-note" data-slots>2 of 4 slots</span>
-                        <span class="vc-meter" aria-hidden="true"><i data-slots-bar style="width: 50%"></i></span>
+            <div class="cs" data-cs>
+              <header class="cs-head">
+                <a class="cs-back" href="first-run.html" title="Back to Vector Home"><i data-icon="back" data-size="13"></i>Home</a>
+                <span class="cs-brand"><img src="../assets/favicon.svg" alt="" />Cloud Services</span>
+                <span class="cs-slash" aria-hidden="true">/</span>
+                <button class="cs-repo" type="button" data-cs-choose title="Choose another repository">
+                  <span class="cs-repo-mark" data-glyph="repo" data-size="14"></span>
+                  <span><b data-cs-repo-name>Vectordev.ai</b><small data-cs-repo-path>~/code/Vectordev.ai</small></span>
+                  <i data-icon="caret" data-size="13"></i>
+                </button>
+                <div class="cs-head-end">
+                  <span class="cs-scope">Repository-scoped · not tied to a workspace</span>
+                  <span class="cs-pill" data-cs-releases><i></i>3 releases · 1 live</span>
+                </div>
+              </header>
+
+              <div class="cs-shell">
+                <aside class="cs-nav" aria-label="Cloud Services sections" data-cs-nav></aside>
+
+                <main class="cs-main">
+                  <section class="cs-section" data-cs-section="runs" aria-label="Agent runs">
+                    <header class="app-header cs-sec-head">
+                      <span class="cs-sec-icon" data-glyph="cloud" data-size="15"></span>
+                      <h2>Agent runs</h2>
+                      <span class="app-header-sub">Agents that keep working with your laptop closed</span>
+                      <div class="app-header-end">
+                        <span class="vc-usage" title="Vector Cloud usage this month">
+                          <span>October</span>
+                          <b data-usage>$23.18</b>
+                          <span class="muted">of $60</span>
+                          <span class="vc-meter" aria-hidden="true"><i data-usage-bar style="width: 38%"></i></span>
+                        </span>
+                        <button class="btn btn-primary" type="button" data-open-sheet>
+                          <i data-icon="plus" data-size="14"></i>Start a cloud run
+                        </button>
                       </div>
-                      <div class="vc-runner">
-                        <span data-glyph="actions"></span>
-                        <span>GitHub Actions <span class="muted">· Vectordev.ai</span></span>
-                        <span class="vc-runner-note">1,240 of 3,000 min</span>
-                        <span class="vc-meter" data-tone="muted" aria-hidden="true"><i style="width: 41%"></i></span>
+                    </header>
+                    <div class="app-body vc-body" data-cs-runs>
+                      <section class="vc-list" aria-label="Cloud runs">
+                        <div class="tabs" role="tablist" aria-label="Filter runs" data-filters>
+                          <button class="tab" role="tab" type="button" aria-selected="true" data-filter="all">All <span class="count" data-count="all">7</span></button>
+                          <button class="tab" role="tab" type="button" aria-selected="false" data-filter="running">Running <span class="count" data-count="running">3</span></button>
+                          <button class="tab" role="tab" type="button" aria-selected="false" data-filter="needs">Needs you <span class="count" data-count="needs">1</span></button>
+                          <button class="tab" role="tab" type="button" aria-selected="false" data-filter="finished">Finished <span class="count" data-count="finished">3</span></button>
+                        </div>
+                        <div class="vc-runs scroll" data-runs></div>
+                        <div class="vc-runners" aria-label="Runners">
+                          <div class="vc-runner">
+                            <span data-glyph="cloud"></span>
+                            <span>Vector Cloud <span class="muted">· us-east</span></span>
+                            <span class="vc-runner-note" data-slots>2 of 4 slots</span>
+                            <span class="vc-meter" aria-hidden="true"><i data-slots-bar style="width: 50%"></i></span>
+                          </div>
+                          <div class="vc-runner">
+                            <span data-glyph="actions"></span>
+                            <span>GitHub Actions <span class="muted">· Vectordev.ai</span></span>
+                            <span class="vc-runner-note">1,240 of 3,000 min</span>
+                            <span class="vc-meter" data-tone="muted" aria-hidden="true"><i style="width: 41%"></i></span>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section class="vc-detail" aria-live="off" data-detail></section>
+                    </div>
+                    <div class="cs-runs-empty" data-cs-runs-empty hidden>
+                      <span data-glyph="cloud" data-size="26"></span>
+                      <b>No agent runs for <span data-cs-empty-name>this repository</span> yet</b>
+                      <span>Start one here, or send a running session to the cloud from its workspace.</span>
+                      <button class="btn" type="button" data-cs-show-demo>Show Vectordev.ai's runs</button>
+                    </div>
+                  </section>
+
+                  <section class="cs-section" data-cs-section="overview" aria-label="Project overview" hidden>
+                    <div class="cs-page scroll">
+                      <div class="cs-inner">
+                        <div class="cs-kicker" data-cs-repo-label>Vectordev.ai</div>
+                        <h1>Project overview</h1>
+                        <p class="cs-lede">One repository-scoped view of releases, provider connections, data services, runtime health and the agents running in the cloud. Vector's agent uses the same project context when it deploys or prepares cloud-backed features.</p>
+                        <div class="cs-metrics">
+                          <button class="cs-metric" type="button" data-cs-go="deployments"><span class="cs-metric-value">12</span><strong>Deployments</strong><small>3 current releases</small></button>
+                          <button class="cs-metric" type="button" data-cs-go="observability"><span class="cs-metric-value">3/3</span><strong>Healthy releases</strong><small>Latest health checks passed</small></button>
+                          <button class="cs-metric" type="button" data-cs-go="connections"><span class="cs-metric-value">3</span><strong>Cloud accounts</strong><small>Vercel, Supabase and AWS</small></button>
+                          <button class="cs-metric" type="button" data-cs-go="environment"><span class="cs-metric-value">18</span><strong>Environment variables</strong><small>Preview and Production</small></button>
+                        </div>
+                        <div class="cs-panel">
+                          <div class="cs-panel-head">
+                            <div>
+                              <div class="cs-panel-title">Agents in the cloud</div>
+                              <div class="cs-panel-sub">Runs for this repository keep going while your laptop sleeps. Open one to steer it, or continue it on this laptop.</div>
+                            </div>
+                            <button class="btn btn-sm" type="button" data-cs-go="runs">Open Agent runs</button>
+                          </div>
+                          <div class="cs-runs-strip">
+                            <button class="cs-run-chip" type="button" data-cs-go="runs" data-cs-run="r1"><i></i><b>Fix flaky session recovery test</b><span>Vector Cloud · running</span></button>
+                            <button class="cs-run-chip" type="button" data-cs-go="runs" data-cs-run="r4"><i data-tone="amber"></i><b>Refresh the free model list</b><span>Needs you · budget cap</span></button>
+                            <button class="cs-run-chip" type="button" data-cs-go="runs" data-cs-run="r2"><i></i><b>Keep transcript scroll on card expand</b><span>GitHub Actions · running</span></button>
+                          </div>
+                        </div>
+                        <div class="cs-two">
+                          <div class="cs-panel">
+                            <div class="cs-panel-title">Services</div>
+                            <div class="cs-rows">
+                              <div class="cs-row"><span class="cs-row-mark">▲</span><span><b>Vercel</b><small>vectordev-ai · Production and Preview</small></span><span class="cs-state" data-tone="green">Connected</span><span></span></div>
+                              <div class="cs-row"><span class="cs-row-mark">S</span><span><b>Supabase</b><small>Postgres 16 · Auth · Storage</small></span><span class="cs-state" data-tone="green">Connected</span><span></span></div>
+                              <div class="cs-row"><span class="cs-row-mark">N</span><span><b>Netlify</b><small>Not used by this repository</small></span><span class="cs-state">Not connected</span><span></span></div>
+                            </div>
+                          </div>
+                          <div class="cs-panel">
+                            <div class="cs-panel-title">Runtime health</div>
+                            <div class="cs-rows">
+                              <div class="cs-row"><span class="cs-row-mark">P</span><span><b>Production</b><small class="mono">vectordev.ai · main@b517348</small></span><span class="cs-state" data-tone="green">Healthy</span><span class="mono muted">142 ms</span></div>
+                              <div class="cs-row"><span class="cs-row-mark">Pr</span><span><b>Preview</b><small class="mono">session-recovery · from an agent run</small></span><span class="cs-state" data-tone="violet">Building</span><span class="mono muted">1m 12s</span></div>
+                              <div class="cs-row"><span class="cs-row-mark">Db</span><span><b>Database</b><small>Connections 14 of 60 · last backup 02:00</small></span><span class="cs-state" data-tone="green">Healthy</span><span class="mono muted">9 ms</span></div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </section>
 
-                  <section class="vc-detail" aria-live="off" data-detail></section>
+                  <section class="cs-section" data-cs-section="deployments" aria-label="Deployments" hidden>
+                    <div class="cs-page scroll">
+                      <div class="cs-inner">
+                        <div class="cs-kicker" data-cs-repo-label>Vectordev.ai</div>
+                        <h1>Deployments</h1>
+                        <p class="cs-lede">Vector runs the whole deploy on your own Vercel or Netlify account. Your code is never proxied through Vector.</p>
+                        <div class="cs-panel">
+                          <div class="cs-panel-title">Releases</div>
+                          <div class="cs-rows">
+                            <div class="cs-row"><span class="cs-row-mark">▲</span><span><b>Production</b><small class="mono">main@b517348 · fix(web): sign the Design Lab cookie…</small></span><span class="cs-state" data-tone="green">Current</span><span class="mono muted">2h ago</span></div>
+                            <div class="cs-row"><span class="cs-row-mark">▲</span><span><b>Preview</b><small class="mono">changes-panel@4c49989 · feat(app): redesign the Changes panel</small></span><span class="cs-state" data-tone="green">Ready</span><span class="mono muted">5h ago</span></div>
+                            <div class="cs-row"><span class="cs-row-mark">▲</span><span><b>Production</b><small class="mono">main@7026ec9 · previous release</small></span><span class="cs-state">Superseded</span><span class="mono muted">yesterday</span></div>
+                          </div>
+                        </div>
+                        <div class="cs-panel">
+                          <div class="cs-panel-head">
+                            <div>
+                              <div class="cs-panel-title">Agent previews</div>
+                              <div class="cs-panel-sub">Deploy an agent run's branch before merging it. The main project stays untouched.</div>
+                            </div>
+                          </div>
+                          <div class="cs-rows">
+                            <div class="cs-row"><span class="cs-row-mark" data-glyph="cloud"></span><span><b>Fix flaky session recovery test</b><small class="mono">session-recovery · Vector Cloud run</small></span><span class="cs-state" data-tone="violet">Building</span><span class="mono muted">1m 12s</span></div>
+                            <div class="cs-row"><span class="cs-row-mark" data-glyph="actions"></span><span><b>Keep transcript scroll on card expand</b><small class="mono">fix-scroll-state · GitHub Actions run</small></span><span></span><button class="btn btn-sm" type="button" data-cs-preview="fix-scroll-state">Deploy preview</button></div>
+                            <div class="cs-row"><span class="cs-row-mark" data-glyph="cloud"></span><span><b>Add tests for workspace trust</b><small class="mono">trust-tests · Vector Cloud run</small></span><span></span><button class="btn btn-sm" type="button" data-cs-preview="trust-tests">Deploy preview</button></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="cs-section" data-cs-section="other" aria-label="Section" hidden>
+                    <div class="cs-page scroll">
+                      <div class="cs-inner">
+                        <div class="cs-kicker" data-cs-repo-label>Vectordev.ai</div>
+                        <h1 data-cs-other-title>Logs</h1>
+                        <p class="cs-lede" data-cs-other-text></p>
+                        <div class="cs-unchanged" data-cs-note></div>
+                      </div>
+                    </div>
+                  </section>
+                </main>
+              </div>
+
+              <section class="cs-home" data-cs-home aria-label="Choose a repository" hidden>
+                <pre class="cs-field" aria-hidden="true" data-cs-field></pre>
+                <div class="cs-veil" aria-hidden="true"></div>
+                <div class="cs-home-shell">
+                  <header class="cs-home-head">
+                    <a class="cs-back" href="first-run.html"><i data-icon="back" data-size="13"></i>Home</a>
+                    <span class="cs-brand"><img src="../assets/favicon.svg" alt="" />Cloud Services</span>
+                    <span></span>
+                  </header>
+                  <div class="cs-home-intro">
+                    <span>Deploy and operate</span>
+                    <h1>Choose a repository for Cloud Services.</h1>
+                    <p>Select any repository, then manage deployments, domains, environment variables, databases, runtime health and the agents running in the cloud, without leaving Vector.</p>
+                  </div>
+                  <div class="cs-repos" data-cs-repos>
+                    <div class="cs-repos-head">Repositories <small>4</small></div>
+                  </div>
                 </div>
-              </main>
+              </section>
             </div>
 
             <div class="vc-scrim" data-scrim hidden></div>
@@ -2672,6 +3564,188 @@
         fillGlyphs(stage)
         renderList()
         renderDetail()
+      })
+    </script>
+    <script>
+      // Cloud Services frame: the section list, the repository chooser and the links between
+      // sections. Cloud Services is its own surface opened from Vector Home, scoped to a
+      // repository rather than a workspace, so there is no workspace sidebar here.
+      document.addEventListener("DOMContentLoaded", function () {
+        const stage = document.querySelector(".d-vector-cloud")
+        const shell = stage.querySelector("[data-cs]")
+        const stroke = (body, size = 15) =>
+          `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+
+        // The same sections and order as today's Cloud Services console, plus Agent runs.
+        const GROUPS = [
+          { items: [["overview", "Project overview", '<rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/>']] },
+          { label: "Agents", fresh: true, items: [["runs", "Agent runs", '<path d="M4.7 12.4h6.8a2.85 2.85 0 0 0 .3-5.68 3.9 3.9 0 0 0-7.55.9A2.4 2.4 0 0 0 4.7 12.4Z"/>']] },
+          {
+            label: "Deploy & observe",
+            items: [
+              ["deployments", "Deployments", '<path d="M8 11.5v-8M4.8 6.7 8 3.5l3.2 3.2"/><path d="M3 13.5h10"/>'],
+              ["logs", "Logs", '<path d="M3 4h10M3 8h10M3 12h6"/>'],
+              ["analytics", "Analytics", '<path d="M3.5 13V9M8 13V3.5M12.5 13V6.5"/>'],
+              ["observability", "Observability", '<path d="M2 8h2.6l1.6-3.5 3 7 1.6-3.5H14"/>'],
+              ["domains", "Domains", '<circle cx="8" cy="8" r="5.6"/><path d="M2.4 8h11.2M8 2.4c1.6 1.7 2.4 3.6 2.4 5.6s-.8 3.9-2.4 5.6c-1.6-1.7-2.4-3.6-2.4-5.6s.8-3.9 2.4-5.6Z"/>'],
+              ["environment", "Environment variables", '<circle cx="5.5" cy="10.5" r="2.6"/><path d="m7.4 8.6 5.1-5.1M10.6 5.4l1.6 1.6"/>'],
+              ["delivery", "Delivery & security", '<path d="M8 2.3 3.2 4.1v3.6c0 3 2 5 4.8 6 2.8-1 4.8-3 4.8-6V4.1Z"/>'],
+            ],
+          },
+          {
+            label: "Data services",
+            items: [
+              ["database", "Database", '<ellipse cx="8" cy="4" rx="4.8" ry="1.8"/><path d="M3.2 4v8c0 1 2.1 1.8 4.8 1.8s4.8-.8 4.8-1.8V4M3.2 8c0 1 2.1 1.8 4.8 1.8s4.8-.8 4.8-1.8"/>'],
+              ["authentication", "Authentication", '<circle cx="8" cy="5.6" r="2.6"/><path d="M3.2 13.4c.6-2.4 2.5-3.8 4.8-3.8s4.2 1.4 4.8 3.8"/>'],
+              ["storage", "Storage", '<path d="M2.6 5.2 8 2.6l5.4 2.6v5.6L8 13.4l-5.4-2.6Z"/><path d="M2.6 5.2 8 7.8l5.4-2.6M8 7.8v5.6"/>'],
+              ["functions", "Edge functions", '<path d="M8.8 2.5 4.2 9h3.6l-.6 4.5L11.8 7H8.2Z"/>'],
+              ["realtime", "Realtime", '<path d="M5.2 5.2a4 4 0 0 0 0 5.6M10.8 5.2a4 4 0 0 1 0 5.6M3.3 3.3a6.7 6.7 0 0 0 0 9.4M12.7 3.3a6.7 6.7 0 0 1 0 9.4"/><circle cx="8" cy="8" r="1"/>'],
+            ],
+          },
+          {
+            label: "Connections",
+            items: [
+              ["connections", "Integrations", '<path d="M6.6 9.4 9.4 6.6M5.4 7.8 4 9.2a2.3 2.3 0 0 0 3.2 3.2l1.4-1.4M10.6 8.2 12 6.8a2.3 2.3 0 0 0-3.2-3.2L7.4 5"/>'],
+              ["aws", "AWS", '<rect x="2.5" y="3" width="11" height="4" rx="1"/><rect x="2.5" y="9" width="11" height="4" rx="1"/><path d="M5 5h.01M5 11h.01"/>'],
+              ["settings", "Project settings", '<circle cx="8" cy="8" r="2.1"/><path d="M8 2.2v1.6M8 12.2v1.6M2.2 8h1.6M12.2 8h1.6M3.9 3.9 5 5M11 11l1.1 1.1M3.9 12.1 5 11M11 5l1.1-1.1"/>'],
+            ],
+          },
+        ]
+        const ABOUT = {
+          overview: "One repository-scoped view of releases, provider connections, data services, runtime health and the agents running in the cloud.",
+          deployments: "Releases and agent previews on your own Vercel or Netlify account. Your code is never proxied through Vector.",
+          logs: "Build and runtime logs for every release, filtered by deployment, level and time, with a one-click hand-off to the agent.",
+          analytics: "Traffic, top pages and Web Vitals from the hosting provider, for this repository's production and preview deployments.",
+          observability: "Health checks, error rates and latency for each release, with the checks Vector runs after a deploy.",
+          domains: "Custom domains, DNS records and certificates for this repository's projects.",
+          environment: "Environment variables per scope, stored for this repository and synced to the hosting provider.",
+          delivery: "Build and runtime settings, preview protection and security headers.",
+          database: "Tables, migrations, backups and connection details for this repository's database.",
+          authentication: "Sign-in providers, users and email templates for this repository's auth service.",
+          storage: "Buckets, policies and usage for this repository's file storage.",
+          functions: "Edge functions with their deploys, logs and secrets.",
+          realtime: "Channels, presence and broadcast usage for this repository.",
+          connections: "Vercel, Netlify, Supabase, GitHub and GitLab accounts connected to this repository.",
+          aws: "AWS accounts and resources linked to this repository.",
+          settings: "Project name, framework detection, build command and output directory for this repository.",
+        }
+        const NAMES = Object.fromEntries(GROUPS.flatMap((g) => g.items.map(([id, name]) => [id, name])))
+
+        const nav = shell.querySelector("[data-cs-nav]")
+        nav.innerHTML = GROUPS.map(
+          (group) =>
+            `<div class="cs-nav-group">${group.label ? `<div class="cs-nav-label">${group.label}${group.fresh ? "<em>New</em>" : ""}</div>` : ""}${group.items
+              .map(
+                ([id, name, body]) =>
+                  `<button class="cs-nav-item" type="button" data-cs-go="${id}">${stroke(body)}<span>${name}</span>${id === "runs" ? '<span class="cs-nav-count" data-cs-live title="Running now">3</span>' : ""}</button>`,
+              )
+              .join("")}</div>`,
+        ).join("")
+
+        // Only Vectordev.ai is drawn in full; another repository gets its empty Agent runs
+        // and an honest note on the other sections.
+        let demo = true
+
+        function show(id) {
+          const written = ["runs", ...(demo ? ["overview", "deployments"] : [])].includes(id)
+          shell.querySelectorAll("[data-cs-section]").forEach((section) => {
+            section.hidden = section.dataset.csSection !== (written ? id : "other")
+          })
+          nav.querySelectorAll("[data-cs-go]").forEach((item) => {
+            if (item.dataset.csGo === id) item.setAttribute("aria-current", "page")
+            else item.removeAttribute("aria-current")
+          })
+          if (written) return
+          shell.querySelector("[data-cs-other-title]").textContent = NAMES[id]
+          shell.querySelector("[data-cs-other-text]").textContent = ABOUT[id]
+          shell.querySelector("[data-cs-note]").innerHTML = demo && !["overview", "deployments"].includes(id)
+            ? `<span><b>Same as today's Cloud Services.</b> This concept redraws Agent runs, Project overview and Deployments. The other sections keep the screens Vector already has.</span><button class="btn btn-sm" type="button" data-cs-go="runs">Back to Agent runs</button>`
+            : `<span><b>Drawn for Vectordev.ai.</b> This concept fills in Agent runs, Project overview and Deployments for one repository. Pick Vectordev.ai to see them.</span><button class="btn btn-sm" type="button" data-cs-show-demo>Show Vectordev.ai</button>`
+        }
+
+        // Mirror the live "Running" count from the runs list into the section list.
+        const running = stage.querySelector('[data-count="running"]')
+        const live = nav.querySelector("[data-cs-live]")
+        new MutationObserver(() => {
+          live.textContent = running.textContent
+          live.hidden = running.textContent.trim() === "0"
+        }).observe(running, { childList: true, characterData: true, subtree: true })
+
+        // ---- repository chooser ----
+        const REPOS = [
+          { name: "Vectordev.ai", path: "~/code/Vectordev.ai", note: "<b>3 running</b> · 7 agent runs" },
+          { name: "vector-site", path: "~/code/vector-site", note: "Production · vector-site.vercel.app" },
+          { name: "vectorscope-action", path: "~/code/vectorscope-action", note: "No deployments yet" },
+          { name: "api-gateway", path: "~/work/api-gateway", note: "Supabase · 2 functions" },
+        ]
+        const home = shell.querySelector("[data-cs-home]")
+        const repoMark = `<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h5l1.4 1.7H16v7.8H4V6Z"/></svg>`
+        shell.querySelector("[data-cs-repos]").insertAdjacentHTML(
+          "beforeend",
+          REPOS.map(
+            (repo) =>
+              `<button type="button" data-cs-pick="${repo.name}"><span class="cs-repo-mark">${repoMark}</span><span><b>${repo.name}</b><small>${repo.path}</small></span><span class="cs-repo-note">${repo.note}</span><em>Repository</em>${LabUI.svg("chevron-right", 14)}</button>`,
+          ).join(""),
+        )
+
+        // A faint character field behind the chooser, like the app's ASCII backdrop.
+        const field = shell.querySelector("[data-cs-field]")
+        const chars = " .·:-=+*"
+        field.textContent = Array.from({ length: 64 }, (_, y) =>
+          Array.from({ length: 170 }, (_, x) => {
+            const wave = Math.sin(x / 9 + y / 6) + Math.cos(x / 15 - y / 11) + Math.sin((x + y) / 23)
+            return chars[Math.max(0, Math.min(chars.length - 1, Math.floor((wave + 1.4) * 2)))]
+          }).join(""),
+        ).join("\n")
+
+        function pick(name) {
+          const repo = REPOS.find((r) => r.name === name) ?? REPOS[0]
+          shell.querySelector("[data-cs-repo-name]").textContent = repo.name
+          shell.querySelector("[data-cs-repo-path]").textContent = repo.path
+          shell.querySelectorAll("[data-cs-repo-label]").forEach((el) => (el.textContent = repo.name))
+          demo = repo.name === "Vectordev.ai"
+          shell.querySelector("[data-cs-runs]").hidden = !demo
+          shell.querySelector("[data-cs-runs-empty]").hidden = demo
+          shell.querySelector("[data-cs-empty-name]").textContent = repo.name
+          live.hidden = !demo || running.textContent.trim() === "0"
+          home.hidden = true
+        }
+
+        shell.addEventListener("click", (event) => {
+          const go = event.target.closest("[data-cs-go]")
+          if (go) {
+            show(go.dataset.csGo)
+            if (go.dataset.csRun) stage.querySelector(`[data-run="${go.dataset.csRun}"]`)?.click()
+            return
+          }
+          if (event.target.closest("[data-cs-choose]")) {
+            home.hidden = false
+            return
+          }
+          const chosen = event.target.closest("[data-cs-pick]")
+          if (chosen) {
+            pick(chosen.dataset.csPick)
+            show("runs")
+            return
+          }
+          if (event.target.closest("[data-cs-show-demo]")) {
+            const current = nav.querySelector('[aria-current="page"]')?.dataset.csGo ?? "runs"
+            pick("Vectordev.ai")
+            show(current)
+            return
+          }
+          const preview = event.target.closest("[data-cs-preview]")
+          if (preview) {
+            const row = preview.closest(".cs-row")
+            preview.replaceWith(Object.assign(document.createElement("span"), { className: "mono muted", textContent: "0m 04s" }))
+            const state = row.children[2]
+            state.className = "cs-state"
+            state.dataset.tone = "violet"
+            state.textContent = "Building"
+          }
+        })
+
+        show("runs")
       })
     </script>
   </body>

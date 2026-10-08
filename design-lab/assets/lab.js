@@ -39,11 +39,9 @@
     { group: "Project tools", items: [
       { id: "dashboard", icon: "dashboard", name: "Agent Dashboard" },
       { id: "browser", icon: "browser", name: "Browser" },
-      { id: "cloud", icon: "chip", name: "Vector Cloud" },
     ] },
     { group: "Connections", items: [
       { id: "pulls", icon: "pulls", name: "Pull Requests" },
-      { id: "vectorscope", icon: "review", name: "Vectorscope" },
       { id: "mcp", icon: "mcp", name: "MCP" },
       { id: "plugins", icon: "plugins", name: "Plugins" },
     ] },
