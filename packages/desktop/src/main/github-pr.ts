@@ -5,6 +5,7 @@ import { GH_PACKAGE_MANAGERS, ghInstallHint, ghInstallWarning, type GhPackageMan
 import {
   requireMergeStrategy,
   requirePullRequestDirectory,
+  requirePullRequestHead,
   requirePullRequestLimit,
   requirePullRequestNumber,
   requirePullRequestState,
@@ -262,25 +263,44 @@ export async function createPullRequest(input: {
 
 // Posting a review is the one action here that is visible to other people, so
 // it stays an explicit call the UI only makes after the user confirms.
-export async function submitPullRequestReview(input: {
-  cwd: string
-  number: number
-  body: string
-  event: "comment" | "approve" | "request-changes"
-}) {
-  const result = await gh(
+export async function submitPullRequestReview(
+  input: {
+    cwd: string
+    number: number
+    head: string
+    body: string
+    event: "comment" | "approve" | "request-changes"
+  },
+  run: typeof gh = gh,
+) {
+  const cwd = requirePullRequestDirectory(input.cwd)
+  const number = requirePullRequestNumber(input.number)
+  const head = requirePullRequestHead(input.head)
+  const event = requireReviewEvent(input.event).toUpperCase().replaceAll("-", "_")
+  const body = requirePullRequestText(input.body, "Review body", 1_000_000, false)
+  const endpoint = `repos/{owner}/{repo}/pulls/${number}`
+  const current = await run(["api", endpoint, "--method", "GET", "--jq", ".head.sha"], { cwd })
+  if (current.failed) throw new Error(current.stderr.trim() || "Could not verify the pull request's current commit.")
+  if (requirePullRequestHead(current.stdout.trim()) !== head)
+    throw new Error(
+      "This pull request changed after the review started. Reload it and run Review with Vector again before posting.",
+    )
+
+  // The API records the exact commit reviewed, even if another push lands after the check above.
+  const result = await run(
     [
-      "pr",
-      "review",
-      String(requirePullRequestNumber(input.number)),
-      `--${requireReviewEvent(input.event)}`,
-      "--body",
-      requirePullRequestText(input.body, "Review body", 1_000_000, false),
+      "api",
+      `${endpoint}/reviews`,
+      "--method",
+      "POST",
+      "-f",
+      `commit_id=${head}`,
+      "-f",
+      `event=${event}`,
+      "-f",
+      `body=${body}`,
     ],
-    {
-      cwd: requirePullRequestDirectory(input.cwd),
-      timeoutMs: 60_000,
-    },
+    { cwd, timeoutMs: 60_000 },
   )
   if (result.failed) throw new Error(result.stderr.trim() || "Could not post the review.")
   return { posted: true }

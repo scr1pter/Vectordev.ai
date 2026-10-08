@@ -124,6 +124,26 @@ describe("recommendModel", () => {
     expect(recommendModel(outcomes, "frontend", 3)).toBeUndefined()
     expect(recommendModel(outcomes, "frontend", 2)?.model).toBe("claude-sonnet-5")
   })
+
+  test("recommends only usable models and keeps disconnected history as evidence", () => {
+    const outcomes = [
+      ...Array.from({ length: 3 }, () => outcome({ provider: "gone", model: "cheap", costUsd: 0.001 })),
+      ...Array.from({ length: 3 }, () => outcome({ provider: "connected", model: "current", costUsd: 0.02 })),
+    ]
+    expect(
+      recommendModel(outcomes, "frontend", 3, (provider, model) => provider === "connected" && model === "current")
+        ?.model,
+    ).toBe("current")
+    expect(recommendModel(outcomes, "frontend", 3, () => false)).toBeUndefined()
+    expect(outcomes).toHaveLength(6)
+  })
+
+  test("unknown timing is not ranked as faster than measured execution", () => {
+    const missing = Array.from({ length: 3 }, () => outcome({ provider: "x", model: "missing", latencyMs: 0 }))
+    const measured = Array.from({ length: 3 }, () => outcome({ provider: "x", model: "measured", latencyMs: 500 }))
+    expect(recommendModel([...missing, ...measured], "frontend")?.model).toBe("measured")
+    expect(recommendModel(missing, "frontend")?.medianLatencyMs).toBeUndefined()
+  })
 })
 
 describe("recommendModel cost ranking", () => {
@@ -197,5 +217,17 @@ describe("recommendModel cost ranking", () => {
   test("surfaces measured spend as evidence", () => {
     const result = recommendModel(runs("openai", "gpt-4o", 0.0125), "frontend", 3)
     expect(result?.evidence.some((line) => line.includes("median 1,200 tokens at $0.0125 per run"))).toBe(true)
+  })
+
+  test("evidence distinguishes unvalidated, unpriced, and very low positive-cost runs", () => {
+    const unknown = recommendModel(
+      [0, 1, 2].map(() => outcome({ provider: "x", model: "m", usage })),
+      "frontend",
+    )
+    expect(unknown?.evidence).toContain("No validation checks recorded")
+    expect(unknown?.evidence).toContain("Cost unknown: no fully priced runs recorded")
+    const tiny = recommendModel(runs("x", "m", 0.00001), "frontend")
+    expect(tiny?.evidence.some((line) => line.includes("<$0.0001 per run"))).toBe(true)
+    expect(tiny?.evidence.some((line) => line.includes("$0.0000 per run"))).toBe(false)
   })
 })

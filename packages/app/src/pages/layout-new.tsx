@@ -68,10 +68,11 @@ import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
 import { OnboardingProgress } from "@/features/onboarding/onboarding"
 import { SpotlightTour } from "@/features/onboarding/spotlight-tour"
 import { createSpotlightSteps } from "@/features/onboarding/spotlight-steps"
-import { outcomesFromWorkspaceRecord, recordOutcome } from "@/features/economics/economics-repository"
+import { outcomesFromWorkspaceRecord, recordOutcome, removeOutcome } from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
-import { measureUsage } from "@/features/economics/token-usage"
+import { aggregateCostUsd, measureUsage } from "@/features/economics/token-usage"
 import { outcomeFromSession } from "@/features/economics/session-outcomes"
+import { createSessionOutcomeRecorder } from "@/features/economics/session-outcome-recorder"
 import {
   ONBOARDING_UPDATED_EVENT,
   readOnboardingFlags,
@@ -1183,9 +1184,9 @@ export default function NewLayout(props: ParentProps) {
     return "border-[color:var(--vx-purple)]/35 bg-[color:var(--vx-purple-soft)] text-[color:var(--vx-purple-bright)]"
   }
 
-  const swarmStatusTone = (status: SwarmRunStatus) => {
+  const swarmStatusTone = (status: SwarmRunStatus | SwarmTaskRecord["status"]) => {
     if (status === "merged" || status === "complete") return "border-emerald-400/25 bg-emerald-400/10 text-emerald-100"
-    if (status === "failed") return "border-red-400/25 bg-red-400/10 text-red-100"
+    if (status === "failed" || status === "blocked") return "border-red-400/25 bg-red-400/10 text-red-100"
     if (status === "needs review" || status === "interrupted")
       return "border-amber-300/25 bg-amber-300/10 text-amber-100"
     if (status === "discarded" || status === "canceled")
@@ -1202,6 +1203,18 @@ export default function NewLayout(props: ParentProps) {
   }
 
   const isSwarmRunning = (run: SwarmRunRecord) => run.status === "planning" || run.status === "running"
+  const canResumeSwarm = (run: SwarmRunRecord) =>
+    ["failed", "canceled", "interrupted"].includes(run.status) ||
+    (run.status === "needs review" &&
+      run.tasks.some((task) => ["failed", "blocked", "canceled", "interrupted"].includes(task.status)))
+
+  const swarmRunMarker = (run: SwarmRunRecord) => {
+    if (isSwarmRunning(run)) return "animate-pulse bg-[color:var(--vx-purple-bright)]"
+    if (run.status === "failed") return "bg-rose-400"
+    if (run.status === "needs review" || run.status === "interrupted") return "bg-amber-300"
+    if (run.status === "complete" || run.status === "merged") return "bg-emerald-400"
+    return "bg-white/30"
+  }
 
   const workspaceBackgroundTask = (workspace: ParallelWorkspaceRecord) => {
     return backgroundTaskRecords().find((task) => task.workspaceId === workspace.id)
@@ -1514,6 +1527,7 @@ export default function NewLayout(props: ParentProps) {
         </div>
         <Show when={diffViewMode() === "agent"}>
           <ParallelDiffReview
+            reviewKey={recordAccessor().id}
             diff={recordAccessor().diff}
             disabled={recordAccessor().mergeState !== "none"}
             onMergeSelection={(selection) => mergeParallelWorkspaceSelection(recordAccessor(), selection)}
@@ -1616,33 +1630,53 @@ export default function NewLayout(props: ParentProps) {
     "merged",
     "discarded",
   ]
-  // Callers re-run over the full workspace list every poll, so remember which
-  // records were already measured. Without this the engine would refetch every
-  // finished agent's whole message history every 1.5 seconds.
-  const measuredEconomicsIds = new Set<string>()
+  // Refresh changed terminal records without fetching unchanged histories on
+  // every poll. Failed reads and writes remain eligible for a later retry.
+  const measuredEconomicsRevisions = new Map<string, string>()
+  const pendingEconomicsIds = new Set<string>()
 
   // Real spend comes from the provider's own reported usage on the agent
   // session's assistant messages. A workspace with no reachable session simply
   // records no usage rather than a fabricated zero.
   const measureWorkspaceUsage = async (record: ParallelWorkspaceRecord) => {
-    if (!record.agentSessionId) return undefined
-    const history = await serverSDK()
-      .createClient({ directory: record.isolatedPath })
-      .session.messages({ sessionID: record.agentSessionId })
-      .catch(() => undefined)
-    if (!Array.isArray(history?.data)) return undefined
-    return measureUsage(history.data.map((entry) => entry.info))
+    if (!record.agentSessionId) return { measured: undefined }
+    const client = serverSDK().createClient({ directory: record.isolatedPath })
+    const [history, session] = await Promise.all([
+      client.session.messages({ sessionID: record.agentSessionId }).catch(() => undefined),
+      client.session.get({ sessionID: record.agentSessionId }).catch(() => undefined),
+    ])
+    if (!Array.isArray(history?.data) || !session?.data) return undefined
+    const measured = measureUsage(history.data.map((entry) => entry.info))
+    return {
+      measured: measured ? { ...measured, costUsd: aggregateCostUsd(measured.costUsd, session.data) } : undefined,
+    }
   }
 
   const recordEconomicsOutcomes = (records: ParallelWorkspaceRecord[]) => {
     for (const record of records) {
       if (!record.validationReport && record.validationPassed === undefined) continue
       if (!TERMINAL_WORKSPACE_STATUSES.includes(record.status)) continue
-      if (measuredEconomicsIds.has(record.id)) continue
-      measuredEconomicsIds.add(record.id)
-      void measureWorkspaceUsage(record).then((measured) =>
-        recordOutcome(outcomesFromWorkspaceRecord(record, categorizeTask(record.taskPrompt), measured)),
-      )
+      const revision = JSON.stringify([
+        record.lastActivityAt,
+        record.agentSessionId,
+        record.provider,
+        record.model,
+        record.changedFilesCount,
+        record.validationPassed,
+        record.validationReport,
+      ])
+      if (measuredEconomicsRevisions.get(record.id) === revision || pendingEconomicsIds.has(record.id)) continue
+      pendingEconomicsIds.add(record.id)
+      void measureWorkspaceUsage(record)
+        .then(async (result) => {
+          if (!result) return
+          const outcome = outcomesFromWorkspaceRecord(record, categorizeTask(record.taskPrompt), result.measured)
+          if (outcome) await recordOutcome(outcome)
+          if (!outcome) await removeOutcome(record.sourcePath, record.id)
+          measuredEconomicsRevisions.set(record.id, revision)
+        })
+        .catch(() => undefined)
+        .finally(() => pendingEconomicsIds.delete(record.id))
     }
   }
 
@@ -2789,56 +2823,51 @@ export default function NewLayout(props: ParentProps) {
   // Ordinary sessions feed the economics engine too. Learning only from
   // validated parallel runs left it with too few samples to ever recommend
   // anything, which is why the feature looked dead.
-  const recordedSessionOutcomes = new Set<string>()
-  // Sessions whose idle had no usage to record yet. A provider that never reports usage would otherwise have the
-  // whole history fetched again on every turn, so each session gets a few tries.
-  const outcomeAttempts = new Map<string, number>()
-  const stopSessionOutcomes = serverSDK().event.listen((event) => {
-    if (event.details.type !== "session.idle") return
-    const sessionID = sessionIDFromEvent(event.details)
-    const directory = (event as { name?: string }).name
-    if (!sessionID || !directory) return
-    const outcomeRecorded = recordedSessionOutcomes.has(sessionID)
-    if (outcomeRecorded && readOnboardingFlags().taskCompleted) return
-    if (!outcomeRecorded) recordedSessionOutcomes.add(sessionID)
-    void (async () => {
+  const sessionOutcomes = createSessionOutcomeRecorder({
+    load: async (directory, sessionID) => {
       const client = serverSDK().createClient({ directory })
-      const history = await client.session.messages({ sessionID }).catch(() => undefined)
-      if (!Array.isArray(history?.data)) {
-        if (!outcomeRecorded) recordedSessionOutcomes.delete(sessionID)
-        return
-      }
+      const [history, session] = await Promise.all([
+        client.session.messages({ sessionID }).catch(() => undefined),
+        client.session.get({ sessionID }).catch(() => undefined),
+      ])
+      if (!Array.isArray(history?.data)) return
       if (successfulActivationFromSession(history.data)) {
         setOnboardingFlag("providerVerified")
         setOnboardingFlag("taskCompleted")
       }
-      if (outcomeRecorded) return
       // A subagent's session is part of its parent's task, not a task of its own whose model choice to learn from.
-      const session = await client.session.get({ sessionID }).catch(() => undefined)
-      if (session?.data?.parentID) return
+      // Do not infer parent ownership from a failed session read.
+      if (!session?.data) return
+      if (session.data.parentID) return {}
       const parts: Record<string, unknown[]> = {}
       for (const entry of history.data) {
         const id = (entry.info as { id?: string } | undefined)?.id
         if (id) parts[id] = (entry as { parts?: unknown[] }).parts ?? []
       }
-      const outcome = outcomeFromSession({
-        sessionID,
-        projectId: directory,
-        messages: history.data as never,
-        parts: parts as never,
-        subagents: session?.data,
-      })
-      // A first turn that failed or was stopped before any usage has nothing to record yet, so a later idle tries again.
-      if (!outcome) {
-        const attempts = (outcomeAttempts.get(sessionID) ?? 0) + 1
-        outcomeAttempts.set(sessionID, attempts)
-        if (attempts < 3) recordedSessionOutcomes.delete(sessionID)
-        return
+      return {
+        outcome: outcomeFromSession({
+          sessionID,
+          projectId: directory,
+          messages: history.data as never,
+          parts: parts as never,
+          subagents: session.data,
+        }),
       }
-      await recordOutcome(outcome)
-    })()
+    },
+    save: (directory, sessionID, outcome) =>
+      outcome ? recordOutcome(outcome) : removeOutcome(directory, `session:${sessionID}`),
   })
-  onCleanup(stopSessionOutcomes)
+  const stopSessionOutcomes = serverSDK().event.listen((event) => {
+    if (event.details.type !== "session.idle") return
+    const sessionID = sessionIDFromEvent(event.details)
+    const directory = (event as { name?: string }).name
+    if (!sessionID || !directory) return
+    void sessionOutcomes.refresh(directory, sessionID).catch(() => undefined)
+  })
+  onCleanup(() => {
+    stopSessionOutcomes()
+    sessionOutcomes.dispose()
+  })
 
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
   const taskDraftRoute = () => location.pathname === "/new-session" && Boolean(activeDraftID())
@@ -4963,9 +4992,7 @@ export default function NewLayout(props: ParentProps) {
                           onClick={() => openSwarmRun(run)}
                         >
                           <div class="flex items-center gap-2">
-                            <span
-                              class={`size-1.5 shrink-0 rounded-full ${isSwarmRunning(run) ? "animate-pulse bg-[color:var(--vx-purple-bright)]" : run.status === "failed" ? "bg-rose-400" : run.status === "needs review" ? "bg-amber-300" : "bg-emerald-400"}`}
-                            />
+                            <span class={`size-1.5 shrink-0 rounded-full ${swarmRunMarker(run)}`} />
                             <span class="min-w-0 flex-1 truncate text-[12px] font-medium text-white/76">
                               {run.name}
                             </span>
@@ -5020,8 +5047,19 @@ export default function NewLayout(props: ParentProps) {
                                   <span class="rounded-full bg-white/[0.045] px-2 py-0.5 text-[9.5px] uppercase text-white/38">
                                     {task.role}
                                   </span>
+                                  <span
+                                    class={`rounded-full border px-2 py-0.5 text-[10px] ${swarmStatusTone(task.status)}`}
+                                  >
+                                    {parallelStatusLabel(task.status)}
+                                  </span>
                                 </div>
                                 <p class="mt-1.5 pl-3.5 text-[11px] leading-5 text-white/42">{task.lastAction}</p>
+                                <p class="mt-1 pl-3.5 text-[10px] text-white/35">
+                                  {task.provider} · {task.model}
+                                </p>
+                                <Show when={task.error}>
+                                  <p class="mt-2 pl-3.5 text-[11px] leading-5 text-rose-200/80">{task.error}</p>
+                                </Show>
                                 <Show when={task.workspaceId}>
                                   <button
                                     type="button"
@@ -5037,6 +5075,7 @@ export default function NewLayout(props: ParentProps) {
                         </div>
                         <Show when={run().diff && run().status === "needs review"}>
                           <ParallelDiffReview
+                            reviewKey={run().id}
                             diff={run().diff}
                             onMergeSelection={(selection) => mergeSwarmSelection(run().id, selection)}
                           />
@@ -5051,13 +5090,13 @@ export default function NewLayout(props: ParentProps) {
                               Stop run
                             </button>
                           </Show>
-                          <Show when={["failed", "canceled", "interrupted"].includes(run().status)}>
+                          <Show when={canResumeSwarm(run())}>
                             <button
                               type="button"
                               class="h-9 rounded-[10px] border border-[color:var(--vx-line)] px-3 text-[12px] text-white/62"
                               onClick={() => void resumeSwarm(run().id)}
                             >
-                              Resume
+                              Retry unfinished tasks
                             </button>
                           </Show>
                           <div class="flex-1" />
@@ -5632,13 +5671,13 @@ export default function NewLayout(props: ParentProps) {
                           Stop swarm
                         </button>
                       </Show>
-                      <Show when={["failed", "canceled", "interrupted"].includes(run().status)}>
+                      <Show when={canResumeSwarm(run())}>
                         <button
                           type="button"
                           class="h-9 rounded-[10px] bg-[color:var(--vx-purple)] px-3 text-[12px] font-semibold text-white transition-colors duration-200 hover:brightness-110"
                           onClick={() => void resumeSwarm(run().id)}
                         >
-                          Resume
+                          Retry unfinished tasks
                         </button>
                       </Show>
                       <Show when={run().status === "needs review" && run().changedFiles.length}>
@@ -5831,6 +5870,7 @@ export default function NewLayout(props: ParentProps) {
                               </span>
                             </div>
                             <ParallelDiffReview
+                              reviewKey={run().id}
                               diff={run().diff}
                               disabled={isSwarmRunning(run()) || run().status === "merged"}
                               onMergeSelection={(selection) => mergeSwarmSelection(run().id, selection)}

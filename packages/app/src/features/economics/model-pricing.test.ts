@@ -53,6 +53,19 @@ describe("ratesFor", () => {
     expect(ratesFor(broken, "mirror", "nan")).toBeUndefined()
     expect(ratesFor(broken, "google", "tier")).toBeUndefined()
   })
+
+  test("honors the catalog's unpriced flag even if compatibility rates are nonzero", () => {
+    expect(
+      ratesFor(
+        new Map([["custom", { models: { model: { cost: { ...sonnet, unpriced: true } } } }]]),
+        "custom",
+        "model",
+      ),
+    ).toBeUndefined()
+    expect(
+      ratesFor(new Map([["custom", { models: { model: { cost: { ...free, unpriced: false } } } }]]), "custom", "model"),
+    ).toEqual({ ...free, unpriced: false })
+  })
 })
 
 describe("ratesAtContext", () => {
@@ -99,6 +112,13 @@ describe("costOfUsage", () => {
       costOfUsage(undefined, { input: 1000, output: 1000, reasoning: 0, cacheRead: 0, cacheWrite: 0 }),
     ).toBeUndefined()
   })
+
+  test("rejects invalid counts and unpriced rates at the public pricing boundary", () => {
+    const usage = { input: 1000, output: 100, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
+    expect(costOfUsage(sonnet, { ...usage, input: Number.NaN })).toBeUndefined()
+    expect(costOfUsage({ ...sonnet, unpriced: true }, usage)).toBeUndefined()
+    expect(costOfUsage({ ...sonnet, output: -1 }, usage)).toBeUndefined()
+  })
 })
 
 describe("projectCost", () => {
@@ -123,5 +143,15 @@ describe("projectCost", () => {
 
   test("never produces a negative cost from junk input", () => {
     expect(projectCost(sonnet, -5_000, -1)?.totalCost).toBe(0)
+  })
+
+  test("does not expose NaN or infinite estimates as a price", () => {
+    expect(projectCost(sonnet, Number.NaN)).toBeUndefined()
+    expect(projectCost(sonnet, Number.POSITIVE_INFINITY)).toBeUndefined()
+    expect(projectCost(sonnet, 1_000, Number.NaN)).toBeUndefined()
+    expect(projectCost({ ...sonnet, unpriced: true }, 1_000)).toBeUndefined()
+    expect(
+      projectCost({ ...tiered, tiers: [{ ...tiered.tiers![0], tier: { type: "context", size: Number.NaN } }] }, 1_000),
+    ).toBeUndefined()
   })
 })

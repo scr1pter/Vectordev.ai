@@ -1,23 +1,63 @@
-import { createMemo, createSignal, For, Show } from "solid-js"
+import { createEffect, createMemo, For, onCleanup, Show } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
 import { parseReviewDiff, reviewRows } from "@/utils/unified-diff"
 
 type ReviewChoice = "accepted" | "rejected" | "pending"
 
+export function createParallelDiffReviewState(input: { diff: () => string; reviewKey?: () => string | undefined }) {
+  const scope = createMemo(() => ({ diff: input.diff(), reviewKey: input.reviewKey?.() }))
+  const [state, setState] = createStore({ choices: {} as Record<string, ReviewChoice>, merging: false })
+  const lifecycle = { scope: scope(), active: true, merge: undefined as object | undefined }
+  const synchronize = () => {
+    if (lifecycle.scope === scope()) return
+    lifecycle.scope = scope()
+    lifecycle.merge = undefined
+    setState("choices", reconcile({}))
+    setState("merging", false)
+  }
+  createEffect(synchronize)
+  onCleanup(() => {
+    lifecycle.active = false
+    lifecycle.merge = undefined
+  })
+
+  return {
+    choices: () => (lifecycle.scope === scope() ? state.choices : {}),
+    merging: () => lifecycle.scope === scope() && state.merging,
+    decide: (key: string, value: ReviewChoice) => {
+      synchronize()
+      setState("choices", key, (current) => (current === value ? "pending" : value))
+    },
+    beginMerge: () => {
+      synchronize()
+      const request = { scope: scope() }
+      lifecycle.merge = request
+      setState("merging", true)
+      return (success: boolean) => {
+        // A delayed merge belongs to the diff it submitted, including when a
+        // user switches away and returns to identical diff text.
+        if (!lifecycle.active || lifecycle.merge !== request || scope() !== request.scope) return
+        if (success) setState("choices", reconcile({}))
+        lifecycle.merge = undefined
+        setState("merging", false)
+      }
+    },
+  }
+}
+
 export function ParallelDiffReview(props: {
   diff: string
+  reviewKey?: string
   disabled?: boolean
   readOnly?: boolean
   label?: string
   onMergeSelection: (selection: { hunkIds: string[]; files: string[] }) => Promise<void> | void
 }) {
   const files = createMemo(() => parseReviewDiff(props.diff))
-  const [choices, setChoices] = createSignal<Record<string, ReviewChoice>>({})
-  const [merging, setMerging] = createSignal(false)
+  const approval = createParallelDiffReviewState({ diff: () => props.diff, reviewKey: () => props.reviewKey })
 
   const keyForFile = (path: string) => `file:${path}`
-  const choice = (key: string) => choices()[key] ?? "pending"
-  const decide = (key: string, value: ReviewChoice) =>
-    setChoices((current) => ({ ...current, [key]: current[key] === value ? "pending" : value }))
+  const choice = (key: string) => approval.choices()[key] ?? "pending"
 
   const accepted = createMemo(() => {
     const hunkIds: string[] = []
@@ -34,16 +74,17 @@ export function ParallelDiffReview(props: {
     return { hunkIds, files: selectedFiles }
   })
   const acceptedCount = createMemo(() => accepted().hunkIds.length + accepted().files.length)
-  const rejectedCount = createMemo(() => Object.values(choices()).filter((item) => item === "rejected").length)
+  const rejectedCount = createMemo(() => Object.values(approval.choices()).filter((item) => item === "rejected").length)
 
   const merge = async () => {
-    if (!acceptedCount() || merging() || props.disabled) return
-    setMerging(true)
+    if (!acceptedCount() || approval.merging() || props.disabled || props.readOnly) return
+    const finish = approval.beginMerge()
+    let success = false
     try {
       await props.onMergeSelection(accepted())
-      setChoices({})
+      success = true
     } finally {
-      setMerging(false)
+      finish(success)
     }
   }
 
@@ -63,10 +104,10 @@ export function ParallelDiffReview(props: {
             <button
               type="button"
               class="rounded-lg bg-white px-3 py-1.5 font-semibold text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-35"
-              disabled={!acceptedCount() || merging() || props.disabled}
+              disabled={!acceptedCount() || approval.merging() || props.disabled}
               onClick={() => void merge()}
             >
-              {merging() ? "Merging..." : "Merge approved"}
+              {approval.merging() ? "Merging..." : "Merge approved"}
             </button>
           </div>
         </Show>
@@ -86,8 +127,8 @@ export function ParallelDiffReview(props: {
                   <Show when={!props.readOnly}>
                     <DecisionButtons
                       value={choice(keyForFile(file.path))}
-                      disabled={props.disabled}
-                      onDecision={(value) => decide(keyForFile(file.path), value)}
+                      disabled={props.disabled || approval.merging()}
+                      onDecision={(value) => approval.decide(keyForFile(file.path), value)}
                     />
                   </Show>
                 </Show>
@@ -105,8 +146,8 @@ export function ParallelDiffReview(props: {
                         <Show when={file.supportsHunks && !props.readOnly}>
                           <DecisionButtons
                             value={choice(hunk.id)}
-                            disabled={props.disabled}
-                            onDecision={(value) => decide(hunk.id, value)}
+                            disabled={props.disabled || approval.merging()}
+                            onDecision={(value) => approval.decide(hunk.id, value)}
                           />
                         </Show>
                       </div>

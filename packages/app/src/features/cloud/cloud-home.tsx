@@ -161,9 +161,6 @@ export function CloudHome() {
           onClose={() => {
             setSelectedPath("")
           }}
-          onRepair={(context) => {
-            void navigator.clipboard?.writeText(context)
-          }}
           initialSection={requestedSection() ?? undefined}
         />
       </Show>

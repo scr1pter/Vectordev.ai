@@ -1,6 +1,7 @@
 import {
   checkPassScore,
   knownCostUsd,
+  knownLatencyMs,
   totalTokens,
   type ModelOutcome,
   type ModelRecommendation,
@@ -57,12 +58,15 @@ function evidenceFor(provider: string, model: string, category: TaskCategory, ou
     const passed = checked.filter((o) => o.checksPassed === true).length
     evidence.push(`checks passed ${passed}/${checked.length} runs`)
   }
+  if (checked.length === 0) evidence.push("No validation checks recorded")
 
   const cost = medianCostOf(outcomes)
   const tokens = medianTokensOf(outcomes)
   if (cost !== undefined && tokens !== undefined) {
-    evidence.push(`median ${Math.round(tokens).toLocaleString()} tokens at $${cost.toFixed(4)} per run`)
+    const price = cost > 0 && cost < 0.0001 ? "<$0.0001" : `$${cost.toFixed(4)}`
+    evidence.push(`median ${Math.round(tokens).toLocaleString()} tokens at ${price} per run`)
   }
+  if (cost === undefined) evidence.push("Cost unknown: no fully priced runs recorded")
 
   evidence.push(
     `${outcomes.length} recorded ${category} run${outcomes.length === 1 ? "" : "s"} for ${provider}/${model}`,
@@ -78,8 +82,9 @@ export function recommendModel(
   outcomes: ModelOutcome[],
   category: TaskCategory,
   minSamples = 3,
+  available?: (provider: string, model: string) => boolean,
 ): ModelRecommendation | undefined {
-  const matching = outcomes.filter((o) => o.category === category)
+  const matching = outcomes.filter((o) => o.category === category && (!available || available(o.provider, o.model)))
 
   const groups = new Map<string, Group>()
   for (const outcome of matching) {
@@ -93,14 +98,17 @@ export function recommendModel(
   if (eligible.length === 0) return undefined
 
   const ranked = eligible
-    .map((group) => ({
-      group,
-      checkPassRate: checkPassRateOf(group.outcomes),
-      checkPassScore: checkPassScore(group.outcomes),
-      medianLatencyMs: median(group.outcomes.map((o) => o.latencyMs)),
-      medianCostUsd: medianCostOf(group.outcomes),
-      medianTokens: medianTokensOf(group.outcomes),
-    }))
+    .map((group) => {
+      const timings = group.outcomes.map(knownLatencyMs).filter((latency): latency is number => latency !== undefined)
+      return {
+        group,
+        checkPassRate: checkPassRateOf(group.outcomes),
+        checkPassScore: checkPassScore(group.outcomes),
+        medianLatencyMs: timings.length ? median(timings) : undefined,
+        medianCostUsd: medianCostOf(group.outcomes),
+        medianTokens: medianTokensOf(group.outcomes),
+      }
+    })
     .sort((a, b) => {
       const passDiff = b.checkPassScore - a.checkPassScore
       if (passDiff !== 0) return passDiff
@@ -111,7 +119,9 @@ export function recommendModel(
       const aCost = a.medianCostUsd ?? Infinity
       const bCost = b.medianCostUsd ?? Infinity
       if (aCost !== bCost) return aCost - bCost
-      return a.medianLatencyMs - b.medianLatencyMs
+      const aLatency = a.medianLatencyMs ?? Infinity
+      const bLatency = b.medianLatencyMs ?? Infinity
+      return aLatency === bLatency ? 0 : aLatency - bLatency
     })
 
   const best = ranked[0]

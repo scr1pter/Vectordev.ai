@@ -116,6 +116,7 @@ function formatCount(value: number): string {
 // The model and what the review cost (section 5.5). The engine's `input` excludes cached tokens, so "in" adds
 // them back and "of it cached" shows the cache reads.
 export function costWording(cost: ReviewCost): string {
+  if (cost.usageMissing) return `${cost.model} · cost and token usage unavailable`
   const tokensIn = cost.input + cost.cacheRead + cost.cacheWrite
   const usage =
     cost.cacheRead > 0
@@ -124,7 +125,7 @@ export function costWording(cost: ReviewCost): string {
   if (cost.kind === "free") return `${cost.model.replace(/:free$/, "")} · free through OpenRouter (${usage})`
   if (cost.kind === "priced") return `${cost.model} · ${formatUsd(cost.costUsd)} (${usage})`
   if (cost.kind === "plan") return `${cost.model} · subscription sign-in, no per-token price (${usage})`
-  return `${cost.model} · cost unknown: no price is listed for this model (${usage})`
+  return `${cost.model} · cost unknown: pricing or complete usage is unavailable (${usage})`
 }
 
 // ---------------------------------------------------------------------------------------------------------------

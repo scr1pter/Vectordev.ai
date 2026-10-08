@@ -7,13 +7,13 @@
 // actually cost, how long it took, and how many files it touched.
 
 import { categorizeTask } from "./task-categorizer"
-import { measureUsage, type UsageBearingMessage } from "./token-usage"
+import { aggregateCostUsd, measureUsage, type UsageBearingMessage } from "./token-usage"
 import type { ModelOutcome } from "./economics-types"
 
 type MessageEntry = {
   info?: UsageBearingMessage & { id?: string; role?: string; time?: { created?: number; completed?: number } }
 }
-type PartEntry = { type?: string; tool?: string; state?: { input?: Record<string, unknown> } }
+type PartEntry = { type?: string; text?: string; tool?: string; state?: { input?: Record<string, unknown> } }
 
 function firstUserText(parts: Record<string, PartEntry[] | undefined>, messages: MessageEntry[]) {
   for (const message of messages) {
@@ -23,6 +23,10 @@ function firstUserText(parts: Record<string, PartEntry[] | undefined>, messages:
     if (text?.text?.trim()) return text.text
   }
   return ""
+}
+
+export function categoryFromSession(messages: MessageEntry[], parts: Record<string, PartEntry[] | undefined>) {
+  return categorizeTask(firstUserText(parts, messages))
 }
 
 // Distinct file paths any write-like tool touched. Counting tool calls instead
@@ -56,28 +60,37 @@ export function outcomeFromSession(input: {
   // reached a provider tells us nothing about that model.
   if (!measured?.provider || !measured.model) return undefined
 
-  // History a fork copied in keeps its original times, so it would stretch the latency back to the original session.
+  // Sum execution durations: the time a user waits between turns is not model
+  // latency. History copied into a fork belongs to the original session.
   const assistant = infos.filter((info) => info.role === "assistant" && !(info as { forked?: boolean }).forked)
-  const started = assistant[0]?.time?.created
-  const finished = assistant[assistant.length - 1]?.time?.completed ?? assistant[assistant.length - 1]?.time?.created
-  const latencyMs = typeof started === "number" && typeof finished === "number" ? Math.max(0, finished - started) : 0
+  const durations = assistant.map((info) => {
+    const started = info.time?.created
+    const finished = info.time?.completed
+    return typeof started === "number" &&
+      typeof finished === "number" &&
+      Number.isFinite(started) &&
+      Number.isFinite(finished) &&
+      finished >= started
+      ? finished - started
+      : undefined
+  })
+  const latencyMeasured = durations.every((duration) => duration !== undefined)
+  const latencyMs = durations.reduce<number>((total, duration) => total + (duration ?? 0), 0)
   // A model that delegates most of the work must not rank as cheap, so the task's cost includes its subagents.
-  const costUsd =
-    measured.costUsd === undefined || input.subagents?.subagentUnpricedSteps
-      ? undefined
-      : measured.costUsd + (input.subagents?.subagentCost ?? 0)
+  const costUsd = aggregateCostUsd(measured.costUsd, input.subagents)
 
   return {
-    // The session id keeps this idempotent: recordOutcome dedupes on id, so a
-    // session that goes idle several times records once.
+    // Replace the session's cumulative sample when it goes idle again, keeping
+    // one recorded run rather than inflating the evidence with every idle.
     id: `session:${input.sessionID}`,
     projectId: input.projectId,
     provider: measured.provider,
     model: measured.model,
-    category: categorizeTask(firstUserText(input.parts, input.messages)),
+    category: categoryFromSession(input.messages, input.parts),
     createdAt: Date.now(),
     hadChecks: false,
     latencyMs,
+    latencyMeasured,
     changedFiles: changedFileCount(input.parts),
     usage: measured.usage,
     costUsd,

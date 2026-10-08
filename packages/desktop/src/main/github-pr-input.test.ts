@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   requireMergeStrategy,
   requirePullRequestDirectory,
+  requirePullRequestHead,
   requirePullRequestLimit,
   requirePullRequestNumber,
   requirePullRequestState,
@@ -16,6 +17,7 @@ describe("pull request bridge input", () => {
     expect(requirePullRequestState("open")).toBe("open")
     expect(requirePullRequestLimit(100)).toBe(100)
     expect(requireReviewEvent("request-changes")).toBe("request-changes")
+    expect(requirePullRequestHead("a".repeat(40))).toBe("a".repeat(40))
     expect(requireMergeStrategy("squash")).toBe("squash")
     expect(requirePullRequestText("Review", "Review body", 100)).toBe("Review")
   })
@@ -24,6 +26,8 @@ describe("pull request bridge input", () => {
     expect(() => requirePullRequestNumber("--repo=someone/else" as unknown)).toThrow("positive integer")
     expect(() => requirePullRequestState("--repo=someone/else")).toThrow("Invalid pull request state")
     expect(() => requireReviewEvent("body")).toThrow("Invalid pull request review action")
+    expect(() => requirePullRequestHead("main")).toThrow("full commit SHA")
+    expect(() => requirePullRequestHead("--repo=someone/else")).toThrow("full commit SHA")
     expect(() => requireMergeStrategy("delete-branch")).toThrow("Invalid pull request merge strategy")
   })
 

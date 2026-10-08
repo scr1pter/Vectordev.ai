@@ -8,7 +8,7 @@ import { useSessionLayout } from "@/pages/session/session-layout"
 import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
 import { createOutcomes } from "@/features/economics/economics-repository"
-import { categorizeTask } from "@/features/economics/task-categorizer"
+import { categoryFromSession } from "@/features/economics/session-outcomes"
 import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
 import { rankModelsForCategory } from "./session-model-economics"
 import { createSessionContextFormatter } from "./session-context-format"
@@ -44,12 +44,14 @@ export function SessionContextTab() {
   )
   // Per-run prices of cheap models are often below a cent, where two decimals would read as free.
   const price = (value: number) =>
-    new Intl.NumberFormat(language.intl(), {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
-      maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
-    }).format(value)
+    value > 0 && value < 0.0001
+      ? "<$0.0001"
+      : new Intl.NumberFormat(language.intl(), {
+          style: "currency",
+          currency: "USD",
+          minimumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
+          maximumFractionDigits: value > 0 && value < 0.01 ? 4 : 2,
+        }).format(value)
   const ctx = createMemo(() => getSessionContext(messages(), [...providers.all().values()]))
   const tokens = createMemo(() => info()?.tokens)
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
@@ -63,15 +65,21 @@ export function SessionContextTab() {
     return { all: all.length, user, assistant }
   })
 
-  // Model economics: rank the models Vector has verified for this task's
-  // category, learned from real parallel-workspace outcomes.
+  // Model economics: compare measured project history. Unchecked ordinary
+  // sessions carry cost and timing evidence without claiming verification.
   const economicsOutcomes = createOutcomes(() => sdk().directory)
-  const taskCategory = createMemo(() => categorizeTask(info()?.title ?? ""))
+  const taskCategory = createMemo(() =>
+    categoryFromSession(
+      messages().map((info) => ({ info })),
+      sync().data.part,
+    ),
+  )
   const modelEconomics = createMemo(() =>
-    rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), ctx()?.tokens ?? 0, providers.all()),
+    rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), ctx()?.tokens, providers.all()),
   )
   const formatPercent = (value: number | undefined) => (value === undefined ? "-" : `${Math.round(value * 100)}%`)
-  const formatLatency = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`)
+  const formatLatency = (ms: number | undefined) =>
+    ms === undefined ? "time unavailable" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
 
   const ledger = createMemo(() => [
     {
@@ -300,12 +308,17 @@ export function SessionContextTab() {
             when={modelEconomics().length > 0}
             fallback={
               <div class="mt-3 text-xs leading-5 text-white/38">
-                No verified runs yet for this task type. As you run agents and their checks pass or fail, Vector learns
-                which model performs best here.
+                No runs recorded for this task type yet. Complete tasks to compare measured cost and time. Validation
+                checks add quality evidence to the comparison.
               </div>
             }
           >
             <div class="mt-4 flex flex-col gap-2">
+              <p class="text-xs leading-5 text-white/42">
+                Based on this project's recorded runs. Check results lead the ranking, then known cost and time.
+                Unchecked runs do not establish quality. Recorded rates and provider reports may differ from your
+                invoice.
+              </p>
               <For each={modelEconomics()}>
                 {(row) => (
                   <div class="rounded-md border border-[color:var(--vx-line)] bg-white/[0.025] px-4 py-3">
@@ -317,17 +330,38 @@ export function SessionContextTab() {
                       <span>
                         {row.sampleSize} run{row.sampleSize === 1 ? "" : "s"}
                       </span>
-                      <span>checks {formatPercent(row.checkPassRate)}</span>
-                      <span>median {formatLatency(row.medianLatencyMs)}</span>
-                      <Show when={row.medianCostUsd !== undefined}>
-                        <span>median {price(row.medianCostUsd ?? 0)}/run</span>
-                      </Show>
+                      <span>
+                        {row.checkedSampleSize
+                          ? `${formatPercent(row.checkPassRate)} checked runs passed · ${row.checkedSampleSize} checked runs`
+                          : "checks not recorded"}
+                      </span>
+                      <span>
+                        {row.medianLatencyMs !== undefined
+                          ? `median time ${formatLatency(row.medianLatencyMs)}`
+                          : "time unavailable"}
+                      </span>
+                      <span>
+                        {row.medianCostUsd !== undefined
+                          ? `median ${price(row.medianCostUsd)}/run · ${row.costSampleSize} priced runs`
+                          : "run cost unknown"}
+                      </span>
                       <span>
                         {row.projectedCostUsd !== undefined
                           ? `~${price(row.projectedCostUsd)} next turn`
-                          : "rate unknown"}
+                          : ctx()
+                            ? "turn estimate unavailable"
+                            : "context not measured"}
                       </span>
                     </div>
+                    <Show when={row.projection}>
+                      {(projection) => (
+                        <p class="mt-2 text-[11px] leading-4 text-white/38">
+                          Turn estimate assumes {formatter().number(projection().inputTokens)} uncached input tokens and{" "}
+                          {formatter().number(projection().assumedOutputTokens)} output tokens. Cache, reasoning and
+                          further tool turns can change the total.
+                        </p>
+                      )}
+                    </Show>
                   </div>
                 )}
               </For>

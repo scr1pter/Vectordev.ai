@@ -54,9 +54,11 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   if (!Array.isArray(root.tasks)) throw new Error("The planning agent returned no task list.")
 
   const limit = Math.max(2, Number.isFinite(maxTasks) ? Math.floor(maxTasks) : 12)
+  if (root.tasks.length > limit) {
+    throw new Error(`The planning agent returned more than the requested ${limit} tasks.`)
+  }
+  if (!root.tasks.every(isRecord)) throw new Error("The planning agent returned an invalid task.")
   const raw = root.tasks
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
-    .slice(0, limit)
   if (raw.length < 2) throw new Error("A swarm plan needs at least two coordinated tasks.")
 
   const ids = raw.map((item, index) => safeTaskID(typeof item.id === "string" ? item.id : `task-${index + 1}`, index))
@@ -75,13 +77,20 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
           ? "strong"
           : "balanced"
     const id = ids[index]
+    if (item.dependsOn !== undefined && !Array.isArray(item.dependsOn)) {
+      throw new Error(`Task ${id} has an invalid dependency list.`)
+    }
     const dependsOn = Array.isArray(item.dependsOn)
       ? [
           ...new Set(
-            item.dependsOn
-              .filter((dependency): dependency is string => typeof dependency === "string")
-              .map((dependency) => originalIDs.get(dependency.trim()) ?? safeTaskID(dependency, 0))
-              .filter((dependency) => dependency !== id && known.has(dependency)),
+            item.dependsOn.map((dependency: unknown) => {
+              if (typeof dependency !== "string" || !dependency.trim()) {
+                throw new Error(`Task ${id} has an invalid dependency.`)
+              }
+              const target = originalIDs.get(dependency.trim()) ?? dependency.trim()
+              if (!known.has(target)) throw new Error(`Task ${id} depends on an unknown task: ${dependency}.`)
+              return target
+            }),
           ),
         ]
       : []

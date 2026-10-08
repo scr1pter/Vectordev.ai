@@ -338,7 +338,7 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "pr-review",
-    (_event, input: { cwd: string; number: number; body: string; event: "comment" | "approve" | "request-changes" }) =>
+    (_event, input: Parameters<typeof submitPullRequestReview>[0]) =>
       submitPullRequestReview(input),
   )
   handle("pr-merge", (_event, input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) =>
