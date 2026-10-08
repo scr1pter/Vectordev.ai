@@ -8,9 +8,18 @@
 
 export type Tokens = { input: number; cacheRead: number; cacheWrite: number; output: number; reasoning: number }
 
+export type CostSource = "catalog-estimate" | "runtime-reported" | "unknown"
+
 export type Meter = {
+  // Undefined if any priced step is missing, invalid, or marked unpriced.
   costUsd?: number
+  knownCostUsd?: number
+  costComplete?: boolean
+  // A CLI report is not a billing invoice; Vector generally calculates catalog estimates.
+  costSource?: CostSource
+  // Undefined totals and false coverage persist after any request omits valid input/output usage.
   tokens?: Tokens
+  tokensComplete?: boolean
   // Provider requests, where the runtime reports them.
   requests?: number
 }
@@ -28,8 +37,9 @@ export function cacheReadShare(tokens: Tokens) {
 }
 
 export function meterLine(meter: Meter, line: string): Meter {
-  if (!line.startsWith("{")) return meter
-  const event = parse(line)
+  const trimmed = line.trim()
+  if (!trimmed.startsWith("{")) return meter
+  const event = parse(trimmed)
   if (!event) return meter
 
   // Vector: one step_finish per provider request, subagents' included, each with that request's cost and tokens.
@@ -37,16 +47,30 @@ export function meterLine(meter: Meter, line: string): Meter {
     const part = record(event.part)
     const tokens = record(part?.tokens)
     const cache = record(tokens?.cache)
-    const reasoning = count(tokens?.reasoning)
+    const usage =
+      tokens && (tokens.cache === undefined || cache)
+        ? usageTokens({
+            input: tokens.input,
+            output: tokens.output,
+            cacheRead: cache?.read,
+            cacheWrite: cache?.write,
+            reasoning: tokens.reasoning,
+          })
+        : undefined
+    const summed =
+      meter.tokensComplete === false || usage === undefined
+        ? undefined
+        : add(meter.tokens, { ...usage, output: usage.output + usage.reasoning })
+    const cost = part?.unpriced === true ? undefined : number(part?.cost)
+    const knownCostUsd = (meter.knownCostUsd ?? meter.costUsd ?? 0) + (cost ?? 0)
+    const costComplete = meter.costComplete !== false && cost !== undefined && Number.isFinite(knownCostUsd)
     return {
-      costUsd: (meter.costUsd ?? 0) + count(part?.cost),
-      tokens: add(meter.tokens, {
-        input: count(tokens?.input),
-        cacheRead: count(cache?.read),
-        cacheWrite: count(cache?.write),
-        output: count(tokens?.output) + reasoning,
-        reasoning,
-      }),
+      costUsd: costComplete ? knownCostUsd : undefined,
+      knownCostUsd: Number.isFinite(knownCostUsd) ? knownCostUsd : undefined,
+      costComplete,
+      costSource: costComplete ? "catalog-estimate" : "unknown",
+      tokens: summed,
+      tokensComplete: summed !== undefined,
       requests: (meter.requests ?? 0) + 1,
     }
   }
@@ -54,35 +78,42 @@ export function meterLine(meter: Meter, line: string): Meter {
   // Claude Code and Cursor: one terminal result with the run's totals. modelUsage covers every model the run used,
   // subagents on a smaller model included; usage covers only the main model.
   if (event.type === "result") {
-    const models = Object.values(record(event.modelUsage) ?? {})
-      .map(record)
-      .filter((item) => item !== undefined)
+    const cost = number(event.total_cost_usd) ?? number(event.cost_usd)
+    const modelUsage = record(event.modelUsage)
+    const models = Object.values(modelUsage ?? {})
     const usage = record(event.usage)
     const tokens =
-      models.length > 0
-        ? models.reduce<Tokens>(
-            (total, item) =>
-              add(total, {
-                input: count(item.inputTokens),
-                cacheRead: count(item.cacheReadInputTokens),
-                cacheWrite: count(item.cacheCreationInputTokens),
-                output: count(item.outputTokens),
-                reasoning: 0,
-              }),
-            EMPTY,
-          )
-        : usage
-          ? {
-              input: count(usage.input_tokens),
-              cacheRead: count(usage.cache_read_input_tokens),
-              cacheWrite: count(usage.cache_creation_input_tokens),
-              output: count(usage.output_tokens),
-              reasoning: 0,
-            }
-          : meter.tokens
+      meter.tokensComplete === false || (event.modelUsage !== undefined && !modelUsage)
+        ? undefined
+        : models.length > 0
+          ? models.reduce<Tokens | undefined>(
+              (total, item) =>
+                total === undefined
+                  ? undefined
+                  : add(
+                      total,
+                      usageTokens({
+                        input: record(item)?.inputTokens,
+                        output: record(item)?.outputTokens,
+                        cacheRead: record(item)?.cacheReadInputTokens,
+                        cacheWrite: record(item)?.cacheCreationInputTokens,
+                      }),
+                    ),
+              EMPTY,
+            )
+          : usageTokens({
+              input: usage?.input_tokens,
+              output: usage?.output_tokens,
+              cacheRead: usage?.cache_read_input_tokens,
+              cacheWrite: usage?.cache_creation_input_tokens,
+            })
     return {
-      costUsd: number(event.total_cost_usd) ?? number(event.cost_usd) ?? meter.costUsd,
+      costUsd: cost,
+      knownCostUsd: cost ?? meter.knownCostUsd,
+      costComplete: cost !== undefined,
+      costSource: cost === undefined ? "unknown" : "runtime-reported",
       tokens,
+      tokensComplete: tokens !== undefined,
       requests: number(event.num_turns) ?? meter.requests,
     }
   }
@@ -90,38 +121,87 @@ export function meterLine(meter: Meter, line: string): Meter {
   // Codex: turn.completed carries each turn's usage, and input_tokens includes the cached input.
   if (event.type === "turn.completed") {
     const usage = record(event.usage)
-    if (!usage) return meter
-    return { ...meter, tokens: add(meter.tokens, codexTokens(usage)) }
+    const tokens = meter.tokensComplete === false ? undefined : add(meter.tokens, codexTokens(usage))
+    return {
+      ...meter,
+      costUsd: undefined,
+      costComplete: false,
+      costSource: "unknown",
+      tokens,
+      tokensComplete: tokens !== undefined,
+    }
   }
 
   // Older Codex: token_count events carry the cumulative usage, so the last one wins.
   const info = record(record(event.msg)?.info) ?? record(event.info)
   const cumulative = record(info?.total_token_usage)
-  if (cumulative) return { ...meter, tokens: codexTokens(cumulative) }
+  if (cumulative) {
+    const tokens = meter.tokensComplete === false ? undefined : codexTokens(cumulative)
+    return {
+      ...meter,
+      costUsd: undefined,
+      costComplete: false,
+      costSource: "unknown",
+      tokens,
+      tokensComplete: tokens !== undefined,
+    }
+  }
 
   return meter
 }
 
-function codexTokens(usage: Record<string, unknown>): Tokens {
-  const cached = count(usage.cached_input_tokens)
+function codexTokens(usage: Record<string, unknown> | undefined) {
+  const tokens = usageTokens({
+    input: usage?.input_tokens,
+    output: usage?.output_tokens,
+    cacheRead: usage?.cached_input_tokens,
+    reasoning: usage?.reasoning_output_tokens,
+  })
+  if (!tokens) return undefined
+  const cached = Math.min(tokens.cacheRead, tokens.input)
   return {
-    input: Math.max(0, count(usage.input_tokens) - cached),
+    input: tokens.input - cached,
     cacheRead: cached,
     cacheWrite: 0,
-    output: count(usage.output_tokens),
-    reasoning: count(usage.reasoning_output_tokens),
+    output: tokens.output,
+    reasoning: Math.min(tokens.reasoning, tokens.output),
   }
 }
 
-function add(base: Tokens | undefined, next: Tokens): Tokens {
+function usageTokens(usage: {
+  input: unknown
+  output: unknown
+  cacheRead?: unknown
+  cacheWrite?: unknown
+  reasoning?: unknown
+}): Tokens | undefined {
+  const input = tokenCount(usage.input)
+  const output = tokenCount(usage.output)
+  const cacheRead = tokenCount(usage.cacheRead === undefined ? 0 : usage.cacheRead)
+  const cacheWrite = tokenCount(usage.cacheWrite === undefined ? 0 : usage.cacheWrite)
+  const reasoning = tokenCount(usage.reasoning === undefined ? 0 : usage.reasoning)
+  if (
+    input === undefined ||
+    output === undefined ||
+    cacheRead === undefined ||
+    cacheWrite === undefined ||
+    reasoning === undefined
+  )
+    return undefined
+  return { input, output, cacheRead, cacheWrite, reasoning }
+}
+
+function add(base: Tokens | undefined, next: Tokens | undefined): Tokens | undefined {
+  if (!next) return undefined
   const from = base ?? EMPTY
-  return {
+  const tokens = {
     input: from.input + next.input,
     cacheRead: from.cacheRead + next.cacheRead,
     cacheWrite: from.cacheWrite + next.cacheWrite,
     output: from.output + next.output,
     reasoning: from.reasoning + next.reasoning,
   }
+  return Object.values(tokens).every((value) => tokenCount(value) !== undefined) ? tokens : undefined
 }
 
 // Mirrors the defensive line parsing in external-agents.ts: agent stdout is a mixed stream and a malformed line must
@@ -139,9 +219,9 @@ function record(value: unknown) {
 }
 
 function number(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
-function count(value: unknown) {
-  return number(value) ?? 0
+function tokenCount(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 }
