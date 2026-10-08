@@ -21,7 +21,7 @@ export const upcomingRelease = {
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.102"
+export const publishedDesktopVersion = "1.99.103"
 
 export const releaseSeries: VectorRelease[] = [
   {
@@ -644,8 +644,6 @@ export const release199: VectorRelease[] = [
   {
     version: "1.99.103",
     title: "Pull Requests with your GitHub sign-in",
-    availability:
-      "Upcoming, not published: 1.99.103 is prepared as an unsigned desktop release. Desktop downloads remain at 1.99.102 until its installers are published, and the npm CLI and plugin SDK stay at 1.99.99.",
     summary:
       "Pull Requests now works with your GitHub sign-in in Vector, and nothing has to be installed. Open Pull Requests, choose Connect GitHub, enter the code it shows on github.com, and your repository's pull requests appear: list, open, read the diff, create, comment, approve, request changes and merge, and run a Vectorscope review, all from Vector. Failed GitHub Actions runs and their logs come through the same sign-in, cut down to the step that failed. This is the same GitHub sign-in Open from GitHub uses, and the token stays in your computer's keychain; Sign out of GitHub in the panel switches accounts. If the GitHub CLI is already signed in on your computer, Pull Requests uses that login without asking again. When an organization requires single sign-on or approval for Vector, the panel says where to authorize it. Links you click in Vector's browser now open, including Google search results, results that pass through a redirect and links that open a new tab; before, a click that led to another website did nothing. The agent still needs your approval for each new website it visits, and when it is stopped it now names the link so it can ask you for it. Release notes and Changelog in the app open the changelog in the documentation. The terminal agent stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
   },
