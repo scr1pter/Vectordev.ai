@@ -6,7 +6,7 @@ import { showToast } from "@/utils/toast"
 
 export function SettingsSearch() {
   return (
-    <section class="flex flex-col gap-4" aria-labelledby="search-settings-title">
+    <section class="settings-form-section flex flex-col gap-4" aria-labelledby="search-settings-title">
       <div>
         <h3 id="search-settings-title" class="text-14-medium text-text-strong">
           Web search
@@ -58,34 +58,34 @@ function SearchKey(props: { provider: "exa" | "parallel" }) {
   }
   return (
     <form
-      class="flex flex-col gap-2"
+      class="flex flex-wrap items-end gap-2"
       onSubmit={(event) => {
         event.preventDefault()
         void change(false)
       }}
     >
-      <TextField
-        type="password"
-        autocomplete="new-password"
-        label={`${name()} API key`}
-        placeholder={hasKey() ? "A key is saved. Enter a new key to replace it." : `Enter your ${name()} API key`}
-        value={key()}
-        onChange={setKey}
-        disabled={pending()}
-      />
-      <Show when={saved.error}>
-        <p class="text-12-regular text-text-weak">Could not check saved-key status.</p>
-      </Show>
-      <div class="flex gap-2">
-        <Button type="submit" disabled={pending() || !key().trim()}>
-          {hasKey() ? "Replace key" : "Save key"}
-        </Button>
-        <Show when={hasKey()}>
-          <Button type="button" variant="ghost" disabled={pending()} onClick={() => void change(true)}>
-            Remove key
-          </Button>
-        </Show>
+      <div class="min-w-[240px] max-w-[440px] flex-1">
+        <TextField
+          type="password"
+          autocomplete="new-password"
+          label={`${name()} API key`}
+          placeholder={hasKey() ? "A key is saved. Enter a new key to replace it." : `Enter your ${name()} API key`}
+          value={key()}
+          onChange={setKey}
+          disabled={pending()}
+        />
       </div>
+      <Button type="submit" disabled={pending() || !key().trim()}>
+        {hasKey() ? "Replace key" : "Save key"}
+      </Button>
+      <Show when={hasKey()}>
+        <Button type="button" variant="ghost" disabled={pending()} onClick={() => void change(true)}>
+          Remove key
+        </Button>
+      </Show>
+      <Show when={saved.error}>
+        <p class="basis-full text-12-regular text-text-weak">Could not check saved-key status.</p>
+      </Show>
     </form>
   )
 }

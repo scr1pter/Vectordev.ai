@@ -521,6 +521,150 @@
   outline-color: color-mix(in oklab, var(--vector-accent, #9b6cff) 78%, white);
 }
 
+/* Spacing and alignment -----------------------------------------------------------
+   Rows carry their own padding and divider. Everything else in a section (a text
+   box, a note, a button) used to sit flush against the divider above it. */
+.settings-v2-workspace
+  .settings-v2-card-body
+  > :not([data-component="settings-v2-row"], .settings-v2-row-modern, [data-component="settings-v2-list"]) {
+  margin-top: 14px;
+}
+
+.settings-v2-workspace
+  .settings-v2-card-body:has(
+    > :last-child:not([data-component="settings-v2-row"], .settings-v2-row-modern, [data-component="settings-v2-list"])
+  ) {
+  padding-bottom: 4px;
+}
+
+/* Buttons sit together at the start of the line, not spread across two columns. */
+.settings-v2-workspace .settings-v2-action-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-v2-workspace .settings-v2-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.settings-v2-workspace textarea.settings-v2-textarea {
+  min-height: 140px;
+  padding-block: 12px;
+}
+
+/* Settings' own text buttons had no style at all and read as stray text under a field. The first button in a
+   section's own button row is the main action. */
+.settings-v2-workspace .settings-v2-action {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--settings-line-strong);
+  border-radius: 8px;
+  background: var(--settings-control);
+  padding: 0 13px;
+  color: var(--settings-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 520;
+  cursor: pointer;
+}
+
+.settings-v2-workspace .settings-v2-action:hover:not(:disabled) {
+  background: var(--settings-control-hover);
+}
+
+.settings-v2-workspace .settings-v2-action:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.settings-v2-workspace .settings-v2-card-body > .settings-v2-action-grid > .settings-v2-action:first-child {
+  border-color: transparent;
+  background: var(--vector-accent, #9b6cff);
+  color: white;
+}
+
+.settings-v2-workspace
+  .settings-v2-card-body
+  > .settings-v2-action-grid
+  > .settings-v2-action:first-child:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--vector-accent, #9b6cff) 88%, white);
+}
+
+.settings-v2-workspace .settings-v2-card-body > .settings-v2-card-description {
+  max-width: 820px;
+  line-height: 1.55;
+}
+
+/* The search field is the frame, and it shows focus; the text inside it has no border, fill or ring of its own.
+   The html prefix outranks the focus-indicator accessibility rule, which the frame's ring already satisfies. */
+html .settings-v2-workspace .settings-v2-nav-search input,
+html .settings-v2-workspace .settings-v2-nav-search input:focus,
+html .settings-v2-workspace .settings-v2-nav-search input:focus-visible {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none !important;
+  padding: 0;
+  line-height: 1;
+}
+
+/* Categories scroll under the search field; fade them out there instead of cutting a row in half. */
+.settings-v2--fullscreen .settings-v2-nav-groups {
+  padding-top: 6px;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 12px);
+}
+
+/* Sections built outside the settings kit (Vector account, Teams, web search keys) take its type and fields. */
+.settings-v2-workspace .settings-form-section {
+  gap: 12px;
+}
+
+.settings-v2-workspace .settings-form-section h3 {
+  color: var(--settings-text);
+  font-size: 14px;
+  font-weight: 570;
+}
+
+.settings-v2-workspace .settings-form-section p {
+  max-width: 820px;
+  color: var(--settings-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.settings-v2-workspace .settings-form-section label {
+  color: var(--settings-muted);
+  font-size: 12px;
+}
+
+.settings-v2-workspace .settings-form-section :is(select, input:not([type="checkbox"], [type="radio"])) {
+  width: 100%;
+  max-width: 440px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.settings-v2-workspace .settings-form-section [data-component="button"] {
+  height: 36px;
+  border-radius: 8px;
+  padding-inline: 14px;
+}
+
+.settings-v2-workspace .settings-form-section [role="alert"] {
+  color: #fda4af;
+}
+
 @media (max-width: 860px) {
   .settings-v2--fullscreen[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
     [data-slot="tabs-v2-list"] {

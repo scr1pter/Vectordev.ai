@@ -79,7 +79,7 @@ export function TeamsPicker(props: {
   }
 
   return (
-    <section class="flex flex-col gap-3" aria-labelledby="vector-teams-title" aria-busy={busy()}>
+    <section class="settings-form-section flex flex-col gap-3" aria-labelledby="vector-teams-title" aria-busy={busy()}>
       <div>
         <h3 id="vector-teams-title" class="text-14-medium text-text-strong">
           Vector Teams
@@ -92,16 +92,24 @@ export function TeamsPicker(props: {
       <label class="text-12-regular" for="vector-team-selection">
         Workspace team
       </label>
-      <select
-        id="vector-team-selection"
-        value={selected()}
-        disabled={busy()}
-        onChange={(event) => setSelected(event.currentTarget.value)}
-        class="rounded-md border border-border-weak-base bg-surface-base px-3 py-2 text-14-regular text-text-strong"
-      >
-        <option value="">Personal workspace</option>
-        <For each={teams()}>{(team) => <option value={team.orgID}>{team.orgName}</option>}</For>
-      </select>
+      <div class="flex flex-wrap items-center gap-2">
+        <select
+          id="vector-team-selection"
+          value={selected()}
+          disabled={busy()}
+          onChange={(event) => setSelected(event.currentTarget.value)}
+          class="min-w-[220px] flex-1 rounded-md border border-border-weak-base bg-surface-base px-3 py-2 text-14-regular text-text-strong"
+        >
+          <option value="">Personal workspace</option>
+          <For each={teams()}>{(team) => <option value={team.orgID}>{team.orgName}</option>}</For>
+        </select>
+        <Button disabled={busy() || (loaded() && selected() === active())} onClick={() => void apply()}>
+          Apply team settings
+        </Button>
+        <Button disabled={busy()} variant="secondary" onClick={() => void refresh()}>
+          Refresh teams
+        </Button>
+      </div>
       <Show when={loaded() && teams().length === 0}>
         <p class="text-12-regular text-text-weak">
           {enabled()
@@ -119,14 +127,6 @@ export function TeamsPicker(props: {
           {notice()}
         </p>
       </Show>
-      <div class="flex gap-2">
-        <Button disabled={busy() || (loaded() && selected() === active())} onClick={() => void apply()}>
-          Apply team settings
-        </Button>
-        <Button disabled={busy()} variant="secondary" onClick={() => void refresh()}>
-          Refresh teams
-        </Button>
-      </div>
     </section>
   )
 }
