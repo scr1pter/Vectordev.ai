@@ -37,7 +37,7 @@ import {
   createPullRequest,
   listPullRequests,
   mergePullRequest,
-  pullRequestCliStatus,
+  pullRequestAccessStatus,
   pullRequestDiff,
   submitPullRequestReview,
   viewPullRequest,
@@ -325,9 +325,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("custom-instructions-read", () => readCustomInstructions())
   handle("custom-instructions-write", (_event, content: string) => writeCustomInstructions(String(content ?? "")))
   handle("custom-instructions-clear", () => clearCustomInstructions())
-  handle("pr-cli-status", (_event, options?: { refresh?: boolean }) =>
-    pullRequestCliStatus({ refresh: options?.refresh === true }),
-  )
+  handle("pr-access-status", () => pullRequestAccessStatus())
   handle("pr-list", (_event, cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) =>
     listPullRequests(cwd, options),
   )
@@ -338,7 +336,7 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "pr-review",
-    (_event, input: { cwd: string; number: number; body: string; event: "comment" | "approve" | "request-changes" }) =>
+    (_event, input: Parameters<typeof submitPullRequestReview>[0]) =>
       submitPullRequestReview(input),
   )
   handle("pr-merge", (_event, input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) =>

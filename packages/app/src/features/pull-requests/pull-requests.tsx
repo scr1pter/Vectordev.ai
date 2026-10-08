@@ -1,4 +1,5 @@
 import { createEffect, createSignal, For, Show } from "solid-js"
+import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
   buildDesktopSummary,
   countBySeverity,
@@ -22,14 +23,12 @@ import {
   pullRequestProjectIsCurrent,
 } from "./pull-request-actions"
 
-type CliStatus = {
-  installed: boolean
+// Whether Vector can act on GitHub: the user's GitHub sign-in in Vector, or an existing GitHub CLI login.
+type AccessStatus = {
   authenticated: boolean
+  configured: boolean
   login?: string
-  installCommand?: string
-  installUrl: string
-  installDetail: string
-  authCommand: string
+  source?: "vector" | "gh"
   detail: string
 }
 
@@ -59,7 +58,7 @@ type PullRequestDetail = PullRequest & {
 }
 
 type PullRequestsApi = {
-  status: (options?: { refresh?: boolean }) => Promise<CliStatus>
+  status: () => Promise<AccessStatus>
   list: (cwd: string, options?: { state?: string; limit?: number }) => Promise<PullRequest[]>
   view: (cwd: string, number: number) => Promise<PullRequestDetail>
   diff: (cwd: string, number: number) => Promise<string>
@@ -117,24 +116,6 @@ function ciApi(): CiApi | undefined {
   return (globalThis.window as unknown as { api?: { ci?: CiApi } } | undefined)?.api?.ci
 }
 
-function CopyableCommand(props: { command: string }) {
-  const [copied, setCopied] = createSignal(false)
-  return (
-    <button
-      type="button"
-      class="flex w-full items-center gap-2 rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-3 py-2 text-left font-mono text-[12px] text-white/80 transition hover:border-[color:var(--vx-purple)]"
-      onClick={() => {
-        void navigator.clipboard?.writeText(props.command)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1_500)
-      }}
-    >
-      <span class="min-w-0 flex-1 truncate">{props.command}</span>
-      <span class="shrink-0 text-[11px] text-white/45">{copied() ? "Copied" : "Copy"}</span>
-    </button>
-  )
-}
-
 const SEVERITY_TITLE = { blocking: "Blocking", concern: "Concern", nit: "Nit" } as const
 
 // Backticks mark code in Vector's own copy and in model titles; they are shown as code, not as raw backticks.
@@ -162,7 +143,7 @@ export function PullRequests(props: {
   onClose: () => void
   onReview: (input: ReviewRequest) => Promise<ReviewOutcomeLite | undefined>
 }) {
-  const [status, setStatus] = createSignal<CliStatus>()
+  const [status, setStatus] = createSignal<AccessStatus>()
   const [list, setList] = createSignal<PullRequest[]>([])
   const [selected, setSelected] = createSignal<PullRequestDetail>()
   const [review, setReview] = createSignal<ReviewOutcomeLite>()
@@ -232,8 +213,7 @@ export function PullRequests(props: {
     setConfirmingMerge(false)
   }
 
-  // recheck is the user's "Check again": main re-reads the shell PATH, so a gh installed since launch is found.
-  const refresh = async (projectPath = props.projectPath, recheck = false) => {
+  const refresh = async (projectPath = props.projectPath) => {
     const request = ++refreshRequest
     const current = () => request === refreshRequest && props.open && props.projectPath === projectPath
     const bridge = api()
@@ -244,15 +224,15 @@ export function PullRequests(props: {
       }
       return
     }
-    setBusy("Checking GitHub CLI…")
+    setBusy("Checking your GitHub sign-in…")
     setError(undefined)
-    const cli = await bridge.status({ refresh: recheck }).catch((cause: unknown) => {
+    const access = await bridge.status().catch((cause: unknown) => {
       if (current()) setError(pullRequestErrorMessage(cause))
       return undefined
     })
     if (!current()) return
-    setStatus(cli)
-    if (!cli?.installed || !cli.authenticated || !projectPath) {
+    setStatus(access)
+    if (!access?.authenticated || !projectPath) {
       setBusy(undefined)
       return
     }
@@ -264,7 +244,7 @@ export function PullRequests(props: {
     if (!current()) return
     setList(prs)
     setBusy(undefined)
-    // CI shares the same gh sign-in the panel just confirmed, so load it after
+    // CI shares the same GitHub sign-in the panel just confirmed, so load it after
     // the PR list rather than gating the whole panel on it — a repo with no
     // workflows should still show its pull requests.
     const ci = ciApi()
@@ -526,6 +506,21 @@ export function PullRequests(props: {
           <Show when={busy()}>
             <span class="shrink-0 text-[11.5px] text-white/45">{busy()}</span>
           </Show>
+          <Show when={status()?.authenticated && status()?.source === "vector"}>
+            <button
+              type="button"
+              class="shrink-0 rounded-[5px] px-2 py-1 text-[11.5px] text-white/50 transition hover:bg-white/[0.06] hover:text-white"
+              disabled={Boolean(busy())}
+              onClick={() =>
+                void githubApi()
+                  ?.auth?.logout()
+                  .catch(() => undefined)
+                  .then(() => refresh(props.projectPath))
+              }
+            >
+              Sign out of GitHub
+            </button>
+          </Show>
           <button
             type="button"
             aria-label="Close Pull Requests"
@@ -545,54 +540,23 @@ export function PullRequests(props: {
             </div>
           </Show>
 
-          <Show when={status() && !status()!.installed}>
-            <div class="mx-auto max-w-[560px] rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] p-5">
-              <h2 class="mb-1 text-[14px] font-semibold text-white">Install the GitHub CLI</h2>
-              <p class="mb-3 text-[12.5px] leading-relaxed text-white/60">
-                Vector drives your own <span class="font-mono">gh</span> installation, so it uses your existing GitHub
-                sign-in and respects your organization's policies. No extra token needed.
-              </p>
+          <Show when={status() && !status()!.authenticated}>
+            <div class="mx-auto max-w-[560px] rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)]">
               <Show
-                when={status()!.installCommand}
+                when={status()!.configured && githubApi()?.auth}
                 fallback={
-                  <a
-                    class="flex items-center justify-between gap-3 rounded-[6px] border border-[color:var(--vx-line)] bg-black/25 px-3 py-2.5 text-[12.5px] text-white/80 transition hover:border-[color:var(--vx-purple)]"
-                    href={status()!.installUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <span>Download the GitHub CLI</span>
-                    <span class="shrink-0 text-[11.5px] text-white/40">{status()!.installUrl}</span>
-                  </a>
+                  <p class="p-5 text-[12.5px] leading-relaxed text-white/60">
+                    This build of Vector can't sign in to GitHub. Install the latest Vector to work with pull requests.
+                  </p>
                 }
               >
-                <CopyableCommand command={status()!.installCommand!} />
+                <GithubDeviceSignIn
+                  intro="Sign in to GitHub to see this repository's pull requests, review them with Vectorscope, and merge them, all from Vector."
+                  closeLabel="Not now"
+                  onConnected={() => void refresh(props.projectPath)}
+                  onClose={props.onClose}
+                />
               </Show>
-              <p class="mt-2 text-[11.5px] leading-relaxed text-white/45">{status()!.installDetail}</p>
-              <p class="mb-2 mt-3 text-[12px] text-white/50">Then sign in:</p>
-              <CopyableCommand command={status()!.authCommand} />
-              <button
-                type="button"
-                class="mt-4 rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white"
-                onClick={() => void refresh(props.projectPath, true)}
-              >
-                Check again
-              </button>
-            </div>
-          </Show>
-
-          <Show when={status()?.installed && !status()?.authenticated}>
-            <div class="mx-auto max-w-[560px] rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] p-5">
-              <h2 class="mb-1 text-[14px] font-semibold text-white">Sign in to GitHub</h2>
-              <p class="mb-3 text-[12.5px] text-white/60">The GitHub CLI is installed but not signed in.</p>
-              <CopyableCommand command={status()!.authCommand} />
-              <button
-                type="button"
-                class="mt-4 rounded-[6px] bg-[color:var(--vx-purple)] px-3 py-1.5 text-[12.5px] font-medium text-white"
-                onClick={() => void refresh(props.projectPath, true)}
-              >
-                Check again
-              </button>
             </div>
           </Show>
 
@@ -1051,7 +1015,7 @@ export function PullRequests(props: {
                                 <span class="text-[11.5px] text-white/45">
                                   {status()?.login
                                     ? `Posting as @${status()!.login}`
-                                    : "Posting with your GitHub CLI sign-in"}
+                                    : "Posting with your GitHub sign-in"}
                                 </span>
                               </div>
                             </Show>

@@ -42,6 +42,13 @@ export function requireReviewEvent(value: unknown) {
   return value as "comment" | "approve" | "request-changes"
 }
 
+export function requirePullRequestHead(value: unknown) {
+  if (typeof value !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value)) {
+    throw new Error("Review requires the pull request's full commit SHA. Reload the pull request and review it again.")
+  }
+  return value.toLowerCase()
+}
+
 export function requireMergeStrategy(value: unknown) {
   if (typeof value !== "string" || !MERGE_STRATEGIES.has(value)) throw new Error("Invalid pull request merge strategy.")
   return value as "merge" | "squash" | "rebase"
