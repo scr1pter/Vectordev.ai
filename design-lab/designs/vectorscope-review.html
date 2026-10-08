@@ -28,6 +28,21 @@
         white-space: nowrap;
       }
 
+      .d-vectorscope-review .hd-crumb {
+        color: var(--text-3);
+        font-size: 13px;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .d-vectorscope-review .hd-crumb:hover {
+        color: var(--text-1);
+      }
+
+      .d-vectorscope-review .hd-sep-slash {
+        color: rgba(255, 255, 255, 0.2);
+      }
+
       .d-vectorscope-review .hd-num {
         color: var(--text-3);
         font: 12.5px var(--mono);
@@ -1354,10 +1369,11 @@
         <div class="lab-viewport" data-height="900">
           <div class="lab-stage d-vectorscope-review">
             <div class="app">
-              <nav data-lab-sidebar data-active="vectorscope" data-workspace="Vector" data-branch="security-boundaries"></nav>
+              <nav data-lab-sidebar data-active="pulls" data-workspace="Vector" data-branch="security-boundaries"></nav>
               <main class="app-main">
                 <header class="app-header">
-                  <i data-icon="pulls" data-size="15" class="muted"></i>
+                  <a class="hd-crumb" href="pull-requests.html">Pull Requests</a>
+                  <span class="hd-sep-slash" aria-hidden="true">/</span>
                   <h2>Bind workspace trust to a folder fingerprint</h2>
                   <span class="hd-num">#2318</span>
                   <span class="badge badge-green" data-state-badge>Open</span>
