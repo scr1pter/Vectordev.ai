@@ -1,7 +1,11 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
-  buildDesktopSummary,
+  buildDesktopReview,
+  checksForReview,
+  dismissalRule,
+  fixMission,
+  withoutDismissed,
   countBySeverity,
   estimateText,
   findingGroups,
@@ -14,6 +18,8 @@ import {
   type ReviewEstimate,
   type ReviewEvent,
   type ReviewFindingView,
+  type LineComment,
+  type PullRequestChecks,
   type ReviewOutcomeLite,
   type ReviewRequest,
 } from "./ai-review"
@@ -77,8 +83,13 @@ type PullRequestsApi = {
     number: number
     head?: string
     body: string
+    // Findings on changed lines as line comments; GitHub refuses them all if one misses the diff, and the review is
+    // then posted with fallbackBody, which lists every finding.
+    comments?: LineComment[]
+    fallbackBody?: string
     event: "comment" | "approve" | "request-changes"
-  }) => Promise<{ posted: boolean }>
+  }) => Promise<{ posted: boolean; inline?: number }>
+  checks?: (cwd: string, number: number, head: string) => Promise<PullRequestChecks>
   merge: (input: {
     cwd: string
     number: number
@@ -90,6 +101,18 @@ type PullRequestsApi = {
 function api(): PullRequestsApi | undefined {
   return (globalThis.window as unknown as { api?: { pullRequests?: PullRequestsApi } } | undefined)?.api?.pullRequests
 }
+
+type RepoRulesApi = {
+  save: (input: { description: string; repositoryPath: string; filePatterns: string[] }) => Promise<unknown>
+}
+
+function rulesApi(): RepoRulesApi | undefined {
+  return (globalThis.window as unknown as { api?: { repoRules?: RepoRulesApi } } | undefined)?.api?.repoRules
+}
+
+const DISMISS_REASONS = ["Not a bug", "Intended behaviour", "Fixed elsewhere", "Won't fix in this pull request"]
+const REMEMBER = "Don't flag this again"
+const REMEMBERED = "Won't be flagged again · saved to Project rules"
 
 type CiRun = {
   id: number
@@ -204,6 +227,8 @@ const ICONS = {
   ),
   plus: () => <path d="M8 3.5v9M3.5 8h9" />,
   comment: () => <path d="M3 4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7.5L5 13v-2H4a1 1 0 0 1-1-1z" />,
+  wand: () => <path d="m2.5 13.5 7.5-7.5M11.5 2v2M13.75 4.5h-2M13 3l-1 1M9 3.5l.75 1M12.75 7.25l-1-.75" />,
+  rule: () => <path d="M4.5 2.5h7a1 1 0 0 1 1 1v10l-4.5-2.5-4.5 2.5v-10a1 1 0 0 1 1-1zM6 6h4M6 8.5h2.5" />,
 } satisfies Record<string, () => JSX.Element>
 
 function Icon(props: { name: keyof typeof ICONS; class?: string }) {
@@ -287,65 +312,233 @@ function RiskMeter(props: { risk: keyof typeof RISK; counts: { blocking: number;
   )
 }
 
-function FindingCard(props: { finding: ReviewFindingView }) {
+const CHIP = "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px]"
+const MENU_ITEM =
+  "w-full rounded-[5px] px-2.5 py-1.5 text-left text-[12px] text-[color:var(--vx-text)] transition hover:bg-[color:var(--vx-control-hover)]"
+
+// What the review was grounded in beyond the diff, so a reader can judge how much to trust it.
+function Grounding(props: { outcome: ReviewOutcomeLite }) {
+  const verification = () => props.outcome.verification
+  const context = () => props.outcome.context
   return (
-    <article class="rounded-[8px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-3.5 py-3">
-      <div class="flex items-start gap-2.5">
-        <span
-          class="mt-[5px] size-2 shrink-0 rounded-full"
-          style={{ background: SEVERITY[props.finding.severity].tone }}
-          title={SEVERITY[props.finding.severity].label}
-        />
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h4 class="text-[13px] font-medium leading-snug text-[color:var(--vx-text)]">
-              <CodeText text={props.finding.title} />
-            </h4>
-            <span class="text-[10.5px] text-[color:var(--vx-text-muted)]">{props.finding.category}</span>
-          </div>
-          <div class="mt-1 flex flex-wrap items-baseline gap-x-2 font-mono text-[11px] text-[color:var(--vx-purple-bright)]">
-            <span class="break-all">
-              {props.finding.path}:{props.finding.line}
+    <Show when={verification() || context()?.checks || context()?.callers || context()?.instructions}>
+      <div class="mt-3 flex flex-wrap gap-1.5">
+        <Show when={verification()}>
+          {(checked) => (
+            <span
+              class={`${CHIP} ${
+                checked().status === "ok"
+                  ? "bg-[color:color-mix(in_srgb,var(--vx-green)_12%,transparent)] text-[color:var(--vx-green)]"
+                  : "bg-[color:color-mix(in_srgb,var(--vx-amber)_12%,transparent)] text-[color:var(--vx-amber)]"
+              }`}
+              title="A second pass re-read the code behind each finding and dropped the ones that were not real."
+            >
+              <Icon name="check" class="size-3" />
+              {checked().status === "ok"
+                ? `Double-checked ${checked().checked} · ${checked().rejected} dropped`
+                : "Not double-checked"}
             </span>
-            <Show when={props.finding.place !== "changed"}>
-              <span class="font-sans text-[color:var(--vx-text-muted)]">
-                {props.finding.place === "outside" ? "outside the changed lines" : "elsewhere in this pull request"}
-              </span>
-            </Show>
-          </div>
-          <Show when={props.finding.body}>
-            <p class="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
-              <CodeText text={props.finding.body} />
-            </p>
-          </Show>
-          <Show when={props.finding.fix}>
-            {(fix) => (
-              <div class="mt-2.5 overflow-hidden rounded-[6px] border border-[color:var(--vx-line)]">
-                <div class="border-b border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-2.5 py-1 text-[10.5px] text-[color:var(--vx-text-muted)]">
-                  Suggested change
-                </div>
-                <pre class="max-h-56 overflow-auto bg-[color:var(--vx-surface)] py-1 font-mono text-[11px] leading-[1.55]">
-                  <For each={fix().removed}>
-                    {(line) => (
-                      <div class="bg-[color:color-mix(in_srgb,var(--vx-red)_10%,transparent)] px-2.5 text-[color:var(--vx-red)]">
-                        -{line}
-                      </div>
-                    )}
-                  </For>
-                  <For each={fix().added}>
-                    {(line) => (
-                      <div class="bg-[color:color-mix(in_srgb,var(--vx-green)_10%,transparent)] px-2.5 text-[color:var(--vx-green)]">
-                        +{line}
-                      </div>
-                    )}
-                  </For>
-                </pre>
-              </div>
-            )}
-          </Show>
-        </div>
+          )}
+        </Show>
+        <Show when={context()?.checks}>
+          <span
+            class={`${CHIP} bg-[color:var(--vx-control)] text-[color:var(--vx-text-subtle)]`}
+            title="The reviewers read this commit's CI results from GitHub, with the end of each failing step's log."
+          >
+            {context()!.failing
+              ? `${context()!.failing} failing CI ${context()!.failing === 1 ? "check" : "checks"} read`
+              : `${context()!.checks} CI ${context()!.checks === 1 ? "check" : "checks"} read`}
+          </span>
+        </Show>
+        <Show when={context()?.callers}>
+          <span
+            class={`${CHIP} bg-[color:var(--vx-control)] text-[color:var(--vx-text-subtle)]`}
+            title="Places in your checkout that call what this change declares, given to the reviewers."
+          >
+            {context()!.callers} call {context()!.callers === 1 ? "site" : "sites"} read
+          </span>
+        </Show>
+        <Show when={context()?.instructions}>
+          <span
+            class={`${CHIP} bg-[color:var(--vx-control)] text-[color:var(--vx-text-subtle)]`}
+            title="AGENTS.md and .vector/RULES.md from your checkout, including findings you chose not to see again."
+          >
+            <Icon name="rule" class="size-3" />
+            Project rules applied
+          </span>
+        </Show>
       </div>
-    </article>
+    </Show>
+  )
+}
+
+function FindingCard(props: {
+  finding: ReviewFindingView
+  dismissed?: string
+  menuOpen: boolean
+  canFix: boolean
+  canRemember: boolean
+  onMenu: (open: boolean) => void
+  onDismiss: (reason: string) => void
+  onRestore: () => void
+  onFix: () => void
+}) {
+  // The menu opens upward when there is no room for it below the button.
+  const [menuUp, setMenuUp] = createSignal(false)
+  return (
+    <Show
+      when={!props.dismissed}
+      fallback={
+        <article class="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-[8px] border border-dashed border-[color:var(--vx-line)] px-3.5 py-2 text-[12px] text-[color:var(--vx-text-muted)]">
+          <span
+            class="size-2 shrink-0 rounded-full opacity-50"
+            style={{ background: SEVERITY[props.finding.severity].tone }}
+          />
+          <span class="min-w-0 flex-1 truncate line-through">
+            <CodeText text={props.finding.title} />
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <Show when={props.dismissed === REMEMBER || props.dismissed === REMEMBERED}>
+              <Icon name="rule" class="size-3" />
+            </Show>
+            {props.dismissed === REMEMBER ? "Saving as a project rule…" : props.dismissed}
+          </span>
+          <button
+            type="button"
+            class="rounded-[5px] px-1.5 py-0.5 text-[color:var(--vx-text-subtle)] transition hover:bg-[color:var(--vx-control)] hover:text-[color:var(--vx-text)]"
+            onClick={props.onRestore}
+          >
+            Undo
+          </button>
+        </article>
+      }
+    >
+      <article class="rounded-[8px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-3.5 py-3">
+        <div class="flex items-start gap-2.5">
+          <span
+            class="mt-[5px] size-2 shrink-0 rounded-full"
+            style={{ background: SEVERITY[props.finding.severity].tone }}
+            title={SEVERITY[props.finding.severity].label}
+          />
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <h4 class="text-[13px] font-medium leading-snug text-[color:var(--vx-text)]">
+                <CodeText text={props.finding.title} />
+              </h4>
+              <span class="text-[10.5px] text-[color:var(--vx-text-muted)]">{props.finding.category}</span>
+              <Show when={props.finding.verified}>
+                <span
+                  class={`${CHIP} bg-[color:color-mix(in_srgb,var(--vx-green)_12%,transparent)] text-[color:var(--vx-green)]`}
+                  title="A second pass re-read the code and confirmed this is real."
+                >
+                  <Icon name="check" class="size-3" />
+                  Double-checked
+                </span>
+              </Show>
+            </div>
+            <div class="mt-1 flex flex-wrap items-baseline gap-x-2 font-mono text-[11px] text-[color:var(--vx-purple-bright)]">
+              <span class="break-all">
+                {props.finding.path}:{props.finding.line}
+              </span>
+              <Show when={props.finding.place !== "changed"}>
+                <span class="font-sans text-[color:var(--vx-text-muted)]">
+                  {props.finding.place === "outside" ? "outside the changed lines" : "elsewhere in this pull request"}
+                </span>
+              </Show>
+            </div>
+            <Show when={props.finding.body}>
+              <p class="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                <CodeText text={props.finding.body} />
+              </p>
+            </Show>
+            <Show when={props.finding.fix}>
+              {(fix) => (
+                <div class="mt-2.5 overflow-hidden rounded-[6px] border border-[color:var(--vx-line)]">
+                  <div class="border-b border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-2.5 py-1 text-[10.5px] text-[color:var(--vx-text-muted)]">
+                    Suggested change
+                  </div>
+                  <pre class="max-h-56 overflow-auto bg-[color:var(--vx-surface)] py-1 font-mono text-[11px] leading-[1.55]">
+                    <For each={fix().removed}>
+                      {(line) => (
+                        <div class="bg-[color:color-mix(in_srgb,var(--vx-red)_10%,transparent)] px-2.5 text-[color:var(--vx-red)]">
+                          -{line}
+                        </div>
+                      )}
+                    </For>
+                    <For each={fix().added}>
+                      {(line) => (
+                        <div class="bg-[color:color-mix(in_srgb,var(--vx-green)_10%,transparent)] px-2.5 text-[color:var(--vx-green)]">
+                          +{line}
+                        </div>
+                      )}
+                    </For>
+                  </pre>
+                </div>
+              )}
+            </Show>
+            <div class="mt-3 flex flex-wrap items-center gap-1.5">
+              <Show when={props.canFix}>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-[6px] border border-[color:var(--vx-line-strong)] bg-[color:var(--vx-control)] px-2.5 py-1 text-[11.5px] font-medium text-[color:var(--vx-text)] transition hover:bg-[color:var(--vx-control-hover)]"
+                  title="Opens an isolated agent workspace with this finding as its task. You start it."
+                  onClick={props.onFix}
+                >
+                  <Icon name="wand" class="size-3" />
+                  Fix with agent
+                </button>
+              </Show>
+              <div class="relative">
+                <button
+                  type="button"
+                  aria-haspopup="menu"
+                  aria-expanded={props.menuOpen}
+                  class="rounded-[6px] px-2.5 py-1 text-[11.5px] text-[color:var(--vx-text-subtle)] transition hover:bg-[color:var(--vx-control)] hover:text-[color:var(--vx-text)]"
+                  onClick={(event) => {
+                    setMenuUp(event.currentTarget.getBoundingClientRect().bottom > globalThis.innerHeight - 280)
+                    props.onMenu(!props.menuOpen)
+                  }}
+                >
+                  Dismiss
+                </button>
+                <Show when={props.menuOpen}>
+                  <div class="fixed inset-0 z-10" aria-hidden="true" onClick={() => props.onMenu(false)} />
+                  <div
+                    role="menu"
+                    aria-label="Dismiss with a reason"
+                    class="absolute left-0 z-20 w-[240px] rounded-[8px] border border-[color:var(--vx-line-strong)] bg-[color:var(--vx-surface-raised)] p-1 shadow-[var(--vx-shadow-float)]"
+                    classList={{ "top-full mt-1": !menuUp(), "bottom-full mb-1": menuUp() }}
+                  >
+                    <p class="px-2.5 pb-1 pt-1.5 text-[10.5px] text-[color:var(--vx-text-muted)]">
+                      Dismiss with a reason. It is left out of what you post.
+                    </p>
+                    <For each={DISMISS_REASONS}>
+                      {(reason) => (
+                        <button type="button" role="menuitem" class={MENU_ITEM} onClick={() => props.onDismiss(reason)}>
+                          {reason}
+                        </button>
+                      )}
+                    </For>
+                    <Show when={props.canRemember}>
+                      <div class="my-1 border-t border-[color:var(--vx-line)]" />
+                      <button type="button" role="menuitem" class={MENU_ITEM} onClick={() => props.onDismiss(REMEMBER)}>
+                        <span class="flex items-center gap-1.5">
+                          <Icon name="rule" class="size-3" />
+                          {REMEMBER}
+                        </span>
+                        <span class="mt-0.5 block text-[10.5px] text-[color:var(--vx-text-muted)]">
+                          Saves a project rule that every review reads
+                        </span>
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </Show>
   )
 }
 
@@ -383,6 +576,10 @@ export function PullRequests(props: {
   const [busy, setBusy] = createSignal<string>()
   const [error, setError] = createSignal<string>()
   const [posted, setPosted] = createSignal(false)
+  const [postedNote, setPostedNote] = createSignal<string>()
+  // Finding id → why it was dismissed. Dismissed findings stay visible, struck through, and are never posted.
+  const [dismissed, setDismissed] = createSignal<Record<string, string>>({})
+  const [menuFor, setMenuFor] = createSignal<string>()
   const [query, setQuery] = createSignal("")
   const [severityFilter, setSeverityFilter] = createSignal<"all" | ReviewFindingView["severity"]>("all")
   const [ciRuns, setCiRuns] = createSignal<CiRun[]>([])
@@ -414,14 +611,23 @@ export function PullRequests(props: {
     const outcome = review()
     return outcome ? findingGroups(outcome) : []
   }
-  const counts = () => countBySeverity(groups())
+  const dismissedIds = () => new Set(Object.keys(dismissed()))
+  const counts = () =>
+    countBySeverity(
+      groups().map((group) => ({ ...group, findings: group.findings.filter((finding) => !dismissed()[finding.id]) })),
+    )
   const events = () => {
     const outcome = review()
-    return outcome ? reviewEvents(outcome.selection) : undefined
+    return outcome ? reviewEvents(withoutDismissed(outcome.selection, dismissedIds())) : undefined
   }
+  // Dismissed findings sink to the bottom of their list.
   const visibleFindings = () =>
-    groups().flatMap((group) =>
-      severityFilter() === "all" || group.severity === severityFilter() ? group.findings : [],
+    groups()
+      .flatMap((group) => (severityFilter() === "all" || group.severity === severityFilter() ? group.findings : []))
+      .toSorted((a, b) => Number(Boolean(dismissed()[a.id])) - Number(Boolean(dismissed()[b.id])))
+  const canFix = () =>
+    Boolean(
+      (globalThis.window as unknown as { api?: { parallelWorkspaces?: unknown } } | undefined)?.api?.parallelWorkspaces,
     )
   const shown = () => {
     const words = query().trim().toLowerCase()
@@ -585,7 +791,10 @@ export function PullRequests(props: {
     setReview(undefined)
     setCheckout(undefined)
     setSeverityFilter("all")
+    setDismissed({})
+    setMenuFor(undefined)
     setPosted(false)
+    setPostedNote(undefined)
     setConfirmingMerge(false)
     const detail = await bridge.view(projectPath, number).catch((cause: unknown) => {
       if (current()) setError(pullRequestErrorMessage(cause))
@@ -610,6 +819,9 @@ export function PullRequests(props: {
       reviewRun()?.controller === controller
     setReviewRun({ controller, number: opened.number })
     setSeverityFilter("all")
+    setDismissed({})
+    setMenuFor(undefined)
+    setPostedNote(undefined)
     setBusy("Checking for new commits…")
     setError(undefined)
     setReview(undefined)
@@ -632,6 +844,12 @@ export function PullRequests(props: {
             return ""
           })
         : ""
+    // The reviewers get the commit's CI results too: a failing test is evidence, not an opinion.
+    if (pr && diff && current() && pr.headRefOid && bridge.checks) setBusy("Reading CI results…")
+    const checks =
+      pr && diff && current() && pr.headRefOid && bridge.checks
+        ? await bridge.checks(projectPath, pr.number, pr.headRefOid).then(checksForReview, () => undefined)
+        : undefined
     const outcome =
       pr && diff && !controller.signal.aborted
         ? await props
@@ -650,6 +868,7 @@ export function PullRequests(props: {
                 comments: pr.comments,
               },
               diff,
+              ...(checks?.length ? { checks } : {}),
               signal: controller.signal,
               confirm: (value) =>
                 new Promise<boolean>((resolve) => {
@@ -701,7 +920,10 @@ export function PullRequests(props: {
     const outcome = review()
     const projectPath = props.projectPath
     const request = { path: projectPath, revision: projectRevision }
-    if (!bridge || !pr || !outcome || !projectPath || busy() || !reviewEvents(outcome.selection)[event]) return
+    const ignored = dismissedIds()
+    if (!bridge || !pr || !outcome || !projectPath || busy()) return
+    if (!reviewEvents(withoutDismissed(outcome.selection, ignored))[event]) return
+    const draft = buildDesktopReview(outcome, pr.url, ignored)
     const current = () =>
       props.open &&
       pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
@@ -714,7 +936,9 @@ export function PullRequests(props: {
         cwd: projectPath,
         number: pr.number,
         head: outcome.head,
-        body: buildDesktopSummary(outcome, pr.url),
+        body: draft.body,
+        fallbackBody: draft.fallbackBody,
+        comments: draft.comments,
         event,
       })
       .catch((cause: unknown) => {
@@ -723,7 +947,52 @@ export function PullRequests(props: {
       })
     if (!current()) return
     setPosted(Boolean(result?.posted))
+    setPostedNote(
+      !result?.posted || result.inline === undefined || !draft.comments.length
+        ? undefined
+        : result.inline
+          ? `with ${result.inline} ${result.inline === 1 ? "comment" : "comments"} on the lines they're about`
+          : "as one summary, because GitHub would not take the line comments",
+    )
     setBusy(undefined)
+  }
+
+  const dismiss = async (finding: ReviewFindingView, reason: string) => {
+    const projectPath = props.projectPath
+    setMenuFor(undefined)
+    setDismissed((current) => ({ ...current, [finding.id]: reason }))
+    if (reason !== REMEMBER) return
+    const rules = rulesApi()
+    if (!rules || !projectPath) return
+    // The rule lands in .vector/RULES.md, which every later review reads as the repository's instructions.
+    await rules
+      .save({ description: dismissalRule(finding), repositoryPath: projectPath, filePatterns: [finding.path] })
+      .then(
+        () =>
+          setDismissed((current) =>
+            current[finding.id] === REMEMBER ? { ...current, [finding.id]: REMEMBERED } : current,
+          ),
+        (cause: unknown) => {
+          setDismissed((current) =>
+            current[finding.id] === REMEMBER ? { ...current, [finding.id]: "Dismissed" } : current,
+          )
+          setError(`Vector could not save the project rule: ${pullRequestErrorMessage(cause)}`)
+        },
+      )
+  }
+
+  const restore = (finding: ReviewFindingView) =>
+    setDismissed((current) => Object.fromEntries(Object.entries(current).filter(([id]) => id !== finding.id)))
+
+  // Hands the finding to an isolated agent workspace. The launcher opens with the task filled in; nothing runs until
+  // the user starts it there.
+  const fixWithAgent = (finding: ReviewFindingView) => {
+    const pr = selected()
+    if (!pr) return
+    globalThis.window?.dispatchEvent(
+      new CustomEvent("vector:delegate-parallel", { detail: { missions: [fixMission(pr, finding)] } }),
+    )
+    props.onClose()
   }
 
   const createPr = async (event: SubmitEvent) => {
@@ -814,6 +1083,10 @@ export function PullRequests(props: {
           if (event.key !== "Escape" || event.defaultPrevented) return
           // Escape in a field clears or leaves the field; it must not throw away a half-written pull request.
           if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select")) return
+          if (menuFor()) {
+            setMenuFor(undefined)
+            return
+          }
           if (confirmingMerge()) {
             setConfirmingMerge(false)
             return
@@ -1356,6 +1629,7 @@ export function PullRequests(props: {
                                     <CodeText text={outcome().report.summary} />
                                   </p>
                                 </Show>
+                                <Grounding outcome={outcome()} />
                                 <For each={[...outcome().banners, ...outcome().notes]}>
                                   {(note) => (
                                     <p class="mt-2.5 rounded-[6px] border border-[color:color-mix(in_srgb,var(--vx-amber)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-amber)_8%,transparent)] px-3 py-2 text-[12px] leading-relaxed text-[color:var(--vx-amber)]">
@@ -1418,7 +1692,21 @@ export function PullRequests(props: {
                                 </div>
                               </div>
                               <div class="flex flex-col gap-2 px-4 pb-4">
-                                <For each={visibleFindings()}>{(finding) => <FindingCard finding={finding} />}</For>
+                                <For each={visibleFindings()}>
+                                  {(finding) => (
+                                    <FindingCard
+                                      finding={finding}
+                                      dismissed={dismissed()[finding.id]}
+                                      menuOpen={menuFor() === finding.id}
+                                      canFix={canFix()}
+                                      canRemember={Boolean(rulesApi() && props.projectPath)}
+                                      onMenu={(open) => setMenuFor(open ? finding.id : undefined)}
+                                      onDismiss={(reason) => void dismiss(finding, reason)}
+                                      onRestore={() => restore(finding)}
+                                      onFix={() => fixWithAgent(finding)}
+                                    />
+                                  )}
+                                </For>
                               </div>
                             </Show>
 
@@ -1436,6 +1724,9 @@ export function PullRequests(props: {
                                     <span class="inline-flex items-center gap-1.5 text-[12.5px] text-[color:var(--vx-green)]">
                                       <Icon name="check" />
                                       Review posted
+                                      <Show when={postedNote()}>
+                                        <span class="text-[color:var(--vx-text-muted)]">{postedNote()}</span>
+                                      </Show>
                                     </span>
                                     <a
                                       class="ml-auto text-[12px] text-[color:var(--vx-purple-bright)] underline underline-offset-2"
