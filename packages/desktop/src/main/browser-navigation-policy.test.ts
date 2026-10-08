@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test"
-import { browserOrigin, isAllowedBrowserNavigation, isLocalBrowserUrl } from "./browser-navigation-policy"
+import {
+  AUTOMATION_SETTLE_MS,
+  USER_NAVIGATION_WINDOW_MS,
+  beginAutomation,
+  browserOrigin,
+  endAutomation,
+  isAllowedBrowserNavigation,
+  isLocalBrowserUrl,
+  isUserNavigation,
+  navigationIntent,
+  recordPageInput,
+} from "./browser-navigation-policy"
 
 describe("browser navigation policy", () => {
   test("allows only loopback URLs without external-site approval", () => {
@@ -22,5 +33,56 @@ describe("browser navigation policy", () => {
     expect(isAllowedBrowserNavigation("https://accounts.example.com/login", allowed)).toBe(false)
     expect(isAllowedBrowserNavigation("https://example.net", allowed)).toBe(false)
     expect(browserOrigin("javascript:alert(1)")).toBeUndefined()
+  })
+})
+
+describe("who is driving the browser", () => {
+  test("the user's own click lets the next navigation through", () => {
+    const intent = navigationIntent()
+    expect(isUserNavigation(intent, 1_000)).toBe(false)
+    recordPageInput(intent, "mouseDown", 1_000)
+    expect(isUserNavigation(intent, 1_200)).toBe(true)
+    expect(isUserNavigation(intent, 1_000 + USER_NAVIGATION_WINDOW_MS)).toBe(false)
+  })
+
+  test("pointer movement and scrolling are not a choice to navigate", () => {
+    const intent = navigationIntent()
+    recordPageInput(intent, "mouseMove", 1_000)
+    recordPageInput(intent, "mouseWheel", 1_000)
+    recordPageInput(intent, undefined, 1_000)
+    expect(isUserNavigation(intent, 1_100)).toBe(false)
+  })
+
+  test("input during and just after an automated command belongs to the automation", () => {
+    const intent = navigationIntent()
+    beginAutomation(intent)
+    recordPageInput(intent, "keyDown", 1_000)
+    expect(isUserNavigation(intent, 1_050)).toBe(false)
+    endAutomation(intent, 1_100)
+    recordPageInput(intent, "char", 1_100 + AUTOMATION_SETTLE_MS - 1)
+    expect(isUserNavigation(intent, 1_100 + AUTOMATION_SETTLE_MS)).toBe(false)
+    recordPageInput(intent, "mouseUp", 1_100 + AUTOMATION_SETTLE_MS)
+    expect(isUserNavigation(intent, 1_200 + AUTOMATION_SETTLE_MS)).toBe(true)
+  })
+
+  test("an automated command never rides the user's earlier click", () => {
+    const intent = navigationIntent()
+    recordPageInput(intent, "mouseDown", 1_000)
+    beginAutomation(intent)
+    expect(isUserNavigation(intent, 1_100)).toBe(false)
+    endAutomation(intent, 1_200)
+    expect(isUserNavigation(intent, 1_300)).toBe(false)
+  })
+
+  test("overlapping commands keep the automation in charge until the last one ends", () => {
+    const intent = navigationIntent()
+    beginAutomation(intent)
+    beginAutomation(intent)
+    endAutomation(intent, 1_000)
+    recordPageInput(intent, "mouseDown", 5_000)
+    expect(isUserNavigation(intent, 5_100)).toBe(false)
+    endAutomation(intent, 5_200)
+    recordPageInput(intent, "mouseDown", 5_200 + AUTOMATION_SETTLE_MS)
+    expect(isUserNavigation(intent, 5_300 + AUTOMATION_SETTLE_MS)).toBe(true)
   })
 })
