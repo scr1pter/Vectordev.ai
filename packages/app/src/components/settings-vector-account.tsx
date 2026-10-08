@@ -32,7 +32,7 @@ export function SettingsVectorAccount() {
   }
   return (
     <Show when={platform.vectorAccount}>
-      <section class="flex flex-col gap-3" aria-labelledby="vector-account-title">
+      <section class="settings-form-section flex flex-col gap-3" aria-labelledby="vector-account-title">
         <div>
           <h3 id="vector-account-title" class="text-14-medium text-text-strong">
             Vector account
