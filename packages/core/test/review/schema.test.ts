@@ -214,6 +214,43 @@ describe("decodeReport", () => {
     expect(decodeReport([{ summary: "array" }])).toBeUndefined()
   })
 
+  test("finds the report after an unrelated JSON fence", () => {
+    const output =
+      'Read result:\n```json\n{"path":"src/a.ts","content":"example"}\n```\nReview:\n```json\n{"summary":"Actual review","risk":"medium","findings":[]}\n```'
+    expect(decodeReport(output)?.summary).toBe("Actual review")
+    expect(
+      decodeReport(
+        '```json\n{"summary":"Tool result"}\n```\n```json\n{"summary":"Actual review","risk":"medium","findings":[]}\n```',
+      )?.summary,
+    ).toBe("Actual review")
+  })
+
+  test("finds separate JSON objects in prose and preserves braces inside strings", () => {
+    const output =
+      'Read result: {"path":"src/a.ts"}. Review: {"summary":"Handle {nested} and \\\"quoted\\\" input","findings":[]}. Done.'
+    expect(decodeReport(output)?.summary).toBe('Handle {nested} and "quoted" input')
+  })
+
+  test("a stray bracket in the prose does not hide the report after it", () => {
+    expect(
+      decodeReport('Checked the half-open range [0, n). {"summary":"Real review","risk":"low","findings":[]}')?.summary,
+    ).toBe("Real review")
+    // An odd number of quotes in the prose cannot flip the scanner either.
+    expect(decodeReport('A 5" screen and [0, n). {"summary":"Still found","findings":[]}')?.summary).toBe("Still found")
+  })
+
+  test("a report quoted before the real one does not win", () => {
+    const output = [
+      "The earlier run said:",
+      '```json\n{"summary":"LGTM","risk":"low","findings":[]}\n```',
+      "My review of the current head:",
+      '```json\n{"summary":"Two problems","risk":"high","findings":[{"path":"src/a.ts","line":3,"severity":"blocking","category":"bug","title":"Null read","body":"b","confidence":0.9}]}\n```',
+    ].join("\n")
+    const report = decodeReport(output)
+    expect(report?.summary).toBe("Two problems")
+    expect(report?.findings).toHaveLength(1)
+  })
+
   test("drops a fix too long for a comment, and caps the summary", () => {
     const base = { path: "a.ts", line: 1, severity: "concern", category: "bug", title: "t", body: "b", confidence: 0.9 }
     const report = decodeReport({
@@ -265,5 +302,26 @@ describe("decodeVerify", () => {
     expect(decodeVerify('{"results":[{"id":"a","verdict":"confirmed","reason":"r"}]}')).toHaveLength(1)
     expect(decodeVerify({ summary: "no results" })).toBeUndefined()
     expect(decodeVerify("nothing")).toBeUndefined()
+  })
+
+  test("unrelated JSON never reads as an empty set of verdicts", () => {
+    expect(decodeVerify('Files I read: {"results":["src/a.ts","src/b.ts"]}')).toBeUndefined()
+    expect(decodeVerify('{"results":[{"path":"src/a.ts"}]}')).toBeUndefined()
+  })
+
+  test("finds verification results after unrelated JSON", () => {
+    expect(
+      decodeVerify(
+        '```json\n{"path":"src/a.ts"}\n```\n```json\n{"results":[{"id":"a","verdict":"confirmed","reason":"Read the caller"}]}\n```',
+      ),
+    ).toEqual([{ id: "a", verdict: "confirmed", reason: "Read the caller" }])
+    expect(decodeVerify('Results: [{"id":"a","verdict":"rejected","reason":"Not reachable"}] Done.')).toEqual([
+      { id: "a", verdict: "rejected", reason: "Not reachable" },
+    ])
+    expect(
+      decodeVerify(
+        '```json\n["src/a.ts"]\n```\n```json\n{"results":[{"id":"a","verdict":"confirmed","reason":"Read the caller"}]}\n```',
+      ),
+    ).toEqual([{ id: "a", verdict: "confirmed", reason: "Read the caller" }])
   })
 })

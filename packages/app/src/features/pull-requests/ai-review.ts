@@ -1,5 +1,6 @@
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { providerUsable } from "@vectordevai/schema/provider-policy"
+import { measureUsage } from "../economics/token-usage"
 // Vector code review in the desktop Pull Requests panel (section 6, D1). It runs the same core as the GitHub Action
 // and `vector review`: the same prompts, output schema, filters and summary. The engine instance always stays on the
 // user's own project, so another person's code never loads its config, plugins or language servers. Everything but
@@ -107,7 +108,7 @@ const SKIP_REASON: Record<SkippedFile["reason"], string> = {
   "size-limit": "too large",
 }
 
-// What the panel knows about a pull request, from `gh pr view`. The SHAs are absent on gh releases before them.
+// What the panel knows about a pull request, from GitHub's API.
 export type ReviewPullRequest = {
   number: number
   title: string
@@ -203,6 +204,8 @@ export type ReviewMessage = {
     providerID?: string
     modelID?: string
     cost?: number
+    unpriced?: boolean
+    forked?: boolean
     tokens?: Tokens
     structured?: unknown
     error?: unknown
@@ -372,16 +375,11 @@ function promptHeadFiles(files: readonly HeadFile[], inlined: ReadonlySet<string
 type StopReason = "user" | "timeout"
 
 type Usage = {
-  cost: number
-  input: number
-  output: number
-  reasoning: number
-  cacheRead: number
-  cacheWrite: number
-  model?: string
+  messages: ReviewMessage["info"][]
+  complete: boolean
 }
 
-const NO_USAGE: Usage = { cost: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
+const NO_USAGE: Usage = { messages: [], complete: true }
 
 type SpecialistResult = SpecialistRun & { report?: ModelReport; usage: Usage }
 
@@ -570,10 +568,16 @@ export async function runPullRequestReview(
     if (resolved.ok) anchored[finding.id] = anchorText(index, resolved.anchor)
   }
 
-  const usage = runs.reduce((total, run) => addUsage(total, run.usage), NO_USAGE)
-  const used = usage.model ?? (model && modelName(model))
+  const usage = measureUsage(runs.flatMap((run) => run.usage.messages))
+  const used = usage
+    ? usage.provider && usage.model
+      ? `${usage.provider}/${usage.model}`
+      : "Multiple models"
+    : modelName(model)
   const kind: CostKind =
-    catalog.find((entry) => modelName(entry) === used)?.costKind ?? (usage.cost > 0 ? "priced" : "unknown")
+    !usage || usage.costUsd === undefined || runs.some((run) => !run.usage.complete)
+      ? "unknown"
+      : (catalog.find((entry) => modelName(entry) === used)?.costKind ?? (usage.costUsd > 0 ? "priced" : "unknown"))
   return {
     ...summary,
     checkout,
@@ -583,12 +587,13 @@ export async function runPullRequestReview(
     anchored,
     cost: used
       ? {
-          costUsd: usage.cost,
-          input: usage.input,
-          output: usage.output,
-          reasoning: usage.reasoning,
-          cacheRead: usage.cacheRead,
-          cacheWrite: usage.cacheWrite,
+          costUsd: usage?.costUsd ?? 0,
+          input: usage?.usage.input ?? 0,
+          output: usage?.usage.output ?? 0,
+          reasoning: usage?.usage.reasoning ?? 0,
+          cacheRead: usage?.usage.cacheRead ?? 0,
+          cacheWrite: usage?.usage.cacheWrite ?? 0,
+          ...(!usage ? { usageMissing: true } : {}),
           kind,
           model: used,
         }
@@ -658,9 +663,21 @@ async function runSpecialist(input: {
   // findings exist only in its own context.
   let report = reportOf(message)
   if (!report) {
-    await client.session
+    const restrictionFailure = await client.session
       .update({ sessionID, directory, permission: [...input.rules, ...FINALIZE_RULES] })
-      .catch(() => undefined)
+      .then(
+        (result) => (result.data ? undefined : "Vector could not confirm review permissions. Try the review again."),
+        (cause: unknown) => errorText(cause) ?? "Vector could not restrict the review session's tools.",
+      )
+    // Finalizing may only return a summary; a failed permission update must never launch another tool-enabled turn.
+    if (restrictionFailure)
+      return {
+        name,
+        status: "failed",
+        sessionID,
+        detail: restrictionFailure,
+        usage: await usageOf(client, sessionID, directory),
+      }
     const answer = await within(ask(buildFinalizePrompt()), FINALIZE_MS)
     if (!answer) await client.session.abort({ sessionID, directory }).catch(() => undefined)
     report = reportOf(answer)
@@ -724,34 +741,10 @@ function estimateReview(input: {
 
 // Every assistant step of the session, so the cost includes the finalize step.
 async function usageOf(client: ReviewClient, sessionID: string, directory: string): Promise<Usage> {
-  const messages = await client.session.messages({ sessionID, directory }).then(
-    (result) => result.data ?? [],
-    () => [] as ReviewMessage[],
+  return client.session.messages({ sessionID, directory }).then(
+    (result) => ({ messages: (result.data ?? []).map((message) => message.info), complete: result.data !== undefined }),
+    () => ({ messages: [], complete: false }),
   )
-  return messages.reduce<Usage>((total, { info }) => {
-    if (info.role !== "assistant") return total
-    return addUsage(total, {
-      cost: info.cost ?? 0,
-      input: info.tokens?.input ?? 0,
-      output: info.tokens?.output ?? 0,
-      reasoning: info.tokens?.reasoning ?? 0,
-      cacheRead: info.tokens?.cache.read ?? 0,
-      cacheWrite: info.tokens?.cache.write ?? 0,
-      model: info.providerID && info.modelID ? `${info.providerID}/${info.modelID}` : undefined,
-    })
-  }, NO_USAGE)
-}
-
-function addUsage(a: Usage, b: Usage): Usage {
-  return {
-    cost: a.cost + b.cost,
-    input: a.input + b.input,
-    output: a.output + b.output,
-    reasoning: a.reasoning + b.reasoning,
-    cacheRead: a.cacheRead + b.cacheRead,
-    cacheWrite: a.cacheWrite + b.cacheWrite,
-    model: a.model ?? b.model,
-  }
 }
 
 function partialBanners(runs: readonly SpecialistResult[], timeoutMs: number): string[] {

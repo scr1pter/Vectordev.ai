@@ -279,7 +279,8 @@ export type PullRequestsAPI = {
     options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number },
   ) => Promise<PullRequestSummary[]>
   view: (cwd: string, number: number) => Promise<PullRequestDetail>
-  diff: (cwd: string, number: number) => Promise<string>
+  // With the head the panel saw, a diff of a newer commit is refused rather than reviewed under that head's name.
+  diff: (cwd: string, number: number, head?: string) => Promise<string>
   create: (input: {
     cwd: string
     title: string
@@ -299,6 +300,8 @@ export type PullRequestsAPI = {
     cwd: string
     number: number
     strategy: "merge" | "squash" | "rebase"
+    // The commit the user last saw. GitHub refuses the merge if anything was pushed since.
+    head?: string
   }) => Promise<{ merged: boolean }>
 }
 

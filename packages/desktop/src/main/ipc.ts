@@ -330,18 +330,12 @@ export function registerIpcHandlers(deps: Deps) {
     listPullRequests(cwd, options),
   )
   handle("pr-view", (_event, cwd: string, number: number) => viewPullRequest(cwd, number))
-  handle("pr-diff", (_event, cwd: string, number: number) => pullRequestDiff(cwd, number))
+  handle("pr-diff", (_event, cwd: string, number: number, head?: string) => pullRequestDiff(cwd, number, head))
   handle("pr-create", (_event, input: { cwd: string; title: string; body: string; base?: string; draft?: boolean }) =>
     createPullRequest(input),
   )
-  handle(
-    "pr-review",
-    (_event, input: Parameters<typeof submitPullRequestReview>[0]) =>
-      submitPullRequestReview(input),
-  )
-  handle("pr-merge", (_event, input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) =>
-    mergePullRequest(input),
-  )
+  handle("pr-review", (_event, input: Parameters<typeof submitPullRequestReview>[0]) => submitPullRequestReview(input))
+  handle("pr-merge", (_event, input: Parameters<typeof mergePullRequest>[0]) => mergePullRequest(input))
   handle("updater-unsubscribe", (event) => updaterSubscriptions.delete(event.sender.id))
   handle("updater-check", () => deps.updater.check())
   handle("updater-install", () => deps.updater.install())
