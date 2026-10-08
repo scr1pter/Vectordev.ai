@@ -1,99 +1,153 @@
 <canvas class="account-matrix" data-account-matrix aria-hidden="true"></canvas>
 
 <script>
+  // Dense rain: every cell of the screen holds a dim glyph, and bright streams run down the
+  // columns over them, lighting the glyphs they pass. Glyphs flicker in place, as in the film,
+  // instead of travelling with the stream.
+  type Drop = { column: number; row: number; speed: number; trail: number; glow: number }
+
   const bootMatrix = () => {
     const canvas = document.querySelector<HTMLCanvasElement>("[data-account-matrix]")
     const context = canvas?.getContext("2d")
-    if (!canvas || !context || canvas.dataset.ready === "true") return
+    const field = document.createElement("canvas")
+    const fieldContext = field.getContext("2d")
+    if (!canvas || !context || !fieldContext || canvas.dataset.ready === "true") return
     canvas.dataset.ready = "true"
 
-    const glyphs = "01VECTOR{}[]<>/\\+=:*"
+    const glyphs = "01VECTOR{}[]<>/\\+=:*#$%&;~"
     const reduced = globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches
-    let width = 1
-    let height = 1
-    let fontSize = 10
-    let lastFrame = 0
-    let frame = 0
-    let columns: Array<{ x: number; y: number; speed: number; trail: number; phase: number; opacity: number }> = []
+    const pick = () => glyphs[Math.floor(Math.random() * glyphs.length)]
+    const state = {
+      width: 1,
+      height: 1,
+      ratio: 1,
+      size: 14,
+      pitch: 13,
+      line: 15,
+      columns: 0,
+      rows: 0,
+      cells: [] as string[],
+      drops: [] as Drop[],
+      last: 0,
+      fieldAt: 0,
+      frame: 0,
+    }
+
+    const spawn = (column: number, row: number): Drop => ({
+      column,
+      row,
+      speed: 7 + Math.random() * 15,
+      trail: 14 + Math.floor(Math.random() * 30),
+      glow: 0.55 + Math.random() * 0.45,
+    })
 
     const build = () => {
-      fontSize = width < 720 ? 9 : 10
-      const spacing = fontSize * 1.18
-      columns = Array.from({ length: Math.ceil(width / spacing) }, (_, index) => ({
-        x: index * spacing + spacing / 2,
-        y: Math.random() * height,
-        speed: 24 + Math.random() * 42,
-        trail: 10 + Math.floor(Math.random() * 22),
-        phase: Math.floor(Math.random() * glyphs.length),
-        opacity: 0.2 + Math.random() * 0.48,
-      }))
+      state.size = state.width < 720 ? 12 : 14
+      state.pitch = Math.round(state.size * 0.92)
+      state.line = Math.round(state.size * 1.1)
+      state.columns = Math.ceil(state.width / state.pitch) + 1
+      state.rows = Math.ceil(state.height / state.line) + 1
+      state.cells = Array.from({ length: state.columns * state.rows }, pick)
+      // About two streams per column, spread over the screen and above it, so it starts full.
+      state.drops = Array.from({ length: Math.round(state.columns * (state.width < 720 ? 1.5 : 2)) }, (_, index) =>
+        spawn(index % state.columns, Math.random() * state.rows * 1.4 - state.rows * 0.3),
+      )
+    }
+
+    const font = (target: CanvasRenderingContext2D) => {
+      target.font = `${state.size}px ui-monospace, SFMono-Regular, Menlo, Monaco, monospace`
+      target.textAlign = "center"
+      target.textBaseline = "top"
+    }
+
+    // The dim layer, drawn to its own canvas and refreshed a few times a second, since it is
+    // every cell on the screen.
+    const paintField = () => {
+      fieldContext.setTransform(state.ratio, 0, 0, state.ratio, 0, 0)
+      fieldContext.clearRect(0, 0, state.width, state.height)
+      font(fieldContext)
+      fieldContext.fillStyle = "rgb(148, 108, 238)"
+      fieldContext.globalAlpha = 0.085
+      for (let column = 0; column < state.columns; column += 1) {
+        for (let row = 0; row < state.rows; row += 1) {
+          fieldContext.fillText(state.cells[column * state.rows + row], column * state.pitch, row * state.line)
+        }
+      }
+      fieldContext.globalAlpha = 1
     }
 
     const render = (timestamp = performance.now()) => {
-      const elapsed = lastFrame ? timestamp - lastFrame : 34
-      if (!reduced && elapsed < 30) {
-        frame = requestAnimationFrame(render)
+      const elapsed = state.last ? timestamp - state.last : 40
+      if (!reduced && elapsed < 38) {
+        state.frame = requestAnimationFrame(render)
         return
       }
-      const delta = Math.min(elapsed, 80) / 1000
-      lastFrame = timestamp
-      context.clearRect(0, 0, width, height)
-      context.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, monospace`
-      context.textAlign = "center"
-      context.textBaseline = "middle"
-      const lineHeight = fontSize * 1.22
-      const tick = Math.floor(timestamp / 180)
+      const delta = Math.min(elapsed, 100) / 1000
+      state.last = timestamp
 
-      columns.forEach((column, columnIndex) => {
-        if (!reduced) column.y += column.speed * delta
-        for (let step = 0; step < column.trail; step += 1) {
-          const y = column.y - step * lineHeight
-          if (y < -lineHeight || y > height + lineHeight) continue
-          const fade = 1 - step / column.trail
-          const center = Math.exp(
-            -(Math.pow((column.x / Math.max(1, width) - 0.5) / 0.34, 2) + Math.pow((y / Math.max(1, height) - 0.47) / 0.32, 2)),
-          )
-          const alpha = Math.max(0.025, fade * fade * column.opacity * (1 - center * 0.72))
-          const index = Math.abs(column.phase + columnIndex * 3 + tick - step * 2) % glyphs.length
-          context.fillStyle =
-            step === 0
-              ? `rgba(231, 222, 255, ${Math.min(0.82, alpha + 0.24)})`
-              : `rgba(166, 125, 255, ${alpha})`
-          context.fillText(glyphs[index], column.x, y)
+      for (let flicker = Math.ceil(state.cells.length * 0.012); flicker > 0; flicker -= 1) {
+        state.cells[Math.floor(Math.random() * state.cells.length)] = pick()
+      }
+      if (timestamp - state.fieldAt > 320) {
+        state.fieldAt = timestamp
+        paintField()
+      }
+
+      context.clearRect(0, 0, state.width, state.height)
+      context.drawImage(field, 0, 0, state.width, state.height)
+      font(context)
+
+      // Tails first in one colour, then the heads, so the fill colour changes twice per frame.
+      context.fillStyle = "rgb(168, 126, 255)"
+      state.drops.forEach((drop) => {
+        if (!reduced) drop.row += drop.speed * delta
+        const head = Math.floor(drop.row)
+        for (let step = 1; step < drop.trail; step += 1) {
+          const row = head - step
+          if (row < 0 || row >= state.rows) continue
+          const fade = 1 - step / drop.trail
+          context.globalAlpha = step < 3 ? 0.85 * drop.glow : Math.pow(fade, 1.5) * 0.8 * drop.glow
+          context.fillText(state.cells[drop.column * state.rows + row], drop.column * state.pitch, row * state.line)
         }
-        if (column.y - column.trail * lineHeight <= height + lineHeight) return
-        column.y = -Math.random() * height * 0.75 - lineHeight
-        column.speed = 24 + Math.random() * 42
-        column.trail = 10 + Math.floor(Math.random() * 22)
-        column.phase = Math.floor(Math.random() * glyphs.length)
       })
-      if (!reduced && !document.hidden) frame = requestAnimationFrame(render)
+      context.fillStyle = "rgb(244, 238, 255)"
+      state.drops.forEach((drop, index) => {
+        const head = Math.floor(drop.row)
+        if (head >= 0 && head < state.rows) {
+          context.globalAlpha = drop.glow
+          context.fillText(pick(), drop.column * state.pitch, head * state.line)
+        }
+        if (head - drop.trail < state.rows) return
+        state.drops[index] = spawn(Math.floor(Math.random() * state.columns), -Math.random() * state.rows * 0.35)
+      })
+      context.globalAlpha = 1
+
+      if (!reduced && !document.hidden) state.frame = requestAnimationFrame(render)
     }
 
     const resize = () => {
       const rectangle = canvas.getBoundingClientRect()
-      const ratio = Math.min(globalThis.devicePixelRatio || 1, 2)
-      width = Math.max(1, rectangle.width)
-      height = Math.max(1, rectangle.height)
-      canvas.width = Math.round(width * ratio)
-      canvas.height = Math.round(height * ratio)
-      context.setTransform(ratio, 0, 0, ratio, 0, 0)
+      state.ratio = Math.min(globalThis.devicePixelRatio || 1, 2)
+      state.width = Math.max(1, rectangle.width)
+      state.height = Math.max(1, rectangle.height)
+      canvas.width = field.width = Math.round(state.width * state.ratio)
+      canvas.height = field.height = Math.round(state.height * state.ratio)
+      context.setTransform(state.ratio, 0, 0, state.ratio, 0, 0)
       build()
+      state.fieldAt = 0
       if (reduced) render()
     }
 
-    const observer = new ResizeObserver(resize)
-    observer.observe(canvas)
+    new ResizeObserver(resize).observe(canvas)
     resize()
-    if (!reduced) {
-      frame = requestAnimationFrame(render)
-      document.addEventListener("visibilitychange", () => {
-        cancelAnimationFrame(frame)
-        if (document.hidden) return
-        lastFrame = 0
-        frame = requestAnimationFrame(render)
-      })
-    }
+    if (reduced) return
+    state.frame = requestAnimationFrame(render)
+    document.addEventListener("visibilitychange", () => {
+      cancelAnimationFrame(state.frame)
+      if (document.hidden) return
+      state.last = 0
+      state.frame = requestAnimationFrame(render)
+    })
   }
 
   bootMatrix()
@@ -108,7 +162,5 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    opacity: 0.92;
-    mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.9) 72%, transparent 100%);
   }
 </style>

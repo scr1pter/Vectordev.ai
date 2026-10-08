@@ -11,14 +11,18 @@ export const prerender = true
 <MarketingLayout title="Vector" description="Private." noindex>
   <div class="account-environment auth-environment">
     <MatrixRain />
-    <main class="auth-page auth-page-single">
-      <div class="auth-panel">
-        <div class="auth-panel-content">
-          <DesignGate client:only="react">
-            <div slot="fallback" class="auth-loading" role="status">Checking your session…</div>
-          </DesignGate>
-        </div>
-      </div>
-    </main>
+    <div class="login-shell">
+      <header class="login-top">
+        <a class="login-brand" href="/" aria-label="Vector home">
+          <img src="/vector-logo.png" alt="" width="26" height="26" />
+          <span>Vector</span>
+        </a>
+      </header>
+      <main class="login-main">
+        <DesignGate client:only="react">
+          <div slot="fallback" class="auth-card auth-card-loading" role="status">Checking your session…</div>
+        </DesignGate>
+      </main>
+    </div>
   </div>
 </MarketingLayout>
