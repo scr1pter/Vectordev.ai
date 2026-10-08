@@ -35,7 +35,16 @@ export function isAllowedBrowserNavigation(rawUrl: string, allowedExternalOrigin
 
 // Commands that can move the page or put input into it. While one runs, and briefly after,
 // input the page receives belongs to the automation, not the user.
-export const DRIVING_COMMANDS = new Set(["openUrl", "click", "type", "press", "reload", "goBack", "goForward", "scroll"])
+export const DRIVING_COMMANDS = new Set([
+  "openUrl",
+  "click",
+  "type",
+  "press",
+  "reload",
+  "goBack",
+  "goForward",
+  "scroll",
+])
 export const AUTOMATION_SETTLE_MS = 800
 // Long enough for a slow redirect chain after a click, such as a search result's.
 export const USER_NAVIGATION_WINDOW_MS = 10_000

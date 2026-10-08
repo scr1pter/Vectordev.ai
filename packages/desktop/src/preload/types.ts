@@ -57,7 +57,7 @@ import type {
 } from "../main/external-agents"
 import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
-import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
+import type { PullRequestAccessStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
 import type { CustomInstructionsState } from "../main/custom-instructions"
 import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
@@ -89,7 +89,7 @@ import type { AgentTeam, TeamCollaborationGraph, TeamMessage, TeamTopology } fro
 export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
 export type { CustomInstructionsState } from "../main/custom-instructions"
-export type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
+export type { PullRequestAccessStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
 export type {
   CloudRuntimeLogResult,
   PublishProgressEvent,
@@ -272,8 +272,8 @@ export type CustomInstructionsAPI = {
 }
 
 export type PullRequestsAPI = {
-  // refresh re-reads the login-shell PATH, for "Check again" after installing gh.
-  status: (options?: { refresh?: boolean }) => Promise<PullRequestCliStatus>
+  // Whether Vector can act on GitHub: the user's GitHub sign-in, or an existing GitHub CLI login.
+  status: () => Promise<PullRequestAccessStatus>
   list: (
     cwd: string,
     options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number },
@@ -290,6 +290,8 @@ export type PullRequestsAPI = {
   review: (input: {
     cwd: string
     number: number
+    // The commit the review ran on. GitHub records it, and the post is refused if the pull request moved since.
+    head?: string
     body: string
     event: "comment" | "approve" | "request-changes"
   }) => Promise<{ posted: boolean }>
