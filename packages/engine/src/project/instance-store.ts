@@ -23,6 +23,8 @@ export interface Interface {
   readonly dispose: (ctx: InstanceContext) => Effect.Effect<void>
   readonly disposeDirectory: (directory: string) => Effect.Effect<void>
   readonly disposeAll: () => Effect.Effect<void>
+  /** The instances that are loaded, once any still loading have finished. */
+  readonly loaded: () => Effect.Effect<InstanceContext[]>
   readonly provide: <A, E, R>(input: LoadInput, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
@@ -193,6 +195,11 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       )
     })
 
+    const loaded = Effect.fn("InstanceStore.loaded")(function* () {
+      const exits = yield* Effect.forEach([...cache.values()], (entry) => Deferred.await(entry.deferred).pipe(Effect.exit))
+      return exits.flatMap((exit) => (Exit.isSuccess(exit) ? [exit.value] : []))
+    })
+
     const cachedDisposeAll = yield* Effect.cachedWithTTL(disposeAllOnce(), Duration.zero)
     const disposeAll = Effect.fn("InstanceStore.disposeAll")(function* () {
       return yield* cachedDisposeAll
@@ -209,6 +216,7 @@ const layer: Layer.Layer<Service, never, Project.Service | InstanceBootstrap.Ser
       dispose,
       disposeDirectory,
       disposeAll,
+      loaded,
       provide,
     })
   }),
