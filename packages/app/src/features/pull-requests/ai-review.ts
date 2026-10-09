@@ -217,7 +217,7 @@ export type ReviewRequest = {
 export type ReviewRunInput = ReviewRequest & {
   directory: string
   catalog?: readonly ReviewModel[]
-  preferredModels?: readonly (string | undefined)[] // the review agent's model, then the configured default
+  preferredModels?: readonly (string | undefined)[] // the agent's model first, then the configured defaults
   timeoutMs?: number
   now?: () => number
 }
@@ -480,7 +480,7 @@ export async function runPullRequestReview(
   input.onProgress?.({ type: "checkout", checkout, label })
   if (input.signal?.aborted) return undefined
 
-  // Use review.json, then the review agent's model and the configured default.
+  // An explicit model in review.json wins; otherwise the review runs on the agent's model (see preferredModels).
   // The resolved model is passed explicitly to every prompt.
   const catalog = input.catalog ?? []
   const model =
@@ -545,7 +545,7 @@ export async function runPullRequestReview(
     if (!go || input.signal?.aborted) return undefined
   }
 
-  status("Vector is reviewing…")
+  status(`Reviewing with ${modelName(model)}…`)
   const rules = reviewPermissionRules({})
   const timeoutMs = input.timeoutMs ?? REVIEW_TIMEOUT_MS
   const stop = stopWhen(input.signal, timeoutMs)

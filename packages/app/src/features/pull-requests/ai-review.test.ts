@@ -544,6 +544,20 @@ describe("runPullRequestReview", () => {
     expect(calls.prompt[0]!.model).toEqual({ providerID: sonnet.providerID, modelID: sonnet.modelID })
   })
 
+  test("runs the review and the double-check on the agent's model, and names it", async () => {
+    const progress: string[] = []
+    const { client, calls } = fakeClient({ files: { "src/list.ts": HEAD } })
+    await run(client, {
+      preferredModels: [undefined, "openai/gpt-5.5", "anthropic/claude-sonnet-4-5"],
+      onProgress: (event) => progress.push(event.type === "checkout" ? event.label : event.text),
+    })
+    expect(calls.prompt.length).toBeGreaterThan(1)
+    expect(calls.prompt.map((call) => call.model)).toEqual(
+      calls.prompt.map(() => ({ providerID: "openai", modelID: "gpt-5.5" })),
+    )
+    expect(progress).toContain("Reviewing with openai/gpt-5.5…")
+  })
+
   test("explains provider setup when the connected catalog is empty", async () => {
     const { client, calls } = fakeClient()
     await expect(run(client, { preferredModels: [], catalog: [] })).rejects.toThrow("Settings → Providers")
