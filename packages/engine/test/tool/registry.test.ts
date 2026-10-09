@@ -59,6 +59,12 @@ const replacements = [
 
 const it = testEffect(LayerNode.compile(root, replacements))
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
+const foregroundOnly = testEffect(
+  LayerNode.compile(root, [
+    [Config.node, configLayer],
+    [RuntimeFlags.node, RuntimeFlags.layer({ backgroundSubagents: false })],
+  ]),
+)
 afterEach(async () => {
   await disposeAllInstances()
 })
@@ -147,7 +153,7 @@ describe("tool.registry", () => {
     }),
   )
 
-  it.instance("hides task background parameter unless experimental background subagents are enabled", () =>
+  foregroundOnly.instance("hides task background parameter when background subagents are turned off", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const agent = yield* Agent.Service
@@ -161,6 +167,24 @@ describe("tool.registry", () => {
 
       expect(task?.jsonSchema).toBeDefined()
       expect((task?.jsonSchema?.properties as Record<string, unknown> | undefined)?.background).toBeUndefined()
+    }),
+  )
+
+  it.instance("offers the task background parameter by default", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const agent = yield* Agent.Service
+      const build = yield* agent.get("build")
+      if (!build) throw new Error("build agent not found")
+      const task = (yield* registry.tools({
+        providerID: ProviderV2.ID.openai,
+        modelID: ModelV2.ID.make("test"),
+        agent: build,
+      })).find((tool) => tool.id === "task")
+      if (!task) throw new Error("task tool not found")
+
+      expect(task.jsonSchema).toBeUndefined()
+      expect(ToolJsonSchema.fromSchema(task.parameters).properties).toHaveProperty("background")
     }),
   )
 

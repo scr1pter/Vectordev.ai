@@ -403,7 +403,6 @@ describe("vector run (non-interactive subprocess)", () => {
 
         const result = yield* vector.run("launch the survey", {
           extraArgs: ["--dangerously-skip-permissions"],
-          env: { VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true" },
           timeoutMs: 50_000,
         })
 
@@ -433,7 +432,7 @@ describe("vector run (non-interactive subprocess)", () => {
 
         const result = yield* vector.run("launch the survey", {
           extraArgs: ["--dangerously-skip-permissions"],
-          env: { VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true", VECTOR_RUN_BACKGROUND_WAIT_MS: "1000" },
+          env: { VECTOR_RUN_BACKGROUND_WAIT_MS: "1000" },
           timeoutMs: 50_000,
         })
 

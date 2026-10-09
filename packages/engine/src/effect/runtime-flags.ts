@@ -39,7 +39,12 @@ export class Service extends ConfigService.Service<Service>()("@vector/RuntimeFl
   enableExperimentalModels: bool("VECTOR_ENABLE_EXPERIMENTAL_MODELS"),
   enableQuestionTool: bool("VECTOR_ENABLE_QUESTION_TOOL"),
   experimentalReferences: enabledByExperimental("VECTOR_EXPERIMENTAL_REFERENCES"),
-  experimentalBackgroundSubagents: enabledByExperimental("VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS"),
+  // On by default. VECTOR_DISABLE_BACKGROUND_SUBAGENTS turns it off, and the older experimental variable still decides
+  // when it is set.
+  backgroundSubagents: Config.all({
+    disabled: bool("VECTOR_DISABLE_BACKGROUND_SUBAGENTS"),
+    legacy: Config.boolean("VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS").pipe(Config.option),
+  }).pipe(Config.map((flags) => !flags.disabled && Option.getOrElse(flags.legacy, () => true))),
   experimentalLspTy: bool("VECTOR_EXPERIMENTAL_LSP_TY"),
   experimentalLspTool: enabledByExperimental("VECTOR_EXPERIMENTAL_LSP_TOOL"),
   experimentalOxfmt: enabledByExperimental("VECTOR_EXPERIMENTAL_OXFMT"),

@@ -42,7 +42,7 @@ describe("RuntimeFlags", () => {
       expect(flags.enableExperimentalModels).toBe(true)
       expect(flags.enableQuestionTool).toBe(true)
       expect(flags.experimentalReferences).toBe(true)
-      expect(flags.experimentalBackgroundSubagents).toBe(true)
+      expect(flags.backgroundSubagents).toBe(true)
       expect(flags.experimentalLspTy).toBe(false)
       expect(flags.experimentalLspTool).toBe(true)
       expect(flags.experimentalOxfmt).toBe(true)
@@ -53,6 +53,25 @@ describe("RuntimeFlags", () => {
       expect(flags.experimentalNativeLlm).toBe(false)
       expect(flags.experimentalWebSockets).toBe(false)
       expect(flags.client).toBe("desktop")
+    }),
+  )
+
+  it.effect("background subagents are on by default and have a variable to turn them off", () =>
+    Effect.gen(function* () {
+      const read = (input: Record<string, unknown>) =>
+        readFlags.pipe(
+          Effect.provide(fromConfig(input)),
+          Effect.map((flags) => flags.backgroundSubagents),
+        )
+
+      expect(yield* read({})).toBe(true)
+      expect(yield* read({ VECTOR_DISABLE_BACKGROUND_SUBAGENTS: "1" })).toBe(false)
+      // The variable that used to turn them on still decides when it is set.
+      expect(yield* read({ VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "false" })).toBe(false)
+      expect(yield* read({ VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true" })).toBe(true)
+      expect(
+        yield* read({ VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true", VECTOR_DISABLE_BACKGROUND_SUBAGENTS: "true" }),
+      ).toBe(false)
     }),
   )
 

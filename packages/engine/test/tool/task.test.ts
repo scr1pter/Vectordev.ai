@@ -61,7 +61,8 @@ const layer = (flags: Partial<RuntimeFlags.Info> = {}) =>
   )
 
 const it = testEffect(layer())
-const background = testEffect(layer({ experimentalBackgroundSubagents: true }))
+const background = testEffect(layer({ backgroundSubagents: true }))
+const foregroundOnly = testEffect(layer({ backgroundSubagents: false }))
 
 for (const id of ["acme/coder:free", "acme/coder:FREE"])
   it.instance(
@@ -1475,7 +1476,18 @@ describe("tool.task", () => {
     },
   )
 
-  it.instance("rejects background execution when the experiment is disabled", () =>
+  it.instance("offers background runs by default", () =>
+    Effect.gen(function* () {
+      const flags = yield* RuntimeFlags.Service
+      const def = yield* (yield* TaskTool).init()
+      expect(flags.backgroundSubagents).toBe(true)
+      expect(def.description).toContain("Set background=true only when you have other useful work to do meanwhile")
+      // No narrower schema replaces the one with background in it.
+      expect(def.jsonSchema).toBeUndefined()
+    }),
+  )
+
+  foregroundOnly.instance("rejects background execution when background subagents are turned off", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
       const tool = yield* TaskTool

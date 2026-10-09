@@ -33,7 +33,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const flags = yield* RuntimeFlags.Service
 
     const capabilities = Effect.fn("ExperimentalHttpApi.capabilities")(function* () {
-      return { backgroundSubagents: flags.experimentalBackgroundSubagents }
+      return { backgroundSubagents: flags.backgroundSubagents }
     })
 
     const tool = Effect.fn("ExperimentalHttpApi.tool")(function* (ctx: { query: typeof ToolListQuery.Type }) {
@@ -108,7 +108,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
     const sessionBackground = Effect.fn("ExperimentalHttpApi.sessionBackground")(function* (ctx: {
       params: { sessionID: SessionID }
     }) {
-      if (!flags.experimentalBackgroundSubagents) return false
+      if (!flags.backgroundSubagents) return false
       // A subagent's own tasks stay in the foreground, as the task tool keeps them: a background result would start a
       // turn of the subagent after its run ended, which no one reads and stopping the root cannot reach.
       const session = yield* sessions.get(ctx.params.sessionID).pipe(Effect.option)

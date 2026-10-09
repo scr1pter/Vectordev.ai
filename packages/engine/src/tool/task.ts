@@ -361,9 +361,11 @@ export const TaskTool = Tool.define(
       ctx: Tool.Context,
     ) {
       const cfg = yield* config.get()
-      if (params.background === true && !flags.experimentalBackgroundSubagents) {
+      if (params.background === true && !flags.backgroundSubagents) {
         return yield* Effect.fail(
-          new Error("Background subagents require VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true"),
+          new Error(
+            "Background subagents are turned off (VECTOR_DISABLE_BACKGROUND_SUBAGENTS); run this task without background.",
+          ),
         )
       }
       const parent = yield* sessions.get(ctx.sessionID)
@@ -1095,11 +1097,11 @@ export const TaskTool = Tool.define(
     })
 
     return {
-      description: flags.experimentalBackgroundSubagents
+      description: flags.backgroundSubagents
         ? [DESCRIPTION, BACKGROUND_DESCRIPTION].join("\n\n")
         : DESCRIPTION,
       parameters: Parameters,
-      jsonSchema: flags.experimentalBackgroundSubagents ? undefined : ToolJsonSchema.fromSchema(BaseParameters),
+      jsonSchema: flags.backgroundSubagents ? undefined : ToolJsonSchema.fromSchema(BaseParameters),
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         run(params, ctx).pipe(Effect.scoped, Effect.orDie),
     }
