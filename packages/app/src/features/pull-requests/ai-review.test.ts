@@ -20,6 +20,7 @@ import {
   reviewEvents,
   reviewFooter,
   runReview,
+  workflowModel,
   workingTreeChanges,
   type ReviewClient,
   type ReviewEstimate,
@@ -761,6 +762,32 @@ describe("models", () => {
         costKind: "priced",
       },
     ])
+  })
+
+  test("automatic reviews run on the model a review here picks, with its provider's key variables as secrets", () => {
+    const providers: Parameters<typeof workflowModel>[1] = [
+      {
+        id: "anthropic",
+        source: "env",
+        env: ["ANTHROPIC_API_KEY"],
+        models: { sonnet: { id: "claude-sonnet-4-5", cost: { input: 3, output: 15 } } },
+      },
+      { id: "openai", source: "api", env: ["OPENAI_API_KEY"], models: { gpt: { id: "gpt-5.5" } } },
+      { id: "ollama", source: "config", env: [], models: { coder: { id: "coder" } } },
+      { id: "gitmodels", source: "config", env: ["GITHUB_TOKEN"], models: { mini: { id: "mini" } } },
+    ]
+    expect(workflowModel([undefined, "openai/gpt-5.5"], providers)).toEqual({
+      model: "openai/gpt-5.5",
+      keys: ["OPENAI_API_KEY"],
+    })
+    expect(workflowModel(["missing/model"], providers)).toEqual({
+      model: "anthropic/claude-sonnet-4-5",
+      keys: ["ANTHROPIC_API_KEY"],
+    })
+    // A local model has no key for Actions to use, and GitHub reserves GITHUB_ secret names.
+    expect(workflowModel(["ollama/coder"], providers)?.reason).toContain("GitHub Actions can't reach it")
+    expect(workflowModel(["gitmodels/mini"], providers)?.reason).toContain("can't sign in to gitmodels")
+    expect(workflowModel([], [])).toBeUndefined()
   })
 
   test("words the estimate for a model with a listed zero token price", () => {

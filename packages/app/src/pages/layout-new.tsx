@@ -28,7 +28,7 @@ import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope
 import { sessionIDFromEvent } from "@/utils/session-event"
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
-import { reviewCatalog, runReview, workingTreeChanges } from "@/features/pull-requests/ai-review"
+import { reviewCatalog, runReview, workflowModel, workingTreeChanges } from "@/features/pull-requests/ai-review"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useProviders } from "@/hooks/use-providers"
@@ -612,6 +612,21 @@ export default function NewLayout(props: ParentProps) {
   const [parallelComposerOpen, setParallelComposerOpen] = createSignal(false)
   const byokProviders = useProviders()
   const byokModels = useModels()
+  // What Vectorscope reviews run on, in order: an explicit review model, then the agent's own (the model last chosen
+  // in its picker, as the agent launcher defaults to), then the configured default and the connected providers'
+  // defaults.
+  const reviewModels = () => {
+    const config = serverSync().data.config
+    return [
+      config.agent?.review?.model,
+      ...byokModels.recent.list().map((item) => `${item.providerID}/${item.modelID}`),
+      config.model,
+      ...byokProviders.connected().map((provider) => {
+        const model = byokProviders.default()[provider.id]
+        return model ? `${provider.id}/${model}` : undefined
+      }),
+    ]
+  }
   const parallelModelState: ModelSelectorModelState = {
     list: byokModels.list,
     visible: byokModels.visible,
@@ -6458,23 +6473,12 @@ export default function NewLayout(props: ParentProps) {
           // rules; another person's code is never opened as an instance.
           const directory = activeWorkspaceScope().sourcePath
           if (!directory) throw new Error("Open a project before running a review.")
-          const config = serverSync().data.config
           return runReview(
             {
               ...input,
               directory,
               catalog: reviewCatalog(byokProviders.connected()),
-              // An explicit review model, then the agent's own: the model last chosen in its picker, as the agent
-              // launcher defaults to, then the configured default and the connected providers' defaults.
-              preferredModels: [
-                config.agent?.review?.model,
-                ...byokModels.recent.list().map((item) => `${item.providerID}/${item.modelID}`),
-                config.model,
-                ...byokProviders.connected().map((provider) => {
-                  const model = byokProviders.default()[provider.id]
-                  return model ? `${provider.id}/${model}` : undefined
-                }),
-              ],
+              preferredModels: reviewModels(),
             },
             serverSDK().createClient({ directory, throwOnError: true }),
           )
@@ -6485,6 +6489,7 @@ export default function NewLayout(props: ParentProps) {
             ? workingTreeChanges(serverSDK().createClient({ directory, throwOnError: true }), directory)
             : Promise.resolve(undefined)
         }}
+        automaticReviewModel={() => workflowModel(reviewModels(), byokProviders.connected())}
       />
 
       <AgentDashboard

@@ -343,6 +343,35 @@ export function reviewCatalog(providers: readonly CatalogProvider[]): ReviewMode
     )
 }
 
+// The model automatic reviews in GitHub Actions run on: the one a review in the app picks, with the environment
+// variables its provider reads a key from, which the workflow takes from repository secrets of the same names. reason
+// says why Actions could not use it.
+export function workflowModel(
+  candidates: readonly (string | undefined)[],
+  providers: readonly (CatalogProvider & { env?: readonly string[] })[],
+) {
+  const catalog = reviewCatalog(providers)
+  const model = pickReviewModel(candidates, catalog) ?? catalog.find((item) => item.costKind === "free") ?? catalog[0]
+  if (!model) return undefined
+  const keys = [...(providers.find((provider) => provider.id === model.providerID)?.env ?? [])]
+  const name = modelName(model)
+  // Vector's shared models sign in with the Vector account token every workflow already has.
+  if (model.providerID === "vector") return { model: name, keys }
+  if (!keys.length)
+    return {
+      model: name,
+      keys,
+      reason: `${name} needs no API key, so it runs where GitHub Actions can't reach it. Choose a hosted provider's model for your agent, or run \`vector github install\` to pick one.`,
+    }
+  if (keys.some((key) => key.startsWith("GITHUB_")))
+    return {
+      model: name,
+      keys,
+      reason: `GitHub Actions can't sign in to ${model.providerID} with a repository secret. Choose another provider's model for your agent, or run \`vector github install\` to pick one.`,
+    }
+  return { model: name, keys }
+}
+
 // The first candidate that is a connected, supported provider model.
 export function pickReviewModel(candidates: readonly (string | undefined)[], catalog: readonly ReviewModel[]) {
   for (const name of candidates) {
