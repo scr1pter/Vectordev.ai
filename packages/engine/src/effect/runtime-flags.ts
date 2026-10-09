@@ -49,6 +49,7 @@ export class Service extends ConfigService.Service<Service>()("@vector/RuntimeFl
   experimentalIconDiscovery: enabledByExperimental("VECTOR_EXPERIMENTAL_ICON_DISCOVERY"),
   outputTokenMax: positiveInteger("VECTOR_EXPERIMENTAL_OUTPUT_TOKEN_MAX"),
   bashDefaultTimeoutMs: positiveInteger("VECTOR_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"),
+  runBackgroundWaitMs: positiveInteger("VECTOR_RUN_BACKGROUND_WAIT_MS"),
   experimentalNativeLlm: bool("VECTOR_EXPERIMENTAL_NATIVE_LLM"),
   experimentalWebSockets: bool("VECTOR_EXPERIMENTAL_WEBSOCKETS"),
   client: Config.string("VECTOR_CLIENT").pipe(Config.withDefault("cli")),
