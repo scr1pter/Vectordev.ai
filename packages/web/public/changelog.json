@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.104",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Vectorscope double-checks its reviews",
+              "description": "Pull Requests is now called Vectorscope, with the same icon, and its screen is redesigned. Reviews are more careful: after the review, a second pass re-reads the code behind every finding above a nit and drops the ones it cannot confirm, and the findings it keeps are marked Double-checked. The reviewers also read the failing CI checks for the commit under review, with the log of the step that failed, the places in your project that use the functions and types the pull request changes, and your project's rules in AGENTS.md (or CLAUDE.md) and .vector/RULES.md. A review runs on the model you last chose for the agent, and its progress line names that model; a model set in .vector/review.json still takes precedence. Comment, Request changes and Approve now post each finding on its own line, with GitHub's one-click suggested change when a fix is safe to commit; if GitHub refuses the line comments, the review goes out as one summary that lists every finding. Dismiss a finding with a reason to leave it out of what is posted, and choose Don't flag this again to save a project rule to .vector/RULES.md that later reviews follow. Fix with agent opens an isolated agent on the pull request's code with the finding as its task: it checks the problem is real, fixes it, runs the tests and commits without pushing. Reviews and merges are pinned to the commit you were looking at, so a push that arrives in the meantime is never reviewed or merged by mistake. The panel no longer reloads itself while agents are running, and its header is no longer hidden under the window's title bar. In Settings, text boxes and buttons no longer sit directly on a section's dividing line, and the search field shows one frame instead of two. Built-in Sign in with ChatGPT is turned off until OpenAI authorizes it: connect OpenAI with an API key, or use the separately installed Codex runtime. If you signed in with ChatGPT before, Vector tells you once and stops using that sign-in. The Terms, Privacy Policy and Software License now name Krishna B / VectorDev.ai and keep your rights under the LGPL for the open-source libraries Vector includes. The terminal agent stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.103",
       "highlights": [
         {
