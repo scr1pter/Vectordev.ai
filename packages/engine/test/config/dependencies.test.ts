@@ -16,6 +16,28 @@ const dependencyLayer = (cache: string, add: Npm.Interface["add"]) =>
     [Npm.node, Layer.mock(Npm.Service, { add })],
   ])
 
+// TUI plugin tests earlier in the same `bun test` process install OpenTUI's runtime plugin, which rewrites every
+// `from "<package>"` in files loaded afterwards, string literals included, to a package the test process resolves.
+// Fixture sources therefore spell the SDK import as an interpolation, and fixture plugins are imported in a fresh
+// process.
+const sdkPlugin = (body: string) => `import { tool } from ${JSON.stringify(ConfigDependencies.packageName)}; ${body}\n`
+
+async function importFresh(file: string) {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "--no-env-file",
+      "--eval",
+      `console.log(JSON.stringify((await import(${JSON.stringify(pathToFileURL(file).href)})).default))`,
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  )
+  const output = await new Response(child.stdout).text()
+  const error = await new Response(child.stderr).text()
+  expect(await child.exited, error || output).toBe(0)
+  return JSON.parse(output)
+}
+
 async function loadOffline(entry: string, directory: string) {
   const child = Bun.spawn(
     [
@@ -137,9 +159,9 @@ test("cached SDK imports work offline through a shared link and preserve a proje
   const first = path.join(tmp.path, "first", "plugin.mjs")
   const second = path.join(tmp.path, "second", "plugin.mjs")
   for (const file of [first, second]) {
-    await Bun.write(file, 'import { tool } from "@vectordevai/plugin"; export default tool({ ready: true });\n')
+    await Bun.write(file, sdkPlugin("export default tool({ ready: true });"))
     expect(await ConfigDependencies.link(pathToFileURL(file).href, cache)).toBe(true)
-    expect((await import(pathToFileURL(file).href)).default).toEqual({ ready: true })
+    expect(await importFresh(file)).toEqual({ ready: true })
     expect(await fs.realpath(path.join(path.dirname(file), "node_modules", ConfigDependencies.packageName))).toBe(
       await fs.realpath(sdk),
     )
@@ -152,9 +174,9 @@ test("cached SDK imports work offline through a shared link and preserve a proje
   )
   await Bun.write(path.join(pinned, "index.js"), "export const tool = () => ({ pinned: true });\n")
   const file = path.join(tmp.path, "pinned", "plugins", "plugin.mjs")
-  await Bun.write(file, 'import { tool } from "@vectordevai/plugin"; export default tool({});\n')
+  await Bun.write(file, sdkPlugin("export default tool({});"))
   expect(await ConfigDependencies.link(pathToFileURL(file).href, cache)).toBe(true)
-  expect((await import(pathToFileURL(file).href)).default).toEqual({ pinned: true })
+  expect(await importFresh(file)).toEqual({ pinned: true })
   expect(await Bun.file(path.join(pinned, "index.js")).text()).toContain("pinned: true")
   expect(await fs.lstat(path.join(path.dirname(file), "node_modules")).catch(() => undefined)).toBeUndefined()
 })
@@ -162,8 +184,7 @@ test("cached SDK imports work offline through a shared link and preserve a proje
 test("an uncached SDK-dependent plugin uses the bundled SDK offline without installing it", async () => {
   await using tmp = await tmpdir()
   const entry = path.join(tmp.path, "plugin.mjs")
-  const source =
-    'import { tool } from "@vectordevai/plugin"; export default { value: tool.schema.string().parse("ready") };\n'
+  const source = sdkPlugin('export default { value: tool.schema.string().parse("ready") };')
   await Bun.write(entry, source)
   expect(await loadOffline(entry, tmp.path)).toEqual({ value: "ready" })
   expect(await Bun.file(ConfigDependencies.readyFile(path.join(tmp.path, "cache", "vector"))).exists()).toBe(false)
@@ -187,7 +208,7 @@ test("an interrupted SDK install is not linked into a local plugin", async () =>
 test("an SDK-dependent plugin prefers a completed shared SDK over its bundled fallback after restart", async () => {
   await using tmp = await tmpdir()
   const entry = path.join(tmp.path, "plugin space # percent%", "plugin.mjs")
-  await Bun.write(entry, 'import { tool } from "@vectordevai/plugin"; export default tool({ source: "bundled" });\n')
+  await Bun.write(entry, sdkPlugin('export default tool({ source: "bundled" });'))
   expect(await loadOffline(entry, tmp.path)).toEqual({ source: "bundled" })
   const cache = path.join(tmp.path, "cache", "vector")
   const sdk = ConfigDependencies.directory(cache)
