@@ -4,6 +4,19 @@ export const dict = {
     "Shared allowance is expected to reset at {{time}}. You can continue this conversation with your own OpenRouter account.",
   "freeModels.limit.resume": "Continue with connected OpenRouter",
   "freeModels.limit.resumed": "Continuing this conversation with your OpenRouter account.",
+  "freeModels.start.label": "Connect a model",
+  "freeModels.start.title": "Connect a model to start",
+  "freeModels.start.description":
+    "Use your own free OpenRouter account. No payment or credits needed, and Vector picks a free model for you.",
+  "freeModels.start.fallback": "Connect a provider with your API key or sign-in to send prompts.",
+  "freeModels.start.note":
+    "OpenRouter and its model providers process your prompts. Free accounts allow up to 50 requests a day, subject to availability.",
+  "freeModels.start.free": "Start free with OpenRouter",
+  "freeModels.start.ownKey": "Use my own API key",
+  "freeModels.start.ready": "{{model}} is selected. Your prompt is ready to send.",
+  "freeModels.start.readyForProject": "{{model}} is ready. Open a project to send your first prompt.",
+  "freeModels.start.unavailable":
+    "No free model is available on your account right now. Vector won't pick a paid model for you. Try again later or choose a model yourself.",
   "command.category.suggested": "Suggested",
   "command.category.view": "View",
   "command.category.project": "Project",
@@ -123,7 +136,7 @@ export const dict = {
     "{{provider}} sign-in is currently paused in Vector. Choose another provider to continue.",
   "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
-  "dialog.provider.openrouter.note": "Access all supported models from one provider",
+  "dialog.provider.openrouter.note": "Free models with your own account. No payment needed.",
   "dialog.provider.vercel.note": "Unified access to AI models with smart routing",
 
   "dialog.model.select.title": "Select model",
@@ -160,6 +173,10 @@ export const dict = {
   "provider.connect.oauth.auto.visit.suffix":
     " and enter the code below to connect your account and use {{provider}} models in Vector.",
   "provider.connect.oauth.auto.confirmationCode": "Confirmation code",
+  "provider.connect.oauth.browser.prefix":
+    "Finish in your browser: sign in to {{provider}} and approve Vector. This window continues by itself. If the page didn't open, ",
+  "provider.connect.oauth.browser.link": "open it again",
+  "provider.connect.oauth.browser.suffix": ".",
   "provider.connect.toast.connected.title": "{{provider}} connected",
   "provider.connect.toast.connected.description": "{{provider}} models are now available to use.",
 
@@ -295,9 +312,9 @@ export const dict = {
   "prompt.toast.pasteUnsupported.description": "Only images, PDFs, or text files can be attached here.",
   "prompt.toast.modelAgentRequired.title": "Select an agent and model",
   "prompt.toast.modelAgentRequired.description": "Choose an agent and model before sending a prompt.",
-  "prompt.toast.providerRequired.title": "Connect a provider to send prompts",
+  "prompt.toast.providerRequired.title": "Connect a model to send this prompt",
   "prompt.toast.providerRequired.description":
-    "No models are available yet. Connect a provider with an API key or sign-in, then send your prompt again.",
+    "Your prompt is kept. Start free with your own OpenRouter account, or use an API key you already have.",
   "prompt.toast.worktreeCreateFailed.title": "Failed to create worktree",
   "prompt.toast.sessionCreateFailed.title": "Failed to create session",
   "prompt.toast.shellSendFailed.title": "Failed to send shell command",

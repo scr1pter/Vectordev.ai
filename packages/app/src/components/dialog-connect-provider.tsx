@@ -35,7 +35,8 @@ export function DialogConnectProvider(props: {
   provider: string
   directory?: Accessor<string | undefined>
   preferredMethod?: "oauth"
-  onConnected?: () => void | Promise<void>
+  /** May return a description that replaces the generic "connected" toast text. */
+  onConnected?: () => void | string | Promise<void | string>
 }) {
   const platform = usePlatform()
   const dialog = useDialog()
@@ -391,12 +392,13 @@ export function DialogConnectProvider(props: {
     await serverSDK().client.global.dispose()
     await serverSync().refreshProviders()
     dialog.close()
-    await props.onConnected?.()
+    const description = await props.onConnected?.()
     showToast({
       variant: "success",
       icon: "circle-check",
       title: language.t("provider.connect.toast.connected.title", { provider: provider().name }),
-      description: language.t("provider.connect.toast.connected.description", { provider: provider().name }),
+      description:
+        description || language.t("provider.connect.toast.connected.description", { provider: provider().name }),
     })
   }
 
@@ -600,15 +602,25 @@ export function DialogConnectProvider(props: {
 
     return (
       <div class="flex flex-col gap-6">
-        <div class="text-14-regular text-text-base">
-          {language.t("provider.connect.oauth.auto.visit.prefix")}
-          <Link href={store.authorization!.url}>{language.t("provider.connect.oauth.auto.visit.link")}</Link>
-          {language.t("provider.connect.oauth.auto.visit.suffix", { provider: provider().name })}
-        </div>
+        {/* OpenRouter opens the browser itself and shows no confirmation code to copy. */}
         <Show
           when={props.provider !== "openrouter"}
-          fallback={<div class="text-14-regular text-text-base">{OPENROUTER_ACCOUNT_COPY}</div>}
+          fallback={
+            <>
+              <div class="text-14-regular text-text-base">
+                {language.t("provider.connect.oauth.browser.prefix", { provider: provider().name })}
+                <Link href={store.authorization!.url}>{language.t("provider.connect.oauth.browser.link")}</Link>
+                {language.t("provider.connect.oauth.browser.suffix")}
+              </div>
+              <div class="text-14-regular text-text-base">{OPENROUTER_ACCOUNT_COPY}</div>
+            </>
+          }
         >
+          <div class="text-14-regular text-text-base">
+            {language.t("provider.connect.oauth.auto.visit.prefix")}
+            <Link href={store.authorization!.url}>{language.t("provider.connect.oauth.auto.visit.link")}</Link>
+            {language.t("provider.connect.oauth.auto.visit.suffix", { provider: provider().name })}
+          </div>
           <TextField
             label={language.t("provider.connect.oauth.auto.confirmationCode")}
             class="font-mono"
@@ -655,7 +667,12 @@ export function DialogConnectProvider(props: {
               {OPENROUTER_REMOTE_COPY}
             </p>
           </Show>
-          <div onKeyDown={handleKey} tabIndex={0} autofocus={store.methodIndex === undefined ? true : undefined}>
+          <div
+            class="outline-none"
+            onKeyDown={handleKey}
+            tabIndex={0}
+            autofocus={store.methodIndex === undefined ? true : undefined}
+          >
             <Switch>
               <Match when={loading()}>
                 <div class="text-14-regular text-text-base">
