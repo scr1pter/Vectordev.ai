@@ -590,6 +590,33 @@
   color: var(--vx-ink);
 }
 
+.vprogress-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.vprogress-alt {
+  padding: 0.15rem 0.2rem;
+  border: none;
+  background: transparent;
+  color: var(--vx-muted);
+  font-size: 0.76rem;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 180ms var(--vx-ease);
+}
+
+.vprogress-alt:hover {
+  color: var(--vx-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* ---------- feature guide: the whole product, surface by surface ---------- */
 
 .vguide {

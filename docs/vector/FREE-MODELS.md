@@ -18,7 +18,7 @@ Selecting another provider, using an external agent, or enabling a paid external
 
 ## Connect your account
 
-In the desktop app, open Getting Started or Settings → Providers and choose **Connect OpenRouter**. The browser authorization flow stores the resulting key in Vector's provider credential store. You can also enter your own API key. In the terminal, use `/connect`, or run:
+In the desktop app, choose **Start free with OpenRouter** above the composer (shown while no connected provider offers a model) or **Start free** in Getting Started. You can also open Settings → Providers and choose **Connect OpenRouter**. The browser authorization flow stores the resulting key in Vector's provider credential store, and the composer then selects the largest-context eligible free model and keeps your draft prompt ready to send. If no eligible free model is available, Vector says so and selects nothing; it never substitutes a paid model. You can also enter your own API key. In the terminal, use `/connect`, or run:
 
 ```sh
 vector providers login --provider openrouter --method "Connect OpenRouter"
