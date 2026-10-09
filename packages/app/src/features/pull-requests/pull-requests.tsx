@@ -270,11 +270,7 @@ function CodeText(props: { text: string }) {
 }
 
 function BranchName(props: { name: string }) {
-  return (
-    <span class="rounded-[4px] bg-[color:var(--vx-purple-soft)] px-1.5 py-px font-mono text-[11px] text-[color:var(--vx-purple-bright)]">
-      {props.name}
-    </span>
-  )
+  return <span data-vector-ref-chip>{props.name}</span>
 }
 
 function RiskMeter(props: { risk: keyof typeof RISK; counts: { blocking: number; concern: number; nit: number } }) {
@@ -1273,7 +1269,7 @@ export function PullRequests(props: {
                             {pr.title}
                           </span>
                           <span class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[color:var(--vx-text-muted)]">
-                            <span class="font-mono">#{pr.number}</span>
+                            <span class="font-mono text-[color:var(--vx-ref-text)]">#{pr.number}</span>
                             <span>{pr.author}</span>
                             <span>{since(pr.updatedAt)}</span>
                             <Show when={pr.isDraft}>
@@ -1484,21 +1480,19 @@ export function PullRequests(props: {
                   <div class="mx-auto max-w-[960px] px-6 pb-10 pt-5">
                     <div class="flex items-start gap-4">
                       <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2 text-[11.5px]">
-                          <span
-                            class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium"
-                            classList={{
-                              "bg-[color:var(--vx-control)] text-[color:var(--vx-text-subtle)]": pr().isDraft,
-                              "bg-[color:color-mix(in_srgb,var(--vx-green)_14%,transparent)] text-[color:var(--vx-green)]":
-                                !pr().isDraft,
-                            }}
-                          >
-                            <Icon name={pr().isDraft ? "draft" : "pull"} class="size-3" />
+                        <div data-vector-ref-bar>
+                          <Icon name="pull" class="size-4 shrink-0" />
+                          <span data-slot="ref-number">#{pr().number}</span>
+                          <Show when={repoName()}>{(name) => <span data-slot="ref-repo">{name()}</span>}</Show>
+                          <span data-slot="ref-branch">{pr().headRefName}</span>
+                          <span data-slot="ref-state" data-state={pr().isDraft ? "draft" : "open"}>
+                            <Show when={pr().isDraft}>
+                              <Icon name="draft" class="size-3.5" />
+                            </Show>
                             {pr().isDraft ? "Draft" : "Open"}
                           </span>
-                          <span class="font-mono text-[color:var(--vx-text-muted)]">#{pr().number}</span>
                         </div>
-                        <h2 class="mt-2 text-[19px] font-semibold leading-snug">{pr().title}</h2>
+                        <h2 class="mt-4 text-[19px] font-semibold leading-snug">{pr().title}</h2>
                         <p class="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12px] text-[color:var(--vx-text-subtle)]">
                           <span class="font-medium text-[color:var(--vx-text)]">{pr().author}</span>
                           <span>wants to merge into</span>

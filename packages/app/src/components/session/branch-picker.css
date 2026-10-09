@@ -13,14 +13,13 @@ button[data-vector-branch-picker] {
 
 button[data-vector-branch-picker]:hover,
 button[data-vector-branch-picker][data-expanded] {
-  border-color: var(--vx-line-strong);
-  background: color-mix(in srgb, var(--vx-text) 6%, transparent);
-  color: var(--vx-text);
+  background: var(--vx-ref-surface-hover);
+  color: var(--vx-ref-text);
 }
 
 button[data-vector-branch-picker][aria-busy="true"] {
   cursor: progress;
-  color: var(--vx-text-muted);
+  color: var(--vx-ref-muted);
 }
 
 [data-vector-branch-picker] [data-slot="branch-picker-name"] {
