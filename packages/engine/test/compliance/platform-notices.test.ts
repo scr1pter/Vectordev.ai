@@ -95,6 +95,38 @@ test("unused overrides and changed platform override text require review", async
   await expect(dependencyNotices(tmp.path)).rejects.toThrow("Stale platform notice override")
 })
 
+test("sharp-libvips cannot substitute its packaging-script license for bundled-library notices", async () => {
+  await using tmp = await fixture()
+  const name = "@img/sharp-libvips-fixture"
+  const identity = `${name}@1.2.3`
+  const lock = await Bun.file(path.join(tmp.path, "bun.lock")).json()
+  lock.packages[name] = [identity, "", { os: "linux", cpu: "x64" }, tmp.platform.integrity]
+  delete lock.packages["fixture-native"]
+  lock.packages.wrapper[2].optionalDependencies = { [name]: "~1.2.0" }
+  await Bun.write(path.join(tmp.path, "bun.lock"), JSON.stringify(lock))
+  const wrapper = Bun.file(path.join(tmp.path, "node_modules/wrapper/package.json"))
+  await Bun.write(wrapper, JSON.stringify({ ...(await wrapper.json()), optionalDependencies: { [name]: "~1.2.0" } }))
+  const platform = {
+    ...tmp.platform,
+    name,
+    license: "LGPL-3.0-or-later",
+    source: `https://registry.npmjs.org/${name}/-/${name.split("/").at(-1)}-1.2.3.tgz`,
+  }
+  for (const text of [
+    "Apache License, Version 2.0",
+    "This software contains third-party libraries\nGNU LESSER GENERAL PUBLIC LICENSE",
+    "GNU LESSER GENERAL PUBLIC LICENSE\nGNU GENERAL PUBLIC LICENSE",
+  ]) {
+    await Bun.write(tmp.inventory, JSON.stringify({ [identity]: { ...platform, texts: [text] } }))
+    await expect(dependencyNotices(tmp.path)).rejects.toThrow("Incomplete bundled-library notices")
+  }
+  const verifiedNotice = await Bun.file(
+    path.resolve(import.meta.dirname, "../../../../licenses/dependencies/@img__sharp-libvips-linux-x64@1.2.4.txt"),
+  ).text()
+  await Bun.write(tmp.inventory, JSON.stringify({ [identity]: { ...platform, texts: [verifiedNotice] } }))
+  expect((await dependencyNotices(tmp.path)).body).toContain(verifiedNotice.trim())
+})
+
 test("native dependency ranges resolve through the locked parent instead of an unrelated installed version", async () => {
   await using tmp = await fixture()
   const lock = await Bun.file(path.join(tmp.path, "bun.lock")).json()

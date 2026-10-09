@@ -235,6 +235,19 @@ export async function dependencyNotices(root: string, refreshPlatforms = false) 
       throw new Error(
         `Missing or stale platform notices for ${identity}; install the locked platform package and run script/dependency-notices.ts --update-platform-notices`,
       )
+    // The sharp-libvips repository's Apache license covers its packaging scripts,
+    // while the published native libraries need their own publisher notice and LGPL/GPL terms.
+    if (
+      name.startsWith("@img/sharp-libvips-") &&
+      ![
+        "This software contains third-party libraries",
+        "GNU LESSER GENERAL PUBLIC LICENSE",
+        "GNU GENERAL PUBLIC LICENSE",
+      ].every((notice) => record.texts.some((text) => text.includes(notice)))
+    )
+      throw new Error(
+        `Incomplete bundled-library notices for ${identity}; preserve the verified publisher licensing notice and full LGPL/GPL terms, not the packaging scripts' Apache license`,
+      )
     if (record.override) {
       if (
         !refreshPlatforms &&

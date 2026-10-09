@@ -14,13 +14,21 @@ export function providerUsable(id: string, provider?: Parameters<typeof Provider
 }
 
 // Re-enabling these requires Vector-owned registrations and provider approval.
-// Restored at the owner's request (26 September 2026): "Sign in with ChatGPT"
-// works as it did up to 1.99.10.
-export const CHATGPT_SIGN_IN = true
+export const CHATGPT_SIGN_IN = false
 export const XAI_SIGN_IN = false
 export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false
 export const GITLAB_SIGN_IN = false
+
+// A configured registration does not enable sign-in: provider approval must be
+// recorded and the release policy explicitly enabled before these flows ship.
+export const CHATGPT_CLIENT_ID = ""
+export function chatgptOAuthConfiguration(environment: NodeJS.ProcessEnv = process.env, enabled = CHATGPT_SIGN_IN) {
+  if (!enabled) return
+  const clientId = environment.VECTOR_OPENAI_OAUTH_CLIENT_ID?.trim() || CHATGPT_CLIENT_ID
+  if (!/^[A-Za-z0-9._-]{8,256}$/.test(clientId)) return
+  return { clientId, origin: "https://auth.openai.com" }
+}
 
 // Register a separate, least-privilege Vector application after Copilot partner approval.
 export const COPILOT_CLIENT_ID = ""
@@ -167,7 +175,7 @@ export function requireGitlabOAuthEndpoint(
 export function providerOAuthAllowed(id: string, userDefined = false) {
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
   if (id.startsWith("github-copilot")) return Boolean(copilotOAuthConfiguration())
-  if (id === "openai") return CHATGPT_SIGN_IN
+  if (id === "openai") return Boolean(chatgptOAuthConfiguration())
   if (id === "xai") return Boolean(xaiOAuthConfiguration())
   if (id === "poe") return Boolean(poeOAuthConfiguration())
   if (id === "digitalocean") return Boolean(digitalOceanOAuthConfiguration())
@@ -185,6 +193,7 @@ export function providerCredentialAllowed(
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
   if (id.startsWith("github-copilot") && credential.type === "oauth")
     return ownedOAuthMatches(credential, copilotOAuthConfiguration())
+  if (id === "openai" && credential.type === "oauth") return ownedOAuthMatches(credential, chatgptOAuthConfiguration())
   if (id === "xai" && credential.type === "oauth") return ownedOAuthMatches(credential, xaiOAuthConfiguration())
   if (id === "digitalocean" && credential.type === "oauth")
     return ownedOAuthMatches(credential, digitalOceanOAuthConfiguration())

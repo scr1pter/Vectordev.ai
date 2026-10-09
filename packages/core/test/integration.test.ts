@@ -53,8 +53,8 @@ describe("Integration", () => {
   it.effect("registers and overrides methods independently", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
-      const integrationID = Integration.ID.make("openai")
-      const methodID = Integration.MethodID.make("chatgpt")
+      const integrationID = Integration.ID.make("fixture-oauth")
+      const methodID = Integration.MethodID.make("fixture-sign-in")
       const first = yield* Scope.fork(yield* Scope.Scope)
       const second = yield* Scope.fork(yield* Scope.Scope)
       const authorize = () =>
@@ -69,31 +69,31 @@ describe("Integration", () => {
         .transform((editor) =>
           editor.method.update({
             integrationID,
-            method: { id: methodID, type: "oauth", label: "ChatGPT" },
+            method: { id: methodID, type: "oauth", label: "Fixture OAuth" },
             authorize,
           }),
         )
         .pipe(Scope.provide(first))
       yield* integrations
         .transform((editor) => {
-          expect(editor.get(integrationID)).toEqual({ id: integrationID, name: "openai" })
-          expect(editor.list()).toEqual([{ id: integrationID, name: "openai" }])
+          expect(editor.get(integrationID)).toEqual({ id: integrationID, name: "fixture-oauth" })
+          expect(editor.list()).toEqual([{ id: integrationID, name: "fixture-oauth" }])
           expect(editor.method.list(integrationID)).toEqual([
-            expect.objectContaining({ id: methodID, label: "ChatGPT" }),
+            expect.objectContaining({ id: methodID, label: "Fixture OAuth" }),
           ])
           editor.method.update({
             integrationID,
-            method: { id: methodID, type: "oauth", label: "ChatGPT Override" },
+            method: { id: methodID, type: "oauth", label: "Fixture OAuth Override" },
             authorize,
           })
         })
         .pipe(Scope.provide(second))
 
-      expect((yield* integrations.get(integrationID))?.name).toBe("openai")
-      expect((yield* integrations.get(integrationID))?.methods[0]).toMatchObject({ label: "ChatGPT Override" })
+      expect((yield* integrations.get(integrationID))?.name).toBe("fixture-oauth")
+      expect((yield* integrations.get(integrationID))?.methods[0]).toMatchObject({ label: "Fixture OAuth Override" })
 
       yield* Scope.close(second, Exit.void)
-      expect((yield* integrations.get(integrationID))?.methods[0]).toMatchObject({ label: "ChatGPT" })
+      expect((yield* integrations.get(integrationID))?.methods[0]).toMatchObject({ label: "Fixture OAuth" })
       expect((yield* integrations.get(integrationID))?.methods).toEqual([expect.objectContaining({ id: methodID })])
     }),
   )
@@ -103,7 +103,7 @@ describe("Integration", () => {
       const integrations = yield* Integration.Service
       const credentials = yield* Credential.Service
       const events = yield* EventV2.Service
-      const integrationID = Integration.ID.make("openai")
+      const integrationID = Integration.ID.make("fixture-oauth")
       yield* integrations.transform((editor) =>
         editor.method.update({
           integrationID,
@@ -136,12 +136,12 @@ describe("Integration", () => {
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
       const credentials = yield* Credential.Service
-      const integrationID = Integration.ID.make("openai")
-      const methodID = Integration.MethodID.make("chatgpt")
+      const integrationID = Integration.ID.make("fixture-oauth")
+      const methodID = Integration.MethodID.make("fixture-sign-in")
       yield* integrations.transform((editor) =>
         editor.method.update({
           integrationID,
-          method: { id: methodID, type: "oauth", label: "ChatGPT" },
+          method: { id: methodID, type: "oauth", label: "Fixture OAuth" },
           authorize: () =>
             Effect.succeed({
               mode: "code" as const,
@@ -222,13 +222,13 @@ describe("Integration", () => {
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
       const credentials = yield* Credential.Service
-      const integrationID = Integration.ID.make("openai")
-      const methodID = Integration.MethodID.make("chatgpt")
+      const integrationID = Integration.ID.make("fixture-oauth")
+      const methodID = Integration.MethodID.make("fixture-sign-in")
       let closed = false
       yield* integrations.transform((editor) =>
         editor.method.update({
           integrationID,
-          method: { id: methodID, type: "oauth", label: "ChatGPT" },
+          method: { id: methodID, type: "oauth", label: "Fixture OAuth" },
           authorize: () =>
             Effect.addFinalizer(() => Effect.sync(() => (closed = true))).pipe(
               Effect.as({
@@ -256,7 +256,7 @@ describe("Integration", () => {
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
       const credentials = yield* Credential.Service
-      const integrationID = Integration.ID.make("openai")
+      const integrationID = Integration.ID.make("fixture-oauth")
       const methodID = Integration.MethodID.make("browser")
       yield* integrations.transform((editor) =>
         editor.method.update({
@@ -288,7 +288,7 @@ describe("Integration", () => {
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
       const credentials = yield* Credential.Service
-      const integrationID = Integration.ID.make("openai")
+      const integrationID = Integration.ID.make("fixture-oauth")
       const methodID = Integration.MethodID.make("browser")
       let closed = false
       yield* integrations.transform((editor) =>

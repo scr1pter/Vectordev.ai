@@ -428,18 +428,11 @@ describe("session.llm-native.request", () => {
         provider: providerInfo,
         auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1 },
       }),
-    ).toEqual({ type: "unsupported", reason: "OAuth auth requires a provider fetch override" })
+    ).toEqual({ type: "unsupported", reason: "provider sign-in is paused" })
     expect(
       LLMNativeRuntime.status({
         model: baseModel,
         provider: { ...providerInfo, options: { apiKey: OAUTH_DUMMY_KEY, fetch: async () => new Response() } },
-        auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1 },
-      }),
-    ).toMatchObject({ type: "supported", apiKey: OAUTH_DUMMY_KEY })
-    expect(
-      LLMNativeRuntime.status({
-        model: { ...baseModel, providerID: ProviderV2.ID.make("xai") },
-        provider: { ...providerInfo, id: ProviderV2.ID.make("xai") },
         auth: { type: "oauth", refresh: "refresh", access: "access", expires: 1 },
       }),
     ).toEqual({ type: "unsupported", reason: "provider sign-in is paused" })
@@ -715,7 +708,7 @@ describe("session.llm-native.request", () => {
     }),
   )
 
-  it.effect("uses provider fetch override for native OpenAI OAuth requests", () =>
+  it.effect("rejects paused OpenAI OAuth before invoking a provider fetch override", () =>
     Effect.gen(function* () {
       const captures: Array<{ url: string; body: unknown }> = []
       const customFetch = Object.assign(
@@ -742,25 +735,8 @@ describe("session.llm-native.request", () => {
         headers: {},
         abort: new AbortController().signal,
       })
-      expect(native.type).toBe("supported")
-      if (native.type === "unsupported") throw new Error(native.reason)
-      const events = Array.from(yield* native.stream.pipe(Stream.runCollect))
-
-      expect(captures).toHaveLength(1)
-      expect(captures[0]).toMatchObject({
-        url: "https://api.openai.com/v1/responses",
-        body: {
-          model: "gpt-5-mini",
-          instructions: "You are concise.",
-          input: [{ role: "user", content: [{ type: "input_text", text: "hello" }] }],
-        },
-      })
-      expect(events).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ type: "text-delta", text: "Hello" }),
-          expect.objectContaining({ type: "finish" }),
-        ]),
-      )
+      expect(native).toEqual({ type: "unsupported", reason: "provider sign-in is paused" })
+      expect(captures).toHaveLength(0)
     }),
   )
 })

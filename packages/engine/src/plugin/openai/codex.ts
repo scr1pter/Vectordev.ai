@@ -1,4 +1,4 @@
-import { CHATGPT_SIGN_IN } from "@vectordevai/core/provider-policy"
+import { chatgptOAuthConfiguration, ownedOAuthMatches } from "@vectordevai/core/provider-policy"
 import type { Hooks, PluginInput } from "@vectordevai/plugin"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { OAUTH_DUMMY_KEY } from "../../auth"
@@ -8,8 +8,8 @@ import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@vectordevai/core/oauth/page"
 
-// The Codex CLI client, as Vector used it for ChatGPT sign-in up to 1.99.10.
-const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+const configuration = chatgptOAuthConfiguration()
+const CLIENT_ID = configuration?.clientId ?? ""
 const ISSUER = "https://auth.openai.com"
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 const OAUTH_PORT = 1455
@@ -107,6 +107,7 @@ interface CodexAuthPluginOptions {
 }
 
 async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: PkceCodes): Promise<TokenResponse> {
+  if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
   const response = await fetch(`${ISSUER}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -125,6 +126,7 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
 }
 
 async function refreshAccessToken(refreshToken: string, issuer = ISSUER): Promise<TokenResponse> {
+  if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
   const response = await fetch(`${issuer}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -292,7 +294,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
     provider: {
       id: "openai",
       async models(provider, ctx) {
-        if (!CHATGPT_SIGN_IN || ctx.auth?.type !== "oauth") return provider.models
+        if (ctx.auth?.type !== "oauth" || !ownedOAuthMatches(ctx.auth, configuration)) return provider.models
 
         return Object.fromEntries(
           Object.entries(provider.models)
@@ -330,7 +332,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       provider: "openai",
       async loader(getAuth) {
         const auth = await getAuth()
-        if (auth.type === "oauth" && !CHATGPT_SIGN_IN) return {}
+        if (auth.type === "oauth" && !ownedOAuthMatches(auth, configuration)) return {}
         const websocketFetch = options.experimentalWebSockets
           ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch })
           : undefined
@@ -365,6 +367,10 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             const currentAuth = await getAuth()
             if (currentAuth.type !== "oauth")
               return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
+            if (!ownedOAuthMatches(currentAuth, configuration))
+              throw new Error(
+                "Built-in ChatGPT sign-in is unavailable. Use an OpenAI API key or the external Codex runtime.",
+              )
 
             const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
 
@@ -380,6 +386,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                         refresh: tokens.refresh_token,
                         access: tokens.access_token,
                         expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                        clientId: CLIENT_ID,
+                        enterpriseUrl: ISSUER,
                         ...(accountId && { accountId }),
                       },
                     })
@@ -441,6 +449,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             label: "ChatGPT Pro/Plus (browser)",
             type: "oauth",
             authorize: async () => {
+              if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
               const { redirectUri } = await startOAuthServer()
               const pkce = await generatePKCE()
               const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
@@ -463,6 +472,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                     refresh: tokens.refresh_token,
                     access: tokens.access_token,
                     expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                    clientId: CLIENT_ID,
+                    enterpriseUrl: ISSUER,
                     accountId,
                   }
                 },
@@ -473,6 +484,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             label: "ChatGPT Pro/Plus (headless)",
             type: "oauth",
             authorize: async () => {
+              if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
               const deviceResponse = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
                 method: "POST",
                 headers: {
@@ -538,6 +550,8 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                         refresh: tokens.refresh_token,
                         access: tokens.access_token,
                         expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                        clientId: CLIENT_ID,
+                        enterpriseUrl: ISSUER,
                         accountId: extractAccountId(tokens),
                       }
                     }
@@ -557,7 +571,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             type: "api",
           },
         ] satisfies NonNullable<Hooks["auth"]>["methods"]
-      ).filter((method) => CHATGPT_SIGN_IN || method.type !== "oauth"),
+      ).filter((method) => configuration || method.type !== "oauth"),
     },
     "chat.headers": async (input, output) => {
       if (input.model.providerID !== "openai") return

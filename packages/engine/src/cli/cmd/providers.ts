@@ -412,7 +412,7 @@ export const ProvidersLoginCommand = effectCmd({
           label: x.name,
           value: x.id,
           hint: {
-            openai: "ChatGPT Plus/Pro or API key",
+            openai: "API key",
           }[x.id],
         })),
       ),

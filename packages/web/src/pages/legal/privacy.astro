@@ -7,14 +7,14 @@ export const prerender = true
   eyebrow="Privacy"
   title="Privacy Policy"
   description="How Vector handles account information, local work, AI requests, connected services, and diagnostics."
-  updated="October 2, 2026"
+  updated="October 7, 2026"
 >
   <section>
     <h2>1. Scope and contact</h2>
     <p>
       This Policy explains information handling for the Vector website, desktop application, command-line
       tools, and Vector-operated account, support, and cloud endpoints. “Vector,” “we,” and “us” refer
-      to the provider of those services. For privacy questions or requests, email
+      to Krishna B / VectorDev.ai, the operator of those services. For privacy questions or requests, email
       <a href="mailto:krishnabharadwaj0521@gmail.com">krishnabharadwaj0521@gmail.com</a>.
     </p>
     <p>
@@ -98,12 +98,10 @@ export const prerender = true
       the provider already received or revoke credentials everywhere they may be used.
     </p>
     <p>
-      <strong>Invitations and session sharing.</strong> A live workspace invitation contains guest credentials.
+      <strong>Live workspace invitations.</strong> A live workspace invitation contains guest credentials.
       People who have the link and can reach your server can access the workspace through the guest account;
       a tunnel provider may also process connection traffic. Share invitations only with trusted people and
-      stop the server to end live access. Public session sharing through the former third-party public share service is no
-      longer available in Vector. This does not remove content shared with an external service using an
-      earlier release, and recipients may retain copies.
+      stop the server to end live access.
     </p>
   </section>
 
@@ -150,6 +148,48 @@ export const prerender = true
       to anyone with access to their URLs. Publishing can disclose content publicly. Remove private data and
       secrets before uploading. Local deletion, sign-out, or account deletion does not itself remove
       a hosted deployment; use the hosting provider's controls or contact support about Vector-hosted content.
+    </p>
+    <p>
+      <strong>Vector-hosted public sessions.</strong> Where this optional service is available, publishing a
+      session stores its visible transcript in Vector's Supabase service and makes it readable by anyone with
+      the link, without signing in. The transcript includes its title, visible prompts, assistant responses,
+      displayed reasoning, code, and tool input and output. Review it before publishing: these fields may
+      contain personal information, confidential material, or secrets, and Vector does not guarantee automatic
+      removal of sensitive content. Account credentials, application settings, and hidden system instructions
+      are excluded as separate data fields, but credentials or other sensitive information appearing in the
+      visible text can still be published. Attachments are represented by descriptive labels; the public viewer
+      does not fetch the attached files or their URLs.
+    </p>
+    <p>
+      Public sharing requires explicit consent. You choose whether future updates to that conversation are
+      public and select an expiry no later than 30 days after publication. If you separately choose to remember
+      account-wide consent for automatic sharing, future sessions can be published when automatic sharing is
+      enabled, including sensitive text they may contain. Project automatic-share settings alone do not
+      authorize uploads. Disable automatic sharing to stop new automatic publications and use Unshare to
+      remove existing public copies. Sharing is optional and is not required to use Vector.
+    </p>
+    <p>
+      Successful unsharing, link expiry, account-access revocation, or account deletion stops public access
+      through Vector. Successful unsharing and account deletion erase the live transcript; expired live
+      transcripts are erased by scheduled cleanup. If a removal request fails, the link may remain public;
+      retry it or contact support. Deleted or expired content may remain in service-provider backups until
+      those backups expire under the configured retention policy. Contact us for the applicable storage
+      location and backup-retention information. People who have already viewed a transcript may keep their
+      own copies, which Vector cannot erase. The viewer asks search engines not to index the page, but this
+      does not make a public link private or prevent others from sharing it.
+    </p>
+    <p>
+      To prevent delayed upload requests from restoring removed links, we retain a minimal deletion record
+      indefinitely without the transcript. It contains the random share identifier, a hash of its management
+      secret, and lifecycle metadata, linked to your account identifier until account deletion clears that
+      link. These records are not returned by the public viewer.
+    </p>
+    <p>
+      <strong>Earlier third-party shares.</strong> The former third-party public-share service is no longer
+      used for new publication in Vector. This does not remove copies published there by earlier releases.
+      Removing a Vector-hosted public session, deleting local history, or deleting your Vector account does
+      not remove those historical copies. Their removal requires the former service's controls or separate
+      cleanup, and recipients may also retain copies.
     </p>
   </section>
 
@@ -212,8 +252,8 @@ export const prerender = true
       Where a law requires a legal basis for processing, the applicable basis depends on the purpose: providing
       a service you request; legitimate interests in security, abuse prevention,
       and service support balanced against your rights; compliance with legal obligations; or consent for
-      optional processing such as remote crash diagnostics. You can withdraw consent for optional processing
-      without affecting processing that was lawful before withdrawal. Required account information
+      optional processing such as public session sharing and remote crash diagnostics. You can withdraw consent
+      for optional processing without affecting processing that was lawful before withdrawal. Required account information
       is necessary to provide those features; optional diagnostics are not a condition of using Vector.
     </p>
   </section>
@@ -249,8 +289,9 @@ export const prerender = true
     <h2>12. Your choices and privacy rights</h2>
     <p>
       You can choose models and integrations, limit permissions, stop background work or computer use,
-      disconnect providers, turn off diagnostics, edit or erase local memory, and remove local sessions and
-      other data. Use the relevant provider's controls to revoke its credentials or manage records it holds.
+      disconnect providers, turn off diagnostics and automatic sharing, unshare public sessions, edit or erase
+      local memory, and remove local sessions and other data. Removing a local session alone does not remove
+      its public copy. Use the relevant provider's controls to revoke its credentials or manage records it holds.
       Deleting an account, deleting local data, and deleting provider-held content are
       separate actions.
     </p>

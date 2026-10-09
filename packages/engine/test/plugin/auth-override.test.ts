@@ -38,7 +38,7 @@ function providerAuthLayer(directory: string, plugins: string[]) {
 }
 
 describe("plugin.auth-override", () => {
-  for (const providerID of ["xai", "digitalocean", "gitlab"]) {
+  for (const providerID of ["openai", "xai", "digitalocean", "gitlab"]) {
     it.instance(`plugin OAuth for ${providerID} stays paused while API method indexes remain aligned`, () =>
       Effect.gen(function* () {
         const tmp = yield* TestInstance
