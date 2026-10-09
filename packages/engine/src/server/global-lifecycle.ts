@@ -1,5 +1,9 @@
 import { GlobalBus } from "@/bus/global"
+import { BackgroundJob } from "@/background/job"
+import { InstanceRef } from "@/effect/instance-ref"
+import type { InstanceContext } from "@/project/instance-context"
 import { InstanceStore } from "@/project/instance-store"
+import { SessionStatus } from "@/session/status"
 import { Effect, Option, RcMap } from "effect"
 import { LocationServiceMap } from "@vectordevai/core/location-service-map"
 import { Event } from "./event"
@@ -24,11 +28,59 @@ export const disposeAllInstancesAndEmitGlobalDisposed = Effect.fn("Server.dispos
         yield* Effect.forEach(keys, (ref) => locations.value.invalidate(ref))
       }
       yield* options?.swallowErrors
-        ? store.disposeAll().pipe(Effect.catchCause((cause) => Effect.logWarning("global disposal failed", { cause })))
-        : store.disposeAll()
+        ? disposeIdleInstances(store).pipe(
+            Effect.catchCause((cause) => Effect.logWarning("global disposal failed", { cause })),
+          )
+        : disposeIdleInstances(store)
       yield* emitGlobalDisposed
     }).pipe(Effect.uninterruptible)
   },
 )
+
+// A global reload follows a settings change, such as a provider key, and disposing an instance stops the subagents and
+// turns running in it. An instance with work still running keeps its services until that work ends, and reloads then.
+const disposeIdleInstances = Effect.fnUntraced(function* (store: InstanceStore.Interface) {
+  const background = yield* Effect.serviceOption(BackgroundJob.Service)
+  const statuses = yield* Effect.serviceOption(SessionStatus.Service)
+  if (Option.isNone(background) || Option.isNone(statuses)) return yield* store.disposeAll()
+  const busy = (ctx: InstanceContext) =>
+    Effect.gen(function* () {
+      if ((yield* background.value.list()).some((job) => job.status === "running")) return true
+      return (yield* statuses.value.list()).size > 0
+    }).pipe(Effect.provideService(InstanceRef, ctx))
+  yield* Effect.forEach(
+    yield* store.loaded(),
+    Effect.fnUntraced(function* (ctx) {
+      if (!(yield* busy(ctx))) return yield* store.dispose(ctx)
+      yield* deferDispose(store, ctx, busy)
+    }),
+    { discard: true },
+  )
+})
+
+// Directories whose reload waits on their running work, so a second reload does not wait twice.
+const deferred = new Set<string>()
+
+function deferDispose(
+  store: InstanceStore.Interface,
+  ctx: InstanceContext,
+  busy: (ctx: InstanceContext) => Effect.Effect<boolean>,
+) {
+  if (deferred.has(ctx.directory)) return Effect.void
+  deferred.add(ctx.directory)
+  const idle: Effect.Effect<void> = busy(ctx).pipe(
+    Effect.flatMap((live) => (live ? Effect.sleep("1 second").pipe(Effect.andThen(idle)) : Effect.void)),
+  )
+  return Effect.logInfo("reloading instance once its running work ends", { directory: ctx.directory }).pipe(
+    Effect.andThen(Effect.suspend(() => idle)),
+    // Disposing by directory reloads whatever instance is there by then, which publishes server.instance.disposed so
+    // clients refetch it.
+    Effect.andThen(store.disposeDirectory(ctx.directory)),
+    Effect.ensuring(Effect.sync(() => deferred.delete(ctx.directory))),
+    Effect.ignore,
+    Effect.forkDetach,
+    Effect.asVoid,
+  )
+}
 
 export * as GlobalLifecycle from "./global-lifecycle"
