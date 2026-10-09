@@ -25,6 +25,12 @@
   --vx-purple: #9274ec;
   --vx-purple-bright: #b69ff7;
   --vx-purple-soft: rgba(182, 159, 247, 0.14);
+  /* Git and pull request references (branch chips, the Vectorscope ref bar): a solid dusky violet with lavender
+   * type, kept to references so the workspace itself stays neutral. */
+  --vx-ref-surface: #362f45;
+  --vx-ref-surface-hover: #3f3753;
+  --vx-ref-text: #b796ff;
+  --vx-ref-muted: #a690da;
   /* The signature. A vector is a direction; the gradient is the direction the
    * agent improves. Used sparingly — one moment per screen, never wallpaper. */
   --vx-gradient: linear-gradient(135deg, #7659d0 0%, #8b6ce3 38%, #a287ef 70%, #c0acf9 100%);
@@ -73,6 +79,10 @@
   --vx-purple: #7c4fe0;
   --vx-purple-bright: #6a3fd1;
   --vx-purple-soft: rgba(124, 79, 224, 0.12);
+  --vx-ref-surface: #ece6fb;
+  --vx-ref-surface-hover: #e2d8f8;
+  --vx-ref-text: #5b34c7;
+  --vx-ref-muted: #6a55a8;
   --vx-green: #2f9e63;
   --vx-amber: #a97a1f;
   --vx-red: #cf4750;
@@ -2872,9 +2882,63 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
 [data-vector-session-branch] {
   max-width: 160px;
   overflow: hidden;
+  border-color: transparent;
+  background: var(--vx-ref-surface);
+  color: var(--vx-ref-text);
   font-family: var(--vx-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The Vectorscope pull request header: the pull request as one reference, like a branch chip at full width. */
+[data-vector-ref-bar] {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  border-radius: 9px;
+  background: var(--vx-ref-surface);
+  padding: 0 14px;
+  color: var(--vx-ref-text);
+  font-size: 13px;
+  line-height: 1;
+}
+
+[data-vector-ref-bar] [data-slot="ref-number"],
+[data-vector-ref-bar] [data-slot="ref-branch"] {
+  font-family: var(--vx-mono);
+}
+
+[data-vector-ref-bar] [data-slot="ref-repo"] {
+  color: var(--vx-ref-muted);
+}
+
+[data-vector-ref-bar] [data-slot="ref-branch"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-vector-ref-bar] [data-slot="ref-state"] {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+[data-vector-ref-bar] [data-slot="ref-state"][data-state="draft"] {
+  color: var(--vx-ref-muted);
+}
+
+[data-vector-ref-chip] {
+  border-radius: 4px;
+  background: var(--vx-ref-surface);
+  padding: 1px 6px;
+  color: var(--vx-ref-text);
+  font-family: var(--vx-mono);
+  font-size: 11px;
 }
 
 [data-vector-session-status] > span {
