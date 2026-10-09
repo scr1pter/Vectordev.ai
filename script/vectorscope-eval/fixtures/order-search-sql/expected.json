@@ -1,0 +1,10 @@
+[
+  {
+    "id": "email-search-injection",
+    "path": "app/orders/repository.py",
+    "line": 54,
+    "severity": "blocking",
+    "category": "security",
+    "description": "The search text from the q query parameter is concatenated into the SQL string instead of being passed as a parameter, so a quote in q closes the string literal and any signed-in staff member can inject SQL, for example an OR clause that drops the shop_id scope and returns other shops' orders. It must be a %s parameter with the % wildcards added to the value."
+  }
+]

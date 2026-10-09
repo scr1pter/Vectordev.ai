@@ -93,6 +93,16 @@ html {
   background: var(--vx-canvas);
 }
 
+/* A progress bar for work of unknown length: one segment sweeping across. */
+@keyframes vx-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
 html,
 body,
 #root {
@@ -1854,6 +1864,11 @@ html[data-vector-navigation-resizing] * {
   padding-inline: 36px !important;
 }
 
+/* Providers, Models and Servers use a separate header; it shares the pages' inset so every title lines up. */
+.settings-v2-tab-header {
+  padding-inline: 36px !important;
+}
+
 :is(
   [data-component="settings-v2-list"],
   .settings-v2-shortcuts [data-component="settings-v2-list"],
@@ -1885,7 +1900,9 @@ html[data-vector-navigation-resizing] * {
   background: rgba(255, 255, 255, 0.025) !important;
 }
 
-[data-component="dialog-v2"][data-variant="settings"] :is(input, textarea, select) {
+/* Search fields and switches draw their own frame; boxing them again put a box inside a box. */
+[data-component="dialog-v2"][data-variant="settings"]
+  :is(input:not([type="search"], [type="range"], [type="checkbox"], [type="radio"]), textarea, select) {
   border: 1px solid var(--vx-line-strong) !important;
   border-radius: 9px !important;
   background: var(--vx-control) !important;

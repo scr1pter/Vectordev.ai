@@ -29,6 +29,7 @@ html[data-vector-native-chrome] [data-vector-floating-sidebar-toggle] {
 }
 
 html[data-vector-native-chrome] [data-vector-codespace]:not([data-embedded="true"]),
+html[data-vector-native-chrome] [data-vector-pull-requests],
 html[data-vector-native-chrome] [data-vector-agent-launcher-overlay],
 html[data-vector-native-chrome] [data-component="dialog-v2"],
 html[data-vector-native-chrome] [data-component="dialog-overlay"] {

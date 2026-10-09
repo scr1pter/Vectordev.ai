@@ -1,27 +1,22 @@
 import { execFile } from "node:child_process"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
-import { gh, resolveGhInstall } from "./github-pr"
+import { githubFetch, githubJson, parseGithubRemote, readTail, type GithubAccess } from "./github-api"
+import { resolveGithubAccess } from "./github-access"
 import { redactText } from "./security-redaction"
 
 // Vector's read side of GitHub Actions: notice that the branch the user just
 // pushed is red, pull only the failed steps out of a log that can be hundreds
 // of megabytes, and turn that into a prompt an agent can act on. Every GitHub
-// call goes through the user's own `gh` CLI for the same reason github-pr.ts
-// does — gh already holds their credentials and honours their SSO and org
-// policies, so Vector never asks for a token of its own.
+// call goes through GitHub's API with the user's GitHub sign-in in Vector, the
+// same access the Pull Requests panel uses, so nothing has to be installed.
 
-export type CiUnavailableReason =
-  | "gh-missing"
-  | "gh-unauthenticated"
-  | "not-a-repo"
-  | "no-remote"
-  | "no-branch"
-  | "gh-failed"
+export type CiUnavailableReason = "signed-out" | "not-a-repo" | "no-remote" | "no-branch" | "github-failed"
 
 // Every failure path in this module resolves to one of these instead of
-// throwing. What the user needs when CI is unreadable is the one command that
-// makes it readable, and a rejected promise carries that badly.
+// throwing. What the user needs when CI is unreadable is the one step that
+// makes it readable, and a rejected promise carries that badly. command is a
+// shell command when one fixes it, and empty when the fix is signing in.
 export type CiUnavailable = {
   ok: false
   reason: CiUnavailableReason
@@ -67,83 +62,122 @@ export type CiFailure = {
 // small enough that several of them still fit alongside the repo's own context.
 const MAX_EXCERPT_BYTES = 8 * 1024
 const MAX_STEPS = 6
-// `gh run view --log-failed` only emits the failed steps, so this ceiling is a
-// guard against a pathological single step rather than the normal case. Keeping
-// the tail loses the "##[group]Run" header of a step that big, which only costs
-// us the echoed command.
-const MAX_LOG_CHARS = 4 * 1024 * 1024
+// A job's log holds every step, and only its tail is read, so this is also the
+// most of a job log Vector ever holds in memory. Keeping the tail loses the
+// "##[group]Run" header of a step bigger than this, which only costs us the
+// echoed command.
+export const MAX_LOG_BYTES = 4 * 1024 * 1024
+const MAX_FAILED_JOBS = 4
 const CONTEXT_LINES = 3
 const TRIM_MARKER_BYTES = 48
 const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "startup_failure"])
-const RUN_FIELDS =
-  "databaseId,number,workflowName,displayTitle,headBranch,headSha,event,status,conclusion,url,createdAt"
 
 export async function ciStatus(projectPath: string): Promise<{ ok: true; repo: CiRepo } | CiUnavailable> {
-  const missing = await ghAvailability()
-  if (missing) return missing
-  return detectCiRepo(projectPath)
+  const context = await ciContext(projectPath)
+  return context.ok ? { ok: true, repo: context.repo } : context
+}
+
+async function ciContext(
+  projectPath: string,
+): Promise<{ ok: true; repo: CiRepo; access: GithubAccess } | CiUnavailable> {
+  const access = await resolveGithubAccess()
+  if (!access) {
+    return {
+      ok: false,
+      reason: "signed-out",
+      detail: "Sign in to GitHub in Vector so it can read this repository's workflow runs.",
+      command: "",
+    }
+  }
+  const detected = await detectCiRepo(projectPath)
+  return detected.ok ? { ...detected, access } : detected
 }
 
 export async function listCiRuns(
   projectPath: string,
   options?: { branch?: string; limit?: number },
 ): Promise<{ ok: true; repo: CiRepo; runs: CiRun[] } | CiUnavailable> {
-  const status = await ciStatus(projectPath)
-  if (!status.ok) return status
-  const branch = options?.branch?.trim() || status.repo.branch
-  const result = await gh(
-    ["run", "list", "--branch", branch, "--limit", String(options?.limit ?? 20), "--json", RUN_FIELDS],
-    { cwd: projectPath, timeoutMs: 45_000 },
+  const context = await ciContext(projectPath)
+  if (!context.ok) return context
+  const branch = options?.branch?.trim() || context.repo.branch
+  const limit = Math.max(1, Math.min(100, options?.limit ?? 20))
+  const result = await githubJson<{ workflow_runs?: RawRun[] }>(
+    context.access,
+    `${repoPath(context.repo)}/actions/runs?branch=${encodeURIComponent(branch)}&per_page=${limit}`,
+    { timeoutMs: 45_000 },
+  ).then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => failed(error, `GitHub could not list workflow runs for ${branch}.`),
   )
-  if (result.failed) {
-    return {
-      ok: false,
-      reason: "gh-failed",
-      detail: lastLine(result.stderr) || `GitHub could not list workflow runs for ${branch}.`,
-      command: `gh run list --branch ${branch}`,
-    }
-  }
-  return {
-    ok: true,
-    repo: { ...status.repo, branch },
-    runs: (parseJson<RawRun[]>(result.stdout) ?? []).map(toRun),
-  }
+  if (!result.ok) return result
+  return { ok: true, repo: { ...context.repo, branch }, runs: (result.value.workflow_runs ?? []).map(toRun) }
 }
 
 export async function viewCiFailure(
   projectPath: string,
   runId: number,
 ): Promise<{ ok: true; failure: CiFailure } | CiUnavailable> {
-  const status = await ciStatus(projectPath)
-  if (!status.ok) return status
-  const view = await gh(["run", "view", String(runId), "--json", `${RUN_FIELDS},jobs`], {
-    cwd: projectPath,
-    timeoutMs: 45_000,
-  })
-  const raw = view.failed ? undefined : parseJson<RawRun & { jobs?: RawJob[] }>(view.stdout)
-  if (!raw) {
-    return {
-      ok: false,
-      reason: "gh-failed",
-      detail: lastLine(view.stderr) || `GitHub could not load run ${runId}.`,
-      command: `gh run view ${runId}`,
-    }
-  }
-  const log = await gh(["run", "view", String(runId), "--log-failed"], { cwd: projectPath, timeoutMs: 120_000 })
-  // A run that failed to start, or one whose logs GitHub has already expired,
-  // returns no log at all. The job list still names what went red, which is
-  // worth more to the user than an empty panel.
-  const parsed = parseFailureLog(log.stdout.length > MAX_LOG_CHARS ? log.stdout.slice(-MAX_LOG_CHARS) : log.stdout)
-  const steps = parsed.length ? parsed : failedStepsFromJobs(raw.jobs)
+  const context = await ciContext(projectPath)
+  if (!context.ok) return context
+  const run = `${repoPath(context.repo)}/actions/runs/${Number(runId)}`
+  const loaded = await Promise.all([
+    githubJson<RawRun>(context.access, run, { timeoutMs: 45_000 }),
+    githubJson<{ jobs?: RawJob[] }>(context.access, `${run}/jobs?per_page=100`, { timeoutMs: 45_000 }),
+  ]).then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => failed(error, `GitHub could not load run ${runId}.`),
+  )
+  if (!loaded.ok) return loaded
+  const [raw, jobs] = loaded.value
+  const failedJobs = (jobs.jobs ?? []).filter((job) => job.conclusion === "failure").slice(0, MAX_FAILED_JOBS)
+  // Each failed job's log, reduced to its failing step. A run that failed to
+  // start, or one whose logs GitHub has already expired, returns no log at all;
+  // the job list still names what went red, which is worth more to the user
+  // than an empty panel.
+  const logs = await Promise.all(
+    failedJobs.map(async (job) => {
+      // GitHub answers with a redirect to a short-lived download URL, which fetch follows.
+      const response = await githubFetch(context.access, `${repoPath(context.repo)}/actions/jobs/${job.id}/logs`, {
+        timeoutMs: 120_000,
+      }).catch(() => undefined)
+      const tail = response ? await readTail(response, MAX_LOG_BYTES).catch(() => undefined) : undefined
+      return tail ? { lines: failedStepLog(tail.text, job), truncated: tail.truncated } : undefined
+    }),
+  )
+  const parsed = parseFailureLog(logs.flatMap((log) => log?.lines ?? []).join("\n"))
+  const steps = parsed.length ? parsed : failedStepsFromJobs(jobs.jobs)
   return {
     ok: true,
     failure: {
-      repo: `${status.repo.owner}/${status.repo.name}`,
+      repo: `${context.repo.owner}/${context.repo.name}`,
       run: toRun(raw),
       steps: steps.slice(0, MAX_STEPS),
-      logTruncated: log.stdout.length > MAX_LOG_CHARS,
+      logTruncated: logs.some((log) => log?.truncated),
     },
   }
+}
+
+// A job's log runs every step together. The step that failed is the one whose
+// "##[group]Run" header comes last before the job's final "##[error]", the same
+// slice `gh run view --log-failed` shows, prefixed "<job>\t<step>\t" the way
+// parseFailureLog reads it.
+export function failedStepLog(log: string, job: RawJob) {
+  const lines = log.split(/\r?\n/)
+  const exitLine = lines.findLastIndex((line) =>
+    /^##\[error\]Process completed with exit code/.test(cleanLogLine(line)),
+  )
+  const errorLine = exitLine >= 0 ? exitLine : lines.findLastIndex((line) => /^##\[error\]/.test(cleanLogLine(line)))
+  const end = errorLine >= 0 ? errorLine + 1 : lines.length
+  const start = Math.max(
+    0,
+    lines.slice(0, end).findLastIndex((line) => /^##\[group\]Run\s/.test(cleanLogLine(line))),
+  )
+  const step = (job.steps ?? []).find((candidate) => candidate.conclusion === "failure")?.name ?? ""
+  const name = (job.name ?? "").replaceAll("\t", " ")
+  return lines
+    .slice(start, end)
+    .filter((line) => line.trim() !== "")
+    .map((line) => `${name}\t${step.replaceAll("\t", " ")}\t${line}`)
 }
 
 export async function prepareCiRepair(
@@ -201,7 +235,7 @@ export function parseFailureLog(log: string, options?: { maxExcerptBytes?: numbe
     const step = prefixed ? columns[1].trim() : ""
     const key = `${job}\u0000${step}`
     const group = groups.get(key) ?? { job, step, lines: [] }
-    group.lines.push(stripAnsi(prefixed ? columns.slice(2).join("\t") : raw).replace(TIMESTAMP, ""))
+    group.lines.push(cleanLogLine(prefixed ? columns.slice(2).join("\t") : raw))
     groups.set(key, group)
   }
   return Array.from(groups.values())
@@ -265,18 +299,6 @@ export function buildRepairPrompt(failure: CiFailure) {
   ].join("\n")
 }
 
-// Duplicated from github.ts's parseGithubRemote on purpose: that module reaches
-// github-auth.ts, which pulls in electron, and CI parsing has to stay importable
-// (and testable) outside an Electron process.
-export function parseRemoteSlug(raw: string) {
-  const url = raw.trim()
-  const match =
-    url.match(/^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i) ??
-    url.match(/^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i)
-  if (!match) return
-  return { owner: match[1], name: match[2] }
-}
-
 export async function detectCiRepo(projectPath: string): Promise<{ ok: true; repo: CiRepo } | CiUnavailable> {
   const inside = await run("git", ["rev-parse", "--is-inside-work-tree"], { cwd: projectPath })
   if (inside.failed || !/true/.test(inside.stdout)) {
@@ -297,7 +319,7 @@ export async function detectCiRepo(projectPath: string): Promise<{ ok: true; rep
       command: "git remote add origin https://github.com/<owner>/<repo>.git",
     }
   }
-  const slug = parseRemoteSlug(remote)
+  const slug = parseGithubRemote(remote)
   if (!slug) {
     return {
       ok: false,
@@ -338,62 +360,51 @@ function run(command: string, args: string[], opts: { cwd?: string; timeoutMs?: 
   })
 }
 
-// gh is found the way the Pull Requests panel finds it: a bare `gh` with the
-// app's own PATH misses Homebrew in a Finder-launched app, so CI said "install
-// it" while the rest of the panel was already signed in.
-export async function ghAvailability(runGh = gh): Promise<CiUnavailable | undefined> {
-  const version = await runGh(["--version"], { timeoutMs: 10_000 })
-  if (version.failed) {
-    const install = await resolveGhInstall()
-    return {
-      ok: false,
-      reason: "gh-missing",
-      detail: "Vector reads CI through your own GitHub CLI login. Install it, then sign in.",
-      command: install.command ?? `See ${install.url}`,
-    }
-  }
-  // gh writes `auth status` to stderr on older releases and stdout on newer
-  // ones, so read both before deciding the user is signed out.
-  const status = await runGh(["auth", "status"], { timeoutMs: 10_000 })
-  if (/logged in to/i.test(`${status.stdout}\n${status.stderr}`)) return
-  return {
-    ok: false,
-    reason: "gh-unauthenticated",
-    detail: "Sign in to GitHub so Vector can read this repository's workflow runs.",
-    command: "gh auth login",
-  }
-}
-
+// GitHub's REST shape of a workflow run and a job.
 type RawRun = {
-  databaseId?: number
-  number?: number
-  workflowName?: string
-  displayTitle?: string
-  headBranch?: string
-  headSha?: string
+  id?: number
+  run_number?: number
+  name?: string | null
+  display_title?: string
+  head_branch?: string | null
+  head_sha?: string
   event?: string
-  status?: string
-  conclusion?: string
-  url?: string
-  createdAt?: string
+  status?: string | null
+  conclusion?: string | null
+  html_url?: string
+  created_at?: string
 }
 
-type RawJob = { name?: string; conclusion?: string; steps?: { name?: string; conclusion?: string }[] }
+type RawJob = {
+  id?: number
+  name?: string
+  conclusion?: string | null
+  steps?: { name?: string; conclusion?: string | null }[]
+}
 
 function toRun(raw: RawRun): CiRun {
   return {
-    id: raw.databaseId ?? 0,
-    number: raw.number ?? 0,
-    workflow: raw.workflowName ?? "workflow",
-    title: raw.displayTitle ?? "",
-    branch: raw.headBranch ?? "",
-    headSha: raw.headSha ?? "",
+    id: raw.id ?? 0,
+    number: raw.run_number ?? 0,
+    workflow: raw.name ?? "workflow",
+    title: raw.display_title ?? "",
+    branch: raw.head_branch ?? "",
+    headSha: raw.head_sha ?? "",
     event: raw.event ?? "",
     status: raw.status ?? "",
     conclusion: raw.conclusion ?? "",
-    url: raw.url ?? "",
-    createdAt: raw.createdAt ?? "",
+    url: raw.html_url ?? "",
+    createdAt: raw.created_at ?? "",
   }
+}
+
+function failed(error: unknown, fallback: string): CiUnavailable {
+  const message = error instanceof Error && error.message ? error.message : fallback
+  return { ok: false, reason: "github-failed", detail: message, command: "" }
+}
+
+function repoPath(repo: CiRepo) {
+  return `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`
 }
 
 function failedStepsFromJobs(jobs: RawJob[] | undefined): CiFailedStep[] {
@@ -406,30 +417,13 @@ function failedStepsFromJobs(jobs: RawJob[] | undefined): CiFailedStep[] {
     )
 }
 
-function parseJson<T>(raw: string): T | undefined {
-  const trimmed = raw.trim()
-  if (!trimmed) return undefined
-  try {
-    return JSON.parse(trimmed) as T
-  } catch {
-    return undefined
-  }
-}
-
-function lastLine(text: string) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .at(-1)
-}
-
 const ANSI = /\u001B\[[0-?]*[ -\/]*[@-~]|\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)/g
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z ?/
 const EXIT_CODE = /Process completed with exit code (\d+)/
 
-function stripAnsi(line: string) {
-  return line.replace(ANSI, "")
+// One raw Actions log line without its ANSI colouring or leading timestamp.
+export function cleanLogLine(line: string) {
+  return line.replace(ANSI, "").replace(TIMESTAMP, "")
 }
 
 // Ordered by how much each one narrows the problem down: a type error names the

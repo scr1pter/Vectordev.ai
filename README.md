@@ -4,7 +4,7 @@
 
 **An AI coding workspace for planning, building, reviewing, and shipping software.**
 
-[vectordev.ai](https://vectordev.ai) · [Docs](https://vectordev.ai/docs) · [Releases](https://vectordev.ai/releases)
+[vectordev.ai](https://vectordev.ai) · [Docs](https://vectordev.ai/docs) · [Changelog](https://vectordev.ai/docs/changelog)
 
 </div>
 
@@ -27,9 +27,9 @@ vector auth login
 vector
 ```
 
-Published builds and their notes are at [vectordev.ai/releases](https://vectordev.ai/releases).
+Installers are at [vectordev.ai/download](https://vectordev.ai/download), and release notes at [vectordev.ai/docs/changelog](https://vectordev.ai/docs/changelog).
 
-**Release status.** Desktop **1.99.102** and CLI **1.99.99** are published, including the guarded personal OpenRouter free-model setup described below. Installed copies update with Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS. Vector is free; model access follows the provider you connect. Version 2 is reserved. See the [release notes](https://vectordev.ai/releases#release-1-99-102) for what changed and what remains unavailable.
+**Release status.** Desktop **1.99.103** and CLI **1.99.99** are published, including the guarded personal OpenRouter free-model setup described below. Installed copies update with Check now in Settings → Updates & about, or Check for Updates in the Vector menu on macOS. Vector is free; model access follows the provider you connect. Version 2 is reserved. See the [release notes](https://vectordev.ai/docs/changelog#release-1-99-103) for what changed and what remains unavailable.
 
 ## Features
 

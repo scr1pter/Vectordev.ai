@@ -11,7 +11,7 @@ import "./account.css"
 
 type Mode = "signin" | "register"
 
-function GoogleMark() {
+export function GoogleMark() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path
@@ -124,13 +124,11 @@ export function AuthPage() {
 
   return (
     <section className="auth-card" aria-labelledby="auth-title">
-      <div className="auth-form-mark" aria-hidden="true">
-        <img src="/vector-logo.png" alt="" width="44" height="44" />
-      </div>
-      <p className="auth-form-eyebrow">YOUR VECTOR WORKSPACE</p>
-      <h1 id="auth-title">{mode === "signin" ? "Welcome back." : "Create your account."}</h1>
+      <h1 id="auth-title">{mode === "signin" ? "Sign in to Vector" : "Create your Vector account"}</h1>
       <p className="auth-sub">
-        {mode === "signin" ? "Sign in to your Vector workspace." : "Your next project starts here."}
+        {mode === "signin"
+          ? "One account for the desktop app and the CLI."
+          : "Free. One account for the desktop app and the CLI."}
       </p>
 
       <button className="google-button" type="button" onClick={google} disabled={loading}>
@@ -138,7 +136,7 @@ export function AuthPage() {
       </button>
 
       <div className="auth-divider">
-        <span>or continue with email</span>
+        <span>or</span>
       </div>
 
       <form className="auth-form" onSubmit={submit} aria-busy={loading}>
@@ -156,7 +154,7 @@ export function AuthPage() {
           </label>
         )}
         <label>
-          <span>Email address</span>
+          <span>Email</span>
           <input
             className="auth-field"
             type="email"
@@ -206,7 +204,7 @@ export function AuthPage() {
 
         <button className="auth-submit" disabled={loading}>
           {loading ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
-          {!loading && <ArrowRight size={17} aria-hidden="true" />}
+          {!loading && <ArrowRight size={15} aria-hidden="true" />}
         </button>
       </form>
 
@@ -216,11 +214,6 @@ export function AuthPage() {
           {mode === "signin" ? "Create an account" : "Sign in"}
         </button>
       </p>
-      {mode === "register" && (
-        <p className="auth-account-note">
-          Vector is free. One account covers the desktop app and the terminal agent.
-        </p>
-      )}
       <p className="auth-legal">
         By continuing, you agree to the <a href="/legal/terms">Terms of Service</a> and acknowledge our{" "}
         <a href="/legal/privacy">Privacy Policy</a>.

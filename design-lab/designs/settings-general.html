@@ -1,0 +1,2880 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-settings-general [hidden] {
+        display: none !important;
+      }
+
+      /* ---------- Settings navigation (shared shape across D09-D12) ---------- */
+      .d-settings-general .sn {
+        display: flex;
+        flex: 0 0 248px;
+        flex-direction: column;
+        width: 248px;
+        height: 100%;
+        border-right: 1px solid rgba(255, 255, 255, 0.035);
+        background: var(--sidebar);
+        color: var(--text-2);
+        user-select: none;
+      }
+      .d-settings-general .sn-top {
+        display: flex;
+        flex: none;
+        align-items: center;
+        height: 47px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--sidebar-top);
+      }
+      .d-settings-general .sn-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 9px 0 6px;
+        border-radius: 6px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        text-decoration: none;
+      }
+      .d-settings-general .sn-back:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+      }
+      .d-settings-general .sn-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 14px 12px;
+      }
+      .d-settings-general .sn-mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 8px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 18px rgba(146, 116, 236, 0.18);
+      }
+      .d-settings-general .sn-brand b {
+        display: block;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .d-settings-general .sn-brand span {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+      .d-settings-general .sn-search {
+        margin: 0 10px 8px;
+        background: rgba(0, 0, 0, 0.16);
+      }
+      .d-settings-general .sn-search svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-settings-general .sn-search input::placeholder {
+        color: var(--text-3);
+      }
+      .d-settings-general .sn-search input::-webkit-search-cancel-button {
+        display: none;
+      }
+      .d-settings-general .sn-clear {
+        display: grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-3);
+      }
+      .d-settings-general .sn-clear:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+      }
+      .d-settings-general .sn-groups {
+        flex: 1;
+        min-height: 0;
+        padding: 2px 8px 12px;
+      }
+      .d-settings-general .sn-group {
+        padding: 8px 0 4px;
+      }
+      .d-settings-general .sn-group[hidden],
+      .d-settings-general .sn-item[hidden] {
+        display: none;
+      }
+      .d-settings-general .sn-label {
+        margin: 0;
+        padding: 4px 8px 5px;
+        color: #9a96a0;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .d-settings-general .sn-item {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        height: 31px;
+        padding: 0 8px;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: #c4c1c8;
+        font-size: 13px;
+        text-align: left;
+        text-decoration: none;
+        white-space: nowrap;
+        transition:
+          background-color 120ms ease,
+          color 120ms ease;
+      }
+      .d-settings-general .sn-item svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-settings-general .sn-item:hover {
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+      }
+      .d-settings-general .sn-item[aria-current="page"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.12), transparent 72%), rgba(255, 255, 255, 0.068);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+      }
+      .d-settings-general .sn-item[aria-current="page"] svg {
+        color: var(--violet-bright);
+      }
+      .d-settings-general .sn-end {
+        margin-left: auto;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-settings-general .sn-hits {
+        margin-left: auto;
+      }
+      .d-settings-general .sn-out {
+        margin-left: auto;
+        color: var(--text-3);
+        opacity: 0;
+        transition: opacity 120ms ease;
+      }
+      .d-settings-general .sn-item:hover .sn-out {
+        opacity: 1;
+      }
+      .d-settings-general .sn-item .sn-end + .sn-out {
+        margin-left: 4px;
+      }
+      .d-settings-general .sn-empty {
+        margin: 10px 8px;
+        padding: 12px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 8px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .d-settings-general .sn-empty strong {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-settings-general .sn-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: space-between;
+        height: 46px;
+        padding: 0 14px;
+        border-top: 1px solid var(--hairline);
+        background: var(--sidebar-foot);
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* ---------- Header ---------- */
+      .d-settings-general .sg-crumbs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 13px;
+      }
+      .d-settings-general .sg-crumbs svg {
+        color: var(--text-3);
+      }
+      .d-settings-general .sg-saved {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-right: 4px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      /* ---------- Body: settings column + preview column ---------- */
+      .d-settings-general .sg-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      .d-settings-general .sg-col {
+        flex: 0 0 572px;
+        width: 572px;
+        padding: 26px 26px 48px 30px;
+      }
+      .d-settings-general .sg-side {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+        padding: 22px 24px 22px 6px;
+      }
+      .d-settings-general .sg-hero {
+        margin-bottom: 18px;
+      }
+      .d-settings-general .sg-kicker {
+        margin: 0 0 6px;
+        color: var(--violet-bright);
+        font: 600 10.5px/1 var(--mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .d-settings-general .sg-hero h3 {
+        margin: 0 0 6px;
+        color: var(--text-1);
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .d-settings-general .sg-hero p {
+        margin: 0;
+        max-width: 470px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+      .d-settings-general .st-card {
+        margin-bottom: 14px;
+        overflow: hidden;
+      }
+      .d-settings-general .st-card-head {
+        padding: 12px 14px 11px;
+      }
+      .d-settings-general .st-card-head h4 {
+        margin: 0;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .d-settings-general .st-card-head p {
+        margin: 3px 0 0;
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+      .d-settings-general .st-row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        min-height: 54px;
+        padding: 10px 14px;
+        border-top: 1px solid var(--hairline);
+        transition: background-color 160ms ease;
+      }
+      .d-settings-general .st-row:hover {
+        background: rgba(255, 255, 255, 0.018);
+      }
+      .d-settings-general .st-row.is-flash {
+        animation: sg-flash 1.4s var(--ease);
+      }
+      @keyframes sg-flash {
+        0%,
+        30% {
+          background: rgba(182, 159, 247, 0.12);
+        }
+        100% {
+          background: transparent;
+        }
+      }
+      .d-settings-general .st-text {
+        display: grid;
+        flex: 1;
+        gap: 3px;
+        min-width: 0;
+      }
+      .d-settings-general .st-title {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--text-1);
+        font-size: 13px;
+      }
+      .d-settings-general .st-eye {
+        display: inline-flex;
+        color: var(--text-3);
+        opacity: 0.7;
+      }
+      .d-settings-general .st-row:hover .st-eye {
+        color: var(--violet-bright);
+        opacity: 1;
+      }
+      .d-settings-general .st-desc {
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+      .d-settings-general .st-desc.is-warn {
+        color: var(--amber);
+      }
+      .d-settings-general .st-ctl {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+      }
+      .d-settings-general mark {
+        border-radius: 3px;
+        background: rgba(182, 159, 247, 0.24);
+        color: var(--text-1);
+      }
+      .d-settings-general .st-row .badge {
+        height: 18px;
+        font-size: 10.5px;
+      }
+
+      /* Theme tiles */
+      .d-settings-general .st-row.is-stack {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+      }
+      .d-settings-general .themes {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+      .d-settings-general .theme {
+        display: grid;
+        gap: 7px;
+        padding: 6px 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--text-2);
+        font-size: 12px;
+        text-align: left;
+      }
+      .d-settings-general .theme:hover {
+        border-color: var(--line-strong);
+        color: var(--text-1);
+      }
+      .d-settings-general .theme[aria-checked="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--text-1);
+        box-shadow: inset 0 0 0 1px rgba(182, 159, 247, 0.18);
+      }
+      .d-settings-general .theme-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 3px;
+      }
+      .d-settings-general .theme-label svg {
+        color: var(--violet-bright);
+        opacity: 0;
+      }
+      .d-settings-general .theme[aria-checked="true"] .theme-label svg {
+        opacity: 1;
+      }
+      .d-settings-general .theme-art {
+        position: relative;
+        display: flex;
+        height: 64px;
+        overflow: hidden;
+        border-radius: 6px;
+      }
+      .d-settings-general .theme-art .half {
+        position: absolute;
+        inset: 0;
+        display: flex;
+      }
+      .d-settings-general .theme-art .half + .half.is-light {
+        clip-path: polygon(62% 0, 100% 0, 100% 100%, 38% 100%);
+      }
+      .d-settings-general .ta-side {
+        width: 28%;
+        padding: 7px 5px;
+        background: var(--ta-side);
+      }
+      .d-settings-general .ta-main {
+        flex: 1;
+        padding: 8px 8px;
+        background: var(--ta-main);
+      }
+      .d-settings-general .ta-side i,
+      .d-settings-general .ta-main i {
+        display: block;
+        height: 4px;
+        margin-bottom: 5px;
+        border-radius: 2px;
+        background: var(--ta-line);
+      }
+      .d-settings-general .ta-side i:first-child {
+        background: var(--ta-accent);
+        opacity: 0.8;
+      }
+      .d-settings-general .ta-main i:nth-child(2) {
+        width: 70%;
+      }
+      .d-settings-general .ta-main i:nth-child(3) {
+        width: 84%;
+      }
+      .d-settings-general .ta-main b {
+        display: block;
+        width: 42%;
+        height: 9px;
+        margin: 8px 0 0 auto;
+        border-radius: 3px;
+        background: var(--ta-bubble);
+      }
+      .d-settings-general .is-dark {
+        --ta-side: #252129;
+        --ta-main: #1d1a21;
+        --ta-line: rgba(255, 255, 255, 0.12);
+        --ta-bubble: rgba(255, 255, 255, 0.1);
+        --ta-accent: var(--sg-accent, #9b6cff);
+      }
+      .d-settings-general .is-light {
+        --ta-side: #ece9f0;
+        --ta-main: #f8f7fa;
+        --ta-line: rgba(30, 20, 50, 0.13);
+        --ta-bubble: rgba(30, 20, 50, 0.08);
+        --ta-accent: var(--sg-accent, #9b6cff);
+      }
+
+      /* Accent swatches */
+      .d-settings-general .swatches {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .d-settings-general .swatch {
+        position: relative;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: var(--c);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+      }
+      .d-settings-general .swatch[aria-checked="true"] {
+        box-shadow:
+          0 0 0 2px var(--card),
+          0 0 0 3.5px var(--c);
+      }
+      .d-settings-general .hex {
+        width: 92px;
+        height: 26px;
+        padding: 0 8px;
+        gap: 6px;
+      }
+      .d-settings-general .hex i {
+        width: 10px;
+        height: 10px;
+        flex: none;
+        border-radius: 3px;
+        background: var(--c);
+      }
+      .d-settings-general .hex input {
+        width: 100%;
+        font: 11.5px var(--mono);
+        text-transform: lowercase;
+      }
+      .d-settings-general .hex.is-bad {
+        border-color: rgba(230, 120, 125, 0.6);
+      }
+
+      /* Range */
+      .d-settings-general .rng {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .d-settings-general .rng output {
+        min-width: 38px;
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+        text-align: right;
+      }
+      .d-settings-general input[type="range"] {
+        --fill: 25%;
+        width: 150px;
+        height: 18px;
+        margin: 0;
+        background: transparent;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .d-settings-general input[type="range"]::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 4px;
+        background: linear-gradient(90deg, var(--violet) var(--fill), rgba(255, 255, 255, 0.12) var(--fill));
+      }
+      .d-settings-general input[type="range"]::-webkit-slider-thumb {
+        width: 14px;
+        height: 14px;
+        margin-top: -5px;
+        border-radius: 50%;
+        background: #f1edf8;
+        box-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.4),
+          0 0 0 3px rgba(146, 116, 236, 0.22);
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .d-settings-general input[type="range"]::-moz-range-track {
+        height: 4px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .d-settings-general input[type="range"]::-moz-range-progress {
+        height: 4px;
+        border-radius: 4px;
+        background: var(--violet);
+      }
+      .d-settings-general input[type="range"]::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        border: 0;
+        border-radius: 50%;
+        background: #f1edf8;
+      }
+      .d-settings-general input[type="range"]:focus-visible {
+        outline: none;
+      }
+      .d-settings-general input[type="range"]:focus-visible::-webkit-slider-thumb {
+        outline: 2px solid #9d84ee;
+        outline-offset: 2px;
+      }
+
+      /* Select */
+      .d-settings-general .sel {
+        position: relative;
+        display: inline-flex;
+      }
+      .d-settings-general .sel select {
+        height: 28px;
+        min-width: 168px;
+        padding: 0 28px 0 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background: var(--control);
+        color: var(--text-1);
+        font-size: 12.5px;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .d-settings-general .sel select:hover {
+        background: var(--control-hover);
+      }
+      .d-settings-general .sel svg {
+        position: absolute;
+        top: 7px;
+        right: 8px;
+        color: var(--text-3);
+        pointer-events: none;
+      }
+
+      /* Keyboard rows */
+      .d-settings-general .kb {
+        display: inline-flex;
+        gap: 3px;
+        align-items: center;
+        min-width: 64px;
+        justify-content: flex-end;
+      }
+      .d-settings-general .kb kbd {
+        min-width: 20px;
+        height: 20px;
+        font-size: 11px;
+      }
+      .d-settings-general .kb.is-recording {
+        min-width: 112px;
+        height: 24px;
+        padding: 0 8px;
+        border: 1px solid var(--violet-line);
+        border-radius: 6px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font-size: 11.5px;
+        justify-content: center;
+      }
+      .d-settings-general .kb .unset {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* Provider and about rows */
+      .d-settings-general .prov-mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        flex: none;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--raised);
+        color: var(--text-2);
+        font: 600 11px var(--mono);
+      }
+      .d-settings-general .about {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px 14px;
+      }
+      .d-settings-general .about .sn-mark {
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+      }
+      .d-settings-general .about b {
+        display: block;
+        color: var(--text-1);
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .d-settings-general .about span {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-settings-general .about .btn {
+        margin-left: auto;
+      }
+      .d-settings-general .spin {
+        width: 12px;
+        height: 12px;
+        border: 1.5px solid rgba(255, 255, 255, 0.2);
+        border-top-color: var(--violet-bright);
+        border-radius: 50%;
+        animation: sg-spin 700ms linear infinite;
+      }
+      @keyframes sg-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Search results */
+      .d-settings-general .res-head {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        margin: 22px 0 10px;
+      }
+      .d-settings-general .res-head:first-of-type {
+        margin-top: 0;
+      }
+      .d-settings-general .res-head h4 {
+        margin: 0;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .d-settings-general .res-head button {
+        margin-left: auto;
+      }
+      .d-settings-general .res-empty {
+        padding: 48px 20px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 10px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        line-height: 1.55;
+        text-align: center;
+      }
+      .d-settings-general .res-empty strong {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 500;
+      }
+
+      /* ---------- Preview card ---------- */
+      .d-settings-general .pv-card {
+        flex: none;
+        overflow: hidden;
+      }
+      .d-settings-general .pv-card .card-head {
+        gap: 10px;
+        padding: 10px 12px 10px 14px;
+      }
+      .d-settings-general .pv-card .card-head > div:first-child {
+        min-width: 0;
+      }
+      .d-settings-general .pv-card .card-head .card-sub {
+        display: block;
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-settings-general .pv-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+      .d-settings-general .pv-sys {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+      .d-settings-general .pv-tools .seg button {
+        padding: 0 8px;
+      }
+      .d-settings-general .pv-sys[hidden] {
+        display: none;
+      }
+      .d-settings-general .pv-hold[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+      .d-settings-general .pv-hold:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .d-settings-general .pv-wrap {
+        position: relative;
+        padding: 12px;
+        background: #151318;
+      }
+      .d-settings-general .pv-frame {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(235, 228, 255, 0.14);
+        border-radius: 10px;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+      }
+      .d-settings-general .pv-frame.is-before {
+        border-color: var(--violet-line);
+        box-shadow:
+          0 0 0 3px rgba(182, 159, 247, 0.16),
+          0 18px 50px rgba(0, 0, 0, 0.45);
+      }
+      .d-settings-general .pv-frame.is-target {
+        border-color: rgba(182, 159, 247, 0.85);
+        box-shadow:
+          0 0 0 4px rgba(182, 159, 247, 0.16),
+          0 18px 50px rgba(0, 0, 0, 0.45);
+      }
+      .d-settings-general .pv-frame.is-flash {
+        animation: frame-flash 1.1s var(--ease);
+      }
+      @keyframes frame-flash {
+        0%,
+        35% {
+          border-color: rgba(182, 159, 247, 0.8);
+          box-shadow:
+            0 0 0 4px rgba(182, 159, 247, 0.16),
+            0 18px 50px rgba(0, 0, 0, 0.45);
+        }
+      }
+      .d-settings-general .card-sub.is-before {
+        color: var(--violet-bright);
+      }
+
+      /* The miniature app. Laid out at 760x560 and scaled to the frame. */
+      .d-settings-general .pv {
+        --pv-bg: #1d1a21;
+        --pv-side: #252129;
+        --pv-head: #1c1b22;
+        --pv-card: #221f27;
+        --pv-raised: #29252f;
+        --pv-well: #121117;
+        --pv-line: rgba(226, 213, 237, 0.09);
+        --pv-hair: rgba(255, 255, 255, 0.05);
+        --pv-t1: #e8e8ea;
+        --pv-t2: #a8a6ad;
+        --pv-t3: #878590;
+        --pv-accent: #9b6cff;
+        --pv-accent-soft: color-mix(in srgb, var(--pv-accent) 16%, transparent);
+        --pv-accent-text: color-mix(in srgb, var(--pv-accent) 62%, white);
+        --pv-fs: 13px;
+        --pv-d: 1;
+        --pv-r: 1;
+        --pv-chat: 430px;
+        --pv-gap: 14px;
+        --pv-mono: ui-monospace, "SF Mono", Menlo, "Lab Mono", monospace;
+        --pv-anim: 220ms;
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: flex;
+        width: 760px;
+        height: 560px;
+        overflow: hidden;
+        background: var(--pv-bg);
+        color: var(--pv-t1);
+        font-size: var(--pv-fs);
+        line-height: 1.45;
+        transform-origin: 0 0;
+        transition:
+          background-color var(--pv-anim) ease,
+          color var(--pv-anim) ease;
+      }
+      .d-settings-general .pv[data-theme="light"] {
+        --pv-bg: #f7f6f9;
+        --pv-side: #eeebf2;
+        --pv-head: #f3f1f6;
+        --pv-card: #ffffff;
+        --pv-raised: #ebe8ef;
+        --pv-well: #f1eff5;
+        --pv-line: rgba(40, 24, 70, 0.12);
+        --pv-hair: rgba(40, 24, 70, 0.07);
+        --pv-t1: #1f1c25;
+        --pv-t2: #5c5866;
+        --pv-t3: #8a8594;
+        --pv-accent-text: color-mix(in srgb, var(--pv-accent) 78%, black);
+      }
+      .d-settings-general .pv[data-contrast="high"] {
+        --pv-t2: #d2d0d6;
+        --pv-t3: #b5b2bc;
+        --pv-line: rgba(226, 213, 237, 0.22);
+      }
+      .d-settings-general .pv[data-theme="light"][data-contrast="high"] {
+        --pv-t2: #34303b;
+        --pv-t3: #4f4a58;
+        --pv-line: rgba(40, 24, 70, 0.28);
+      }
+      .d-settings-general .pv *,
+      .d-settings-general .pv *::before {
+        transition:
+          background-color var(--pv-anim) ease,
+          border-color var(--pv-anim) ease,
+          color var(--pv-anim) ease,
+          width var(--pv-anim) var(--ease),
+          max-width var(--pv-anim) var(--ease),
+          min-height var(--pv-anim) var(--ease),
+          padding var(--pv-anim) var(--ease),
+          margin var(--pv-anim) var(--ease),
+          gap var(--pv-anim) var(--ease);
+      }
+      .d-settings-general .pv p {
+        margin: 0;
+      }
+      .d-settings-general .pv svg {
+        flex: none;
+      }
+      .d-settings-general .pv-sb {
+        display: flex;
+        flex: none;
+        flex-direction: column;
+        width: 176px;
+        overflow: hidden;
+        border-right: 1px solid var(--pv-hair);
+        background: var(--pv-side);
+        color: var(--pv-t2);
+        font-size: 0.92em;
+        white-space: nowrap;
+      }
+      .d-settings-general .pv[data-sidebar="collapsed"] .pv-sb {
+        width: 0;
+        border-right-width: 0;
+      }
+      .d-settings-general .pv-sb-top {
+        display: flex;
+        flex: none;
+        align-items: center;
+        height: 36px;
+        padding: 0 8px;
+        border-bottom: 1px solid var(--pv-hair);
+      }
+      .d-settings-general .pv-mode {
+        display: grid;
+        flex: 1;
+        grid-template-columns: 1fr 1fr;
+        height: 20px;
+        font-size: 0.92em;
+        text-align: center;
+      }
+      .d-settings-general .pv-mode b {
+        border: 1px solid var(--pv-line);
+        border-radius: calc(5px * var(--pv-r));
+        background: var(--pv-card);
+        color: var(--pv-t1);
+        font-weight: 500;
+        line-height: 18px;
+      }
+      .d-settings-general .pv-mode span {
+        color: var(--pv-t3);
+        line-height: 20px;
+      }
+      .d-settings-general .pv-sb-nav {
+        padding: calc(5px * var(--pv-d)) 6px;
+        border-bottom: 1px solid var(--pv-hair);
+      }
+      .d-settings-general .pv-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: calc(24px * var(--pv-d));
+        padding: 0 6px;
+        color: var(--pv-t2);
+      }
+      .d-settings-general .pv-item svg {
+        color: var(--pv-t3);
+      }
+      .d-settings-general .pv-item kbd {
+        min-width: 0;
+        height: auto;
+        margin-left: auto;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--pv-t3);
+        font-size: 0.8em;
+      }
+      .d-settings-general .pv-label {
+        padding: calc(9px * var(--pv-d)) 12px calc(4px * var(--pv-d));
+        color: var(--pv-t3);
+        font-size: 0.86em;
+      }
+      .d-settings-general .pv-project {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 12px 4px;
+        color: var(--pv-t1);
+        font-weight: 500;
+      }
+      .d-settings-general .pv-project i {
+        width: 13px;
+        height: 13px;
+        border-radius: calc(4px * var(--pv-r));
+        background: var(--pv-accent-soft);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pv-accent) 40%, transparent);
+      }
+      .d-settings-general .pv-project span {
+        margin-left: auto;
+        color: var(--pv-t3);
+        font-weight: 400;
+      }
+      .d-settings-general .pv-row {
+        position: relative;
+        display: grid;
+        gap: 2px;
+        min-height: calc(38px * var(--pv-d));
+        margin: 1px 6px;
+        padding: calc(5px * var(--pv-d)) 8px calc(5px * var(--pv-d)) 10px;
+        border-radius: calc(5px * var(--pv-r));
+        align-content: center;
+      }
+      .d-settings-general .pv[data-targets="large"] .pv-row {
+        min-height: calc(44px * var(--pv-d));
+      }
+      .d-settings-general .pv-row b {
+        overflow: hidden;
+        color: var(--pv-t1);
+        font-weight: 500;
+        text-overflow: ellipsis;
+      }
+      .d-settings-general .pv-row span {
+        overflow: hidden;
+        color: var(--pv-t3);
+        font-size: 0.88em;
+        text-overflow: ellipsis;
+      }
+      .d-settings-general .pv-row.is-active {
+        background: color-mix(in srgb, var(--pv-t1) 7%, transparent);
+      }
+      .d-settings-general .pv-row.is-active::before {
+        content: "";
+        position: absolute;
+        top: 6px;
+        bottom: 6px;
+        left: 0;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--pv-accent);
+        box-shadow: 0 0 10px color-mix(in srgb, var(--pv-accent) 60%, transparent);
+      }
+      .d-settings-general .pv-main {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+      }
+      .d-settings-general .pv-head {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 7px;
+        height: 36px;
+        padding: 0 10px 0 12px;
+        border-bottom: 1px solid var(--pv-hair);
+        background: var(--pv-head);
+        color: var(--pv-t1);
+        white-space: nowrap;
+      }
+      .d-settings-general .pv-head svg {
+        color: var(--pv-t3);
+      }
+      .d-settings-general .pv-head-title {
+        overflow: hidden;
+        font-weight: 500;
+        text-overflow: ellipsis;
+      }
+      .d-settings-general .pv-head-end {
+        display: flex;
+        gap: 4px;
+        margin-left: auto;
+      }
+      .d-settings-general .pv-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 7px;
+        border: 1px solid transparent;
+        border-radius: calc(5px * var(--pv-r));
+        color: var(--pv-t2);
+        font-size: 0.88em;
+      }
+      .d-settings-general .pv-chip.is-on {
+        border-color: color-mix(in srgb, var(--pv-accent) 40%, transparent);
+        background: var(--pv-accent-soft);
+        color: var(--pv-accent-text);
+      }
+      .d-settings-general .pv-chip.is-on svg {
+        color: currentColor;
+      }
+      .d-settings-general .pv-count {
+        padding: 1px 4px;
+        border-radius: 3px;
+        background: var(--pv-accent-soft);
+        color: var(--pv-accent-text);
+        font: 600 0.78em/1.2 var(--pv-mono);
+      }
+      .d-settings-general .pv-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      .d-settings-general .pv-conv {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        padding: 16px 18px 12px;
+      }
+      .d-settings-general .pv-col {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: var(--pv-gap);
+        justify-content: flex-end;
+        width: 100%;
+        max-width: var(--pv-chat);
+        margin: 0 auto;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 22px);
+        mask-image: linear-gradient(180deg, transparent 0, #000 22px);
+      }
+      .d-settings-general .pv-col > * {
+        flex: none;
+      }
+      .d-settings-general .pv-user {
+        align-self: flex-end;
+        max-width: 78%;
+        padding: calc(6px * var(--pv-d)) 10px;
+        border-radius: calc(9px * var(--pv-r));
+        background: var(--pv-raised);
+        color: var(--pv-t1);
+      }
+      .d-settings-general .pv-reason {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--pv-t3);
+        font-size: 0.92em;
+      }
+      .d-settings-general .pv-reason[hidden],
+      .d-settings-general .pv-out[hidden] {
+        display: none;
+      }
+      .d-settings-general .pv-reason i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--pv-accent);
+      }
+      .d-settings-general .pv-prose {
+        color: var(--pv-t1);
+      }
+      .d-settings-general .pv-prose code {
+        padding: 0 4px;
+        border-radius: 3px;
+        background: var(--pv-accent-soft);
+        color: var(--pv-accent-text);
+        font: 0.9em var(--pv-mono);
+      }
+      .d-settings-general .pv-tool {
+        overflow: hidden;
+        border: 1px solid var(--pv-line);
+        border-radius: calc(7px * var(--pv-r));
+        background: var(--pv-card);
+      }
+      .d-settings-general .pv-tool-head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-height: calc(28px * var(--pv-d));
+        padding: 0 9px;
+        color: var(--pv-t2);
+        font-size: 0.92em;
+        white-space: nowrap;
+      }
+      .d-settings-general .pv-tool-head svg {
+        color: var(--pv-t3);
+      }
+      .d-settings-general .pv-tool-head code {
+        overflow: hidden;
+        color: var(--pv-t1);
+        font: 0.95em var(--pv-mono);
+        text-overflow: ellipsis;
+      }
+      .d-settings-general .pv-tool-head .end {
+        margin-left: auto;
+        font: 0.92em var(--pv-mono);
+      }
+      .d-settings-general .pv-add {
+        color: #65c78e;
+      }
+      .d-settings-general .pv-del {
+        color: #e6787d;
+      }
+      .d-settings-general .pv[data-theme="light"] .pv-add {
+        color: #2f9a5f;
+      }
+      .d-settings-general .pv[data-theme="light"] .pv-del {
+        color: #c8474e;
+      }
+      .d-settings-general .pv-out {
+        display: grid;
+        padding: 6px 0;
+        border-top: 1px solid var(--pv-hair);
+        background: var(--pv-well);
+        font: 0.85em/1.6 var(--pv-mono);
+      }
+      .d-settings-general .pv-out code {
+        padding: 0 10px;
+        overflow: hidden;
+        color: var(--pv-t2);
+        text-overflow: ellipsis;
+        white-space: pre;
+      }
+      .d-settings-general .pv-out .ok {
+        color: #65c78e;
+      }
+      .d-settings-general .pv-out .hunk {
+        color: #8a84c9;
+      }
+      .d-settings-general .pv-out .a {
+        background: rgba(101, 199, 142, 0.1);
+        color: #a8e2bf;
+      }
+      .d-settings-general .pv-out .d {
+        background: rgba(230, 120, 125, 0.1);
+        color: #f0b0b3;
+      }
+      .d-settings-general .pv[data-theme="light"] .pv-out .a {
+        color: #23774a;
+      }
+      .d-settings-general .pv[data-theme="light"] .pv-out .d {
+        color: #a83a40;
+      }
+      .d-settings-general .pv-task {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: calc(8px * var(--pv-d)) 11px;
+        border: 1px solid var(--pv-line);
+        border-radius: calc(8px * var(--pv-r));
+        background: var(--pv-card);
+      }
+      .d-settings-general .pv-task > span {
+        display: grid;
+        gap: 2px;
+      }
+      .d-settings-general .pv-task b {
+        font-weight: 500;
+      }
+      .d-settings-general .pv-task span span {
+        color: var(--pv-t3);
+        font-size: 0.88em;
+      }
+      .d-settings-general .pv-task i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--pv-accent);
+        box-shadow: 0 0 8px var(--pv-accent);
+      }
+      .d-settings-general .pv-meta {
+        color: var(--pv-t3);
+        font-size: 0.88em;
+      }
+      .d-settings-general .pv-composer {
+        flex: none;
+        width: 100%;
+        max-width: var(--pv-chat);
+        margin: 10px auto 0;
+        padding: 9px 10px 8px;
+        border: 1px solid var(--pv-line);
+        border-radius: calc(10px * var(--pv-r));
+        background: var(--pv-card);
+      }
+      .d-settings-general .pv[data-glass="on"] .pv-composer {
+        background: color-mix(in srgb, var(--pv-card) 72%, transparent);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 10px 30px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(10px);
+      }
+      .d-settings-general .pv-composer p {
+        margin-bottom: 9px;
+        color: var(--pv-t3);
+      }
+      .d-settings-general .pv-comp-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--pv-t2);
+        font-size: 0.88em;
+        white-space: nowrap;
+      }
+      .d-settings-general .pv-comp-row span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+      .d-settings-general .pv-comp-row .dotm {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--pv-t3);
+      }
+      .d-settings-general .pv-send {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        margin-left: auto;
+        place-items: center;
+        border-radius: calc(7px * var(--pv-r));
+        background: var(--pv-accent);
+        color: #fff;
+      }
+      .d-settings-general .pv-changes {
+        display: flex;
+        flex: none;
+        flex-direction: column;
+        width: 0;
+        overflow: hidden;
+        border-left: 0 solid var(--pv-hair);
+        background: var(--pv-head);
+        white-space: nowrap;
+      }
+      .d-settings-general .pv[data-panel="changes"] .pv-changes {
+        width: 250px;
+        border-left-width: 1px;
+      }
+      .d-settings-general .pv-ch-tabs {
+        display: flex;
+        flex: none;
+        align-items: center;
+        height: 34px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--pv-hair);
+      }
+      .d-settings-general .pv-ch-tab {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 6px;
+        border-radius: calc(5px * var(--pv-r));
+        background: var(--pv-raised);
+        color: var(--pv-t1);
+        font-size: 0.92em;
+      }
+      .d-settings-general .pv-ch-tab svg {
+        color: var(--pv-accent-text);
+      }
+      .d-settings-general .pv-ch-tab::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        bottom: -7px;
+        left: 0;
+        height: 1.5px;
+        background: var(--pv-accent);
+      }
+      .d-settings-general .pv-ch-sum {
+        display: flex;
+        gap: 8px;
+        padding: 9px 14px 6px;
+        color: var(--pv-t2);
+        font-size: 0.92em;
+      }
+      .d-settings-general .pv-ch-sum span:first-child {
+        flex: 1;
+      }
+      .d-settings-general .pv-ch-sum span:not(:first-child),
+      .d-settings-general .pv-file .end {
+        font: 0.85em var(--pv-mono);
+      }
+      .d-settings-general .pv-file {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-height: calc(36px * var(--pv-d));
+        margin: 0 6px;
+        padding: calc(4px * var(--pv-d)) 8px;
+        border-radius: calc(5px * var(--pv-r));
+      }
+      .d-settings-general .pv[data-targets="large"] .pv-file {
+        min-height: calc(42px * var(--pv-d));
+      }
+      .d-settings-general .pv-file:first-of-type {
+        background: color-mix(in srgb, var(--pv-t1) 5%, transparent);
+      }
+      .d-settings-general .pv-file svg {
+        color: var(--pv-t3);
+      }
+      .d-settings-general .pv-file div {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+      }
+      .d-settings-general .pv-file b {
+        color: var(--pv-t1);
+        font-weight: 400;
+      }
+      .d-settings-general .pv-file span {
+        overflow: hidden;
+        color: var(--pv-t3);
+        font-size: 0.86em;
+        text-overflow: ellipsis;
+      }
+      .d-settings-general .pv-file .end {
+        display: flex;
+        gap: 5px;
+      }
+
+      /* Where a setting lands: hover a row to outline it, change it to flash it. */
+      .d-settings-general .pv [data-pv] {
+        outline: 1.5px solid transparent;
+        outline-offset: -1px;
+      }
+      .d-settings-general .pv.is-pointing [data-pv].is-target {
+        outline-color: color-mix(in srgb, var(--violet-bright) 85%, transparent);
+        box-shadow: 0 0 0 4px rgba(182, 159, 247, 0.16);
+      }
+      .d-settings-general .pv [data-pv].is-flash {
+        animation: pv-flash 1.1s var(--ease);
+      }
+      @keyframes pv-flash {
+        0%,
+        35% {
+          outline-color: rgba(182, 159, 247, 0.95);
+          box-shadow: 0 0 0 5px rgba(182, 159, 247, 0.2);
+        }
+        100% {
+          outline-color: transparent;
+          box-shadow: 0 0 0 0 transparent;
+        }
+      }
+
+      /* ---------- Changes this visit ---------- */
+      .d-settings-general .hist {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+      .d-settings-general .hist .card-head {
+        padding: 10px 12px 10px 14px;
+      }
+      .d-settings-general .hist-list {
+        flex: 1;
+        min-height: 0;
+        margin: 0;
+        padding: 6px;
+        list-style: none;
+      }
+      .d-settings-general .hist-row {
+        gap: 10px;
+        padding: 5px 6px 5px 10px;
+        animation: hist-in 260ms var(--ease);
+      }
+      @keyframes hist-in {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+      }
+      .d-settings-general .hist-mark {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        flex: none;
+        place-items: center;
+        border-radius: 6px;
+        background: var(--raised);
+        color: var(--text-2);
+      }
+      .d-settings-general .hist-mark i {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+        background: var(--c, var(--violet));
+      }
+      .d-settings-general .hist-row .row-sub b {
+        color: var(--text-2);
+        font-weight: 500;
+      }
+      .d-settings-general .hist-row time {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+      .d-settings-general .hist-empty {
+        display: grid;
+        flex: 1;
+        place-content: center;
+        gap: 6px;
+        padding: 20px 40px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.55;
+        text-align: center;
+      }
+      .d-settings-general .try {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .d-settings-general .hist-empty strong {
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      /* ---------- Dialog and toast ---------- */
+      .d-settings-general .sg-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        background: rgba(8, 6, 12, 0.55);
+        animation: sg-fade 160ms ease;
+      }
+      .d-settings-general .sg-scrim[hidden] {
+        display: none;
+      }
+      @keyframes sg-fade {
+        from {
+          opacity: 0;
+        }
+      }
+      .d-settings-general .sg-dialog {
+        width: 420px;
+        padding: 18px;
+        animation: sg-pop 200ms var(--ease);
+      }
+      @keyframes sg-pop {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.98);
+        }
+      }
+      .d-settings-general .sg-dialog h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0 0 6px;
+        color: var(--text-1);
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .d-settings-general .sg-dialog p {
+        margin: 0 0 14px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+      .d-settings-general .sg-dialog label {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-settings-general .sg-dialog .input {
+        height: 32px;
+      }
+      .d-settings-general .sg-dialog .input input {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .d-settings-general .sg-dialog .note {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 10px 0 16px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-settings-general .sg-dialog .err {
+        margin: 8px 0 0;
+        color: var(--red);
+        font-size: 11.5px;
+      }
+      .d-settings-general .sg-dialog .err[hidden] {
+        display: none;
+      }
+      .d-settings-general .sg-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 6px);
+        }
+      }
+      .d-settings-general .sg-toast {
+        position: absolute;
+        bottom: 22px;
+        left: calc(248px + 290px);
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 8px 8px 14px;
+        border-radius: 10px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        animation: toast-in 220ms var(--ease);
+      }
+      .d-settings-general .sg-toast[hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="settings-general"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-settings-general">
+            <div class="app">
+              <aside class="sn" id="sn" aria-label="Settings sections"></aside>
+              <main class="app-main">
+                <header class="app-header">
+                  <span class="sg-crumbs"><span>Settings</span><i data-icon="chevron-right" data-size="13"></i></span>
+                  <h2 id="crumb">Appearance</h2>
+                  <div class="app-header-end">
+                    <span class="sg-saved"><span class="dot dot-green"></span>Applies instantly, saved on this Mac</span>
+                    <button class="btn btn-sm" type="button" id="reset-section">Restore defaults</button>
+                  </div>
+                </header>
+                <div class="sg-body">
+                  <div class="sg-col scroll" id="content" tabindex="-1"></div>
+                  <aside class="sg-side" aria-label="Live preview">
+                    <section class="card pv-card">
+                      <div class="card-head">
+                        <div>
+                          <h3 class="card-title">Live preview</h3>
+                          <span class="card-sub" id="pv-sub">A Vectordev.ai session, as you have it set up</span>
+                        </div>
+                        <div class="pv-tools">
+                          <span class="pv-sys" id="pv-sys" hidden>
+                            Mac
+                            <span class="seg" id="sys-seg" role="group" aria-label="Simulate system appearance">
+                              <button type="button" data-value="dark" aria-pressed="true">Dark</button>
+                              <button type="button" data-value="light" aria-pressed="false">Light</button>
+                            </span>
+                          </span>
+                          <span class="seg" id="pv-panel" role="group" aria-label="Preview view">
+                            <button type="button" data-value="chat" aria-pressed="true">Chat</button>
+                            <button type="button" data-value="changes" aria-pressed="false">Changes</button>
+                          </span>
+                          <button class="btn btn-sm pv-hold" type="button" id="pv-hold" aria-pressed="false" disabled title="Hold to see Vector as it was when you opened Settings">Hold to compare</button>
+                        </div>
+                      </div>
+                      <div class="pv-wrap">
+                        <div class="pv-frame" id="pv-frame">
+                          <div class="pv" id="pv" data-theme="dark" data-panel="chat" data-glass="on">
+                            <aside class="pv-sb" data-pv="sidebar">
+                              <div class="pv-sb-top"><span class="pv-mode"><b>Agent</b><span>Editor</span></span></div>
+                              <div class="pv-sb-nav">
+                                <p class="pv-item"><i data-icon="home" data-size="12"></i>Home</p>
+                                <p class="pv-item"><i data-icon="search" data-size="12"></i>Search<kbd>⌘P</kbd></p>
+                              </div>
+                              <p class="pv-label">Projects</p>
+                              <p class="pv-project"><i></i>Vectordev.ai<span>3</span></p>
+                              <div class="pv-row is-active" data-pv="rows accent"><b>Review the workspace trust changes</b><span>security-boundaries · Ready</span></div>
+                              <div class="pv-row" data-pv="rows"><b>Fix scroll state</b><span>fix-scroll-state · Testing</span></div>
+                              <div class="pv-row" data-pv="rows"><b>Regenerate the SDK</b><span>regenerate-sdk · Done</span></div>
+                              <p class="pv-label">Project tools</p>
+                              <div class="pv-sb-nav" style="border:0;padding-top:0">
+                                <p class="pv-item"><i data-icon="dashboard" data-size="12"></i>Agent Dashboard</p>
+                                <p class="pv-item"><i data-icon="browser" data-size="12"></i>Browser</p>
+                              </div>
+                            </aside>
+                            <section class="pv-main">
+                              <header class="pv-head">
+                                <i data-icon="branch" data-size="13"></i>
+                                <span class="pv-head-title">Review the workspace trust changes</span>
+                                <span class="pv-head-end">
+                                  <span class="pv-chip"><i data-icon="task" data-size="12"></i>Tasks</span>
+                                  <span class="pv-chip" id="pv-changes-chip" data-pv="accent"><i data-icon="review" data-size="12"></i>Changes<span class="pv-count">6</span></span>
+                                  <span class="pv-chip"><i data-icon="terminal" data-size="12"></i>Terminal</span>
+                                </span>
+                              </header>
+                              <div class="pv-body">
+                                <div class="pv-conv">
+                                  <div class="pv-col" data-pv="chat text">
+                                    <p class="pv-user">Tighten the trust check so a moved folder loses its trust.</p>
+                                    <p class="pv-reason" id="pv-reason" data-pv="reasoning"><i></i>Checking how trust records are keyed, and what moves a folder</p>
+                                    <p class="pv-prose">Trust is now bound to a fingerprint of the folder, so a moved or edited folder counts as a new one. <code>trusted()</code> compares the fingerprint before anything runs.</p>
+                                    <div class="pv-tool" data-pv="shell">
+                                      <div class="pv-tool-head"><i data-icon="terminal" data-size="12"></i>Shell<code>bun test packages/engine/test/project</code><span class="end pv-add">5 pass</span></div>
+                                      <div class="pv-out" id="pv-shell-out" data-pv="code">
+                                        <code><span class="ok">✓</span> a changed fingerprint revokes trust [1.12ms]</code>
+                                        <code><span class="ok">✓</span> project policy cannot widen permissions [0.67ms]</code>
+                                        <code><span class="ok">✓</span> project MCP servers wait for trust [1.38ms]</code>
+                                      </div>
+                                    </div>
+                                    <div class="pv-tool" data-pv="edit">
+                                      <div class="pv-tool-head"><i data-icon="review" data-size="12"></i>Edit<code>packages/engine/src/project/trust.ts</code><span class="end"><span class="pv-add">+40</span> <span class="pv-del">−5</span></span></div>
+                                      <div class="pv-out" id="pv-edit-out" data-pv="code">
+                                        <code class="hunk">@@ -41,3 +41,6 @@ export function trusted(project: Project) {</code>
+                                        <code class="d">-  return settings.trusted.includes(project.directory)</code>
+                                        <code class="a">+  const record = settings.trusted.find((item) =&gt; item.directory === project.directory)</code>
+                                        <code class="a">+  return record?.fingerprint === fingerprint(project)</code>
+                                      </div>
+                                    </div>
+                                    <div class="pv-task" data-pv="accent"><span><b>Final security diff audit</b><span>Specialist · Security · 1 agent · 2m 14s</span></span><i></i></div>
+                                    <p class="pv-meta">4m 12s · 33K tokens · 1 running task</p>
+                                  </div>
+                                  <div class="pv-composer" data-pv="composer">
+                                    <p>Ask anything, / for commands, @ for context…</p>
+                                    <div class="pv-comp-row">
+                                      <span><i data-icon="model" data-size="11"></i><span id="pv-model">GPT-6 Sol</span></span>
+                                      <span><i class="dotm"></i>Manual</span>
+                                      <span><i class="dotm"></i><span id="pv-effort">High</span></span>
+                                      <span class="pv-send" data-pv="accent"><i data-icon="arrow" data-size="12"></i></span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <aside class="pv-changes" data-pv="changes">
+                                  <div class="pv-ch-tabs"><span class="pv-ch-tab"><i data-icon="review" data-size="12"></i>Changes<span class="pv-count">6</span></span></div>
+                                  <p class="pv-ch-sum"><span>6 files changed</span><span class="pv-add">+174</span><span class="pv-del">−12</span></p>
+                                  <div class="pv-file" data-pv="rows"><i data-icon="chevron-right" data-size="11"></i><div><b>trust.ts</b><span>packages/engine/src/project/</span></div><span class="end"><span class="pv-add">+40</span><span class="pv-del">−5</span></span></div>
+                                  <div class="pv-file" data-pv="rows"><i data-icon="chevron-right" data-size="11"></i><div><b>project-policy.ts</b><span>packages/engine/src/config/</span></div><span class="end"><span class="pv-add">+15</span><span class="pv-del">−4</span></span></div>
+                                  <div class="pv-file" data-pv="rows"><i data-icon="chevron-right" data-size="11"></i><div><b>launch.ts</b><span>packages/engine/src/mcp/</span></div><span class="end"><span class="pv-add">+8</span><span class="pv-del">−1</span></span></div>
+                                  <div class="pv-file" data-pv="rows"><i data-icon="chevron-right" data-size="11"></i><div><b>executable.ts</b><span>packages/engine/src/permission/</span></div><span class="end"><span class="pv-add">+11</span><span class="pv-del">−2</span></span></div>
+                                  <div class="pv-file" data-pv="rows"><i data-icon="chevron-right" data-size="11"></i><div><b>workspace-trust-dialog.tsx</b><span>packages/app/src/components/</span></div><span class="end"><span class="pv-add">+38</span><span class="pv-del">−0</span></span></div>
+                                  <div class="pv-file" data-pv="rows"><i data-icon="chevron-right" data-size="11"></i><div><b>trust.test.ts</b><span>packages/engine/test/project/</span></div><span class="end"><span class="pv-add">+62</span><span class="pv-del">−0</span></span></div>
+                                </aside>
+                              </div>
+                            </section>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section class="card hist" aria-labelledby="hist-title">
+                      <div class="card-head">
+                        <h3 class="card-title" id="hist-title">Changes this visit</h3>
+                        <span class="count" id="hist-count" hidden>0</span>
+                        <button class="btn btn-sm btn-ghost" type="button" id="undo-all" style="margin-left:auto" hidden>Undo all</button>
+                      </div>
+                      <ul class="hist-list scroll" id="hist-list"></ul>
+                      <div class="hist-empty" id="hist-empty">
+                        <strong>Nothing changed yet</strong>
+                        <span>Every change applies the moment you make it and is remembered on this Mac. It is listed here so you can take it back.</span>
+                        <span class="try" aria-label="Try a change">
+                          <button type="button" class="btn btn-sm" data-try="theme:light">Light theme</button>
+                          <button type="button" class="btn btn-sm" data-try="density:compact">Compact density</button>
+                          <button type="button" class="btn btn-sm" data-try="chatWidth:full">Full-width chat</button>
+                        </span>
+                      </div>
+                    </section>
+                  </aside>
+                </div>
+              </main>
+            </div>
+
+            <div class="sg-scrim" id="dialog" hidden>
+              <div class="float sg-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+                <h3 id="dialog-title"><span class="prov-mark">G</span>Connect Google AI</h3>
+                <p>Paste an API key from Google AI Studio. Gemini models then appear in the model picker, priced from the model catalog.</p>
+                <label for="dialog-key">API key</label>
+                <span class="input"><input id="dialog-key" type="password" placeholder="AIza…" autocomplete="off" spellcheck="false" /></span>
+                <p class="err" id="dialog-err" hidden>That doesn’t look like a Google AI key. Keys start with AIza.</p>
+                <span class="note"><i data-icon="check" data-size="13"></i>Stored in this Mac’s keychain. Vector never sends it anywhere but Google.</span>
+                <div class="sg-actions">
+                  <button class="btn" type="button" data-dialog-close>Cancel</button>
+                  <button class="btn btn-primary" type="button" id="dialog-ok">Connect</button>
+                </div>
+              </div>
+            </div>
+            <div class="float sg-toast" id="toast" role="status" aria-live="polite" hidden>
+              <span id="toast-text"></span>
+              <button class="btn btn-sm btn-ghost" type="button" id="toast-undo" hidden>Undo</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-settings-general")
+        const $ = (sel) => root.querySelector(sel)
+        const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const stroke = (body, size = 15) =>
+          `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+        const ICONS = {
+          sliders: '<path d="M2.75 5h6.5M12 5h1.25M2.75 11h1.5M7 11h6.25"/><circle cx="10.6" cy="5" r="1.35"/><circle cx="5.6" cy="11" r="1.35"/>',
+          palette: '<circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none" opacity=".45"/>',
+          code: '<path d="m5.75 4.75-3.25 3.25 3.25 3.25M10.25 4.75l3.25 3.25-3.25 3.25"/>',
+          bell: '<path d="M4.4 10.6V7.4a3.6 3.6 0 0 1 7.2 0v3.2l1.1 1.4H3.3l1.1-1.4ZM6.7 13.4a1.4 1.4 0 0 0 2.6 0"/>',
+          shield: '<path d="M8 2.25 3.25 4v3.55c0 2.9 1.95 5.15 4.75 6.2 2.8-1.05 4.75-3.3 4.75-6.2V4L8 2.25Z"/><path d="m6 8 1.4 1.4L10.2 6.6"/>',
+          key: '<circle cx="5.4" cy="10.6" r="2.6"/><path d="m7.3 8.7 5.4-5.4M10.6 5.4l1.6 1.6M12 4l1.1 1.1"/>',
+          bars: '<path d="M2.75 13.25h10.5M4.6 13.25V9M8 13.25V3.5M11.4 13.25V6.75"/>',
+          team: '<circle cx="6" cy="5.6" r="2.3"/><path d="M2.4 13.1c.4-2.2 1.8-3.4 3.6-3.4s3.2 1.2 3.6 3.4M10.6 3.4a2.25 2.25 0 0 1 0 4.4M11.7 9.8c1 .45 1.65 1.5 1.9 3.3"/>',
+          keyboard: '<rect x="2" y="4.25" width="12" height="7.5" rx="1.6"/><path d="M4.6 6.8h.01M6.8 6.8h.01M9.2 6.8h.01M11.4 6.8h.01M5.4 9.3h5.2"/>',
+          access: '<circle cx="8" cy="3.5" r="1.15"/><path d="M3.25 6.1h9.5M8 6.1v3.6M8 9.7l-2 3.7M8 9.7l2 3.7"/>',
+          download: '<path d="M8 2.75v7.5M5 7.4l3 3 3-3M3 13.25h10"/>',
+          eye: '<path d="M1.75 8s2.3-4.25 6.25-4.25S14.25 8 14.25 8 11.95 12.25 8 12.25 1.75 8 1.75 8Z"/><circle cx="8" cy="8" r="1.9"/>',
+          out: '<path d="M6.25 4.25h5.5v5.5M11.5 4.5 4.25 11.75"/>',
+          play: '<path d="M5.5 3.9v8.2L12 8 5.5 3.9Z"/>',
+          undo: '<path d="M5.5 4.25 2.75 7l2.75 2.75"/><path d="M3 7h6.25a3.5 3.5 0 0 1 0 7H7.5"/>',
+        }
+        const icon = (name, size = 15) => (ICONS[name] ? stroke(ICONS[name], size) : LabUI.svg(name, size))
+
+        // ---------- The settings model (names and defaults from packages/app/src/context/settings.tsx) ----------
+        const ACCENTS = [
+          { name: "Vector violet", hex: "#9b6cff" },
+          { name: "Indigo", hex: "#7c83f2" },
+          { name: "Blue", hex: "#5aa2e6" },
+          { name: "Teal", hex: "#3fb6a6" },
+          { name: "Green", hex: "#5fbf85" },
+          { name: "Amber", hex: "#d9a253" },
+          { name: "Rose", hex: "#e07aa0" },
+        ]
+        const MODELS = [
+          ["openai/gpt-6-sol", "GPT-6 Sol", "ChatGPT"],
+          ["openai/gpt-6.1-sol", "GPT-6.1 Sol", "ChatGPT"],
+          ["openai/gpt-6-astra", "GPT-6 Astra", "ChatGPT"],
+          ["openai/gpt-5.6-sol", "GPT-5.6 Sol", "ChatGPT"],
+          ["openai/gpt-6-luna", "GPT-6 Luna", "ChatGPT"],
+          ["anthropic/claude-sonnet-4-5", "Claude Sonnet 4.5", "Anthropic"],
+          ["openrouter/qwen3-coder:free", "Qwen3 Coder (free)", "OpenRouter"],
+        ]
+        const KEYS = [
+          ["palette", "Command palette", "⌘⇧P"],
+          ["search", "Search", "⌘P"],
+          ["newchat", "New chat", "⌘T"],
+          ["sidebar", "Toggle sidebar", "⌘B"],
+          ["terminal", "Toggle terminal", "⌃`"],
+          ["filetree", "Toggle file tree", "⌘\\"],
+          ["model", "Choose model", "⌘'"],
+          ["agent", "Cycle agent", "⌘."],
+          ["effort", "Cycle effort", "⇧⌘D"],
+          ["attach", "Attach file", "⌘U"],
+          ["settings", "Open settings", "⌘,"],
+        ]
+        const SPECIALISTS = [
+          ["explore", "Explore", "Fast read-only search across a codebase when the raw output would flood the main context.", true],
+          ["review", "Review", "Reviews a diff for correctness, regressions and missing tests without editing.", true],
+          ["judge", "Judge", "Scores requirement coverage, correctness and evidence, then returns PASS, FAIL or INCONCLUSIVE.", true],
+          ["debug", "Debug", "Reproduces failures, isolates the root cause and verifies a focused repair.", false],
+          ["test", "Test", "Designs focused coverage, writes or repairs tests and runs the relevant suite.", false],
+          ["security", "Security", "Read-only review of trust boundaries, secrets, injection and unsafe data flow.", true],
+          ["performance", "Performance", "Measures a baseline, applies focused optimizations and verifies the gain.", false],
+          ["migration", "Migration", "Framework, dependency and schema upgrades with staged, reversible steps.", false],
+        ]
+
+        const DEFAULTS = {
+          launchOnStartup: false,
+          reopenLastProject: true,
+          reopenPreviousChats: true,
+          landing: "home",
+          reasoning: false,
+          shellExpanded: false,
+          editExpanded: false,
+          llmJudge: false,
+          autoRouting: false,
+          confirmDelete: true,
+          autoSave: true,
+          crash: false,
+          theme: "dark",
+          accent: "#9b6cff",
+          fontSize: 14,
+          density: "comfortable",
+          mono: "system",
+          chatWidth: "focused",
+          spacing: "comfortable",
+          rounded: true,
+          glass: true,
+          sidebarCollapsed: false,
+          reduceMotion: false,
+          edFontSize: 14,
+          edFont: "system",
+          lineHeight: "1.6",
+          wordWrap: true,
+          lineNumbers: true,
+          activeLine: true,
+          whitespace: false,
+          autocomplete: true,
+          followAgent: true,
+          notifyAgent: true,
+          notifyPermissions: true,
+          notifyErrors: false,
+          sounds: true,
+          sound: "staplebops-01",
+          model: "openai/gpt-6-sol",
+          smallModel: "openai/gpt-6-luna",
+          effort: "high",
+          freeOnly: false,
+          subagents: true,
+          customAgents: false,
+          uiScale: 100,
+          highContrast: false,
+          focusRings: true,
+          largeTargets: false,
+          channel: "stable",
+          releaseNotes: true,
+        }
+        KEYS.forEach((k) => (DEFAULTS[`kb_${k[0]}`] = k[2]))
+        SPECIALISTS.forEach((s) => (DEFAULTS[`sp_${s[0]}`] = true))
+        // How this person already has Vector set up: a few choices away from the defaults.
+        const state = Object.assign({}, DEFAULTS, { reasoning: true, mono: "jetbrains", llmJudge: true, sp_migration: false })
+        const before = Object.assign({}, state)
+
+        const onOff = [
+          [true, "On"],
+          [false, "Off"],
+        ]
+        const sw = (id, title, desc, extra = {}) => Object.assign({ id, type: "switch", title, desc }, extra)
+        const seg = (id, title, desc, options, extra = {}) => Object.assign({ id, type: "seg", title, desc, options }, extra)
+        const sel = (id, title, desc, options, extra = {}) => Object.assign({ id, type: "select", title, desc, options }, extra)
+
+        const SECTIONS = [
+          {
+            id: "general",
+            label: "General",
+            kicker: "General",
+            title: "How Vector behaves",
+            desc: "Startup, how much of an agent's work the transcript shows, and whether Vector proves its work before it reports done.",
+            cards: [
+              {
+                title: "Startup",
+                desc: "What you see when Vector opens.",
+                rows: [
+                  sw("launchOnStartup", "Launch on startup", "Open Vector when you sign in to this Mac."),
+                  sw("reopenLastProject", "Reopen last project", "Start in the project you had open instead of on Home."),
+                  sw("reopenPreviousChats", "Reopen previous chats", "Restore the chats that were open as tabs."),
+                  seg("landing", "Default landing page", "Where a new window starts.", [
+                    ["home", "Home"],
+                    ["last-project", "Last project"],
+                    ["new-chat", "New chat"],
+                  ]),
+                ],
+              },
+              {
+                title: "Conversation details",
+                desc: "How much of an agent's work the transcript shows.",
+                rows: [
+                  sw("reasoning", "Show reasoning summaries", "A short line on what the model is working through, above its reply.", { affects: "reasoning" }),
+                  sw("shellExpanded", "Expand shell output", "Show command output open instead of collapsed to its first line.", { affects: "shell" }),
+                  sw("editExpanded", "Expand edits", "Show each edit's diff inline in the conversation.", { affects: "edit" }),
+                ],
+              },
+              {
+                title: "Verified completion",
+                desc: "Have Vector prove its work matches what you asked before it reports done.",
+                rows: [
+                  sw("llmJudge", "LLM-as-a-judge", "A separate judge compares the result with your request and the checks it ran. On a failed verdict Vector repairs it, up to three rounds.", { badge: ["Extra model calls", ""] }),
+                  sw("autoRouting", "Automatic model routing", "Switch to a stronger model when a task looks complex. This spends your own key at that model's rate.", { warnOn: "Uses your key at the stronger model's rate, which can be many times higher." }),
+                ],
+              },
+              {
+                title: "Chats and local data",
+                desc: "Preferences and caches stored on this Mac. Project files are never touched.",
+                rows: [
+                  sw("confirmDelete", "Confirm before deleting chats", ""),
+                  sw("autoSave", "Keep unsent drafts", "Remember what you typed when you switch chats."),
+                  sw("crash", "Share crash diagnostics", "Version, OS and stack traces when the interface crashes. Prompts, files and keys are never attached."),
+                  { id: "clearCache", type: "action", title: "Clear local caches", desc: "File previews and model lists: 184 MB.", button: "Clear caches" },
+                ],
+              },
+            ],
+          },
+          {
+            id: "appearance",
+            label: "Appearance",
+            kicker: "Appearance",
+            title: "Shape the workspace",
+            desc: "Every choice applies instantly and is remembered on this Mac. Hover a setting to see where it lands in the preview.",
+            cards: [
+              {
+                title: "Theme",
+                desc: "Interface colors and the accent Vector uses for its own actions.",
+                rows: [
+                  { id: "theme", type: "theme", title: "Color scheme", desc: "Follow the system, or pin light or dark.", affects: "all", keywords: "dark light system mode" },
+                  { id: "accent", type: "accent", title: "Accent color", desc: "Focused controls, highlights and Vector actions.", affects: "accent", keywords: "color colour highlight" },
+                ],
+              },
+              {
+                title: "Text and density",
+                desc: "Size and spacing across the sidebar, lists and panels.",
+                rows: [
+                  { id: "fontSize", type: "range", title: "Interface font size", desc: "", min: 12, max: 20, step: 1, unit: "px", affects: "all", keywords: "text size zoom" },
+                  seg("density", "Density", "Row height and padding in lists like Changes.", [
+                    ["compact", "Compact"],
+                    ["comfortable", "Comfortable"],
+                    ["spacious", "Spacious"],
+                  ], { affects: "rows" }),
+                  sel("mono", "Code font", "Diffs, shell output and inline code.", [
+                    ["system", "System mono"],
+                    ["jetbrains", "JetBrains Mono"],
+                    ["sf", "SF Mono"],
+                    ["fira", "Fira Code"],
+                    ["geist", "Geist Mono"],
+                  ], { affects: "code", keywords: "monospace typeface" }),
+                ],
+              },
+              {
+                title: "Conversation layout",
+                desc: "Keep the chat canvas comfortable to read.",
+                rows: [
+                  seg("chatWidth", "Chat width", "How wide the conversation column runs.", [
+                    ["focused", "Focused"],
+                    ["wide", "Wide"],
+                    ["full", "Full"],
+                  ], { affects: "chat composer" }),
+                  seg("spacing", "Message spacing", "Space between messages and tool calls.", [
+                    ["compact", "Compact"],
+                    ["comfortable", "Comfortable"],
+                    ["relaxed", "Relaxed"],
+                  ], { affects: "chat" }),
+                ],
+              },
+              {
+                title: "Window",
+                desc: "Rounding, transparency and motion.",
+                rows: [
+                  sw("rounded", "Rounded corners", "Softer corners on controls, cards and panels.", { affects: "all" }),
+                  sw("glass", "Soft glass panels", "Subtle transparency where the renderer supports it.", { affects: "composer" }),
+                  sw("sidebarCollapsed", "Collapse sidebar by default", "Open windows with the sidebar hidden. ⌘B brings it back.", { affects: "sidebar" }),
+                  sw("reduceMotion", "Reduce motion", "Shorter, calmer transitions everywhere.", { keywords: "animation" }),
+                ],
+              },
+            ],
+          },
+          {
+            id: "editor",
+            label: "Editor",
+            kicker: "Editor",
+            title: "Code editor preferences",
+            desc: "Local editor behavior for readable, calm coding sessions.",
+            cards: [
+              {
+                title: "Typography",
+                desc: "How code is displayed in the editor.",
+                rows: [
+                  { id: "edFontSize", type: "range", title: "Font size", desc: "", min: 11, max: 20, step: 1, unit: "px" },
+                  sel("edFont", "Font family", "", [
+                    ["system", "System mono"],
+                    ["jetbrains", "JetBrains Mono"],
+                    ["sf", "SF Mono"],
+                    ["fira", "Fira Code"],
+                    ["geist", "Geist Mono"],
+                  ]),
+                  seg("lineHeight", "Line height", "", [
+                    ["1.4", "1.4"],
+                    ["1.6", "1.6"],
+                    ["1.8", "1.8"],
+                  ]),
+                ],
+              },
+              {
+                title: "Editing behavior",
+                desc: "Applied to the file editor live.",
+                rows: [
+                  sw("wordWrap", "Word wrap", ""),
+                  sw("lineNumbers", "Show line numbers", ""),
+                  sw("activeLine", "Highlight active line", ""),
+                  sw("whitespace", "Render whitespace", ""),
+                  sw("autocomplete", "AI autocomplete", "Ghost-text suggestions as you type. Tab to accept."),
+                  sw("followAgent", "Follow the agent in the editor", "Open the file an agent is editing and scroll to the lines it changes, live."),
+                ],
+              },
+            ],
+          },
+          {
+            id: "notifications",
+            label: "Notifications",
+            kicker: "Notifications",
+            title: "Local alerts",
+            desc: "Desktop notifications and sounds for the moments that need you.",
+            cards: [
+              {
+                title: "Signals",
+                desc: "Shown by macOS when Vector is in the background.",
+                rows: [
+                  sw("notifyAgent", "Agent finished or needs input", "A notification when a run completes or asks a question."),
+                  sw("notifyPermissions", "Permission requests", "When an agent is waiting for you to allow a tool."),
+                  sw("notifyErrors", "Errors", "When a run fails or a provider rejects a request."),
+                  sw("sounds", "Sound effects", "Master switch for agent, permission and error sounds."),
+                  { id: "sound", type: "sound", title: "Agent sound", desc: "Played when an agent finishes.", options: [
+                    ["staplebops-01", "Staplebops 01"],
+                    ["staplebops-02", "Staplebops 02"],
+                    ["nope-03", "Nope 03"],
+                    ["glass-04", "Glass 04"],
+                  ] },
+                ],
+              },
+            ],
+          },
+          {
+            id: "models",
+            label: "Models",
+            kicker: "Models",
+            title: "Default models",
+            desc: "What new chats start with. The composer always shows the model actually in use.",
+            cards: [
+              {
+                title: "Defaults",
+                desc: "Every model your connected providers offer is listed.",
+                rows: [
+                  sel("model", "Default model", "New chats and agent workspaces start here.", MODELS.map((m) => [m[0], `${m[1]} · ${m[2]}`]), { affects: "composer" }),
+                  sel("smallModel", "Small model", "Titles, summaries and other quick work.", MODELS.map((m) => [m[0], `${m[1]} · ${m[2]}`])),
+                  seg("effort", "Default effort", "How long models may think before answering.", [
+                    ["low", "Low"],
+                    ["medium", "Medium"],
+                    ["high", "High"],
+                    ["max", "Max"],
+                  ], { affects: "composer", keywords: "reasoning thinking budget" }),
+                  sw("freeOnly", "Free models only", "Show only OpenRouter's zero-price models. They stop at their limits instead of switching to a paid model."),
+                ],
+              },
+            ],
+          },
+          {
+            id: "agents",
+            label: "Agents",
+            kicker: "Agents",
+            title: "Agents and subagents",
+            desc: "How the main agent splits big tasks, and which specialists it may call.",
+            cards: [
+              {
+                title: "Delegation",
+                desc: "Subagents run in parallel, each in its own context, and report back once.",
+                rows: [
+                  sw("subagents", "General subagents", "Let the main agent hand independent parts of a big task to Subagents. Specialists keep working when this is off."),
+                  sw("customAgents", "Show custom agents", "List agents from .vector/agents in the composer's agent picker."),
+                ],
+              },
+              {
+                title: "Specialists",
+                desc: "The main agent picks one when the work clearly matches it. Read-only specialists cannot write, whatever you allow.",
+                rows: SPECIALISTS.map((s) => sw(`sp_${s[0]}`, s[1], s[2], { badge: s[3] ? ["Read-only", "blue"] : null, keywords: "subagent specialist" })),
+              },
+            ],
+          },
+          {
+            id: "providers",
+            label: "Providers & keys",
+            kicker: "Providers",
+            title: "Providers and keys",
+            desc: "Your keys, your bill. Keys are kept in this Mac's keychain and never shown to connected clients.",
+            cards: [
+              {
+                title: "Connected providers",
+                desc: "Models from every connected provider appear in the picker.",
+                rows: [
+                  { id: "prov_openai", type: "provider", title: "OpenAI", desc: "Signed in with ChatGPT · krishna@vectordev.ai", mark: "AI", status: "connected" },
+                  { id: "prov_anthropic", type: "provider", title: "Anthropic", desc: "API key ending 4f2a · added 12 Aug", mark: "A", status: "connected" },
+                  { id: "prov_openrouter", type: "provider", title: "OpenRouter", desc: "Your OpenRouter account · free models only", mark: "OR", status: "connected" },
+                  { id: "prov_google", type: "provider", title: "Google AI", desc: "Gemini models with your own API key.", mark: "G", status: "none" },
+                ],
+              },
+            ],
+          },
+          {
+            id: "keyboard",
+            label: "Keyboard",
+            kicker: "Keyboard",
+            title: "Keyboard shortcuts",
+            desc: "Click Change, then press the new shortcut. Esc cancels.",
+            cards: [
+              {
+                title: "Shortcuts",
+                desc: "A shortcut can only do one thing; taking one that is in use unassigns it there.",
+                rows: KEYS.map((k) => ({ id: `kb_${k[0]}`, type: "keys", title: k[1], desc: "", keywords: "shortcut keybind" })),
+              },
+            ],
+          },
+          {
+            id: "accessibility",
+            label: "Accessibility",
+            kicker: "Accessibility",
+            title: "Readable by default",
+            desc: "Make Vector easier to see, navigate and click.",
+            cards: [
+              {
+                title: "Display and input",
+                desc: "Applies instantly.",
+                rows: [
+                  { id: "uiScale", type: "range", title: "UI scaling", desc: "Scales the whole interface, text included.", min: 80, max: 140, step: 10, unit: "%", affects: "all", keywords: "zoom size" },
+                  sw("highContrast", "High contrast", "Brighter secondary text and stronger borders.", { affects: "all" }),
+                  sw("focusRings", "Visible focus indicators", "A clear ring around whatever has keyboard focus."),
+                  sw("largeTargets", "Larger click targets", "Taller rows and buttons.", { affects: "rows" }),
+                ],
+              },
+            ],
+          },
+          {
+            id: "about",
+            label: "Updates & about",
+            kicker: "Updates & about",
+            title: "Vector 1.99.102",
+            desc: "Installed copies update from inside the app: Vector downloads the release, installs it and restarts.",
+            cards: [
+              {
+                title: "",
+                rows: [{ id: "version", type: "about", title: "Check for updates", desc: "", keywords: "version update" }],
+              },
+              {
+                title: "Updates",
+                desc: "Checksum-verified downloads from vectordev.ai.",
+                rows: [
+                  seg("channel", "Update channel", "Beta gets new releases about a week early.", [
+                    ["stable", "Stable"],
+                    ["beta", "Beta"],
+                  ]),
+                  sw("releaseNotes", "Show release notes after updates", "A short summary of what changed, once per release."),
+                ],
+              },
+            ],
+          },
+        ]
+        const ROWS = {}
+        SECTIONS.forEach((s) => s.cards.forEach((c) => c.rows.forEach((r) => (ROWS[r.id] = Object.assign(r, { section: s.id })))))
+        const providerState = { prov_google: "none" }
+
+        // ---------- Navigation ----------
+        const NAV = [
+          { group: "Personal", items: ["general", "appearance", "editor", "notifications"] },
+          { group: "Agents", items: ["models", "agents", { id: "permissions", label: "Permissions", icon: "shield", href: "settings-permissions.html", keywords: "approval ask allow deny shell commands folders network safety risk" }, "providers"] },
+          {
+            group: "Account",
+            items: [
+              { id: "usage", label: "Usage & spend", icon: "bars", href: "tokenomics.html", keywords: "tokens cost spend budget cache tokenomics", end: "$412" },
+              { id: "team", label: "Vector Team", icon: "team", href: "team-admin.html", keywords: "members seats roles invite policies admin" },
+            ],
+          },
+          { group: "App", items: ["keyboard", "accessibility", "about"] },
+        ]
+        const NAV_ICON = { general: "sliders", appearance: "palette", editor: "code", notifications: "bell", models: "model", agents: "task", providers: "key", keyboard: "keyboard", accessibility: "access", about: "download" }
+        const navItems = NAV.flatMap((g) => g.items.map((it) => (typeof it === "string" ? { id: it, label: SECTIONS.find((s) => s.id === it).label, icon: NAV_ICON[it] } : it)))
+
+        const sn = $("#sn")
+        sn.innerHTML = `
+          <div class="sn-top"><a class="sn-back" href="first-run.html">${icon("back", 14)}Back to app</a></div>
+          <div class="sn-brand"><span class="sn-mark">${LabUI.svg("chip", 15)}</span><div><b>Settings</b><span>Vector 1.99.102</span></div></div>
+          <label class="input sn-search">${icon("search", 14)}<input type="search" id="search" placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false" /><button type="button" class="sn-clear" id="search-clear" aria-label="Clear settings search" hidden>${LabUI.svg("close-small", 14)}</button><kbd id="search-kbd">⌘F</kbd></label>
+          <nav class="sn-groups scroll" aria-label="Settings">
+            ${NAV.map(
+              (g) => `<div class="sn-group" data-group="${g.group}"><p class="sn-label">${g.group}</p>${g.items
+                .map((it) => {
+                  const item = navItems.find((n) => n.id === (typeof it === "string" ? it : it.id))
+                  const tail = item.href ? `${item.end ? `<span class="sn-end">${item.end}</span>` : ""}<span class="sn-out">${icon("out", 12)}</span>` : `<span class="sn-hits"></span>`
+                  return item.href
+                    ? `<a class="sn-item" data-nav="${item.id}" href="${item.href}">${icon(item.icon)}<span>${item.label}</span>${tail}</a>`
+                    : `<button type="button" class="sn-item" data-nav="${item.id}">${icon(item.icon)}<span>${item.label}</span>${tail}</button>`
+                })
+                .join("")}</div>`,
+            ).join("")}
+            <div class="sn-empty" id="nav-empty" hidden><strong>No settings found</strong>Try a feature name such as model, memory, update or notifications.</div>
+          </nav>
+          <div class="sn-foot"><span>Vector 1.99.102</span><span>Desktop</span></div>`
+
+        // ---------- Rendering rows ----------
+        const label = (id, value) => {
+          const row = ROWS[id]
+          if (!row) return String(value)
+          if (row.type === "switch") return value ? "On" : "Off"
+          if (row.type === "range") return `${value}${row.unit}`
+          if (row.type === "accent") return ACCENTS.find((a) => a.hex === value)?.name ?? value
+          if (row.type === "theme") return { dark: "Dark", light: "Light", system: "Match system" }[value]
+          if (row.type === "keys") return value || "Unassigned"
+          return row.options?.find((o) => String(o[0]) === String(value))?.[1] ?? String(value)
+        }
+        const mark = (text, query) => {
+          const safe = esc(text)
+          if (!query) return safe
+          const i = text.toLowerCase().indexOf(query)
+          if (i < 0) return safe
+          return `${esc(text.slice(0, i))}<mark>${esc(text.slice(i, i + query.length))}</mark>${esc(text.slice(i + query.length))}`
+        }
+        const keysHTML = (combo) => (combo ? Array.from(combo).map((c) => `<kbd>${esc(c)}</kbd>`).join("") : `<span class="unset">Unassigned</span>`)
+        const fill = (row, value) => `${((value - row.min) / (row.max - row.min)) * 100}%`
+        const caret = LabUI.svg("chevron-down", 12)
+
+        function control(row) {
+          const v = state[row.id]
+          const t = esc(row.title)
+          if (row.type === "switch") return `<button type="button" class="switch" role="switch" aria-checked="${v}" data-set="${row.id}" aria-label="${t}"></button>`
+          if (row.type === "seg")
+            return `<span class="seg" role="group" aria-label="${t}" data-set="${row.id}">${row.options.map((o) => `<button type="button" data-value="${o[0]}" aria-pressed="${String(o[0]) === String(v)}">${o[1]}</button>`).join("")}</span>`
+          if (row.type === "select" || row.type === "sound")
+            return `${row.type === "sound" ? `<button type="button" class="icon-btn" data-play aria-label="Play ${t}">${icon("play", 14)}</button>` : ""}<span class="sel"><select data-set="${row.id}" aria-label="${t}">${row.options.map((o) => `<option value="${o[0]}"${String(o[0]) === String(v) ? " selected" : ""}>${o[1]}</option>`).join("")}</select>${caret}</span>`
+          if (row.type === "range")
+            return `<span class="rng"><input type="range" data-set="${row.id}" min="${row.min}" max="${row.max}" step="${row.step}" value="${v}" aria-label="${t}" style="--fill:${fill(row, v)}" /><output data-out="${row.id}">${v}${row.unit}</output></span>`
+          if (row.type === "accent")
+            return `<span class="swatches" role="radiogroup" aria-label="${t}">${ACCENTS.map((a) => `<button type="button" class="swatch" role="radio" data-accent="${a.hex}" aria-checked="${a.hex === v}" aria-label="${a.name}" title="${a.name}" style="--c:${a.hex}"></button>`).join("")}</span><label class="input hex" style="--c:${v}"><i></i><input data-hex value="${v}" aria-label="Custom accent hex" maxlength="7" spellcheck="false" /></label>`
+          if (row.type === "keys") return `<span class="kb" data-set="${row.id}">${keysHTML(v)}</span><button type="button" class="btn btn-sm btn-ghost" data-record="${row.id}">Change</button>`
+          if (row.type === "action") return `<button type="button" class="btn btn-sm" data-action="${row.id}">${row.button}</button>`
+          if (row.type === "provider") {
+            const status = providerState[row.id] ?? row.status
+            return status === "connected" ? `<span class="badge badge-green"><span class="dot dot-green"></span>Connected</span>` : `<button type="button" class="btn btn-sm" data-connect="${row.id}">Connect</button>`
+          }
+          return ""
+        }
+
+        function rowHTML(row, query) {
+          const affects = row.affects ? ` data-affects="${row.affects}"` : ""
+          const eye = row.affects ? `<span class="st-eye" title="Shown in the preview">${icon("eye", 12)}</span>` : ""
+          const badge = row.badge ? `<span class="badge ${row.badge[1] ? `badge-${row.badge[1]}` : ""}">${row.badge[0]}</span>` : ""
+          if (row.type === "theme")
+            return `<div class="st-row is-stack" data-row="${row.id}"${affects}><div class="st-text"><span class="st-title">${mark(row.title, query)}${eye}</span><span class="st-desc">${mark(row.desc, query)}</span></div><div class="themes" role="radiogroup" aria-label="Color scheme">${[
+              ["dark", "Dark"],
+              ["light", "Light"],
+              ["system", "Match system"],
+            ]
+              .map(
+                (o) =>
+                  `<button type="button" class="theme" role="radio" data-theme-pick="${o[0]}" aria-checked="${state.theme === o[0]}"><span class="theme-art">${o[0] === "system" ? `<span class="half is-dark"><span class="ta-side"><i></i><i></i><i></i></span><span class="ta-main"><i></i><i></i><i></i><b></b></span></span><span class="half is-light"><span class="ta-side"><i></i><i></i><i></i></span><span class="ta-main"><i></i><i></i><i></i><b></b></span></span>` : `<span class="half is-${o[0]}"><span class="ta-side"><i></i><i></i><i></i></span><span class="ta-main"><i></i><i></i><i></i><b></b></span></span>`}</span><span class="theme-label">${o[1]}${LabUI.svg("check", 13)}</span></button>`,
+              )
+              .join("")}</div></div>`
+          if (row.type === "about")
+            return `<div class="about" data-row="${row.id}"><span class="sn-mark">${LabUI.svg("chip", 20)}</span><div><b>Vector 1.99.102</b><span id="update-status">Desktop · macOS 15.6 · Apple silicon · up to date, checked 2 hours ago</span></div><button type="button" class="btn btn-sm" data-action="checkUpdates">${mark("Check for updates", query)}</button></div>`
+          if (row.type === "provider")
+            return `<div class="st-row" data-row="${row.id}"><span class="prov-mark">${row.mark}</span><div class="st-text"><span class="st-title">${mark(row.title, query)}</span><span class="st-desc">${mark(providerState[row.id] === "connected" && row.id === "prov_google" ? "API key ending 9c1e · added just now" : row.desc, query)}</span></div><div class="st-ctl">${control(row)}</div></div>`
+          const warn = row.warnOn && state[row.id] ? `<span class="st-desc is-warn">${row.warnOn}</span>` : ""
+          const desc = row.desc ? `<span class="st-desc">${mark(row.desc, query)}</span>` : ""
+          const conflict = row.type === "keys" && row.conflict ? `<span class="st-desc is-warn">${row.conflict}</span>` : ""
+          return `<div class="st-row" data-row="${row.id}"${affects}><div class="st-text"><span class="st-title">${mark(row.title, query)}${eye}${badge}</span>${desc}${warn}${conflict}</div><div class="st-ctl">${control(row)}</div></div>`
+        }
+
+        const cardHTML = (card, rows, query) =>
+          `<section class="card st-card">${card.title ? `<div class="st-card-head"><h4>${mark(card.title, query)}</h4>${card.desc ? `<p>${card.desc}</p>` : ""}</div>` : ""}${rows.map((r) => rowHTML(r, query)).join("")}</section>`
+
+        // ---------- Sections and search ----------
+        const content = $("#content")
+        let current = "appearance"
+        let query = ""
+
+        function matches(row, section, q) {
+          const words = [row.title, row.desc, row.keywords, section.label, row.type === "keys" ? state[row.id] : "", ...(row.options ?? []).map((o) => o[1])].join(" ").toLowerCase()
+          return words.includes(q)
+        }
+
+        function render() {
+          const q = query.trim().toLowerCase()
+          const results = q
+            ? SECTIONS.map((s) => ({
+                section: s,
+                cards: s.cards.map((c) => ({ card: c, rows: c.rows.filter((r) => matches(r, s, q) || c.title.toLowerCase().includes(q)) })).filter((c) => c.rows.length),
+              })).filter((s) => s.cards.length || s.section.label.toLowerCase().includes(q))
+            : []
+          // Navigation: matching items stay, with how many settings each holds.
+          let shown = 0
+          sn.querySelectorAll(".sn-group").forEach((group) => {
+            let any = false
+            group.querySelectorAll("[data-nav]").forEach((el) => {
+              const item = navItems.find((n) => n.id === el.dataset.nav)
+              const hit = results.find((r) => r.section.id === item.id)
+              const count = hit ? hit.cards.reduce((n, c) => n + c.rows.length, 0) : 0
+              const visible = !q || Boolean(hit) || `${item.label} ${item.keywords ?? ""}`.toLowerCase().includes(q)
+              el.hidden = !visible
+              if (visible) any = true
+              const hits = el.querySelector(".sn-hits")
+              if (hits) hits.innerHTML = q && count ? `<span class="count">${count}</span>` : ""
+              el.setAttribute("aria-current", !q && item.id === current ? "page" : "false")
+            })
+            group.hidden = !any
+            if (any) shown++
+          })
+          $("#nav-empty").hidden = shown > 0
+          $("#search-clear").hidden = !q
+          $("#search-kbd").hidden = Boolean(q)
+
+          if (!q) {
+            const s = SECTIONS.find((x) => x.id === current)
+            $("#crumb").textContent = s.label
+            $("#reset-section").hidden = !s.cards.some((c) => c.rows.some((r) => r.id in DEFAULTS))
+            content.innerHTML = `<div class="sg-hero"><p class="sg-kicker">${s.kicker}</p><h3>${s.title}</h3><p>${s.desc}</p></div>${s.cards.map((c) => cardHTML(c, c.rows, "")).join("")}`
+          } else {
+            const total = results.reduce((n, r) => n + r.cards.reduce((m, c) => m + c.rows.length, 0), 0)
+            $("#crumb").textContent = `Search`
+            $("#reset-section").hidden = true
+            content.innerHTML = total
+              ? `<div class="sg-hero"><p class="sg-kicker">Search</p><h3>${total} setting${total === 1 ? "" : "s"} match “${esc(query.trim())}”</h3><p>Change them right here. Open a section to see everything around them.</p></div>${results
+                  .filter((r) => r.cards.length)
+                  .map(
+                    (r) =>
+                      `<div class="res-head"><h4>${r.section.label}</h4><span class="count">${r.cards.reduce((n, c) => n + c.rows.length, 0)}</span><button type="button" class="btn btn-sm btn-ghost" data-open="${r.section.id}">Open section ${LabUI.svg("chevron-right", 12)}</button></div>${r.cards.map((c) => cardHTML(c.card, c.rows, q)).join("")}`,
+                  )
+                  .join("")}`
+              : `<div class="res-empty"><strong>No settings match “${esc(query.trim())}”</strong>Try a feature name such as model, memory, update or notifications.</div>`
+          }
+          LabUI.renderIcons(content)
+          content.scrollTop = 0
+        }
+
+        function open(id, focusRow) {
+          if (!SECTIONS.some((s) => s.id === id)) return
+          current = id
+          query = ""
+          $("#search").value = ""
+          render()
+          if (focusRow) {
+            const el = content.querySelector(`[data-row="${focusRow}"]`)
+            if (el) {
+              el.scrollIntoView({ block: "center" })
+              el.classList.add("is-flash")
+            }
+          }
+          try {
+            history.replaceState(null, "", `#${id}`)
+          } catch {}
+        }
+
+        sn.addEventListener("click", (event) => {
+          const item = event.target.closest("button[data-nav]")
+          if (item) open(item.dataset.nav)
+        })
+        $("#search").addEventListener("input", (event) => {
+          query = event.target.value
+          render()
+        })
+        $("#search-clear").addEventListener("click", () => {
+          query = ""
+          $("#search").value = ""
+          render()
+          $("#search").focus()
+        })
+        document.addEventListener("keydown", (event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && !recording) {
+            event.preventDefault()
+            $("#search").focus()
+            $("#search").select()
+          }
+        })
+
+        // ---------- Preview ----------
+        const pv = $("#pv")
+        const frame = $("#pv-frame")
+        const MONO = {
+          system: 'ui-monospace, "SF Mono", Menlo, "Lab Mono", monospace',
+          jetbrains: '"JetBrains Mono", "Lab Mono", ui-monospace, monospace',
+          sf: '"SF Mono", "Lab Mono", ui-monospace, monospace',
+          fira: '"Fira Code", "Lab Mono", ui-monospace, monospace',
+          geist: '"Geist Mono", "Lab Mono", ui-monospace, monospace',
+        }
+        let systemTheme = "dark"
+        let comparing = false
+
+        function paint(s) {
+          const theme = s.theme === "system" ? systemTheme : s.theme
+          pv.dataset.theme = theme
+          pv.dataset.sidebar = s.sidebarCollapsed ? "collapsed" : "open"
+          pv.dataset.glass = s.glass ? "on" : "off"
+          pv.dataset.contrast = s.highContrast ? "high" : "normal"
+          pv.dataset.targets = s.largeTargets ? "large" : "normal"
+          pv.style.setProperty("--pv-accent", s.accent)
+          pv.style.setProperty("--pv-fs", `${((s.fontSize - 1) * s.uiScale) / 100}px`)
+          pv.style.setProperty("--pv-d", { compact: 0.78, comfortable: 1, spacious: 1.18 }[s.density])
+          pv.style.setProperty("--pv-r", s.rounded ? 1 : 0.35)
+          pv.style.setProperty("--pv-chat", { focused: "430px", wide: "510px", full: "100%" }[s.chatWidth])
+          pv.style.setProperty("--pv-gap", { compact: "9px", comfortable: "14px", relaxed: "21px" }[s.spacing])
+          pv.style.setProperty("--pv-mono", MONO[s.mono])
+          pv.style.setProperty("--pv-anim", s.reduceMotion ? "60ms" : "220ms")
+          $("#pv-reason").hidden = !s.reasoning
+          $("#pv-shell-out").hidden = !s.shellExpanded
+          $("#pv-edit-out").hidden = !s.editExpanded
+          $("#pv-changes-chip").classList.toggle("is-on", pv.dataset.panel === "changes")
+          const model = MODELS.find((m) => m[0] === s.model)
+          $("#pv-model").textContent = model ? model[1] : "GPT-6 Sol"
+          $("#pv-effort").textContent = label("effort", s.effort)
+          root.style.setProperty("--sg-accent", s.accent)
+          $("#pv-sys").hidden = state.theme !== "system"
+        }
+
+        function fit() {
+          const scale = frame.clientWidth / 760
+          pv.style.transform = `scale(${scale})`
+          frame.style.height = `${Math.round(560 * scale)}px`
+        }
+
+        function targets(affects) {
+          if (!affects) return []
+          if (affects.split(" ").includes("all")) return [pv]
+          return affects.split(" ").flatMap((a) => Array.from(pv.querySelectorAll(`[data-pv~="${a}"]`)))
+        }
+        function flash(affects) {
+          targets(affects).forEach((el) => {
+            if (el === pv) {
+              frame.classList.remove("is-flash")
+              void frame.offsetWidth
+              frame.classList.add("is-flash")
+              return
+            }
+            el.classList.remove("is-flash")
+            void el.offsetWidth
+            el.classList.add("is-flash")
+          })
+        }
+        content.addEventListener("pointerover", (event) => {
+          const row = event.target.closest("[data-affects]")
+          pv.querySelectorAll(".is-target").forEach((el) => el.classList.remove("is-target"))
+          frame.classList.remove("is-target")
+          pv.classList.toggle("is-pointing", Boolean(row))
+          if (!row) return
+          const list = targets(row.dataset.affects)
+          list.forEach((el) => el !== pv && el.classList.add("is-target"))
+          frame.classList.toggle("is-target", list.includes(pv))
+        })
+        content.addEventListener("pointerleave", () => {
+          frame.classList.remove("is-target")
+          pv.classList.remove("is-pointing")
+          pv.querySelectorAll(".is-target").forEach((el) => el.classList.remove("is-target"))
+        })
+
+        // ---------- Changing settings, with a history you can undo ----------
+        const log = []
+        function sync(id) {
+          root.querySelectorAll(`[data-set="${id}"]`).forEach((el) => {
+            const v = state[id]
+            if (el.matches(".switch")) el.setAttribute("aria-checked", String(v))
+            else if (el.matches(".seg")) el.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === String(v))))
+            else if (el.matches("select")) el.value = v
+            else if (el.matches("input[type=range]")) {
+              el.value = v
+              el.style.setProperty("--fill", fill(ROWS[id], v))
+              const out = root.querySelector(`[data-out="${id}"]`)
+              if (out) out.textContent = `${v}${ROWS[id].unit}`
+            } else if (el.matches(".kb")) el.innerHTML = keysHTML(v)
+          })
+          if (id === "theme") root.querySelectorAll("[data-theme-pick]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.themePick === state.theme)))
+          if (id === "accent") {
+            root.querySelectorAll("[data-accent]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.accent === state.accent)))
+            const hex = root.querySelector("[data-hex]")
+            if (hex && document.activeElement !== hex) hex.value = state.accent
+            if (hex) hex.parentElement.style.setProperty("--c", state.accent)
+          }
+          if (ROWS[id]?.warnOn || ROWS[id]?.type === "keys") {
+            const el = content.querySelector(`[data-row="${id}"]`)
+            if (el) {
+              el.outerHTML = rowHTML(ROWS[id], query.trim().toLowerCase())
+              LabUI.renderIcons(content)
+            }
+          }
+        }
+
+        function apply(changes, options = {}) {
+          const real = changes.filter((c) => c.from !== c.to)
+          if (!real.length) return
+          real.forEach((c) => (state[c.id] = c.to))
+          if (!comparing) paint(state)
+          real.forEach((c) => sync(c.id))
+          real.forEach((c) => flash(ROWS[c.id]?.affects))
+          if (options.record !== false) {
+            log.unshift({ changes: real, at: new Date(), title: options.title, sub: options.sub })
+            renderLog()
+          }
+          $("#pv-hold").disabled = !Object.keys(before).some((k) => before[k] !== state[k])
+        }
+        const set = (id, to, options) => apply([{ id, from: state[id], to }], options)
+
+        const time = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`
+        function renderLog() {
+          const list = $("#hist-list")
+          $("#hist-empty").hidden = log.length > 0
+          list.hidden = log.length === 0
+          $("#hist-count").hidden = log.length === 0
+          $("#hist-count").textContent = log.length
+          $("#undo-all").hidden = log.length < 2
+          list.innerHTML = log
+            .map((entry, index) => {
+              const first = entry.changes[0]
+              const row = ROWS[first.id]
+              const title = entry.title ?? row.title
+              const sub = entry.sub ?? `${esc(label(first.id, first.from))} <span aria-hidden="true">→</span> <b>${esc(label(first.id, first.to))}</b>`
+              const swatch = first.id === "accent" ? `<span class="hist-mark"><i style="--c:${first.to}"></i></span>` : `<span class="hist-mark">${icon(NAV_ICON[row.section] ?? "sliders", 13)}</span>`
+              return `<li class="row hist-row">${swatch}<span class="row-text"><span class="row-name">${esc(title)}</span><span class="row-sub">${sub}</span></span><span class="row-end"><time>${time(entry.at)}</time><button type="button" class="icon-btn" data-undo="${index}" aria-label="Undo ${esc(title)}" title="Undo">${icon("undo", 14)}</button></span></li>`
+            })
+            .join("")
+        }
+        function undo(index) {
+          const entry = log[index]
+          if (!entry) return
+          log.splice(index, 1)
+          apply(
+            entry.changes.map((c) => ({ id: c.id, from: state[c.id], to: c.from })).reverse(),
+            { record: false },
+          )
+          renderLog()
+        }
+        $("#hist-list").addEventListener("click", (event) => {
+          const btn = event.target.closest("[data-undo]")
+          if (btn) undo(Number(btn.dataset.undo))
+        })
+        $("#hist-empty").addEventListener("click", (event) => {
+          const btn = event.target.closest("[data-try]")
+          if (!btn) return
+          const [id, value] = btn.dataset.try.split(":")
+          set(id, value)
+        })
+        $("#undo-all").addEventListener("click", () => {
+          while (log.length) undo(0)
+          toast("Back to how Vector was when you opened Settings")
+        })
+
+        // Controls. lab.js flips switches and segments, then tells us.
+        root.addEventListener("lab:switch", (event) => {
+          const id = event.target.dataset.set
+          if (id) set(id, event.detail)
+        })
+        root.addEventListener("lab:seg", (event) => {
+          const el = event.target
+          if (el.id === "pv-panel") {
+            pv.dataset.panel = event.detail
+            paint(comparing ? before : state)
+            return
+          }
+          if (el.id === "sys-seg") {
+            systemTheme = event.detail
+            paint(comparing ? before : state)
+            flash("all")
+            return
+          }
+          const id = el.dataset.set
+          if (id) set(id, event.detail)
+        })
+        const rangeFrom = {}
+        content.addEventListener("input", (event) => {
+          const el = event.target
+          if (el.matches("input[type=range]")) {
+            const id = el.dataset.set
+            if (!(id in rangeFrom)) rangeFrom[id] = state[id]
+            set(id, Number(el.value), { record: false })
+          }
+        })
+        content.addEventListener("change", (event) => {
+          const el = event.target
+          if (el.matches("input[type=range]")) {
+            const id = el.dataset.set
+            const from = rangeFrom[id] ?? state[id]
+            delete rangeFrom[id]
+            // Arrow-key nudges within a few seconds read as one change.
+            const last = log[0]
+            if (last && last.changes.length === 1 && last.changes[0].id === id && Date.now() - last.at.getTime() < 5000) {
+              last.changes[0].to = state[id]
+              last.at = new Date()
+              if (last.changes[0].from === last.changes[0].to) log.shift()
+              renderLog()
+            } else if (from !== state[id]) {
+              log.unshift({ changes: [{ id, from, to: state[id] }], at: new Date() })
+              renderLog()
+            }
+          }
+          if (el.matches("select[data-set]")) set(el.dataset.set, el.value)
+          if (el.matches("[data-hex]")) commitHex(el)
+        })
+        function commitHex(el) {
+          const value = el.value.trim().toLowerCase()
+          const ok = /^#[0-9a-f]{6}$/.test(value)
+          el.parentElement.classList.toggle("is-bad", !ok)
+          if (ok) set("accent", value)
+        }
+        content.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && event.target.matches("[data-hex]")) commitHex(event.target)
+        })
+
+        content.addEventListener("click", (event) => {
+          const t = event.target
+          const theme = t.closest("[data-theme-pick]")
+          if (theme) return set("theme", theme.dataset.themePick)
+          const swatch = t.closest("[data-accent]")
+          if (swatch) return set("accent", swatch.dataset.accent)
+          const openBtn = t.closest("[data-open]")
+          if (openBtn) return open(openBtn.dataset.open)
+          const rec = t.closest("[data-record]")
+          if (rec) return startRecording(rec.dataset.record)
+          const play = t.closest("[data-play]")
+          if (play) return chime(state.sound)
+          const connect = t.closest("[data-connect]")
+          if (connect) return openDialog(connect)
+          const action = t.closest("[data-action]")
+          if (action?.dataset.action === "clearCache") {
+            action.disabled = true
+            action.textContent = "Cleared"
+            toast("Cleared 184 MB of local caches. Your settings and chats are untouched.")
+            return
+          }
+          if (action?.dataset.action === "checkUpdates") return checkUpdates(action)
+        })
+
+        // Restore defaults for the open section, as one change you can undo.
+        $("#reset-section").addEventListener("click", () => {
+          const s = SECTIONS.find((x) => x.id === current)
+          const changes = s.cards.flatMap((c) => c.rows).filter((r) => r.id in DEFAULTS && state[r.id] !== DEFAULTS[r.id]).map((r) => ({ id: r.id, from: state[r.id], to: DEFAULTS[r.id] }))
+          if (!changes.length) return toast(`${s.label} is already at its defaults`)
+          apply(changes, { title: `${s.label} restored to defaults`, sub: `${changes.length} setting${changes.length === 1 ? "" : "s"}: ${changes.map((c) => esc(ROWS[c.id].title.toLowerCase())).slice(0, 3).join(", ")}${changes.length > 3 ? "…" : ""}` })
+          toast(`${s.label} restored to defaults`, () => undo(0))
+        })
+
+        // Hold to compare with how things were when Settings opened.
+        const hold = $("#pv-hold")
+        const compare = (on) => {
+          if (hold.disabled && on) return
+          comparing = on
+          hold.setAttribute("aria-pressed", String(on))
+          frame.classList.toggle("is-before", on)
+          $("#pv-sub").textContent = on ? "As it was when you opened Settings" : "A Vectordev.ai session, as you have it set up"
+          $("#pv-sub").classList.toggle("is-before", on)
+          paint(on ? before : state)
+        }
+        hold.addEventListener("pointerdown", () => compare(true))
+        ;["pointerup", "pointerleave", "blur"].forEach((type) => hold.addEventListener(type, () => comparing && compare(false)))
+        hold.addEventListener("keydown", (event) => {
+          if ((event.key === " " || event.key === "Enter") && !event.repeat) {
+            event.preventDefault()
+            compare(true)
+          }
+        })
+        hold.addEventListener("keyup", (event) => {
+          if (event.key === " " || event.key === "Enter") compare(false)
+        })
+
+        // ---------- Keyboard shortcut recording ----------
+        let recording = null
+        function startRecording(id) {
+          stopRecording()
+          recording = id
+          const kb = content.querySelector(`.kb[data-set="${id}"]`)
+          const btn = content.querySelector(`[data-record="${id}"]`)
+          if (kb) {
+            kb.classList.add("is-recording")
+            kb.textContent = "Press a shortcut…"
+          }
+          if (btn) btn.textContent = "Cancel"
+        }
+        function stopRecording() {
+          if (!recording) return
+          const id = recording
+          recording = null
+          const kb = content.querySelector(`.kb[data-set="${id}"]`)
+          const btn = content.querySelector(`[data-record="${id}"]`)
+          if (kb) {
+            kb.classList.remove("is-recording")
+            kb.innerHTML = keysHTML(state[id])
+          }
+          if (btn) btn.textContent = "Change"
+        }
+        document.addEventListener(
+          "keydown",
+          (event) => {
+            if (!recording) return
+            if (["Shift", "Meta", "Control", "Alt"].includes(event.key)) return
+            event.preventDefault()
+            event.stopPropagation()
+            if (event.key === "Escape") return stopRecording()
+            if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+              const kb = content.querySelector(`.kb[data-set="${recording}"]`)
+              if (kb) kb.textContent = "Add ⌘, ⌃ or ⌥"
+              return
+            }
+            const key = event.key.length === 1 ? event.key.toUpperCase() : { ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Enter: "↩", Backspace: "⌫", Tab: "⇥" }[event.key] ?? event.key
+            const combo = `${event.ctrlKey ? "⌃" : ""}${event.altKey ? "⌥" : ""}${event.shiftKey ? "⇧" : ""}${event.metaKey ? "⌘" : ""}${key}`
+            const id = recording
+            recording = null
+            const clash = KEYS.map((k) => `kb_${k[0]}`).find((k) => k !== id && state[k] === combo)
+            const changes = [{ id, from: state[id], to: combo }]
+            if (clash) changes.push({ id: clash, from: state[clash], to: "" })
+            KEYS.forEach((k) => delete ROWS[`kb_${k[0]}`].conflict)
+            if (clash) ROWS[clash].conflict = `${combo} now opens ${ROWS[id].title.toLowerCase()}. Change it to give this one a shortcut again.`
+            apply(changes, { sub: `${esc(label(id, changes[0].from))} → <b>${esc(combo)}</b>${clash ? `, unassigned from ${esc(ROWS[clash].title)}` : ""}` })
+            const btn = content.querySelector(`[data-record="${id}"]`)
+            if (btn) btn.textContent = "Change"
+            content.querySelector(`.kb[data-set="${id}"]`)?.classList.remove("is-recording")
+            if (clash) toast(`${combo} was used by ${ROWS[clash].title}. It is unassigned there now.`)
+          },
+          true,
+        )
+
+        // ---------- Small extras: sound preview, update check, provider dialog, toast ----------
+        let audio
+        function chime(name) {
+          try {
+            audio = audio ?? new AudioContext()
+            const notes = { "staplebops-01": [660, 880], "staplebops-02": [523, 784], "nope-03": [392, 311], "glass-04": [1046, 1318] }[name] ?? [660, 880]
+            notes.forEach((freq, i) => {
+              const osc = audio.createOscillator()
+              const gain = audio.createGain()
+              const start = audio.currentTime + i * 0.09
+              osc.type = "sine"
+              osc.frequency.value = freq
+              gain.gain.setValueAtTime(0.0001, start)
+              gain.gain.exponentialRampToValueAtTime(0.12, start + 0.01)
+              gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.22)
+              osc.connect(gain).connect(audio.destination)
+              osc.start(start)
+              osc.stop(start + 0.25)
+            })
+          } catch {}
+        }
+
+        function checkUpdates(btn) {
+          btn.disabled = true
+          btn.innerHTML = `<span class="spin" aria-hidden="true"></span>Checking…`
+          setTimeout(() => {
+            btn.disabled = false
+            btn.textContent = "Check for updates"
+            const status = $("#update-status")
+            if (status) status.textContent = "Desktop · macOS 15.6 · Apple silicon · up to date, checked just now"
+            toast(state.channel === "beta" ? "Vector 1.99.103-beta.2 is downloading. It installs when you restart." : "Vector 1.99.102 is the latest stable release")
+          }, 1100)
+        }
+
+        const dialog = $("#dialog")
+        let dialogOpener = null
+        function openDialog(opener) {
+          dialogOpener = opener
+          dialog.hidden = false
+          $("#dialog-err").hidden = true
+          $("#dialog-key").value = ""
+          setTimeout(() => $("#dialog-key").focus(), 20)
+        }
+        function closeDialog() {
+          dialog.hidden = true
+          dialogOpener?.focus()
+        }
+        dialog.addEventListener("click", (event) => {
+          if (event.target === dialog || event.target.closest("[data-dialog-close]")) closeDialog()
+        })
+        dialog.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeDialog()
+          if (event.key === "Enter") $("#dialog-ok").click()
+        })
+        $("#dialog-ok").addEventListener("click", () => {
+          const key = $("#dialog-key").value.trim()
+          if (!/^AIza[0-9A-Za-z_-]{8,}$/.test(key)) {
+            $("#dialog-err").hidden = false
+            return
+          }
+          providerState.prov_google = "connected"
+          dialog.hidden = true
+          const el = content.querySelector('[data-row="prov_google"]')
+          if (el) {
+            el.outerHTML = rowHTML(ROWS.prov_google, "")
+            LabUI.renderIcons(content)
+          }
+          toast("Google AI connected. Gemini models are in the model picker.")
+        })
+
+        let toastTimer
+        function toast(text, undoFn) {
+          const el = $("#toast")
+          $("#toast-text").textContent = text
+          const btn = $("#toast-undo")
+          btn.hidden = !undoFn
+          btn.onclick = () => {
+            undoFn?.()
+            el.hidden = true
+          }
+          el.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (el.hidden = true), 3600)
+        }
+
+        // ---------- Start ----------
+        const start = location.hash.slice(1)
+        current = SECTIONS.some((s) => s.id === start) ? start : "appearance"
+        render()
+        renderLog()
+        paint(state)
+        document.addEventListener("DOMContentLoaded", () => {
+          LabUI.renderIcons(root)
+          fit()
+          new ResizeObserver(fit).observe(frame)
+        })
+      })()
+    </script>
+  </body>
+</html>

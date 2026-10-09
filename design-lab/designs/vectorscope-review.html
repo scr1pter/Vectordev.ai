@@ -1,0 +1,2394 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* D01 Vectorscope pull request review. Everything is scoped under .d-vectorscope-review. */
+      .d-vectorscope-review {
+        --rail: #1b1920;
+        --reader: #17151c;
+        --code: #141218;
+        --gutter: #18161d;
+        --code-text: #d9d5de;
+      }
+
+      .d-vectorscope-review button {
+        font: inherit;
+      }
+
+      .d-vectorscope-review .app-header h2 {
+        overflow: hidden;
+        max-width: 420px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vectorscope-review .hd-crumb {
+        color: var(--text-3);
+        font-size: 13px;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .d-vectorscope-review .hd-crumb:hover {
+        color: var(--text-1);
+      }
+
+      .d-vectorscope-review .hd-sep-slash {
+        color: rgba(255, 255, 255, 0.2);
+      }
+
+      .d-vectorscope-review .hd-num {
+        color: var(--text-3);
+        font: 12.5px var(--mono);
+      }
+
+      .d-vectorscope-review .hd-sep {
+        width: 1px;
+        height: 18px;
+        margin: 0 4px;
+        background: var(--line-strong);
+      }
+
+      .d-vectorscope-review .btn[aria-disabled="true"] {
+        border-color: var(--line-strong);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-3);
+      }
+
+      .d-vectorscope-review .btn svg {
+        flex: none;
+      }
+
+      .d-vectorscope-review .is-spinning svg {
+        animation: vs-spin 0.9s linear infinite;
+      }
+
+      @keyframes vs-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .d-vectorscope-review .vs {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      /* ---- the band: who, what, and Vectorscope's verdict ---- */
+      .d-vectorscope-review .vs-band {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        flex: none;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, rgba(182, 159, 247, 0.035), transparent 70%), var(--stage);
+      }
+
+      .d-vectorscope-review .vs-band-main {
+        display: grid;
+        gap: 10px;
+        padding: 14px 22px 15px 20px;
+      }
+
+      .d-vectorscope-review .vs-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-vectorscope-review .vs-meta b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      .d-vectorscope-review .ref {
+        display: inline-flex;
+        align-items: center;
+        height: 20px;
+        padding: 0 6px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+
+      .d-vectorscope-review .sep {
+        color: var(--text-3);
+      }
+
+      .d-vectorscope-review .avatar {
+        display: inline-grid;
+        flex: none;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border-radius: 50%;
+        background: #3b3346;
+        color: #e5dcf5;
+        font-size: 9.5px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .d-vectorscope-review .vs-mark {
+        display: inline-grid;
+        flex: none;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 6px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 14px rgba(182, 159, 247, 0.18);
+      }
+
+      .d-vectorscope-review .vs-mark.sm {
+        width: 18px;
+        height: 18px;
+        border-radius: 5px;
+      }
+
+      .d-vectorscope-review .vs-summary {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        gap: 3px 10px;
+        align-items: start;
+      }
+
+      .d-vectorscope-review .vs-summary-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 20px;
+        font-size: 12.5px;
+      }
+
+      .d-vectorscope-review .vs-summary-head b {
+        color: var(--text-1);
+        font-weight: 600;
+      }
+
+      .d-vectorscope-review .vs-summary p {
+        grid-column: 2;
+        max-width: 790px;
+        margin: 0;
+        color: var(--text-2);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .d-vectorscope-review code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-1);
+        font: 0.92em var(--mono);
+      }
+
+      .d-vectorscope-review .vs-risk {
+        display: grid;
+        align-content: center;
+        gap: 9px;
+        padding: 14px 20px;
+        border-left: 1px solid var(--line);
+      }
+
+      .d-vectorscope-review .vs-risk-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .d-vectorscope-review .vs-risk-level {
+        color: var(--red);
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0;
+        text-transform: none;
+        transition: color 200ms ease;
+      }
+
+      .d-vectorscope-review .vs-risk[data-risk="medium"] .vs-risk-level {
+        color: var(--amber);
+      }
+
+      .d-vectorscope-review .vs-risk[data-risk="low"] .vs-risk-level {
+        color: var(--green);
+      }
+
+      .d-vectorscope-review .vs-meter {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4px;
+      }
+
+      .d-vectorscope-review .vs-meter i {
+        height: 5px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.07);
+        transition: background-color 240ms ease;
+      }
+
+      .d-vectorscope-review .vs-risk[data-risk="high"] .vs-meter i {
+        background: var(--red);
+      }
+
+      .d-vectorscope-review .vs-risk[data-risk="medium"] .vs-meter i:nth-child(-n + 2) {
+        background: var(--amber);
+      }
+
+      .d-vectorscope-review .vs-risk[data-risk="low"] .vs-meter i:first-child {
+        background: var(--green);
+      }
+
+      .d-vectorscope-review .vs-risk-counts {
+        color: var(--text-1);
+        font-size: 12.5px;
+      }
+
+      .d-vectorscope-review .vs-risk-counts .z {
+        color: var(--text-3);
+      }
+
+      .d-vectorscope-review .vs-risk-foot {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* ---- split: the rail and the reader ---- */
+      .d-vectorscope-review .vs-split {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .d-vectorscope-review .vs-rail {
+        display: flex;
+        flex: 0 0 384px;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--line);
+        background: var(--rail);
+      }
+
+      .d-vectorscope-review .vs-rail .tabs {
+        flex: none;
+        background: #1e1b24;
+      }
+
+      .d-vectorscope-review .tab .count {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-2);
+      }
+
+      .d-vectorscope-review .tab[aria-selected="true"] .count {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-vectorscope-review .vs-panel {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+      }
+
+      .d-vectorscope-review .vs-panel[hidden] {
+        display: none;
+      }
+
+      .d-vectorscope-review .vs-tool {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px 6px;
+      }
+
+      .d-vectorscope-review .vs-tool .seg {
+        flex: 1;
+      }
+
+      .d-vectorscope-review .vs-tool .seg button {
+        display: inline-flex;
+        flex: 1;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        padding: 0 6px;
+      }
+
+      .d-vectorscope-review .seg button .n {
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+
+      .d-vectorscope-review .vs-list {
+        flex: 1;
+        min-height: 0;
+        padding: 2px 8px 12px;
+      }
+
+      .d-vectorscope-review .vs-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 10px 6px 4px;
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .d-vectorscope-review .vs-group .n {
+        font: 500 10.5px var(--mono);
+        letter-spacing: 0;
+      }
+
+      .d-vectorscope-review .vs-f {
+        position: relative;
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr) auto;
+        gap: 2px 10px;
+        width: 100%;
+        min-height: 52px;
+        align-items: start;
+        padding: 8px 10px 8px 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+        transition: background-color 120ms ease;
+      }
+
+      .d-vectorscope-review .vs-f:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-vectorscope-review .vs-f[aria-current="true"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.1), transparent 75%), rgba(255, 255, 255, 0.055);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+      }
+
+      .d-vectorscope-review .vs-f[aria-current="true"]::before {
+        content: "";
+        position: absolute;
+        inset: 9px auto 9px 0;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--violet-bright);
+        box-shadow: 0 0 12px rgba(182, 159, 247, 0.42);
+      }
+
+      .d-vectorscope-review .vs-f-sev {
+        display: grid;
+        height: 18px;
+        place-items: center;
+      }
+
+      .d-vectorscope-review .vs-f-title {
+        display: -webkit-box;
+        overflow: hidden;
+        font-size: 13px;
+        line-height: 18px;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+      }
+
+      .d-vectorscope-review .vs-f-sub {
+        grid-column: 2;
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vectorscope-review .vs-f-sub .mono {
+        color: var(--text-2);
+        font-size: 11px;
+      }
+
+      .d-vectorscope-review .vs-f-end {
+        grid-row: 1;
+        grid-column: 3;
+        display: flex;
+        align-items: center;
+        height: 18px;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+
+      .d-vectorscope-review .vs-f[data-status="fixed"] .vs-f-title,
+      .d-vectorscope-review .vs-f[data-status="dismissed"] .vs-f-title {
+        color: var(--text-3);
+        text-decoration: line-through;
+        text-decoration-color: rgba(255, 255, 255, 0.25);
+      }
+
+      .d-vectorscope-review .st {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 18px;
+        padding: 0 6px;
+        border-radius: 999px;
+        font: 500 10.5px var(--font);
+      }
+
+      .d-vectorscope-review .st-fixed {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-vectorscope-review .st-dismissed {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text-3);
+      }
+
+      .d-vectorscope-review .st-fixing {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-vectorscope-review .vs-empty {
+        padding: 30px 16px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        text-align: center;
+      }
+
+      .d-vectorscope-review .vs-rail-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 44px;
+        padding: 0 14px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-vectorscope-review .vs-rail-foot label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+        color: var(--text-2);
+      }
+
+      /* checks */
+      .d-vectorscope-review .vs-checks-sum {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 18px 8px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-vectorscope-review .vs-checks-sum span:first-child {
+        flex: 1;
+      }
+
+      .d-vectorscope-review .vs-c {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 6px 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-vectorscope-review button.vs-c:hover,
+      .d-vectorscope-review .vs-c[aria-expanded="true"] {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .d-vectorscope-review .vs-c .row-text {
+        gap: 1px;
+      }
+
+      .d-vectorscope-review .vs-c-time {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-vectorscope-review .vs-log {
+        margin: 2px 4px 8px 36px;
+        padding: 9px 11px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 7px;
+        background: var(--code);
+        font: 11px/17px var(--mono);
+      }
+
+      .d-vectorscope-review .vs-log p {
+        margin: 0;
+        padding-left: 2ch;
+        color: var(--text-2);
+        text-indent: -2ch;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .d-vectorscope-review .vs-log .err {
+        color: #f0b0b3;
+      }
+
+      .d-vectorscope-review .vs-log-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 9px;
+        font-family: var(--font);
+      }
+
+      /* files */
+      .d-vectorscope-review .vs-file {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        min-height: 42px;
+        padding: 5px 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-vectorscope-review .vs-file:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-vectorscope-review .vs-file[aria-current="true"] {
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .d-vectorscope-review .vs-file .row-text {
+        gap: 1px;
+      }
+
+      .d-vectorscope-review .vs-file .add,
+      .d-vectorscope-review .vs-file .del,
+      .d-vectorscope-review .vs-filebar .add,
+      .d-vectorscope-review .vs-filebar .del {
+        font-size: 12px;
+      }
+
+      .d-vectorscope-review .cmt {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        height: 17px;
+        padding: 0 5px;
+        border: 1px solid var(--violet-line);
+        border-radius: 4px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font: 600 10px var(--mono);
+      }
+
+      .d-vectorscope-review .viewed-mark {
+        color: var(--green);
+      }
+
+      /* ---- reader ---- */
+      .d-vectorscope-review .vs-reader {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        background: var(--reader);
+      }
+
+      .d-vectorscope-review .vs-filebar {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 54px;
+        padding: 0 12px 0 18px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-vectorscope-review .vs-filebar .row-text {
+        gap: 1px;
+      }
+
+      .d-vectorscope-review .vs-filebar .row-name {
+        font-weight: 500;
+      }
+
+      .d-vectorscope-review .vs-viewed {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 26px;
+        padding: 0 9px 0 7px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-vectorscope-review .vs-viewed .box {
+        display: grid;
+        width: 14px;
+        height: 14px;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 4px;
+        color: transparent;
+      }
+
+      .d-vectorscope-review .vs-viewed[aria-pressed="true"] {
+        border-color: rgba(101, 199, 142, 0.3);
+        color: var(--green);
+      }
+
+      .d-vectorscope-review .vs-viewed[aria-pressed="true"] .box {
+        border-color: var(--green);
+        background: var(--green);
+        color: #13241a;
+      }
+
+      .d-vectorscope-review .vs-nav {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+      }
+
+      .d-vectorscope-review .vs-nav .icon-btn {
+        width: 24px;
+        height: 24px;
+      }
+
+      .d-vectorscope-review .vs-body {
+        flex: 1;
+        min-height: 0;
+        padding: 12px 14px 60px;
+      }
+
+      .d-vectorscope-review .dv {
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        background: var(--code);
+        font: 12px/20px var(--mono);
+      }
+
+      .d-vectorscope-review .dl {
+        position: relative;
+        display: grid;
+        grid-template-columns: 46px 20px minmax(0, 1fr);
+        color: var(--code-text);
+      }
+
+      .d-vectorscope-review .dl-n {
+        padding-right: 9px;
+        background: var(--gutter);
+        color: #6f6b78;
+        text-align: right;
+        user-select: none;
+      }
+
+      .d-vectorscope-review .dl-s {
+        color: #6f6b78;
+        text-align: center;
+        user-select: none;
+      }
+
+      .d-vectorscope-review .dl-c {
+        padding-right: 14px;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+      }
+
+      .d-vectorscope-review .dl.add {
+        background: rgba(101, 199, 142, 0.075);
+      }
+
+      .d-vectorscope-review .dl.add .dl-n {
+        background: rgba(101, 199, 142, 0.12);
+        box-shadow: inset 2px 0 0 rgba(101, 199, 142, 0.7);
+        color: #8fcfa9;
+      }
+
+      .d-vectorscope-review .dl.add .dl-s {
+        color: var(--green);
+      }
+
+      .d-vectorscope-review .dl.del {
+        background: rgba(230, 120, 125, 0.075);
+      }
+
+      .d-vectorscope-review .dl.del .dl-n {
+        background: rgba(230, 120, 125, 0.12);
+        box-shadow: inset 2px 0 0 rgba(230, 120, 125, 0.7);
+      }
+
+      .d-vectorscope-review .dl.del .dl-s {
+        color: var(--red);
+      }
+
+      .d-vectorscope-review .dl.hunk {
+        grid-template-columns: 66px minmax(0, 1fr);
+        border-block: 1px solid rgba(255, 255, 255, 0.04);
+        background: rgba(146, 116, 236, 0.06);
+        color: #8f88cc;
+      }
+
+      .d-vectorscope-review .dl.hunk:first-child {
+        border-top: 0;
+      }
+
+      .d-vectorscope-review .dl.hunk .dl-n {
+        background: transparent;
+        color: #6f6b88;
+        text-align: center;
+      }
+
+      .d-vectorscope-review .dl.fresh {
+        animation: vs-fresh 1.6s var(--ease);
+      }
+
+      @keyframes vs-fresh {
+        0% {
+          background: rgba(101, 199, 142, 0.32);
+        }
+      }
+
+      /* gutter button: comment on a line, as in the Changes reader */
+      .d-vectorscope-review .dl-add {
+        position: absolute;
+        top: 2px;
+        left: 28px;
+        display: none;
+        width: 16px;
+        height: 16px;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: var(--violet);
+        color: #fff;
+      }
+
+      .d-vectorscope-review .dl:hover .dl-add,
+      .d-vectorscope-review .dl-add:focus-visible {
+        display: grid;
+      }
+
+      .d-vectorscope-review .dl.anchor .dl-n {
+        background: rgba(146, 116, 236, 0.2);
+        box-shadow: inset 2px 0 0 var(--violet-bright);
+        color: #d9cdfb;
+      }
+
+      .tk-k {
+        color: #c6aefc;
+      }
+
+      .tk-s {
+        color: #e3c597;
+      }
+
+      .tk-c {
+        color: #85818e;
+      }
+
+      .tk-n {
+        color: #9cc3ee;
+      }
+
+      /* the comment thread under a line */
+      .d-vectorscope-review .dc {
+        display: grid;
+        grid-template-columns: 46px minmax(0, 1fr);
+        padding: 6px 16px 10px 0;
+        background: var(--code);
+        font-family: var(--font);
+        line-height: normal;
+      }
+
+      .d-vectorscope-review .dc-rail {
+        position: relative;
+      }
+
+      .d-vectorscope-review .dc-rail::after {
+        content: "";
+        position: absolute;
+        top: -6px;
+        bottom: -10px;
+        left: 45px;
+        width: 2px;
+        background: var(--violet);
+        opacity: 0.8;
+      }
+
+      .d-vectorscope-review .card-c {
+        margin-left: 22px;
+        max-width: 690px;
+        border: 1px solid rgba(182, 159, 247, 0.26);
+        border-radius: 9px;
+        background: #1f1b27;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+        transition:
+          border-color 200ms ease,
+          box-shadow 200ms ease;
+      }
+
+      .d-vectorscope-review .card-c.is-focus {
+        border-color: rgba(182, 159, 247, 0.6);
+        box-shadow:
+          0 0 0 3px rgba(157, 132, 238, 0.12),
+          0 10px 30px rgba(0, 0, 0, 0.28);
+      }
+
+      .d-vectorscope-review .card-c-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 10px 0 12px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-vectorscope-review .card-c-head b {
+        color: var(--text-1);
+        font-weight: 600;
+      }
+
+      .d-vectorscope-review .card-c-head .end {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        margin-left: auto;
+      }
+
+      .d-vectorscope-review .card-c-head .icon-btn {
+        width: 24px;
+        height: 24px;
+      }
+
+      .d-vectorscope-review .chev svg {
+        transition: transform 160ms ease;
+      }
+
+      .d-vectorscope-review .chev[aria-expanded="false"] svg {
+        transform: rotate(-90deg);
+      }
+
+      .d-vectorscope-review .card-c-body {
+        padding: 6px 14px 12px 40px;
+      }
+
+      .d-vectorscope-review .card-c-body[hidden] {
+        display: none;
+      }
+
+      .d-vectorscope-review .card-c h4 {
+        margin: 0 0 5px;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+
+      .d-vectorscope-review .card-c p {
+        margin: 0;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+
+      .d-vectorscope-review .sugg {
+        margin-top: 10px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 7px;
+        background: var(--code);
+      }
+
+      .d-vectorscope-review .sugg-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vectorscope-review .sugg .dl {
+        grid-template-columns: 22px minmax(0, 1fr);
+        font: 11.5px/19px var(--mono);
+      }
+
+      .d-vectorscope-review .sugg .dl .dl-n {
+        display: none;
+      }
+
+      .d-vectorscope-review .evidence {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-top: 10px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vectorscope-review .evidence .ref {
+        height: 18px;
+        color: var(--text-2);
+        font-size: 10.5px;
+      }
+
+      .d-vectorscope-review .card-c-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 12px;
+      }
+
+      .d-vectorscope-review .card-c-actions .spacer {
+        flex: 1;
+      }
+
+      .d-vectorscope-review .reply {
+        display: grid;
+        grid-template-columns: 20px minmax(0, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+        padding-top: 11px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-vectorscope-review .reply-head {
+        margin-bottom: 3px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vectorscope-review .reply-head b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      .d-vectorscope-review .composer {
+        margin-top: 12px;
+        padding: 10px;
+        border: 1px solid rgba(182, 159, 247, 0.45);
+        border-radius: 8px;
+        background: #19161f;
+      }
+
+      .d-vectorscope-review .composer label {
+        display: block;
+        margin-bottom: 7px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+
+      .d-vectorscope-review textarea {
+        display: block;
+        width: 100%;
+        min-height: 64px;
+        padding: 8px 10px;
+        resize: vertical;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        outline: 0;
+        background: rgba(0, 0, 0, 0.2);
+        color: var(--text-1);
+        font: 12.5px/1.5 var(--font);
+      }
+
+      .d-vectorscope-review textarea:focus {
+        border-color: rgba(182, 159, 247, 0.6);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.14);
+      }
+
+      .d-vectorscope-review .composer-foot {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .d-vectorscope-review .composer-foot .mono {
+        flex: 1;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      /* the agent fixing a finding */
+      .d-vectorscope-review .run {
+        display: grid;
+        gap: 6px;
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid rgba(182, 159, 247, 0.2);
+        border-radius: 8px;
+        background: rgba(146, 116, 236, 0.06);
+      }
+
+      .d-vectorscope-review .run-head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 2px;
+        color: var(--violet-bright);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .d-vectorscope-review .run-head .mono {
+        margin-left: auto;
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 400;
+      }
+
+      .d-vectorscope-review .run-step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-vectorscope-review .run-step[data-state="done"] {
+        color: var(--text-2);
+      }
+
+      .d-vectorscope-review .run-step[data-state="active"] {
+        color: var(--text-1);
+      }
+
+      .d-vectorscope-review .run-step svg {
+        flex: none;
+      }
+
+      .d-vectorscope-review .run-step[data-state="active"] svg {
+        animation: vs-spin 0.9s linear infinite;
+      }
+
+      .d-vectorscope-review .resolved {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 12px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-vectorscope-review .resolved b {
+        overflow: hidden;
+        color: var(--text-1);
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vectorscope-review .resolved .end {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: auto;
+      }
+
+      /* ---- floating pieces ---- */
+      .d-vectorscope-review .pop {
+        position: absolute;
+        z-index: 20;
+        animation: vs-pop 180ms var(--ease);
+      }
+
+      .d-vectorscope-review .pop[hidden] {
+        display: none;
+      }
+
+      @keyframes vs-pop {
+        from {
+          opacity: 0;
+          transform: translateY(-4px) scale(0.985);
+        }
+      }
+
+      .d-vectorscope-review .sheet {
+        top: 8px;
+        right: 14px;
+        width: 420px;
+      }
+
+      .d-vectorscope-review .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 13px 10px 11px 16px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-vectorscope-review .sheet-head h3 {
+        margin: 0;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+
+      .d-vectorscope-review .sheet-head .icon-btn {
+        margin-left: auto;
+      }
+
+      .d-vectorscope-review .sheet-body {
+        display: grid;
+        gap: 12px;
+        padding: 14px 16px;
+      }
+
+      .d-vectorscope-review .sheet-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 7px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-vectorscope-review .sheet-label .badge {
+        height: 18px;
+        margin-left: auto;
+      }
+
+      .d-vectorscope-review .sheet textarea {
+        min-height: 92px;
+      }
+
+      .d-vectorscope-review .pick {
+        display: grid;
+        gap: 2px;
+        max-height: 196px;
+        overflow: auto;
+      }
+
+      .d-vectorscope-review .pick label {
+        display: grid;
+        grid-template-columns: 16px 14px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        min-height: 32px;
+        padding: 0 8px;
+        border-radius: 6px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        cursor: pointer;
+      }
+
+      .d-vectorscope-review .pick label:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-vectorscope-review .pick .t {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vectorscope-review .pick .mono {
+        max-width: 150px;
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 10.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-vectorscope-review input[type="checkbox"] {
+        width: 14px;
+        height: 14px;
+        margin: 0;
+        accent-color: var(--violet);
+      }
+
+      .d-vectorscope-review .sheet-opt {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.02);
+        font-size: 12.5px;
+      }
+
+      .d-vectorscope-review .sheet-opt span {
+        flex: 1;
+        display: grid;
+        gap: 2px;
+      }
+
+      .d-vectorscope-review .sheet-opt small {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-vectorscope-review .sheet-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-vectorscope-review .sheet-foot .muted {
+        flex: 1;
+        font-size: 11.5px;
+      }
+
+      .d-vectorscope-review .lockpop {
+        top: 8px;
+        right: 14px;
+        width: 330px;
+        padding: 14px 14px 12px;
+      }
+
+      .d-vectorscope-review .lockpop h3 {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 6px;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .d-vectorscope-review .lockpop p {
+        margin: 0 0 12px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      .d-vectorscope-review .lockpop .row-end {
+        justify-content: flex-end;
+      }
+
+      .d-vectorscope-review .menu {
+        width: 210px;
+        padding: 5px;
+      }
+
+      .d-vectorscope-review .menu p {
+        margin: 4px 8px 6px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-vectorscope-review .menu button {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        height: 30px;
+        padding: 0 9px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-1);
+        font-size: 12.5px;
+        text-align: left;
+      }
+
+      .d-vectorscope-review .menu button:hover,
+      .d-vectorscope-review .menu button:focus-visible {
+        background: rgba(255, 255, 255, 0.06);
+        outline: 0;
+      }
+
+      .d-vectorscope-review .toast {
+        right: 18px;
+        bottom: 18px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        max-width: 460px;
+        padding: 11px 14px;
+        color: var(--text-1);
+        font-size: 12.5px;
+      }
+
+      .d-vectorscope-review .toast .mono {
+        color: var(--violet-bright);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="vectorscope-review"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-vectorscope-review">
+            <div class="app">
+              <nav data-lab-sidebar data-active="pulls" data-workspace="Vector" data-branch="security-boundaries"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <a class="hd-crumb" href="pull-requests.html">Pull Requests</a>
+                  <span class="hd-sep-slash" aria-hidden="true">/</span>
+                  <h2>Bind workspace trust to a folder fingerprint</h2>
+                  <span class="hd-num">#2318</span>
+                  <span class="badge badge-green" data-state-badge>Open</span>
+                  <div class="app-header-end">
+                    <button class="chip-tool" type="button" data-rerun><i data-icon="reload" data-size="14"></i>Re-run review</button>
+                    <button class="icon-btn" type="button" aria-label="Open #2318 on GitHub" title="Open on GitHub"><i data-icon="external" data-size="15"></i></button>
+                    <span class="hd-sep" aria-hidden="true"></span>
+                    <button class="btn" type="button" data-request>Request changes</button>
+                    <button class="btn btn-primary" type="button" data-approve aria-haspopup="dialog"></button>
+                  </div>
+                </header>
+
+                <div class="vs">
+                  <section class="vs-band" aria-label="Pull request and Vectorscope summary">
+                    <div class="vs-band-main">
+                      <p class="vs-meta" style="margin: 0">
+                        <span class="avatar" aria-hidden="true" style="background:#2f3d45;color:#cfe6f2">ML</span>
+                        <b>mira-lund</b> wants to merge 4 commits into <span class="ref">main</span> from
+                        <span class="ref">security-boundaries</span>
+                        <span class="sep">·</span><span class="add">+278</span><span class="del">−31</span>
+                        <span class="sep">·</span>6 files <span class="sep">·</span>updated 12m ago
+                      </p>
+                      <div class="vs-summary">
+                        <span class="vs-mark"><i data-icon="review" data-size="12"></i></span>
+                        <div class="vs-summary-head">
+                          <b>Vectorscope</b><span class="muted">reviewed</span><span class="ref" data-reviewed-sha>a1c9e4f</span><span class="muted" data-reviewed-when>14m ago</span>
+                        </div>
+                        <p data-summary>
+                          Trust now follows a folder's fingerprint instead of its path, and untrusted projects can only narrow
+                          permissions. One blocking gap: <code>.vector/hooks/</code> is not fingerprinted, so a hook added after
+                          trust runs without asking.
+                        </p>
+                      </div>
+                    </div>
+                    <div class="vs-risk" data-risk="high" aria-live="polite">
+                      <div class="vs-risk-top"><span>Risk</span><span class="vs-risk-level" data-risk-level>High</span></div>
+                      <div class="vs-meter" aria-hidden="true"><i></i><i></i><i></i></div>
+                      <div class="vs-risk-counts" data-risk-counts></div>
+                      <div class="vs-risk-foot">review + security specialists · 2m 14s · $0.41</div>
+                    </div>
+                  </section>
+
+                  <div class="vs-split">
+                    <aside class="vs-rail" aria-label="Review">
+                      <div class="tabs" role="tablist" data-tabs="rail">
+                        <button class="tab" role="tab" type="button" data-tab="findings" aria-selected="true">Findings <span class="count" data-n-findings>6</span></button>
+                        <button class="tab" role="tab" type="button" data-tab="checks" aria-selected="false">Checks <span class="count" data-n-checks>8</span></button>
+                        <button class="tab" role="tab" type="button" data-tab="files" aria-selected="false">Files <span class="count">6</span></button>
+                      </div>
+
+                      <div class="vs-panel" data-panel="findings" data-tabs-for="rail" role="tabpanel">
+                        <div class="vs-tool">
+                          <div class="seg" role="group" aria-label="Filter findings by severity" data-filter></div>
+                        </div>
+                        <div class="vs-list scroll" data-findings></div>
+                        <div class="vs-rail-foot">
+                          <span data-dropped>1 low-confidence finding hidden</span>
+                          <label>Show resolved <button class="switch" role="switch" type="button" aria-checked="true" data-show-resolved aria-label="Show resolved findings"></button></label>
+                        </div>
+                      </div>
+
+                      <div class="vs-panel" data-panel="checks" data-tabs-for="rail" role="tabpanel" hidden>
+                        <div class="vs-checks-sum" data-checks-sum></div>
+                        <div class="vs-list scroll" data-checks></div>
+                      </div>
+
+                      <div class="vs-panel" data-panel="files" data-tabs-for="rail" role="tabpanel" hidden>
+                        <div class="vs-checks-sum" data-files-sum></div>
+                        <div class="vs-list scroll" data-files></div>
+                      </div>
+                    </aside>
+
+                    <section class="vs-reader" aria-label="Diff">
+                      <div class="vs-filebar" data-filebar></div>
+                      <div class="vs-body scroll" data-reader></div>
+                    </section>
+                  </div>
+
+                  <!-- Submit review sheet -->
+                  <div class="pop float sheet" role="dialog" aria-modal="false" aria-labelledby="vs-sheet-title" data-sheet hidden></div>
+                  <!-- Approve is locked -->
+                  <div class="pop float lockpop" role="dialog" aria-labelledby="vs-lock-title" data-lockpop hidden>
+                    <h3 id="vs-lock-title"><span class="del" data-ic="lock"></span>Approve is off while a blocking finding stands.</h3>
+                    <p>Fix it with the agent, or dismiss it with a reason, and Approve unlocks.</p>
+                    <div class="row-end"><button class="btn btn-sm btn-ghost" type="button" data-lock-close>Close</button><button class="btn btn-sm" type="button" data-goto-blocking>Go to finding</button></div>
+                  </div>
+                  <div class="pop float menu" role="menu" aria-label="Dismiss reason" data-menu hidden>
+                    <p>Dismiss with a reason</p>
+                    <button type="button" role="menuitem" data-reason="Not a bug">Not a bug</button>
+                    <button type="button" role="menuitem" data-reason="Intended">Intended behaviour</button>
+                    <button type="button" role="menuitem" data-reason="Fixed elsewhere">Fixed elsewhere</button>
+                    <button type="button" role="menuitem" data-reason="Won't fix">Won't fix in this PR</button>
+                  </div>
+                  <div class="pop float toast" role="status" data-toast hidden></div>
+                </div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <!-- The diffs, as unified diff text, so the samples need no escaping. -->
+    <script type="text/plain" data-diff="trust">
+@@ -1,5 +1,7 @@
+ import path from "node:path"
++import { realpath } from "node:fs/promises"
++import { createHash } from "node:crypto"
+ import { Settings } from "../settings/settings"
+ import { Project } from "./project"
+
+@@ -38,9 +40,25 @@ export namespace Trust {
+   export type Level = "trusted" | "untrusted"
+
++  export interface Record {
++    directory: string
++    fingerprint: string
++    trustedAt: number
++  }
++
+-  export function trusted(project: Project.Info) {
++  export async function trusted(project: Project.Info) {
+     const settings = Settings.current()
+-    return settings.trusted.includes(project.directory)
++    const record = settings.trusted.find((item) => item.directory === project.directory)
++    if (!record) return false
++    // A moved or edited folder is a different folder.
++    return record.fingerprint === (await fingerprint(project))
+   }
+
++  // Hashes the folder's real path and every config file that can run code.
++  export async function fingerprint(project: Project.Info) {
++    const hash = createHash("sha256").update(await realpath(project.directory))
++    for (const name of ["vector.json", ".vector/config.json"]) {
++      const file = path.join(project.directory, name)
++      hash.update(await Bun.file(file).text().catch(() => ""))
++    }
++    return hash.digest("hex")
++  }
+@@ -71,6 +103,13 @@ export namespace Trust {
+   export function forget(directory: string) {
+     Settings.update((draft) => {
+-      draft.trusted = draft.trusted.filter((item) => item !== directory)
++      draft.trusted = draft.trusted.filter((item) => item.directory !== directory)
+     })
+   }
++
++  export async function remember(project: Project.Info) {
++    const fingerprint = await Trust.fingerprint(project)
++    Settings.update((draft) => {
++      draft.trusted.push({ directory: project.directory, fingerprint, trustedAt: Date.now() })
++    })
++  }
+ }
+</script>
+    <script type="text/plain" data-diff="policy">
+@@ -1,4 +1,5 @@
+ import { merge } from "remeda"
++import { Permission } from "../permission"
+ import type { Policy, ProjectPolicy } from "./policy"
+
+@@ -14,10 +15,24 @@ export function resolvePolicy(user: Policy, project: ProjectPolicy) {
+ export function resolvePolicy(user: Policy, project: ProjectPolicy) {
+   return {
+-    permissions: merge(user.permissions, project.permissions),
++    // An untrusted project can narrow permissions, never widen them.
++    permissions: project.trusted
++      ? merge(user.permissions, project.permissions)
++      : narrow(user.permissions, project.permissions),
+     tools: merge(user.tools, project.tools),
+   }
+ }
++
++// Keeps the stricter action for every tool both sides name.
++function narrow(user: Permission.Rules, project: Permission.Rules) {
++  return Object.fromEntries(
++    Object.entries(user).map(([tool, action]) => [tool, Permission.stricter(action, project[tool])]),
++  )
++}
+</script>
+    <script type="text/plain" data-diff="launch">
+@@ -1,4 +1,5 @@
+ import { spawn } from "../util/process"
++import { Trust } from "../project/trust"
+ import { resolveEnv } from "./env"
+ import type { McpServer } from "./server"
+@@ -24,6 +25,8 @@ export async function launch(server: McpServer) {
+ export async function launch(server: McpServer) {
+   const env = await resolveEnv(server)
++  if (server.source === "project" && !(await Trust.trusted(server.project)))
++    return refuse(server, "Trust this folder to start its MCP servers.")
+   return spawn(server.command, server.args, { env })
+ }
+@@ -41,3 +44,9 @@ export function stop(server: McpServer) {
+   server.process?.kill()
+ }
++
++function refuse(server: McpServer, reason: string) {
++  server.status = { kind: "failed", reason }
++  Bus.publish(McpEvent.Refused, { name: server.name, reason })
++}
+</script>
+    <script type="text/plain" data-diff="executable">
+@@ -1,3 +1,4 @@
+ import { spawn } from "../util/process"
++import { Trust } from "../project/trust"
+ import { ask } from "./ask"
+
+@@ -9,6 +10,8 @@ export type ExecutableConfig = {
+ export async function run(config: ExecutableConfig) {
+   if (!config.command) return
++  // Project config asks first until its folder is trusted.
++  if (!(await Trust.trusted(config.project))) return ask(config.command)
+   return spawn(config.command)
+ }
+</script>
+    <script type="text/plain" data-diff="dialog">
+@@ -0,0 +1,24 @@
++import { Dialog } from "@vectordevai/ui/dialog"
++import { Button } from "@vectordevai/ui/button"
++import { useTrust } from "@/context/trust"
++
++export function WorkspaceTrustDialog(props: { project: Project }) {
++  const trust = useTrust()
++  return (
++    <Dialog title="Trust this folder?">
++      <p>{describeFolder(props.project)}</p>
++      <ul class="trust-list">
++        <li>Run commands from vector.json</li>
++        <li>Start the project's MCP servers</li>
++        <li>Load plugins from .vector/plugins</li>
++      </ul>
++      <Button variant="ghost" onClick={() => trust.decline(props.project)}>Not now</Button>
++      <Button onClick={() => trust.remember(props.project)}>Trust folder</Button>
++    </Dialog>
++  )
++}
++
++function describeFolder(project: Project) {
++  return project.name + " wants to run code on this computer."
++}
+</script>
+    <script type="text/plain" data-diff="test">
+@@ -0,0 +1,28 @@
++import { test, expect } from "bun:test"
++import { Trust } from "../../src/project/trust"
++import { run } from "../../src/permission/executable"
++import { fixture } from "../fixture"
++
++test("an untrusted project cannot run executable config", async () => {
++  const project = await fixture({ trusted: false })
++  expect(await run(project.config("vector.json"))).toEqual({ asked: true })
++})
++
++test("a changed fingerprint revokes trust", async () => {
++  const project = await fixture({ trusted: true })
++  const before = await Trust.fingerprint(project)
++  await project.write("vector.json", "{}")
++  expect(await Trust.fingerprint(project)).not.toBe(before)
++})
++
++test("a symlinked config resolves before the check", async () => {
++  const project = await fixture({ trusted: true, link: "vector.json" })
++  expect(await Trust.trusted(project)).toBe(true)
++})
++
++test("project MCP servers wait for trust", async () => {
++  const project = await fixture({ trusted: false, mcp: ["docs"] })
++  const server = await launch(project.mcp("docs"))
++  expect(server).toBeUndefined()
++  expect(project.mcp("docs").status.kind).toBe("failed")
++})
+</script>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      // Runs after lab.js has drawn the sidebar and sized the stage, so the reader can scroll to a finding.
+      document.addEventListener("DOMContentLoaded", () => {
+        const root = document.querySelector(".d-vectorscope-review")
+        const $ = (sel) => root.querySelector(sel)
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const svg = (body, size = 14, extra = "") =>
+          `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${body}</svg>`
+        const IC = {
+          blocking: (s = 14) => `<span style="color:var(--red);display:inline-grid">${svg('<circle cx="8" cy="8" r="5.9"/><path d="M8 5v3.4M8 10.9v.1" stroke-width="1.4"/>', s)}</span>`,
+          concern: (s = 14) => `<span style="color:var(--amber);display:inline-grid">${svg('<path d="M7.1 2.9a1 1 0 0 1 1.8 0l5 9.1a1 1 0 0 1-.9 1.5H3a1 1 0 0 1-.9-1.5l5-9.1Z"/><path d="M8 6.4v2.8M8 11.1v.1" stroke-width="1.35"/>', s)}</span>`,
+          nit: (s = 14) => `<span style="color:var(--text-3);display:inline-grid">${svg('<circle cx="8" cy="8" r="2.6"/>', s)}</span>`,
+          ok: (s = 14) => `<span style="color:var(--green);display:inline-grid">${svg('<circle cx="8" cy="8" r="5.9"/><path d="m5.6 8.1 1.7 1.7 3.1-3.4"/>', s)}</span>`,
+          fail: (s = 14) => `<span style="color:var(--red);display:inline-grid">${svg('<circle cx="8" cy="8" r="5.9"/><path d="m6 6 4 4m0-4-4 4"/>', s)}</span>`,
+          run: (s = 14) => `<span class="is-spinning" style="color:var(--amber);display:inline-grid">${svg('<circle cx="8" cy="8" r="5.9" opacity=".3"/><path d="M8 2.1a5.9 5.9 0 0 1 5.9 5.9"/>', s)}</span>`,
+          pending: (s = 14) => svg('<circle cx="8" cy="8" r="5.6" stroke-dasharray="2 2.2"/>', s),
+          spark: (s = 14) => svg('<path d="M8 2.2c.45 2.85 1.9 4.3 4.75 4.75C9.9 7.4 8.45 8.85 8 11.7c-.45-2.85-1.9-4.3-4.75-4.75C6.1 6.5 7.55 5.05 8 2.2Z"/><path d="M12.4 10.6c.15.95.6 1.4 1.55 1.55-.95.15-1.4.6-1.55 1.55-.15-.95-.6-1.4-1.55-1.55.95-.15 1.4-.6 1.55-1.55Z"/>', s),
+          lock: (s = 14) => svg('<rect x="3.5" y="7" width="9" height="6.5" rx="1.4"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/>', s),
+          reply: (s = 14) => svg('<path d="M6.5 4 3 7.3l3.5 3.2M3.3 7.3h5.9a3.8 3.8 0 0 1 3.8 3.8v.9"/>', s),
+          comment: (s = 12) => svg('<path d="M3 4.2c0-.7.5-1.2 1.2-1.2h7.6c.7 0 1.2.5 1.2 1.2v5.2c0 .7-.5 1.2-1.2 1.2H7.4L4.6 13v-2.4h-.4c-.7 0-1.2-.5-1.2-1.2V4.2Z"/>', s),
+          plus: (s = 12) => svg('<path d="M8 3.5v9M3.5 8h9" stroke-width="1.6"/>', s),
+          chevron: (s = 14) => LabUI.svg("chevron-down", s),
+          prev: (s = 14) => svg('<path d="m10 4-4 4 4 4"/>', s),
+          next: (s = 14) => svg('<path d="m6 4 4 4-4 4"/>', s),
+          check: (s = 10) => svg('<path d="m3.5 8.4 2.9 2.8 6-6.4" stroke-width="2"/>', s),
+          commit: (s = 14) => svg('<circle cx="8" cy="8" r="2.4"/><path d="M1.8 8h3.8M10.4 8h3.8"/>', s),
+          x: (s = 14) => LabUI.svg("close-small", s),
+        }
+        root.querySelectorAll("[data-ic]").forEach((el) => (el.innerHTML = IC[el.dataset.ic](14)))
+
+        // ---------- data ----------
+        const files = [
+          { id: "trust", name: "trust.ts", dir: "packages/engine/src/project/", add: 64, del: 9, more: "2 more hunks below" },
+          { id: "policy", name: "project-policy.ts", dir: "packages/engine/src/config/", add: 31, del: 12, more: "1 more hunk below" },
+          { id: "launch", name: "launch.ts", dir: "packages/engine/src/mcp/", add: 18, del: 6, more: "1 more hunk below" },
+          { id: "executable", name: "executable.ts", dir: "packages/engine/src/permission/", add: 22, del: 4, more: "1 more hunk below" },
+          { id: "dialog", name: "workspace-trust-dialog.tsx", dir: "packages/app/src/components/", add: 47, del: 0, more: "23 more lines below" },
+          { id: "test", name: "trust.test.ts", dir: "packages/engine/test/project/", add: 96, del: 0, more: "68 more lines below" },
+        ]
+        files.forEach((f) => {
+          f.rows = parse(document.querySelector(`[data-diff="${f.id}"]`).textContent)
+          f.viewed = false
+        })
+
+        const findings = [
+          {
+            id: "f1", sev: "blocking", cat: "security", conf: 94, file: "trust", anchor: 'for (const name of ["vector.json"',
+            title: "Hook files are not part of the folder fingerprint",
+            body: 'The fingerprint covers <code>vector.json</code> and <code>.vector/config.json</code>, but hooks under <code>.vector/hooks/</code> run code too. A hook added after the folder is trusted keeps the old fingerprint and runs without asking.',
+            sugg: ['-    for (const name of ["vector.json", ".vector/config.json"]) {', '+    for (const name of ["vector.json", ".vector/config.json", ...(await hookFiles(project))]) {'],
+            evidence: ["trust.ts:59", "hooks/load.ts:22", "hooks/load.ts:40"],
+            fix: ["Read trust.ts and hooks/load.ts", "Add hook files to the fingerprint", "Run trust.test.ts · 7 pass", "Push to security-boundaries"],
+            sha: "3f2a91c",
+          },
+          {
+            id: "f2", sev: "concern", cat: "security", conf: 78, file: "policy", anchor: "tools: merge(user.tools, project.tools)",
+            title: "Untrusted projects can still turn tools back on",
+            body: "Permissions are narrowed, but <code>tools</code> still merges for an untrusted project, so it can re-enable a tool the user switched off. If that is intended, a comment would help; otherwise narrow it the same way.",
+            sugg: ["-    tools: merge(user.tools, project.tools),", "+    tools: project.trusted ? merge(user.tools, project.tools) : narrow(user.tools, project.tools),"],
+            evidence: ["project-policy.ts:22", "config/policy.ts:31"],
+            fix: ["Read project-policy.ts", "Narrow tools for untrusted projects", "Run policy.test.ts · 4 pass", "Push to security-boundaries"],
+            sha: "b81e07d",
+          },
+          {
+            id: "f3", sev: "concern", cat: "reliability", conf: 86, file: "launch", anchor: 'server.status = { kind: "failed", reason }',
+            title: "Refused MCP servers are not retried after trust",
+            body: "<code>refuse()</code> leaves the server in <code>failed</code>. Trusting the folder from the dialog does not restart it, so the user has to reload the window before the project's MCP servers start.",
+            evidence: ["launch.ts:49", "mcp/index.ts:118"],
+            fix: ["Read launch.ts and mcp/index.ts", "Restart refused servers on Trust.Changed", "Run mcp.test.ts · 9 pass", "Push to security-boundaries"],
+            sha: "c4d93a2",
+          },
+          {
+            id: "f4", sev: "nit", cat: "tests", conf: 91, file: "test", anchor: "expect(await Trust.fingerprint(project)).not.toBe(before)",
+            title: "Test says it revokes trust but only checks the hash",
+            body: "Assert <code>Trust.trusted(project)</code> is false after the write, so the test covers what its name promises.",
+            sugg: ["-  expect(await Trust.fingerprint(project)).not.toBe(before)", "+  expect(await Trust.trusted(project)).toBe(false)"],
+            evidence: ["trust.test.ts:15"],
+            fix: ["Read trust.test.ts", "Assert trust is revoked", "Run trust.test.ts · 7 pass", "Push to security-boundaries"],
+            sha: "e19f5b0",
+          },
+          {
+            id: "f5", sev: "nit", cat: "maintainability", conf: 72, file: "dialog", anchor: "function describeFolder",
+            title: "Inline the single-use describeFolder helper",
+            body: "It is used once and its name says less than the sentence it returns. Inlining keeps the dialog's copy in one place.",
+            evidence: ["workspace-trust-dialog.tsx:9"],
+            fix: ["Read workspace-trust-dialog.tsx", "Inline describeFolder", "Typecheck app · pass", "Push to security-boundaries"],
+            sha: "7a0c6e4",
+          },
+          {
+            id: "f6", sev: "nit", cat: "docs", conf: 64, file: "executable", anchor: "// Project config asks first",
+            title: "Comment restates the next line",
+            body: "Say why instead: a cloned repository's config has not been read by the user yet, so it asks before running.",
+            evidence: ["executable.ts:12"],
+            fix: ["Read executable.ts", "Rewrite the comment", "Typecheck engine · pass", "Push to security-boundaries"],
+            sha: "0d5be91",
+          },
+        ]
+        findings.forEach((f) => {
+          f.status = "open"
+          f.replies = []
+          f.open = true
+          const file = files.find((x) => x.id === f.file)
+          const row = file.rows.find((r) => r.t !== "del" && r.t !== "hunk" && r.text.includes(f.anchor))
+          f.line = row.n
+          f.evidence[0] = `${file.name}:${row.n}`
+          row.finding = f.id
+        })
+
+        const checks = [
+          { id: "c1", name: "typecheck · engine", sub: "GitHub Actions · ci.yml", state: "ok", time: "1m 12s" },
+          { id: "c2", name: "typecheck · app", sub: "GitHub Actions · ci.yml", state: "ok", time: "58s" },
+          { id: "c3", name: "test · engine", sub: "GitHub Actions · ci.yml · 1,284 pass", state: "ok", time: "3m 41s" },
+          { id: "c4", name: "test · app", sub: "GitHub Actions · ci.yml · 412 pass", state: "ok", time: "2m 05s" },
+          {
+            id: "c5", name: "e2e · desktop smoke", sub: "GitHub Actions · e2e.yml · 1 failed", state: "fail", time: "4m 10s",
+            log: [
+              ["", "e2e/workspace-trust.spec.ts:24:31"],
+              ["err", "  ✕ trust dialog appears on first open (5.0s)"],
+              ["", "    Error: expect(locator).toBeVisible() failed"],
+              ["", '    Locator: getByRole("dialog", { name: "Trust this folder?" })'],
+              ["err", "    Expected: visible · Received: <element(s) not found>"],
+            ],
+          },
+          { id: "c6", name: "build · desktop (macOS arm64)", sub: "GitHub Actions · release.yml", state: "run", secs: 151 },
+          { id: "c7", name: "generate · sdk is current", sub: "GitHub Actions · ci.yml", state: "ok", time: "47s" },
+          { id: "c8", name: "Vectorscope", sub: "Vectorscope GitHub App · review + security", state: "vs", time: "2m 14s" },
+        ]
+
+        const state = { filter: "all", file: "trust", focus: "f1", showResolved: true, review: null, timers: [] }
+
+        // ---------- diff parsing and highlighting ----------
+        function parse(src) {
+          const rows = []
+          let n = 0
+          let o = 0
+          src.replace(/^\n/, "").replace(/\n$/, "").split("\n").forEach((line) => {
+            if (line.startsWith("@@")) {
+              const m = /-(\d+)(?:,\d+)? \+(\d+)/.exec(line)
+              o = Number(m[1])
+              n = Number(m[2])
+              return rows.push({ t: "hunk", text: line })
+            }
+            const sign = line[0] ?? " "
+            const text = line.slice(1)
+            if (sign === "+") return rows.push({ t: "add", n: n++, text })
+            if (sign === "-") return rows.push({ t: "del", o: o++, text })
+            rows.push({ t: "ctx", n: n++, o: o++, text })
+          })
+          return rows
+        }
+
+        const KW = "import|from|export|const|let|return|if|else|for|of|await|async|function|type|interface|namespace|new|true|false|undefined|null"
+        const TOKEN = new RegExp(`(\\/\\/.*$)|("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\\\n]|\\\\.)*')|\\b(${KW})\\b|\\b(\\d+)\\b`, "g")
+        function hl(code) {
+          const safe = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          return safe.replace(TOKEN, (m, c, s, k, n) => {
+            if (c) return `<span class="tk-c">${c}</span>`
+            if (s) return `<span class="tk-s">${s}</span>`
+            if (k) return `<span class="tk-k">${k}</span>`
+            return `<span class="tk-n">${n}</span>`
+          })
+        }
+
+        // ---------- rendering ----------
+        const sevName = { blocking: "Blocking", concern: "Concern", nit: "Nit" }
+        const sevBadge = { blocking: "badge-red", concern: "badge-amber", nit: "" }
+        const fileOf = (id) => files.find((f) => f.id === id)
+        const open = (f) => f.status === "open" || f.status === "fixing"
+
+        function counts() {
+          const live = findings.filter(open)
+          return {
+            blocking: live.filter((f) => f.sev === "blocking").length,
+            concern: live.filter((f) => f.sev === "concern").length,
+            nit: live.filter((f) => f.sev === "nit").length,
+            all: live.length,
+          }
+        }
+
+        function renderSummary() {
+          const c = counts()
+          const risk = c.blocking ? "high" : c.concern ? "medium" : "low"
+          const box = $(".vs-risk")
+          box.dataset.risk = risk
+          $("[data-risk-level]").textContent = risk[0].toUpperCase() + risk.slice(1)
+          const part = (n, one, many) => `<span class="${n ? "" : "z"}">${n} ${n === 1 ? one : many}</span>`
+          $("[data-risk-counts]").innerHTML = [part(c.blocking, "blocking", "blocking"), part(c.concern, "concern", "concerns"), part(c.nit, "nit", "nits")].join('<span class="sep"> · </span>')
+          $("[data-n-findings]").textContent = c.all
+          const blocker = findings.find((f) => f.sev === "blocking")
+          if (blocker.status === "fixed")
+            $("[data-summary]").innerHTML = `Trust now follows a folder's fingerprint instead of its path, and untrusted projects can only narrow permissions. The hook gap is closed in <code>${blocker.sha}</code>; ${c.concern ? `${c.concern} ${c.concern === 1 ? "concern remains" : "concerns remain"}` : "nothing blocking or concerning remains"}${c.nit ? `, with ${c.nit} ${c.nit === 1 ? "nit" : "nits"}` : ""}.`
+          renderApprove()
+        }
+
+        function renderFilter() {
+          const total = (sev) => findings.filter((f) => (sev === "all" || f.sev === sev) && (state.showResolved || open(f))).length
+          const opts = [
+            ["all", "All"],
+            ["blocking", "Blocking"],
+            ["concern", "Concerns"],
+            ["nit", "Nits"],
+          ]
+          $("[data-filter]").innerHTML = opts
+            .map(([v, label]) => `<button type="button" data-value="${v}" aria-pressed="${state.filter === v}">${label}<span class="n">${total(v)}</span></button>`)
+            .join("")
+        }
+
+        function renderFindings() {
+          const groups = [
+            ["blocking", "Blocking"],
+            ["concern", "Concerns"],
+            ["nit", "Nits"],
+          ]
+          const html = groups
+            .filter(([sev]) => state.filter === "all" || state.filter === sev)
+            .map(([sev, label]) => {
+              const list = findings.filter((f) => f.sev === sev && (state.showResolved || open(f)))
+              if (!list.length) return ""
+              return `<p class="vs-group">${label}<span class="n">${list.length}</span></p>${list.map(findingRow).join("")}`
+            })
+            .join("")
+          $("[data-findings]").innerHTML = html || `<p class="vs-empty">Nothing here. Resolved findings are hidden.</p>`
+        }
+
+        function findingRow(f) {
+          const file = fileOf(f.file)
+          const end =
+            f.status === "fixed"
+              ? `<span class="st st-fixed">Fixed</span>`
+              : f.status === "dismissed"
+                ? `<span class="st st-dismissed">Dismissed</span>`
+                : f.status === "fixing"
+                  ? `<span class="st st-fixing">Fixing</span>`
+                  : `${f.conf}%`
+          return `<button type="button" class="vs-f" data-finding="${f.id}" data-status="${f.status}" aria-current="${state.focus === f.id}">
+            <span class="vs-f-sev">${IC[f.sev]()}</span>
+            <span class="vs-f-title">${esc(f.title)}</span>
+            <span class="vs-f-end" title="${f.status === "open" ? "Confidence" : ""}">${end}</span>
+            <span class="vs-f-sub"><span class="mono">${file.name}:${f.line}</span> · ${f.cat}</span>
+          </button>`
+        }
+
+        function renderChecks() {
+          const done = checks.filter((c) => c.state !== "run").length
+          const failed = checks.filter((c) => c.state === "fail").length
+          $("[data-checks-sum]").innerHTML = `<span>${done} of ${checks.length} checks finished</span>${failed ? `<span class="badge badge-red">${failed} failing</span>` : `<span class="badge badge-green">All passing</span>`}`
+          $("[data-n-checks]").textContent = checks.length
+          $("[data-checks]").innerHTML = checks
+            .map((c) => {
+              const icon = c.state === "ok" ? IC.ok() : c.state === "fail" ? IC.fail() : c.state === "run" ? IC.run() : c.state === "fixing" ? IC.run() : `<span class="vs-mark sm"><span style="display:grid">${LabUI.svg("review", 10)}</span></span>`
+              const time = c.state === "run" ? `${Math.floor(c.secs / 60)}m ${String(c.secs % 60).padStart(2, "0")}s` : c.time
+              const end = c.state === "vs" ? `<span class="badge ${counts().blocking ? "badge-red" : "badge-green"}">${counts().blocking ? `${counts().blocking} blocking` : "No blocking"}</span>` : `<span class="vs-c-time">${time}</span>`
+              const body = `${icon}<span class="row-text"><span class="row-name">${esc(c.name)}</span><span class="row-sub">${esc(c.sub)}</span></span>${end}`
+              if (!c.log) return `<div class="vs-c" data-check="${c.id}">${body}</div>`
+              const expanded = c.expanded ?? true
+              return `<button type="button" class="vs-c" data-check-toggle="${c.id}" aria-expanded="${expanded}">${body}<span class="chev" aria-expanded="${expanded}" style="display:grid;color:var(--text-3)">${IC.chevron(14)}</span></button>
+                <div class="vs-log" ${expanded ? "" : "hidden"}>${c.log.map(([k, t]) => `<p class="${k}">${esc(t.trim())}</p>`).join("")}
+                  <div class="vs-log-actions">${
+                    c.state === "fixing"
+                      ? `<span class="st st-fixing">${IC.spark(11)} Vector is fixing this on security-boundaries</span>`
+                      : `<button class="btn btn-sm btn-primary" type="button" data-fix-check="${c.id}">${IC.spark(12)} Fix with agent</button><button class="btn btn-sm" type="button">Open log</button><button class="btn btn-sm btn-ghost" type="button" data-rerun-check="${c.id}">Re-run</button>`
+                  }</div></div>`
+            })
+            .join("")
+        }
+
+        function renderFiles() {
+          const viewed = files.filter((f) => f.viewed).length
+          $("[data-files-sum]").innerHTML = `<span>${files.length} files changed</span><span class="add">+278</span><span class="del">−31</span>`
+          $("[data-files]").innerHTML = files
+            .map((f) => {
+              const n = findings.filter((x) => x.file === f.id && open(x)).length
+              return `<button type="button" class="vs-file" data-file="${f.id}" aria-current="${state.file === f.id}">
+                <span class="row-text"><span class="row-name">${f.name}</span><span class="row-sub">${f.dir}</span></span>
+                ${n ? `<span class="cmt">${IC.comment(10)}${n}</span>` : ""}
+                ${f.viewed ? `<span class="viewed-mark" title="Viewed">${IC.check(12)}</span>` : ""}
+                <span class="add">+${f.add}</span><span class="del">−${f.del}</span>
+              </button>`
+            })
+            .join("") + `<p class="vs-empty" style="padding:14px 12px;text-align:left">${viewed} of ${files.length} viewed</p>`
+        }
+
+        function renderFilebar() {
+          const f = fileOf(state.file)
+          const i = files.indexOf(f)
+          const n = findings.filter((x) => x.file === f.id && open(x)).length
+          $("[data-filebar]").innerHTML = `
+            <span class="row-text"><span class="row-name">${f.name}</span><span class="row-sub">${f.dir}</span></span>
+            ${n ? `<span class="cmt" title="${n} open finding${n === 1 ? "" : "s"}">${IC.comment(10)}${n}</span>` : ""}
+            <span class="add">+${f.add}</span><span class="del">−${f.del}</span>
+            <button type="button" class="vs-viewed" data-viewed aria-pressed="${f.viewed}"><span class="box">${IC.check(10)}</span>Viewed</button>
+            <span class="vs-nav"><button class="icon-btn" type="button" data-step="-1" aria-label="Previous file">${IC.prev()}</button>${i + 1}/${files.length}<button class="icon-btn" type="button" data-step="1" aria-label="Next file">${IC.next()}</button></span>`
+        }
+
+        function renderReader(scroll = true) {
+          const f = fileOf(state.file)
+          const rows = f.rows
+            .map((r, idx) => {
+              if (r.t === "hunk") return `<div class="dl hunk"><span class="dl-n">⋯</span><span class="dl-c">${esc(r.text)}</span></div>`
+              const sign = r.t === "add" ? "+" : r.t === "del" ? "−" : ""
+              const num = r.t === "del" ? "" : r.n
+              const anchored = r.finding && findings.find((x) => x.id === r.finding)
+              const cls = `dl ${r.t}${anchored && open(anchored) ? " anchor" : ""}${r.fresh ? " fresh" : ""}`
+              const add = r.t === "del" ? "" : `<button class="dl-add" type="button" data-comment-line="${idx}" aria-label="Comment on line ${num}">${IC.plus(10)}</button>`
+              const line = `<div class="${cls}"><span class="dl-n">${num}</span>${add}<span class="dl-s">${sign}</span><span class="dl-c">${hl(r.text) || " "}</span></div>`
+              const thread = anchored ? threadHtml(anchored) : ""
+              const mine = (r.mine ?? []).map((m) => mineHtml(m)).join("")
+              const draft = r.draft ? draftHtml(idx, num) : ""
+              return line + thread + mine + draft
+            })
+            .join("")
+          $("[data-reader]").innerHTML = `<div class="dv">${rows}<div class="dl hunk"><span class="dl-n">⋯</span><span class="dl-c" style="font-family:var(--font);font-size:11.5px">${f.more}</span></div></div>`
+          LabUI.renderIcons($("[data-reader]"))
+          if (!scroll) return
+          const focus = $(`.card-c[data-card="${state.focus}"]`)
+          const body = $("[data-reader]")
+          if (focus) body.scrollTo({ top: Math.max(0, focus.offsetTop - 150), behavior: "auto" })
+          else body.scrollTo({ top: 0 })
+        }
+
+        function threadHtml(f) {
+          const focus = state.focus === f.id ? " is-focus" : ""
+          if (f.status === "fixed" || f.status === "dismissed") {
+            const what = f.status === "fixed" ? `${IC.ok(15)}<span>Fixed by Vector in <span class="ref">${f.sha}</span></span>` : `${IC.nit(15)}<span>Dismissed · ${esc(f.reason)}</span>`
+            return `<div class="dc"><span class="dc-rail"></span><div class="card-c${focus}" data-card="${f.id}"><div class="resolved">${what}<b>${esc(f.title)}</b><span class="end"><button class="btn btn-sm btn-ghost" type="button" data-reopen="${f.id}">Reopen</button></span></div></div></div>`
+          }
+          const sugg = f.sugg
+            ? `<div class="sugg"><div class="sugg-head">Suggested change</div>${f.sugg
+                .map((l) => `<div class="dl ${l[0] === "+" ? "add" : "del"}"><span class="dl-n"></span><span class="dl-s">${l[0] === "+" ? "+" : "−"}</span><span class="dl-c">${hl(l.slice(1))}</span></div>`)
+                .join("")}</div>`
+            : ""
+          const replies = f.replies
+            .map((r) => `<div class="reply"><span class="avatar">KB</span><div><p class="reply-head"><b>kbharadwaj</b> · just now</p><p>${esc(r)}</p></div></div>`)
+            .join("")
+          const actions =
+            f.status === "fixing"
+              ? `<div class="run" data-run="${f.id}"><div class="run-head">${IC.spark(13)}Vector is fixing this<span class="mono">security-boundaries</span></div>${f.fix
+                  .map((s, i) => {
+                    const st = i < f.step ? "done" : i === f.step ? "active" : "todo"
+                    const icon = st === "done" ? IC.ok(13) : st === "active" ? `<span style="color:var(--violet-bright);display:inline-grid">${svg('<circle cx="8" cy="8" r="5.6" opacity=".3"/><path d="M8 2.4A5.6 5.6 0 0 1 13.6 8"/>', 13)}</span>` : IC.pending(13)
+                    return `<div class="run-step" data-state="${st}">${icon}${esc(s)}</div>`
+                  })
+                  .join("")}</div>`
+              : f.replying
+                ? `<div class="composer"><label for="reply-${f.id}">Reply</label><textarea id="reply-${f.id}" data-reply-text="${f.id}" placeholder="Explain, push back, or ask Vectorscope to look again"></textarea><div class="composer-foot"><span class="mono">${fileOf(f.file).name}:${f.line}</span><button class="btn btn-sm" type="button" data-reply-cancel="${f.id}">Cancel</button><button class="btn btn-sm btn-primary" type="button" data-reply-send="${f.id}">Reply</button></div></div>`
+                : `<div class="card-c-actions">
+                    <button class="btn btn-sm btn-primary" type="button" data-fix="${f.id}">${IC.spark(12)} Fix with agent</button>
+                    ${f.sugg ? `<button class="btn btn-sm" type="button" data-apply="${f.id}">Apply suggestion</button>` : ""}
+                    <button class="btn btn-sm btn-ghost" type="button" data-reply="${f.id}">${IC.reply(13)} Reply</button>
+                    <span class="spacer"></span>
+                    <button class="btn btn-sm btn-ghost" type="button" data-dismiss="${f.id}" aria-haspopup="menu">Dismiss</button>
+                  </div>`
+          return `<div class="dc"><span class="dc-rail"></span><article class="card-c${focus}" data-card="${f.id}" aria-label="Vectorscope finding">
+            <div class="card-c-head">
+              <span class="vs-mark sm">${LabUI.svg("review", 10)}</span><b>Vectorscope</b>
+              <span class="badge ${sevBadge[f.sev]}" style="height:18px">${sevName[f.sev]}</span>
+              <span>${f.cat}</span><span class="sep">·</span><span class="mono" style="font-size:11px">${f.conf}% confident</span>
+              <span class="end"><button class="icon-btn chev" type="button" data-collapse="${f.id}" aria-expanded="${f.open}" aria-label="${f.open ? "Collapse" : "Expand"} finding">${IC.chevron(14)}</button></span>
+            </div>
+            <div class="card-c-body" ${f.open ? "" : "hidden"}>
+              <h4>${esc(f.title)}</h4>
+              <p>${f.body}</p>
+              ${sugg}
+              <div class="evidence">Read ${f.evidence.map((e) => `<span class="ref">${e}</span>`).join("")}</div>
+              ${replies}
+              ${actions}
+            </div>
+          </article></div>`
+        }
+
+        function mineHtml(m) {
+          return `<div class="dc"><span class="dc-rail"></span><article class="card-c" style="border-color:var(--line-strong)"><div class="card-c-head"><span class="avatar">KB</span><b>kbharadwaj</b><span class="muted">pending · posts with your review</span></div><div class="card-c-body" style="padding-left:40px"><p>${esc(m)}</p></div></article></div>`
+        }
+
+        function draftHtml(idx, num) {
+          return `<div class="dc"><span class="dc-rail"></span><div class="card-c" style="margin-right:0"><div class="composer" style="margin:0;border:0;background:transparent"><label for="draft-${idx}">Comment</label><textarea id="draft-${idx}" data-draft-text="${idx}" placeholder="Leave a comment on this line"></textarea><div class="composer-foot"><span class="mono">line ${num}</span><button class="btn btn-sm" type="button" data-draft-cancel="${idx}">Cancel</button><button class="btn btn-sm btn-primary" type="button" data-draft-send="${idx}">Comment</button></div></div></div></div>`
+        }
+
+        function renderApprove() {
+          const btn = $("[data-approve]")
+          const locked = counts().blocking > 0
+          btn.setAttribute("aria-disabled", String(locked))
+          btn.innerHTML = locked ? `${IC.lock(13)}Approve` : `${IC.check(11)}Approve`
+          btn.title = locked ? "Approve is off while a blocking finding stands." : "Approve #2318"
+        }
+
+        function renderAll(scroll = true) {
+          renderSummary()
+          renderFilter()
+          renderFindings()
+          renderChecks()
+          renderFiles()
+          renderFilebar()
+          renderReader(scroll)
+        }
+
+        // ---------- floating pieces ----------
+        const pops = ["[data-sheet]", "[data-lockpop]", "[data-menu]"]
+        function closePops(except) {
+          pops.filter((p) => p !== except).forEach((p) => ($(p).hidden = true))
+        }
+
+        let toastTimer
+        function toast(html) {
+          const t = $("[data-toast]")
+          t.innerHTML = html
+          t.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (t.hidden = true), 3600)
+        }
+
+        function select(id, opts = {}) {
+          const f = findings.find((x) => x.id === id)
+          state.focus = id
+          state.file = f.file
+          f.open = true
+          renderFindings()
+          renderFiles()
+          renderFilebar()
+          renderReader()
+          if (opts.focusCard) $(`.card-c[data-card="${id}"]`)?.setAttribute("tabindex", "-1")
+        }
+
+        // The agent fixes a finding: four steps, then the line in the diff changes and the finding resolves.
+        function fix(id) {
+          const f = findings.find((x) => x.id === id)
+          f.status = "fixing"
+          f.step = 0
+          state.focus = id
+          renderAll(false)
+          const tick = () => {
+            f.step += 1
+            if (f.step < f.fix.length) {
+              renderFindings()
+              const run = $(`[data-run="${id}"]`)
+              if (run) {
+                renderReader(false)
+              }
+              return state.timers.push(setTimeout(tick, 820))
+            }
+            f.status = "fixed"
+            applyLine(f)
+            renderAll(false)
+            toast(`${IC.commit(15)}<span>Vector pushed <span class="mono">${f.sha}</span> to security-boundaries · ${esc(f.title)}</span>`)
+            if (f.sev === "blocking") setTimeout(() => toast(`${IC.ok(15)}<span>No blocking findings left. Risk is now <b>${counts().concern ? "Medium" : "Low"}</b> and Approve is on.</span>`), 1900)
+          }
+          state.timers.push(setTimeout(tick, 820))
+        }
+
+        function applyLine(f) {
+          if (!f.sugg) return
+          const file = fileOf(f.file)
+          const row = file.rows.find((r) => r.finding === f.id)
+          row.text = f.sugg[1].slice(1)
+          row.t = "add"
+          row.fresh = true
+          setTimeout(() => (row.fresh = false), 1700)
+        }
+
+        function sheet(kind) {
+          const c = counts()
+          const live = findings.filter(open)
+          const title = kind === "approve" ? "Approve #2318" : "Request changes on #2318"
+          const text =
+            kind === "approve"
+              ? "Looks good. Trust follows the fingerprint, hooks included, and project MCP servers wait for it."
+              : c.blocking
+                ? "Requesting changes for the hook fingerprint gap (trust.ts:59): a hook added after trust runs without asking. The rest reads well."
+                : "A couple of concerns below before this lands; nothing blocking."
+          const picks = live
+            .map((f) => `<label><input type="checkbox" data-pick="${f.id}" ${f.sev === "nit" ? "" : "checked"} />${IC[f.sev]()}<span class="t">${esc(f.title)}</span><span class="mono">${fileOf(f.file).name}:${f.line}</span></label>`)
+            .join("")
+          $("[data-sheet]").innerHTML = `
+            <div class="sheet-head"><span class="vs-mark sm">${LabUI.svg("review", 10)}</span><h3 id="vs-sheet-title">${title}</h3><button class="icon-btn" type="button" data-sheet-close aria-label="Close">${IC.x(16)}</button></div>
+            <div class="sheet-body">
+              <div><p class="sheet-label">Summary <span class="badge badge-violet">${IC.spark(11)} Drafted by Vectorscope</span></p><textarea aria-label="Review summary" data-sheet-text>${esc(text)}</textarea></div>
+              ${
+                kind === "approve"
+                  ? `<div class="sheet-opt"><span>Enable auto-merge<small>Squash into main once the desktop build passes</small></span><button class="switch" role="switch" type="button" aria-checked="true" data-automerge aria-label="Enable auto-merge"></button></div>`
+                  : live.length
+                    ? `<div><p class="sheet-label">Post findings as line comments <span class="muted" style="margin-left:auto" data-pick-count></span></p><div class="pick">${picks}</div></div>`
+                    : ""
+              }
+            </div>
+            <div class="sheet-foot"><span class="muted">Posts as kbharadwaj</span><button class="btn" type="button" data-sheet-close>Cancel</button><button class="btn ${kind === "approve" ? "btn-primary" : "btn-danger"}" type="button" data-submit="${kind}">${kind === "approve" ? "Approve" : "Request changes"}</button></div>`
+          countPicks()
+          closePops("[data-sheet]")
+          $("[data-sheet]").hidden = false
+          $("[data-sheet-text]").focus()
+        }
+
+        function countPicks() {
+          const el = $("[data-pick-count]")
+          if (!el) return
+          const n = root.querySelectorAll("[data-pick]:checked").length
+          el.textContent = `${n} selected`
+        }
+
+        function submit(kind) {
+          const n = kind === "approve" ? 0 : root.querySelectorAll("[data-pick]:checked").length
+          const mine = files.flatMap((f) => f.rows.flatMap((r) => r.mine ?? [])).length
+          const auto = kind === "approve" && $("[data-automerge]")?.getAttribute("aria-checked") === "true"
+          $("[data-sheet]").hidden = true
+          const badge = $("[data-state-badge]")
+          badge.className = `badge ${kind === "approve" ? "badge-green" : "badge-red"}`
+          badge.textContent = kind === "approve" ? (auto ? "Approved · auto-merge on" : "Approved") : "Changes requested"
+          const total = n + mine
+          toast(`${kind === "approve" ? IC.ok(15) : IC.fail(15)}<span>Review posted to <span class="mono">#2318</span>${total ? ` with ${total} line comment${total === 1 ? "" : "s"}` : ""}.</span>`)
+        }
+
+        // ---------- events ----------
+        root.addEventListener("click", (event) => {
+          const t = event.target.closest("button, [data-pick]")
+          if (!t) {
+            if (!event.target.closest(".pop")) closePops()
+            return
+          }
+          const d = t.dataset
+          if (!t.closest(".pop") && !t.matches("[data-dismiss], [data-approve], [data-request]")) closePops()
+
+          if (d.value && t.closest("[data-filter]")) {
+            state.filter = d.value
+            renderFilter()
+            return renderFindings()
+          }
+          if (d.finding) return select(d.finding)
+          if (d.file) {
+            state.file = d.file
+            const first = findings.find((x) => x.file === d.file && open(x))
+            state.focus = first?.id ?? state.focus
+            renderFindings()
+            renderFiles()
+            renderFilebar()
+            return renderReader()
+          }
+          if (d.step) {
+            const i = (files.findIndex((f) => f.id === state.file) + Number(d.step) + files.length) % files.length
+            state.file = files[i].id
+            renderFiles()
+            renderFilebar()
+            return renderReader(false)
+          }
+          if ("viewed" in d) {
+            const f = fileOf(state.file)
+            f.viewed = !f.viewed
+            renderFiles()
+            renderFilebar()
+            if (f.viewed) {
+              const next = files.find((x) => !x.viewed)
+              if (next) toast(`${IC.ok(15)}<span>${f.name} viewed · ${files.filter((x) => x.viewed).length} of ${files.length}</span>`)
+            }
+            return
+          }
+          if (d.collapse) {
+            const f = findings.find((x) => x.id === d.collapse)
+            f.open = !f.open
+            return renderReader(false)
+          }
+          if (d.fix) return fix(d.fix)
+          if (d.apply) {
+            const f = findings.find((x) => x.id === d.apply)
+            f.status = "fixed"
+            f.sha = "suggestion"
+            applyLine(f)
+            renderAll(false)
+            return toast(`${IC.ok(15)}<span>Suggestion committed to security-boundaries</span>`)
+          }
+          if (d.reply) {
+            findings.find((x) => x.id === d.reply).replying = true
+            renderReader(false)
+            return $(`[data-reply-text="${d.reply}"]`)?.focus()
+          }
+          if (d.replyCancel) {
+            findings.find((x) => x.id === d.replyCancel).replying = false
+            return renderReader(false)
+          }
+          if (d.replySend) {
+            const f = findings.find((x) => x.id === d.replySend)
+            const text = $(`[data-reply-text="${d.replySend}"]`).value.trim()
+            if (text) f.replies.push(text)
+            f.replying = false
+            return renderReader(false)
+          }
+          if (d.dismiss) {
+            const menu = $("[data-menu]")
+            if (!menu.hidden && menu.dataset.for === d.dismiss) return (menu.hidden = true)
+            closePops("[data-menu]")
+            menu.dataset.for = d.dismiss
+            const host = root.querySelector(".vs").getBoundingClientRect()
+            const b = t.getBoundingClientRect()
+            const scale = host.width / root.querySelector(".vs").offsetWidth
+            menu.style.left = `${(b.right - host.left) / scale - 210}px`
+            menu.hidden = false
+            const below = (b.bottom - host.top) / scale + 6
+            const room = root.querySelector(".vs").offsetHeight - below - 12
+            menu.style.top = `${room > menu.offsetHeight ? below : (b.top - host.top) / scale - menu.offsetHeight - 6}px`
+            return menu.querySelector("button").focus()
+          }
+          if (d.reason) {
+            const f = findings.find((x) => x.id === $("[data-menu]").dataset.for)
+            f.status = "dismissed"
+            f.reason = d.reason
+            $("[data-menu]").hidden = true
+            renderAll(false)
+            return toast(`${IC.nit(15)}<span>Dismissed as “${esc(d.reason)}”. Vectorscope won't raise it again on this PR.</span>`)
+          }
+          if (d.reopen) {
+            const f = findings.find((x) => x.id === d.reopen)
+            f.status = "open"
+            return renderAll(false)
+          }
+          if (d.commentLine) {
+            fileOf(state.file).rows[Number(d.commentLine)].draft = true
+            renderReader(false)
+            return $(`[data-draft-text="${d.commentLine}"]`)?.focus()
+          }
+          if (d.draftCancel) {
+            fileOf(state.file).rows[Number(d.draftCancel)].draft = false
+            return renderReader(false)
+          }
+          if (d.draftSend) {
+            const row = fileOf(state.file).rows[Number(d.draftSend)]
+            const text = $(`[data-draft-text="${d.draftSend}"]`).value.trim()
+            row.draft = false
+            if (text) row.mine = [...(row.mine ?? []), text]
+            return renderReader(false)
+          }
+          if (d.checkToggle) {
+            const c = checks.find((x) => x.id === d.checkToggle)
+            c.expanded = !(c.expanded ?? true)
+            return renderChecks()
+          }
+          if (d.fixCheck) {
+            const c = checks.find((x) => x.id === d.fixCheck)
+            c.state = "fixing"
+            renderChecks()
+            state.timers.push(
+              setTimeout(() => {
+                c.state = "run"
+                c.secs = 0
+                c.sub = "GitHub Actions · e2e.yml · re-running after 9b02c4e"
+                c.expanded = false
+                delete c.log
+                renderChecks()
+                toast(`${IC.commit(15)}<span>Vector pushed <span class="mono">9b02c4e</span>: the trust dialog now opens before the first MCP launch</span>`)
+              }, 2600),
+            )
+            return
+          }
+          if (d.rerunCheck) {
+            const c = checks.find((x) => x.id === d.rerunCheck)
+            c.state = "run"
+            c.secs = 0
+            delete c.log
+            return renderChecks()
+          }
+          if (t.matches("[data-approve]")) {
+            if (!counts().blocking) return sheet("approve")
+            const pop = $("[data-lockpop]")
+            closePops("[data-lockpop]")
+            pop.hidden = !pop.hidden
+            if (!pop.hidden) pop.querySelector("[data-goto-blocking]").focus()
+            return
+          }
+          if (t.matches("[data-request]")) return sheet("request")
+          if ("sheetClose" in d) return ($("[data-sheet]").hidden = true)
+          if (d.submit) return submit(d.submit)
+          if ("lockClose" in d) return ($("[data-lockpop]").hidden = true)
+          if ("gotoBlocking" in d) {
+            $("[data-lockpop]").hidden = true
+            root.querySelector('[data-tab="findings"]').click()
+            return select(findings.find((f) => f.sev === "blocking" && open(f)).id)
+          }
+          if (t.matches("[data-rerun]")) {
+            t.classList.add("is-spinning")
+            t.disabled = true
+            $("[data-reviewed-when]").textContent = "reviewing…"
+            setTimeout(() => {
+              t.classList.remove("is-spinning")
+              t.disabled = false
+              const fixed = findings.filter((f) => f.status === "fixed")
+              $("[data-reviewed-sha]").textContent = fixed.at(-1)?.sha && fixed.at(-1).sha !== "suggestion" ? fixed.at(-1).sha : "a1c9e4f"
+              $("[data-reviewed-when]").textContent = "just now"
+              toast(`${LabUI.svg("review", 14)}<span>Vectorscope re-reviewed the head commit: ${fixed.length ? `${fixed.length} fixed, ` : ""}${counts().all} still open, no new findings.</span>`)
+            }, 1800)
+          }
+        })
+
+        root.addEventListener("change", (event) => {
+          if (event.target.matches("[data-pick]")) countPicks()
+        })
+
+        root.addEventListener("lab:switch", (event) => {
+          if (!event.target.matches("[data-show-resolved]")) return
+          state.showResolved = event.detail
+          renderFilter()
+          renderFindings()
+        })
+
+        root.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") return closePops()
+          if (!event.target.closest("[data-findings]")) return
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+          event.preventDefault()
+          const rows = [...root.querySelectorAll("[data-findings] .vs-f")]
+          const at = rows.indexOf(event.target.closest(".vs-f"))
+          const next = rows[Math.max(0, Math.min(rows.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)))]
+          if (!next) return
+          select(next.dataset.finding)
+          root.querySelector(`[data-findings] [data-finding="${next.dataset.finding}"]`)?.focus()
+        })
+
+        // The desktop build finishes while you read.
+        setInterval(() => {
+          const c = checks.find((x) => x.state === "run")
+          if (!c) return
+          c.secs += 1
+          if (c.id === "c6" && c.secs >= 158) {
+            c.state = "ok"
+            c.time = "2m 38s"
+          }
+          if (c.id === "c5" && c.secs >= 9) {
+            c.state = "ok"
+            c.time = "3m 52s"
+            c.sub = "GitHub Actions · e2e.yml · 38 pass"
+          }
+          if (!$('[data-panel="checks"]').hidden) renderChecks()
+          else if (c.state === "ok") renderChecks()
+        }, 1000)
+
+        renderAll()
+      })
+    </script>
+  </body>
+</html>

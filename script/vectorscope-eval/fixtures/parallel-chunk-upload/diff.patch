@@ -1,0 +1,65 @@
+diff --git a/src/upload/chunked-uploader.ts b/src/upload/chunked-uploader.ts
+index 4f71f7a..1717570 100644
+--- a/src/upload/chunked-uploader.ts
++++ b/src/upload/chunked-uploader.ts
+@@ -1,3 +1,4 @@
++import { setTimeout as sleep } from "node:timers/promises"
+ import type { MultipartSession, StorageClient } from "./storage"
+ 
+ export interface Chunk {
+@@ -14,6 +15,11 @@ export interface Upload {
+ 
+ export type ProgressListener = (uploadId: string, fraction: number) => void
+ 
++// The storage service accepts parts in any order and assembles them by part number.
++const CONCURRENCY = 4
++const MAX_ATTEMPTS = 3
++const RETRY_DELAY_MS = 500
++
+ export class ChunkedUploader {
+   // Bytes confirmed by the storage service, per upload in flight.
+   private readonly sent = new Map<string, number>()
+@@ -26,12 +32,20 @@ export class ChunkedUploader {
+   async upload(upload: Upload): Promise<void> {
+     this.sent.set(upload.id, 0)
+     const session = await this.storage.startMultipart(upload.id)
+-    for (const chunk of upload.chunks) {
+-      await this.storage.putPart(session, chunk.index, chunk.data)
+-      const sent = (this.sent.get(upload.id) ?? 0) + chunk.size
+-      this.sent.set(upload.id, sent)
+-      this.onProgress?.(upload.id, sent / upload.size)
++    const queue = [...upload.chunks]
++    const worker = async () => {
++      for (let chunk = queue.shift(); chunk; chunk = queue.shift()) {
++        const before = this.sent.get(upload.id) ?? 0
++        await this.putWithRetry(session, chunk)
++        this.sent.set(upload.id, before + chunk.size)
++        this.onProgress?.(upload.id, (before + chunk.size) / upload.size)
++      }
+     }
++    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker)).catch((error: unknown) => {
++      // Stop the other workers from starting new parts once one has failed for good.
++      queue.length = 0
++      throw error
++    })
+     if (this.sent.get(upload.id) !== upload.size) throw new Error(`upload ${upload.id} is incomplete`)
+     await this.storage.completeMultipart(session)
+     this.sent.delete(upload.id)
+@@ -45,4 +59,17 @@ export class ChunkedUploader {
+     this.sent.delete(uploadId)
+     await this.storage.abortMultipart(session)
+   }
++
++  // The last attempt's error is the one the upload fails with.
++  private async putWithRetry(session: MultipartSession, chunk: Chunk): Promise<void> {
++    for (let attempt = 1; attempt < MAX_ATTEMPTS; attempt++) {
++      const done = await this.storage.putPart(session, chunk.index, chunk.data).then(
++        () => true,
++        () => false,
++      )
++      if (done) return
++      await sleep(RETRY_DELAY_MS * attempt)
++    }
++    await this.storage.putPart(session, chunk.index, chunk.data)
++  }
+ }

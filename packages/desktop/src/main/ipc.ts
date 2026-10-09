@@ -37,7 +37,8 @@ import {
   createPullRequest,
   listPullRequests,
   mergePullRequest,
-  pullRequestCliStatus,
+  pullRequestAccessStatus,
+  pullRequestChecks,
   pullRequestDiff,
   submitPullRequestReview,
   viewPullRequest,
@@ -325,25 +326,18 @@ export function registerIpcHandlers(deps: Deps) {
   handle("custom-instructions-read", () => readCustomInstructions())
   handle("custom-instructions-write", (_event, content: string) => writeCustomInstructions(String(content ?? "")))
   handle("custom-instructions-clear", () => clearCustomInstructions())
-  handle("pr-cli-status", (_event, options?: { refresh?: boolean }) =>
-    pullRequestCliStatus({ refresh: options?.refresh === true }),
-  )
+  handle("pr-access-status", () => pullRequestAccessStatus())
   handle("pr-list", (_event, cwd: string, options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number }) =>
     listPullRequests(cwd, options),
   )
   handle("pr-view", (_event, cwd: string, number: number) => viewPullRequest(cwd, number))
-  handle("pr-diff", (_event, cwd: string, number: number) => pullRequestDiff(cwd, number))
+  handle("pr-diff", (_event, cwd: string, number: number, head?: string) => pullRequestDiff(cwd, number, head))
+  handle("pr-checks", (_event, cwd: string, number: number, head: string) => pullRequestChecks(cwd, number, head))
   handle("pr-create", (_event, input: { cwd: string; title: string; body: string; base?: string; draft?: boolean }) =>
     createPullRequest(input),
   )
-  handle(
-    "pr-review",
-    (_event, input: { cwd: string; number: number; body: string; event: "comment" | "approve" | "request-changes" }) =>
-      submitPullRequestReview(input),
-  )
-  handle("pr-merge", (_event, input: { cwd: string; number: number; strategy: "merge" | "squash" | "rebase" }) =>
-    mergePullRequest(input),
-  )
+  handle("pr-review", (_event, input: Parameters<typeof submitPullRequestReview>[0]) => submitPullRequestReview(input))
+  handle("pr-merge", (_event, input: Parameters<typeof mergePullRequest>[0]) => mergePullRequest(input))
   handle("updater-unsubscribe", (event) => updaterSubscriptions.delete(event.sender.id))
   handle("updater-check", () => deps.updater.check())
   handle("updater-install", () => deps.updater.install())

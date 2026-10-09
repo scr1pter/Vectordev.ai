@@ -1,0 +1,10 @@
+[
+  {
+    "id": "page-offset",
+    "path": "src/admin/audit-log.ts",
+    "line": 46,
+    "severity": "blocking",
+    "category": "bug",
+    "description": "page is 1-based, but the slice starts at page * size, so page 1 skips the first pageSize entries (the newest ones), and the last page is always empty. The offset must be (page - 1) * size."
+  }
+]

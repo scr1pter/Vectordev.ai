@@ -1,0 +1,10 @@
+[
+  {
+    "id": "unawaited-ledger-post",
+    "path": "src/billing/sync.ts",
+    "line": 41,
+    "severity": "blocking",
+    "category": "bug",
+    "description": "The ledger post is not awaited, so a rejected post escapes the try/catch as an unhandled rejection, is never recorded in failures, and the invoice is marked synced anyway; later runs skip it, so the invoice never reaches the ledger."
+  }
+]

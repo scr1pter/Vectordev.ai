@@ -61,6 +61,12 @@
     overflow: hidden;
   }
 
+  /* The nav bar stays unclipped so the Login button's hover glow can spill past its edge;
+     the smear below is clipped to the bar on its own instead. */
+  .vector-marketing .site-header .site-nav {
+    overflow: visible;
+  }
+
   /* the specular smear — a soft light that tracks the cursor */
   .vector-marketing .site-header .site-nav::before,
   .vector-marketing .chapters ul::before,
@@ -78,6 +84,11 @@
     );
     opacity: 0;
     transition: opacity 420ms ease;
+  }
+
+  /* The smear overhangs the bar by 40% on every side, so 22.2% of its own box is the bar's edge. */
+  .vector-marketing .site-header .site-nav::before {
+    clip-path: inset(22.2222% round 21px);
   }
 
   .vector-marketing .site-header .site-nav:hover::before,

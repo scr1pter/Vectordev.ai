@@ -7,6 +7,9 @@ import { CliLaunchPanel } from "./CliLaunchPanel"
 import "../download/download.css"
 import "./account.css"
 
+// Only the owner sees the Design tab; api/design-lab decides who may open it.
+const DESIGN_LAB_OWNER = "krishnabharadwaj0521@gmail.com"
+
 type AccountState = {
   user: { id: string; email: string; name?: string }
 }
@@ -122,8 +125,8 @@ export function AccountPage(props: { preview?: AccountState }) {
             <span>Vector</span>
           </a>
           <nav aria-label="Account navigation">
+            {account?.user.email === DESIGN_LAB_OWNER && <a href="/design">Design</a>}
             <a href="/docs">Docs</a>
-            <a href="/releases">Releases</a>
             <button type="button" onClick={signOut} disabled={Boolean(action)}>
               Sign out
             </button>

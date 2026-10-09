@@ -43,14 +43,6 @@ import { sectionShots } from "./shots/shots"
     padding: clamp(120px, 11vw, 168px) 0 24px;
   }
 
-  /* Where the page shows its scroll rail on the right edge, keep the windows
-     clear of it. */
-  @media (min-width: 1360px) and (hover: hover) and (pointer: fine) {
-    .shots {
-      --shots-width: min(1440px, calc(100% - 128px));
-    }
-  }
-
   .shots-head {
     position: relative;
     isolation: isolate;

@@ -153,6 +153,7 @@ export interface SkippedFile {
 
 export interface ReviewCost {
   costUsd: number
+  usageMissing?: boolean
   input: number
   output: number
   reasoning: number

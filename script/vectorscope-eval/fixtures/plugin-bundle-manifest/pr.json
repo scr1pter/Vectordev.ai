@@ -1,0 +1,4 @@
+{
+  "title": "Read plugin manifests from the bundle header",
+  "body": "Plugin discovery only looked at file names, so a half-copied or foreign `.vplg` file showed up in the plugin list and failed later, when the user enabled it.\n\nDiscovery now reads each bundle's header and manifest (format 2, see docs/plugins/bundle-format.md) and skips, with a warning, anything that is not a valid bundle. The watcher calls discovery again on the next change, so a bundle that was still being copied is picked up once the copy finishes."
+}

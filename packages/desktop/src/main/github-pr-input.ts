@@ -3,6 +3,8 @@ import { isAbsolute } from "node:path"
 const STATES = new Set(["open", "closed", "merged", "all"])
 const REVIEW_EVENTS = new Set(["comment", "approve", "request-changes"])
 const MERGE_STRATEGIES = new Set(["merge", "squash", "rebase"])
+const DIFF_SIDES = new Set(["LEFT", "RIGHT"])
+const MAX_REVIEW_COMMENTS = 60
 
 export function requirePullRequestDirectory(value: unknown) {
   if (typeof value !== "string" || !value || value.length > 4_096 || !isAbsolute(value)) {
@@ -40,6 +42,49 @@ export function requirePullRequestText(value: unknown, label: string, maximum: n
 export function requireReviewEvent(value: unknown) {
   if (typeof value !== "string" || !REVIEW_EVENTS.has(value)) throw new Error("Invalid pull request review action.")
   return value as "comment" | "approve" | "request-changes"
+}
+
+export function requirePullRequestHead(value: unknown) {
+  if (typeof value !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value)) {
+    throw new Error("Review requires the pull request's full commit SHA. Reload the pull request and review it again.")
+  }
+  return value.toLowerCase()
+}
+
+// Only the known fields are kept, so nothing else the renderer sends reaches GitHub.
+export function requirePullRequestComments(value: unknown) {
+  if (!Array.isArray(value) || value.length > MAX_REVIEW_COMMENTS) {
+    throw new Error(`A review can carry at most ${MAX_REVIEW_COMMENTS} line comments.`)
+  }
+  return value.map((comment: unknown, index) => {
+    const label = `Line comment ${index + 1}`
+    if (typeof comment !== "object" || comment === null) throw new Error(`${label} is invalid.`)
+    const raw = comment as { path?: unknown; line?: unknown; side?: unknown; startLine?: unknown; body?: unknown }
+    const path = raw.path
+    if (typeof path !== "string" || !path || path.length > 1_024 || path.includes("\0") || path.startsWith("/")) {
+      throw new Error(`${label} needs a file path relative to the repository.`)
+    }
+    const line = requireDiffLine(raw.line, label)
+    const startLine = raw.startLine === undefined ? undefined : requireDiffLine(raw.startLine, label)
+    if (startLine !== undefined && startLine >= line) throw new Error(`${label} must start before the line it ends on.`)
+    if (typeof raw.side !== "string" || !DIFF_SIDES.has(raw.side)) {
+      throw new Error(`${label} side must be LEFT or RIGHT.`)
+    }
+    return {
+      path,
+      line,
+      side: raw.side as "LEFT" | "RIGHT",
+      startLine,
+      body: requirePullRequestText(raw.body, `${label} body`, 65_536, false),
+    }
+  })
+}
+
+function requireDiffLine(value: unknown, label: string) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > 10_000_000) {
+    throw new Error(`${label} line numbers must be positive integers.`)
+  }
+  return value
 }
 
 export function requireMergeStrategy(value: unknown) {

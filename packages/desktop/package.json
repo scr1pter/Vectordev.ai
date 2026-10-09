@@ -2,7 +2,7 @@
   "name": "vector-desktop",
   "productName": "Vector",
   "private": true,
-  "version": "1.99.102",
+  "version": "1.99.103",
   "vectorRequiredCliVersion": "1.99.99",
   "type": "module",
   "license": "SEE LICENSE IN ../../LICENSE",

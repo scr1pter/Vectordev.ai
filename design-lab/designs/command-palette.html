@@ -1,0 +1,1570 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* D17 Command palette. Everything is scoped under .d-command-palette. */
+      .d-command-palette :is(h3, h4, p, ul, ol, pre) {
+        margin: 0;
+        padding: 0;
+      }
+
+      .d-command-palette :is(ul, ol) {
+        list-style: none;
+      }
+
+      .d-command-palette svg {
+        flex: none;
+      }
+
+      .d-command-palette [hidden] {
+        display: none !important;
+      }
+
+      /* ---- the app underneath ---- */
+      .d-command-palette .bg-header {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 47px;
+        padding: 0 9px 0 18px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--header);
+      }
+
+      .d-command-palette .bg-header h2 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .d-command-palette .bg-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: auto;
+      }
+
+      .d-command-palette .bg-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 8px;
+        border: 1px solid rgba(255, 255, 255, 0.075);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-2);
+        font-size: 11.5px;
+      }
+
+      .d-command-palette .bg-search {
+        min-width: 210px;
+        height: 28px;
+        padding: 0 6px 0 10px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-command-palette .bg-search kbd {
+        margin-left: auto;
+      }
+
+      .d-command-palette .bg-search:hover {
+        border-color: var(--line-strong);
+        color: var(--text-2);
+      }
+
+      .d-command-palette .bg-tool {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 8px;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-command-palette .bg-tool svg {
+        color: var(--text-3);
+      }
+
+      .d-command-palette .bg-tool[data-on] {
+        border-color: rgba(182, 159, 247, 0.28);
+        background: rgba(182, 159, 247, 0.11);
+        color: var(--violet-bright);
+      }
+
+      .d-command-palette .bg-tool[data-on] svg {
+        color: inherit;
+      }
+
+      .d-command-palette .bg-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .d-command-palette .bg-conv {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        padding-bottom: 18px;
+        background: var(--canvas);
+      }
+
+      .d-command-palette .bg-column {
+        flex: 1;
+        width: min(620px, calc(100% - 48px));
+        margin: 0 auto;
+        padding-top: 30px;
+        overflow: hidden;
+      }
+
+      .d-command-palette .bg-user {
+        width: fit-content;
+        max-width: 80%;
+        margin-left: auto;
+        padding: 9px 13px;
+        border-radius: 6px;
+        background: #2a2631;
+        font-size: 14px;
+        line-height: 21px;
+      }
+
+      .d-command-palette .bg-prose {
+        margin-top: 26px;
+        color: #e6e4ea;
+        font-size: 14px;
+        line-height: 21.6px;
+      }
+
+      .d-command-palette .bg-prose code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: #37343a;
+        font: 12.5px var(--mono);
+      }
+
+      .d-command-palette .bg-chip {
+        display: grid;
+        gap: 4px;
+        margin-top: 14px;
+        padding: 11px 14px 12px 15px;
+        border-radius: 10px;
+        background: #221f27;
+        font-size: 14px;
+      }
+
+      .d-command-palette .bg-chip span {
+        color: #c9c3cd;
+        font-size: 13px;
+      }
+
+      .d-command-palette .bg-composer {
+        width: min(760px, calc(100% - 28px));
+        height: 92px;
+        margin: 0 auto;
+        padding: 14px 14px 0;
+        border: 1px solid rgba(255, 255, 255, 0.055);
+        border-radius: 12px;
+        background: #1e1e20;
+        color: #8b8a8e;
+        font-size: 14.5px;
+      }
+
+      .d-command-palette .bg-composer p:last-child {
+        display: flex;
+        gap: 26px;
+        margin-top: 24px;
+        color: #c7c6ca;
+        font-size: 13px;
+      }
+
+      .d-command-palette .bg-composer b {
+        color: #d2d1d5;
+        font-weight: 600;
+      }
+
+      .d-command-palette .bg-side {
+        display: flex;
+        flex: 0 0 420px;
+        flex-direction: column;
+        border-left: 1px solid rgba(226, 213, 237, 0.09);
+        background: #17151c;
+      }
+
+      .d-command-palette .bg-side-tabs {
+        display: flex;
+        align-items: center;
+        height: 43px;
+        padding: 0 12px;
+        border-bottom: 1px solid rgba(226, 213, 237, 0.07);
+        background: #1b1921;
+      }
+
+      .d-command-palette .bg-side-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 24px;
+        padding: 0 6px;
+        border-radius: 7px;
+        background: #231f2a;
+        font-size: 14px;
+      }
+
+      .d-command-palette .bg-side-tab svg {
+        color: #b3a1f2;
+      }
+
+      .d-command-palette .bg-files {
+        padding: 12px 10px;
+      }
+
+      .d-command-palette .bg-files-sum {
+        display: flex;
+        gap: 10px;
+        padding: 0 8px 10px;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-command-palette .bg-files-sum span:first-child {
+        flex: 1;
+      }
+
+      .d-command-palette .bg-file {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 6px 10px 6px 6px;
+      }
+
+      .d-command-palette .bg-file svg {
+        color: var(--text-3);
+      }
+
+      .d-command-palette .bg-file > span:nth-child(2) {
+        display: grid;
+        flex: 1;
+        font-size: 13px;
+      }
+
+      .d-command-palette .bg-file small {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-command-palette .bg-files .add,
+      .d-command-palette .bg-files .del {
+        font-size: 12px;
+      }
+
+      .d-command-palette .bg-term {
+        flex: 0 0 170px;
+        padding: 10px 16px;
+        border-top: 1px solid rgba(226, 213, 237, 0.09);
+        background: #15141a;
+        color: #d6d3db;
+        font: 11.5px/16px var(--mono);
+        white-space: pre;
+      }
+
+      .d-command-palette .bg-term .p {
+        color: var(--violet-bright);
+      }
+
+      .d-command-palette .bg-term .ok {
+        color: var(--green);
+      }
+
+      /* ---- scrim and palette ---- */
+      .d-command-palette .cp-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        background: rgba(9, 7, 12, 0.52);
+        backdrop-filter: blur(1.5px);
+        animation: cp-fade 140ms ease-out;
+      }
+
+      @keyframes cp-fade {
+        from {
+          opacity: 0;
+        }
+      }
+
+      .d-command-palette .cp {
+        position: absolute;
+        top: 92px;
+        left: calc(50% - 440px);
+        z-index: 21;
+        display: flex;
+        width: 880px;
+        height: 564px;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid rgba(226, 213, 237, 0.16);
+        border-radius: 14px;
+        background: #1f1c24;
+        box-shadow:
+          0 40px 120px rgba(0, 0, 0, 0.6),
+          0 0 0 1px rgba(0, 0, 0, 0.3),
+          0 0 60px rgba(132, 86, 219, 0.1);
+        animation: cp-pop 160ms var(--ease);
+      }
+
+      @keyframes cp-pop {
+        from {
+          opacity: 0;
+          transform: translateY(-6px) scale(0.985);
+        }
+      }
+
+      .d-command-palette .cp-input-row {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 12px;
+        height: 56px;
+        padding: 0 16px 0 18px;
+        border-bottom: 1px solid var(--line);
+        color: var(--text-3);
+      }
+
+      .d-command-palette .cp-input-row input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text-1);
+        font-size: 16px;
+      }
+
+      .d-command-palette .cp-input-row input::placeholder {
+        color: #77737d;
+      }
+
+      .d-command-palette .cp-scope span {
+        opacity: 0.7;
+      }
+
+      .d-command-palette .cp-scope {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 6px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        font-size: 12px;
+      }
+
+      .d-command-palette .cp-chips {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 4px;
+        height: 44px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-command-palette .cp-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 26px;
+        padding: 0 9px;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-command-palette .cp-chip:hover {
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text-1);
+      }
+
+      .d-command-palette .cp-chip[aria-selected="true"] {
+        border-color: rgba(182, 159, 247, 0.3);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-command-palette .cp-chip .cp-n {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-command-palette .cp-chip[aria-selected="true"] .cp-n {
+        color: inherit;
+        opacity: 0.8;
+      }
+
+      .d-command-palette .cp-chips-end {
+        display: flex;
+        gap: 10px;
+        margin-left: auto;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-command-palette .cp-chips-end code {
+        color: var(--text-2);
+        font: 11px var(--mono);
+      }
+
+      .d-command-palette .cp-body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+
+      .d-command-palette .cp-list {
+        flex: 0 0 438px;
+        min-height: 0;
+        padding: 6px 6px 10px;
+      }
+
+      .d-command-palette .cp-group {
+        padding: 10px 12px 5px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-command-palette .cp-group span {
+        float: right;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .d-command-palette .cp-item {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        min-height: 42px;
+        padding: 5px 12px;
+        border-radius: 8px;
+        color: var(--text-1);
+        cursor: pointer;
+      }
+
+      .d-command-palette .cp-item[aria-selected="true"] {
+        background: rgba(255, 255, 255, 0.07);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      }
+
+      .d-command-palette .cp-item[aria-selected="true"]::before {
+        content: "";
+        position: absolute;
+      }
+
+      .d-command-palette .cp-icon {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        flex: none;
+        place-items: center;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text-2);
+      }
+
+      .d-command-palette .cp-item[aria-selected="true"] .cp-icon {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-command-palette .cp-icon[data-kind="file"] {
+        font: 600 8.5px var(--mono);
+        letter-spacing: -0.02em;
+      }
+
+      .d-command-palette .cp-icon[data-ext="ts"],
+      .d-command-palette .cp-icon[data-ext="tsx"] {
+        color: #8cbbe8;
+      }
+
+      .d-command-palette .cp-icon[data-ext="md"] {
+        color: #c9c3cd;
+      }
+
+      .d-command-palette .cp-icon[data-ext="css"] {
+        color: #d6a95c;
+      }
+
+      .d-command-palette .cp-icon[data-ext="astro"] {
+        color: #e3a283;
+      }
+
+      .d-command-palette .cp-text {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        gap: 2px;
+      }
+
+      .d-command-palette .cp-label {
+        overflow: hidden;
+        font-size: 13px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-command-palette .cp-sub {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-command-palette .cp-sub.mono {
+        font-size: 11px;
+      }
+
+      .d-command-palette mark {
+        background: none;
+        color: var(--violet-bright);
+        font-weight: 600;
+      }
+
+      .d-command-palette .cp-end {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-command-palette .cp-end kbd {
+        min-width: 20px;
+      }
+
+      .d-command-palette .cp-empty {
+        padding: 40px 20px;
+        color: var(--text-3);
+        font-size: 13px;
+        text-align: center;
+      }
+
+      .d-command-palette .cp-empty b {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      /* preview */
+      .d-command-palette .cp-preview {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        border-left: 1px solid var(--line);
+        background: #1a181f;
+      }
+
+      .d-command-palette .cp-pv-head {
+        display: grid;
+        gap: 6px;
+        padding: 16px 18px 14px;
+        border-bottom: 1px solid var(--hairline);
+      }
+
+      .d-command-palette .cp-pv-kind {
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-command-palette .cp-pv-head h3 {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 15px;
+        font-weight: 550;
+      }
+
+      .d-command-palette .cp-pv-head p {
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+      }
+
+      .d-command-palette .cp-pv-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .d-command-palette .cp-pv-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 14px 18px;
+        scrollbar-width: thin;
+      }
+
+      .d-command-palette .cp-code {
+        display: grid;
+        padding: 10px 0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        background: #131217;
+        font: 11.5px/18px var(--mono);
+        counter-reset: line var(--start, 0);
+      }
+
+      .d-command-palette .cp-code code {
+        display: block;
+        overflow: hidden;
+        padding: 0 12px 0 0;
+        color: #d6d3db;
+        font: inherit;
+        text-overflow: ellipsis;
+        white-space: pre;
+      }
+
+      .d-command-palette .cp-code code::before {
+        counter-increment: line;
+        content: counter(line);
+        display: inline-block;
+        width: 34px;
+        margin-right: 12px;
+        color: #57535d;
+        text-align: right;
+      }
+
+      .d-command-palette .cp-code code.is-add {
+        background: rgba(101, 199, 142, 0.08);
+      }
+
+      .d-command-palette .t-k {
+        color: #b69ff7;
+      }
+
+      .d-command-palette .t-s {
+        color: #a8e2bf;
+      }
+
+      .d-command-palette .t-c {
+        color: #77737d;
+        font-style: italic;
+      }
+
+      .d-command-palette .t-f {
+        color: #8cbbe8;
+      }
+
+      .d-command-palette .t-h {
+        color: var(--text-1);
+        font-weight: 600;
+      }
+
+      .d-command-palette .cp-pv-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 18px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-command-palette .cp-pv-foot .btn {
+        margin-left: auto;
+      }
+
+      .d-command-palette .cp-dl {
+        display: grid;
+        grid-template-columns: 96px minmax(0, 1fr);
+        gap: 9px 12px;
+        font-size: 12.5px;
+      }
+
+      .d-command-palette .cp-dl dt {
+        color: var(--text-3);
+      }
+
+      .d-command-palette .cp-dl dd {
+        margin: 0;
+        color: var(--text-1);
+      }
+
+      .d-command-palette .cp-dl .mono {
+        font-size: 12px;
+      }
+
+      .d-command-palette .cp-desc {
+        color: var(--text-2);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .d-command-palette .cp-quote {
+        margin-top: 14px;
+        padding: 10px 12px;
+        border-left: 2px solid var(--violet-line);
+        border-radius: 0 7px 7px 0;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.55;
+      }
+
+      .d-command-palette .cp-mini {
+        margin-top: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .d-command-palette .cp-mini-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 36px;
+        padding: 4px 10px;
+        font-size: 12.5px;
+      }
+
+      .d-command-palette .cp-mini-row + .cp-mini-row {
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-command-palette .cp-mini-row > span:first-child {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .d-command-palette .cp-mini-row small {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-command-palette .cp-mini-row .add,
+      .d-command-palette .cp-mini-row .del {
+        font-size: 11.5px;
+      }
+
+      .d-command-palette .cp-bigkey {
+        display: flex;
+        gap: 6px;
+        margin-top: 16px;
+      }
+
+      .d-command-palette .cp-bigkey kbd {
+        min-width: 32px;
+        height: 30px;
+        border-radius: 7px;
+        font-size: 13px;
+      }
+
+      .d-command-palette .cp-setting {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-top: 16px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--card);
+      }
+
+      .d-command-palette .cp-setting > div {
+        display: grid;
+        flex: 1;
+        gap: 3px;
+        font-size: 13px;
+      }
+
+      .d-command-palette .cp-setting span {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-command-palette .cp-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 16px;
+        height: 38px;
+        padding: 0 16px;
+        border-top: 1px solid var(--line);
+        background: #1b1920;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-command-palette .cp-foot > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-command-palette .cp-foot .cp-count {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+
+      .d-command-palette .cp-toast {
+        position: absolute;
+        top: 62px;
+        left: 50%;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 10px 12px;
+        transform: translateX(-50%);
+        font-size: 12.5px;
+        white-space: nowrap;
+        animation: cp-drop 200ms var(--ease);
+      }
+
+      @keyframes cp-drop {
+        from {
+          opacity: 0;
+          transform: translate(-50%, -6px);
+        }
+      }
+
+      .d-command-palette .cp-toast svg {
+        color: var(--violet-bright);
+      }
+
+      .d-command-palette .cp-toast span {
+        color: var(--text-3);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .d-command-palette *,
+        .d-command-palette *::before {
+          animation: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="command-palette"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-command-palette">
+            <div class="app" data-app>
+              <nav data-lab-sidebar data-active="workspace" data-workspace="Harden workspace trust" data-branch="workspace-trust"></nav>
+              <main class="app-main">
+                <header class="bg-header">
+                  <i data-icon="branch" data-size="16" class="muted"></i>
+                  <h2>Harden workspace trust</h2>
+                  <div class="bg-controls">
+                    <button class="bg-pill bg-search" type="button" data-open-palette><i data-icon="magnifier" data-size="13"></i>Search everything<kbd>⌘K</kbd></button>
+                    <span class="bg-pill mono" style="font-size: 11px">workspace-trust</span>
+                    <span class="bg-tool"><i data-icon="task" data-size="16"></i>Tasks</span>
+                    <span class="bg-tool" data-on data-bg-changes-tool><i data-icon="review" data-size="16"></i>Changes</span>
+                    <span class="bg-tool" data-bg-term-tool><i data-icon="terminal" data-size="16"></i>Terminal</span>
+                  </div>
+                </header>
+                <div class="bg-body">
+                  <div class="bg-conv">
+                    <div class="bg-column">
+                      <p class="bg-user">Harden workspace trust and get an independent verdict before committing.</p>
+                      <p class="bg-prose">The Judge returned <b>PASS</b>. Fingerprint-bound trust, narrowing-only project policy and the MCP launch gate are in, with 14 tests. 7 files changed, +289 −31.</p>
+                      <div class="bg-chip">Security review of the patch, Code review, Independent verdict<span>Subagent specialists · Phase 3 · 3 agents · Done</span></div>
+                      <p class="bg-prose">Ready to commit when you are. The change is staged on <code>workspace-trust</code>.</p>
+                    </div>
+                    <div class="bg-composer"><p>Ask anything, / for commands, @ for context...</p><p><span data-bg-agent>Build</span><span>GPT-6 Sol</span><b>Manual</b></p></div>
+                  </div>
+                  <aside class="bg-side" data-bg-changes>
+                    <div class="bg-side-tabs"><span class="bg-side-tab"><i data-icon="review" data-size="14"></i>Changes<span class="count">7</span></span></div>
+                    <div class="bg-files">
+                      <p class="bg-files-sum"><span>7 files staged</span><span class="add">+289</span><span class="del">−31</span></p>
+                      <div class="bg-file"><i data-icon="chevron-right" data-size="14"></i><span>trust.ts<small>packages/engine/src/project/</small></span><span class="add">+70</span><span class="del">−10</span></div>
+                      <div class="bg-file"><i data-icon="chevron-right" data-size="14"></i><span>project-policy.ts<small>packages/engine/src/config/</small></span><span class="add">+31</span><span class="del">−12</span></div>
+                      <div class="bg-file"><i data-icon="chevron-right" data-size="14"></i><span>launch.ts<small>packages/engine/src/mcp/</small></span><span class="add">+18</span><span class="del">−6</span></div>
+                      <div class="bg-file"><i data-icon="chevron-right" data-size="14"></i><span>executable.ts<small>packages/engine/src/permission/</small></span><span class="add">+22</span><span class="del">−4</span></div>
+                      <div class="bg-file"><i data-icon="chevron-right" data-size="14"></i><span>trust.test.ts<small>packages/engine/test/project/</small></span><span class="add">+96</span><span class="del">−0</span></div>
+                      <div class="bg-file"><i data-icon="chevron-right" data-size="14"></i><span>launch.test.ts<small>packages/engine/test/mcp/</small></span><span class="add">+58</span><span class="del">−0</span></div>
+                    </div>
+                  </aside>
+                </div>
+                <div class="bg-term" data-bg-term hidden><span class="p">~/Vectordev.ai (workspace-trust) $</span> bun test packages/engine/test/project
+<span class="ok">✓</span> trust &gt; a changed fingerprint revokes trust [1.12ms]
+<span class="ok">✓</span> trust &gt; a symlinked config resolves before the check [0.84ms]
+<span class="ok">✓</span> trust &gt; project policy cannot widen permissions [0.67ms]
+ <span class="ok">14 pass</span>
+ 0 fail
+<span class="p">~/Vectordev.ai (workspace-trust) $</span> </div>
+              </main>
+            </div>
+
+            <div class="cp-scrim" data-scrim></div>
+            <div class="cp" data-palette role="dialog" aria-modal="true" aria-label="Command palette">
+              <div class="cp-input-row">
+                <i data-icon="magnifier" data-size="17"></i>
+                <span class="cp-scope" data-scope hidden></span>
+                <input data-input type="text" role="combobox" aria-expanded="true" aria-controls="cp-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search files, sessions, commands, agents and settings" aria-label="Search everything" />
+                <kbd>esc</kbd>
+              </div>
+              <div class="cp-chips" role="tablist" aria-label="Categories" data-chips></div>
+              <div class="cp-body">
+                <div class="cp-list scroll" id="cp-list" role="listbox" aria-label="Results" data-list></div>
+                <div class="cp-preview" data-preview aria-live="polite"></div>
+              </div>
+              <div class="cp-foot">
+                <span><kbd>↑</kbd><kbd>↓</kbd>Navigate</span>
+                <span><kbd>↵</kbd>Open</span>
+                <span><kbd>⌘↵</kbd>Open to the side</span>
+                <span><kbd>tab</kbd>Next category</span>
+                <span class="cp-count" data-count></span>
+              </div>
+            </div>
+            <div class="cp-toast float" data-toast role="status" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const stage = document.querySelector(".d-command-palette")
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+
+        const paths = {
+          session: '<path d="M3 4.3A1.3 1.3 0 0 1 4.3 3h7.4A1.3 1.3 0 0 1 13 4.3v5A1.3 1.3 0 0 1 11.7 10.6H7.3l-2.9 2.3v-2.3A1.3 1.3 0 0 1 3 9.3Z"/>',
+          command: '<path d="M5.4 3.2a2.2 2.2 0 1 0 0 4.4h5.2a2.2 2.2 0 1 0 0-4.4M5.4 12.8a2.2 2.2 0 1 1 0-4.4h5.2a2.2 2.2 0 1 1 0 4.4"/><path d="M5.4 3.2v9.6M10.6 3.2v9.6"/>',
+          agent: '<circle cx="8" cy="6" r="2.6"/><path d="M3.4 13.2c.6-2.2 2.4-3.5 4.6-3.5s4 1.3 4.6 3.5"/>',
+          gear: '<circle cx="8" cy="8" r="2.1"/><path d="M8 2.4v1.5M8 12.1v1.5M2.4 8h1.5M12.1 8h1.5M4 4l1.1 1.1M10.9 10.9 12 12M4 12l1.1-1.1M10.9 5.1 12 4"/>',
+          check: '<path d="m3.8 8.3 2.7 2.7 5.7-6"/>',
+          spark: '<path d="M8 2.8c.4 2.6 1.6 3.8 4.2 4.2-2.6.4-3.8 1.6-4.2 4.2-.4-2.6-1.6-3.8-4.2-4.2 2.6-.4 3.8-1.6 4.2-4.2Z"/>',
+          clock: '<circle cx="8" cy="8" r="5.6"/><path d="M8 5.1v3.1l2 1.3"/>',
+          doc: '<path d="M4.5 2.5h4.6l2.4 2.4v8.6h-7Z"/><path d="M9 2.6v2.5h2.4M6.4 8h3.3M6.4 10.4h3.3"/>',
+        }
+        const glyph = (name, size = 14) =>
+          paths[name]
+            ? `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`
+            : LabUI.svg(name, size)
+        const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+        // ---- what the palette can reach ----
+        const CATS = [
+          { key: "all", name: "All" },
+          { key: "file", name: "Files", prefix: "/" },
+          { key: "session", name: "Sessions", prefix: "#" },
+          { key: "command", name: "Commands", prefix: ">" },
+          { key: "agent", name: "Agents", prefix: "@" },
+          { key: "setting", name: "Settings", prefix: "," },
+        ]
+        const file = (name, dir, status, code, extra = {}) => ({ kind: "file", label: name, sub: dir, status, code, ...extra })
+        const items = [
+          file("trust.ts", "packages/engine/src/project/", ["Modified", "+70", "−10"], [
+            'import { realpath } from "node:fs/promises"',
+            'import { Settings } from "../settings"',
+            "",
+            "export async function trusted(project: Project) {",
+            "  const record = Settings.current().trusted.find((item) => item.directory === project.directory)",
+            "  if (!record) return false",
+            "  // A moved or edited folder is a different folder.",
+            "  return record.fingerprint === (await folderFingerprint(project))",
+            "}",
+            "",
+            "export async function folderFingerprint(project: Project) {",
+            "  const dir = await realpath(project.directory)",
+            "  return hash([dir, ...(await executableConfig(project))])",
+            "}",
+          ], { start: 40, recent: true, by: "Edited by Fingerprint-bound trust, a Subagent, 6 minutes ago" }),
+          file("project-policy.ts", "packages/engine/src/config/", ["Modified", "+31", "−12"], [
+            "export function resolvePolicy(user: Policy, project: ProjectPolicy) {",
+            "  return {",
+            "    // An untrusted project can narrow permissions, never widen them.",
+            "    permissions: project.trusted",
+            "      ? merge(user.permissions, project.permissions)",
+            "      : narrow(user.permissions, project.permissions),",
+            "    tools: merge(user.tools, project.tools),",
+            "  }",
+            "}",
+          ], { start: 17, by: "Edited by Fingerprint-bound trust, a Subagent, 9 minutes ago" }),
+          file("launch.ts", "packages/engine/src/mcp/", ["Modified", "+18", "−6"], [
+            "export async function launch(server: McpServer) {",
+            "  const env = await resolveEnv(server)",
+            '  if (server.source === "project" && !(await trusted(server.project)))',
+            '    return refuse(server, "Trust this folder to start its MCP servers.")',
+            "  return spawn(server.command, server.args, { env })",
+            "}",
+          ], { start: 26, recent: true, by: "Edited by Gate project MCP launch, a Subagent, 8 minutes ago" }),
+          file("trust.test.ts", "packages/engine/test/project/", ["Added", "+96", "−0"], [
+            'test("a changed fingerprint revokes trust", async () => {',
+            "  const project = await fixture({ trusted: true })",
+            '  await project.write("vector.json", "{}")',
+            "  expect(await trusted(project)).toBe(false)",
+            "})",
+            "",
+            'test("a symlinked config resolves before the check", async () => {',
+            '  const project = await fixture({ trusted: true, symlink: "../untrusted/vector.json" })',
+            "  expect(await trusted(project)).toBe(false)",
+            "})",
+          ], { start: 1, by: "Written by the Test specialist, 4 minutes ago" }),
+          file("task.ts", "packages/engine/src/tool/", null, [
+            "const BUSY_SUBAGENTS_PER_SESSION = 6",
+            "const MAX_SUBAGENT_DEPTH = 2",
+            "",
+            "function pathsOverlap(a: string, b: string) {",
+            '  if (a === "." || b === ".") return true',
+            "  if (a === b) return true",
+            "  return a.startsWith(`${b}/`) || b.startsWith(`${a}/`)",
+            "}",
+          ], { start: 57 }),
+          file("subagent-kind.ts", "packages/engine/src/agent/", null, [
+            'export const GENERAL_SUBAGENT = "general"',
+            "",
+            'export type SubagentKind = "subagent" | "specialist"',
+            "",
+            'export type SubagentStatus = "queued" | "running" | "completed" | "error" | "cancelled"',
+          ], { start: 9 }),
+          file("trusted-folders.tsx", "packages/app/src/pages/settings/", null, [
+            "export function TrustedFolders() {",
+            "  const folders = useTrustedFolders()",
+            "  return (",
+            '    <SettingsSection title="Trusted folders">',
+            "      <For each={folders()}>{(folder) => <TrustRow folder={folder} />}</For>",
+            "    </SettingsSection>",
+            "  )",
+            "}",
+          ], { start: 1 }),
+          file("workspace-trust-dialog.tsx", "packages/app/src/components/", ["Added", "+47", "−0"], [
+            "export function WorkspaceTrustDialog(props: { project: Project }) {",
+            "  return (",
+            '    <Dialog title="Trust this folder?">',
+            "      <p>Its vector.json, hooks and MCP servers will be able to run.</p>",
+            "    </Dialog>",
+            "  )",
+            "}",
+          ], { start: 1 }),
+          file("background-tasks-pane.tsx", "packages/app/src/features/background-tasks/", null, [
+            "export function BackgroundTasksPane() {",
+            "  const tasks = useBackgroundTasks()",
+            "  const running = () => tasks.cards().filter((card) => card.status === \"running\")",
+            "  return <aside id=\"vector-bg-tasks\" data-floating={backgroundTasksPane.floating()}>",
+          ], { start: 31 }),
+          file("session-header.tsx", "packages/app/src/pages/session/", null, [
+            "export function SessionHeader(props: { session: Session }) {",
+            "  return (",
+            "    <header data-vector-session-header>",
+            "      <BranchPicker session={props.session} />",
+          ], { start: 12 }),
+          file("execution.ts", "packages/engine/src/session/", null, [
+            "const drainOnce = Effect.fn(function* (sessionID: SessionID) {",
+            "  const rows = yield* inbox.eligible(sessionID)",
+            "  if (rows.length === 0) return yield* idle(sessionID)",
+          ], { start: 142 }),
+          file("AGENTS.md", "repository root", null, [
+            "## Style Guide",
+            "",
+            "- Keep things in one function unless composable or reusable",
+            "- Avoid `try`/`catch` where possible",
+            "- Use Bun APIs when possible, like `Bun.file()`",
+            "- Prefer `const` over `let`",
+          ], { start: 24, recent: true }),
+          file("vector-premium.css", "packages/app/src/", null, [
+            ":root {",
+            "  --vx-purple: #9274ec;",
+            "  --vx-purple-bright: #b69ff7;",
+            "  --vx-amber: #d6a95c;",
+            "}",
+          ], { start: 1 }),
+
+          { kind: "session", label: "Harden workspace trust", sub: "workspace-trust · Ready · now", status: "Ready", runtime: "Vector · GPT-6 Sol", stats: ["8 subagents", "$1.52", "7 files +289 −31"], quote: "The Judge returned PASS. Fingerprint-bound trust, narrowing-only project policy and the MCP launch gate are in, with 14 tests.", files: [["trust.ts", "+70", "−10"], ["trust.test.ts", "+96", "−0"], ["launch.test.ts", "+58", "−0"]], recent: true, current: true },
+          { kind: "session", label: "Fix flaky session recovery test", sub: "session-recovery · Vector Cloud · running 14m", status: "Running in the cloud", runtime: "Vector · GPT-6 Sol", stats: ["Vector Cloud", "$0.62", "3 files +101 −24"], quote: "Found the race: the wake can fire before the inbox row commits, so the drain sees nothing and the Session goes idle.", files: [["run-coordinator.ts", "+22", "−4"], ["execution.ts", "+38", "−11"], ["recovery.test.ts", "+41", "−9"]], recent: true },
+          { kind: "session", label: "Keep transcript scroll on card expand", sub: "fix-scroll-state · Claude Code · working", status: "Working", runtime: "Claude Code", stats: ["Parallel Workspace", "$0.63", "3 files +41 −18"], quote: "The chip reports its new size before layout, so the list re-anchors to the old height.", files: [["timeline.tsx", "+31", "−14"], ["subagent-task-chip.tsx", "+6", "−2"]] },
+          { kind: "session", label: "Refresh the free model list", sub: "openrouter-free · Needs you", status: "Needs you", runtime: "Vector · GPT-6 Luna", stats: ["Asks to run a command", "$0.88", "2 files +256 −115"], quote: "Asks to run: bun run script/models.ts --write", files: [["openrouter.ts", "+44", "−18"], ["free.json", "+212", "−97"]] },
+          { kind: "session", label: "Regenerate SDK types", sub: "regenerate-sdk · Merged #2481 · 2h ago", status: "Merged", runtime: "Codex", stats: ["#2481", "$0.34", "2 files +422 −378"], quote: "chore(sdk): regenerate types", files: [["types.gen.ts", "+418", "−377"]] },
+          { kind: "session", label: "Review the workspace trust changes", sub: "main · Ready · yesterday", status: "Ready", runtime: "Vector · GPT-6 Astra", stats: ["Review", "$0.21", "6 files +174 −12"], quote: "Should this stay an additive union, or become an enum once the restricted level ships?", files: [["trust.ts", "+40", "−5"]] },
+
+          { kind: "command", label: "New session", sub: "Start a fresh conversation in this workspace", keys: ["⌘", "⇧", "S"], where: "Workspace" },
+          { kind: "command", label: "New Parallel Workspace", sub: "Another agent on its own branch, without touching main", keys: ["⌘", "⇧", "N"], where: "Project", suggested: true },
+          { kind: "command", label: "Toggle Changes panel", sub: "Show or hide the staged changes", keys: ["⌘", "⇧", "R"], where: "Session", action: "changes", suggested: true },
+          { kind: "command", label: "Toggle terminal", sub: "Open the integrated terminal under the session", keys: ["⌃", "`"], where: "Session", action: "terminal", suggested: true },
+          { kind: "command", label: "Toggle background tasks", sub: "Subagents and specialists while they work", keys: ["⌘", "⇧", "B"], where: "Session" },
+          { kind: "command", label: "Choose model", sub: "Pick the model for the next message", keys: ["⌘", "'"], where: "Composer" },
+          { kind: "command", label: "Cycle agent", sub: "Build, Plan and your own primary agents", keys: ["⌘", "."], where: "Composer", action: "agent" },
+          { kind: "command", label: "Add selection to context", sub: "Attach the selected lines to the next message", keys: ["⌘", "⇧", "L"], where: "Editor" },
+          { kind: "command", label: "Review with Vectorscope", sub: "Review the staged diff before you commit", keys: [], where: "Session", suggested: true },
+          { kind: "command", label: "Start a cloud run", sub: "Hand this task to Vector Cloud or GitHub Actions", keys: [], where: "Project" },
+          { kind: "command", label: "Rewind code and chat", sub: "Go back to an earlier message, with its files", keys: [], where: "Session" },
+          { kind: "command", label: "Check for updates", sub: "Download, install and restart", keys: [], where: "Vector" },
+          { kind: "command", label: "Toggle sidebar", sub: "Projects, workspaces and tools", keys: ["⌘", "\\"], where: "Window", action: "sidebar" },
+
+          { kind: "agent", label: "Build", sub: "Primary · the default agent", badge: "Primary", desc: "The default agent. Executes tools based on configured permissions.", perms: "Edits files and runs commands, as your permission rules allow" },
+          { kind: "agent", label: "Plan", sub: "Primary · no edits", badge: "Primary", desc: "Plan mode. Disallows all edit tools.", perms: "Read-only: every edit tool is denied" },
+          { kind: "agent", label: "Subagent", sub: "general · the main agent's worker", badge: "Subagent", desc: "General-purpose agent for researching complex questions and executing multi-step tasks. The main agent launches one per substantial, independent part.", perms: "Edits only inside the paths it owns" },
+          { kind: "agent", label: "Explore", sub: "Specialist · read-only search", badge: "Specialist", desc: "Fast read-only agent for broad codebase searches across several areas or naming conventions, whose raw output would flood your context.", perms: "Read-only" },
+          { kind: "agent", label: "Review", sub: "Specialist · read-only reviewer", badge: "Specialist", desc: "Read-only senior code reviewer for correctness, regressions, missing tests, maintainability and security issues.", perms: "Read-only" },
+          { kind: "agent", label: "Judge", sub: "Specialist · PASS, FAIL or INCONCLUSIVE", badge: "Specialist", desc: "Independent completion judge. Scores requirement coverage, correctness, regression safety, evidence and security, then returns PASS, FAIL or INCONCLUSIVE.", perms: "Read-only" },
+          { kind: "agent", label: "Security", sub: "Specialist · trust boundaries", badge: "Specialist", desc: "Read-only application security reviewer for trust boundaries, authentication, authorization, secrets, injection risks and unsafe data flow.", perms: "Read-only" },
+          { kind: "agent", label: "Debug", sub: "Specialist · reproduce and repair", badge: "Specialist", desc: "Debugging specialist that reproduces failures, isolates root causes, applies focused repairs and verifies the fix with targeted checks.", perms: "Edits files, no todo list" },
+          { kind: "agent", label: "Test", sub: "Specialist · coverage", badge: "Specialist", desc: "Testing specialist that designs focused coverage, writes or repairs tests, runs the relevant suite and reports failures with evidence.", perms: "Edits files, no todo list" },
+
+          { kind: "setting", label: "General subagents", sub: "Settings › Agents", control: "switch", value: true, desc: "Let the main agent hand substantial, independent parts of a task to Subagents that run in parallel. Specialists keep working when this is off." },
+          { kind: "setting", label: "Theme", sub: "Settings › Appearance", control: "seg", options: ["Dark", "Light", "System"], value: "Dark", desc: "Vector's colours, everywhere at once." },
+          { kind: "setting", label: "Auto-accept edits", sub: "Settings › Permissions · ⌘⇧A", control: "switch", value: false, desc: "Apply edits without asking in this session. Commands still ask unless a rule allows them." },
+          { kind: "setting", label: "Trusted folders", sub: "Settings › Security", control: "link", value: "3 folders", desc: "Folders whose own config may run: vector.json hooks, commands and MCP servers. Trust is tied to each folder's fingerprint." },
+          { kind: "setting", label: "Notify me when an agent needs me", sub: "Settings › Notifications", control: "switch", value: true, desc: "A system notification when an agent asks a question or wants permission." },
+          { kind: "setting", label: "Default model", sub: "Settings › Models", control: "link", value: "GPT-6 Sol", desc: "Used for new sessions. Change it per message from the composer." },
+          { kind: "setting", label: "Keyboard shortcuts", sub: "Settings › Keyboard", control: "link", value: "62 shortcuts", desc: "Every command's shortcut, and your own." },
+        ]
+        items.forEach((item, i) => (item.id = `cp-opt-${i}`))
+
+        // ---- fuzzy matching ----
+        // A subsequence match, scored up for runs and word starts, as in most editors.
+        function fuzzy(query, text) {
+          const q = query.toLowerCase().replace(/\s+/g, "")
+          if (!q) return { score: 0, idx: [] }
+          const t = text.toLowerCase()
+          let from = 0
+          let prev = -2
+          let score = 0
+          const idx = []
+          for (const ch of q) {
+            let at = t.indexOf(ch, from)
+            // Prefer a later word start over an early mid-word hit.
+            const boundary = (i) => i === 0 || /[\s/._\-›·]/.test(t[i - 1]) || (text[i] !== t[i] && text[i - 1] === t[i - 1])
+            if (at >= 0 && !boundary(at) && at !== prev + 1) {
+              let probe = t.indexOf(ch, at + 1)
+              while (probe >= 0 && !boundary(probe)) probe = t.indexOf(ch, probe + 1)
+              if (probe >= 0 && probe - at < 12) at = probe
+            }
+            if (at < 0) return null
+            score += 1 + (at === prev + 1 ? 5 : 0) + (boundary(at) ? 3 : 0) - Math.min(at - from, 8) * 0.2
+            idx.push(at)
+            prev = at
+            from = at + 1
+          }
+          if (t.startsWith(q)) score += 10
+          else if (t.includes(q)) score += 6
+          // Letters strewn across a long label are noise, not a match.
+          else if (idx.at(-1) - idx[0] > q.length * 3 + 4) return null
+          return { score, idx }
+        }
+        const mark = (text, idx) => {
+          if (!idx?.length) return esc(text)
+          const set = new Set(idx)
+          return [...text].map((ch, i) => (set.has(i) ? `<mark>${esc(ch)}</mark>` : esc(ch))).join("")
+        }
+
+        // ---- state and rendering ----
+        let cat = "all"
+        let active = 0
+        let shown = []
+        const input = stage.querySelector("[data-input]")
+        const listEl = stage.querySelector("[data-list]")
+        const preview = stage.querySelector("[data-preview]")
+        const palette = stage.querySelector("[data-palette]")
+        const scrim = stage.querySelector("[data-scrim]")
+
+        function parse() {
+          return { scope: cat, query: input.value.trim(), prefixed: cat !== "all" }
+        }
+
+        function results() {
+          const { scope, query } = parse()
+          const pool = items.filter((item) => scope === "all" || item.kind === scope)
+          if (!query) {
+            if (scope !== "all") return [{ group: CATS.find((c) => c.key === scope).name, rows: pool.map((item) => ({ item })) }]
+            return [
+              { group: "Recent", rows: items.filter((i) => i.recent).map((item) => ({ item })) },
+              { group: "Suggested commands", rows: items.filter((i) => i.suggested).map((item) => ({ item })) },
+              { group: "Agents", rows: items.filter((i) => i.kind === "agent").slice(0, 3).map((item) => ({ item })) },
+            ]
+          }
+          const scored = pool
+            .map((item) => {
+              const label = fuzzy(query, item.label)
+              if (label) return { item, score: label.score + (item.recent ? 1.5 : 0), idx: label.idx }
+              // The second line only counts when it holds the query as typed.
+              const at = item.sub.toLowerCase().indexOf(query.toLowerCase())
+              if (at < 0 || query.length < 3) return null
+              return { item, score: 4 + query.length * 0.5, subIdx: [...query].map((_, i) => at + i) }
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.score - a.score)
+          if (scope !== "all") return scored.length ? [{ group: CATS.find((c) => c.key === scope).name, rows: scored }] : []
+          if (!scored.length) return []
+          const best = scored[0]
+          const groups = [{ group: "Best match", rows: [best] }]
+          CATS.slice(1).forEach((c) => {
+            const rows = scored.filter((r) => r !== best && r.item.kind === c.key)
+            if (rows.length) groups.push({ group: c.name, rows: rows.slice(0, 4), more: rows.length - 4 })
+          })
+          return groups
+        }
+
+        function iconHtml(item) {
+          if (item.kind === "file") {
+            const ext = item.label.split(".").pop()
+            return `<span class="cp-icon" data-kind="file" data-ext="${ext}">${ext.toUpperCase().slice(0, 3)}</span>`
+          }
+          const name = { session: "session", command: "command", agent: "agent", setting: "gear" }[item.kind]
+          return `<span class="cp-icon">${glyph(name, 14)}</span>`
+        }
+
+        function endHtml(item) {
+          if (item.kind === "file" && item.status) return `<span class="add">${item.status[1]}</span><span class="del">${item.status[2]}</span>`
+          if (item.kind === "command") return item.keys.map((k) => `<kbd>${k}</kbd>`).join("")
+          if (item.kind === "session") return item.current ? `<span class="badge badge-violet" style="height:18px">Current</span>` : `<span>${esc(item.status)}</span>`
+          if (item.kind === "agent") return `<span>${item.badge}</span>`
+          if (item.kind === "setting") return item.control === "switch" ? `<span class="badge ${item.value ? "badge-violet" : ""}" style="height:18px">${item.value ? "On" : "Off"}</span>` : `<span>${esc(item.value)}</span>`
+          return ""
+        }
+
+        function render(keepActive) {
+          const { scope, query, prefixed } = parse()
+          const groups = results()
+          shown = groups.flatMap((g) => g.rows.map((r) => r.item))
+          if (!keepActive) active = 0
+          active = Math.max(0, Math.min(active, shown.length - 1))
+          listEl.innerHTML = groups.length
+            ? groups
+                .map(
+                  (g) => `<p class="cp-group" role="presentation">${g.group}${g.more > 0 ? `<span>+${g.more} more</span>` : ""}</p>${g.rows
+                    .map((r) => {
+                      const item = r.item
+                      const i = shown.indexOf(item)
+                      return `<div class="cp-item" role="option" id="${item.id}" data-i="${i}" aria-selected="${i === active}">
+                        ${iconHtml(item)}
+                        <span class="cp-text"><span class="cp-label">${mark(item.label, r.idx)}</span><span class="cp-sub ${item.kind === "file" ? "mono" : ""}">${mark(item.sub, r.subIdx)}</span></span>
+                        <span class="cp-end">${endHtml(item)}</span>
+                      </div>`
+                    })
+                    .join("")}`,
+                )
+                .join("")
+            : `<div class="cp-empty"><b>Nothing matches “${esc(query)}”</b>Try fewer letters, or <kbd>tab</kbd> to another category.</div>`
+          // chips
+          const counts = Object.fromEntries(
+            CATS.map((c) => [c.key, items.filter((it) => (c.key === "all" || it.kind === c.key) && (!query || fuzzy(query, it.label) || (query.length >= 3 && it.sub.toLowerCase().includes(query.toLowerCase())))).length]),
+          )
+          stage.querySelector("[data-chips]").innerHTML =
+            CATS.map((c) => `<button class="cp-chip" role="tab" type="button" aria-selected="${scope === c.key}" data-cat="${c.key}">${c.name}<span class="cp-n">${counts[c.key]}</span></button>`).join("") +
+            `<span class="cp-chips-end"><span><code>&gt;</code> commands</span><span><code>@</code> agents</span><span><code>#</code> sessions</span></span>`
+          const scopeEl = stage.querySelector("[data-scope]")
+          scopeEl.hidden = !prefixed
+          scopeEl.innerHTML = prefixed ? `${CATS.find((c) => c.key === scope).name}<span aria-hidden="true">›</span>` : ""
+          stage.querySelector("[data-count]").textContent = `${shown.length} result${shown.length === 1 ? "" : "s"}`
+          input.setAttribute("aria-activedescendant", shown[active]?.id ?? "")
+          renderPreview()
+        }
+
+        function highlight(code, ext) {
+          if (ext === "md")
+            return esc(code)
+              .replace(/^(#+ .*)$/, '<span class="t-h">$1</span>')
+              .replace(/`([^`]+)`/g, '<span class="t-s">`$1`</span>')
+          if (ext === "css") return esc(code).replace(/(--[\w-]+)/g, '<span class="t-f">$1</span>').replace(/(#[0-9a-f]{6})/g, '<span class="t-s">$1</span>')
+          const comment = code.indexOf("//")
+          const body = comment >= 0 ? code.slice(0, comment) : code
+          const rest = comment >= 0 ? code.slice(comment) : ""
+          const html = esc(body)
+            .replace(/("[^"]*"|`[^`]*`)/g, '<span class="t-s">$1</span>')
+            .replace(/\b(import|from|export|async|function|const|let|return|if|await|type|test|expect|yield|true|false)\b(?![^<]*<\/span>)/g, '<span class="t-k">$1</span>')
+            .replace(/\b([a-zA-Z_]\w*)(?=\()/g, '<span class="t-f">$1</span>')
+          return html + (rest ? `<span class="t-c">${esc(rest)}</span>` : "")
+        }
+
+        function renderPreview() {
+          const item = shown[active]
+          if (!item) {
+            preview.innerHTML = `<div class="cp-pv-body" style="display:grid;align-content:center;gap:12px">
+              <p class="cp-pv-kind">Narrow it down as you type</p>
+              <dl class="cp-dl">${CATS.slice(1).map((c) => `<dt><kbd>${c.prefix}</kbd></dt><dd>${c.name}</dd>`).join("")}</dl>
+              <p class="cp-desc" style="color:var(--text-3)">Letters can skip: <span class="mono" style="font-size:12px">tgchp</span> finds Toggle Changes panel.</p>
+            </div>`
+            return
+          }
+          const kindName = { file: "File", session: "Session", command: "Command", agent: "Agent", setting: "Setting" }[item.kind]
+          if (item.kind === "file") {
+            const ext = item.label.split(".").pop()
+            preview.innerHTML = `
+              <div class="cp-pv-head"><span class="cp-pv-kind">${kindName} · Vectordev.ai</span><h3>${esc(item.label)}${item.status ? `<span class="badge ${item.status[0] === "Added" ? "badge-green" : "badge-amber"}" style="height:19px">${item.status[0]}</span>` : ""}</h3><p>${esc(item.sub)}</p></div>
+              <div class="cp-pv-body"><div class="cp-code" style="--start:${item.start - 1}">${item.code.map((line) => `<code>${highlight(line, ext) || " "}</code>`).join("")}</div></div>
+              <div class="cp-pv-foot">${glyph("clock", 13)}<span>${esc(item.by ?? "Unchanged on workspace-trust")}</span><button class="btn btn-sm" type="button" data-run>Open</button></div>`
+            return
+          }
+          if (item.kind === "session") {
+            preview.innerHTML = `
+              <div class="cp-pv-head"><span class="cp-pv-kind">${kindName} · ${esc(item.runtime)}</span><h3>${esc(item.label)}</h3><div class="cp-pv-tags">${item.stats.map((s) => `<span class="badge">${esc(s)}</span>`).join("")}</div></div>
+              <div class="cp-pv-body">
+                <dl class="cp-dl"><dt>Branch</dt><dd class="mono">${esc(item.sub.split(" · ")[0])}</dd><dt>Status</dt><dd>${esc(item.status)}</dd></dl>
+                <p class="cp-quote">${esc(item.quote)}</p>
+                <div class="cp-mini">${item.files.map(([n, a, d]) => `<div class="cp-mini-row"><span>${esc(n)}</span><span class="add">${a}</span><span class="del">${d}</span></div>`).join("")}</div>
+              </div>
+              <div class="cp-pv-foot"><span>${item.current ? "You are in this session" : "Opens in this window"}</span><button class="btn btn-sm" type="button" data-run>${item.current ? "Stay here" : "Switch"}</button></div>`
+            return
+          }
+          if (item.kind === "command") {
+            preview.innerHTML = `
+              <div class="cp-pv-head"><span class="cp-pv-kind">${kindName} · ${esc(item.where)}</span><h3>${esc(item.label)}</h3></div>
+              <div class="cp-pv-body"><p class="cp-desc">${esc(item.sub)}.</p>${item.keys.length ? `<div class="cp-bigkey">${item.keys.map((k) => `<kbd>${k}</kbd>`).join("")}</div>` : `<p class="cp-desc" style="margin-top:14px;color:var(--text-3)">No shortcut yet. You can add one in Keyboard shortcuts.</p>`}
+                ${item.action ? `<p class="cp-quote">Try it: press <kbd>↵</kbd> and watch the window behind the palette.</p>` : ""}</div>
+              <div class="cp-pv-foot"><span>Runs in the current ${esc(item.where.toLowerCase())}</span><button class="btn btn-sm btn-primary" type="button" data-run>Run</button></div>`
+            return
+          }
+          if (item.kind === "agent") {
+            preview.innerHTML = `
+              <div class="cp-pv-head"><span class="cp-pv-kind">${kindName}</span><h3>${esc(item.label)}<span class="badge ${item.badge === "Primary" ? "badge-violet" : item.badge === "Subagent" ? "badge-blue" : ""}" style="height:19px">${item.badge}</span></h3></div>
+              <div class="cp-pv-body"><p class="cp-desc">${esc(item.desc)}</p>
+                <dl class="cp-dl" style="margin-top:16px"><dt>Permissions</dt><dd>${esc(item.perms)}</dd><dt>Model</dt><dd>${item.badge === "Primary" ? "GPT-6 Sol, from the composer" : "Chosen by the main agent's settings"}</dd><dt>Started by</dt><dd>${item.badge === "Primary" ? "You, from the composer" : "The main agent, through the task tool"}</dd></dl></div>
+              <div class="cp-pv-foot"><span>${item.badge === "Primary" ? "Switches the composer's agent" : "Mention it to ask the main agent to use it"}</span><button class="btn btn-sm" type="button" data-run>${item.badge === "Primary" ? "Use" : "Mention"}</button></div>`
+            return
+          }
+          const control =
+            item.control === "switch"
+              ? `<button class="switch" role="switch" aria-checked="${item.value}" type="button" data-setting aria-label="${esc(item.label)}"></button>`
+              : item.control === "seg"
+                ? `<div class="seg" role="group" aria-label="${esc(item.label)}" data-setting-seg>${item.options.map((o) => `<button type="button" aria-pressed="${o === item.value}">${o}</button>`).join("")}</div>`
+                : `<button class="btn btn-sm" type="button" data-run>${esc(item.value)} ›</button>`
+          preview.innerHTML = `
+            <div class="cp-pv-head"><span class="cp-pv-kind">${kindName}</span><h3>${esc(item.label)}</h3><p>${esc(item.sub)}</p></div>
+            <div class="cp-pv-body"><p class="cp-desc">${esc(item.desc)}</p><div class="cp-setting"><div>${esc(item.label)}<span>Changes apply right away</span></div>${control}</div></div>
+            <div class="cp-pv-foot"><span>${item.control === "switch" ? "Press ↵ to toggle without leaving the palette" : "Opens Settings at this section"}</span></div>`
+        }
+
+        function move(delta) {
+          if (!shown.length) return
+          active = (active + delta + shown.length) % shown.length
+          listEl.querySelectorAll(".cp-item").forEach((el) => el.setAttribute("aria-selected", String(Number(el.dataset.i) === active)))
+          const el = listEl.querySelector(`[data-i="${active}"]`)
+          el?.scrollIntoView({ block: "nearest" })
+          input.setAttribute("aria-activedescendant", shown[active]?.id ?? "")
+          renderPreview()
+        }
+
+        function setCat(key) {
+          cat = key
+          render()
+        }
+
+        // ---- running an item ----
+        let agentIndex = 0
+        function run(item, side) {
+          if (!item) return
+          if (item.kind === "setting" && item.control === "switch") {
+            item.value = !item.value
+            render(true)
+            toast("gear", `${item.label}: ${item.value ? "on" : "off"}`, item.sub)
+            return
+          }
+          close()
+          if (item.kind === "file") return toast("doc", `Opened ${item.label}${side ? " to the side" : ""}`, item.sub)
+          if (item.kind === "session") return toast("session", item.current ? "You're already here" : `Switched to ${item.label}`, item.sub.split(" · ")[0])
+          if (item.kind === "agent") {
+            if (item.badge === "Primary") {
+              stage.querySelector("[data-bg-agent]").textContent = item.label
+              return toast("agent", `Composer agent: ${item.label}`, item.desc)
+            }
+            return toast("agent", `Mentioned @${item.label.toLowerCase()}`, "The main agent decides when to launch it")
+          }
+          if (item.kind === "setting") return toast("gear", `Opening ${item.sub}`, item.label)
+          if (item.action === "changes") {
+            const side = stage.querySelector("[data-bg-changes]")
+            side.hidden = !side.hidden
+            stage.querySelector("[data-bg-changes-tool]").toggleAttribute("data-on", !side.hidden)
+            return toast("review", side.hidden ? "Changes panel hidden" : "Changes panel shown", "⌘⇧R next time")
+          }
+          if (item.action === "terminal") {
+            const term = stage.querySelector("[data-bg-term]")
+            term.hidden = !term.hidden
+            stage.querySelector("[data-bg-term-tool]").toggleAttribute("data-on", !term.hidden)
+            return toast("terminal", term.hidden ? "Terminal hidden" : "Terminal opened", "⌃` next time")
+          }
+          if (item.action === "sidebar") {
+            const sb = stage.querySelector(".sb")
+            sb.hidden = !sb.hidden
+            return toast("sidebar-hide", sb.hidden ? "Sidebar hidden" : "Sidebar shown", "⌘\\ next time")
+          }
+          if (item.action === "agent") {
+            agentIndex = (agentIndex + 1) % 2
+            const name = ["Build", "Plan"][agentIndex]
+            stage.querySelector("[data-bg-agent]").textContent = name
+            return toast("agent", `Composer agent: ${name}`, "⌘. next time")
+          }
+          toast("command", item.label, "Ran from the command palette")
+        }
+
+        // ---- open and close ----
+        let lastFocus = null
+        function open(prefill) {
+          lastFocus = document.activeElement
+          scrim.hidden = false
+          palette.hidden = false
+          if (prefill !== undefined) input.value = prefill
+          cat = "all"
+          render()
+          input.focus({ preventScroll: true })
+          input.select()
+        }
+        function close() {
+          scrim.hidden = true
+          palette.hidden = true
+          stopTyping()
+          ;(lastFocus && lastFocus !== input ? lastFocus : stage.querySelector("[data-open-palette]"))?.focus({ preventScroll: true })
+        }
+
+        input.addEventListener("input", () => {
+          stopTyping()
+          // A leading > @ # / or , picks the category and leaves the query clean.
+          const pre = CATS.find((c) => c.prefix && input.value.startsWith(c.prefix))
+          if (pre) {
+            cat = pre.key
+            input.value = input.value.slice(1)
+          }
+          render()
+        })
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "ArrowDown") return event.preventDefault(), move(1)
+          if (event.key === "ArrowUp") return event.preventDefault(), move(-1)
+          if (event.key === "Enter") {
+            event.preventDefault()
+            return run(shown[active], event.metaKey || event.ctrlKey)
+          }
+          if (event.key === "Tab") {
+            event.preventDefault()
+            const at = CATS.findIndex((c) => c.key === parse().scope)
+            return setCat(CATS[(at + (event.shiftKey ? -1 : 1) + CATS.length) % CATS.length].key)
+          }
+          if (event.key === "Backspace" && input.value === "" && cat !== "all") {
+            event.preventDefault()
+            return setCat("all")
+          }
+          if (event.key === "Escape") {
+            event.preventDefault()
+            if (input.value || cat !== "all") {
+              cat = "all"
+              input.value = ""
+              return render()
+            }
+            return close()
+          }
+        })
+        listEl.addEventListener("mousemove", (event) => {
+          const el = event.target.closest(".cp-item")
+          if (!el || Number(el.dataset.i) === active) return
+          active = Number(el.dataset.i)
+          move(0)
+        })
+        listEl.addEventListener("click", (event) => {
+          const el = event.target.closest(".cp-item")
+          if (!el) return
+          active = Number(el.dataset.i)
+          run(shown[active], event.metaKey || event.ctrlKey)
+        })
+        stage.querySelector("[data-chips]").addEventListener("click", (event) => {
+          const chip = event.target.closest("[data-cat]")
+          if (!chip) return
+          setCat(chip.dataset.cat)
+          input.focus({ preventScroll: true })
+        })
+        preview.addEventListener("click", (event) => {
+          if (event.target.closest("[data-run]")) return run(shown[active])
+          if (event.target.closest("[data-setting]")) {
+            // lab.js has flipped aria-checked already; keep the item in step.
+            const item = shown[active]
+            item.value = event.target.closest("[data-setting]").getAttribute("aria-checked") === "true"
+            render(true)
+            toast("gear", `${item.label}: ${item.value ? "on" : "off"}`, item.sub)
+          }
+        })
+        preview.addEventListener("lab:seg", (event) => {
+          const item = shown[active]
+          item.value = event.detail
+          render(true)
+          toast("gear", `${item.label}: ${item.value}`, item.sub)
+        })
+        scrim.addEventListener("click", close)
+        stage.querySelector("[data-open-palette]").addEventListener("click", () => open(""))
+        // The sidebar's Search row opens the palette here instead of reloading this page.
+        stage.querySelectorAll(".sb-item").forEach((el) => {
+          if (el.textContent.trim().startsWith("Search"))
+            el.addEventListener("click", (event) => {
+              event.preventDefault()
+              open("")
+            })
+        })
+        document.addEventListener("keydown", (event) => {
+          const combo = (event.metaKey || event.ctrlKey) && (event.key === "k" || event.key === "p")
+          if (!combo) return
+          event.preventDefault()
+          if (palette.hidden) open(event.key === "p" ? "" : undefined)
+          else close()
+        })
+
+        // ---- toast ----
+        const toastEl = stage.querySelector("[data-toast]")
+        let toastTimer = 0
+        function toast(icon, title, sub) {
+          toastEl.innerHTML = `${glyph(icon, 15)}<b style="font-weight:500">${esc(title)}</b><span>${esc(sub)}</span>`
+          toastEl.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (toastEl.hidden = true), 3200)
+        }
+
+        // ---- first paint: the palette types its first query, as a reader would ----
+        let typing = 0
+        function stopTyping() {
+          clearTimeout(typing)
+          typing = 0
+        }
+        render()
+        input.focus({ preventScroll: true })
+        if (reduced) {
+          input.value = "trust"
+          render()
+        } else {
+          const word = "trust"
+          const step = (n) => {
+            input.value = word.slice(0, n)
+            render()
+            if (n < word.length) typing = setTimeout(() => step(n + 1), 140)
+            else typing = 0
+          }
+          typing = setTimeout(() => step(1), 650)
+        }
+      })
+    </script>
+  </body>
+</html>

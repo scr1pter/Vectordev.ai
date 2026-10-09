@@ -373,7 +373,7 @@ describe("the summary comment", () => {
       "<sub>Reviewed `d4e5f6a` against `main` · full review · openai/gpt-5 · subscription sign-in, no per-token price (48.2k in / 3.1k out) · 48s · this pull request: 1 review · [workflow run](https://github.com/o/r/actions/runs/42)</sub>",
     )
     expect(footer(unknown)).toContain(
-      "· provider/model · cost unknown: no price is listed for this model (48.2k in / 3.1k out) ·",
+      "· provider/model · cost unknown: pricing or complete usage is unavailable (48.2k in / 3.1k out) ·",
     )
   })
 
@@ -415,6 +415,15 @@ describe("the summary comment", () => {
     expect(body).not.toContain("/vector")
     expect(body).not.toContain("```suggestion")
     expect(body).toContain("**Blocking** · `src/auth/refresh.ts:52` · Refresh can restore a session after logout")
+  })
+})
+
+describe("the desktop form with line comments", () => {
+  test("does not list the findings that went out as line comments", () => {
+    const body = buildSummaryBody({ ...FULL, form: "desktop", inlinePosted: true })
+    expect(body).not.toContain("**Blocking** · `src/auth/refresh.ts:52` · Refresh can restore a session after logout")
+    expect(body).toContain("## Vectorscope review")
+    expect(body).not.toContain("vector-review:")
   })
 })
 
@@ -560,6 +569,12 @@ describe("inline comments", () => {
         "<!-- vector-finding v1 id=3f9a1c07be21 sev=b cat=bug sha=d4e5f6a st=o t=logout,refresh,restore,session -->",
       ].join("\n"),
     )
+  })
+
+  test("a comment posted from the desktop does not offer the /vector fix command", () => {
+    const body = buildInlineBody(blocking, { head: HEAD, trust: "trusted", repo: REPO, commands: false })
+    expect(body).not.toContain("/vector fix")
+    expect(body).toContain("```suggestion")
   })
 
   test("untrusted mode has no /vector fix line, and an unconfirmed fix is a diff block", () => {
@@ -816,7 +831,7 @@ describe("numbers and cost", () => {
     expect(costWording(zeroCost)).toBe("openai/gpt-4.1 · $0.00 (48.2k in / 3.1k out)")
     expect(costWording(plan)).toBe("openai/gpt-5 · subscription sign-in, no per-token price (48.2k in / 3.1k out)")
     expect(costWording(unknown)).toBe(
-      "provider/model · cost unknown: no price is listed for this model (48.2k in / 3.1k out)",
+      "provider/model · cost unknown: pricing or complete usage is unavailable (48.2k in / 3.1k out)",
     )
   })
 

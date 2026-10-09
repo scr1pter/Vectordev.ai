@@ -1,0 +1,11 @@
+[
+  {
+    "id": "lost-progress-update",
+    "path": "src/upload/chunked-uploader.ts",
+    "line": 38,
+    "endLine": 40,
+    "severity": "blocking",
+    "category": "bug",
+    "description": "Each worker reads the shared byte count before awaiting its part and writes before + chunk.size afterwards, so concurrent workers overwrite each other's updates. The count ends below upload.size for any upload with more than one part in flight, the completeness check throws \"incomplete\" after every part succeeded, and progress jumps backwards. The count must be read and updated after the await."
+  }
+]

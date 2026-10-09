@@ -57,7 +57,13 @@ import type {
 } from "../main/external-agents"
 import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
-import type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
+import type {
+  PullRequestAccessStatus,
+  PullRequestChecks,
+  PullRequestDetail,
+  PullRequestReviewComment,
+  PullRequestSummary,
+} from "../main/github-pr"
 import type { LocalMemoryState } from "../main/local-memory"
 import type { CustomInstructionsState } from "../main/custom-instructions"
 import type { RuntimeName, RuntimeStatus } from "../main/runtime-bootstrap"
@@ -89,7 +95,13 @@ import type { AgentTeam, TeamCollaborationGraph, TeamMessage, TeamTopology } fro
 export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopology } from "../main/agent-team-model"
 export type { LocalMemoryState } from "../main/local-memory"
 export type { CustomInstructionsState } from "../main/custom-instructions"
-export type { PullRequestCliStatus, PullRequestDetail, PullRequestSummary } from "../main/github-pr"
+export type {
+  PullRequestAccessStatus,
+  PullRequestChecks,
+  PullRequestDetail,
+  PullRequestReviewComment,
+  PullRequestSummary,
+} from "../main/github-pr"
 export type {
   CloudRuntimeLogResult,
   PublishProgressEvent,
@@ -272,14 +284,17 @@ export type CustomInstructionsAPI = {
 }
 
 export type PullRequestsAPI = {
-  // refresh re-reads the login-shell PATH, for "Check again" after installing gh.
-  status: (options?: { refresh?: boolean }) => Promise<PullRequestCliStatus>
+  // Whether Vector can act on GitHub: the user's GitHub sign-in, or an existing GitHub CLI login.
+  status: () => Promise<PullRequestAccessStatus>
   list: (
     cwd: string,
     options?: { state?: "open" | "closed" | "merged" | "all"; limit?: number },
   ) => Promise<PullRequestSummary[]>
   view: (cwd: string, number: number) => Promise<PullRequestDetail>
-  diff: (cwd: string, number: number) => Promise<string>
+  // With the head the panel saw, a diff of a newer commit is refused rather than reviewed under that head's name.
+  diff: (cwd: string, number: number, head?: string) => Promise<string>
+  // The check runs of that exact commit, with the failing step's log of the first few failed Actions jobs.
+  checks: (cwd: string, number: number, head: string) => Promise<PullRequestChecks>
   create: (input: {
     cwd: string
     title: string
@@ -287,16 +302,25 @@ export type PullRequestsAPI = {
     base?: string
     draft?: boolean
   }) => Promise<{ url: string }>
+  // inline is how many line comments were posted: 0 without head, or when the review fell back to fallbackBody.
   review: (input: {
     cwd: string
     number: number
+    // The commit the review ran on. GitHub records it, and the post is refused if the pull request moved since.
+    head?: string
     body: string
     event: "comment" | "approve" | "request-changes"
-  }) => Promise<{ posted: boolean }>
+    // Sent only with head. If GitHub refuses any of them, the review is posted once more without line comments,
+    // using fallbackBody (or body) as its body.
+    comments?: PullRequestReviewComment[]
+    fallbackBody?: string
+  }) => Promise<{ posted: boolean; inline?: number }>
   merge: (input: {
     cwd: string
     number: number
     strategy: "merge" | "squash" | "rebase"
+    // The commit the user last saw. GitHub refuses the merge if anything was pushed since.
+    head?: string
   }) => Promise<{ merged: boolean }>
 }
 

@@ -509,7 +509,7 @@ export function WorkspaceNavigation(props: {
                 stroke-linejoin="round"
               />
             </svg>
-            <span>Pull Requests</span>
+            <span>Vectorscope</span>
           </button>
           <button type="button" data-vector-nav-item data-tour="nav-mcp" onClick={props.onMcp}>
             <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" aria-hidden="true">
@@ -609,7 +609,7 @@ export function WorkspaceNavigation(props: {
               type="button"
               class="vector-help-menu-item"
               data-help-menu-sub
-              onClick={() => openLink("https://vectordev.ai/releases")}
+              onClick={() => openLink("https://vectordev.ai/docs/changelog")}
             >
               <span class="min-w-0 flex-1">Changelog</span>
               <span aria-hidden="true" data-help-menu-external>

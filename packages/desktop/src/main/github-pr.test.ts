@@ -1,0 +1,420 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { afterAll, describe, expect, test } from "bun:test"
+
+import type { GithubAccess } from "./github-api"
+import {
+  fetchPullRequest,
+  fetchPullRequestChecks,
+  fetchPullRequestDiff,
+  fetchPullRequests,
+  postPullRequestReview,
+  pushedHead,
+  putPullRequestMerge,
+  submitPullRequestReview,
+} from "./github-pr"
+
+// A small stand-in for api.github.com that answers the calls the Pull Requests panel makes, so the real request,
+// pagination and error code runs end to end without a network or a token.
+const HEAD = "a".repeat(40)
+const PUSHED = "c".repeat(40)
+const requests: { method: string; path: string; body?: Record<string, unknown> }[] = []
+// The pull request's newest commit as the stand-in reports it, and a push that lands while its diff is being read.
+const live = { head: HEAD, pushDuringDiff: false }
+const node = (number: number) => ({
+  number,
+  title: `Change ${number}`,
+  author: number === 3 ? null : { login: "mira" },
+  state: "OPEN",
+  isDraft: false,
+  baseRefName: "main",
+  headRefName: `change-${number}`,
+  additions: 10,
+  deletions: 2,
+  changedFiles: 1,
+  url: `https://github.com/acme/app/pull/${number}`,
+  updatedAt: "2026-10-08T10:00:00Z",
+  reviewDecision: number === 1 ? "APPROVED" : null,
+  headRefOid: HEAD,
+  baseRefOid: "b".repeat(40),
+  isCrossRepository: false,
+})
+
+// The check runs of HEAD. A GitHub Actions run's id is its job's id; a run from another app has no Actions job.
+const checkRun = (id: number, name: string, status: string, conclusion: string | null, slug = "github-actions") => ({
+  id,
+  name,
+  status,
+  conclusion,
+  html_url: `https://github.com/acme/app/actions/runs/1/job/${id}`,
+  app: { slug },
+})
+const CHECK_RUNS = [
+  checkRun(11, "typecheck", "completed", "failure"),
+  checkRun(12, "lint", "completed", "failure"),
+  checkRun(13, "build", "in_progress", null),
+  checkRun(14, "Vercel", "completed", "failure", "vercel"),
+  checkRun(15, "unit", "completed", "success"),
+  checkRun(16, "e2e", "completed", "timed_out"),
+]
+// Each job's steps and its whole log as GitHub serves it: every step in a row, each line timestamped. The lint
+// job's log has expired.
+const JOBS: Record<string, { steps: { name: string; conclusion: string }[]; log?: string }> = {
+  "11": {
+    steps: [
+      { name: "Checkout", conclusion: "success" },
+      { name: "Typecheck", conclusion: "failure" },
+    ],
+    log: [
+      "2026-10-08T10:00:00.0000000Z ##[group]Run actions/checkout@v4",
+      "2026-10-08T10:00:01.0000000Z ##[endgroup]",
+      "2026-10-08T10:00:02.0000000Z ##[group]Run bun typecheck",
+      "2026-10-08T10:00:02.1000000Z ##[endgroup]",
+      "2026-10-08T10:00:03.0000000Z $ echo ghp_0123456789abcdefghijklmnopqrstuvwx",
+      "2026-10-08T10:00:09.0000000Z src/a.ts(4,7): error TS2322: Type 'string' is not assignable to type 'number'.",
+      "2026-10-08T10:00:10.0000000Z ##[error]Process completed with exit code 2.",
+      "2026-10-08T10:00:11.0000000Z Post job cleanup.",
+    ].join("\n"),
+  },
+  "12": { steps: [{ name: "Lint", conclusion: "failure" }] },
+  "16": {
+    steps: [
+      { name: "Set up job", conclusion: "success" },
+      { name: "End to end", conclusion: "cancelled" },
+    ],
+    log: [
+      "2026-10-08T10:00:00.0000000Z ##[group]Run bun test:e2e",
+      "2026-10-08T10:00:00.1000000Z ##[endgroup]",
+      ...Array.from({ length: 400 }, (_, index) => `2026-10-08T10:00:01.0000000Z (pass) e2e case ${index}`),
+      "2026-10-08T10:30:00.0000000Z ##[error]The job has exceeded the maximum execution time of 30m0s",
+      "2026-10-08T10:30:00.1000000Z ##[error]The operation was canceled.",
+    ].join("\n"),
+  },
+}
+
+const server = Bun.serve({
+  port: 0,
+  async fetch(request) {
+    const url = new URL(request.url)
+    const body = request.method === "GET" ? undefined : ((await request.json()) as Record<string, unknown>)
+    requests.push({ method: request.method, path: url.pathname, body })
+    if (request.headers.get("authorization") !== "Bearer test-token")
+      return Response.json({ message: "Bad credentials" }, { status: 401 })
+    if (url.pathname === "/graphql") {
+      const variables = (body?.variables ?? {}) as { after?: string; number?: number; first?: number }
+      const query = String(body?.query)
+      if (query.includes("pullRequests(")) {
+        const page = variables.after ? [3] : [1, 2]
+        return Response.json({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: page.slice(0, variables.first).map(node),
+                pageInfo: { hasNextPage: !variables.after, endCursor: variables.after ? null : "cursor-1" },
+              },
+            },
+          },
+        })
+      }
+      const files = variables.after
+        ? [{ path: "b.ts", additions: 2, deletions: 0 }]
+        : [{ path: "a.ts", additions: 8, deletions: 2 }]
+      return Response.json({
+        data: {
+          repository: {
+            pullRequest: {
+              ...node(variables.number ?? 0),
+              body: "Why this change",
+              files: {
+                nodes: files,
+                pageInfo: { hasNextPage: !variables.after, endCursor: variables.after ? null : "f-1" },
+              },
+              comments: {
+                nodes: [{ author: { login: "sam" }, body: "Looks good", createdAt: "2026-10-08T11:00:00Z" }],
+              },
+            },
+          },
+        },
+      })
+    }
+    if (url.pathname === "/repos/acme/app/pulls/7" && request.headers.get("accept") === "application/vnd.github.diff") {
+      if (live.pushDuringDiff) live.head = PUSHED
+      return new Response("diff --git a/a.ts b/a.ts\n")
+    }
+    if (url.pathname === "/repos/acme/app/pulls/7" && request.method === "GET")
+      return Response.json({ head: { sha: live.head } })
+    if (url.pathname === "/repos/acme/app/pulls/7/reviews") {
+      // GitHub refuses the whole review when any line comment falls outside the diff, here past line 100.
+      const comments = (body?.comments ?? []) as { line: number }[]
+      if (comments.some((comment) => comment.line > 100))
+        return Response.json(
+          { message: "Unprocessable Entity", errors: ["Line could not be resolved"] },
+          { status: 422 },
+        )
+      if (!body?.body) return Response.json({ message: "Body is required" }, { status: 422 })
+      return Response.json({ id: 1 })
+    }
+    if (url.pathname === `/repos/acme/app/commits/${HEAD}/check-runs`) {
+      return Response.json({ total_count: CHECK_RUNS.length, check_runs: CHECK_RUNS })
+    }
+    const job = JOBS[url.pathname.match(/^\/repos\/acme\/app\/actions\/jobs\/(\d+)/)?.[1] ?? ""]
+    if (job && url.pathname.endsWith("/logs") && job.log) return new Response(job.log)
+    if (job && !url.pathname.endsWith("/logs")) return Response.json(job)
+    if (url.pathname === "/repos/acme/app/pulls/7/merge") {
+      if (body?.sha && body.sha !== live.head)
+        return Response.json({ message: "Head branch was modified. Review and try the merge again." }, { status: 409 })
+      return Response.json({ merged: true })
+    }
+    return Response.json({ message: "Not Found" }, { status: 404 })
+  },
+})
+afterAll(() => server.stop(true))
+
+const access: GithubAccess = { token: "test-token", source: "vector", apiUrl: `http://127.0.0.1:${server.port}` }
+const repo = { owner: "acme", name: "app" }
+
+describe("pull requests over GitHub's API", () => {
+  test("lists pull requests across pages up to the limit, with the fields the panel shows", async () => {
+    const all = await fetchPullRequests(access, repo, "open", 100)
+    expect(all.map((pr) => pr.number)).toEqual([1, 2, 3])
+    expect(all[0]).toMatchObject({ author: "mira", reviewDecision: "APPROVED", headRefOid: HEAD })
+    expect(all[1].reviewDecision).toBeUndefined()
+    // A deleted account comes back as GitHub's ghost user, not a crash.
+    expect(all[2].author).toBe("ghost")
+    expect(await fetchPullRequests(access, repo, "open", 1)).toHaveLength(1)
+  })
+
+  test("reads one pull request with every page of its files", async () => {
+    const pr = await fetchPullRequest(access, repo, 7)
+    expect(pr.files.map((file) => file.path)).toEqual(["a.ts", "b.ts"])
+    expect(pr.comments).toEqual([{ author: "sam", body: "Looks good", createdAt: "2026-10-08T11:00:00Z" }])
+    expect(pr.body).toBe("Why this change")
+  })
+
+  test("posts a review pinned to the commit it ran on", async () => {
+    requests.length = 0
+    await postPullRequestReview(access, repo, 7, { body: "Two findings", event: "request-changes", head: HEAD })
+    const posted = requests.find((request) => request.path.endsWith("/reviews"))
+    expect(posted?.body).toEqual({ body: "Two findings", event: "REQUEST_CHANGES", commit_id: HEAD })
+  })
+
+  test("refuses to post when the pull request moved after the review", async () => {
+    requests.length = 0
+    const stale = "c".repeat(40)
+    await expect(
+      postPullRequestReview(access, repo, 7, { body: "LGTM", event: "approve", head: stale }),
+    ).rejects.toThrow("changed after the review started")
+    expect(requests.some((request) => request.path.endsWith("/reviews"))).toBe(false)
+  })
+
+  test("posts line comments with the review, as ranges when they start on an earlier line", async () => {
+    requests.length = 0
+    const comments = [
+      { path: "a.ts", line: 4, side: "RIGHT" as const, body: "Off by one" },
+      { path: "a.ts", line: 9, side: "RIGHT" as const, startLine: 6, body: "This block leaks the handle" },
+      { path: "b.ts", line: 2, side: "LEFT" as const, startLine: 2, body: "The removed guard was needed" },
+    ]
+    expect(
+      await postPullRequestReview(access, repo, 7, { body: "Three findings", event: "comment", head: HEAD, comments }),
+    ).toEqual({ posted: true, inline: 3 })
+    expect(requests.find((request) => request.path.endsWith("/reviews"))?.body).toEqual({
+      body: "Three findings",
+      event: "COMMENT",
+      commit_id: HEAD,
+      comments: [
+        { path: "a.ts", line: 4, side: "RIGHT", body: "Off by one" },
+        {
+          path: "a.ts",
+          line: 9,
+          side: "RIGHT",
+          start_line: 6,
+          start_side: "RIGHT",
+          body: "This block leaks the handle",
+        },
+        { path: "b.ts", line: 2, side: "LEFT", body: "The removed guard was needed" },
+      ],
+    })
+
+    // Without the commit they were read on, line numbers could point anywhere, so the comments are left out.
+    requests.length = 0
+    expect(
+      await postPullRequestReview(access, repo, 7, { body: "Three findings", event: "comment", comments }),
+    ).toEqual({ posted: true, inline: 0 })
+    expect(requests.find((request) => request.path.endsWith("/reviews"))?.body).toEqual({
+      body: "Three findings",
+      event: "COMMENT",
+    })
+  })
+
+  test("posts the review once more without line comments when GitHub refuses one of them", async () => {
+    requests.length = 0
+    const comments = [
+      { path: "a.ts", line: 4, side: "RIGHT" as const, body: "Off by one" },
+      { path: "a.ts", line: 900, side: "RIGHT" as const, body: "Outside the diff" },
+    ]
+    const fallbackBody = "Two findings\n\n- a.ts:4 Off by one\n- a.ts:900 Outside the diff"
+    expect(
+      await postPullRequestReview(access, repo, 7, {
+        body: "Two findings",
+        event: "comment",
+        head: HEAD,
+        comments,
+        fallbackBody,
+      }),
+    ).toEqual({ posted: true, inline: 0 })
+    const posts = requests.filter((request) => request.path.endsWith("/reviews"))
+    expect(posts).toHaveLength(2)
+    expect(posts[0].body?.comments).toHaveLength(2)
+    expect(posts[1].body).toEqual({ body: fallbackBody, event: "COMMENT", commit_id: HEAD })
+
+    // Only once: a fallback GitHub refuses too is reported, not retried.
+    requests.length = 0
+    await expect(
+      postPullRequestReview(access, repo, 7, {
+        body: "Two findings",
+        event: "comment",
+        head: HEAD,
+        comments,
+        fallbackBody: "",
+      }),
+    ).rejects.toThrow("Body is required")
+    expect(requests.filter((request) => request.path.endsWith("/reviews"))).toHaveLength(2)
+  })
+
+  test("refuses malformed line comments before calling GitHub", async () => {
+    requests.length = 0
+    await expect(
+      submitPullRequestReview({
+        cwd: "/tmp/project",
+        number: 7,
+        head: HEAD,
+        body: "One finding",
+        event: "comment",
+        comments: [{ path: "a.ts", line: 4, side: "right" as "RIGHT", body: "Off by one" }],
+      }),
+    ).rejects.toThrow("side must be LEFT or RIGHT")
+    expect(requests).toHaveLength(0)
+  })
+
+  test("lists the commit's check runs with the failing step of each failed Actions job", async () => {
+    requests.length = 0
+    const checks = await fetchPullRequestChecks(access, repo, HEAD)
+    expect(checks.head).toBe(HEAD)
+    expect(checks.runs).toEqual(
+      CHECK_RUNS.map((run) => ({
+        name: run.name,
+        status: run.status,
+        // A check that is still running has no conclusion yet.
+        conclusion: run.conclusion ?? "",
+        url: run.html_url,
+      })),
+    )
+    // Vercel's failure is not an Actions job, so it has no job log to read.
+    expect(checks.failures.map((failure) => failure.name)).toEqual(["typecheck", "lint", "e2e"])
+    expect(requests.some((request) => request.path.includes("/actions/jobs/14"))).toBe(false)
+
+    const typecheck = checks.failures[0]
+    expect(typecheck.step).toBe("Typecheck")
+    expect(typecheck.excerpt).toContain("##[group]Run bun typecheck")
+    expect(typecheck.excerpt).toContain("error TS2322: Type 'string' is not assignable to type 'number'.")
+    expect(typecheck.excerpt.endsWith("##[error]Process completed with exit code 2.")).toBe(true)
+    // Only the failing step, without timestamps, and with a token-shaped string redacted.
+    expect(typecheck.excerpt).not.toContain("actions/checkout")
+    expect(typecheck.excerpt).not.toContain("Post job cleanup")
+    expect(typecheck.excerpt).not.toContain("2026-10-08T")
+    expect(typecheck.excerpt).not.toContain("ghp_0123456789abcdefghijklmnopqrstuvwx")
+
+    // A timed-out job's long step keeps its end, where the error is, within the cap.
+    const e2e = checks.failures[2]
+    expect(e2e.step).toBe("End to end")
+    expect(e2e.excerpt.length).toBeLessThanOrEqual(4_000)
+    expect(e2e.excerpt.endsWith("##[error]The operation was canceled.")).toBe(true)
+    expect(e2e.excerpt).toContain("(pass) e2e case 399")
+    expect(e2e.excerpt).not.toContain("(pass) e2e case 0\n")
+  })
+
+  test("a job whose log GitHub no longer has still lists as a failure, without an excerpt", async () => {
+    const checks = await fetchPullRequestChecks(access, repo, HEAD)
+    expect(checks.failures[1]).toEqual({ name: "lint", step: "", excerpt: "" })
+  })
+
+  test("a commit GitHub has not seen has no checks", async () => {
+    expect(await fetchPullRequestChecks(access, repo, PUSHED)).toEqual({ head: PUSHED, runs: [], failures: [] })
+  })
+
+  test("reads the diff of the commit the panel saw", async () => {
+    expect(await fetchPullRequestDiff(access, repo, 7, HEAD)).toBe("diff --git a/a.ts b/a.ts\n")
+  })
+
+  test("refuses a diff when a push lands while it is read, so a newer commit is never reviewed as the old one", async () => {
+    live.pushDuringDiff = true
+    await expect(fetchPullRequestDiff(access, repo, 7, HEAD)).rejects.toThrow("changed while Vector was reading it")
+    live.pushDuringDiff = false
+    live.head = HEAD
+  })
+
+  test("merges only the commit the user saw", async () => {
+    requests.length = 0
+    expect(await putPullRequestMerge(access, repo, 7, { strategy: "squash", head: HEAD })).toEqual({ merged: true })
+    expect(requests.find((request) => request.path.endsWith("/merge"))?.body).toEqual({
+      merge_method: "squash",
+      sha: HEAD,
+    })
+    live.head = PUSHED
+    await expect(putPullRequestMerge(access, repo, 7, { strategy: "squash", head: HEAD })).rejects.toThrow(
+      "New commits were pushed to this pull request",
+    )
+    live.head = HEAD
+  })
+
+  test("an expired token says to sign in again", async () => {
+    await expect(fetchPullRequests({ ...access, token: "revoked" }, repo, "open", 10)).rejects.toThrow(
+      "Sign in to GitHub again",
+    )
+  })
+})
+
+describe("pushedHead", () => {
+  const repository = async (remotes: Record<string, string>, tracking: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "vector-pr-head-"))
+    const run = (...args: string[]) =>
+      Bun.spawn(["git", ...args], { cwd: dir, stdout: "ignore", stderr: "ignore" }).exited
+    await run("init", "-q", "-b", "feature")
+    await run(
+      "-c",
+      "user.name=Vector",
+      "-c",
+      "user.email=vector@example.com",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "start",
+    )
+    for (const [name, url] of Object.entries(remotes)) await run("remote", "add", name, url)
+    if (tracking) {
+      await run("update-ref", `refs/remotes/${tracking}/feature`, "HEAD")
+      await run("branch", "--set-upstream-to", `${tracking}/feature`)
+    }
+    return dir
+  }
+
+  test("names the branch as GitHub knows it, with the fork's owner for a fork", async () => {
+    const own = await repository({ origin: "https://github.com/acme/app.git" }, "origin")
+    const fork = await repository(
+      { origin: "git@github.com:me/app.git", upstream: "https://github.com/acme/app.git" },
+      "origin",
+    )
+    expect(await pushedHead(own, repo)).toBe("feature")
+    expect(await pushedHead(fork, repo)).toBe("me:feature")
+    await Promise.all([rm(own, { recursive: true, force: true }), rm(fork, { recursive: true, force: true })])
+  })
+
+  test("asks for a push when the branch is not on GitHub yet", async () => {
+    const local = await repository({ origin: "https://github.com/acme/app.git" }, "")
+    await expect(pushedHead(local, repo)).rejects.toThrow("Push this branch to GitHub first")
+    await rm(local, { recursive: true, force: true })
+  })
+})

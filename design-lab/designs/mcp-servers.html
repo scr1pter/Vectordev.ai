@@ -1,0 +1,2069 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-mcp-servers .app-main {
+        position: relative;
+      }
+
+      .d-mcp-servers .app-body {
+        display: flex;
+        overflow: hidden;
+      }
+
+      .d-mcp-servers .tile {
+        display: grid;
+        flex: none;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015));
+        color: var(--text-2);
+        font: 600 10.5px/1 var(--font);
+        letter-spacing: 0.02em;
+      }
+
+      .d-mcp-servers .tile-lg {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        font-size: 13px;
+      }
+
+      .d-mcp-servers .spin {
+        animation: mcp-spin 0.9s linear infinite;
+      }
+
+      @keyframes mcp-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* ---------- Server list (left) ---------- */
+
+      .d-mcp-servers .m-list {
+        display: flex;
+        flex: 0 0 372px;
+        flex-direction: column;
+        min-width: 0;
+        border-right: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .d-mcp-servers .m-sum {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 18px 10px;
+        color: var(--text-2);
+        font-size: 13px;
+      }
+
+      .d-mcp-servers .m-sum > span:first-child {
+        flex: 1;
+      }
+
+      .d-mcp-servers .m-sum .m-stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font: 12px var(--mono);
+      }
+
+      .d-mcp-servers .m-sum .m-stat .dot {
+        width: 6px;
+        height: 6px;
+        box-shadow: none;
+      }
+
+      .d-mcp-servers .m-controls {
+        display: grid;
+        gap: 8px;
+        padding: 0 12px 10px;
+      }
+
+      .d-mcp-servers .m-controls .seg {
+        display: flex;
+      }
+
+      .d-mcp-servers .m-controls .seg button {
+        flex: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      .d-mcp-servers .seg button .n {
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+
+      .d-mcp-servers .m-rows {
+        flex: 1;
+        min-height: 0;
+        padding: 2px 8px 10px;
+      }
+
+      .d-mcp-servers .m-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 10px 6px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-mcp-servers .m-group .mono {
+        color: #75727d;
+        font-size: 11px;
+      }
+
+      .d-mcp-servers .srv {
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+      }
+
+      .d-mcp-servers .srv[aria-selected="true"] {
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      }
+
+      .d-mcp-servers .srv[aria-selected="true"] .tile {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-mcp-servers .srv .lat {
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+      }
+
+      .d-mcp-servers .srv.is-off .row-name,
+      .d-mcp-servers .srv.is-off .tile {
+        opacity: 0.55;
+      }
+
+      .d-mcp-servers .m-empty {
+        padding: 30px 16px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      .d-mcp-servers .m-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 18px 13px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .d-mcp-servers .m-foot code {
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+      }
+
+      /* ---------- Detail (right) ---------- */
+
+      .d-mcp-servers .m-detail {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .d-mcp-servers .m-head {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 18px 22px 16px;
+      }
+
+      .d-mcp-servers .m-head-text {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        gap: 5px;
+      }
+
+      .d-mcp-servers .m-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-mcp-servers .m-title h3 {
+        margin: 0 4px 0 0;
+        color: var(--text-1);
+        font-size: 16px;
+        font-weight: 600;
+      }
+
+      .d-mcp-servers .m-head-sub {
+        overflow: hidden;
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-mcp-servers .m-head-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-mcp-servers .m-enable {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: 6px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-mcp-servers .badge .dot {
+        width: 6px;
+        height: 6px;
+        box-shadow: none;
+      }
+
+      .d-mcp-servers .badge.mono {
+        font: 500 10.5px var(--mono);
+      }
+
+      .d-mcp-servers .m-callout {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0 22px 14px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: var(--card);
+      }
+
+      .d-mcp-servers .m-callout.is-amber {
+        border-color: rgba(214, 169, 92, 0.28);
+        background: linear-gradient(90deg, rgba(214, 169, 92, 0.08), transparent 70%), var(--card);
+      }
+
+      .d-mcp-servers .m-callout.is-red {
+        border-color: rgba(230, 120, 125, 0.28);
+        background: linear-gradient(90deg, rgba(230, 120, 125, 0.08), transparent 70%), var(--card);
+      }
+
+      .d-mcp-servers .m-callout-icon {
+        display: grid;
+        flex: none;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-2);
+      }
+
+      .d-mcp-servers .is-amber .m-callout-icon {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .d-mcp-servers .is-red .m-callout-icon {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .d-mcp-servers .m-callout-text {
+        display: grid;
+        flex: 1;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .d-mcp-servers .m-callout-text strong {
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-mcp-servers .m-callout-text span {
+        color: var(--text-2);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .d-mcp-servers .m-callout-text code {
+        color: #f0b0b3;
+        font: 11.5px var(--mono);
+      }
+
+      .d-mcp-servers .m-callout-end {
+        display: flex;
+        flex: none;
+        gap: 8px;
+      }
+
+      /* Health strip */
+      .d-mcp-servers .m-stats {
+        display: grid;
+        grid-template-columns: 1.55fr 1fr 1fr 1fr;
+        margin: 0 22px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.015);
+      }
+
+      .d-mcp-servers .m-stat-cell {
+        display: grid;
+        gap: 5px;
+        padding: 11px 14px 12px;
+        border-left: 1px solid var(--hairline);
+      }
+
+      .d-mcp-servers .m-stat-cell:first-child {
+        grid-template-columns: auto 1fr;
+        align-items: end;
+        column-gap: 14px;
+        border-left: 0;
+      }
+
+      .d-mcp-servers .m-stat-cell:first-child .m-stat-label {
+        grid-column: 1 / 3;
+      }
+
+      .d-mcp-servers .m-stat-label {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-mcp-servers .m-stat-value {
+        color: var(--text-1);
+        font: 500 15px/1.1 var(--mono);
+      }
+
+      .d-mcp-servers .m-stat-value small {
+        margin-left: 2px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      .d-mcp-servers .m-spark {
+        grid-column: 2;
+        grid-row: 2;
+        align-self: end;
+        justify-self: end;
+      }
+
+      .d-mcp-servers .tool .switch[aria-checked="true"] {
+        background: #7c66cc;
+      }
+
+      .d-mcp-servers .t-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        padding: 12px 10px 6px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-mcp-servers .t-group:first-of-type {
+        padding-top: 4px;
+      }
+
+      .d-mcp-servers .t-group .mono {
+        font-size: 11px;
+      }
+
+      .d-mcp-servers .m-stats.is-idle .m-stat-value {
+        color: var(--text-3);
+      }
+
+      /* Tabs + panels */
+      .d-mcp-servers .m-tabs {
+        margin-top: 10px;
+        padding: 0 16px;
+      }
+
+      .d-mcp-servers .m-tabs .tab .count {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--text-2);
+      }
+
+      .d-mcp-servers .m-tabs .tab[aria-selected="true"] .count {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-mcp-servers .m-tabs-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 7px auto;
+        align-self: center;
+      }
+
+      .d-mcp-servers .m-panel {
+        flex: 1;
+        min-height: 0;
+        padding: 10px 14px 16px;
+      }
+
+      .d-mcp-servers .m-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 2px 8px 10px;
+      }
+
+      .d-mcp-servers input[type="search"]::-webkit-search-cancel-button {
+        -webkit-appearance: none;
+      }
+
+      .d-mcp-servers .m-toolbar .input {
+        width: 250px;
+        height: 28px;
+      }
+
+      .d-mcp-servers .m-toolbar .muted {
+        margin-left: auto;
+        font-size: 12px;
+      }
+
+      /* Tool rows */
+      .d-mcp-servers .tool {
+        border-radius: 7px;
+      }
+
+      .d-mcp-servers .tool:hover,
+      .d-mcp-servers .tool.is-open {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-mcp-servers .tool-line {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 42px;
+        padding: 0 10px 0 0;
+      }
+
+      .d-mcp-servers .tool-main {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+        align-self: stretch;
+        padding: 6px 0 6px 6px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        text-align: left;
+      }
+
+      .d-mcp-servers .tool-main svg {
+        flex: none;
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+
+      .d-mcp-servers .tool-main[aria-expanded="true"] svg {
+        transform: rotate(90deg);
+      }
+
+      .d-mcp-servers .tool-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-1);
+        font: 12.5px var(--mono);
+      }
+
+      .d-mcp-servers .tool-kind {
+        height: 17px;
+        padding: 0 6px;
+        font: 500 10px var(--font);
+      }
+
+      .d-mcp-servers .tool.is-off .tool-name {
+        color: var(--text-3);
+      }
+
+      .d-mcp-servers .mode {
+        padding: 1px;
+      }
+
+      .d-mcp-servers .mode button {
+        height: 22px;
+        padding: 0 9px;
+        font-size: 11.5px;
+      }
+
+      .d-mcp-servers .mode button[aria-pressed="true"][data-value="ask"] {
+        color: var(--amber);
+      }
+
+      .d-mcp-servers .mode button:disabled {
+        cursor: default;
+        opacity: 0.4;
+      }
+
+      .d-mcp-servers .tool-detail {
+        display: grid;
+        margin: 0 10px 10px 28px;
+        padding: 8px 0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 6px;
+        background: #121117;
+        font: 11px/17px var(--mono);
+      }
+
+      .d-mcp-servers .tool-detail code {
+        display: grid;
+        grid-template-columns: 110px 70px 70px 1fr;
+        padding: 0 12px;
+        color: var(--text-2);
+        white-space: pre;
+      }
+
+      .d-mcp-servers .tool-detail .is-hunk {
+        display: block;
+        margin-bottom: 2px;
+        color: #8a84c9;
+      }
+
+      .d-mcp-servers .tool-detail .req {
+        color: var(--amber);
+      }
+
+      .d-mcp-servers .tool-detail .dim {
+        color: var(--text-3);
+      }
+
+      .d-mcp-servers .tool-detail .is-more {
+        display: block;
+        margin-top: 4px;
+        color: var(--text-3);
+        font-family: var(--font);
+      }
+
+      .d-mcp-servers .m-blank {
+        display: grid;
+        place-items: center;
+        gap: 8px;
+        padding: 64px 20px;
+        color: var(--text-3);
+        text-align: center;
+      }
+
+      .d-mcp-servers .m-blank strong {
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 500;
+      }
+
+      /* Config */
+      .d-mcp-servers .code {
+        display: grid;
+        padding: 8px 0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 7px;
+        background: #121117;
+        font: 11.5px/19px var(--mono);
+      }
+
+      .d-mcp-servers .code code {
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        color: #d8d4de;
+        white-space: pre;
+      }
+
+      .d-mcp-servers .code code::before {
+        content: attr(data-n);
+        padding-right: 12px;
+        color: #5e5b66;
+        text-align: right;
+      }
+
+      .d-mcp-servers .code .k {
+        color: #b69ff7;
+      }
+
+      .d-mcp-servers .code .s {
+        color: #a8e2bf;
+      }
+
+      .d-mcp-servers .code .n {
+        color: #e7c48b;
+      }
+
+      .d-mcp-servers .code .secret {
+        color: var(--text-3);
+      }
+
+      .d-mcp-servers .m-config {
+        display: grid;
+        grid-template-columns: 1fr 300px;
+        gap: 18px;
+        padding: 4px 8px;
+      }
+
+      .d-mcp-servers .m-config-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-mcp-servers .m-config-head .mono {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-mcp-servers .m-config-head .btn:first-of-type {
+        margin-left: auto;
+      }
+
+      .d-mcp-servers .btn:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+
+      .d-mcp-servers .btn-primary:disabled {
+        opacity: 0.75;
+      }
+
+      .d-mcp-servers .m-sum .m-stat.is-zero span {
+        color: var(--text-3);
+      }
+
+      .d-mcp-servers .m-sum .m-stat.is-zero .dot {
+        background: var(--text-3);
+        opacity: 0.5;
+      }
+
+      .d-mcp-servers .m-field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 16px;
+      }
+
+      .d-mcp-servers .m-field > span {
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-mcp-servers .m-field .hint {
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+
+      .d-mcp-servers .kv {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        padding: 0 4px 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.16);
+        font: 11.5px var(--mono);
+      }
+
+      .d-mcp-servers .kv b {
+        color: var(--text-1);
+        font-weight: 400;
+      }
+
+      .d-mcp-servers .kv span {
+        flex: 1;
+        overflow: hidden;
+        color: var(--text-3);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-mcp-servers .kv .icon-btn {
+        width: 24px;
+        height: 24px;
+      }
+
+      /* Logs */
+      .d-mcp-servers .logs {
+        display: grid;
+        align-content: start;
+        padding: 6px 0;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 7px;
+        background: #121117;
+        font: 11.5px/20px var(--mono);
+      }
+
+      .d-mcp-servers .logs p {
+        display: grid;
+        grid-template-columns: 96px 18px 1fr auto;
+        margin: 0;
+        padding: 0 12px;
+        color: var(--text-2);
+        white-space: pre;
+      }
+
+      .d-mcp-servers .logs p.is-new {
+        animation: mcp-flash 1.2s ease;
+      }
+
+      @keyframes mcp-flash {
+        from {
+          background: rgba(182, 159, 247, 0.12);
+        }
+      }
+
+      .d-mcp-servers .logs .t {
+        color: #5e5b66;
+      }
+
+      .d-mcp-servers .logs .in {
+        color: var(--violet-bright);
+      }
+
+      .d-mcp-servers .logs .out {
+        color: var(--green);
+      }
+
+      .d-mcp-servers .logs .err {
+        color: var(--red);
+      }
+
+      .d-mcp-servers .logs .warn {
+        color: var(--amber);
+      }
+
+      .d-mcp-servers .logs .ms {
+        color: var(--text-3);
+      }
+
+      .d-mcp-servers .logs p.is-err {
+        background: rgba(230, 120, 125, 0.08);
+        color: #f0b0b3;
+      }
+
+      .d-mcp-servers .live {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      /* ---------- Add server sheet ---------- */
+
+      .d-mcp-servers .sheet-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        background: rgba(12, 10, 15, 0.55);
+        animation: mcp-fade 160ms ease;
+      }
+
+      .d-mcp-servers .sheet-scrim[hidden] {
+        display: none;
+      }
+
+      @keyframes mcp-fade {
+        from {
+          opacity: 0;
+        }
+      }
+
+      .d-mcp-servers .sheet {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        bottom: 12px;
+        display: flex;
+        width: 640px;
+        flex-direction: column;
+        overflow: hidden;
+        animation: mcp-slide 220ms var(--ease);
+      }
+
+      @keyframes mcp-slide {
+        from {
+          opacity: 0;
+          transform: translateX(24px);
+        }
+      }
+
+      .d-mcp-servers .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 16px 14px 4px 20px;
+      }
+
+      .d-mcp-servers .sheet-head h3 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .d-mcp-servers .sheet-head p {
+        margin: 3px 0 0;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-mcp-servers .sheet-head .icon-btn {
+        margin-left: auto;
+      }
+
+      .d-mcp-servers .sheet .tabs {
+        padding: 0 14px;
+      }
+
+      .d-mcp-servers .sheet-body {
+        flex: 1;
+        min-height: 0;
+        padding: 12px 12px 14px;
+      }
+
+      .d-mcp-servers .cat-tools {
+        display: grid;
+        gap: 10px;
+        padding: 0 8px 10px;
+      }
+
+      .d-mcp-servers .cats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .d-mcp-servers .cat {
+        height: 25px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-mcp-servers .cat:hover {
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text-1);
+      }
+
+      .d-mcp-servers .cat[aria-pressed="true"] {
+        border-color: var(--violet-line);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-mcp-servers .entry {
+        display: grid;
+        grid-template-columns: 28px 1fr auto;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 10px;
+        border-radius: 7px;
+      }
+
+      .d-mcp-servers .entry:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-mcp-servers .entry .row-text {
+        gap: 3px;
+      }
+
+      .d-mcp-servers .entry-meta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-mcp-servers .entry-meta .row-sub {
+        flex: 1;
+      }
+
+      .d-mcp-servers .entry .badge {
+        height: 18px;
+        padding: 0 6px;
+        font-size: 10.5px;
+      }
+
+      .d-mcp-servers .entry .btn {
+        min-width: 74px;
+      }
+
+      .d-mcp-servers .entry .btn.is-done {
+        border-color: transparent;
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-mcp-servers .entry-form {
+        display: flex;
+        grid-column: 2 / 4;
+        gap: 8px;
+        margin-top: 2px;
+      }
+
+      .d-mcp-servers .entry-form .input {
+        flex: 1;
+      }
+
+      .d-mcp-servers .form {
+        display: grid;
+        gap: 14px;
+        padding: 4px 8px;
+      }
+
+      .d-mcp-servers .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .d-mcp-servers .form label,
+      .d-mcp-servers .form .lbl {
+        display: grid;
+        gap: 6px;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-mcp-servers .form .input input {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .d-mcp-servers .env-row {
+        display: grid;
+        grid-template-columns: 1fr 1.4fr 28px;
+        gap: 8px;
+      }
+
+      .d-mcp-servers .sheet-foot {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-mcp-servers .sheet-foot .btn:first-of-type {
+        margin-left: auto;
+      }
+
+      /* Toast */
+      .d-mcp-servers .toast {
+        position: absolute;
+        bottom: 18px;
+        left: 50%;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        animation: mcp-rise 220ms var(--ease);
+      }
+
+      .d-mcp-servers .toast[hidden] {
+        display: none;
+      }
+
+      .d-mcp-servers .toast svg {
+        color: var(--green);
+      }
+
+      @keyframes mcp-rise {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 10px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="mcp-servers"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-mcp-servers">
+            <div class="app">
+              <nav data-lab-sidebar data-active="mcp" data-workspace="Vector" data-branch="main"></nav>
+              <main class="app-main">
+                <header class="app-header">
+                  <i data-icon="mcp" data-size="15" class="muted"></i>
+                  <h2>MCP servers</h2>
+                  <span class="app-header-sub">Vectordev.ai</span>
+                  <div class="app-header-end">
+                    <button class="btn btn-ghost" type="button" data-act="reload-all"><i data-icon="reload" data-size="14"></i>Reconnect all</button>
+                    <button class="btn btn-primary" type="button" data-act="open-sheet"><i data-icon="plus" data-size="14"></i>Add server</button>
+                  </div>
+                </header>
+                <div class="app-body">
+                  <section class="m-list" aria-label="Servers">
+                    <p class="m-sum" style="margin: 0" data-summary></p>
+                    <div class="m-controls">
+                      <label class="input">
+                        <i data-icon="search" data-size="14" class="muted"></i>
+                        <input type="search" placeholder="Filter servers" aria-label="Filter servers" data-q />
+                      </label>
+                      <div class="seg" role="group" aria-label="Show" data-filter></div>
+                    </div>
+                    <div class="m-rows scroll" role="listbox" aria-label="MCP servers" data-rows></div>
+                    <p class="m-foot" style="margin: 0">
+                      <span>Agents call each tool as <code>server_tool</code>. Changes save to <code>vector.json</code>.</span>
+                    </p>
+                  </section>
+                  <section class="m-detail" aria-label="Server detail" data-detail></section>
+                </div>
+
+                <div class="sheet-scrim" hidden data-scrim>
+                  <div class="sheet float" role="dialog" aria-modal="true" aria-labelledby="mcp-sheet-title" data-sheet></div>
+                </div>
+                <div class="toast float" role="status" hidden data-toast></div>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-mcp-servers")
+        const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const icon = (name, size = 14, cls = "") => `<i data-icon="${name}" data-size="${size}"${cls ? ` class="${cls}"` : ""}></i>`
+        const key = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="5.5" cy="10.5" r="3" stroke="currentColor" stroke-width="1.2"/><path d="M7.7 8.3 13 3m-2 2 1.6 1.6M9.6 6.4l1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+        const warn = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2 14.2 13H1.8L8 2.2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 6.4v3.1M8 11.3v.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`
+        const power = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2v5.2M4.6 4.2a5 5 0 1 0 6.8 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`
+        const eye = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/><circle cx="8" cy="8" r="1.9" stroke="currentColor" stroke-width="1.15"/></svg>`
+        const copy = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="5.2" y="5.2" width="8.3" height="8.3" rx="1.6" stroke="currentColor" stroke-width="1.15"/><path d="M10.8 5.2V3.9a1.4 1.4 0 0 0-1.4-1.4H3.9a1.4 1.4 0 0 0-1.4 1.4v5.5a1.4 1.4 0 0 0 1.4 1.4h1.3" stroke="currentColor" stroke-width="1.15"/></svg>`
+
+        // ---------- Data, shaped like ConfigMCPV1 (local | remote) and MCP.Status ----------
+
+        const T = (name, desc, kind, params, extra = {}) => ({
+          name,
+          desc,
+          kind,
+          params: params ?? [],
+          on: kind !== "danger",
+          mode: kind === "read" ? "allow" : "ask",
+          ...extra,
+        })
+        const repo = [
+          ["owner", "string", true, "Repository owner"],
+          ["repo", "string", true, "Repository name"],
+        ]
+
+        const tools = {
+          github: [
+            T("get_me", "Details of the authenticated GitHub user", "read", [], { last: "1h ago · explore · 96ms" }),
+            T("search_repositories", "Search repositories by name, topic or owner", "read", [["query", "string", true, "GitHub search syntax"], ["perPage", "number", false, "1 to 100"]]),
+            T("get_file_contents", "Read a file or directory at a ref", "read", [...repo, ["path", "string", false, "Defaults to the root"], ["ref", "string", false, "Branch, tag or SHA"]], { last: "6m ago · build · 141ms" }),
+            T("search_code", "Code search across repositories", "read", [["query", "string", true, "e.g. repo:vectordev/vector Trust"]]),
+            T("list_issues", "List issues with label and state filters", "read", [...repo, ["state", "string", false, "OPEN or CLOSED"], ["labels", "string[]", false, ""]], { last: "12m ago · plan · 233ms" }),
+            T("issue_read", "Read an issue, its comments and sub-issues", "read", [...repo, ["issue_number", "number", true, ""]]),
+            T("list_pull_requests", "List pull requests on a repository", "read", [...repo, ["state", "string", false, "open, closed or all"]]),
+            T("pull_request_read", "Diff, files, reviews and checks of a pull request", "read", [...repo, ["pullNumber", "number", true, ""], ["method", "string", true, "get_diff, get_files, get_status…"]], { last: "4m ago · review · 388ms" }),
+            T("list_commits", "Commits on a branch, newest first", "read", [...repo, ["sha", "string", false, "Branch or SHA"]]),
+            T("create_issue", "Open a new issue", "write", [...repo, ["title", "string", true, ""], ["body", "string", false, "Markdown"], ["labels", "string[]", false, ""]]),
+            T("add_issue_comment", "Comment on an issue or pull request", "write", [...repo, ["issue_number", "number", true, ""], ["body", "string", true, "Markdown"]], { mode: "allow", last: "4m ago · review · 212ms" }),
+            T("create_branch", "Create a branch from another branch", "write", [...repo, ["branch", "string", true, ""], ["from_branch", "string", false, "Defaults to main"]]),
+            T("create_pull_request", "Open a pull request", "write", [...repo, ["title", "string", true, ""], ["head", "string", true, "Branch with the changes"], ["base", "string", true, "Usually main"], ["draft", "boolean", false, ""]], { last: "38m ago · build · 640ms" }),
+            T("push_files", "Commit and push several files at once", "write", [...repo, ["branch", "string", true, ""], ["files", "object[]", true, "path and content"], ["message", "string", true, "Commit message"]]),
+            T("merge_pull_request", "Merge a pull request", "danger", [...repo, ["pullNumber", "number", true, ""], ["merge_method", "string", false, "merge, squash or rebase"]], { on: true, mode: "ask" }),
+            T("delete_file", "Delete a file and commit the deletion", "danger", [...repo, ["path", "string", true, ""], ["branch", "string", true, ""]]),
+          ],
+          linear: [
+            T("list_my_issues", "Issues assigned to you", "read", [["limit", "number", false, "Default 50"]], { last: "9m ago · plan · 264ms" }),
+            T("list_issues", "Search issues by team, state or label", "read", [["teamId", "string", false, ""], ["query", "string", false, ""]]),
+            T("get_issue", "One issue with its description and history", "read", [["id", "string", true, "e.g. VEC-212"]], { last: "9m ago · build · 198ms" }),
+            T("list_comments", "Comments on an issue", "read", [["issueId", "string", true, ""]]),
+            T("list_projects", "Projects in the workspace", "read", []),
+            T("list_teams", "Teams you can see", "read", []),
+            T("list_issue_statuses", "Workflow states for a team", "read", [["teamId", "string", true, ""]]),
+            T("search_documentation", "Search Linear's own docs", "read", [["query", "string", true, ""]]),
+            T("create_issue", "Create an issue in a team", "write", [["teamId", "string", true, ""], ["title", "string", true, ""], ["description", "string", false, "Markdown"]]),
+            T("update_issue", "Change status, assignee, labels or estimate", "write", [["id", "string", true, ""], ["stateId", "string", false, ""], ["assigneeId", "string", false, ""]], { mode: "allow" }),
+            T("create_comment", "Comment on an issue", "write", [["issueId", "string", true, ""], ["body", "string", true, "Markdown"]], { mode: "allow" }),
+            T("delete_issue", "Delete an issue", "danger", [["id", "string", true, ""]]),
+          ],
+          playwright: [
+            T("browser_navigate", "Open a URL in the controlled browser", "read", [["url", "string", true, ""]], { last: "2m ago · test · 412ms" }),
+            T("browser_snapshot", "Accessibility snapshot of the current page", "read", [], { last: "2m ago · test · 58ms" }),
+            T("browser_take_screenshot", "Screenshot of the page or one element", "read", [["element", "string", false, ""], ["fullPage", "boolean", false, ""]]),
+            T("browser_console_messages", "Console output since the page loaded", "read", []),
+            T("browser_network_requests", "Requests made since the page loaded", "read", []),
+            T("browser_wait_for", "Wait for text to appear or disappear", "read", [["text", "string", false, ""], ["time", "number", false, "Seconds"]]),
+            T("browser_click", "Click an element from the snapshot", "write", [["element", "string", true, ""], ["ref", "string", true, "Snapshot ref"]], { mode: "allow" }),
+            T("browser_type", "Type into an editable element", "write", [["ref", "string", true, ""], ["text", "string", true, ""], ["submit", "boolean", false, ""]], { mode: "allow" }),
+            T("browser_fill_form", "Fill several fields at once", "write", [["fields", "object[]", true, ""]], { mode: "allow" }),
+            T("browser_tabs", "List, open, close or select tabs", "write", [["action", "string", true, ""]], { mode: "allow" }),
+            T("browser_evaluate", "Run JavaScript in the page", "danger", [["function", "string", true, "() => { … }"]], { on: true, mode: "ask" }),
+            T("browser_close", "Close the browser", "write", [], { mode: "allow" }),
+          ],
+          context7: [
+            T("resolve-library-id", "Find the Context7 ID for a package name", "read", [["libraryName", "string", true, "e.g. effect"]], { last: "21m ago · build · 131ms" }),
+            T("get-library-docs", "Version-accurate docs for a library", "read", [["context7CompatibleLibraryID", "string", true, "/effect-ts/effect"], ["topic", "string", false, ""], ["tokens", "number", false, "Default 5000"]], { last: "21m ago · build · 488ms" }),
+          ],
+          sentry: [
+            T("find_organizations", "Organizations you belong to", "read", []),
+            T("find_projects", "Projects in an organization", "read", [["organizationSlug", "string", true, ""]]),
+            T("find_issues", "Search issues with Sentry query syntax", "read", [["organizationSlug", "string", true, ""], ["query", "string", false, "is:unresolved"]]),
+            T("get_issue_details", "Stack trace and tags for one issue", "read", [["issueId", "string", true, "e.g. VECTOR-DESKTOP-4N"]]),
+            T("search_events", "Events and aggregates in natural language", "read", [["naturalLanguageQuery", "string", true, ""]]),
+            T("get_trace_details", "Spans of one distributed trace", "read", [["traceId", "string", true, ""]]),
+            T("update_issue", "Resolve, ignore or assign an issue", "write", [["issueId", "string", true, ""], ["status", "string", false, "resolved, ignored…"]]),
+          ],
+          postgres: [T("query", "Run a read-only SQL query", "read", [["sql", "string", true, "Wrapped in a READ ONLY transaction"]])],
+          figma: [
+            T("get_design_context", "Layout, styles and code hints for a frame", "read", [["nodeId", "string", true, "e.g. 1204:388"]]),
+            T("get_variable_defs", "Variables and tokens used by a frame", "read", [["nodeId", "string", true, ""]]),
+            T("get_screenshot", "Render a frame as an image", "read", [["nodeId", "string", true, ""]]),
+            T("get_metadata", "Node tree with names, types and sizes", "read", [["nodeId", "string", true, ""]]),
+          ],
+          vercel: [
+            T("list_projects", "Projects in the team", "read", []),
+            T("list_deployments", "Recent deployments of a project", "read", [["projectId", "string", true, ""]]),
+            T("get_deployment_build_logs", "Build output for a deployment", "read", [["idOrUrl", "string", true, ""]]),
+          ],
+        }
+
+        const servers = [
+          { key: "github", name: "GitHub", mark: "GH", scope: "project", type: "remote", url: "https://api.githubcopilot.com/mcp/", auth: "token", headers: { Authorization: "Bearer github_pat_11AB4Q…x9Fz" }, status: "connected", lat: 186, p95: 412, up: "99.9", calls: 1204, spark: [] },
+          { key: "linear", name: "Linear", mark: "LN", scope: "project", type: "remote", url: "https://mcp.linear.app/sse", auth: "oauth", status: "connected", lat: 241, p95: 530, up: "99.6", calls: 318, spark: [] },
+          { key: "sentry", name: "Sentry", mark: "SE", scope: "project", type: "remote", url: "https://mcp.sentry.dev/mcp", auth: "oauth", status: "needs_auth", lat: 0, p95: 0, up: "—", calls: 0, spark: [] },
+          { key: "postgres", name: "Postgres", mark: "PG", scope: "project", type: "local", command: ["npx", "-y", "@modelcontextprotocol/server-postgres", "{env:DATABASE_URL}"], environment: { PGSSLMODE: "disable" }, status: "failed", error: "connect ECONNREFUSED 127.0.0.1:5432", lat: 0, p95: 0, up: "—", calls: 0, spark: [] },
+          { key: "playwright", name: "Playwright", mark: "PW", scope: "global", type: "local", command: ["npx", "-y", "@playwright/mcp@latest"], pid: 48213, status: "connected", lat: 38, p95: 96, up: "100", calls: 742, spark: [] },
+          { key: "context7", name: "Context7", mark: "C7", scope: "global", type: "local", command: ["npx", "-y", "@upstash/context7-mcp"], environment: { CONTEXT7_API_KEY: "ctx7sk-9f2c…e41a" }, pid: 48230, status: "connected", lat: 122, p95: 288, up: "99.8", calls: 57, spark: [] },
+          { key: "figma", name: "Figma", mark: "FG", scope: "global", type: "remote", url: "https://mcp.figma.com/mcp", auth: "oauth", status: "disabled", lat: 0, p95: 0, up: "—", calls: 0, spark: [] },
+        ]
+        servers.forEach((s) => {
+          s.tools = tools[s.key] ?? []
+          s.loaded = s.status === "connected"
+          s.timeout = s.type === "local" ? 120000 : 120000
+          s.spark = seedSpark(s.lat)
+          s.logs = seedLogs(s)
+        })
+
+        const catalog = [
+          { id: "github", name: "GitHub", mark: "GH", cat: "Deploy", blurb: "Repositories, branches, issues, pull requests, reviews.", auth: "token", field: "Personal access token", ph: "ghp_… or github_pat_…", type: "remote" },
+          { id: "vercel", name: "Vercel", mark: "VC", cat: "Deploy", blurb: "Deployments, projects, logs and environment config.", auth: "oauth", type: "remote", url: "https://mcp.vercel.com" },
+          { id: "linear", name: "Linear", mark: "LN", cat: "Tracking", blurb: "Turn prompts into tickets, update status, attach changes.", auth: "oauth", type: "remote" },
+          { id: "jira", name: "Jira", mark: "JI", cat: "Tracking", blurb: "Issues, sprints and boards across Atlassian projects.", auth: "oauth", type: "remote", url: "https://mcp.atlassian.com/v1/sse" },
+          { id: "sentry", name: "Sentry", mark: "SE", cat: "Observability", blurb: "Inspect errors, stack traces and release health.", auth: "oauth", type: "remote" },
+          { id: "posthog", name: "PostHog", mark: "PH", cat: "Observability", blurb: "Product analytics, feature flags and session data.", auth: "token", field: "Personal API key", ph: "phx_…", type: "remote", url: "https://mcp.posthog.com/mcp" },
+          { id: "postgres", name: "Postgres", mark: "PG", cat: "Data", blurb: "Read-only queries and schema inspection on any database.", auth: "token", field: "Connection string", ph: "postgresql://user:pass@host:5432/db", type: "local" },
+          { id: "supabase", name: "Supabase", mark: "SB", cat: "Data", blurb: "Databases, auth, migrations and schemas.", auth: "token", field: "Access token", ph: "sbp_…", type: "local", command: ["npx", "-y", "@supabase/mcp-server-supabase@latest"] },
+          { id: "neon", name: "Neon", mark: "NE", cat: "Data", blurb: "Serverless Postgres: branches, roles and queries.", auth: "oauth", type: "remote", url: "https://mcp.neon.tech/mcp" },
+          { id: "playwright", name: "Playwright", mark: "PW", cat: "Browser & design", blurb: "Microsoft's official browser automation: navigate, click, assert.", auth: "none", type: "local" },
+          { id: "chrome-devtools", name: "Chrome DevTools", mark: "CD", cat: "Browser & design", blurb: "Drive a controlled browser: navigate, inspect, debug.", auth: "none", type: "local", command: ["npx", "-y", "chrome-devtools-mcp@latest"] },
+          { id: "figma", name: "Figma", mark: "FG", cat: "Browser & design", blurb: "Inspect designs and convert them into implementation context.", auth: "oauth", type: "remote" },
+          { id: "context7", name: "Context7", mark: "C7", cat: "Docs & search", blurb: "Version-accurate library docs injected straight into context.", auth: "none", type: "local" },
+          { id: "exa", name: "Exa", mark: "EX", cat: "Docs & search", blurb: "Neural web search built for agents and research.", auth: "oauth", type: "remote", url: "https://mcp.exa.ai/mcp" },
+          { id: "notion", name: "Notion", mark: "NO", cat: "Docs & search", blurb: "Project documentation, specs and databases.", auth: "oauth", type: "remote", url: "https://mcp.notion.com/mcp" },
+          { id: "stripe", name: "Stripe", mark: "ST", cat: "Data", blurb: "Products, prices, webhooks and test-mode workflows.", auth: "token", field: "Secret or restricted key", ph: "sk_test_… (test mode recommended)", type: "remote", url: "https://mcp.stripe.com" },
+        ]
+        const cats = ["All", "Deploy", "Tracking", "Observability", "Data", "Browser & design", "Docs & search"]
+
+        const state = {
+          sel: "github",
+          filter: "all",
+          q: "",
+          tab: "tools",
+          toolQ: "",
+          toolShow: "all",
+          open: new Set(["create_pull_request"]),
+          live: true,
+          reveal: false,
+          sheet: false,
+          sheetTab: "catalog",
+          cat: "All",
+          catQ: "",
+          tokenFor: null,
+          adding: {},
+          custom: { name: "docs-search", transport: "local", command: "npx -y @vectordev/docs-mcp", url: "https://", env: [["DOCS_INDEX", "./docs"]], timeout: "30000", scope: "project" },
+        }
+
+        // ---------- Helpers ----------
+
+        function seedSpark(base) {
+          let v = base || 0
+          return Array.from({ length: 36 }, (_, i) => {
+            if (!base) return 0
+            v = Math.max(base * 0.55, Math.min(base * 1.9, v + (Math.sin(i * 1.7 + base) * 0.18 + (i % 7 === 3 ? 0.35 : -0.02)) * base))
+            return Math.round(v)
+          })
+        }
+
+        function seedLogs(s) {
+          if (s.status === "failed")
+            return [
+              ["14:02:11.204", "in", "spawn npx -y @modelcontextprotocol/server-postgres $DATABASE_URL", ""],
+              ["14:02:12.881", "warn", "stderr  npm warn exec The following package was not found and will be installed", ""],
+              ["14:02:15.430", "err", "stderr  Error: connect ECONNREFUSED 127.0.0.1:5432", ""],
+              ["14:02:15.431", "err", "stderr      at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1611:16)", ""],
+              ["14:02:15.502", "err", "process exited with code 1 after 4.3s", ""],
+              ["14:02:15.503", "warn", "MCP status → failed: Connection closed", ""],
+            ]
+          if (s.status === "needs_auth")
+            return [
+              ["14:01:58.020", "in", "POST https://mcp.sentry.dev/mcp  initialize", ""],
+              ["14:01:58.311", "warn", "401 Unauthorized  WWW-Authenticate: Bearer resource_metadata=…", "291ms"],
+              ["14:01:58.312", "warn", "OAuth discovery: dynamic client registration available", ""],
+              ["14:01:58.313", "warn", "MCP status → needs_auth", ""],
+            ]
+          if (s.status === "disabled") return [["13:40:02.118", "warn", "enabled: false in ~/.config/vector/vector.json; not started", ""]]
+          const t = s.tools
+          return [
+            ["14:01:57.902", "in", s.type === "local" ? `spawn ${s.command.join(" ")}  pid ${s.pid}` : `POST ${s.url}  initialize`, ""],
+            ["14:01:58.090", "out", `initialized  protocol 2025-06-18  tools, ${s.key === "github" ? "resources, " : ""}prompts`, `${s.lat}ms`],
+            ["14:01:58.244", "out", `tools/list  ${t.length} tools`, `${Math.round(s.lat * 0.8)}ms`],
+            ["14:06:31.517", "in", `tools/call ${t[2]?.name ?? t[0].name}  ← build`, ""],
+            ["14:06:31.661", "out", `result  ok`, `${Math.round(s.lat * 0.76)}ms`],
+            ["14:09:12.004", "in", `tools/call ${t[t.length > 7 ? 7 : 0].name}  ← review`, ""],
+            ["14:09:12.392", "out", `result  ok`, `${Math.round(s.lat * 2.1)}ms`],
+          ]
+        }
+
+        const statusMeta = {
+          connected: { label: "Connected", badge: "badge-green", dot: "dot-green" },
+          needs_auth: { label: "Sign-in needed", badge: "badge-amber", dot: "dot-amber" },
+          needs_client_registration: { label: "Needs registration", badge: "badge-amber", dot: "dot-amber" },
+          failed: { label: "Failed", badge: "badge-red", dot: "dot-red" },
+          disabled: { label: "Off", badge: "", dot: "" },
+          connecting: { label: "Connecting", badge: "badge-violet", dot: "dot-violet" },
+        }
+
+        const host = (s) => (s.type === "remote" ? s.url.replace(/^https?:\/\//, "").replace(/\/$/, "") : s.command.slice(s.command[1] === "-y" ? 2 : 1).join(" "))
+        const transport = (s) => (s.type === "remote" ? "http" : "stdio")
+        const sel = () => servers.find((s) => s.key === state.sel)
+        const onCount = (s) => s.tools.filter((t) => t.on).length
+        const matches = (s) => {
+          const q = state.q.trim().toLowerCase()
+          if (q && !`${s.name} ${s.key} ${host(s)}`.toLowerCase().includes(q)) return false
+          if (state.filter === "connected") return s.status === "connected"
+          if (state.filter === "attention") return ["needs_auth", "failed", "needs_client_registration"].includes(s.status)
+          if (state.filter === "off") return s.status === "disabled"
+          return true
+        }
+
+        // ---------- List ----------
+
+        function renderSummary() {
+          const c = servers.filter((s) => s.status === "connected").length
+          const a = servers.filter((s) => ["needs_auth", "needs_client_registration"].includes(s.status)).length
+          const f = servers.filter((s) => s.status === "failed").length
+          const tools = servers.filter((s) => s.status === "connected").reduce((n, s) => n + onCount(s), 0)
+          root.querySelector("[data-summary]").innerHTML = `<span>${servers.length} servers · ${tools} tools</span>
+            <span class="m-stat${c ? "" : " is-zero"}" title="Connected"><span class="dot dot-green"></span><span class="add">${c}</span></span>
+            <span class="m-stat${a ? "" : " is-zero"}" title="Sign-in needed"><span class="dot dot-amber"></span><span style="color:var(--amber)">${a}</span></span>
+            <span class="m-stat${f ? "" : " is-zero"}" title="Failed"><span class="dot dot-red"></span><span class="del">${f}</span></span>`
+          const counts = {
+            all: servers.length,
+            connected: c,
+            attention: servers.filter((s) => ["needs_auth", "failed", "needs_client_registration"].includes(s.status)).length,
+            off: servers.filter((s) => s.status === "disabled").length,
+          }
+          const labels = { all: "All", connected: "Connected", attention: "Attention", off: "Off" }
+          root.querySelector("[data-filter]").innerHTML = Object.keys(labels)
+            .map((k) => `<button type="button" data-value="${k}" aria-pressed="${state.filter === k}">${labels[k]}<span class="n">${counts[k]}</span></button>`)
+            .join("")
+        }
+
+        function rowEnd(s) {
+          if (s.status === "connecting") return `<span class="lat">…</span>${icon("ring", 13, "spin")}`
+          if (s.status === "connected") return `<span class="lat" data-lat="${s.key}">${s.lat}ms</span><span class="dot dot-green"></span>`
+          if (s.status === "needs_auth") return `<span class="badge badge-amber">Sign in</span>`
+          if (s.status === "failed") return `<span class="badge badge-red">Failed</span>`
+          return `<span class="lat">Off</span><span class="dot"></span>`
+        }
+
+        function renderRows() {
+          const groups = [
+            ["project", "Project", "vector.json"],
+            ["global", "Global", "~/.config/vector/vector.json"],
+          ]
+          const html = groups
+            .map(([scope, label, file]) => {
+              const list = servers.filter((s) => s.scope === scope && matches(s))
+              if (!list.length) return ""
+              return `<p class="m-group" style="margin:0"><span>${label}</span><span class="mono">${file}</span></p>${list
+                .map(
+                  (s) => `<button type="button" class="row srv${s.status === "disabled" ? " is-off" : ""}" role="option" data-srv="${s.key}" aria-selected="${s.key === state.sel}">
+                    <span class="tile">${s.mark}</span>
+                    <span class="row-text"><span class="row-name">${s.name}</span><span class="row-sub">${transport(s)} · ${esc(host(s))}</span></span>
+                    <span class="row-end">${rowEnd(s)}</span>
+                  </button>`,
+                )
+                .join("")}`
+            })
+            .join("")
+          const rows = root.querySelector("[data-rows]")
+          rows.innerHTML = html || `<p class="m-empty">No servers match “${esc(state.q)}”.</p>`
+          LabUI.renderIcons(rows)
+        }
+
+        // ---------- Detail ----------
+
+        function spark(values, w = 150, h = 30) {
+          const max = Math.max(...values, 1) * 1.15
+          const step = w / (values.length - 1)
+          const pts = values.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`)
+          return `<svg class="m-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+            <defs><linearGradient id="mcp-sg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#b69ff7" stop-opacity=".22"/><stop offset="1" stop-color="#b69ff7" stop-opacity="0"/></linearGradient></defs>
+            <path d="M0,${h} L${pts.join(" L")} L${w},${h} Z" fill="url(#mcp-sg)"/>
+            <polyline points="${pts.join(" ")}" fill="none" stroke="#b69ff7" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+            <circle cx="${w}" cy="${pts[pts.length - 1].split(",")[1]}" r="2.2" fill="#b69ff7"/>
+          </svg>`
+        }
+
+        function callout(s) {
+          if (s.status === "needs_auth" || (s.status === "connecting" && s.via === "auth"))
+            return `<div class="m-callout is-amber">
+              <span class="m-callout-icon">${key}</span>
+              <span class="m-callout-text"><strong>${s.status === "connecting" ? "Finish signing in at sentry.io" : "Sign in to Sentry to load its tools"}</strong>
+              <span>${s.status === "connecting" ? "Vector is waiting for the browser to return to 127.0.0.1:19876. You can keep working while it waits." : "Vector opens sentry.io in your browser and waits for the callback on 127.0.0.1:19876. The token is kept in Vector's auth store, never in vector.json."}</span></span>
+              <span class="m-callout-end">${
+                s.status === "connecting"
+                  ? `<button class="btn" type="button" data-act="cancel-auth">Cancel</button><button class="btn btn-primary" type="button" disabled>${icon("ring", 13, "spin")}Waiting…</button>`
+                  : `<button class="btn btn-primary" type="button" data-act="authorize">${icon("external", 13)}Sign in with Sentry</button>`
+              }</span>
+            </div>`
+          if (s.status === "failed" || (s.status === "connecting" && s.via === "retry"))
+            return `<div class="m-callout is-red">
+              <span class="m-callout-icon">${warn}</span>
+              <span class="m-callout-text"><strong>${s.status === "connecting" ? "Starting the server again…" : "The server exited while starting"}</strong>
+              <span><code>${esc(s.error)}</code> · Is Postgres running on port 5432? Check <span class="mono">DATABASE_URL</span> in your environment.</span></span>
+              <span class="m-callout-end"><button class="btn" type="button" data-act="logs">View logs</button><button class="btn btn-primary" type="button" data-act="retry"${s.status === "connecting" ? " disabled" : ""}>${s.status === "connecting" ? `${icon("ring", 13, "spin")}Starting…` : `${icon("reload", 13)}Retry`}</button></span>
+            </div>`
+          if (s.status === "disabled" || (s.status === "connecting" && s.via === "enable"))
+            return `<div class="m-callout">
+              <span class="m-callout-icon">${power}</span>
+              <span class="m-callout-text"><strong>${s.status === "connecting" ? "Starting Figma…" : "Figma is off"}</strong>
+              <span>Its tools are hidden from every agent and it does not start with Vector. Turn it on to connect.</span></span>
+            </div>`
+          return ""
+        }
+
+        function renderDetail() {
+          const s = sel()
+          const meta = statusMeta[s.status]
+          const live = s.status === "connected"
+          const enabled = s.status !== "disabled"
+          const tabs = [
+            ["tools", "Tools", s.loaded ? `${onCount(s)}/${s.tools.length}` : ""],
+            ["config", "Config", ""],
+            ["logs", "Logs", ""],
+          ]
+          const d = root.querySelector("[data-detail]")
+          d.innerHTML = `
+            <div class="m-head">
+              <span class="tile tile-lg">${s.mark}</span>
+              <div class="m-head-text">
+                <div class="m-title"><h3>${s.name}</h3>
+                  <span class="badge ${meta.badge}">${s.status === "connecting" ? icon("ring", 11, "spin") : `<span class="dot ${meta.dot}"></span>`}${meta.label}</span>
+                  <span class="badge mono">${transport(s)}</span>
+                  ${s.auth === "oauth" ? `<span class="badge mono">oauth</span>` : s.auth === "token" ? `<span class="badge mono">token</span>` : ""}
+                </div>
+                <div class="m-head-sub">${s.key} · ${esc(s.type === "remote" ? s.url : s.command.join(" "))}${s.pid && live ? ` · pid ${s.pid}` : ""}</div>
+              </div>
+              <div class="m-head-end">
+                <span class="m-enable">Enabled<button class="switch" type="button" role="switch" aria-checked="${enabled}" aria-label="Enable ${s.name}" data-sw="enable"></button></span>
+                <button class="btn" type="button" data-act="restart"${live ? "" : " disabled"}>${icon("reload", 13)}${s.type === "local" ? "Restart" : "Reconnect"}</button>
+                <button class="icon-btn" type="button" aria-label="More actions">${icon("dots", 15)}</button>
+              </div>
+            </div>
+            ${callout(s)}
+            <div class="m-stats${live ? "" : " is-idle"}">
+              <div class="m-stat-cell"><span class="m-stat-label">Latency p50 · last hour</span><span class="m-stat-value" data-stat-lat>${live ? `${s.lat}<small>ms</small>` : "—"}</span>${live ? spark(s.spark) : `<svg class="m-spark" width="150" height="30" aria-hidden="true"><path d="M0 22H150" stroke="rgba(255,255,255,.12)" stroke-dasharray="3 4"/></svg>`}</div>
+              <div class="m-stat-cell"><span class="m-stat-label">p95</span><span class="m-stat-value">${live ? `${s.p95}<small>ms</small>` : "—"}</span></div>
+              <div class="m-stat-cell"><span class="m-stat-label">Uptime · 24h</span><span class="m-stat-value">${live ? `${s.up}<small>%</small>` : "—"}</span></div>
+              <div class="m-stat-cell"><span class="m-stat-label">Calls today</span><span class="m-stat-value" data-stat-calls>${live ? s.calls.toLocaleString("en-US") : "—"}</span></div>
+            </div>
+            <div class="tabs m-tabs" role="tablist" aria-label="Server sections">
+              ${tabs.map(([id, label, n]) => `<button class="tab" type="button" role="tab" data-mtab="${id}" aria-selected="${state.tab === id}">${label}${n ? `<span class="count">${n}</span>` : ""}</button>`).join("")}
+            </div>
+            <div class="m-panel scroll" role="tabpanel" data-panel-body></div>`
+          renderPanel()
+          LabUI.renderIcons(d)
+        }
+
+        function renderPanel() {
+          const s = sel()
+          const body = root.querySelector("[data-panel-body]")
+          body.innerHTML = state.tab === "tools" ? toolsPanel(s) : state.tab === "config" ? configPanel(s) : logsPanel(s)
+          LabUI.renderIcons(body)
+        }
+
+        function toolsPanel(s) {
+          if (!s.loaded) {
+            const why = {
+              needs_auth: ["Tools appear after you sign in", "Sentry lists its tools once Vector has a token for your organization."],
+              failed: ["No tools while the server is down", "Fix the error above and retry. Tool settings you made before are kept."],
+              disabled: ["Turn the server on to see its tools", "Approval settings are kept in vector.json while it is off."],
+              connecting: ["Connecting…", "Listing tools with tools/list."],
+            }[s.status] ?? ["No tools", ""]
+            return `<div class="m-blank">${s.status === "connecting" ? icon("ring", 18, "spin") : icon("mcp", 18)}<strong>${why[0]}</strong><span>${why[1]}</span></div>`
+          }
+          const q = state.toolQ.trim().toLowerCase()
+          const list = s.tools.filter((t) => {
+            if (q && !`${t.name} ${t.desc}`.toLowerCase().includes(q)) return false
+            if (state.toolShow === "ask") return t.on && t.mode === "ask"
+            if (state.toolShow === "off") return !t.on
+            return true
+          })
+          const asks = s.tools.filter((t) => t.on && t.mode === "ask").length
+          const offs = s.tools.filter((t) => !t.on).length
+          const writes = s.tools.filter((t) => t.kind !== "read" && t.on && t.mode === "allow").length
+          return `<div class="m-toolbar">
+              <label class="input"><i data-icon="search" data-size="13" class="muted"></i><input type="search" placeholder="Filter ${s.tools.length} tools" aria-label="Filter tools" data-toolq value="${esc(state.toolQ)}" /></label>
+              <div class="seg" role="group" aria-label="Show tools" data-toolshow>
+                <button type="button" data-value="all" aria-pressed="${state.toolShow === "all"}">All</button>
+                <button type="button" data-value="ask" aria-pressed="${state.toolShow === "ask"}">Ask first · ${asks}</button>
+                <button type="button" data-value="off" aria-pressed="${state.toolShow === "off"}">Off · ${offs}</button>
+              </div>
+              <span class="muted">${writes ? `${writes} write tool${writes > 1 ? "s" : ""} run without asking` : "Every write asks first"}</span>
+              <button class="btn btn-sm" type="button" data-act="ask-writes"${writes ? "" : " disabled"}>Ask for all writes</button>
+            </div>
+            ${
+              list.length
+                ? [
+                    ["Can change things", list.filter((t) => t.kind !== "read")],
+                    ["Read only", list.filter((t) => t.kind === "read")],
+                  ]
+                    .filter(([, g]) => g.length)
+                    .map(([label, g]) => `<p class="t-group"><span>${label}</span><span class="mono">${g.length}</span></p>${g.map((t) => toolRow(s, t)).join("")}`)
+                    .join("")
+                : `<div class="m-blank"><strong>No tools match</strong><span>Try another name or clear the filter.</span></div>`
+            }`
+        }
+
+        function toolRow(s, t) {
+          const open = state.open.has(t.name)
+          const kind = t.kind === "write" ? `<span class="badge badge-amber tool-kind">write</span>` : t.kind === "danger" ? `<span class="badge badge-red tool-kind">destructive</span>` : ""
+          const id = `${s.key.replace(/[^a-zA-Z0-9_-]/g, "_")}_${t.name.replace(/[^a-zA-Z0-9_-]/g, "_")}`
+          return `<div class="tool${open ? " is-open" : ""}${t.on ? "" : " is-off"}" data-tool="${t.name}">
+            <div class="tool-line">
+              <button class="tool-main" type="button" aria-expanded="${open}" data-act="toggle-tool">
+                ${icon("chevron-right", 14)}
+                <span class="row-text"><span class="tool-name">${t.name}${kind}</span><span class="row-sub">${esc(t.desc)}</span></span>
+              </button>
+              <div class="seg mode" role="group" aria-label="Approval for ${t.name}" data-mode="${t.name}">
+                <button type="button" data-value="allow" aria-pressed="${t.mode === "allow"}"${t.on ? "" : " disabled"}>Allow</button>
+                <button type="button" data-value="ask" aria-pressed="${t.mode === "ask"}"${t.on ? "" : " disabled"}>Ask</button>
+              </div>
+              <button class="switch" type="button" role="switch" aria-checked="${t.on}" aria-label="Expose ${t.name} to agents" data-sw="tool" data-name="${t.name}"></button>
+            </div>
+            ${
+              open
+                ? `<div class="tool-detail">
+                    <code class="is-hunk">${id}  ·  ${t.on ? (t.mode === "allow" ? "runs without asking" : "asks before each call") : "hidden from agents"}</code>
+                    ${(t.params.length ? t.params : [["(no input)", "", false, ""]]).map(([n, ty, req, d]) => `<code><span>${n}</span><span class="dim">${ty}</span><span class="${req ? "req" : "dim"}">${req ? "required" : ty ? "optional" : ""}</span><span class="dim">${esc(d)}</span></code>`).join("")}
+                    <code class="is-more">${t.last ? `Last call ${t.last} · ok` : "Not called yet in this project"}</code>
+                  </div>`
+                : ""
+            }
+          </div>`
+        }
+
+        function jsonLines(s) {
+          const L = []
+          const str = (v) => `<span class="s">"${esc(v)}"</span>`
+          const k = (v) => `<span class="k">"${esc(v)}"</span>`
+          L.push(`{`)
+          L.push(`  ${k("mcp")}: {`)
+          L.push(`    ${k(s.key)}: {`)
+          L.push(`      ${k("type")}: ${str(s.type)},`)
+          if (s.type === "remote") {
+            L.push(`      ${k("url")}: ${str(s.url)},`)
+            if (s.headers) {
+              L.push(`      ${k("headers")}: {`)
+              Object.entries(s.headers).forEach(([hk, hv]) => L.push(`        ${k(hk)}: ${state.reveal ? str(hv) : `<span class="secret">"Bearer {env:GITHUB_TOKEN}"</span>`}`))
+              L.push(`      },`)
+              L.push(`      ${k("oauth")}: <span class="n">false</span>,`)
+            }
+          } else {
+            L.push(`      ${k("command")}: [${s.command.map(str).join(", ")}],`)
+            if (s.environment) {
+              L.push(`      ${k("environment")}: {`)
+              Object.entries(s.environment).forEach(([ek, ev], i, a) => L.push(`        ${k(ek)}: ${state.reveal || !/KEY|TOKEN/.test(ek) ? str(ev) : `<span class="secret">"••••••••••••"</span>`}${i < a.length - 1 ? "," : ""}`))
+              L.push(`      },`)
+            }
+          }
+          L.push(`      ${k("enabled")}: <span class="n">${s.status !== "disabled"}</span>,`)
+          L.push(`      ${k("timeout")}: <span class="n">${s.timeout}</span>`)
+          L.push(`    }`)
+          const rules = s.tools.filter((t) => !t.on || t.mode === "ask")
+          L.push(rules.length ? `  },` : `  }`)
+          if (!rules.length) return [...L, `}`]
+          L.push(`  ${k("permission")}: {`)
+          rules.slice(0, 6).forEach((t, i, a) => L.push(`    ${k(`${s.key}_${t.name}`)}: ${str(t.on ? "ask" : "deny")}${i < a.length - 1 || rules.length > 6 ? "," : ""}`))
+          if (rules.length > 6) L.push(`    <span class="secret">// ${rules.length - 6} more</span>`)
+          L.push(`  }`)
+          L.push(`}`)
+          return L
+        }
+
+        function configPanel(s) {
+          const file = s.scope === "project" ? "vector.json" : "~/.config/vector/vector.json"
+          const secrets = s.type === "remote" ? Object.entries(s.headers ?? {}) : Object.entries(s.environment ?? {})
+          return `<div class="m-config">
+            <div>
+              <div class="m-config-head"><span>Saved in</span><span class="mono">${file}</span>
+                <button class="btn btn-sm" type="button" data-act="copy">${copy}Copy</button>
+                <button class="btn btn-sm" type="button">${icon("external", 12)}Open file</button></div>
+              <div class="code">${jsonLines(s).map((l, i) => `<code data-n="${i + 1}"><span>${l}</span></code>`).join("")}</div>
+            </div>
+            <div>
+              <label class="m-field"><span>Request timeout</span>
+                <span class="input"><input value="${s.timeout}" aria-label="Timeout in milliseconds" style="font-family:var(--mono)" /><span class="muted mono">ms</span></span>
+                <span class="hint">Calls that report progress reset the timer, so long browser runs are not cut off.</span></label>
+              <div class="m-field"><span>${s.type === "remote" ? "Headers" : "Environment"}</span>
+                ${secrets.length ? secrets.map(([kk, vv]) => `<div class="kv"><b>${kk}</b><span>${state.reveal ? esc(vv) : "••••••••••••••••"}</span><button class="icon-btn" type="button" data-act="reveal" aria-pressed="${state.reveal}" aria-label="Show values">${eye}</button></div>`).join("") : `<span class="hint">${s.auth === "oauth" ? "Signed in with OAuth. The token lives in Vector's auth store." : "None set."}</span>`}
+                <span class="hint">Use <span class="mono">{env:NAME}</span> to read a value from your shell instead of saving it.</span></div>
+              <div class="m-field"><span>Transport</span><span class="hint">${s.type === "remote" ? "Streamable HTTP, falling back to SSE when the server only speaks SSE." : "Started as a child process over stdio when Vector opens this project."}</span></div>
+            </div>
+          </div>`
+        }
+
+        function logsPanel(s) {
+          return `<div class="m-toolbar">
+              <span class="live"><button class="switch" type="button" role="switch" aria-checked="${state.live}" aria-label="Follow live" data-sw="live"></button>Follow live</span>
+              <span class="muted">${s.logs.length} lines · ${s.type === "local" ? "stdout, stderr and JSON-RPC" : "JSON-RPC over HTTP"}</span>
+              <button class="btn btn-sm" type="button" data-act="clear-logs">Clear</button>
+            </div>
+            <div class="logs" data-logs>${s.logs.map(logLine).join("") || `<p><span class="t"></span><span></span><span class="t">No output yet.</span></p>`}</div>`
+        }
+
+        function logLine([t, lvl, msg, ms], i, all, fresh) {
+          const mark = { in: "→", out: "←", err: "✕", warn: "!" }[lvl]
+          return `<p class="${lvl === "err" ? "is-err" : ""}${fresh ? " is-new" : ""}"><span class="t">${t}</span><span class="${lvl}">${mark}</span><span>${esc(msg)}</span><span class="ms">${ms}</span></p>`
+        }
+
+        // ---------- Sheet ----------
+
+        function renderSheet() {
+          const sh = root.querySelector("[data-sheet]")
+          const added = new Set(servers.map((s) => s.key))
+          sh.innerHTML = `
+            <div class="sheet-head">
+              <div><h3 id="mcp-sheet-title">Add an MCP server</h3><p>Saved to vector.json in Vectordev.ai. Agents can use it right away.</p></div>
+              <button class="icon-btn" type="button" data-act="close-sheet" aria-label="Close">${icon("close", 16)}</button>
+            </div>
+            <div class="tabs" role="tablist">
+              <button class="tab" type="button" role="tab" data-stab="catalog" aria-selected="${state.sheetTab === "catalog"}">Catalog<span class="count">${catalog.length}</span></button>
+              <button class="tab" type="button" role="tab" data-stab="custom" aria-selected="${state.sheetTab === "custom"}">Custom server</button>
+            </div>
+            <div class="sheet-body scroll" data-sheet-body>${state.sheetTab === "catalog" ? catalogBody(added) : customBody()}</div>
+            ${
+              state.sheetTab === "custom"
+                ? `<div class="sheet-foot"><span>Vector checks the command and lists its tools before saving.</span><button class="btn" type="button" data-act="close-sheet">Cancel</button><button class="btn btn-primary" type="button" data-act="add-custom">Add server</button></div>`
+                : `<div class="sheet-foot"><span>${icon("check", 13)} Servers marked oauth open your browser once to sign in.</span></div>`
+            }`
+          LabUI.renderIcons(sh)
+        }
+
+        function catalogBody(added) {
+          const q = state.catQ.trim().toLowerCase()
+          const list = catalog.filter((c) => (state.cat === "All" || c.cat === state.cat) && (!q || `${c.name} ${c.blurb}`.toLowerCase().includes(q)))
+          return `<div class="cat-tools">
+              <label class="input"><i data-icon="search" data-size="14" class="muted"></i><input type="search" placeholder="Search GitHub, Sentry, Postgres…" aria-label="Search the catalog" data-catq value="${esc(state.catQ)}" /></label>
+              <div class="cats" role="group" aria-label="Category">${cats.map((c) => `<button class="cat" type="button" data-cat="${c}" aria-pressed="${state.cat === c}">${c}</button>`).join("")}</div>
+            </div>
+            <div data-entries>${list.length ? list.map((c) => entry(c, added)).join("") : `<p class="m-empty">Nothing in the catalog matches “${esc(state.catQ)}”. Try Custom server.</p>`}</div>`
+        }
+
+        function entry(c, added) {
+          const busy = state.adding[c.id]
+          const has = added.has(c.id)
+          const authBadge = c.auth === "oauth" ? `<span class="badge">oauth</span>` : c.auth === "token" ? `<span class="badge">token</span>` : `<span class="badge">no sign-in</span>`
+          const btn = has
+            ? `<button class="btn btn-sm is-done" type="button" disabled>${icon("check", 12)}Added</button>`
+            : busy
+              ? `<button class="btn btn-sm" type="button" disabled>${icon("ring", 12, "spin")}Adding</button>`
+              : `<button class="btn btn-sm" type="button" data-act="add" data-id="${c.id}" aria-expanded="${state.tokenFor === c.id}">${icon("plus", 12)}Add</button>`
+          return `<div class="entry">
+            <span class="tile">${c.mark}</span>
+            <span class="row-text"><span class="row-name">${c.name}</span><span class="entry-meta"><span class="row-sub">${esc(c.blurb)}</span>${authBadge}<span class="badge mono">${c.type === "remote" ? "http" : "stdio"}</span></span></span>
+            ${btn}
+            ${
+              state.tokenFor === c.id && !has
+                ? `<div class="entry-form"><label class="input"><input type="password" placeholder="${esc(c.ph)}" aria-label="${c.field}" data-token style="font-family:var(--mono)" /></label><button class="btn btn-primary btn-sm" type="button" data-act="connect-token" data-id="${c.id}" style="height:30px">Connect</button></div>`
+                : ""
+            }
+          </div>`
+        }
+
+        function customBody() {
+          const c = state.custom
+          const preview = (() => {
+            const lines = [`{`, `  "mcp": {`, `    "${c.name || "my-server"}": {`, `      "type": "${c.transport}",`]
+            if (c.transport === "local") lines.push(`      "command": [${c.command.trim().split(/\s+/).filter(Boolean).map((p) => `"${p}"`).join(", ")}],`)
+            else lines.push(`      "url": "${c.url}",`)
+            const env = c.env.filter(([k]) => k.trim())
+            if (env.length) lines.push(`      "${c.transport === "local" ? "environment" : "headers"}": { ${env.map(([k, v]) => `"${k}": "${v}"`).join(", ")} },`)
+            lines.push(`      "timeout": ${Number(c.timeout) || 5000}`, `    }`, `  }`, `}`)
+            return lines
+          })()
+          return `<div class="form">
+            <div class="form-row">
+              <label>Name<span class="input"><input data-cf="name" value="${esc(c.name)}" aria-label="Server name" /></span></label>
+              <div class="lbl">Transport<div class="seg" role="group" aria-label="Transport" data-transport style="display:flex"><button type="button" style="flex:1" data-value="local" aria-pressed="${c.transport === "local"}">Local · stdio</button><button type="button" style="flex:1" data-value="remote" aria-pressed="${c.transport === "remote"}">Remote · http</button></div></div>
+            </div>
+            ${
+              c.transport === "local"
+                ? `<label>Command<span class="input"><span class="muted mono">$</span><input data-cf="command" value="${esc(c.command)}" aria-label="Command" /></span></label>`
+                : `<label>URL<span class="input"><input data-cf="url" value="${esc(c.url)}" aria-label="URL" /></span></label>`
+            }
+            <div class="lbl">${c.transport === "local" ? "Environment variables" : "Headers"}
+              ${c.env.map(([k, v], i) => `<div class="env-row"><span class="input"><input data-env="${i}" data-part="0" value="${esc(k)}" aria-label="Name" /></span><span class="input"><input data-env="${i}" data-part="1" value="${esc(v)}" aria-label="Value" /></span><button class="icon-btn" type="button" data-act="del-env" data-i="${i}" aria-label="Remove">${icon("close-small", 14)}</button></div>`).join("")}
+              <button class="btn btn-ghost btn-sm" type="button" data-act="add-env" style="justify-self:start">${icon("plus", 12)}Add ${c.transport === "local" ? "variable" : "header"}</button>
+            </div>
+            <div class="form-row">
+              <label>Timeout<span class="input"><input data-cf="timeout" value="${esc(c.timeout)}" aria-label="Timeout" /><span class="muted mono">ms</span></span></label>
+              <div class="lbl">Save to<div class="seg" role="group" aria-label="Save to" data-scope style="display:flex"><button type="button" style="flex:1" data-value="project" aria-pressed="${c.scope === "project"}">This project</button><button type="button" style="flex:1" data-value="global" aria-pressed="${c.scope === "global"}">Everywhere</button></div></div>
+            </div>
+            <div class="lbl">Preview · ${c.scope === "project" ? "vector.json" : "~/.config/vector/vector.json"}
+              <div class="code" data-preview>${preview.map((l, i) => `<code data-n="${i + 1}"><span>${esc(l).replace(/&quot;([^&]*?)&quot;(\s*:)?/g, (m, v, colon) => (colon ? `<span class="k">"${v}"</span>:` : `<span class="s">"${v}"</span>`)).replace(/: (\d+)/, ': <span class="n">$1</span>')}</span></code>`).join("")}</div>
+            </div>
+          </div>`
+        }
+
+        function updatePreview() {
+          const holder = root.querySelector("[data-preview]")
+          if (!holder) return
+          const tmp = document.createElement("div")
+          tmp.innerHTML = customBody()
+          holder.innerHTML = tmp.querySelector("[data-preview]").innerHTML
+        }
+
+        // ---------- Actions ----------
+
+        let toastTimer
+        function toast(html) {
+          const t = root.querySelector("[data-toast]")
+          t.innerHTML = `${icon("check", 14)}<span>${html}</span>`
+          LabUI.renderIcons(t)
+          t.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (t.hidden = true), 2600)
+        }
+
+        function renderAll() {
+          renderSummary()
+          renderRows()
+          renderDetail()
+        }
+
+        function connect(s, via, ms, after) {
+          s.status = "connecting"
+          s.via = via
+          renderAll()
+          setTimeout(() => {
+            s.status = "connected"
+            s.loaded = true
+            s.lat = s.lat || { sentry: 204, postgres: 12, figma: 168 }[s.key] || 140
+            s.p95 = s.p95 || Math.round(s.lat * 2.2)
+            s.up = s.up === "—" ? "100" : s.up
+            s.calls = s.calls || 0
+            s.spark = seedSpark(s.lat)
+            s.logs = seedLogs(s)
+            if (!s.tools.length) s.tools = tools[s.key] ?? tools.vercel
+            renderAll()
+            after?.(s)
+          }, ms)
+        }
+
+        function openSheet() {
+          state.sheet = true
+          root.querySelector("[data-scrim]").hidden = false
+          renderSheet()
+          root.querySelector("[data-sheet] input")?.focus()
+        }
+
+        function closeSheet() {
+          state.sheet = false
+          state.tokenFor = null
+          root.querySelector("[data-scrim]").hidden = true
+          root.querySelector('[data-act="open-sheet"]').focus()
+        }
+
+        function addFromCatalog(c) {
+          state.adding[c.id] = true
+          renderSheet()
+          setTimeout(() => {
+            delete state.adding[c.id]
+            const s = {
+              key: c.id,
+              name: c.name,
+              mark: c.mark,
+              scope: "project",
+              type: c.type,
+              url: c.url ?? `https://mcp.${c.id}.com/mcp`,
+              command: c.command ?? ["npx", "-y", `@${c.id}/mcp`],
+              auth: c.auth,
+              status: "connected",
+              lat: 0,
+              p95: 0,
+              up: "—",
+              calls: 0,
+              tools: tools[c.id] ?? tools.vercel,
+              timeout: 120000,
+              spark: [],
+            }
+            if (c.type === "local" && !c.command) s.command = ["npx", "-y", `@modelcontextprotocol/server-${c.id}`]
+            servers.splice(servers.filter((x) => x.scope === "project").length, 0, s)
+            s.logs = []
+            state.sel = s.key
+            state.tab = "tools"
+            state.filter = "all"
+            renderSheet()
+            if (c.auth === "oauth") {
+              s.status = "needs_auth"
+              s.loaded = false
+              s.logs = seedLogs({ ...s, status: "needs_auth" })
+              renderAll()
+              toast(`${c.name} added · sign in to load its tools`)
+              return
+            }
+            s.status = "connecting"
+            s.via = "add"
+            connect(s, "add", 900, () => toast(`${c.name} connected · ${s.tools.length} tools`))
+          }, 900)
+        }
+
+        root.addEventListener("click", (e) => {
+          const t = e.target
+          if (t.closest(".switch")) return
+          const srv = t.closest("[data-srv]")
+          if (srv) {
+            state.sel = srv.dataset.srv
+            state.tab = state.tab === "logs" || state.tab === "config" ? state.tab : "tools"
+            state.toolQ = ""
+            renderRows()
+            renderDetail()
+            return
+          }
+          const mtab = t.closest("[data-mtab]")
+          if (mtab) {
+            state.tab = mtab.dataset.mtab
+            root.querySelectorAll("[data-mtab]").forEach((b) => b.setAttribute("aria-selected", String(b === mtab)))
+            renderPanel()
+            return
+          }
+          const stab = t.closest("[data-stab]")
+          if (stab) {
+            state.sheetTab = stab.dataset.stab
+            renderSheet()
+            return
+          }
+          const cat = t.closest("[data-cat]")
+          if (cat) {
+            state.cat = cat.dataset.cat
+            renderSheet()
+            return
+          }
+          if (t === root.querySelector("[data-scrim]")) return closeSheet()
+          const act = t.closest("[data-act]")
+          if (!act) return
+          const s = sel()
+          const a = act.dataset.act
+          if (a === "open-sheet") openSheet()
+          if (a === "close-sheet") closeSheet()
+          if (a === "toggle-tool") {
+            const name = act.closest("[data-tool]").dataset.tool
+            state.open.has(name) ? state.open.delete(name) : state.open.add(name)
+            renderPanel()
+            root.querySelector(`[data-tool="${name}"] .tool-main`)?.focus()
+          }
+          if (a === "ask-writes") {
+            s.tools.forEach((x) => x.kind !== "read" && (x.mode = "ask"))
+            renderDetail()
+            toast(`Every write tool on ${s.name} now asks first`)
+          }
+          if (a === "authorize") connect(s, "auth", 1800, () => toast(`Signed in to Sentry · ${s.tools.length} tools loaded`))
+          if (a === "cancel-auth") {
+            s.status = "needs_auth"
+            renderAll()
+          }
+          if (a === "retry") {
+            s.error = s.error
+            connect(s, "retry", 1500, () => toast(`Postgres is running · query tool ready`))
+          }
+          if (a === "logs") {
+            state.tab = "logs"
+            renderDetail()
+          }
+          if (a === "restart") {
+            const was = s.lat
+            connect(s, "restart", 900, () => toast(`${s.name} ${s.type === "local" ? "restarted" : "reconnected"} in ${Math.round(was * 3.4)}ms`))
+          }
+          if (a === "reload-all") {
+            const live = servers.filter((x) => x.status === "connected")
+            live.forEach((x) => connect(x, "restart", 700 + Math.random() * 600))
+            setTimeout(() => toast(`${live.length} servers reconnected`), 1400)
+          }
+          if (a === "reveal") {
+            state.reveal = !state.reveal
+            renderPanel()
+          }
+          if (a === "copy") toast("Config copied")
+          if (a === "clear-logs") {
+            s.logs = []
+            renderPanel()
+          }
+          if (a === "add") {
+            const c = catalog.find((x) => x.id === act.dataset.id)
+            if (c.auth === "token") {
+              state.tokenFor = state.tokenFor === c.id ? null : c.id
+              renderSheet()
+              root.querySelector("[data-token]")?.focus()
+              return
+            }
+            addFromCatalog(c)
+          }
+          if (a === "connect-token") {
+            const c = catalog.find((x) => x.id === act.dataset.id)
+            state.tokenFor = null
+            addFromCatalog(c)
+          }
+          if (a === "add-env") {
+            state.custom.env.push(["", ""])
+            renderSheet()
+          }
+          if (a === "del-env") {
+            state.custom.env.splice(Number(act.dataset.i), 1)
+            renderSheet()
+          }
+          if (a === "add-custom") {
+            const c = state.custom
+            const keyName = (c.name || "my-server").trim().replace(/[^a-zA-Z0-9_-]/g, "-")
+            const s2 = {
+              key: keyName,
+              name: keyName,
+              mark: keyName.slice(0, 2).toUpperCase(),
+              scope: c.scope,
+              type: c.transport,
+              url: c.url,
+              command: c.command.trim().split(/\s+/),
+              environment: Object.fromEntries(c.env.filter(([k]) => k)),
+              status: "connecting",
+              lat: 0,
+              p95: 0,
+              up: "—",
+              calls: 0,
+              timeout: Number(c.timeout) || 5000,
+              tools: [
+                T("search_docs", "Full-text search over the docs index", "read", [["query", "string", true, ""]]),
+                T("read_page", "Read one docs page as markdown", "read", [["path", "string", true, ""]]),
+                T("list_sections", "Top-level sections of the docs", "read", []),
+              ],
+              spark: [],
+              logs: [],
+            }
+            servers.push(s2)
+            state.sel = s2.key
+            state.filter = "all"
+            closeSheet()
+            connect(s2, "add", 1200, () => toast(`${keyName} connected · 3 tools`))
+          }
+        })
+
+        root.addEventListener("lab:seg", (e) => {
+          const g = e.target
+          const s = sel()
+          if (g.matches("[data-filter]")) {
+            state.filter = e.detail
+            renderRows()
+          }
+          if (g.matches("[data-toolshow]")) {
+            state.toolShow = e.detail
+            renderPanel()
+          }
+          if (g.matches("[data-mode]")) {
+            const tool = s.tools.find((x) => x.name === g.dataset.mode)
+            tool.mode = e.detail
+            renderPanel()
+          }
+          if (g.matches("[data-transport]")) {
+            state.custom.transport = e.detail
+            state.custom.env = e.detail === "local" ? [["DOCS_INDEX", "./docs"]] : [["Authorization", "Bearer {env:DOCS_TOKEN}"]]
+            renderSheet()
+          }
+          if (g.matches("[data-scope]")) {
+            state.custom.scope = e.detail
+            updatePreview()
+          }
+        })
+
+        root.addEventListener("lab:switch", (e) => {
+          const sw = e.target
+          const s = sel()
+          if (sw.dataset.sw === "tool") {
+            const tool = s.tools.find((x) => x.name === sw.dataset.name)
+            tool.on = e.detail
+            renderSummary()
+            renderDetail()
+          }
+          if (sw.dataset.sw === "enable") {
+            if (!e.detail) {
+              s.status = "disabled"
+              s.loaded = false
+              renderAll()
+              toast(`${s.name} turned off · tools hidden from agents`)
+              return
+            }
+            if (s.key === "sentry") {
+              s.status = "needs_auth"
+              renderAll()
+              return
+            }
+            connect(s, "enable", 1300, () => toast(`${s.name} connected · ${s.tools.length} tools`))
+          }
+          if (sw.dataset.sw === "live") state.live = e.detail
+        })
+
+        root.addEventListener("input", (e) => {
+          const t = e.target
+          if (t.matches("[data-q]")) {
+            state.q = t.value
+            renderRows()
+          }
+          if (t.matches("[data-toolq]")) {
+            state.toolQ = t.value
+            const pos = t.selectionStart
+            renderPanel()
+            const again = root.querySelector("[data-toolq]")
+            again.focus()
+            again.setSelectionRange(pos, pos)
+          }
+          if (t.matches("[data-catq]")) {
+            state.catQ = t.value
+            const s = root.querySelector("[data-entries]")
+            const tmp = document.createElement("div")
+            tmp.innerHTML = catalogBody(new Set(servers.map((x) => x.key)))
+            s.innerHTML = tmp.querySelector("[data-entries]").innerHTML
+            LabUI.renderIcons(s)
+          }
+          if (t.matches("[data-cf]")) {
+            state.custom[t.dataset.cf] = t.value
+            updatePreview()
+          }
+          if (t.matches("[data-env]")) {
+            state.custom.env[Number(t.dataset.env)][Number(t.dataset.part)] = t.value
+            updatePreview()
+          }
+        })
+
+        root.addEventListener("keydown", (e) => {
+          if (e.key === "Escape" && state.sheet) closeSheet()
+          if (e.key === "Enter" && e.target.matches("[data-token]")) root.querySelector('[data-act="connect-token"]')?.click()
+          if ((e.key === "ArrowDown" || e.key === "ArrowUp") && e.target.closest("[data-srv]")) {
+            e.preventDefault()
+            const all = [...root.querySelectorAll("[data-srv]")]
+            const i = all.indexOf(e.target.closest("[data-srv]"))
+            const next = all[i + (e.key === "ArrowDown" ? 1 : -1)]
+            if (next) {
+              next.click()
+              root.querySelector(`[data-srv="${next.dataset.srv}"]`).focus()
+            }
+          }
+        })
+
+        // Live health: latency drifts and calls arrive while servers are connected.
+        let tick = 0
+        setInterval(() => {
+          tick++
+          servers
+            .filter((s) => s.status === "connected" && s.lat)
+            .forEach((s, i) => {
+              const base = s.spark[0] || s.lat
+              s.lat = Math.max(Math.round(base * 0.6), Math.round(s.lat + (Math.sin(tick * 0.9 + i * 2) * 0.12 + (Math.random() - 0.5) * 0.1) * base))
+              s.spark = [...s.spark.slice(1), s.lat]
+              const el = root.querySelector(`[data-lat="${s.key}"]`)
+              if (el) el.textContent = `${s.lat}ms`
+            })
+          const s = sel()
+          if (s.status !== "connected") return
+          const lat = root.querySelector("[data-stat-lat]")
+          if (lat) lat.innerHTML = `${s.lat}<small>ms</small>`
+          const old = root.querySelector(".m-stats .m-spark")
+          if (old) {
+            old.outerHTML = spark(s.spark)
+          }
+          if (tick % 3 === 0) {
+            const tool = s.tools.filter((x) => x.on)[tick % Math.max(1, s.tools.filter((x) => x.on).length)]
+            if (!tool) return
+            s.calls++
+            const calls = root.querySelector("[data-stat-calls]")
+            if (calls) calls.textContent = s.calls.toLocaleString("en-US")
+            const now = new Date()
+            const ts = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}.${String(now.getMilliseconds()).padStart(3, "0")}`
+            const agent = ["build", "review", "explore", "test"][tick % 4]
+            const lines = [
+              [ts, "in", `tools/call ${tool.name}  ← ${agent}`, ""],
+              [ts, "out", "result  ok", `${s.lat}ms`],
+            ]
+            s.logs.push(...lines)
+            const box = root.querySelector("[data-logs]")
+            if (box && state.live && state.tab === "logs") {
+              box.insertAdjacentHTML("beforeend", lines.map((l) => logLine(l, 0, 0, true)).join(""))
+              const panel = root.querySelector("[data-panel-body]")
+              panel.scrollTop = panel.scrollHeight
+            }
+          }
+        }, 1600)
+
+        renderAll()
+      })()
+    </script>
+  </body>
+</html>

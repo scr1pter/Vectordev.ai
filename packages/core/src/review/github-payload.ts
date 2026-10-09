@@ -24,6 +24,7 @@ export function buildCreateReviewPayload(input: {
   trust: Trust
   leads?: Record<string, string>
   repo?: RepoRef
+  commands?: boolean // false for reviews posted from the desktop; see InlineOptions
 }): CreateReviewPayload {
   return {
     commit_id: input.head,
@@ -44,6 +45,7 @@ export function buildCreateReviewPayload(input: {
           suggestion: finding.suggestion === undefined ? "none" : committable ? "commit" : "diff",
           lead: input.leads?.[finding.id],
           repo: input.repo,
+          commands: input.commands,
         }),
         line: finding.anchor.line,
         side: finding.anchor.side,

@@ -1,0 +1,1802 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      /* D16 Welcome and first run. Everything is scoped under .d-first-run. */
+      .d-first-run {
+        --fr-run: #8b73d6;
+      }
+
+      .d-first-run :is(h1, h2, h3, h4, p, ul, ol) {
+        margin: 0;
+        padding: 0;
+      }
+
+      .d-first-run :is(ul, ol) {
+        list-style: none;
+      }
+
+      .d-first-run svg {
+        flex: none;
+      }
+
+      .d-first-run [hidden] {
+        display: none !important;
+      }
+
+      .d-first-run .fr {
+        display: flex;
+        height: 100%;
+      }
+
+      /* ---- the checklist rail ---- */
+      .d-first-run .fr-rail {
+        display: flex;
+        flex: 0 0 312px;
+        flex-direction: column;
+        border-right: 1px solid rgba(255, 255, 255, 0.035);
+        background: var(--sidebar);
+      }
+
+      .d-first-run .fr-rail-top {
+        padding: 30px 26px 22px;
+      }
+
+      .d-first-run .fr-logo {
+        display: grid;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        border-radius: 11px;
+        background: linear-gradient(160deg, #a78bfa, #7c5fe0);
+        color: #fff;
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.12) inset,
+          0 10px 30px rgba(124, 95, 224, 0.35);
+      }
+
+      .d-first-run .fr-rail h1 {
+        margin-top: 18px;
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .d-first-run .fr-rail-top > p {
+        margin-top: 7px;
+        color: var(--text-2);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .d-first-run .fr-progress {
+        display: grid;
+        gap: 8px;
+        margin-top: 20px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-progress-top {
+        display: flex;
+        justify-content: space-between;
+      }
+
+      .d-first-run .fr-progress-top b {
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-bar {
+        position: relative;
+        height: 4px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .d-first-run .fr-bar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: inherit;
+        background: var(--violet);
+        box-shadow: 0 0 10px rgba(146, 116, 236, 0.5);
+        transition: width 500ms var(--ease);
+      }
+
+      .d-first-run .fr-steps {
+        display: grid;
+        gap: 2px;
+        padding: 6px 14px;
+      }
+
+      .d-first-run .fr-step {
+        position: relative;
+        display: flex;
+        width: 100%;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 11px 12px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-2);
+        text-align: left;
+      }
+
+      .d-first-run .fr-step:not([disabled]):hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .d-first-run .fr-step[disabled] {
+        cursor: default;
+      }
+
+      .d-first-run .fr-step[aria-current="step"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.12), transparent 72%), rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+      }
+
+      .d-first-run .fr-step:not(:last-child)::after {
+        content: "";
+        position: absolute;
+        top: 37px;
+        bottom: -9px;
+        left: 23px;
+        width: 1px;
+        background: var(--line);
+      }
+
+      .d-first-run .fr-step[data-state="done"]:not(:last-child)::after {
+        background: rgba(146, 116, 236, 0.45);
+      }
+
+      .d-first-run .fr-num {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        width: 23px;
+        height: 23px;
+        flex: none;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+        background: var(--sidebar);
+        color: var(--text-3);
+        font: 600 11px var(--mono);
+      }
+
+      .d-first-run .fr-step[aria-current="step"] .fr-num {
+        border-color: var(--violet-bright);
+        color: var(--violet-bright);
+        box-shadow: 0 0 0 3px rgba(182, 159, 247, 0.14);
+      }
+
+      .d-first-run .fr-step[data-state="done"] .fr-num {
+        border-color: transparent;
+        background: var(--violet);
+        color: #fff;
+      }
+
+      .d-first-run .fr-step-text {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+        padding-top: 2px;
+      }
+
+      .d-first-run .fr-step-text b {
+        font-size: 13.5px;
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-step-text span {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-first-run .fr-step[data-state="done"] .fr-step-text span {
+        color: var(--text-2);
+      }
+
+      .d-first-run .fr-rail-foot {
+        display: grid;
+        gap: 10px;
+        margin-top: auto;
+        padding: 16px 26px 22px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-first-run .fr-import {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--text-2);
+        font-size: 12px;
+        text-align: left;
+      }
+
+      .d-first-run .fr-import:hover {
+        border-color: var(--line-strong);
+      }
+
+      .d-first-run .fr-import b {
+        display: block;
+        color: var(--text-1);
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-import[data-done] {
+        border-color: rgba(101, 199, 142, 0.3);
+      }
+
+      .d-first-run .fr-foot-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      /* ---- main ---- */
+      .d-first-run .fr-main {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        background:
+          radial-gradient(700px 260px at 50% -60px, rgba(146, 116, 236, 0.13), transparent 70%),
+          var(--canvas);
+      }
+
+      .d-first-run .fr-scroll {
+        flex: 1;
+        min-height: 0;
+        padding: 52px 40px 24px;
+      }
+
+      .d-first-run .fr-pane {
+        width: min(740px, 100%);
+        margin: 0 auto;
+        animation: fr-in 360ms var(--ease);
+      }
+
+      @keyframes fr-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+      }
+
+      .d-first-run .fr-kicker {
+        color: var(--violet-bright);
+        font: 600 11px var(--mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .d-first-run .fr-pane h2 {
+        margin-top: 10px;
+        font-size: 26px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+      }
+
+      .d-first-run .fr-lede {
+        margin-top: 8px;
+        color: var(--text-2);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .d-first-run .fr-choices {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 26px;
+      }
+
+      .d-first-run .fr-choice {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) 16px;
+        align-items: start;
+        gap: 14px;
+        padding: 16px 16px 16px 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        text-align: left;
+        transition:
+          border-color 120ms ease,
+          background-color 120ms ease;
+      }
+
+      .d-first-run .fr-choice:hover {
+        border-color: var(--line-strong);
+      }
+
+      .d-first-run .fr-choice[aria-checked="true"] {
+        border-color: rgba(182, 159, 247, 0.55);
+        background: linear-gradient(180deg, rgba(182, 159, 247, 0.08), transparent 80%), var(--card);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.1);
+      }
+
+      .d-first-run .fr-choice-icon {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text-2);
+      }
+
+      .d-first-run .fr-choice[aria-checked="true"] .fr-choice-icon {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-first-run .fr-choice b {
+        display: block;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-choice p {
+        margin-top: 4px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      .d-first-run .fr-radio {
+        width: 16px;
+        height: 16px;
+        margin-top: 2px;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+      }
+
+      .d-first-run [aria-checked="true"] .fr-radio {
+        border: 5px solid var(--violet-bright);
+      }
+
+      .d-first-run .fr-block {
+        margin-top: 22px;
+      }
+
+      .d-first-run .fr-block-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-block-head .btn {
+        margin-left: auto;
+      }
+
+      .d-first-run .fr-list {
+        display: grid;
+        gap: 2px;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #1b191f;
+      }
+
+      .d-first-run .fr-row {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 12px;
+        min-height: 48px;
+        padding: 6px 12px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+
+      .d-first-run .fr-row:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .d-first-run .fr-row[aria-checked="true"] {
+        background: rgba(255, 255, 255, 0.06);
+        box-shadow: inset 0 0 0 1px rgba(182, 159, 247, 0.28);
+      }
+
+      .d-first-run .fr-row > svg {
+        color: var(--text-3);
+      }
+
+      .d-first-run .fr-row-text {
+        display: grid;
+        flex: 1;
+        min-width: 0;
+        gap: 2px;
+      }
+
+      .d-first-run .fr-row-text b {
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-row-text span {
+        overflow: hidden;
+        color: var(--text-3);
+        font: 11.5px var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-first-run .fr-row-end {
+        display: flex;
+        gap: 6px;
+      }
+
+      .d-first-run .fr-search {
+        margin: 2px 2px 6px;
+      }
+
+      .d-first-run .fr-detected {
+        display: grid;
+        gap: 12px;
+        margin-top: 14px;
+        padding: 14px 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        animation: fr-in 300ms var(--ease);
+      }
+
+      .d-first-run .fr-detected-top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 14px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-first-run .fr-detected-top > span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .d-first-run .fr-detected-top svg {
+        color: var(--green);
+      }
+
+      .d-first-run .fr-trust {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-first-run .fr-trust div {
+        display: grid;
+        flex: 1;
+        gap: 3px;
+        font-size: 13px;
+      }
+
+      .d-first-run .fr-trust span {
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .d-first-run .fr-facts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 18px;
+        margin-top: 34px;
+        padding-top: 20px;
+        border-top: 1px solid var(--hairline);
+      }
+
+      .d-first-run .fr-facts li {
+        display: flex;
+        gap: 10px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .d-first-run .fr-facts li > span:first-child {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        flex: none;
+        place-items: center;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--violet-bright);
+      }
+
+      .d-first-run .fr-facts b {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        font-weight: 500;
+      }
+
+      /* model step */
+      .d-first-run .fr-options {
+        display: grid;
+        gap: 10px;
+        margin-top: 24px;
+      }
+
+      .d-first-run .fr-option {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        transition: border-color 120ms ease;
+      }
+
+      .d-first-run .fr-option[data-on] {
+        border-color: rgba(182, 159, 247, 0.5);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.08);
+      }
+
+      .d-first-run .fr-option[data-connected] {
+        border-color: rgba(101, 199, 142, 0.4);
+        box-shadow: none;
+      }
+
+      .d-first-run .fr-option-head {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        width: 100%;
+        padding: 14px 16px;
+        border: 0;
+        background: transparent;
+        text-align: left;
+      }
+
+      .d-first-run .fr-option-text {
+        padding: 0;
+        border: 0;
+        background: none;
+        text-align: left;
+      }
+
+      .d-first-run .fr-option-text:focus-visible {
+        outline-offset: 4px;
+        border-radius: 4px;
+      }
+
+      .d-first-run .fr-option-head b {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-option-head p {
+        margin-top: 3px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        line-height: 1.45;
+      }
+
+      .d-first-run .fr-option[data-on] .fr-choice-icon,
+      .d-first-run .fr-option[data-connected] .fr-choice-icon {
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      .d-first-run .fr-option-body {
+        display: grid;
+        gap: 10px;
+        padding: 0 16px 16px 66px;
+      }
+
+      .d-first-run .fr-key-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .d-first-run .fr-key-row .input {
+        flex: 1;
+        height: 32px;
+      }
+
+      .d-first-run .fr-key-row .input input {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-key-row .btn {
+        height: 32px;
+      }
+
+      .d-first-run .fr-note {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-note[data-tone="red"] {
+        color: var(--red);
+      }
+
+      .d-first-run .fr-note[data-tone="green"] {
+        color: var(--green);
+      }
+
+      .d-first-run .fr-connected {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--green);
+        font-size: 12.5px;
+        white-space: nowrap;
+      }
+
+      .d-first-run .fr-waiting {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--violet-bright);
+        font-size: 12.5px;
+        white-space: nowrap;
+      }
+
+      .d-first-run .fr-spin {
+        width: 13px;
+        height: 13px;
+        border: 1.5px solid rgba(182, 159, 247, 0.25);
+        border-top-color: var(--violet-bright);
+        border-radius: 50%;
+        animation: fr-spin 0.9s linear infinite;
+      }
+
+      @keyframes fr-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .d-first-run .fr-default {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 16px;
+        padding: 12px 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        color: var(--text-2);
+        font-size: 13px;
+        animation: fr-in 300ms var(--ease);
+      }
+
+      .d-first-run .fr-default > span:first-child {
+        flex: 1;
+      }
+
+      .d-first-run .fr-models {
+        display: flex;
+        gap: 6px;
+      }
+
+      .d-first-run .fr-models button {
+        height: 28px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: transparent;
+        color: var(--text-2);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-models button[aria-pressed="true"] {
+        border-color: rgba(182, 159, 247, 0.5);
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+      }
+
+      /* task step */
+      .d-first-run .fr-tasks {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 24px;
+      }
+
+      .d-first-run .fr-task {
+        display: grid;
+        align-content: start;
+        gap: 8px;
+        min-height: 128px;
+        padding: 14px 15px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        text-align: left;
+      }
+
+      .d-first-run .fr-task:hover {
+        border-color: var(--line-strong);
+      }
+
+      .d-first-run .fr-task[aria-checked="true"] {
+        border-color: rgba(182, 159, 247, 0.55);
+        background: linear-gradient(180deg, rgba(182, 159, 247, 0.08), transparent 80%), var(--card);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.1);
+      }
+
+      .d-first-run .fr-task-top {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .d-first-run .fr-task-top b {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-task p {
+        color: var(--text-3);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      .d-first-run .fr-task p code {
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+      }
+
+      .d-first-run .fr-task-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: auto;
+      }
+
+      .d-first-run .fr-task-meta .badge {
+        height: 19px;
+        font-size: 10.5px;
+      }
+
+      .d-first-run .fr-task-meta .mono {
+        color: var(--text-3);
+        font-size: 11px;
+        line-height: 19px;
+      }
+
+      .d-first-run .fr-custom {
+        width: 100%;
+        min-height: 64px;
+        margin-top: 10px;
+        padding: 11px 13px;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        outline: 0;
+        background: rgba(0, 0, 0, 0.18);
+        font-size: 13px;
+        line-height: 1.5;
+        resize: none;
+      }
+
+      .d-first-run .fr-custom:focus {
+        border-color: rgba(182, 159, 247, 0.6);
+        box-shadow: 0 0 0 3px rgba(157, 132, 238, 0.14);
+      }
+
+      .d-first-run .fr-mode {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-top: 14px;
+        color: var(--text-3);
+        font-size: 12.5px;
+      }
+
+      /* watch step */
+      .d-first-run .fr-session {
+        margin-top: 22px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #1b191f;
+      }
+
+      .d-first-run .fr-session-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 44px;
+        padding: 0 14px 0 16px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--header);
+        font-size: 13px;
+      }
+
+      .d-first-run .fr-session-head b {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .d-first-run .fr-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 22px;
+        padding: 0 8px;
+        border: 1px solid rgba(255, 255, 255, 0.075);
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-2);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+
+      .d-first-run .fr-pill.mono {
+        font-size: 11px;
+      }
+
+      .d-first-run .fr-pill[data-tone="amber"] {
+        color: var(--amber);
+      }
+
+      .d-first-run .fr-pill[data-tone="green"] {
+        color: var(--green);
+      }
+
+      .d-first-run .fr-pill i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .d-first-run .fr-session-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 220px;
+        min-height: 0;
+      }
+
+      .d-first-run .fr-feed {
+        height: 318px;
+        overflow-y: auto;
+        scrollbar-width: none;
+      }
+
+      .d-first-run .fr-feed-inner {
+        display: grid;
+        gap: 10px;
+        padding: 16px 18px 18px;
+      }
+
+      .d-first-run .fr-line {
+        animation: fr-in 300ms var(--ease);
+      }
+
+      .d-first-run .fr-reason {
+        color: #b3b0b8;
+        font-size: 12.5px;
+      }
+
+      .d-first-run .fr-tool {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--text-2);
+        font-size: 12.5px;
+      }
+
+      .d-first-run .fr-tool svg {
+        color: var(--text-3);
+      }
+
+      .d-first-run .fr-tool code {
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+      }
+
+      .d-first-run .fr-tool .fr-tool-end {
+        margin-left: auto;
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+
+      .d-first-run .fr-answer {
+        color: #e6e4ea;
+        font-size: 13.5px;
+        line-height: 1.6;
+      }
+
+      .d-first-run .fr-answer code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: #37343a;
+        font: 12px var(--mono);
+      }
+
+      .d-first-run .fr-answer ul {
+        display: grid;
+        gap: 3px;
+        margin-top: 6px;
+        padding-left: 4px;
+      }
+
+      .d-first-run .fr-answer li::before {
+        content: "–";
+        margin-right: 8px;
+        color: var(--text-3);
+      }
+
+      .d-first-run .fr-side {
+        display: grid;
+        align-content: start;
+        gap: 14px;
+        padding: 14px 14px 16px;
+        border-left: 1px solid var(--hairline);
+        background: #19171d;
+      }
+
+      .d-first-run .fr-side-label {
+        margin-bottom: 7px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      .d-first-run .fr-todos {
+        display: grid;
+        gap: 7px;
+      }
+
+      .d-first-run .fr-todos li {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        line-height: 1.35;
+      }
+
+      .d-first-run .fr-box {
+        position: relative;
+        width: 14px;
+        height: 14px;
+        flex: none;
+        margin-top: 1px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 3px;
+        background: #141414;
+        color: transparent;
+      }
+
+      .d-first-run .fr-todos li[data-s="doing"] .fr-box::after {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        border-radius: 50%;
+        background: #8a8a8d;
+      }
+
+      .d-first-run .fr-todos li[data-s="done"] {
+        color: var(--text-3);
+      }
+
+      .d-first-run .fr-todos li[data-s="done"] .fr-box {
+        border-color: rgba(101, 199, 142, 0.4);
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .d-first-run .fr-stat {
+        display: flex;
+        justify-content: space-between;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-stat b {
+        color: var(--text-1);
+        font: 400 12px var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .d-first-run .fr-done {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-top: 16px;
+        padding: 14px 16px;
+        border: 1px solid rgba(101, 199, 142, 0.3);
+        border-radius: 12px;
+        background: rgba(101, 199, 142, 0.06);
+        animation: fr-in 360ms var(--ease);
+      }
+
+      .d-first-run .fr-done-icon {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        flex: none;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--green-soft);
+        color: var(--green);
+        animation: fr-pop 520ms var(--ease);
+      }
+
+      @keyframes fr-pop {
+        0% {
+          transform: scale(0.6);
+          opacity: 0;
+        }
+        60% {
+          transform: scale(1.08);
+        }
+      }
+
+      .d-first-run .fr-done div {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+      }
+
+      .d-first-run .fr-done b {
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-done span {
+        color: var(--text-3);
+        font-size: 12.5px;
+      }
+
+      .d-first-run .fr-next {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+        animation: fr-in 420ms var(--ease);
+      }
+
+      .d-first-run .fr-next a,
+      .d-first-run .fr-next button {
+        display: grid;
+        gap: 4px;
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: var(--card);
+        color: var(--text-1);
+        font-size: 13px;
+        text-align: left;
+        text-decoration: none;
+      }
+
+      .d-first-run .fr-next a:hover,
+      .d-first-run .fr-next button:hover {
+        border-color: var(--violet-line);
+      }
+
+      .d-first-run .fr-next span {
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-next b {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 500;
+      }
+
+      .d-first-run .fr-next b svg {
+        color: var(--violet-bright);
+      }
+
+      /* footer */
+      .d-first-run .fr-footer {
+        display: flex;
+        flex: none;
+        align-items: center;
+        gap: 10px;
+        height: 66px;
+        padding: 0 40px;
+        border-top: 1px solid var(--hairline);
+        background: rgba(28, 27, 34, 0.7);
+      }
+
+      .d-first-run .fr-footer-inner {
+        display: flex;
+        width: min(740px, 100%);
+        align-items: center;
+        gap: 10px;
+        margin: 0 auto;
+      }
+
+      .d-first-run .fr-footer .fr-hint {
+        flex: 1;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+
+      .d-first-run .fr-footer .btn {
+        height: 32px;
+        padding: 0 14px;
+        font-size: 13px;
+      }
+
+      .d-first-run .fr-footer .btn[disabled] {
+        opacity: 0.45;
+        cursor: default;
+      }
+
+      .d-first-run .btn kbd {
+        height: 16px;
+        min-width: 16px;
+        border-color: rgba(255, 255, 255, 0.28);
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        font-size: 10px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .d-first-run *,
+        .d-first-run *::before,
+        .d-first-run *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="first-run"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="900">
+          <div class="lab-stage d-first-run">
+            <div class="fr">
+              <aside class="fr-rail" aria-label="Setup checklist">
+                <div class="fr-rail-top">
+                  <span class="fr-logo" aria-hidden="true"><i data-icon="chip" data-size="22"></i></span>
+                  <h1>Welcome to Vector</h1>
+                  <p>Four steps to your first finished task. Most people are done in about five minutes.</p>
+                  <div class="fr-progress">
+                    <div class="fr-progress-top"><span><b data-progress-text>0 of 4</b> done</span><span data-progress-pct>0%</span></div>
+                    <span class="fr-bar"><i data-progress-bar style="width: 0%"></i></span>
+                  </div>
+                </div>
+                <ol class="fr-steps" data-steps></ol>
+                <div class="fr-rail-foot">
+                  <button class="fr-import" type="button" data-import>
+                    <i data-icon="arrow" data-size="15" class="muted"></i>
+                    <span><b>Coming from Vector 1.99.8?</b><span data-import-text>Import settings, agents and MCP servers</span></span>
+                  </button>
+                  <div class="fr-foot-row"><span>You can change all of this later in Settings.</span></div>
+                </div>
+              </aside>
+
+              <main class="fr-main">
+                <div class="fr-scroll scroll" data-scroll>
+                  <section class="fr-pane" data-pane="0" aria-labelledby="fr-h-0">
+                    <p class="fr-kicker">Step 1 of 4</p>
+                    <h2 id="fr-h-0">Open a project</h2>
+                    <p class="fr-lede">Vector works on your code where it lives. Nothing is uploaded unless you send it to a model.</p>
+                    <div class="fr-choices" role="radiogroup" aria-label="Where is the project">
+                      <button class="fr-choice" type="button" role="radio" aria-checked="true" data-source="folder">
+                        <span class="fr-choice-icon" data-glyph="folder" data-size="18"></span>
+                        <span><b>Open a folder</b><p>A project already on this Mac. Vector reads it in place.</p></span>
+                        <span class="fr-radio"></span>
+                      </button>
+                      <button class="fr-choice" type="button" role="radio" aria-checked="false" data-source="github">
+                        <span class="fr-choice-icon" data-glyph="repo" data-size="18"></span>
+                        <span><b>Open from GitHub</b><p>Clone a repository you can access into <code class="mono" style="font-size:11.5px">~/code</code>.</p></span>
+                        <span class="fr-radio"></span>
+                      </button>
+                    </div>
+
+                    <div class="fr-block" data-source-panel="folder">
+                      <div class="fr-block-head"><span>Git projects found on this Mac</span><button class="btn btn-sm btn-ghost" type="button">Choose another folder…</button></div>
+                      <div class="fr-list" role="radiogroup" aria-label="Folder" data-folders></div>
+                    </div>
+
+                    <div class="fr-block" data-source-panel="github" hidden>
+                      <div class="fr-block-head"><span class="badge badge-green"><i class="dot dot-green"></i>Signed in to GitHub</span><span>4 organisations, 38 repositories</span></div>
+                      <div class="fr-list">
+                        <label class="input fr-search"><i data-icon="magnifier" data-size="13" class="muted"></i><input data-repo-search placeholder="Search your repositories" autocomplete="off" aria-label="Search repositories" /></label>
+                        <div role="radiogroup" aria-label="Repository" data-repos style="display:grid;gap:2px"></div>
+                      </div>
+                    </div>
+
+                    <div class="fr-detected" data-detected hidden></div>
+
+                    <ul class="fr-facts">
+                      <li><span data-glyph="shield" data-size="15"></span><span><b>Runs on your machine</b>Your code stays where it is. Vector has no copy of it.</span></li>
+                      <li><span data-glyph="key" data-size="15"></span><span><b>Your models, your keys</b>Free models, your ChatGPT plan, or any provider's key.</span></li>
+                      <li><span data-glyph="branch" data-size="15"></span><span><b>Nothing lands unseen</b>Edits wait for you, or go to their own branch.</span></li>
+                    </ul>
+                  </section>
+
+                  <section class="fr-pane" data-pane="1" aria-labelledby="fr-h-1" hidden>
+                    <p class="fr-kicker">Step 2 of 4</p>
+                    <h2 id="fr-h-1">Connect a model</h2>
+                    <p class="fr-lede">Vector is free. You bring the model: a free one through OpenRouter, your ChatGPT plan, or a key from any provider.</p>
+                    <div class="fr-options" data-options></div>
+                    <div class="fr-default" data-default hidden></div>
+                  </section>
+
+                  <section class="fr-pane" data-pane="2" aria-labelledby="fr-h-2" hidden>
+                    <p class="fr-kicker">Step 3 of 4</p>
+                    <h2 id="fr-h-2">Pick a starter task</h2>
+                    <p class="fr-lede">Picked for <span data-project-name>Vectordev.ai</span>. Each one is small, safe and finishes in a few minutes.</p>
+                    <div class="fr-tasks" role="radiogroup" aria-label="Starter task" data-tasks></div>
+                    <textarea class="fr-custom" data-custom rows="2" placeholder="Or describe your own task…" aria-label="Your own task"></textarea>
+                    <div class="fr-mode">
+                      <span>Before it edits a file</span>
+                      <div class="seg" role="group" aria-label="Permission mode" data-mode>
+                        <button type="button" aria-pressed="true" data-value="ask">Ask me</button>
+                        <button type="button" aria-pressed="false" data-value="auto">Edit on a new branch</button>
+                      </div>
+                      <span data-mode-note>You approve each change. Good for a first run.</span>
+                    </div>
+                  </section>
+
+                  <section class="fr-pane" data-pane="3" aria-labelledby="fr-h-3" hidden>
+                    <p class="fr-kicker" data-watch-kicker>Step 4 of 4</p>
+                    <h2 id="fr-h-3" data-watch-title>Watch it work</h2>
+                    <p class="fr-lede" data-watch-lede>This is a real session. Follow along, or leave it; it keeps going.</p>
+                    <div class="fr-session" data-session></div>
+                    <div data-finish></div>
+                  </section>
+                </div>
+                <footer class="fr-footer">
+                  <div class="fr-footer-inner">
+                    <button class="btn btn-ghost" type="button" data-back hidden><i data-icon="back" data-size="14"></i>Back</button>
+                    <span class="fr-hint" data-hint>Pick a project to continue.</span>
+                    <button class="btn btn-ghost" type="button" data-skip>Skip setup</button>
+                    <button class="btn btn-primary" type="button" data-next>Continue <kbd>↵</kbd></button>
+                  </div>
+                </footer>
+              </main>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const stage = document.querySelector(".d-first-run")
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
+
+        const paths = {
+          folder: '<path d="M2.6 4.6A1.2 1.2 0 0 1 3.8 3.4h2.6l1.3 1.4h4.5a1.2 1.2 0 0 1 1.2 1.2v5.6a1.2 1.2 0 0 1-1.2 1.2H3.8a1.2 1.2 0 0 1-1.2-1.2Z"/>',
+          repo: '<path d="M4 3.3A1.3 1.3 0 0 1 5.3 2h6.7v9.4H5.3A1.3 1.3 0 0 0 4 12.7Zm0 9.4A1.3 1.3 0 0 0 5.3 14H12M6.6 4.7h2.8"/>',
+          check: '<path d="m3.8 8.3 2.7 2.7 5.7-6"/>',
+          key: '<circle cx="5.6" cy="10.4" r="2.6"/><path d="m7.5 8.5 5.3-5.3M10.8 5.2l1.6 1.6M9.3 6.7l1.3 1.3"/>',
+          gift: '<rect x="2.8" y="6.2" width="10.4" height="7" rx="1"/><path d="M2.4 6.2h11.2M8 6.2v7M8 6.2C6.6 3.4 4.6 3.6 4.6 4.9 4.6 6 6.6 6.2 8 6.2Zm0 0c1.4-2.8 3.4-2.6 3.4-1.3 0 1.1-2 1.3-3.4 1.3Z"/>',
+          spark: '<path d="M8 2.8c.4 2.6 1.6 3.8 4.2 4.2-2.6.4-3.8 1.6-4.2 4.2-.4-2.6-1.6-3.8-4.2-4.2 2.6-.4 3.8-1.6 4.2-4.2Z"/>',
+          shield: '<path d="M8 2.6 12.6 4.3v3.6c0 2.8-1.9 4.7-4.6 5.6-2.7-.9-4.6-2.8-4.6-5.6V4.3Z"/>',
+          doc: '<path d="M4.5 2.5h4.6l2.4 2.4v8.6h-7Z"/><path d="M9 2.6v2.5h2.4M6.4 8h3.3M6.4 10.4h3.3"/>',
+          pencil: '<path d="m10.1 3.4 2.5 2.5-6.8 6.8H3.3v-2.5Z"/><path d="m8.8 4.7 2.5 2.5"/>',
+          glob: '<circle cx="7.2" cy="7.2" r="4.3"/><path d="m10.4 10.4 3 3"/>',
+          tests: '<path d="M6 2.8v4.1L3.2 12a1 1 0 0 0 .9 1.4h7.8a1 1 0 0 0 .9-1.4L10 6.9V2.8M5.2 2.8h5.6M4.8 9.6h6.4"/>',
+          book: '<path d="M2.8 3.6h3.4A1.8 1.8 0 0 1 8 5.4v7.8a1.4 1.4 0 0 0-1.4-1.4H2.8ZM13.2 3.6H9.8A1.8 1.8 0 0 0 8 5.4v7.8a1.4 1.4 0 0 1 1.4-1.4h3.8Z"/>',
+          workspace: '<rect x="2.6" y="3" width="10.8" height="10" rx="1.6"/><path d="M6.4 3v10"/>',
+        }
+        const glyph = (name, size = 16) =>
+          paths[name]
+            ? `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name]}</svg>`
+            : LabUI.svg(name, size)
+        const fillGlyphs = (root) =>
+          root.querySelectorAll("[data-glyph]").forEach((el) => {
+            el.innerHTML = glyph(el.dataset.glyph, Number(el.dataset.size ?? 16))
+          })
+        const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        const fmt = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`)
+
+        const STEPS = [
+          { title: "Open a project", hint: "Pick a project to continue." },
+          { title: "Connect a model", hint: "Connect one way to reach a model." },
+          { title: "Pick a starter task", hint: "Pick a task or write your own." },
+          { title: "Watch it finish", hint: "" },
+        ]
+        const state = { step: 0, done: [false, false, false, false], source: "folder", project: null, model: null, connecting: null, task: "explain", mode: "ask", summaries: ["", "", "", ""] }
+
+        // ---- step 1: the project ----
+        const FOLDERS = [
+          { name: "Vectordev.ai", path: "~/code/Vectordev.ai", meta: "main · TypeScript · bun", files: "2,341 files", agents: true },
+          { name: "blog", path: "~/code/blog", meta: "main · Astro", files: "186 files" },
+          { name: "api-gateway", path: "~/work/api-gateway", meta: "develop · Go", files: "912 files" },
+        ]
+        const REPOS = [
+          { name: "Vectordev/Vectordev.ai", meta: "TypeScript · updated 2 hours ago", files: "2,341 files", agents: true },
+          { name: "Vectordev/vector-docs", meta: "MDX · updated yesterday", files: "418 files" },
+          { name: "Vectordev/homebrew-tap", meta: "Ruby · updated last week", files: "12 files" },
+          { name: "Vectordev/vector-plugins", meta: "TypeScript · updated 3 days ago", files: "264 files" },
+          { name: "acme/api-gateway", meta: "Go · updated 5 days ago", files: "912 files" },
+        ]
+
+        function renderFolders() {
+          stage.querySelector("[data-folders]").innerHTML = FOLDERS.map(
+            (f, i) => `<button class="fr-row" type="button" role="radio" aria-checked="${state.project?.path === f.path}" data-folder="${i}">
+              ${glyph("folder", 16)}<span class="fr-row-text"><b>${f.name}</b><span>${f.path}</span></span>
+              <span class="fr-row-end"><span class="badge">${f.meta}</span></span>
+            </button>`,
+          ).join("")
+        }
+        function renderRepos() {
+          const q = stage.querySelector("[data-repo-search]").value.trim().toLowerCase()
+          const items = REPOS.filter((r) => r.name.toLowerCase().includes(q))
+          stage.querySelector("[data-repos]").innerHTML =
+            items
+              .map(
+                (r) => `<button class="fr-row" type="button" role="radio" aria-checked="${state.project?.repo === r.name}" data-repo="${r.name}">
+                  ${glyph("repo", 16)}<span class="fr-row-text"><b>${r.name}</b><span>${r.meta}</span></span>
+                  <span class="fr-row-end"><span class="badge">Clone</span></span>
+                </button>`,
+              )
+              .join("") || `<p style="padding:14px 12px;color:var(--text-3);font-size:12.5px">No repositories match “${esc(q)}”.</p>`
+        }
+        function renderDetected() {
+          const el = stage.querySelector("[data-detected]")
+          const p = state.project
+          if (!p) {
+            el.hidden = true
+            return
+          }
+          el.hidden = false
+          el.innerHTML = `
+            <div class="fr-detected-top">
+              <span style="color:var(--text-1);font-weight:500">${glyph("check", 14)}${esc(p.name)}</span>
+              <span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(p.where)}</span>
+              <span>${p.files}</span>
+              ${p.agents ? `<span>${glyph("doc", 13)}AGENTS.md found, Vector will follow it</span>` : ""}
+            </div>
+            <div class="fr-trust">
+              <div>Trust this folder<span>Lets the project's own config run: <code class="mono" style="font-size:11px">vector.json</code> hooks, commands and MCP servers. Until then they ask first. Trust is tied to the folder's fingerprint.</span></div>
+              <button class="switch" role="switch" aria-checked="${p.trusted}" type="button" aria-label="Trust this folder" data-trust></button>
+            </div>`
+        }
+        stage.querySelectorAll("[data-source]").forEach((b) =>
+          b.addEventListener("click", () => {
+            state.source = b.dataset.source
+            stage.querySelectorAll("[data-source]").forEach((o) => o.setAttribute("aria-checked", String(o === b)))
+            stage.querySelectorAll("[data-source-panel]").forEach((p) => (p.hidden = p.dataset.sourcePanel !== state.source))
+            if (state.source === "github") stage.querySelector("[data-repo-search]").focus({ preventScroll: true })
+          }),
+        )
+        stage.querySelector("[data-folders]").addEventListener("click", (event) => {
+          const row = event.target.closest("[data-folder]")
+          if (!row) return
+          const f = FOLDERS[Number(row.dataset.folder)]
+          state.project = { name: f.name, path: f.path, where: f.path, files: f.files, agents: f.agents, trusted: false }
+          renderFolders()
+          renderDetected()
+          sync()
+        })
+        stage.querySelector("[data-repos]").addEventListener("click", (event) => {
+          const row = event.target.closest("[data-repo]")
+          if (!row) return
+          const r = REPOS.find((x) => x.name === row.dataset.repo)
+          const name = r.name.split("/")[1]
+          state.project = { name, repo: r.name, where: `Cloned to ~/code/${name}`, files: r.files, agents: r.agents, trusted: false }
+          renderRepos()
+          renderDetected()
+          sync()
+        })
+        stage.querySelector("[data-repo-search]").addEventListener("input", renderRepos)
+        stage.querySelector("[data-detected]").addEventListener("lab:switch", (event) => {
+          if (state.project) state.project.trusted = event.detail
+        })
+
+        // ---- step 2: the model ----
+        const OPTIONS = [
+          { key: "openrouter", icon: "gift", title: "Free models with OpenRouter", badge: "Free", text: "Connect your own free OpenRouter account. Vector uses its zero-price coding models and stops at their limits instead of switching to a paid one.", action: "Connect OpenRouter", wait: "Finish in your browser…", result: "Connected · 19 free models", models: ["Best free coding model", "Fastest free model"] },
+          { key: "chatgpt", icon: "spark", title: "Sign in with ChatGPT", text: "Use GPT-6 Sol, GPT-6 Astra and GPT-6 Luna with the plan you already pay for.", action: "Sign in", wait: "Waiting for ChatGPT…", result: "Signed in · 4 models", models: ["GPT-6 Sol", "GPT-6 Astra", "GPT-6 Luna"] },
+          { key: "key", icon: "key", title: "Use an API key", text: "Any provider: OpenAI, Anthropic, Google, xAI, Mistral and more. Billed by them, at their prices.", action: null, result: "Key works · 214 models", models: ["GPT-6 Sol", "GPT-6 Astra"] },
+        ]
+        const connected = new Set()
+        let expanded = "openrouter"
+        let keyProvider = "OpenAI"
+        let keyError = ""
+        let keyValue = ""
+        let defaultModel = null
+
+        function renderOptions() {
+          stage.querySelector("[data-options]").innerHTML = OPTIONS.map((o) => {
+            const on = expanded === o.key
+            const isConnected = connected.has(o.key)
+            const waiting = state.connecting === o.key
+            const end = isConnected
+              ? `<span class="fr-connected">${glyph("check", 14)}${o.result}</span>`
+              : waiting
+                ? `<span class="fr-waiting"><span class="fr-spin"></span>${o.wait}</span>`
+                : o.action
+                  ? `<button class="btn ${on ? "btn-primary" : ""}" type="button" data-connect="${o.key}">${o.action}</button>`
+                  : `<span class="muted" style="font-size:12px">${on ? "" : "Paste a key"}</span>`
+            const body =
+              o.key === "key" && on && !isConnected
+                ? `<div class="fr-option-body">
+                    <div class="seg" role="group" aria-label="Provider" data-provider>${["OpenAI", "Anthropic", "Google", "xAI", "Mistral"].map((p) => `<button type="button" aria-pressed="${p === keyProvider}">${p}</button>`).join("")}</div>
+                    <form class="fr-key-row" data-key-form><label class="input"><span class="muted" style="display:grid">${glyph("key", 13)}</span><input type="password" data-key value="${esc(keyValue)}" placeholder="${keyProvider === "Anthropic" ? "sk-ant-…" : keyProvider === "Google" ? "AIza…" : "sk-…"}" aria-label="${keyProvider} API key" autocomplete="off" spellcheck="false" /></label><button class="btn btn-primary" type="submit">Check key</button></form>
+                    <p class="fr-note" ${keyError ? 'data-tone="red"' : ""} data-key-note>${keyError ? esc(keyError) : `${glyph("shield", 13)}Stored in your system keychain, never in the project or sent to Vector.`}</p>
+                  </div>`
+                : ""
+            return `<div class="fr-option" ${on && !isConnected ? "data-on" : ""} ${isConnected ? "data-connected" : ""}>
+              <div class="fr-option-head">
+                <span class="fr-choice-icon">${glyph(o.icon, 17)}</span>
+                <button class="fr-option-text" type="button" aria-expanded="${on}" data-option="${o.key}"><b>${o.title}${o.badge ? ` <span class="badge badge-green">${o.badge}</span>` : ""}</b><p>${o.text}</p></button>
+                ${end}
+              </div>
+              ${body}
+            </div>`
+          }).join("")
+          const key = stage.querySelector("[data-key]")
+          if (key && expanded === "key") key.focus({ preventScroll: true })
+          renderDefault()
+        }
+        function renderDefault() {
+          const el = stage.querySelector("[data-default]")
+          const last = OPTIONS.filter((o) => connected.has(o.key)).at(-1)
+          if (!last) {
+            el.hidden = true
+            return
+          }
+          if (!defaultModel || !OPTIONS.some((o) => connected.has(o.key) && o.models.includes(defaultModel))) defaultModel = last.models[0]
+          const models = [...new Set(OPTIONS.filter((o) => connected.has(o.key)).flatMap((o) => o.models))]
+          el.hidden = false
+          el.innerHTML = `<span>Default model <span class="muted">· change it any time from the composer</span></span><div class="fr-models" role="group" aria-label="Default model">${models.map((m) => `<button type="button" aria-pressed="${m === defaultModel}" data-model="${esc(m)}">${esc(m)}</button>`).join("")}</div>`
+        }
+        stage.querySelector("[data-options]").addEventListener("click", (event) => {
+          const connect = event.target.closest("[data-connect]")
+          const head = event.target.closest("[data-option]")
+          if (connect) {
+            const key = connect.dataset.connect
+            expanded = key
+            state.connecting = key
+            renderOptions()
+            setTimeout(() => {
+              state.connecting = null
+              connected.add(key)
+              state.model = OPTIONS.find((o) => o.key === key)
+              renderOptions()
+              sync()
+            }, reduced ? 0 : 1600)
+            return
+          }
+          if (head) {
+            expanded = head.dataset.option
+            keyError = ""
+            renderOptions()
+            return
+          }
+          const seg = event.target.closest("[data-provider] button")
+          if (seg) {
+            keyProvider = seg.textContent.trim()
+            keyError = ""
+            renderOptions()
+          }
+        })
+        stage.querySelector("[data-default]").addEventListener("click", (event) => {
+          const b = event.target.closest("[data-model]")
+          if (!b) return
+          defaultModel = b.dataset.model
+          renderDefault()
+          sync()
+        })
+        stage.querySelector("[data-options]").addEventListener("submit", (event) => {
+          event.preventDefault()
+          const value = stage.querySelector("[data-key]").value.trim()
+          keyValue = value
+          if (value.length < 12) {
+            keyError = value ? "That key is too short. Copy the whole key from your provider's dashboard." : "Paste a key first."
+            renderOptions()
+            return
+          }
+          state.connecting = "key"
+          renderOptions()
+          setTimeout(() => {
+            state.connecting = null
+            connected.add("key")
+            OPTIONS[2].result = `${keyProvider} key works · ${keyProvider === "OpenAI" ? 214 : keyProvider === "Anthropic" ? 9 : 31} models`
+            OPTIONS[2].models = keyProvider === "OpenAI" ? ["GPT-6 Sol", "GPT-6 Astra"] : [`${keyProvider} default`]
+            renderOptions()
+            sync()
+          }, reduced ? 0 : 1100)
+        })
+
+        // ---- step 3: the task ----
+        const TASKS = [
+          { key: "explain", icon: "book", title: "Explain this codebase", text: "A tour of <code>packages/</code>: what each one does and how they depend on each other.", safe: true, time: "~2 min", cost: "~$0.04" },
+          { key: "fix", icon: "tests", title: "Find and fix a failing test", text: "Runs <code>bun test</code> in packages/engine, picks one failure and fixes it.", safe: false, time: "~6 min", cost: "~$0.30" },
+          { key: "tests", icon: "pencil", title: "Add tests for a small module", text: "Covers <code>src/util/record.ts</code>, which has no tests yet.", safe: false, time: "~4 min", cost: "~$0.15" },
+          { key: "readme", icon: "doc", title: "Tighten the contributing guide", text: "Checks <code>CONTRIBUTING.md</code> against the real scripts and fixes what drifted.", safe: false, time: "~3 min", cost: "~$0.08" },
+        ]
+        function renderTasks() {
+          stage.querySelector("[data-tasks]").innerHTML = TASKS.map(
+            (t) => `<button class="fr-task" type="button" role="radio" aria-checked="${state.task === t.key}" data-task="${t.key}">
+              <span class="fr-task-top">${glyph(t.icon, 16)}<b>${t.title}</b><span class="fr-radio"></span></span>
+              <p>${t.text}</p>
+              <span class="fr-task-meta"><span class="badge ${t.safe ? "badge-green" : "badge-blue"}">${t.safe ? "Read-only" : "Edits files"}</span><span class="mono">${t.time} · ${t.cost}</span></span>
+            </button>`,
+          ).join("")
+        }
+        stage.querySelector("[data-tasks]").addEventListener("click", (event) => {
+          const t = event.target.closest("[data-task]")
+          if (!t) return
+          state.task = t.dataset.task
+          stage.querySelector("[data-custom]").value = ""
+          renderTasks()
+          sync()
+        })
+        stage.querySelector("[data-custom]").addEventListener("input", (event) => {
+          state.task = event.target.value.trim() ? "custom" : "explain"
+          renderTasks()
+          sync()
+        })
+        stage.querySelector("[data-mode]").addEventListener("lab:seg", (event) => {
+          state.mode = event.target.closest(".seg").querySelector('[aria-pressed="true"]').dataset.value
+          stage.querySelector("[data-mode-note]").textContent =
+            state.mode === "ask" ? "You approve each change. Good for a first run." : "Changes land on a new branch in a Parallel Workspace. main stays untouched."
+        })
+
+        // ---- step 4: the run ----
+        const SCRIPTS = {
+          explain: {
+            title: "Explain this codebase",
+            todos: ["Read the project's own notes", "Map the packages", "Write the tour"],
+            lines: [
+              ["reason", "Reading the project's conventions first"],
+              ["tool", "doc", "Read <code>AGENTS.md</code>", "84 lines", 0],
+              ["tool", "glob", "Glob <code>packages/*/package.json</code>", "14 files", 1],
+              ["reason", "Following the dependency direction between packages"],
+              ["tool", "doc", "Read <code>packages/engine/package.json</code> and 5 more", "6 files", 1],
+              ["tool", "glob", "Grep <code>from \"@vectordevai/</code>", "212 matches", 2],
+              ["answer", `Vectordev.ai is a Bun monorepo. Runtime code flows one way, from Schema to Core and Protocol, then to Server:<ul><li><code>packages/engine</code>: the agent itself, sessions, tools and providers</li><li><code>packages/app</code>: the desktop UI in Solid, inside <code>packages/desktop</code>'s Electron shell</li><li><code>packages/client</code>: the generated client; regenerate it, never edit it</li><li><code>packages/web</code>: vectordev.ai, built with Astro</li></ul>Start with <code>engine/src/session</code> to see how a prompt becomes a turn.`, null, 3],
+            ],
+            files: 0,
+          },
+          fix: {
+            title: "Find and fix a failing test",
+            todos: ["Run the engine's tests", "Find the cause", "Fix it", "Run the tests again"],
+            lines: [
+              ["tool", "terminal", "Ran <code>bun test</code> in packages/engine", "1 fail", 1],
+              ["reason", "One failure: a date in a snapshot depends on the local time zone"],
+              ["tool", "doc", "Read <code>test/util/format.test.ts</code>", "48 lines", 1],
+              ["tool", "pencil", "Edited <code>src/util/format.ts</code>", "+6 −2", 2],
+              ["tool", "pencil", "Edited <code>test/util/format.test.ts</code>", "+8 −1", 2],
+              ["tool", "terminal", "Ran <code>bun test</code> in packages/engine", "1,284 pass", 3],
+              ["answer", `Fixed. <code>formatDay()</code> used the machine's time zone, so the snapshot failed anywhere west of UTC. It now formats in UTC unless a zone is passed, and the test pins one. 2 files changed on <code>fix-format-timezone</code>, +14 −3.`, null, 4],
+            ],
+            files: 2,
+          },
+        }
+        let runTimer = 0
+        let runSecs = 0
+        function startRun() {
+          clearInterval(runTimer)
+          const custom = stage.querySelector("[data-custom]").value.trim()
+          const script = state.task === "explain" || state.task === "custom" ? SCRIPTS.explain : SCRIPTS.fix
+          const title = state.task === "custom" ? custom : TASKS.find((t) => t.key === state.task)?.title ?? script.title
+          const model = defaultModel ?? "GPT-6 Sol"
+          runSecs = 0
+          let shown = 0
+          let doneTodos = 0
+          const session = stage.querySelector("[data-session]")
+          stage.querySelector("[data-finish]").innerHTML = ""
+          stage.querySelector("[data-watch-title]").textContent = "Watch it work"
+          stage.querySelector("[data-watch-lede]").textContent = "This is a real session. Follow along, or leave it; it keeps going."
+          session.innerHTML = `
+            <div class="fr-session-head"><i data-icon="branch" data-size="15" class="muted"></i><b>${esc(title)}</b><span class="fr-pill mono">${script.files ? "fix-format-timezone" : "main"}</span><span class="fr-pill" data-tone="amber" data-run-status><i></i>Working</span></div>
+            <div class="fr-session-body">
+              <div class="fr-feed"><div class="fr-feed-inner" data-feed><p class="fr-reason fr-line">${esc(title)}: starting with ${esc(model)}</p></div></div>
+              <div class="fr-side">
+                <div><p class="fr-side-label">Todos</p><ul class="fr-todos" data-todos></ul></div>
+                <div style="display:grid;gap:6px"><p class="fr-side-label" style="margin:0">This run</p>
+                  <p class="fr-stat"><span>Time</span><b data-run-time>0s</b></p>
+                  <p class="fr-stat"><span>Tokens</span><b data-run-tokens>0</b></p>
+                  <p class="fr-stat"><span>Cost</span><b data-run-cost>$0.00</b></p>
+                  <p class="fr-stat"><span>Files changed</span><b data-run-files>0</b></p>
+                </div>
+              </div>
+            </div>`
+          LabUI.renderIcons(session)
+          const paint = () => {
+            stage.querySelector("[data-todos]").innerHTML = script.todos
+              .map((t, i) => `<li data-s="${i < doneTodos ? "done" : i === doneTodos ? "doing" : ""}"><span class="fr-box">${glyph("check", 10)}</span>${esc(t)}</li>`)
+              .join("")
+          }
+          paint()
+          const step = () => {
+            runSecs += 1
+            stage.querySelector("[data-run-time]").textContent = fmt(runSecs * 4)
+            stage.querySelector("[data-run-tokens]").textContent = `${(runSecs * 2.7).toFixed(1)}k`
+            stage.querySelector("[data-run-cost]").textContent = `$${(runSecs * (script.files ? 0.011 : 0.0024)).toFixed(2)}`
+            if (runSecs % 2 !== 0 && shown < script.lines.length) return
+            const line = script.lines[shown]
+            if (!line) return finish(script, title)
+            shown += 1
+            const feed = stage.querySelector("[data-feed]")
+            const [kind] = line
+            if (kind === "reason") feed.insertAdjacentHTML("beforeend", `<p class="fr-reason fr-line">${line[1]}</p>`)
+            if (kind === "tool") {
+              feed.insertAdjacentHTML("beforeend", `<p class="fr-tool fr-line">${glyph(line[1], 14)}<span>${line[2]}</span><span class="fr-tool-end">${line[3]}</span></p>`)
+              doneTodos = Math.max(doneTodos, line[4])
+              if (line[1] === "pencil") stage.querySelector("[data-run-files]").textContent = String(shown >= 5 ? 2 : 1)
+            }
+            if (kind === "answer") {
+              feed.insertAdjacentHTML("beforeend", `<div class="fr-answer fr-line">${line[1]}</div>`)
+              doneTodos = line[3]
+            }
+            paint()
+            const scroller = stage.querySelector(".fr-feed")
+            scroller.scrollTop = scroller.scrollHeight
+          }
+          if (reduced) {
+            while (shown < script.lines.length) step()
+            finish(script, title)
+            return
+          }
+          runTimer = setInterval(step, 700)
+        }
+        function finish(script, title) {
+          clearInterval(runTimer)
+          state.done[3] = true
+          state.summaries[3] = script.files ? "2 files changed, tests pass" : "Finished in under 2 minutes"
+          const status = stage.querySelector("[data-run-status]")
+          status.dataset.tone = "green"
+          status.innerHTML = "<i></i>Done"
+          stage.querySelector("[data-watch-title]").textContent = "Your first task is done"
+          stage.querySelector("[data-watch-lede]").textContent = "That's the whole loop: a project, a model, a task, a result you can check. Everything from here works the same way."
+          stage.querySelector("[data-finish]").innerHTML = `
+            <div class="fr-done"><span class="fr-done-icon">${glyph("check", 18)}</span><div><b>${esc(title)}</b><span>${script.files ? "2 files changed on a new branch · tests pass · review before you merge" : "Read-only · nothing on disk changed"} · ${stage.querySelector("[data-run-cost]").textContent}</span></div>${script.files ? `<button class="btn" type="button">${LabUI.svg("review", 14)}Review changes</button>` : ""}</div>
+            <div class="fr-next">
+              <a href="${LabUI.page("designs/agent-board")}"><b>${glyph("workspace", 15)}Run agents in parallel</b><span>Each in its own workspace and branch, on the Agent Dashboard.</span></a>
+              <a href="${LabUI.page("designs/command-palette")}"><b>${glyph("glob", 15)}Press ⌘K for anything</b><span>Files, sessions, commands and settings in one place.</span></a>
+              <a href="${LabUI.page("designs/vector-cloud")}"><b>${LabUI.svg("chip", 15)}Keep it going in the cloud</b><span>Close the laptop; Vector Cloud carries on.</span></a>
+            </div>`
+          sync()
+        }
+
+        // ---- navigation and the checklist ----
+        const stepsEl = stage.querySelector("[data-steps]")
+        function canContinue() {
+          if (state.step === 0) return !!state.project
+          if (state.step === 1) return connected.size > 0
+          if (state.step === 2) return !!state.task
+          return state.done[3]
+        }
+        function summary(i) {
+          if (i === 0 && state.project) return `${state.project.name}${state.project.trusted ? " · trusted" : ""}`
+          if (i === 1 && connected.size) return `${OPTIONS.filter((o) => connected.has(o.key)).map((o) => (o.key === "openrouter" ? "OpenRouter free" : o.key === "chatgpt" ? "ChatGPT" : "API key")).join(", ")} · ${defaultModel ?? ""}`
+          if (i === 2 && state.done[2]) return state.task === "custom" ? "Your own task" : TASKS.find((t) => t.key === state.task)?.title
+          if (i === 3 && state.done[3]) return state.summaries[3]
+          return ["Folder or GitHub", "Free, ChatGPT or an API key", "Something small and safe", "A real session, start to finish"][i]
+        }
+        function sync() {
+          const reachable = (i) => i <= state.step || state.done.slice(0, i).every(Boolean)
+          stepsEl.innerHTML = STEPS.map(
+            (s, i) => `<li><button class="fr-step" type="button" data-goto="${i}" data-state="${state.done[i] ? "done" : ""}" ${state.step === i ? 'aria-current="step"' : ""} ${reachable(i) && !(i === 3 && !state.done[2]) ? "" : "disabled"}>
+              <span class="fr-num">${state.done[i] ? glyph("check", 12) : i + 1}</span>
+              <span class="fr-step-text"><b>${s.title}</b><span>${esc(summary(i))}</span></span>
+            </button></li>`,
+          ).join("")
+          const n = state.done.filter(Boolean).length
+          stage.querySelector("[data-progress-text]").textContent = `${n} of 4`
+          stage.querySelector("[data-progress-pct]").textContent = `${n * 25}%`
+          stage.querySelector("[data-progress-bar]").style.width = `${n * 25}%`
+          stage.querySelectorAll("[data-pane]").forEach((p) => (p.hidden = Number(p.dataset.pane) !== state.step))
+          const next = stage.querySelector("[data-next]")
+          const ok = canContinue()
+          next.disabled = !ok
+          next.innerHTML = state.step === 2 ? `Start the task <kbd>↵</kbd>` : state.step === 3 ? (state.done[3] ? `Open Vector <kbd>↵</kbd>` : `Working…`) : `Continue <kbd>↵</kbd>`
+          stage.querySelector("[data-back]").hidden = state.step === 0
+          stage.querySelector("[data-skip]").hidden = state.step === 3
+          stage.querySelector("[data-hint]").textContent = ok
+            ? state.step === 0
+              ? `${state.project.name} is ready.`
+              : state.step === 1
+                ? `Using ${defaultModel} by default.`
+                : state.step === 2
+                  ? state.mode === "ask"
+                    ? "It will ask before it edits anything."
+                    : "Edits go to a new branch."
+                  : "Setup complete. Welcome aboard."
+            : STEPS[state.step].hint || "It takes a minute or two."
+          stage.querySelector("[data-project-name]").textContent = state.project?.name ?? "your project"
+        }
+        function go(step) {
+          state.step = step
+          stage.querySelector("[data-scroll]").scrollTop = 0
+          if (step === 3 && !state.done[3]) startRun()
+          sync()
+        }
+        stage.querySelector("[data-next]").addEventListener("click", () => {
+          if (!canContinue()) return
+          if (state.step === 3) return (location.href = LabUI.page("designs/subagent-orchestration"))
+          state.done[state.step] = true
+          go(state.step + 1)
+        })
+        stage.querySelector("[data-back]").addEventListener("click", () => go(Math.max(0, state.step - 1)))
+        stepsEl.addEventListener("click", (event) => {
+          const b = event.target.closest("[data-goto]")
+          if (b && !b.disabled) go(Number(b.dataset.goto))
+        })
+        stage.querySelector("[data-skip]").addEventListener("click", () => {
+          const hint = stage.querySelector("[data-hint]")
+          hint.textContent = "Skipped steps stay in the checklist on Home until you finish them."
+        })
+        stage.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || event.target.closest("textarea, input, button, [role=radio]")) return
+          event.preventDefault()
+          stage.querySelector("[data-next]").click()
+        })
+        stage.querySelector("[data-import]").addEventListener("click", (event) => {
+          const b = event.currentTarget
+          b.toggleAttribute("data-done", true)
+          stage.querySelector("[data-import-text]").textContent = "Imported 3 agents, 6 MCP servers and 41 permission rules"
+        })
+
+        fillGlyphs(stage)
+        renderFolders()
+        renderRepos()
+        renderOptions()
+        renderTasks()
+        sync()
+      })
+    </script>
+  </body>
+</html>

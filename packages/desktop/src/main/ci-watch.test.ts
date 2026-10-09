@@ -4,8 +4,7 @@ import { join } from "node:path"
 
 import { describe, expect, test } from "bun:test"
 
-import { buildRepairPrompt, detectCiRepo, ghAvailability, parseFailureLog, type CiFailure } from "./ci-watch"
-import { GH_DOWNLOAD_URL } from "./gh-install"
+import { buildRepairPrompt, detectCiRepo, failedStepLog, parseFailureLog, type CiFailure } from "./ci-watch"
 
 // Real `gh run view --log-failed` output: "<job>\t<step>\t<ISO timestamp> <line>".
 const TSC_LOG = [
@@ -229,16 +228,63 @@ describe("buildRepairPrompt", () => {
   })
 })
 
-describe("unavailable environments", () => {
-  test("reports gh as missing with a way to install it this machine can use", async () => {
-    // What the shared gh runner answers when no gh is found anywhere it looks.
-    const status = await ghAvailability(async () => ({ stdout: "", stderr: "GitHub CLI was not found.", failed: true }))
-    if (!status) throw new Error("gh should not have been resolvable")
-    expect(status.reason).toBe("gh-missing")
-    // Either a command a package manager on this machine can run, or the download link; never a guess.
-    expect(status.command === `See ${GH_DOWNLOAD_URL}` || /^(sudo )?\S+ (install|-S)/.test(status.command)).toBe(true)
+// A whole job's log as GitHub's API returns it: every step in a row, each line timestamped.
+const JOB_LOG = [
+  "2026-08-19T11:03:58.0000000Z ##[group]Run actions/checkout@v4",
+  "2026-08-19T11:03:58.1000000Z with:",
+  "2026-08-19T11:03:59.0000000Z ##[endgroup]",
+  "2026-08-19T11:04:00.0000000Z ##[group]Run bun run lint",
+  "2026-08-19T11:04:00.1000000Z ##[endgroup]",
+  "2026-08-19T11:04:01.0000000Z ##[error]Unused import in src/a.ts (continue-on-error)",
+  "2026-08-19T11:04:02.1200000Z ##[group]Run bun typecheck",
+  "2026-08-19T11:04:02.1200000Z bun typecheck",
+  "2026-08-19T11:04:02.1200000Z shell: /usr/bin/bash -e {0}",
+  "2026-08-19T11:04:02.1200000Z ##[endgroup]",
+  "2026-08-19T11:04:03.4000000Z $ tsgo -b",
+  "2026-08-19T11:04:09.9000000Z src/main/ci-watch.ts(84,7): error TS2322: Type 'string' is not assignable to type 'number'.",
+  "2026-08-19T11:04:10.0000000Z Found 1 error in 1 file.",
+  "2026-08-19T11:04:10.1000000Z ##[error]Process completed with exit code 2.",
+  "2026-08-19T11:04:10.3000000Z Post job cleanup.",
+  "2026-08-19T11:04:10.4000000Z [command]/usr/bin/git version",
+].join("\n")
+
+describe("failedStepLog", () => {
+  const job = {
+    id: 1,
+    name: "typecheck",
+    conclusion: "failure",
+    steps: [
+      { name: "Checkout", conclusion: "success" },
+      { name: "Lint", conclusion: "success" },
+      { name: "Typecheck", conclusion: "failure" },
+    ],
+  }
+
+  test("keeps only the step that failed the job, labelled for parseFailureLog", () => {
+    const lines = failedStepLog(JOB_LOG, job)
+    expect(lines[0]).toBe("typecheck\tTypecheck\t2026-08-19T11:04:02.1200000Z ##[group]Run bun typecheck")
+    expect(lines.at(-1)).toContain("Process completed with exit code 2.")
+    // Earlier steps, including one that logged an error and carried on, and the cleanup after it are left out.
+    expect(
+      lines.some((line) => line.includes("checkout") || line.includes("Unused import") || line.includes("Post job")),
+    ).toBe(false)
+    const [step] = parseFailureLog(lines.join("\n"))
+    expect(step).toMatchObject({
+      job: "typecheck",
+      step: "Typecheck",
+      kind: "type-error",
+      command: "bun typecheck",
+      exitCode: 2,
+    })
   })
 
+  test("falls back to the whole log when no step header or error marks the failure", () => {
+    const lines = failedStepLog("2026-08-19T11:04:00.0000000Z segmentation fault", { name: "build", steps: [] })
+    expect(lines).toEqual(["build\t\t2026-08-19T11:04:00.0000000Z segmentation fault"])
+  })
+})
+
+describe("unavailable environments", () => {
   test("names the command that adds a remote when the repo has none", async () => {
     const dir = await mkdtemp(join(tmpdir(), "vector-ci-watch-"))
     await Bun.spawn(["git", "init", "-q"], { cwd: dir, stdout: "ignore", stderr: "ignore" }).exited

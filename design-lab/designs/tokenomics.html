@@ -1,0 +1,1958 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Vector Design Lab</title>
+    <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../assets/lab.css" />
+    <style>
+      .d-tokenomics {
+        /* Chart series, validated for the dark card surface (dataviz validator: all checks pass). */
+        --s-session: #8a6cf0;
+        --s-parallel: #c96a95;
+        --s-scheduled: #3b97cc;
+      }
+      .d-tokenomics [hidden] {
+        display: none !important;
+      }
+
+      /* ---------- Settings navigation (same shape as D09) ---------- */
+      .d-tokenomics .sn {
+        display: flex;
+        flex: 0 0 248px;
+        flex-direction: column;
+        width: 248px;
+        height: 100%;
+        border-right: 1px solid rgba(255, 255, 255, 0.035);
+        background: var(--sidebar);
+        color: var(--text-2);
+        user-select: none;
+      }
+      .d-tokenomics .sn-top {
+        display: flex;
+        flex: none;
+        align-items: center;
+        height: 47px;
+        padding: 0 10px;
+        border-bottom: 1px solid var(--hairline);
+        background: var(--sidebar-top);
+      }
+      .d-tokenomics .sn-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 9px 0 6px;
+        border-radius: 6px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        text-decoration: none;
+      }
+      .d-tokenomics .sn-back:hover {
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+      }
+      .d-tokenomics .sn-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 14px 12px;
+      }
+      .d-tokenomics .sn-mark {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border: 1px solid var(--violet-line);
+        border-radius: 8px;
+        background: var(--violet-soft);
+        color: var(--violet-bright);
+        box-shadow: 0 0 18px rgba(146, 116, 236, 0.18);
+      }
+      .d-tokenomics .sn-brand b {
+        display: block;
+        color: var(--text-1);
+        font-size: 13.5px;
+        font-weight: 600;
+      }
+      .d-tokenomics .sn-brand span {
+        color: var(--text-3);
+        font: 11px var(--mono);
+      }
+      .d-tokenomics .sn-search {
+        margin: 0 10px 8px;
+        background: rgba(0, 0, 0, 0.16);
+      }
+      .d-tokenomics .sn-search svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-tokenomics .sn-search input::placeholder {
+        color: var(--text-3);
+      }
+      .d-tokenomics .sn-search input::-webkit-search-cancel-button {
+        display: none;
+      }
+      .d-tokenomics .sn-groups {
+        flex: 1;
+        min-height: 0;
+        padding: 2px 8px 12px;
+      }
+      .d-tokenomics .sn-group {
+        padding: 8px 0 4px;
+      }
+      .d-tokenomics .sn-label {
+        margin: 0;
+        padding: 4px 8px 5px;
+        color: #9a96a0;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .d-tokenomics .sn-item {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        gap: 9px;
+        height: 31px;
+        padding: 0 8px;
+        border-radius: 5px;
+        color: #c4c1c8;
+        font-size: 13px;
+        text-decoration: none;
+        white-space: nowrap;
+        transition:
+          background-color 120ms ease,
+          color 120ms ease;
+      }
+      .d-tokenomics .sn-item svg {
+        flex: none;
+        color: var(--text-3);
+      }
+      .d-tokenomics .sn-item:hover {
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+      }
+      .d-tokenomics .sn-item[aria-current="page"] {
+        background: linear-gradient(90deg, rgba(182, 159, 247, 0.12), transparent 72%), rgba(255, 255, 255, 0.068);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+        color: var(--text-1);
+      }
+      .d-tokenomics .sn-item[aria-current="page"] svg {
+        color: var(--violet-bright);
+      }
+      .d-tokenomics .sn-end {
+        margin-left: auto;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-tokenomics .sn-empty {
+        margin: 10px 8px;
+        padding: 12px;
+        border: 1px dashed var(--line-strong);
+        border-radius: 8px;
+        color: var(--text-3);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .d-tokenomics .sn-empty strong {
+        display: block;
+        margin-bottom: 2px;
+        color: var(--text-1);
+        font-weight: 500;
+      }
+      .d-tokenomics .sn-foot {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: space-between;
+        height: 46px;
+        padding: 0 14px;
+        border-top: 1px solid var(--hairline);
+        background: var(--sidebar-foot);
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+
+      /* ---------- Header ---------- */
+      .d-tokenomics .crumbs {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 13px;
+      }
+      .d-tokenomics .sel {
+        position: relative;
+        display: inline-flex;
+      }
+      .d-tokenomics .sel select {
+        height: 28px;
+        padding: 0 28px 0 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background: var(--control);
+        color: var(--text-1);
+        font-size: 12.5px;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .d-tokenomics .sel svg {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        color: var(--text-3);
+        pointer-events: none;
+      }
+
+      /* ---------- Page ---------- */
+      .d-tokenomics .tk {
+        display: grid;
+        gap: 14px;
+        padding: 18px 22px 28px;
+      }
+      .d-tokenomics .tk-note {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        color: var(--text-3);
+        font-size: 12px;
+      }
+      .d-tokenomics .tk-note b {
+        color: var(--text-2);
+        font-weight: 500;
+      }
+      .d-tokenomics .tk-note .btn {
+        margin-left: auto;
+      }
+      .d-tokenomics .kpis {
+        display: grid;
+        grid-template-columns: 1.25fr 1fr 1fr 1fr 1.1fr;
+        gap: 12px;
+      }
+      .d-tokenomics .kpi {
+        position: relative;
+        display: grid;
+        gap: 4px;
+        min-height: 98px;
+        padding: 13px 14px 12px;
+        overflow: hidden;
+        transition: opacity 200ms ease;
+      }
+      .d-tokenomics .kpi-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-tokenomics .kpi-value {
+        color: var(--text-1);
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+      .d-tokenomics .kpi-value small {
+        margin-left: 4px;
+        color: var(--text-3);
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0;
+      }
+      .d-tokenomics .kpi-sub {
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+      .d-tokenomics .kpi-sub b {
+        font-weight: 500;
+      }
+      .d-tokenomics .up {
+        color: var(--amber);
+      }
+      .d-tokenomics .down {
+        color: var(--green);
+      }
+      .d-tokenomics .spark {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+      }
+      .d-tokenomics .meter {
+        position: relative;
+        height: 5px;
+        margin-top: 4px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .d-tokenomics .meter i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 3px;
+        background: var(--violet);
+        transition: width 300ms var(--ease);
+      }
+      .d-tokenomics .meter i.is-warn {
+        background: var(--amber);
+      }
+      .d-tokenomics .meter i.is-over {
+        background: var(--red);
+      }
+      .d-tokenomics .meter b {
+        position: absolute;
+        top: -3px;
+        width: 2px;
+        height: 11px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background: var(--text-3);
+      }
+
+      .d-tokenomics .grid-a {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 14px;
+      }
+      .d-tokenomics .grid-b {
+        display: grid;
+        grid-template-columns: 1fr 1fr 0.92fr;
+        gap: 14px;
+      }
+      .d-tokenomics .card-head {
+        min-height: 46px;
+        padding: 10px 12px 10px 14px;
+      }
+      .d-tokenomics .card-head .sub {
+        margin: 2px 0 0;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-tokenomics .head-end {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+      .d-tokenomics .seg button {
+        padding: 0 9px;
+      }
+
+      /* Chart */
+      .d-tokenomics .chart-card {
+        position: relative;
+        transition: opacity 200ms ease;
+      }
+      .d-tokenomics .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        padding: 10px 14px 0;
+        color: var(--text-2);
+        font-size: 11.5px;
+      }
+      .d-tokenomics .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .d-tokenomics .legend i {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+      .d-tokenomics .legend .ring {
+        width: 8px;
+        height: 8px;
+        border: 1.5px solid var(--text-3);
+        border-radius: 50%;
+      }
+      .d-tokenomics .legend .rule {
+        width: 14px;
+        height: 0;
+        border-top: 1.5px solid var(--amber);
+        border-radius: 0;
+      }
+      .d-tokenomics .legend .total {
+        margin-left: auto;
+        color: var(--text-3);
+      }
+      .d-tokenomics .legend .total b {
+        color: var(--text-1);
+        font: 600 12px var(--mono);
+      }
+      .d-tokenomics .chart {
+        display: block;
+        width: 100%;
+        outline: none;
+      }
+      .d-tokenomics .chart:focus-visible {
+        outline: 2px solid #9d84ee;
+        outline-offset: -2px;
+        border-radius: 6px;
+      }
+      .d-tokenomics .chart text {
+        fill: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-tokenomics .chart .grid line {
+        stroke: rgba(255, 255, 255, 0.06);
+        stroke-width: 1;
+      }
+      .d-tokenomics .chart .base {
+        stroke: rgba(255, 255, 255, 0.16);
+      }
+      .d-tokenomics .chart .bar .seg {
+        transition: opacity 120ms ease;
+      }
+      .d-tokenomics .chart.is-hovering .bar:not(.is-on) .seg {
+        opacity: 0.38;
+      }
+      .d-tokenomics .chart .hit {
+        fill: transparent;
+        cursor: crosshair;
+      }
+      .d-tokenomics .chart .alert-line {
+        stroke: var(--amber);
+        stroke-opacity: 0.7;
+        stroke-width: 1;
+      }
+      .d-tokenomics .chart .alert-label {
+        fill: var(--amber);
+        font-size: 10px;
+      }
+      .d-tokenomics .chart .unm {
+        fill: none;
+        stroke: var(--text-3);
+        stroke-width: 1.3;
+      }
+      .d-tokenomics .tip {
+        position: absolute;
+        z-index: 6;
+        min-width: 196px;
+        padding: 10px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 9px;
+        background: rgba(30, 27, 35, 0.97);
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+        color: var(--text-1);
+        font-size: 12px;
+        pointer-events: none;
+      }
+      .d-tokenomics .tip-date {
+        margin-bottom: 6px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-tokenomics .tip-total {
+        margin-bottom: 8px;
+        font: 600 17px var(--font);
+      }
+      .d-tokenomics .tip-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 20px;
+        color: var(--text-2);
+      }
+      .d-tokenomics .tip-row i {
+        width: 12px;
+        height: 2px;
+        border-radius: 1px;
+      }
+      .d-tokenomics .tip-row b {
+        margin-left: auto;
+        color: var(--text-1);
+        font: 500 11.5px var(--mono);
+      }
+      .d-tokenomics .tip-foot {
+        margin-top: 7px;
+        padding-top: 7px;
+        border-top: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11px;
+      }
+
+      /* Budgets */
+      .d-tokenomics .budgets {
+        margin: 0;
+        padding: 4px 6px 8px;
+        list-style: none;
+      }
+      .d-tokenomics .budget {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 12px;
+        align-items: center;
+        padding: 9px 8px;
+        border-radius: 7px;
+      }
+      .d-tokenomics .budget:hover {
+        background: rgba(255, 255, 255, 0.025);
+      }
+      .d-tokenomics .budget.is-new {
+        animation: flash 1.6s var(--ease);
+      }
+      @keyframes flash {
+        0%,
+        30% {
+          background: rgba(182, 159, 247, 0.12);
+        }
+      }
+      .d-tokenomics .budget-name {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        color: var(--text-1);
+        font-size: 12.5px;
+      }
+      .d-tokenomics .budget-name span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-tokenomics .budget-end {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        grid-row: span 2;
+      }
+      .d-tokenomics .budget-end .icon-btn {
+        width: 26px;
+        height: 26px;
+      }
+      .d-tokenomics .budget-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text-3);
+        font-size: 11px;
+      }
+      .d-tokenomics .budget-line .meter {
+        flex: 1;
+        margin: 0;
+      }
+      .d-tokenomics .budget-line .mono {
+        color: var(--text-2);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .d-tokenomics .budget .badge {
+        height: 18px;
+        font-size: 10.5px;
+      }
+
+      /* Breakdown lists */
+      .d-tokenomics .bd {
+        margin: 0;
+        padding: 6px 6px 8px;
+        list-style: none;
+      }
+      .d-tokenomics .bd-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 70px;
+        gap: 3px 12px;
+        align-items: center;
+        width: 100%;
+        min-height: 42px;
+        padding: 5px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+      .d-tokenomics .bd-row:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .d-tokenomics .bd-name {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        font-size: 12.5px;
+      }
+      .d-tokenomics .bd-name > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-tokenomics .bd-name small {
+        color: var(--text-3);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .d-tokenomics .bd-val {
+        color: var(--text-1);
+        font: 500 12px var(--mono);
+        text-align: right;
+      }
+      .d-tokenomics .bd-bar {
+        position: relative;
+        height: 4px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .d-tokenomics .bd-bar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: 2px;
+        background: var(--s-session);
+        transition: width 300ms var(--ease);
+      }
+      .d-tokenomics .bd-meta {
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+        text-align: right;
+      }
+      .d-tokenomics .bd-row.is-child {
+        padding-left: 30px;
+      }
+      .d-tokenomics .bd-row.is-child .bd-bar i {
+        opacity: 0.7;
+      }
+      .d-tokenomics .bd-row .chev {
+        color: var(--text-3);
+        transition: transform 160ms ease;
+      }
+      .d-tokenomics .bd-row[aria-expanded="true"] .chev {
+        transform: rotate(90deg);
+      }
+      .d-tokenomics .bd-row .unmeasured {
+        color: var(--text-3);
+        font: italic 11px var(--font);
+      }
+      .d-tokenomics .bd-scroll {
+        max-height: 292px;
+      }
+      .d-tokenomics .tabs {
+        height: 46px;
+        padding: 0 10px;
+      }
+      .d-tokenomics .tabs .tab {
+        height: 28px;
+        font-size: 12.5px;
+      }
+
+      /* Cache and measurement */
+      .d-tokenomics .stack {
+        display: grid;
+        gap: 0;
+      }
+      .d-tokenomics .facts {
+        padding: 12px 14px 14px;
+      }
+      .d-tokenomics .facts + .facts {
+        border-top: 1px solid var(--hairline);
+      }
+      .d-tokenomics .facts h4 {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin: 0 0 4px;
+        color: var(--text-1);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .d-tokenomics .facts h4 span {
+        margin-left: auto;
+        color: var(--text-1);
+        font: 600 15px var(--font);
+      }
+      .d-tokenomics .facts p {
+        margin: 0 0 9px;
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+      .d-tokenomics .facts dl {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 5px 10px;
+        margin: 10px 0 0;
+        font-size: 12px;
+      }
+      .d-tokenomics .facts dt {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--text-2);
+      }
+      .d-tokenomics .facts dd {
+        margin: 0;
+        color: var(--text-1);
+        font: 11.5px var(--mono);
+        text-align: right;
+      }
+      .d-tokenomics .facts dt i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+      }
+      .d-tokenomics .split {
+        display: flex;
+        gap: 2px;
+        height: 8px;
+        overflow: hidden;
+        border-radius: 3px;
+      }
+      .d-tokenomics .split i {
+        height: 100%;
+        transition: flex-grow 300ms var(--ease);
+      }
+      .d-tokenomics .hatch {
+        background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0 2px, rgba(255, 255, 255, 0.06) 2px 5px);
+      }
+
+      /* Sessions */
+      .d-tokenomics .sess-head,
+      .d-tokenomics .sess-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 150px 70px 86px 70px 84px 20px;
+        gap: 12px;
+        align-items: center;
+        padding: 0 14px;
+      }
+      .d-tokenomics .sess-head {
+        height: 34px;
+        border-top: 1px solid var(--hairline);
+        border-bottom: 1px solid var(--hairline);
+        color: var(--text-3);
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .d-tokenomics .sess-head button {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        justify-self: start;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+      }
+      .d-tokenomics .sess-head .num {
+        justify-self: end;
+      }
+      .d-tokenomics .sess-head button:hover,
+      .d-tokenomics .sess-head button[aria-sort="descending"] {
+        color: var(--text-1);
+      }
+      .d-tokenomics .sess-head button svg {
+        opacity: 0;
+      }
+      .d-tokenomics .sess-head button[aria-sort="descending"] svg {
+        opacity: 1;
+      }
+      .d-tokenomics .sess-list {
+        max-height: 284px;
+        margin: 0;
+        padding: 4px 0;
+        list-style: none;
+      }
+      .d-tokenomics .sess-row {
+        width: 100%;
+        min-height: 46px;
+        border: 0;
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+      }
+      .d-tokenomics .sess-row:hover,
+      .d-tokenomics .sess-row[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.035);
+      }
+      .d-tokenomics .sess-row[aria-pressed="true"] {
+        box-shadow: inset 2px 0 0 var(--violet-bright);
+      }
+      .d-tokenomics .sess-name {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .d-tokenomics .sess-name b {
+        overflow: hidden;
+        font-size: 13px;
+        font-weight: 400;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-tokenomics .sess-name span {
+        overflow: hidden;
+        color: var(--text-3);
+        font-size: 11.5px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-tokenomics .sess-row .cell {
+        overflow: hidden;
+        color: var(--text-2);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-tokenomics .sess-row .num {
+        color: var(--text-2);
+        font: 11.5px var(--mono);
+        text-align: right;
+      }
+      .d-tokenomics .sess-row .cost {
+        color: var(--text-1);
+        font: 500 12px var(--mono);
+        text-align: right;
+      }
+      .d-tokenomics .sess-row svg {
+        color: var(--text-3);
+      }
+      .d-tokenomics .sess-empty {
+        padding: 28px;
+        color: var(--text-3);
+        font-size: 12.5px;
+        text-align: center;
+      }
+      .d-tokenomics .sess-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .d-tokenomics .sess-tools .input {
+        width: 220px;
+        height: 28px;
+      }
+
+      /* Drawer: the Background tasks rectangle */
+      .d-tokenomics .drawer {
+        position: absolute;
+        top: 58px;
+        right: 16px;
+        bottom: 16px;
+        z-index: 15;
+        display: flex;
+        width: 452px;
+        flex-direction: column;
+        overflow: hidden;
+        animation: slide 240ms var(--ease);
+      }
+      @keyframes slide {
+        from {
+          opacity: 0;
+          transform: translateX(16px);
+        }
+      }
+      .d-tokenomics .drawer-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 14px 12px 12px 16px;
+        border-bottom: 1px solid var(--hairline);
+      }
+      .d-tokenomics .drawer-head h3 {
+        margin: 0 0 3px;
+        color: var(--text-1);
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .d-tokenomics .drawer-head p {
+        margin: 0;
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-tokenomics .drawer-head .icon-btn {
+        margin-left: auto;
+      }
+      .d-tokenomics .drawer-body {
+        flex: 1;
+        min-height: 0;
+        padding: 14px 16px 18px;
+      }
+      .d-tokenomics .dstats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .d-tokenomics .dstat {
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .d-tokenomics .dstat span {
+        display: block;
+        color: var(--text-3);
+        font-size: 10.5px;
+      }
+      .d-tokenomics .dstat b {
+        color: var(--text-1);
+        font: 600 14px var(--font);
+      }
+      .d-tokenomics .turns {
+        margin: 8px -6px 0;
+        padding: 0;
+        list-style: none;
+      }
+      .d-tokenomics .turn {
+        display: grid;
+        grid-template-columns: 18px minmax(0, 1fr) 64px;
+        gap: 2px 10px;
+        align-items: center;
+        padding: 7px 6px;
+        border-radius: 6px;
+      }
+      .d-tokenomics .turn:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .d-tokenomics .turn .n {
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-tokenomics .turn .t {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        font-size: 12.5px;
+      }
+      .d-tokenomics .turn .t span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .d-tokenomics .turn .badge {
+        height: 17px;
+        font-size: 10px;
+      }
+      .d-tokenomics .turn .c {
+        font: 500 11.5px var(--mono);
+        text-align: right;
+      }
+      .d-tokenomics .turn .m {
+        grid-column: 2 / 4;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text-3);
+        font: 10.5px var(--mono);
+      }
+      .d-tokenomics .turn .m .bd-bar {
+        flex: 1;
+      }
+      .d-tokenomics .turn.is-sub .t {
+        padding-left: 12px;
+      }
+      .d-tokenomics .drawer-note {
+        margin: 12px 0 0;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--text-3);
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+
+      /* Dialog, toast */
+      .d-tokenomics .scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: start center;
+        padding-top: 150px;
+        background: rgba(8, 6, 12, 0.55);
+        animation: fade 160ms ease;
+      }
+      @keyframes fade {
+        from {
+          opacity: 0;
+        }
+      }
+      .d-tokenomics .dialog {
+        width: 440px;
+        padding: 18px;
+        animation: pop 200ms var(--ease);
+      }
+      @keyframes pop {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.98);
+        }
+      }
+      .d-tokenomics .dialog h3 {
+        margin: 0 0 4px;
+        color: var(--text-1);
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .d-tokenomics .dialog > p {
+        margin: 0 0 16px;
+        color: var(--text-2);
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+      .d-tokenomics .field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 14px;
+      }
+      .d-tokenomics .field > span {
+        color: var(--text-2);
+        font-size: 12px;
+      }
+      .d-tokenomics .field .seg {
+        display: flex;
+      }
+      .d-tokenomics .field .sel,
+      .d-tokenomics .field .sel select {
+        width: 100%;
+      }
+      .d-tokenomics .field .seg button {
+        flex: 1;
+      }
+      .d-tokenomics .field-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .d-tokenomics .money input {
+        font: 13px var(--mono);
+      }
+      .d-tokenomics .warn-at {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .d-tokenomics .warn-at output {
+        min-width: 36px;
+        color: var(--text-1);
+        font: 12px var(--mono);
+        text-align: right;
+      }
+      .d-tokenomics input[type="range"] {
+        --fill: 60%;
+        flex: 1;
+        height: 18px;
+        margin: 0;
+        background: transparent;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .d-tokenomics input[type="range"]::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 4px;
+        background: linear-gradient(90deg, var(--violet) var(--fill), rgba(255, 255, 255, 0.12) var(--fill));
+      }
+      .d-tokenomics input[type="range"]::-webkit-slider-thumb {
+        width: 14px;
+        height: 14px;
+        margin-top: -5px;
+        border-radius: 50%;
+        background: #f1edf8;
+        box-shadow: 0 0 0 3px rgba(146, 116, 236, 0.22);
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .d-tokenomics .stopline {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 2px 0 16px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .d-tokenomics .stopline span {
+        display: grid;
+        flex: 1;
+        gap: 2px;
+        color: var(--text-1);
+        font-size: 12.5px;
+      }
+      .d-tokenomics .stopline small {
+        color: var(--text-3);
+        font-size: 11.5px;
+      }
+      .d-tokenomics .err {
+        margin: -6px 0 12px;
+        color: var(--red);
+        font-size: 11.5px;
+      }
+      .d-tokenomics .actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .d-tokenomics .actions .btn-danger {
+        margin-right: auto;
+      }
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translate(-50%, 6px);
+        }
+      }
+      .d-tokenomics .toast {
+        position: absolute;
+        top: 60px;
+        left: calc(248px + 596px);
+        z-index: 30;
+        padding: 9px 14px;
+        border-radius: 10px;
+        color: var(--text-1);
+        font-size: 12.5px;
+        transform: translateX(-50%);
+        white-space: nowrap;
+        animation: toast-in 220ms var(--ease);
+      }
+      .d-tokenomics .is-loading {
+        opacity: 0.55;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="lab-page">
+      <header data-lab-topbar data-slug="tokenomics"></header>
+
+      <div class="lab-window">
+        <div class="lab-bar">
+          <span class="lab-traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lab-bar-title">Vector</span>
+          <span class="lab-bar-end"><i></i> Concept</span>
+        </div>
+        <div class="lab-viewport" data-height="1380">
+          <div class="lab-stage d-tokenomics">
+            <div class="app">
+              <aside class="sn" id="sn" aria-label="Settings sections"></aside>
+              <main class="app-main">
+                <header class="app-header">
+                  <span class="crumbs"><span>Settings</span><i data-icon="chevron-right" data-size="13"></i></span>
+                  <h2>Usage &amp; spend</h2>
+                  <div class="app-header-end">
+                    <span class="seg" id="period" role="group" aria-label="Period">
+                      <button type="button" data-value="1" aria-pressed="false">Today</button>
+                      <button type="button" data-value="7" aria-pressed="false">7 days</button>
+                      <button type="button" data-value="30" aria-pressed="true">30 days</button>
+                      <button type="button" data-value="90" aria-pressed="false">90 days</button>
+                    </span>
+                    <span class="sel"><select id="project" aria-label="Project">
+                      <option value="all">All projects</option>
+                      <option value="Vectordev.ai">Vectordev.ai</option>
+                      <option value="vector-cloud">vector-cloud</option>
+                      <option value="docs-site">docs-site</option>
+                      <option value="nightly-deps">nightly-deps</option>
+                    </select><i data-icon="chevron-down" data-size="12"></i></span>
+                    <button class="btn" type="button" id="export"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.75v7.5M5 7.4l3 3 3-3M3 13.25h10"/></svg>Export CSV</button>
+                  </div>
+                </header>
+                <div class="app-body scroll">
+                  <div class="tk" id="tk">
+                    <p class="tk-note"><i data-icon="check" data-size="14"></i><span><b>Measured</b> from the tokens each provider reported, priced at the model catalog's list price. Plan discounts are not reflected, and a run with no reported usage is counted as unmeasured, never as $0.</span></p>
+
+                    <div class="kpis" id="kpis"></div>
+
+                    <div class="grid-a">
+                      <section class="card chart-card" id="chart-card" aria-labelledby="chart-title">
+                        <div class="card-head">
+                          <div>
+                            <h3 class="card-title" id="chart-title">Spend by day</h3>
+                            <p class="sub" id="chart-sub">Every session, parallel agent and scheduled run</p>
+                          </div>
+                          <div class="head-end">
+                            <span class="seg" id="metric" role="group" aria-label="Measure">
+                              <button type="button" data-value="cost" aria-pressed="true">Spend</button>
+                              <button type="button" data-value="tokens" aria-pressed="false">Tokens</button>
+                            </span>
+                          </div>
+                        </div>
+                        <div class="legend" id="legend"></div>
+                        <svg class="chart" id="chart" viewBox="0 0 760 286" height="286" tabindex="0" role="img" aria-label="Spend by day"></svg>
+                        <div class="tip" id="tip" hidden></div>
+                      </section>
+
+                      <section class="card" aria-labelledby="budget-title">
+                        <div class="card-head">
+                          <div>
+                            <h3 class="card-title" id="budget-title">Budgets and alerts</h3>
+                            <p class="sub">Calendar days and months, in your time zone</p>
+                          </div>
+                          <button class="btn btn-sm head-end" type="button" id="add-budget"><i data-icon="plus" data-size="13"></i>Add</button>
+                        </div>
+                        <ul class="budgets" id="budgets"></ul>
+                      </section>
+                    </div>
+
+                    <div class="grid-b">
+                      <section class="card" aria-labelledby="model-title">
+                        <div class="card-head">
+                          <div>
+                            <h3 class="card-title" id="model-title">By model</h3>
+                            <p class="sub">Spend, with the share served from cache</p>
+                          </div>
+                        </div>
+                        <ul class="bd" id="by-model"></ul>
+                      </section>
+
+                      <section class="card" aria-label="By project and agent">
+                        <div class="tabs" data-tabs="bd" role="tablist">
+                          <button class="tab" type="button" role="tab" data-tab="agent" aria-selected="true">By agent</button>
+                          <button class="tab" type="button" role="tab" data-tab="project" aria-selected="false">By project</button>
+                        </div>
+                        <ul class="bd bd-scroll scroll" id="by-agent" data-panel="agent" data-tabs-for="bd" role="tabpanel"></ul>
+                        <ul class="bd" id="by-project" data-panel="project" data-tabs-for="bd" role="tabpanel" hidden></ul>
+                      </section>
+
+                      <section class="card stack" aria-label="Cache and measurement">
+                        <div class="facts" id="cache"></div>
+                        <div class="facts" id="measured"></div>
+                      </section>
+                    </div>
+
+                    <section class="card" aria-labelledby="sess-title">
+                      <div class="card-head">
+                        <div>
+                          <h3 class="card-title" id="sess-title">Sessions</h3>
+                          <p class="sub">A session's cost includes everything its subagents spent. Open one to see each turn.</p>
+                        </div>
+                        <div class="head-end sess-tools">
+                          <label class="input"><i data-icon="search" data-size="13" class="muted"></i><input id="sess-search" placeholder="Filter sessions" aria-label="Filter sessions" /></label>
+                        </div>
+                      </div>
+                      <div class="sess-head" role="row">
+                        <button type="button" data-sort="title" aria-sort="none">Session</button>
+                        <span>Model</span>
+                        <button type="button" class="num" data-sort="runs" aria-sort="none">Turns<i data-icon="caret" data-size="11"></i></button>
+                        <button type="button" class="num" data-sort="tokens" aria-sort="none">Tokens<i data-icon="caret" data-size="11"></i></button>
+                        <button type="button" class="num" data-sort="cache" aria-sort="none">Cache<i data-icon="caret" data-size="11"></i></button>
+                        <button type="button" class="num" data-sort="cost" aria-sort="descending">Cost<i data-icon="caret" data-size="11"></i></button>
+                        <span></span>
+                      </div>
+                      <ul class="sess-list scroll" id="sessions"></ul>
+                    </section>
+                  </div>
+                </div>
+              </main>
+            </div>
+
+            <aside class="float drawer" id="drawer" aria-labelledby="drawer-title" hidden>
+              <div class="drawer-head">
+                <div>
+                  <h3 id="drawer-title"></h3>
+                  <p id="drawer-sub"></p>
+                </div>
+                <button type="button" class="icon-btn" id="drawer-close" aria-label="Close session details"><i data-icon="close" data-size="15"></i></button>
+              </div>
+              <div class="drawer-body scroll" id="drawer-body"></div>
+            </aside>
+
+            <div class="scrim" id="dialog" hidden>
+              <div class="float dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+                <h3 id="dialog-title">Edit budget</h3>
+                <p id="dialog-desc">Vector reads the spend ledger before a run starts and refuses the start once a hard limit is spent.</p>
+                <div class="field">
+                  <span>Applies to</span>
+                  <span class="seg" id="f-kind" role="group" aria-label="Applies to">
+                    <button type="button" data-value="all" aria-pressed="true">All work</button>
+                    <button type="button" data-value="interactive" aria-pressed="false">Interactive</button>
+                    <button type="button" data-value="unattended" aria-pressed="false">Unattended</button>
+                  </span>
+                </div>
+                <div class="field-row">
+                  <div class="field">
+                    <span>Window</span>
+                    <span class="sel"><select id="f-window" aria-label="Window">
+                      <option value="run">Per run</option>
+                      <option value="day">Per day</option>
+                      <option value="month">Per month</option>
+                    </select><i data-icon="chevron-down" data-size="12"></i></span>
+                  </div>
+                  <div class="field">
+                    <span>Amount</span>
+                    <label class="input money"><span class="muted mono">$</span><input id="f-amount" inputmode="decimal" aria-label="Amount in dollars" /></label>
+                  </div>
+                </div>
+                <p class="err" id="f-err" hidden>Enter an amount above $0.</p>
+                <div class="field">
+                  <span>Warn at</span>
+                  <span class="warn-at"><input type="range" id="f-warn" min="50" max="95" step="5" value="80" aria-label="Warn at percent" /><output id="f-warn-out">80%</output></span>
+                </div>
+                <div class="stopline">
+                  <span>Stop at the limit<small>Block new runs and stop running ones. Off sends an alert only.</small></span>
+                  <button type="button" class="switch" role="switch" aria-checked="true" id="f-stop" aria-label="Stop at the limit"></button>
+                </div>
+                <div class="actions">
+                  <button class="btn btn-danger" type="button" id="f-delete">Remove</button>
+                  <button class="btn" type="button" data-close>Cancel</button>
+                  <button class="btn btn-primary" type="button" id="f-save">Save budget</button>
+                </div>
+              </div>
+            </div>
+            <div class="float toast" id="toast" role="status" aria-live="polite" hidden></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="lab-note" data-lab-note></p>
+    </div>
+
+    <script src="../assets/icons.js"></script>
+    <script src="../assets/links.js"></script>
+    <script src="../assets/registry/review.js"></script>
+    <script src="../assets/registry/connections.js"></script>
+    <script src="../assets/registry/settings.js"></script>
+    <script src="../assets/registry/agents.js"></script>
+    <script src="../assets/lab.js"></script>
+    <script>
+      ;(function () {
+        const root = document.querySelector(".d-tokenomics")
+        const $ = (sel) => root.querySelector(sel)
+        const esc = (text) => String(text).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c])
+        const stroke = (body, size = 15) =>
+          `<svg width="${size}" height="${size}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.15" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+        const ICONS = {
+          sliders: '<path d="M2.75 5h6.5M12 5h1.25M2.75 11h1.5M7 11h6.25"/><circle cx="10.6" cy="5" r="1.35"/><circle cx="5.6" cy="11" r="1.35"/>',
+          palette: '<circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11Z" fill="currentColor" stroke="none" opacity=".45"/>',
+          code: '<path d="m5.75 4.75-3.25 3.25 3.25 3.25M10.25 4.75l3.25 3.25-3.25 3.25"/>',
+          bell: '<path d="M4.4 10.6V7.4a3.6 3.6 0 0 1 7.2 0v3.2l1.1 1.4H3.3l1.1-1.4ZM6.7 13.4a1.4 1.4 0 0 0 2.6 0"/>',
+          shield: '<path d="M8 2.25 3.25 4v3.55c0 2.9 1.95 5.15 4.75 6.2 2.8-1.05 4.75-3.3 4.75-6.2V4L8 2.25Z"/><path d="m6 8 1.4 1.4L10.2 6.6"/>',
+          key: '<circle cx="5.4" cy="10.6" r="2.6"/><path d="m7.3 8.7 5.4-5.4M10.6 5.4l1.6 1.6M12 4l1.1 1.1"/>',
+          bars: '<path d="M2.75 13.25h10.5M4.6 13.25V9M8 13.25V3.5M11.4 13.25V6.75"/>',
+          team: '<circle cx="6" cy="5.6" r="2.3"/><path d="M2.4 13.1c.4-2.2 1.8-3.4 3.6-3.4s3.2 1.2 3.6 3.4M10.6 3.4a2.25 2.25 0 0 1 0 4.4M11.7 9.8c1 .45 1.65 1.5 1.9 3.3"/>',
+          keyboard: '<rect x="2" y="4.25" width="12" height="7.5" rx="1.6"/><path d="M4.6 6.8h.01M6.8 6.8h.01M9.2 6.8h.01M11.4 6.8h.01M5.4 9.3h5.2"/>',
+          access: '<circle cx="8" cy="3.5" r="1.15"/><path d="M3.25 6.1h9.5M8 6.1v3.6M8 9.7l-2 3.7M8 9.7l2 3.7"/>',
+          download: '<path d="M8 2.75v7.5M5 7.4l3 3 3-3M3 13.25h10"/>',
+          pencil: '<path d="M10.4 3.1a1.5 1.5 0 0 1 2.1 2.1L6 11.7l-2.8.7.7-2.8 6.5-6.5Z"/><path d="m9.4 4.1 2.1 2.1"/>',
+          bolt: '<path d="M8.9 2.25 4 9h3.6l-.6 4.75L12 7H8.3l.6-4.75Z"/>',
+          clock: '<circle cx="8" cy="8" r="5.6"/><path d="M8 5v3.2l2 1.3"/>',
+          stack: '<path d="m8 2.5 5.5 2.75L8 8 2.5 5.25 8 2.5Z"/><path d="m2.5 8 5.5 2.75L13.5 8M2.5 10.75 8 13.5l5.5-2.75"/>',
+          warn: '<path d="M8 2.6 14 13H2L8 2.6Z"/><path d="M8 6.6v3M8 11.3h.01"/>',
+        }
+        const icon = (name, size = 15) => (ICONS[name] ? stroke(ICONS[name], size) : LabUI.svg(name, size))
+
+        // ---------- Settings navigation ----------
+        const NAV = [
+          { group: "Personal", items: [["general", "General", "sliders", "startup judge routing diagnostics"], ["appearance", "Appearance", "palette", "theme dark light accent font density"], ["editor", "Editor", "code", "font wrap autocomplete"], ["notifications", "Notifications", "bell", "alerts sound"]] },
+          { group: "Agents", items: [["models", "Models", "model", "default model effort"], ["agents", "Agents", "task", "subagents specialists"], ["permissions", "Permissions", "shield", "approval ask allow deny shell commands folders network safety risk"], ["providers", "Providers & keys", "key", "api key openai anthropic"]] },
+          { group: "Account", items: [["usage", "Usage & spend", "bars", "tokens cost spend budget tokenomics", "$412"], ["team", "Vector Team", "team", "members seats roles invite policies"]] },
+          { group: "App", items: [["keyboard", "Keyboard", "keyboard", "shortcuts keybinds"], ["accessibility", "Accessibility", "access", "contrast scale focus"], ["about", "Updates & about", "download", "version update"]] },
+        ]
+        const HREF = { permissions: "settings-permissions.html", usage: "tokenomics.html", team: "team-admin.html" }
+        const sn = $("#sn")
+        sn.innerHTML = `
+          <div class="sn-top"><a class="sn-back" href="first-run.html">${icon("back", 14)}Back to app</a></div>
+          <div class="sn-brand"><span class="sn-mark">${LabUI.svg("chip", 15)}</span><div><b>Settings</b><span>Vector 1.99.102</span></div></div>
+          <label class="input sn-search">${icon("search", 14)}<input type="search" id="nav-search" placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false" /><kbd>⌘F</kbd></label>
+          <nav class="sn-groups scroll" aria-label="Settings">${NAV.map((g) => `<div class="sn-group"><p class="sn-label">${g.group}</p>${g.items.map((it) => `<a class="sn-item" href="${HREF[it[0]] ?? `settings-general.html#${it[0]}`}" data-words="${it[1]} ${it[3]}" aria-current="${it[0] === "usage" ? "page" : "false"}">${icon(it[2])}<span>${it[1]}</span>${it[4] ? `<span class="sn-end">${it[4]}</span>` : ""}</a>`).join("")}</div>`).join("")}
+          <div class="sn-empty" id="nav-empty" hidden><strong>No settings found</strong>Try a feature name such as model, memory, update or notifications.</div></nav>
+          <div class="sn-foot"><span>Vector 1.99.102</span><span>Desktop</span></div>`
+        $("#nav-search").addEventListener("input", (event) => {
+          const q = event.target.value.trim().toLowerCase()
+          let any = 0
+          sn.querySelectorAll(".sn-group").forEach((group) => {
+            let shown = 0
+            group.querySelectorAll(".sn-item").forEach((item) => {
+              item.hidden = Boolean(q) && !item.dataset.words.toLowerCase().includes(q)
+              if (!item.hidden) shown++
+            })
+            group.hidden = shown === 0
+            any += shown
+          })
+          $("#nav-empty").hidden = any > 0
+        })
+
+        // ---------- The ledger: 180 days of measured spend, ending today ----------
+        const TODAY = new Date(2026, 9, 7)
+        const DAY = 86400000
+        const day = (i) => new Date(TODAY.getTime() - i * DAY)
+        const fmtDate = (d, opts) => d.toLocaleDateString("en-US", opts ?? { month: "short", day: "numeric" })
+        let seed = 20261007
+        const rand = () => {
+          seed = (seed * 1664525 + 1013904223) % 4294967296
+          return seed / 4294967296
+        }
+        const LEDGER = Array.from({ length: 180 }, (_, k) => {
+          const i = 179 - k
+          const d = day(i)
+          const weekend = d.getDay() === 0 || d.getDay() === 6
+          const trend = 0.78 + (k / 180) * 0.32
+          const burst = rand() > 0.86 ? 2.1 + rand() : 1
+          const session = (weekend ? 1.6 + rand() * 2.4 : 6.5 + rand() * 6.5) * trend
+          const parallel = (weekend ? rand() * 0.9 : rand() * 3.8) * burst * trend
+          const scheduled = 0.48 + rand() * 0.36
+          return { d, session, parallel, scheduled }
+        })
+        // Today is in progress; the last 30 days add up to what the ledger says.
+        Object.assign(LEDGER[179], { session: 8.42, parallel: 2.81, scheduled: 0.61 })
+        const last30 = LEDGER.slice(150, 179)
+        const raw = last30.reduce((n, r) => n + r.session + r.parallel + r.scheduled, 0)
+        const scale = (412.38 - 11.84) / raw
+        LEDGER.slice(0, 179).forEach((r) => ["session", "parallel", "scheduled"].forEach((k) => (r[k] = Math.round(r[k] * scale * 100) / 100)))
+        const drift = Math.round((412.38 - LEDGER.slice(150).reduce((n, r) => n + r.session + r.parallel + r.scheduled, 0)) * 100) / 100
+        LEDGER[170].session = Math.round((LEDGER[170].session + drift) * 100) / 100
+        LEDGER.forEach((r, k) => {
+          r.cost = r.session + r.parallel + r.scheduled
+          r.tokens = r.cost * (420000 + rand() * 50000)
+          r.runs = Math.max(1, Math.round(r.cost * (2.7 + rand() * 0.8)))
+          r.unmeasured = rand() > 0.62 ? 1 + Math.floor(rand() * 3) : 0
+        })
+        // Today, hour by hour (local time; it is 15:40).
+        const HOURS = [0, 0, 0, 0, 0, 0, 0, 0, 0.21, 1.12, 1.64, 1.38, 0.52, 0.94, 2.31, 1.86, 0, 0, 0, 0, 0, 0, 0, 0]
+        const hourSum = HOURS.reduce((a, b) => a + b, 0)
+        const HOURLY = HOURS.map((v, h) => ({
+          h,
+          session: (8.42 * v) / hourSum,
+          parallel: (2.81 * v) / hourSum,
+          scheduled: h === 2 ? 0.61 : 0,
+          unmeasured: h === 10 || h === 14 ? 1 : 0,
+        }))
+        HOURLY.forEach((r) => {
+          r.tokens = (r.session + r.parallel + r.scheduled) * 441000
+          r.runs = Math.round((r.session + r.parallel + r.scheduled) * 3)
+        })
+        HOURLY.forEach((r) => (r.cost = r.session + r.parallel + r.scheduled))
+
+        // Shares for the breakdowns (from the same ledger, by model, project and agent).
+        const MODELS = [
+          ["GPT-6 Sol", "OpenAI · ChatGPT", 0.412, 0.71, 0],
+          ["Claude Sonnet 4.5", "Anthropic", 0.246, 0.64, 0],
+          ["GPT-6 Astra", "OpenAI · ChatGPT", 0.159, 0.58, 0],
+          ["GPT-6.1 Sol", "OpenAI · ChatGPT", 0.108, 0.69, 0],
+          ["GPT-6 Luna", "OpenAI · ChatGPT", 0.075, 0.52, 0],
+          ["Qwen3 Coder (free)", "OpenRouter", 0, 0, 21],
+          ["llama-3.3-70b", "Ollama, on this Mac", 0, 0, 16],
+        ]
+        const PROJECTS = [
+          ["Vectordev.ai", "~/code/Vectordev.ai", 0.73],
+          ["vector-cloud", "~/code/vector-cloud", 0.156],
+          ["docs-site", "~/code/docs-site", 0.07],
+          ["nightly-deps", "Scheduled · every night at 02:10", 0.044],
+        ]
+        const AGENTS = [
+          ["Build", "main agent", 0.52],
+          ["Plan", "main agent", 0.032],
+          ["Subagents", "9 kinds", 0.448, [
+            ["General subagent", 0.094],
+            ["Explore", 0.086],
+            ["Test", 0.079],
+            ["Debug", 0.064],
+            ["Judge", 0.051],
+            ["Review", 0.036],
+            ["Security", 0.022],
+            ["Performance", 0.01],
+            ["Migration", 0.006],
+          ]],
+        ]
+        const SESSIONS = [
+          { id: 1, ago: 0, title: "Review the workspace trust changes", project: "Vectordev.ai", branch: "security-boundaries", model: "GPT-6 Sol", runs: 14, tokens: 9.84e6, cache: 0.82, cost: 6.42, subs: 4, time: "1h 52m" },
+          { id: 2, ago: 0, title: "Validate settings input with zod", project: "Vectordev.ai", branch: "settings-schema", model: "Claude Sonnet 4.5", runs: 6, tokens: 2.31e6, cache: 0.67, cost: 2.18, subs: 1, time: "38m" },
+          { id: 3, ago: 1, title: "Regenerate the SDK", project: "Vectordev.ai", branch: "regenerate-sdk", model: "GPT-6 Astra", runs: 11, tokens: 7.12e6, cache: 0.74, cost: 9.87, subs: 3, time: "2h 14m" },
+          { id: 4, ago: 1, title: "Profile the terminal renderer", project: "Vectordev.ai", branch: "terminal-perf", model: "GPT-6.1 Sol", runs: 9, tokens: 5.6e6, cache: 0.61, cost: 7.31, subs: 2, time: "1h 07m" },
+          { id: 5, ago: 2, title: "Parallel: fix flaky permission tests ×4", project: "Vectordev.ai", branch: "4 workspaces", model: "GPT-6 Sol", runs: 22, tokens: 14.9e6, cache: 0.79, cost: 14.62, subs: 0, time: "48m" },
+          { id: 6, ago: 3, title: "Cloud: rotate worker credentials", project: "vector-cloud", branch: "rotate-creds", model: "Claude Sonnet 4.5", runs: 8, tokens: 4.4e6, cache: 0.58, cost: 5.96, subs: 1, time: "56m" },
+          { id: 7, ago: 4, title: "Fix scroll state", project: "Vectordev.ai", branch: "fix-scroll-state", model: "GPT-6 Sol", runs: 5, tokens: 1.9e6, cache: 0.72, cost: 1.41, subs: 1, time: "24m" },
+          { id: 8, ago: 6, title: "Write the permissions docs page", project: "docs-site", branch: "docs-permissions", model: "GPT-6 Luna", runs: 7, tokens: 2.8e6, cache: 0.49, cost: 1.12, subs: 0, time: "41m" },
+          { id: 9, ago: 9, title: "Migrate to Effect 4 schema helpers", project: "Vectordev.ai", branch: "effect-4", model: "GPT-6 Astra", runs: 19, tokens: 12.2e6, cache: 0.77, cost: 16.84, subs: 5, time: "3h 20m" },
+          { id: 10, ago: 13, title: "nightly-deps: bump and test", project: "nightly-deps", branch: "scheduled", model: "GPT-6 Luna", runs: 3, tokens: 0.9e6, cache: 0.55, cost: 0.58, subs: 0, time: "6m" },
+          { id: 11, ago: 18, title: "Explore with a free model", project: "docs-site", branch: "main", model: "Qwen3 Coder (free)", runs: 4, tokens: null, cache: null, cost: null, subs: 0, time: "17m" },
+          { id: 12, ago: 26, title: "Cloud: billing webhooks", project: "vector-cloud", branch: "billing-hooks", model: "Claude Sonnet 4.5", runs: 12, tokens: 6.3e6, cache: 0.6, cost: 8.73, subs: 2, time: "1h 31m" },
+          { id: 13, ago: 41, title: "Agent Dashboard board view", project: "Vectordev.ai", branch: "agent-board", model: "GPT-6 Sol", runs: 16, tokens: 10.1e6, cache: 0.8, cost: 7.94, subs: 3, time: "2h 02m" },
+        ]
+
+        let BUDGETS = [
+          { id: "b1", kind: "all", window: "day", amount: 30, warn: 0.8, stop: false, label: "All work · per day" },
+          { id: "b2", kind: "all", window: "month", amount: 600, warn: 0.8, stop: true, label: "All work · this month" },
+          { id: "b3", kind: "all", window: "month", amount: 80, warn: 0.8, stop: true, project: "Vectordev.ai", label: "Vectordev.ai · this month" },
+          { id: "b4", kind: "unattended", window: "day", amount: 25, warn: 0.8, stop: true, source: "Vector default", label: "Unattended · per day" },
+          { id: "b5", kind: "unattended", window: "run", amount: 5, warn: 0.8, stop: true, source: "Vector default", label: "Unattended · per run" },
+        ]
+
+        // ---------- State ----------
+        let period = 30
+        let metric = "cost"
+        let project = "all"
+        let sortKey = "cost"
+        let sessQuery = ""
+        let openSession = null
+        const expanded = new Set(["Subagents"])
+
+        const money = (v, digits = 2) => `$${v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+        const compact = (v) => (v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}K` : `${Math.round(v)}`)
+        const projectShare = () => (project === "all" ? 1 : PROJECTS.find((p) => p[0] === project)[2])
+        function rows(p = period, offset = 0) {
+          if (p === 1 && offset === 0) return HOURLY
+          return LEDGER.slice(180 - p - offset, 180 - offset)
+        }
+        const sum = (list, key) => list.reduce((n, r) => n + r[key], 0)
+        // Month to date: October 1st to today.
+        const mtd = LEDGER.slice(180 - TODAY.getDate())
+
+        // ---------- KPIs ----------
+        function spark(values) {
+          const w = 72
+          const h = 26
+          const max = Math.max(...values) || 1
+          const pts = values.map((v, i) => `${(i / (values.length - 1)) * w},${h - (v / max) * (h - 4) - 2}`)
+          return `<svg class="spark" width="${w}" height="${h}" aria-hidden="true"><polyline points="${pts.join(" ")}" fill="none" stroke="rgba(182,159,247,.55)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${pts.at(-1).split(",")[0]}" cy="${pts.at(-1).split(",")[1]}" r="2.5" fill="#b69ff7"/></svg>`
+        }
+        function renderKpis() {
+          const share = projectShare()
+          const now = rows()
+          const before = period === 1 ? [LEDGER[178]] : rows(period, period)
+          const spend = sum(now, "cost") * share
+          const prev = sum(before, "cost") * share
+          const delta = prev ? (spend - prev) / prev : 0
+          const tokens = sum(now, "tokens") * share
+          const cacheRead = tokens * 0.66
+          const saved = (cacheRead / 1e6) * 1.125
+          const runs = Math.round(sum(now, "runs") * share)
+          const unmeasured = Math.max(2, Math.round(sum(now, "unmeasured") * (project === "all" ? 1 : 0.3)))
+          const today = 11.84 * share
+          const alert = BUDGETS.find((b) => b.id === "b1")
+          const label = period === 1 ? "Today" : `${period} days`
+          const weekly = (period === 1 ? LEDGER.slice(168) : rows()).map((r) => r.cost)
+          const points = Array.from({ length: 12 }, (_, i) => {
+            const size = Math.max(1, Math.floor(weekly.length / 12))
+            return weekly.slice(i * size, i * size + size).reduce((n, v) => n + v, 0)
+          })
+          $("#kpis").innerHTML = `
+            <div class="card kpi">${spark(points)}<span class="kpi-label">Spend · ${label}</span><span class="kpi-value">${money(spend)}</span><span class="kpi-sub"><b class="${delta > 0 ? "up" : "down"}">${delta > 0 ? "▲" : "▼"} ${Math.abs(delta * 100).toFixed(0)}%</b> vs ${period === 1 ? "all of yesterday" : `the previous ${period} days`}</span></div>
+            <div class="card kpi"><span class="kpi-label">Tokens</span><span class="kpi-value">${compact(tokens)}</span><span class="kpi-sub">${compact(tokens * 0.17)} input · ${compact(tokens * 0.11)} output and reasoning · ${compact(cacheRead + tokens * 0.06)} cache</span></div>
+            <div class="card kpi"><span class="kpi-label">Saved by cache</span><span class="kpi-value">${money(saved)}</span><span class="kpi-sub">66% of input tokens were cache reads, billed at a tenth of the input rate</span></div>
+            <div class="card kpi"><span class="kpi-label">Runs</span><span class="kpi-value">${runs.toLocaleString("en-US")}<small>measured</small></span><span class="kpi-sub"><b>${unmeasured} unmeasured</b>: no usage reported, so not in any total</span></div>
+            ${
+              project === "all"
+                ? `<div class="card kpi"><span class="kpi-label">Today, all work</span><span class="kpi-value">${money(today)}<small>of ${money(alert.amount, 0)}</small></span><div class="meter"><i style="width:${Math.min(100, (today / alert.amount) * 100)}%"></i><b style="left:${alert.warn * 100}%"></b></div><span class="kpi-sub">Alert at ${Math.round(alert.warn * 100)}%, ${money(alert.amount * alert.warn)}. No hard stop.</span></div>`
+                : `<div class="card kpi"><span class="kpi-label">Today, ${esc(project)}</span><span class="kpi-value">${money(today)}<small>of ${money(11.84)}</small></span><div class="meter"><i style="width:${share * 100}%"></i></div><span class="kpi-sub">${(share * 100).toFixed(1)}% of everything Vector spent today</span></div>`
+            }`
+        }
+
+        // ---------- Chart ----------
+        const SERIES = [
+          ["session", "Sessions", "var(--s-session)"],
+          ["parallel", "Parallel agents", "var(--s-parallel)"],
+          ["scheduled", "Scheduled", "var(--s-scheduled)"],
+        ]
+        const W = 760
+        const H = 286
+        const M = { l: 48, r: 14, t: 14, b: 40 }
+        let hover = -1
+        function niceMax(v) {
+          const steps = [1, 2, 2.5, 5, 10]
+          const p = Math.pow(10, Math.floor(Math.log10(v / 4)))
+          const step = steps.map((s) => s * p).find((s) => s * 4 >= v) ?? 10 * p
+          return { max: step * 4, step }
+        }
+        function chartData() {
+          const share = projectShare()
+          return rows().map((r) => ({
+            r,
+            vals: SERIES.map((s) => (metric === "cost" ? r[s[0]] : (r[s[0]] / (r.cost || 1)) * r.tokens) * share),
+            label: period === 1 ? `${String(r.h).padStart(2, "0")}:00` : fmtDate(r.d, { weekday: "short", month: "short", day: "numeric" }),
+          }))
+        }
+        function renderChart() {
+          const data = chartData()
+          const totals = data.map((x) => x.vals.reduce((a, b) => a + b, 0))
+          const alert = BUDGETS.find((b) => b.id === "b1")
+          const top = Math.max(...totals, metric === "cost" && period > 1 && project === "all" ? alert.amount * 1.05 : 0)
+          const nice = niceMax(top || 1)
+          const iw = W - M.l - M.r
+          const ih = H - M.t - M.b
+          const slot = iw / data.length
+          const bw = Math.min(18, Math.max(2, period >= 90 ? slot - 2 : slot * 0.62))
+          const y = (v) => M.t + ih - (v / nice.max) * ih
+          const fmtY = (v) => (metric === "cost" ? `$${v % 1 ? v.toFixed(1) : v}` : compact(v))
+          let svg = `<g class="grid">${[0, 1, 2, 3, 4].map((i) => `<line x1="${M.l}" x2="${W - M.r}" y1="${y(nice.step * i)}" y2="${y(nice.step * i)}"/>`).join("")}</g>`
+          svg += [0, 1, 2, 3, 4].map((i) => `<text x="${M.l - 8}" y="${y(nice.step * i) + 3.5}" text-anchor="end">${fmtY(nice.step * i)}</text>`).join("")
+          svg += `<line class="base" x1="${M.l}" x2="${W - M.r}" y1="${y(0)}" y2="${y(0)}"/>`
+          data.forEach((x, i) => {
+            const cx = M.l + slot * i + slot / 2
+            let acc = 0
+            const segs = x.vals
+              .map((v, s) => {
+                if (v <= 0) return ""
+                const y0 = y(acc)
+                acc += v
+                const y1 = y(acc)
+                const isTop = x.vals.slice(s + 1).every((n) => n <= 0)
+                const h = Math.max(0, y0 - y1 - (isTop ? 0 : 2))
+                if (h <= 0) return ""
+                const r = isTop ? Math.min(3, bw / 2, h) : 0
+                const xl = cx - bw / 2
+                const path = r ? `M${xl},${y0}V${y1 + r}Q${xl},${y1} ${xl + r},${y1}H${xl + bw - r}Q${xl + bw},${y1} ${xl + bw},${y1 + r}V${y0}Z` : `M${xl},${y0}V${y0 - h}H${xl + bw}V${y0}Z`
+                return `<path class="seg" d="${path}" fill="${SERIES[s][2]}"/>`
+              })
+              .join("")
+            svg += `<g class="bar${i === hover ? " is-on" : ""}" data-i="${i}">${segs}</g>`
+            if (x.r.unmeasured && metric === "cost" && period <= 30) svg += `<circle class="unm" cx="${cx}" cy="${y(0) + 8}" r="2.6"/>`
+          })
+          // X labels
+          const every = period === 7 ? 1 : period === 30 ? 5 : 14
+          data.forEach((x, i) => {
+            if (period === 1 ? x.r.h % 6 : (data.length - 1 - i) % every) return
+            const cx = M.l + slot * i + slot / 2
+            const text = period === 1 ? `${String(x.r.h).padStart(2, "0")}:00` : period === 7 ? `${fmtDate(x.r.d, { weekday: "short" })} ${x.r.d.getDate()}` : fmtDate(x.r.d)
+            svg += `<text x="${cx}" y="${H - 12}" text-anchor="middle">${text}</text>`
+          })
+          if (period === 1) {
+            const nx = M.l + slot * (15 + 40 / 60)
+            svg += `<line x1="${nx}" x2="${nx}" y1="${M.t}" y2="${y(0)}" stroke="rgba(255,255,255,.22)"/><text x="${nx + 5}" y="${M.t + 9}">Now 15:40</text>`
+          }
+          if (metric === "cost" && period > 1 && project === "all") {
+            const ay = y(alert.amount)
+            svg += `<line class="alert-line" x1="${M.l}" x2="${W - M.r}" y1="${ay}" y2="${ay}"/><text class="alert-label" x="${W - M.r}" y="${ay - 5}" text-anchor="end">Daily alert ${money(alert.amount, 0)}</text>`
+          }
+          // Hit areas: a whole slot per bar, bigger than the mark.
+          svg += data.map((x, i) => `<rect class="hit" data-i="${i}" x="${M.l + slot * i}" y="${M.t}" width="${slot}" height="${ih + 14}"/>`).join("")
+          const chart = $("#chart")
+          chart.innerHTML = svg
+          chart.classList.toggle("is-hovering", hover >= 0)
+          chart.setAttribute("aria-label", `${metric === "cost" ? "Spend" : "Tokens"} by ${period === 1 ? "hour today" : "day"}. Use the arrow keys to read each ${period === 1 ? "hour" : "day"}.`)
+          $("#chart-title").textContent = `${metric === "cost" ? "Spend" : "Tokens"} by ${period === 1 ? "hour" : "day"}`
+          $("#chart-sub").textContent = project === "all" ? "Every session, parallel agent and scheduled run" : `${project} only`
+          const total = totals.reduce((a, b) => a + b, 0)
+          $("#legend").innerHTML =
+            SERIES.map((s) => `<span><i style="background:${s[2]}"></i>${s[1]}</span>`).join("") +
+            (metric === "cost" && period <= 30 ? `<span><i class="ring"></i>Unmeasured runs that ${period === 1 ? "hour" : "day"}</span>` : "") + (metric === "cost" && period > 1 && project === "all" ? `<span><i class="rule"></i>Daily alert</span>` : "") +
+            `<span class="total">Total <b>${metric === "cost" ? money(total) : compact(total)}</b></span>`
+          chartState = { data, slot, totals, y }
+        }
+        let chartState = null
+        function showTip(i, fromKey) {
+          hover = i
+          const chart = $("#chart")
+          chart.querySelectorAll(".bar").forEach((g) => g.classList.toggle("is-on", Number(g.dataset.i) === i))
+          chart.classList.toggle("is-hovering", i >= 0)
+          const tip = $("#tip")
+          if (i < 0) {
+            tip.hidden = true
+            return
+          }
+          const x = chartState.data[i]
+          const total = chartState.totals[i]
+          const f = (v) => (metric === "cost" ? money(v) : compact(v))
+          tip.innerHTML = `<div class="tip-date">${x.label}${period === 1 ? " today" : ""}</div><div class="tip-total">${f(total)}</div>${SERIES.map((s, k) => `<div class="tip-row"><i style="background:${s[2]}"></i>${s[1]}<b>${f(x.vals[k])}</b></div>`).join("")}<div class="tip-foot">${Math.round(x.r.runs * projectShare())} measured runs${x.r.unmeasured ? ` · ${x.r.unmeasured} unmeasured, not in the total` : ""}${metric === "cost" && period > 1 && project === "all" && total > BUDGETS[0].amount ? " · over the daily alert" : ""}</div>`
+          tip.hidden = false
+          const card = $("#chart-card")
+          const svgBox = chart.getBoundingClientRect()
+          const cardBox = card.getBoundingClientRect()
+          const k = svgBox.width / W
+          const scaleStage = cardBox.width / card.offsetWidth
+          const cx = (M.l + chartState.slot * i + chartState.slot / 2) * k
+          const left = (svgBox.left - cardBox.left) / scaleStage + cx / scaleStage
+          const top = (svgBox.top - cardBox.top) / scaleStage + (chartState.y(total) * k) / scaleStage
+          const tw = tip.offsetWidth
+          const placeLeft = left + 14 + tw > card.offsetWidth - 8
+          tip.style.left = `${placeLeft ? left - 14 - tw : left + 14}px`
+          tip.style.top = `${Math.max(8, Math.min(top - 20, card.offsetHeight - tip.offsetHeight - 8))}px`
+        }
+        $("#chart").addEventListener("pointermove", (event) => {
+          const hit = event.target.closest(".hit")
+          if (hit) showTip(Number(hit.dataset.i))
+        })
+        $("#chart").addEventListener("pointerleave", () => showTip(-1))
+        $("#chart").addEventListener("keydown", (event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End", "Escape"].includes(event.key)) return
+          event.preventDefault()
+          const n = chartState.data.length
+          if (event.key === "Escape") return showTip(-1)
+          const next = event.key === "Home" ? 0 : event.key === "End" ? n - 1 : hover < 0 ? n - 1 : Math.max(0, Math.min(n - 1, hover + (event.key === "ArrowRight" ? 1 : -1)))
+          showTip(next, true)
+        })
+        $("#chart").addEventListener("blur", () => showTip(-1))
+
+        // ---------- Budgets ----------
+        function budgetSpent(b) {
+          const share = b.project ? PROJECTS.find((p) => p[0] === b.project)[2] : 1
+          if (b.window === "run") return b.kind === "unattended" ? 1.92 : 3.48
+          const list = b.window === "day" ? [LEDGER[179]] : mtd
+          const keys = b.kind === "unattended" ? ["parallel", "scheduled"] : b.kind === "interactive" ? ["session"] : ["session", "parallel", "scheduled"]
+          return list.reduce((n, r) => n + keys.reduce((m, k) => m + r[k], 0), 0) * share
+        }
+        let freshBudget = null
+        function renderBudgets() {
+          $("#budgets").innerHTML =
+            BUDGETS.map((b) => {
+              const spent = budgetSpent(b)
+              const ratio = spent / b.amount
+              const state = ratio >= 1 ? (b.stop ? ["red", "Blocked"] : ["amber", "Over"]) : ratio >= b.warn ? ["amber", "Warning"] : ["green", "OK"]
+              return `<li class="budget${b.id === freshBudget ? " is-new" : ""}">
+                <span class="budget-name"><span>${esc(b.label)}</span>${b.source ? `<span class="muted" style="font-size:11px">${b.source}</span>` : ""}</span>
+                <span class="budget-end"><span class="badge badge-${state[0]}">${state[1]}</span><button type="button" class="icon-btn" data-edit="${b.id}" aria-label="Edit ${esc(b.label)}">${icon("pencil", 13)}</button></span>
+                <span class="budget-line"><span class="meter"><i class="${ratio >= 1 ? "is-over" : ratio >= b.warn ? "is-warn" : ""}" style="width:${Math.min(100, ratio * 100)}%"></i><b style="left:${b.warn * 100}%"></b></span><span class="mono">${money(spent)} / ${money(b.amount, 0)}</span><span>${b.window === "run" ? "largest run" : b.stop ? "stops" : "alert"}</span></span>
+              </li>`
+            }).join("") +
+            `<li class="budget"><span class="budget-name"><span>Interactive sessions · uncapped</span><span class="muted" style="font-size:11px">Vector default</span></span><span class="budget-end"><button type="button" class="btn btn-sm" data-new="interactive">Add a cap</button></span><span class="budget-line">You watch the cost while they run, so they never stop mid-task unless you set a cap.</span></li>`
+          freshBudget = null
+        }
+
+        // ---------- Breakdowns ----------
+        function renderBreakdowns() {
+          const spend = sum(rows(), "cost") * projectShare()
+          const runsTotal = sum(rows(), "runs")
+          const max = Math.max(...MODELS.map((m) => m[2]))
+          $("#by-model").innerHTML = MODELS.map((m) => {
+            const value = spend * m[2]
+            if (!m[2]) {
+              const unmTotal = Math.max(2, Math.round(sum(rows(), "unmeasured") * (project === "all" ? 1 : 0.3)))
+              const n = m[0].startsWith("Qwen") ? Math.ceil(unmTotal * 0.57) : unmTotal - Math.ceil(unmTotal * 0.57)
+              return `<li class="bd-row"><span class="bd-name"><span>${m[0]}</span><small>${m[1]}</small></span><span class="bd-val unmeasured">unmeasured</span><span class="bd-bar"><i class="hatch" style="width:2%;background:none"></i></span><span class="bd-meta">${n} run${n === 1 ? "" : "s"}</span></li>`
+            }
+            return `<li class="bd-row"><span class="bd-name"><span>${m[0]}</span><small>${m[1]}</small></span><span class="bd-val">${money(value)}</span><span class="bd-bar"><i style="width:${(m[2] / max) * 100}%"></i></span><span class="bd-meta">${Math.round(m[3] * 100)}% cache</span></li>`
+          }).join("")
+
+          const pmax = Math.max(...PROJECTS.map((p) => p[2]))
+          const total = sum(rows(), "cost")
+          $("#by-project").innerHTML = PROJECTS.map(
+            (p) => `<li><button type="button" class="bd-row" data-project="${p[0]}" aria-pressed="${project === p[0]}"><span class="bd-name"><span>${p[0]}</span><small>${p[1]}</small></span><span class="bd-val">${money(total * p[2])}</span><span class="bd-bar"><i style="width:${(p[2] / pmax) * 100}%"></i></span><span class="bd-meta">${(p[2] * 100).toFixed(1)}%</span></button></li>`,
+          ).join("")
+
+          const amax = Math.max(...AGENTS.map((a) => a[2]))
+          $("#by-agent").innerHTML = AGENTS.map((a) => {
+            const head = a[3]
+              ? `<li><button type="button" class="bd-row" data-group="${a[0]}" aria-expanded="${expanded.has(a[0])}"><span class="bd-name">${LabUI.svg("chevron-right", 13).replace("<svg", '<svg class="chev"')}<span>${a[0]}</span><small>${a[1]}</small></span><span class="bd-val">${money(spend * a[2])}</span><span class="bd-bar"><i style="width:${(a[2] / amax) * 100}%"></i></span><span class="bd-meta">${(a[2] * 100).toFixed(1)}%</span></button></li>`
+              : `<li class="bd-row"><span class="bd-name"><span>${a[0]}</span><small>${a[1]}</small></span><span class="bd-val">${money(spend * a[2])}</span><span class="bd-bar"><i style="width:${(a[2] / amax) * 100}%"></i></span><span class="bd-meta">${(a[2] * 100).toFixed(1)}%</span></li>`
+            const kids = a[3] && expanded.has(a[0]) ? a[3].map((c) => `<li class="bd-row is-child"><span class="bd-name"><span>${c[0]}</span></span><span class="bd-val">${money(spend * c[1])}</span><span class="bd-bar"><i style="width:${(c[1] / amax) * 100}%"></i></span><span class="bd-meta">${(c[1] * 100).toFixed(1)}%</span></li>`).join("") : ""
+            return head + kids
+          }).join("")
+
+          const tokens = sum(rows(), "tokens") * projectShare()
+          const read = tokens * 0.66
+          const saved = (read / 1e6) * 1.125
+          $("#cache").innerHTML = `<h4>Cache savings<span>${money(saved)}</span></h4><p>Without cache reads this period would have cost ${money(spend + saved)}. Reads are billed at a tenth of the input rate; writes at a premium.</p>
+            <div class="split" aria-hidden="true"><i style="flex:66;background:var(--s-session)"></i><i style="flex:6;background:var(--s-parallel)"></i><i style="flex:17;background:var(--s-scheduled)"></i></div>
+            <dl><dt><i style="background:var(--s-session)"></i>Cache reads</dt><dd>${compact(read)} · 66%</dd><dt><i style="background:var(--s-parallel)"></i>Cache writes</dt><dd>${compact(tokens * 0.06)} · 6%</dd><dt><i style="background:var(--s-scheduled)"></i>Uncached input</dt><dd>${compact(tokens * 0.17)} · 17%</dd></dl>`
+          const measured = Math.round(runsTotal * projectShare())
+          const unm = Math.max(2, Math.round(sum(rows(), "unmeasured") * (project === "all" ? 1 : 0.3)))
+          $("#measured").innerHTML = `<h4>Measured runs<span>${((measured / (measured + unm)) * 100).toFixed(1)}%</span></h4><p>${unm} run${unm === 1 ? "" : "s"} reported no usage: free OpenRouter models and Ollama on this Mac. Their cost is unknown, so they are in no total and can never block a run.</p>
+            <div class="split" aria-hidden="true"><i style="flex:${measured};background:var(--violet)"></i><i class="hatch" style="flex:${Math.max(unm * 6, 4)}"></i></div>
+            <dl><dt><i style="background:var(--violet)"></i>Measured</dt><dd>${measured.toLocaleString("en-US")}</dd><dt><i class="hatch"></i>Unmeasured</dt><dd>${unm}</dd></dl>`
+        }
+        $("#by-agent").addEventListener("click", (event) => {
+          const g = event.target.closest("[data-group]")
+          if (!g) return
+          expanded.has(g.dataset.group) ? expanded.delete(g.dataset.group) : expanded.add(g.dataset.group)
+          renderBreakdowns()
+          $(`[data-group="${g.dataset.group}"]`)?.focus()
+        })
+        $("#by-project").addEventListener("click", (event) => {
+          const p = event.target.closest("[data-project]")
+          if (!p) return
+          project = project === p.dataset.project ? "all" : p.dataset.project
+          $("#project").value = project
+          refresh()
+          $(`[data-project="${p.dataset.project}"]`)?.focus()
+        })
+
+        // ---------- Sessions ----------
+        function renderSessions() {
+          const q = sessQuery.trim().toLowerCase()
+          const list = SESSIONS.filter((s) => s.ago < period && (project === "all" || s.project === project) && (!q || `${s.title} ${s.project} ${s.branch} ${s.model}`.toLowerCase().includes(q)))
+          const val = (s) => (sortKey === "title" ? s.title : s[sortKey] ?? -1)
+          list.sort((a, b) => (sortKey === "title" ? val(a).localeCompare(val(b)) : val(b) - val(a)))
+          root.querySelectorAll("[data-sort]").forEach((b) => b.setAttribute("aria-sort", b.dataset.sort === sortKey ? (sortKey === "title" ? "ascending" : "descending") : "none"))
+          $("#sessions").innerHTML = list.length
+            ? list
+                .map(
+                  (s) => `<li><button type="button" class="sess-row" data-session="${s.id}" aria-pressed="${openSession === s.id}">
+                    <span class="sess-name"><b>${esc(s.title)}</b><span>${s.project} · ${s.branch} · ${s.ago === 0 ? "today" : s.ago === 1 ? "yesterday" : fmtDate(day(s.ago))}</span></span>
+                    <span class="cell">${s.model}${s.subs ? ` <span class="muted">+${s.subs} sub</span>` : ""}</span>
+                    <span class="num">${s.runs}</span>
+                    <span class="num">${s.tokens ? compact(s.tokens) : "—"}</span>
+                    <span class="num">${s.cache ? `${Math.round(s.cache * 100)}%` : "—"}</span>
+                    <span class="cost">${s.cost == null ? '<span class="muted" style="font:italic 11px var(--font)">unmeasured</span>' : money(s.cost)}</span>
+                    ${LabUI.svg("chevron-right", 14)}
+                  </button></li>`,
+                )
+                .join("")
+            : `<li class="sess-empty">No sessions in this period${q ? ` match “${esc(sessQuery.trim())}”` : ""}.</li>`
+        }
+        root.querySelector(".sess-head").addEventListener("click", (event) => {
+          const b = event.target.closest("[data-sort]")
+          if (!b) return
+          sortKey = b.dataset.sort
+          renderSessions()
+        })
+        $("#sess-search").addEventListener("input", (event) => {
+          sessQuery = event.target.value
+          renderSessions()
+        })
+        $("#sessions").addEventListener("click", (event) => {
+          const row = event.target.closest("[data-session]")
+          if (row) openDrawer(Number(row.dataset.session), row)
+        })
+
+        let drawerOpener = null
+        function openDrawer(id, opener) {
+          const s = SESSIONS.find((x) => x.id === id)
+          openSession = id
+          drawerOpener = opener
+          renderSessions()
+          $("#drawer-title").textContent = s.title
+          $("#drawer-sub").textContent = `${s.project} · ${s.branch} · ${s.model} · ${s.time}`
+          if (s.cost == null) {
+            $("#drawer-body").innerHTML = `<div class="dstats"><div class="dstat"><span>Cost</span><b>—</b></div><div class="dstat"><span>Tokens</span><b>—</b></div><div class="dstat"><span>Turns</span><b>${s.runs}</b></div><div class="dstat"><span>Time</span><b>${s.time}</b></div></div><p class="drawer-note">OpenRouter returned no usage for this model, so every turn is unmeasured. Vector records it as unknown rather than $0, so it never reads as free and never sits under a cap it did not test.</p>`
+          } else {
+            const parts = [
+              ["Build", "GPT-6 Sol", 0.46, false],
+              ["Explore", "subagent", 0.12, true],
+              ["Build", s.model, 0.17, false],
+              ["Test", "subagent", 0.09, true],
+              ["Security", "subagent", 0.07, true],
+              ["Build", s.model, 0.06, false],
+              ["Judge", "subagent", 0.03, true],
+            ].slice(0, Math.max(3, Math.min(7, s.subs + 3)))
+            const weight = parts.reduce((n, p) => n + p[2], 0)
+            const max = Math.max(...parts.map((p) => p[2]))
+            $("#drawer-body").innerHTML = `<div class="dstats"><div class="dstat"><span>Cost</span><b>${money(s.cost)}</b></div><div class="dstat"><span>Tokens</span><b>${compact(s.tokens)}</b></div><div class="dstat"><span>Cache</span><b>${Math.round(s.cache * 100)}%</b></div><div class="dstat"><span>Time</span><b>${s.time}</b></div></div>
+              <span class="section-title">Turns and subagents</span>
+              <ul class="turns">${parts
+                .map((p, i) => {
+                  const cost = (s.cost * p[2]) / weight
+                  const tok = (s.tokens * p[2]) / weight
+                  return `<li class="turn${p[3] ? " is-sub" : ""}"><span class="n">${p[3] ? "↳" : i + 1}</span><span class="t"><span>${p[0]}</span>${p[3] ? '<span class="badge">subagent</span>' : `<span class="muted" style="font-size:11px">${p[1]}</span>`}</span><span class="c">${money(cost)}</span><span class="m"><span class="bd-bar"><i style="width:${(p[2] / max) * 100}%"></i></span>${compact(tok)} tok · ${Math.round(s.cache * 100 - 6 + i * 2)}% cache</span></li>`
+                })
+                .join("")}</ul>
+              <p class="drawer-note">The session's cost includes what its subagents spent. Dollars are the provider's reported tokens at ${s.model}'s catalog price: input, output, reasoning, cache reads and cache writes.</p>`
+          }
+          $("#drawer").hidden = false
+          LabUI.renderIcons($("#drawer"))
+          $("#drawer-close").focus()
+        }
+        function closeDrawer() {
+          $("#drawer").hidden = true
+          openSession = null
+          renderSessions()
+          drawerOpener && root.querySelector(`[data-session="${drawerOpener.dataset.session}"]`)?.focus()
+        }
+        $("#drawer-close").addEventListener("click", closeDrawer)
+        root.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return
+          if (!$("#dialog").hidden) return closeDialog()
+          if (!$("#drawer").hidden) closeDrawer()
+        })
+
+        // ---------- Budget dialog ----------
+        let editing = null
+        function openDialog(budget, kind) {
+          editing = budget ?? null
+          const b = budget ?? { kind: kind ?? "all", window: "day", amount: "", warn: 0.8, stop: true }
+          $("#dialog-title").textContent = budget ? `Edit budget: ${budget.label}` : "New budget"
+          $("#dialog-desc").textContent = `${budget?.project ? `Counts only ${budget.project}. ` : ""}Vector reads the spend ledger before a run starts and refuses the start once a hard limit is spent.`
+          $("#f-kind").querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.value === b.kind)))
+          $("#f-window").value = b.window
+          $("#f-amount").value = b.amount
+          $("#f-warn").value = Math.round(b.warn * 100)
+          syncWarn()
+          $("#f-stop").setAttribute("aria-checked", String(b.stop))
+          $("#f-delete").hidden = !budget || Boolean(budget.source)
+          $("#f-err").hidden = true
+          $("#dialog").hidden = false
+          setTimeout(() => $("#f-amount").focus(), 20)
+        }
+        function closeDialog() {
+          $("#dialog").hidden = true
+        }
+        function syncWarn() {
+          const v = $("#f-warn").value
+          $("#f-warn-out").textContent = `${v}%`
+          $("#f-warn").style.setProperty("--fill", `${((v - 50) / 45) * 100}%`)
+        }
+        $("#f-warn").addEventListener("input", syncWarn)
+        $("#budgets").addEventListener("click", (event) => {
+          const e = event.target.closest("[data-edit]")
+          if (e) return openDialog(BUDGETS.find((b) => b.id === e.dataset.edit))
+          const n = event.target.closest("[data-new]")
+          if (n) openDialog(null, n.dataset.new)
+        })
+        $("#add-budget").addEventListener("click", () => openDialog(null))
+        $("#dialog").addEventListener("click", (event) => {
+          if (event.target === $("#dialog") || event.target.closest("[data-close]")) closeDialog()
+        })
+        $("#f-save").addEventListener("click", () => {
+          const amount = Number(String($("#f-amount").value).replace(/[$,\s]/g, ""))
+          if (!(amount > 0)) {
+            $("#f-err").hidden = false
+            return $("#f-amount").focus()
+          }
+          const kind = $('#f-kind [aria-pressed="true"]').dataset.value
+          const win = $("#f-window").value
+          const next = { kind, window: win, amount, warn: Number($("#f-warn").value) / 100, stop: $("#f-stop").getAttribute("aria-checked") === "true" }
+          const kindLabel = { all: "All work", interactive: "Interactive", unattended: "Unattended" }[kind]
+          const winLabel = { run: "per run", day: "per day", month: "this month" }[win]
+          if (editing) {
+            Object.assign(editing, next, { label: editing.project ? `${editing.project} · ${winLabel}` : `${kindLabel} · ${winLabel}`, source: undefined })
+            freshBudget = editing.id
+          } else {
+            const id = `b${Date.now()}`
+            BUDGETS.push(Object.assign(next, { id, label: `${kindLabel} · ${winLabel}` }))
+            freshBudget = id
+          }
+          closeDialog()
+          refresh()
+          toast(next.stop ? `Saved. Vector refuses new ${kind === "all" ? "" : `${kind} `}runs once ${money(amount, 0)} ${winLabel} is spent.` : `Saved. You get an alert at ${Math.round(next.warn * 100)}% of ${money(amount, 0)} ${winLabel}.`)
+        })
+        $("#f-delete").addEventListener("click", () => {
+          BUDGETS = BUDGETS.filter((b) => b !== editing)
+          closeDialog()
+          refresh()
+          toast("Budget removed")
+        })
+
+        // ---------- Filters, export, toast ----------
+        root.addEventListener("lab:seg", (event) => {
+          if (event.target.id === "period") {
+            period = Number(event.detail)
+            refresh(true)
+          }
+          if (event.target.id === "metric") {
+            metric = event.detail
+            renderChart()
+          }
+        })
+        $("#project").addEventListener("change", (event) => {
+          project = event.target.value
+          refresh(true)
+        })
+        $("#export").addEventListener("click", () => {
+          const lines = ["date,sessions_usd,parallel_usd,scheduled_usd,total_usd,tokens,measured_runs,unmeasured_runs"].concat(
+            rows().map((r) => [period === 1 ? `2026-10-07T${String(r.h).padStart(2, "0")}:00` : r.d.toISOString().slice(0, 10), r.session.toFixed(2), r.parallel.toFixed(2), r.scheduled.toFixed(2), r.cost.toFixed(2), Math.round(r.tokens), r.runs, r.unmeasured].join(",")),
+          )
+          const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }))
+          const a = document.createElement("a")
+          a.href = url
+          a.download = `vector-spend-${period === 1 ? "today" : `${period}d`}.csv`
+          a.click()
+          setTimeout(() => URL.revokeObjectURL(url), 1000)
+          toast(`Exported ${rows().length} rows as ${a.download}`)
+        })
+        let toastTimer
+        function toast(text) {
+          const el = $("#toast")
+          el.textContent = text
+          el.hidden = false
+          clearTimeout(toastTimer)
+          toastTimer = setTimeout(() => (el.hidden = true), 3200)
+        }
+
+        // A refetch keeps the frame: the old numbers dim briefly instead of flashing empty.
+        function refresh(fade) {
+          const tk = $("#tk")
+          const draw = () => {
+            renderKpis()
+            renderChart()
+            renderBudgets()
+            renderBreakdowns()
+            renderSessions()
+            tk.querySelectorAll(".is-loading").forEach((el) => el.classList.remove("is-loading"))
+          }
+          if (!fade) return draw()
+          tk.querySelectorAll(".kpi, .chart-card").forEach((el) => el.classList.add("is-loading"))
+          setTimeout(draw, 140)
+        }
+        refresh()
+      })()
+    </script>
+  </body>
+</html>

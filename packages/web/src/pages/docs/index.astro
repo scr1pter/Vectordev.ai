@@ -36,14 +36,14 @@ const start = [
       nextRelease && nextRelease.version !== publishedDesktopVersion && (
         <>
           {" "}Prepared for the next release:{" "}
-          <a href={`/releases#release-${nextRelease.version.replaceAll(".", "-")}`}>
+          <a href="/docs/changelog">
             {nextRelease.version} — {nextRelease.title}
           </a>
           . These changes are not included in the current download yet.
         </>
       )
     }
-    {" "}<a href="/releases">Read the full version history and availability notes.</a>
+    {" "}<a href="/docs/changelog">Read the full version history and availability notes.</a>
   </p>
 
   <h2>Get going</h2>

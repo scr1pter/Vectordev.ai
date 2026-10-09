@@ -10,62 +10,23 @@ export const prerender = true
 <MarketingLayout title="Sign in to Vector" description="Sign in or create a free Vector account to download the desktop app and use the CLI." noindex>
   <div class="account-environment auth-environment">
     <MatrixRain />
-    <main class="auth-page">
-      <aside class="auth-story" aria-label="The Vector workspace">
-        <a class="auth-brand" href="/" aria-label="Vector home">
-          <img src="/vector-logo.png" alt="" width="34" height="34" />
+    <div class="login-shell">
+      <header class="login-top">
+        <a class="login-brand" href="/" aria-label="Vector home">
+          <img src="/vector-logo.png" alt="" width="26" height="26" />
           <span>Vector</span>
         </a>
-
-        <div class="auth-story-copy">
-          <p class="auth-eyebrow"><span></span> The AI engineering workspace</p>
-          <h2>Think bigger.<br />Build with<br /><em>Vector.</em></h2>
-          <p>Bring your code and AI agents together.<br />From the first idea to the final commit.</p>
-          <a class="auth-explore" href="/#everything">Explore the workspace <span aria-hidden="true">↗</span></a>
-        </div>
-
-        <div class="auth-story-footer">
-          <div><span class="auth-footer-label">Built around you</span><p>Local workspace. Parallel agents. Your choice of models.</p></div>
-          <span class="auth-footer-mark" aria-hidden="true">↗</span>
-        </div>
-      </aside>
-
-      <div class="auth-panel">
-        <nav class="auth-panel-nav" aria-label="Account navigation">
-          <a href="/">← <span>Back to home</span></a>
-          <a href="/docs">Need a hand? <span aria-hidden="true">↗</span></a>
-        </nav>
-        <div class="auth-panel-content">
-          <AuthPage client:only="react">
-            <div slot="fallback" class="auth-loading" role="status">Preparing your workspace…</div>
-          </AuthPage>
-        </div>
-        <p class="auth-installers-note">
-          To download Vector without an account, get any installer from
+        <a class="login-top-link" href="/docs">Docs</a>
+      </header>
+      <main class="login-main">
+        <AuthPage client:only="react">
+          <div slot="fallback" class="auth-card auth-card-loading" role="status">Loading sign-in…</div>
+        </AuthPage>
+        <p class="login-aside">
+          No account? Get any installer from
           <a href="https://github.com/scr1pter/Vectordev.ai/releases/latest">GitHub releases</a>.
         </p>
-        <footer class="auth-panel-footer">
-          <span>© {new Date().getFullYear()} Vector</span>
-          <div><a href="/legal/terms">Terms of Service</a><a href="/legal/privacy">Privacy Policy</a></div>
-        </footer>
-      </div>
-    </main>
+      </main>
+    </div>
   </div>
 </MarketingLayout>
-
-<style>
-  .auth-installers-note {
-    max-width: 320px;
-    margin: 0 auto 22px;
-    color: #91829e;
-    font-size: 11px;
-    line-height: 1.7;
-    text-align: center;
-  }
-
-  .auth-installers-note a {
-    color: #ba9cd5;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-</style>

@@ -1,7 +1,18 @@
 import { BrowserWindow, WebContentsView, session, type IpcMainInvokeEvent, type WebContents } from "electron"
 import { isCredentialField } from "./browser-credential-field"
 import { CredentialFocusChangedError, sendGuardedCharacters } from "./browser-credential-input"
-import { browserOrigin, isAllowedBrowserNavigation, isLocalBrowserUrl } from "./browser-navigation-policy"
+import {
+  DRIVING_COMMANDS,
+  beginAutomation,
+  browserOrigin,
+  endAutomation,
+  isAllowedBrowserNavigation,
+  isLocalBrowserUrl,
+  isUserNavigation,
+  navigationIntent,
+  recordPageInput,
+  type NavigationIntent,
+} from "./browser-navigation-policy"
 import { AsyncLocalStorage } from "node:async_hooks"
 
 import type { BrowserAgentInput, BrowserAgentPageEvent, BrowserAutomationRun } from "../preload/types"
@@ -26,6 +37,7 @@ type BrowserContext = {
   lastUsedAt: number
   allowedExternalOrigins: Set<string>
   blockedNavigationError?: string
+  intent: NavigationIntent
 }
 
 // The agent drives a WebContentsView embedded in the main Vector window, so
@@ -55,6 +67,7 @@ function getContext(id: string, create = true) {
     currentPageTitle: "",
     lastUsedAt: Date.now(),
     allowedExternalOrigins: new Set(),
+    intent: navigationIntent(),
   }
   contexts.set(id, context)
   return context
@@ -131,21 +144,32 @@ function emitPageEvent(context = currentContext()) {
 
 function wireView(context: BrowserContext, contents: WebContents) {
   const blockNavigation = (url: string) => {
-    const message =
-      "Browser Agent blocked a redirect to an external origin that was not approved. Open that URL explicitly to continue."
+    const shown = redactText(url)
+    const message = `Browser Agent did not follow ${shown}: ${browserOrigin(url) ?? "that address"} is not approved for this task. Open it with open_url to ask the user.`
     context.blockedNavigationError = message
-    context.networkErrors.push({ url: redactText(url), error: message })
+    context.networkErrors.push({ url: shown, error: message })
     context.networkErrors = context.networkErrors.slice(-50)
     pushAction("Blocked unapproved external navigation", false, message, undefined, context)
   }
+  // Automation only reaches approved origins. A link the user follows with their own click or
+  // key press goes wherever they chose, as in any browser, and approves that site the way
+  // typing it into the address bar does.
+  const allowNavigation = (url: string) => {
+    if (isAllowedBrowserNavigation(url, context.allowedExternalOrigins)) return true
+    const origin = browserOrigin(url)
+    if (!origin || !isUserNavigation(context.intent, Date.now())) return false
+    context.allowedExternalOrigins.add(origin)
+    return true
+  }
+  contents.on("input-event", (_event, input) => recordPageInput(context.intent, input.type, Date.now()))
   contents.setWindowOpenHandler(({ url }) => {
     // Keep the agent's world on one surface: popups navigate in place.
-    if (isAllowedBrowserNavigation(url, context.allowedExternalOrigins)) void contents.loadURL(url)
+    if (allowNavigation(url)) void contents.loadURL(url)
     else blockNavigation(url)
     return { action: "deny" }
   })
   const guardNavigation = (event: Electron.Event, url: string) => {
-    if (isAllowedBrowserNavigation(url, context.allowedExternalOrigins)) return
+    if (allowNavigation(url)) return
     event.preventDefault()
     blockNavigation(url)
   }
@@ -784,7 +808,13 @@ export async function runBrowserAgent(
     input.command === "setVisible"
   const context = getContext(contextId, !passive)
   if (!context) return stoppedReport()
-  return contextStorage.run(context, () => runBrowserAgentInContext(event, input))
+  const driving = DRIVING_COMMANDS.has(input.command ?? "")
+  if (driving) beginAutomation(context.intent)
+  try {
+    return await contextStorage.run(context, () => runBrowserAgentInContext(event, input))
+  } finally {
+    if (driving) endAutomation(context.intent, Date.now())
+  }
 }
 
 async function runBrowserAgentInContext(

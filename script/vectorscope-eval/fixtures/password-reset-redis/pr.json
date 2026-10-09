@@ -1,0 +1,4 @@
+{
+  "title": "Move password reset tokens to Redis",
+  "body": "The `password_resets` table only ever held short-lived rows and needed a nightly purge job. Tokens now live in Redis:\n\n- Each token is stored under the SHA-256 of its value with a 30-minute expiry, the same lifetime as before.\n- `GETDEL` makes a token single-use without a transaction.\n- Tokens that are not 43 base64url characters are rejected before Redis is asked.\n- A successful reset now signs the user out of every session.\n\nReset links sent shortly before the deploy stop working; the expired-link page already tells people to request a new one. The table and the purge job are dropped in a follow-up."
+}

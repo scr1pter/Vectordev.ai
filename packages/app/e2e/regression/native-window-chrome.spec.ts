@@ -12,7 +12,7 @@ for (const os of ["macos", "windows"] as const) {
       <style>*{box-sizing:border-box}html,body{margin:0;height:100%}
         [data-vector-shell]{height:100%;display:flex;flex-direction:column}
         [data-vector-navigation]{position:fixed;inset:0 auto 0 0;width:280px;padding-top:48px}
-        [data-vector-codespace],[data-component=dialog-v2],[data-vector-agent-launcher-overlay]{position:fixed;inset:0}
+        [data-vector-codespace],[data-component=dialog-v2],[data-vector-agent-launcher-overlay],[data-vector-pull-requests]{position:fixed;inset:0}
         [data-vector-agent-launcher-overlay]{display:flex;align-items:center;padding:20px}
         [data-vector-agent-launcher]{height:100vh;overflow:auto}
         [data-vector-floating-sidebar-toggle]{position:fixed;top:11px}
@@ -37,6 +37,7 @@ for (const os of ["macos", "windows"] as const) {
       "<div data-vector-codespace>Editor file tabs</div>",
       '<div data-component="dialog-v2" data-variant="settings"><div data-slot="dialog-container"><div data-slot="dialog-content" class="settings-v2-dialog">Settings</div></div></div>',
       "<div data-vector-agent-launcher-overlay><form data-vector-agent-launcher>Launch agent</form></div>",
+      "<div data-vector-pull-requests>Vectorscope</div>",
     ]) {
       await page.locator("body").evaluate((body, html) => body.insertAdjacentHTML("beforeend", html), surface)
       const overlay = page.locator("body > div").last()

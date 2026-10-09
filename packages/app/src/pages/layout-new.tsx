@@ -6442,9 +6442,11 @@ export default function NewLayout(props: ParentProps) {
               ...input,
               directory,
               catalog: reviewCatalog(byokProviders.connected()),
-              // Prefer explicit settings, then the connected providers' defaults.
+              // An explicit review model, then the agent's own: the model last chosen in its picker, as the agent
+              // launcher defaults to, then the configured default and the connected providers' defaults.
               preferredModels: [
                 config.agent?.review?.model,
+                ...byokModels.recent.list().map((item) => `${item.providerID}/${item.modelID}`),
                 config.model,
                 ...byokProviders.connected().map((provider) => {
                   const model = byokProviders.default()[provider.id]

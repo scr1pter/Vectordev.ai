@@ -90,10 +90,11 @@ const api: ElectronAPI = {
     clear: () => ipcRenderer.invoke("custom-instructions-clear"),
   },
   pullRequests: {
-    status: (options) => ipcRenderer.invoke("pr-cli-status", options),
+    status: () => ipcRenderer.invoke("pr-access-status"),
     list: (cwd, options) => ipcRenderer.invoke("pr-list", cwd, options),
     view: (cwd, number) => ipcRenderer.invoke("pr-view", cwd, number),
-    diff: (cwd, number) => ipcRenderer.invoke("pr-diff", cwd, number),
+    diff: (cwd, number, head) => ipcRenderer.invoke("pr-diff", cwd, number, head),
+    checks: (cwd, number, head) => ipcRenderer.invoke("pr-checks", cwd, number, head),
     create: (input) => ipcRenderer.invoke("pr-create", input),
     review: (input) => ipcRenderer.invoke("pr-review", input),
     merge: (input) => ipcRenderer.invoke("pr-merge", input),

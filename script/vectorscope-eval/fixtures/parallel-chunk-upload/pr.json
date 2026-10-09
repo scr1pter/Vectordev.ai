@@ -1,0 +1,4 @@
+{
+  "title": "Upload chunks in parallel, with retries",
+  "body": "Large uploads were slow because parts went up one at a time, and a single failed part failed the whole upload.\n\n- Up to 4 parts are in flight at once; the storage service assembles them by part number, so order does not matter.\n- Each part is retried up to 3 times with a linear backoff.\n- Progress events and the final completeness check are unchanged."
+}

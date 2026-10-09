@@ -1,0 +1,76 @@
+diff --git a/app/orders/repository.py b/app/orders/repository.py
+index bc2ab52..904a0d7 100644
+--- a/app/orders/repository.py
++++ b/app/orders/repository.py
+@@ -14,6 +14,8 @@ class Order:
+ 
+ 
+ ORDER_COLUMNS = "id, customer_email, status, total_cents, created_at"
++SEARCHABLE_STATUSES = frozenset({"pending", "paid", "shipped", "refunded"})
++MAX_SEARCH_RESULTS = 200
+ 
+ 
+ def get_order(conn: Connection, shop_id: int, order_id: int) -> Order | None:
+@@ -30,3 +32,26 @@ def recent_orders(conn: Connection, shop_id: int, limit: int = 20) -> list[Order
+         (shop_id, limit),
+     ).fetchall()
+     return [Order(*row) for row in rows]
++
++
++def search_orders(
++    conn: Connection,
++    shop_id: int,
++    query: str,
++    status: str | None = None,
++    limit: int = 50,
++) -> list[Order]:
++    """Orders of one shop whose customer email contains `query`, newest first."""
++    clauses = ["shop_id = %s"]
++    params: list[object] = [shop_id]
++    if status is not None:
++        if status not in SEARCHABLE_STATUSES:
++            raise ValueError(f"unknown status: {status}")
++        clauses.append("status = %s")
++        params.append(status)
++    if query.strip():
++        # %% is a literal % once psycopg has filled in the parameters.
++        clauses.append("customer_email ILIKE '%%" + query.strip() + "%%'")
++    params.append(min(limit, MAX_SEARCH_RESULTS))
++    sql = f"SELECT {ORDER_COLUMNS} FROM orders WHERE {' AND '.join(clauses)} ORDER BY created_at DESC LIMIT %s"
++    return [Order(*row) for row in conn.execute(sql, params).fetchall()]
+diff --git a/app/orders/views.py b/app/orders/views.py
+index d2e8bb5..c5b9939 100644
+--- a/app/orders/views.py
++++ b/app/orders/views.py
+@@ -1,4 +1,4 @@
+-from flask import Blueprint, abort, jsonify
++from flask import Blueprint, abort, jsonify, request
+ 
+ from app.auth import current_shop, login_required
+ from app.db import get_connection
+@@ -25,6 +25,25 @@ def list_recent():
+     return jsonify([serialize(order) for order in recent])
+ 
+ 
++@orders.get("/search")
++@login_required
++def search():
++    query = request.args.get("q", "")
++    status = request.args.get("status") or None
++    try:
++        limit = int(request.args.get("limit", "50"))
++    except ValueError:
++        abort(400, description="limit must be an integer")
++    if limit < 1:
++        abort(400, description="limit must be at least 1")
++    with get_connection() as conn:
++        try:
++            results = repository.search_orders(conn, current_shop().id, query, status=status, limit=limit)
++        except ValueError as error:
++            abort(400, description=str(error))
++    return jsonify([serialize(order) for order in results])
++
++
+ @orders.get("/<int:order_id>")
+ @login_required
+ def show(order_id: int):

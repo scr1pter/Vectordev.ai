@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test"
 import { publishedDesktopVersion, release199, upcomingRelease } from "../src/data/vector-releases"
 
-// GitHub release v1.99.102 shipped on 2026-10-07 with every installer and the in-app update feeds,
+// GitHub release v1.99.103 shipped on 2026-10-08 with every installer and the in-app update feeds,
 // so no later edit may present it, or anything before it, as upcoming.
-const shipped = "1.99.102"
+const shipped = "1.99.103"
 const web = new URL("..", import.meta.url).pathname
 const noAccountDownload = "https://github.com/scr1pter/Vectordev.ai/releases/latest"
 
@@ -13,7 +13,7 @@ const stale = [
   /\b(upcoming|next release)\W+1\.99\.99\b/i,
   /\b1\.99\.99,? the next (desktop )?release\b/i,
   /\b1\.99\.99 installers are not published\b/i,
-  /\bnot published yet\b[^.]*\b1\.99\.(8|99|100|101)\b/i,
+  /\bnot published yet\b[^.]*\b1\.99\.(8|99|100|101|102)\b/i,
   /\b(remain|are still)( at)? (desktop )?\**1\.99\.(8|99)\b/i,
   /\bcurrently (published|downloadable)\b[^.]*\b1\.99\.[78]\b/i,
   /\bno standalone CLI release is published\b/i,
@@ -33,7 +33,7 @@ test("the site marks the latest shipped desktop release as published", () => {
       .filter((release) => release.availability && Bun.semver.order(release.version, publishedDesktopVersion) <= 0)
       .map((release) => release.version),
   ).toEqual([])
-  // The unversioned Upcoming card leads /releases and the docs changelog; a version number there reads as upcoming.
+  // The unversioned Upcoming entry leads the docs changelog; a version number there reads as upcoming.
   expect(upcomingRelease.summary).not.toMatch(/\b\d+\.\d+\.\d+\b/)
 })
 
