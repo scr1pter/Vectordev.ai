@@ -2086,6 +2086,40 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("a background job settles with its child's outcome, not as completed", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      // The child's loop returns its last message normally, carrying the error it ended on.
+      const ended = (name: string, message: string) => (input: SessionPrompt.PromptInput) => {
+        const result = reply(input, "half done")
+        return { ...result, info: { ...result.info, error: { name, data: { message } } } } as SessionV1.WithParts
+      }
+      const launch = (end: (input: SessionPrompt.PromptInput) => SessionV1.WithParts) =>
+        def.execute(
+          { description: "survey", prompt: "Survey the handlers.", subagent_type: "general", background: true },
+          taskContext({
+            sessionID: chat.id,
+            messageID: assistant.id,
+            promptOps: {
+              ...stubOps(),
+              prompt: (input) => Effect.succeed(input.sessionID === chat.id ? reply(input, "noted") : end(input)),
+            },
+          }),
+        )
+      const failed = yield* launch(ended("UnknownError", "rate limited"))
+      const stopped = yield* launch(ended("MessageAbortedError", "Aborted"))
+
+      expect((yield* jobs.wait({ id: failed.metadata.sessionId })).info).toMatchObject({
+        status: "error",
+        error: "rate limited",
+        output: "half done",
+      })
+      expect((yield* jobs.wait({ id: stopped.metadata.sessionId })).info?.status).toBe("cancelled")
+    }),
+  )
+
   background.instance("a background result waits out a pending revert instead of committing it", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

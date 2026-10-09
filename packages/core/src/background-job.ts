@@ -1,10 +1,19 @@
 export * as BackgroundJob from "./background-job"
 
-import { Cause, Clock, Context, Deferred, Effect, Exit, Layer, Scope, SynchronizedRef } from "effect"
+import { Cause, Clock, Context, Deferred, Effect, Exit, Layer, Schema, Scope, SynchronizedRef } from "effect"
 import { Identifier } from "./id/id"
 import { makeGlobalNode } from "./effect/app-node"
 
 export type Status = "running" | "completed" | "error" | "cancelled"
+
+/**
+ * A run that failed but still produced output worth keeping, such as a subagent whose provider failed partway through
+ * its answer. The job settles as an error and keeps the output.
+ */
+export class RunFailed extends Schema.TaggedErrorClass<RunFailed>()("BackgroundJob.RunFailed", {
+  message: Schema.String,
+  output: Schema.String,
+}) {}
 
 export type Info = {
   id: string
@@ -136,10 +145,13 @@ export const make = Effect.gen(function* () {
       if (job.token !== token) return [{}, jobs]
       if (job.info.status !== "running") return [{ info: snapshot(job) }, jobs]
       const pending = job.pending - 1
+      const failed = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
       const output =
         Exit.isSuccess(exit) && (!job.output || sequence > job.output.sequence)
           ? { sequence, text: exit.value }
-          : job.output
+          : failed instanceof RunFailed
+            ? { sequence, text: failed.output }
+            : job.output
       if (Exit.isSuccess(exit) && pending > 0) {
         return [{}, new Map(jobs).set(id, { ...job, pending, output })]
       }
@@ -158,7 +170,7 @@ export const make = Effect.gen(function* () {
           status,
           completed_at,
           ...(output ? { output: output.text } : {}),
-          ...(Exit.isFailure(exit) ? { error: errorText(Cause.squash(exit.cause)) } : {}),
+          ...(status === "error" ? { error: errorText(failed) } : {}),
         },
       }
       return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]

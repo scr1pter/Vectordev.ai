@@ -4,6 +4,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { Effect, Layer } from "effect"
 
 export {
+  RunFailed,
   Service,
   type ExtendInput,
   type Info,
