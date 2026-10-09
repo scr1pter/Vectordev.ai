@@ -354,6 +354,12 @@ function reply(input: SessionPrompt.PromptInput, text: string): SessionV1.WithPa
   }
 }
 
+// What the real loop returns when it was stopped: its last assistant message, marked aborted.
+function stopped(input: SessionPrompt.PromptInput): SessionV1.WithParts {
+  const result = reply(input, "stopped")
+  return { ...result, info: { ...result.info, error: { name: "MessageAbortedError", data: { message: "Aborted" } } } }
+}
+
 function taskContext(input: { sessionID: SessionID; messageID: MessageID; promptOps: TaskPromptOps; callID?: string }) {
   return {
     sessionID: input.sessionID,
@@ -1864,14 +1870,25 @@ describe("tool.task", () => {
     }),
   )
 
-  background.instance("cancelling the parent run cancels running background tasks", () =>
+  background.instance("Stop on the parent leaves its background tasks running, and their result still reaches it", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
       const runState = yield* SessionRunState.Service
       const { chat, assistant } = yield* seed()
-      const tool = yield* TaskTool
-      const def = yield* tool.init()
-
+      const def = yield* (yield* TaskTool).init()
+      const release = yield* Deferred.make<void>()
+      const notes: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        cancel: (sessionID) => runState.cancel(sessionID),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) {
+            notes.push(input)
+            return Effect.succeed(reply(input, "noted"))
+          }
+          return Deferred.await(release).pipe(Effect.as(reply(input, "found the leak")))
+        },
+      }
       const result = yield* def.execute(
         {
           description: "inspect bug",
@@ -1879,27 +1896,64 @@ describe("tool.task", () => {
           subagent_type: "general",
           background: true,
         },
-        {
-          sessionID: chat.id,
-          messageID: assistant.id,
-          agent: "build",
-          abort: new AbortController().signal,
-          extra: {
-            promptOps: {
-              ...stubOps(),
-              prompt: () => Effect.never,
-            } satisfies TaskPromptOps,
-          },
-          messages: [],
-          metadata: () => Effect.void,
-          ask: () => Effect.void,
-        },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
       )
 
       yield* runState.cancel(chat.id)
+      expect((yield* jobs.get(result.metadata.sessionId))?.status).toBe("running")
+
+      yield* Deferred.succeed(release, undefined)
       const waited = yield* jobs.wait({ id: result.metadata.sessionId, timeout: 1_000 })
-      expect(waited.timedOut).toBe(false)
-      expect(waited.info?.status).toBe("cancelled")
+      expect(waited.info?.status).toBe("completed")
+      yield* pollWithTimeout(
+        Effect.sync(() => (notes.length > 0 ? true : undefined)),
+        "the parent never heard back from its background task",
+        "3 seconds",
+      )
+      expect(JSON.stringify(notes[0]?.parts)).toContain("found the leak")
+      expect(notes[0]?.noReply).toBeUndefined()
+    }),
+  )
+
+  it.instance("Stop on a parent stops its foreground subagents and spares background ones with their own work", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const runState = yield* SessionRunState.Service
+      const sessions = yield* Session.Service
+      const { chat } = yield* seed()
+      const attached = yield* sessions.create({ parentID: chat.id, title: "foreground" })
+      const detached = yield* sessions.create({ parentID: chat.id, title: "background" })
+      const nested = yield* sessions.create({ parentID: detached.id, title: "background's own subagent" })
+      yield* jobs.start({
+        id: attached.id,
+        type: "task",
+        metadata: { parentSessionId: chat.id, sessionId: attached.id },
+        run: Effect.never,
+      })
+      yield* jobs.start({
+        id: detached.id,
+        type: "task",
+        metadata: { parentSessionId: chat.id, sessionId: detached.id, background: true },
+        run: Effect.never,
+      })
+      yield* jobs.start({
+        id: nested.id,
+        type: "task",
+        metadata: { parentSessionId: detached.id, sessionId: nested.id },
+        run: Effect.never,
+      })
+
+      yield* runState.cancel(chat.id)
+
+      expect((yield* jobs.get(attached.id))?.status).toBe("cancelled")
+      expect((yield* jobs.get(detached.id))?.status).toBe("running")
+      expect((yield* jobs.get(nested.id))?.status).toBe("running")
+
+      // Stopping the background subagent itself still stops it, with the work under it.
+      yield* runState.cancel(detached.id)
+
+      expect((yield* jobs.get(detached.id))?.status).toBe("cancelled")
+      expect((yield* jobs.get(nested.id))?.status).toBe("cancelled")
     }),
   )
 
@@ -1945,7 +1999,7 @@ describe("tool.task", () => {
     }),
   )
 
-  background.instance("a task launched while Stop is still cancelling the others is cancelled too", () =>
+  background.instance("a background task launched after Stop is cancelled, while earlier ones keep running", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
       const runState = yield* SessionRunState.Service
@@ -1976,18 +2030,19 @@ describe("tool.task", () => {
         )
       const first = yield* launch("Inspect the cache.")
 
-      // A launch the parent's stream finishes while Stop waits for the first task to unwind.
+      // A launch the parent's stream finishes after Stop interrupted the turn.
       const stopping = yield* runState.cancel(chat.id).pipe(Effect.forkChild)
       yield* Effect.sleep("50 millis")
       const late = yield* launch("Inspect the queue.")
       yield* Fiber.join(stopping)
 
-      expect((yield* jobs.get(first.metadata.sessionId))?.status).toBe("cancelled")
+      // The first was handed off before Stop, so it runs on; the late one belonged to the stopped turn.
+      expect((yield* jobs.get(first.metadata.sessionId))?.status).toBe("running")
       expect((yield* jobs.get(late.metadata.sessionId))?.status).toBe("cancelled")
     }),
   )
 
-  background.instance("stopping the parent stops a task_id follow-up run, not just its job", () =>
+  background.instance("stopping a background task stops its task_id follow-up run, not just its job", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
       const runState = yield* SessionRunState.Service
@@ -2012,7 +2067,7 @@ describe("tool.task", () => {
                   Effect.onInterrupt(() => Deferred.succeed(secondInterrupted, undefined)),
                   Effect.as(reply(input, "second")),
                 )
-          return runState.ensureRunning(input.sessionID, Effect.succeed(reply(input, "stopped")), work)
+          return runState.ensureRunning(input.sessionID, Effect.succeed(stopped(input)), work)
         },
       }
       const started = yield* def.execute(
@@ -2027,7 +2082,7 @@ describe("tool.task", () => {
       yield* Deferred.succeed(first, undefined)
       yield* awaitWithTimeout(Deferred.await(secondStarted), "the follow-up run never started", "2 seconds")
 
-      yield* runState.cancel(chat.id)
+      yield* runState.cancel(child)
 
       expect((yield* jobs.get(child))?.status).toBe("cancelled")
       yield* awaitWithTimeout(Deferred.await(secondInterrupted), "the follow-up run kept going", "2 seconds")

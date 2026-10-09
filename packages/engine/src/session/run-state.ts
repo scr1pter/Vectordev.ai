@@ -85,10 +85,11 @@ const layer = Layer.effect(
       // The runner stops first. Sweeping the subagents first left the parent's loop live while they unwound, so a
       // foreground task call could return its "stopped" result and the parent take another step, or launch another
       // task, after Stop. Interrupting the runner cancels the foreground task calls it is waiting on and aborts the
-      // signal a launch still in progress checks; the sweep then stops the background ones.
+      // signal a launch still in progress checks; the sweep then stops the session's own job and the foreground work
+      // left under it.
       if (existing) yield* existing.cancel
       else yield* status.set(sessionID, { type: "idle" })
-      yield* cancelBackgroundJobs(background, sessionID)
+      yield* cancelAttachedJobs(background, sessionID)
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
@@ -125,18 +126,22 @@ const layer = Layer.effect(
   }),
 )
 
-const cancelBackgroundJobs = Effect.fn("SessionRunState.cancelBackgroundJobs")(function* (
+const cancelAttachedJobs = Effect.fn("SessionRunState.cancelAttachedJobs")(function* (
   background: BackgroundJob.Interface,
   sessionID: SessionID,
 ) {
   const jobs = yield* background.list()
-  // A subagent that already finished can still have a background task of its own running, so the walk follows
-  // finished jobs to their descendants and cancels only what is still running.
+  // Stopping a session stops its own job and the foreground work it was waiting on. A background subagent was handed
+  // off and keeps running, with everything under it: it is stopped on its own, or with the session when that is
+  // deleted. A subagent that already finished can still have work of its own running, so the
+  // walk follows finished jobs to their descendants and cancels only what is still running.
   const family = new Set<string>([sessionID])
   const linked = (job: BackgroundJob.Info) =>
     family.has(job.id) ||
     (typeof job.metadata?.sessionId === "string" && family.has(job.metadata.sessionId)) ||
-    (typeof job.metadata?.parentSessionId === "string" && family.has(job.metadata.parentSessionId))
+    (job.metadata?.background !== true &&
+      typeof job.metadata?.parentSessionId === "string" &&
+      family.has(job.metadata.parentSessionId))
   const grow = (): void => {
     const before = family.size
     jobs.filter(linked).forEach((job) => {
