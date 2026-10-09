@@ -52,6 +52,7 @@ export interface PromptInput {
   base: string // the merge-base
   head: string
   baseRef?: string // the base branch name
+  uncommitted?: boolean // the change is the working tree's uncommitted changes against base, not a commit
   since?: string // the last reviewed head, in incremental mode
   pr?: { number?: number; title: string; body: string; author?: string; commits?: string[] }
   diff: string // the rendered PR diff, already budgeted
@@ -74,6 +75,7 @@ export interface PromptInput {
 export interface VerifyPromptInput {
   trust: Trust
   head: string
+  uncommitted?: boolean
   candidates: Finding[]
   headFiles?: HeadFile[]
 }
@@ -136,7 +138,7 @@ export function buildSecurityPrompt(input: PromptInput): string {
 export function buildVerifyPrompt(input: VerifyPromptInput): string {
   const sections = [
     [
-      `You are checking candidate findings from an earlier review pass of \`${short(input.head)}\`.`,
+      `You are checking candidate findings from an earlier review pass of ${input.uncommitted ? "the uncommitted changes in the working tree" : `\`${short(input.head)}\``}.`,
       "For each candidate, re-read the code at the cited location. Answer confirmed only when the defect is real and triggered as described; otherwise rejected, with a one-sentence reason.",
     ].join(" "),
     [TOOLS, input.trust === "untrusted" ? UNTRUSTED_WORKTREE : ""].filter(Boolean).join("\n"),
@@ -228,7 +230,12 @@ function data(input: PromptInput, open: PriorFinding[], notInlined: NonNullable<
   const against = input.baseRef
     ? `\`${inline(input.baseRef)}\` (merge-base \`${short(input.base)}\`)`
     : `\`${short(input.base)}\``
-  const target = [`## The change`, `Reviewing \`${short(input.head)}\` against ${against}.`]
+  const target = [
+    `## The change`,
+    input.uncommitted
+      ? `Reviewing the uncommitted changes in the working tree against ${against}.`
+      : `Reviewing \`${short(input.head)}\` against ${against}.`,
+  ]
   if (input.mode === "incremental" && input.since) target.push(`The last review was of \`${short(input.since)}\`.`)
   const out = [target.join("\n")]
 

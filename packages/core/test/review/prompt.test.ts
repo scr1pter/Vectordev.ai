@@ -242,6 +242,14 @@ describe("buildReviewPrompt", () => {
     expect(count(forged, "</ci_checks>")).toBe(1)
   })
 
+  test("names uncommitted changes as the working tree against its base, not as a commit", () => {
+    const text = buildReviewPrompt(
+      input({ uncommitted: true, base: "HEAD", head: "HEAD", baseRef: undefined, pr: undefined }),
+    )
+    expect(text).toContain("## The change\nReviewing the uncommitted changes in the working tree against `HEAD`.")
+    expect(text).not.toContain("Reviewing `HEAD`")
+  })
+
   test("names where repository instructions came from", () => {
     expect(buildReviewPrompt(input({ instructions: "Use Effect.", instructionsSource: "working tree" }))).toContain(
       '<repository_instructions source="working tree">\nUse Effect.\n</repository_instructions>',
@@ -312,6 +320,13 @@ describe("buildVerifyPrompt", () => {
     })
     expect(text).toContain("The working tree is the base branch.")
     expect(text).toContain('<untrusted_pr_file path="src/auth/refresh.ts" exact="true">')
+  })
+
+  test("names uncommitted changes rather than a commit", () => {
+    const text = buildVerifyPrompt({ trust: "trusted", head: "HEAD", uncommitted: true, candidates: [candidate] })
+    expect(text).toStartWith(
+      "You are checking candidate findings from an earlier review pass of the uncommitted changes in the working tree.",
+    )
   })
 })
 
