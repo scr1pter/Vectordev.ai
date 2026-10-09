@@ -67,6 +67,7 @@ import { PromptPopover, type AtOption, type SlashCommand } from "./prompt-input/
 import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
+import { FreeModelStart } from "./prompt-input/free-model-start"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { createPromptInputTransientState } from "./prompt-input/transient-state"
 import { showToast } from "@/utils/toast"
@@ -1488,6 +1489,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     () => COMPOSER_MODES.find((mode) => mode.id === composerMode()) ?? COMPOSER_MODES[0],
   )
   const [composerModeMenuOpen, setComposerModeMenuOpen] = createSignal(false)
+  // Mirrors the submit guard: with no connected provider, a send points here instead of failing.
+  const needsModel = createMemo(() => sync().data.provider_loaded && props.controls.model.selection.list().length === 0)
+  const [modelStartNudge, setModelStartNudge] = createSignal(0)
 
   const { abort, handleSubmit } =
     props.submission ??
@@ -1517,10 +1521,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       executionMode,
       llmJudge: settings.general.llmJudge,
       autoModelRouting: settings.general.autoModelRouting,
-      connectProvider: async () => {
-        const { DialogSelectProvider } = await import("./dialog-select-provider")
-        dialog.show(() => <DialogSelectProvider directory={() => sdk().directory} />)
-      },
+      connectProvider: () => setModelStartNudge((count) => count + 1),
     })
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1763,6 +1764,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         newLayoutDesigns={props.controls.newLayoutDesigns}
         t={(key) => language.t(key as Parameters<typeof language.t>[0])}
       />
+      <Show when={needsModel()}>
+        <FreeModelStart
+          directory={sdk().directory}
+          model={props.controls.model.selection}
+          nudge={modelStartNudge()}
+          onReady={restoreFocus}
+        />
+      </Show>
       <Show when={showDelegationChip()}>
         <div class="mx-1 mb-2 flex items-center gap-2 rounded-full border border-[#9374ec]/30 bg-[#9374ec]/10 px-3 py-1.5 text-[12px] text-[#d8cdfb] animate-in fade-in">
           <span class="shrink-0 text-[#ad95f5]" aria-hidden="true">

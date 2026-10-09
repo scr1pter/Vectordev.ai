@@ -1472,6 +1472,132 @@ html[data-vector-navigation-resizing] * {
   border-radius: 9px !important;
 }
 
+/* First-run model setup above the composer while no connected provider offers
+   a model. Wraps instead of using breakpoints so it also fits narrow panels. */
+.vector-model-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin: 0 4px 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--vx-line-strong);
+  border-radius: 16px;
+  background: var(--vx-gradient-soft), color-mix(in srgb, var(--vx-surface) 94%, transparent);
+  backdrop-filter: blur(18px) saturate(1.2);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: var(--vx-text);
+  font-family: var(--vx-font);
+}
+
+.vector-model-start__copy {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.vector-model-start__copy h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 620;
+  line-height: 20px;
+}
+
+.vector-model-start__copy p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--vx-text-subtle);
+}
+
+.vector-model-start__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vector-model-start__actions button {
+  display: inline-flex;
+  height: 34px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9px;
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    transform 200ms var(--vx-ease),
+    box-shadow 200ms var(--vx-ease),
+    background 200ms var(--vx-ease),
+    color 200ms var(--vx-ease);
+}
+
+.vector-model-start__actions button[data-variant="primary"] {
+  border: 1px solid var(--vx-text);
+  background: var(--vx-text);
+  color: var(--vx-canvas);
+}
+
+.vector-model-start__actions button[data-variant="primary"]:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(147, 116, 236, 0.22);
+}
+
+.vector-model-start__actions button[data-variant="secondary"] {
+  border: 1px solid var(--vx-line-strong);
+  background: var(--vx-surface);
+  color: var(--vx-text-subtle);
+}
+
+.vector-model-start__actions button[data-variant="secondary"]:hover {
+  background: var(--vx-surface-raised);
+  color: var(--vx-text);
+}
+
+.vector-model-start__actions button:focus-visible {
+  outline: 2px solid var(--vx-purple-bright);
+  outline-offset: 2px;
+}
+
+.vector-model-start__note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--vx-text-muted);
+}
+
+/* A send without a model replays this; alternating names restarts it. */
+.vector-model-start[data-nudge="odd"] {
+  animation: vector-model-start-nudge-odd 700ms var(--vx-ease);
+}
+
+.vector-model-start[data-nudge="even"] {
+  animation: vector-model-start-nudge-even 700ms var(--vx-ease);
+}
+
+@keyframes vector-model-start-nudge-odd {
+  35% {
+    border-color: var(--vx-purple);
+    box-shadow: 0 0 0 4px var(--vx-purple-soft);
+  }
+}
+
+@keyframes vector-model-start-nudge-even {
+  35% {
+    border-color: var(--vx-purple);
+    box-shadow: 0 0 0 4px var(--vx-purple-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vector-model-start[data-nudge] {
+    animation: none;
+  }
+}
+
 [data-vector-shell] [data-component="session-followup-dock"] {
   margin-bottom: -20px !important;
   padding-bottom: 20px !important;

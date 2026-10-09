@@ -4,6 +4,7 @@ import { retainFreeModelSelection } from "@vectordevai/schema/free-model"
 import { useLanguage } from "./language"
 import { showToast } from "@/utils/toast"
 import { takeProviderNotice } from "@/utils/provider-notices"
+import { bestOwnFreeModel } from "@/utils/free-model"
 import { createSimpleContext } from "@vectordevai/ui/context"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { useParams } from "@solidjs/router"
@@ -190,10 +191,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const defaultModel = () => {
       const defaults = providers.default()
       const connected = providers.connected()
-      const free = connected
-        .flatMap((provider) => Object.values(provider.models))
-        .filter((model) => model.freeModel?.source === "openrouter")
-        .toSorted((a, b) => b.limit.context - a.limit.context)[0]
+      const free = bestOwnFreeModel(connected.flatMap((provider) => Object.values(provider.models)))
       if (free) return { providerID: "openrouter", modelID: free.id }
       if (connected.some((provider) => provider.id === "openrouter")) return
       const own = connected.filter((provider) =>
