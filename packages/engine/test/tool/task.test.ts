@@ -357,6 +357,7 @@ function reply(input: SessionPrompt.PromptInput, text: string): SessionV1.WithPa
 // What the real loop returns when it was stopped: its last assistant message, marked aborted.
 function stopped(input: SessionPrompt.PromptInput): SessionV1.WithParts {
   const result = reply(input, "stopped")
+  if (result.info.role !== "assistant") return result
   return { ...result, info: { ...result.info, error: { name: "MessageAbortedError", data: { message: "Aborted" } } } }
 }
 
@@ -1647,7 +1648,76 @@ describe("tool.task", () => {
     }),
   )
 
-  background.instance("background task completion waits for running updates", () =>
+  background.instance("a message for a background task that is mid-run reaches it at its next step", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const runState = yield* SessionRunState.Service
+      const statuses = yield* SessionStatus.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const release = yield* Deferred.make<void>()
+      const received: string[] = []
+      const notes: SessionPrompt.PromptInput[] = []
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        cancel: (sessionID) => runState.cancel(sessionID),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) {
+            notes.push(input)
+            return Effect.succeed(reply(input, "noted"))
+          }
+          // As the real prompt does: the message lands in the child's history, then joins the loop already going, which
+          // marks the session busy at each step.
+          received.push(input.parts.map((part) => (part.type === "text" ? part.text : "")).join(""))
+          const work = statuses.set(input.sessionID, { type: "busy" }).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.map(() => reply(input, `answered ${received.join(" + ")}`)),
+          )
+          return runState.ensureRunning(input.sessionID, Effect.succeed(stopped(input)), work)
+        },
+      }
+      const context = taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps })
+      const started = yield* def.execute(
+        { description: "inspect", prompt: "Inspect the cache.", subagent_type: "general", background: true },
+        context,
+      )
+      const child = SessionID.make(started.metadata.sessionId)
+      yield* pollWithTimeout(
+        statuses.get(child).pipe(Effect.map((status) => (status.type === "busy" ? true : undefined))),
+        "the background task never started",
+        "2 seconds",
+      )
+
+      const steered = yield* def.execute(
+        { description: "inspect", prompt: "Also check eviction.", subagent_type: "general", task_id: child },
+        context,
+      )
+      expect(steered.output).toContain("Message delivered to the running background task")
+      expect(steered.output).toContain("reads it at its next step")
+      // It reached the child while the first run was still going, not after it.
+      yield* pollWithTimeout(
+        Effect.sync(() => (received.length === 2 ? true : undefined)),
+        "the message waited for the run to finish",
+        "2 seconds",
+      )
+      expect(received).toEqual(["Inspect the cache.", "Also check eviction."])
+
+      yield* Deferred.succeed(release, undefined)
+      expect((yield* jobs.wait({ id: child })).info?.status).toBe("completed")
+      yield* pollWithTimeout(
+        Effect.sync(() => (notes.length > 0 ? true : undefined)),
+        "the parent never heard back",
+        "3 seconds",
+      )
+      const text = JSON.stringify(notes[0]?.parts)
+      expect(text).toContain("answered Inspect the cache. + Also check eviction.")
+      // Both runs returned the one reply of the loop they shared, reported once.
+      expect(text).not.toContain("Report 1 of")
+      expect(notes).toHaveLength(1)
+    }),
+  )
+
+  background.instance("a message for a background task between runs is queued, and every run's report arrives", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
       const { chat, assistant } = yield* seed()
@@ -1703,7 +1773,9 @@ describe("tool.task", () => {
 
       expect(result.metadata.sessionId).toBe(started.metadata.sessionId)
       expect(result.metadata.background).toBe(true)
-      expect(result.output).toContain("Background task updated")
+      // Not "sent": the child reads it only once the run before it returns.
+      expect(result.output).toContain("Message queued for the background task")
+      expect(result.output).toContain("after its current run finishes")
       first.resolve()
       expect((yield* jobs.get(started.metadata.sessionId))?.status).toBe("running")
       expect((yield* Effect.promise(() => updated.promise)).parts).toEqual([
@@ -1717,7 +1789,10 @@ describe("tool.task", () => {
       const notification = yield* Effect.promise(() => injected.promise)
       expect(notification.variant).toBe("xhigh")
       expect(notification.parts[0]?.type).toBe("text")
-      if (notification.parts[0]?.type === "text") expect(notification.parts[0].text).toContain("second done")
+      // The first run's report is kept alongside the second's, not dropped.
+      const text = notification.parts[0]?.type === "text" ? notification.parts[0].text : ""
+      expect(text).toContain("Report 1 of 2:\nfirst done")
+      expect(text).toContain("Report 2 of 2:\nsecond done")
     }),
   )
 
@@ -2058,15 +2133,14 @@ describe("tool.task", () => {
         prompt: (input) => {
           if (input.sessionID === chat.id) return Effect.succeed(reply(input, "noted"))
           runs++
-          // The child's loop runs in the run-state scope, as the real prompt loop does.
-          const work =
-            runs === 1
-              ? Deferred.await(first).pipe(Effect.as(reply(input, "first")))
-              : Deferred.succeed(secondStarted, undefined).pipe(
-                  Effect.andThen(Effect.never),
-                  Effect.onInterrupt(() => Deferred.succeed(secondInterrupted, undefined)),
-                  Effect.as(reply(input, "second")),
-                )
+          // The first run holds no loop, so the follow-up queues behind it instead of joining it.
+          if (runs === 1) return Deferred.await(first).pipe(Effect.as(reply(input, "first")))
+          // The follow-up's loop runs in the run-state scope, as the real prompt loop does.
+          const work = Deferred.succeed(secondStarted, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(secondInterrupted, undefined)),
+            Effect.as(reply(input, "second")),
+          )
           return runState.ensureRunning(input.sessionID, Effect.succeed(stopped(input)), work)
         },
       }
