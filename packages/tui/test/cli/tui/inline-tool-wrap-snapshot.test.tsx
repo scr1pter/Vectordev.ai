@@ -15,6 +15,7 @@ import {
   parseQuestionAnswers,
   parseQuestions,
   parseTodos,
+  subagentRowState,
   alwaysSeparate,
   toolDisplay,
 } from "../../../src/routes/session"
@@ -287,6 +288,45 @@ describe("TUI inline tool wrapping", () => {
     expect(formatSubagentOutcome("error", undefined)).toBe("Failed")
     expect(formatSubagentOutcome("cancelled", undefined)).toBe("Stopped")
     expect(formatSubagentOutcome(undefined, undefined)).toBeUndefined()
+  })
+
+  test("a background subagent whose run was lost reads as interrupted, never as done", () => {
+    const background = { part: "completed" as const, background: true }
+    // The engine restarted mid-run: the record still says running, and the engine reports no status for the child.
+    expect(subagentRowState({ ...background, lifecycle: "running", child: undefined, started: true })).toEqual({
+      running: false,
+      outcome: "interrupted",
+    })
+    expect(formatSubagentOutcome("interrupted", undefined)).toBe("Interrupted · no longer running")
+    // Seen going idle: the run is settling and its record lands next.
+    expect(subagentRowState({ ...background, lifecycle: "running", child: "idle", started: true })).toEqual({
+      running: false,
+    })
+    // Still working, or just launched and not yet replying.
+    expect(subagentRowState({ ...background, lifecycle: "running", child: "busy", started: true }).running).toBe(true)
+    expect(subagentRowState({ ...background, lifecycle: "running", child: undefined, started: false }).running).toBe(
+      true,
+    )
+    expect(subagentRowState({ ...background, lifecycle: "queued", child: undefined, started: false }).running).toBe(true)
+    // Settled outcomes.
+    expect(subagentRowState({ ...background, lifecycle: "error", child: "idle", started: true })).toEqual({
+      running: false,
+      outcome: "error",
+    })
+    expect(subagentRowState({ ...background, lifecycle: "cancelled", child: "idle", started: true })).toEqual({
+      running: false,
+      outcome: "cancelled",
+    })
+    expect(subagentRowState({ ...background, lifecycle: "completed", child: "idle", started: true })).toEqual({
+      running: false,
+    })
+    // A foreground call follows its own part.
+    expect(
+      subagentRowState({ part: "running", background: false, lifecycle: "running", child: "busy", started: true }),
+    ).toEqual({ running: true })
+    expect(
+      subagentRowState({ part: "completed", background: false, lifecycle: "completed", child: "idle", started: true }),
+    ).toEqual({ running: false })
   })
 
   test("lists the background subagents still running, for Stop background subagents", () => {

@@ -2191,20 +2191,17 @@ function Task(props: ToolProps) {
   const status = createMemo(() => sync.data.session_status[sessionID() ?? ""])
   // The subagent's own outcome. The tool call completes even when the subagent failed or was stopped, so the part's
   // status alone would show those as done.
-  const lifecycle = createMemo(() => stringValue(props.metadata.status))
-  const isRunning = createMemo(() => {
-    const value = status()
-    return (
-      props.part.state.status === "running" ||
-      (props.metadata.background === true &&
-        (lifecycle() === "queued" || (value !== undefined && value.type !== "idle")))
-    )
-  })
-  const outcome = createMemo(() => {
-    if (isRunning()) return
-    const value = lifecycle()
-    if (value === "error" || value === "cancelled") return value
-  })
+  const row = createMemo(() =>
+    subagentRowState({
+      part: props.part.state.status,
+      background: props.metadata.background === true,
+      lifecycle: stringValue(props.metadata.status),
+      child: status()?.type,
+      started: messages().some((message) => message.role === "assistant"),
+    }),
+  )
+  const isRunning = createMemo(() => row().running)
+  const outcome = createMemo(() => row().outcome)
   const retry = createMemo(() => {
     const value = status()
     if (value?.type !== "retry") return
@@ -2255,7 +2252,7 @@ function Task(props: ToolProps) {
       icon={
         outcome() === "error"
           ? "✗"
-          : outcome() === "cancelled"
+          : outcome() === "cancelled" || outcome() === "interrupted"
             ? "■"
             : props.part.state.status === "completed"
               ? "✓"
@@ -2292,9 +2289,36 @@ export function formatSubagentRetry(attempt: number, message: string) {
   return `Retrying (attempt ${attempt}) · ${message}`
 }
 
-export function formatSubagentOutcome(outcome: "error" | "cancelled" | undefined, error: string | undefined) {
+export function formatSubagentOutcome(
+  outcome: "error" | "cancelled" | "interrupted" | undefined,
+  error: string | undefined,
+) {
   if (outcome === "cancelled") return "Stopped"
+  if (outcome === "interrupted") return "Interrupted · no longer running"
   if (outcome === "error") return error ? `Failed · ${error}` : "Failed"
+}
+
+/**
+ * A task row's state. A background task's call completes as soon as it launches, so its row follows the subagent's
+ * lifecycle record and its session status instead. The engine reports only sessions that are not idle, so a record
+ * still saying running for a child that has replied before but has no status at all means its run was lost, to an
+ * engine restart for one, not that it finished. A child just seen going idle is settling: its record lands next.
+ */
+export function subagentRowState(input: {
+  part: ToolPart["state"]["status"]
+  background: boolean
+  lifecycle: string | undefined
+  child: "idle" | "busy" | "retry" | undefined
+  started: boolean
+}): { running: boolean; outcome?: "error" | "cancelled" | "interrupted" } {
+  const busy = input.child !== undefined && input.child !== "idle"
+  if (input.part === "running" || (input.background && (input.lifecycle === "queued" || busy)))
+    return { running: true }
+  if (input.lifecycle === "error" || input.lifecycle === "cancelled") return { running: false, outcome: input.lifecycle }
+  if (input.background && input.lifecycle === "running" && input.child === undefined)
+    // Just launched, the child has not started its first reply, and its status may not have arrived yet.
+    return input.started ? { running: false, outcome: "interrupted" } : { running: true }
+  return { running: false }
 }
 
 /** Sessions of the background subagents still running among a session's parts. */
