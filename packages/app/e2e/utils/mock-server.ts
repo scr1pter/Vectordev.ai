@@ -13,6 +13,7 @@ export interface MockServerConfig {
   sessions: ({ id: string } & Record<string, unknown>)[]
   pageMessages: (sessionId: string, limit: number, before?: string) => { items: unknown[]; cursor?: string }
   vcsDiff?: unknown[]
+  vcsStatus?: unknown[] | (() => unknown[])
   messageDelay?: number
   onMessages?: (input: { sessionID: string; before?: string; phase: "start" | "end" }) => void
   /** Global stream envelopes containing directory and payload. */
@@ -82,6 +83,8 @@ export async function mockVectorServer(page: Page, config: MockServerConfig) {
       return json(route, typeof config.questions === "function" ? config.questions() : (config.questions ?? []))
     if (path === "/session/status") return json(route, config.sessionStatus ?? {})
     if (path === "/vcs/diff" && config.vcsDiff) return json(route, config.vcsDiff)
+    if (path === "/vcs/status" && config.vcsStatus)
+      return json(route, typeof config.vcsStatus === "function" ? config.vcsStatus() : config.vcsStatus)
     if (path === "/file" && config.fileList)
       return json(route, await config.fileList(url.searchParams.get("path") ?? ""))
     if (path === "/file/content" && config.fileContent)
