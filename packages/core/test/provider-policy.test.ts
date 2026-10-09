@@ -15,7 +15,12 @@ import { Integration } from "@vectordevai/core/integration"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
-import { providerCredentialAllowed } from "@vectordevai/core/provider-policy"
+import {
+  CHATGPT_SIGN_IN,
+  chatgptOAuthConfiguration,
+  providerCredentialAllowed,
+  providerOAuthAllowed,
+} from "@vectordevai/core/provider-policy"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 
@@ -158,7 +163,7 @@ it.effect("paused sign-ins never expose stored OAuth connections", () =>
   Effect.gen(function* () {
     const credentials = yield* Credential.Service
     const integrations = yield* Integration.Service
-    for (const id of ["github-copilot", "xai", "gitlab", "poe", "digitalocean"]) {
+    for (const id of ["openai", "github-copilot", "xai", "gitlab", "poe", "digitalocean"]) {
       const integrationID = Integration.ID.make(id)
       yield* integrations.transform((draft) => draft.update(integrationID, () => {}))
       const saved = yield* credentials.create({
@@ -264,8 +269,7 @@ test("unavailable credential reasons preserve ordinary and custom API keys", asy
     expect(providerCredentialUnavailable(id, { type: "oauth" })?.reason).toBe("sign-in-paused")
     expect(providerCredentialUnavailable(id, { type: "api" })).toBeUndefined()
   }
-  // ChatGPT sign-in was restored on 26 September 2026.
-  expect(providerCredentialUnavailable("openai", { type: "oauth" })).toBeUndefined()
+  expect(providerCredentialUnavailable("openai", { type: "oauth" })?.reason).toBe("sign-in-paused")
   expect(providerCredentialUnavailable("openai", { type: "api" })).toBeUndefined()
   expect(
     providerCredentialUnavailable("digitalocean", { type: "api", metadata: { oauth_access: "true" } })?.reason,
@@ -312,3 +316,18 @@ it.effect("V2 publishes one actionable notice for a paused credential without ex
     expect(JSON.stringify(notices)).not.toContain("fixture-private")
   }),
 )
+
+test("ChatGPT OAuth needs release approval and an owned registration; API keys remain usable", () => {
+  expect(CHATGPT_SIGN_IN).toBe(false)
+  expect(chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: "vector-owned-test-registration" })).toBeUndefined()
+  expect(chatgptOAuthConfiguration({}, true)).toBeUndefined()
+  expect(chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: "invalid registration" }, true)).toBeUndefined()
+  expect(chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: "vector-owned-test-registration" }, true)).toEqual({
+    clientId: "vector-owned-test-registration",
+    origin: "https://auth.openai.com",
+  })
+  expect(providerOAuthAllowed("openai")).toBe(false)
+  expect(providerCredentialAllowed("openai", { type: "oauth" })).toBe(false)
+  expect(providerCredentialAllowed("openai", { type: "api" })).toBe(true)
+  expect(providerCredentialAllowed("openai", { type: "key" })).toBe(true)
+})

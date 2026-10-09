@@ -330,11 +330,11 @@ if (process.argv[2] === "pack")
   }
 }, 30_000)
 
-// The Codex CLI client was restored for ChatGPT sign-in on 26 September 2026;
-// every other borrowed registration still stops a publish.
+// Every borrowed OAuth registration stops publication, including the Codex client.
 const borrowedRegistrations = [
   "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
   "Ov23li8tweQw6odWQebz",
+  "app_EMoamEEZ73f0CkXaXp7hrann",
 ]
 for (const problem of [
   "stale version",

@@ -114,26 +114,11 @@ const SYNTHETIC_OPENAI_SCENARIO = {
 const RECORDED_SCENARIOS = [
   SYNTHETIC_OPENAI_SCENARIO,
   {
-    id: "openai-oauth",
-    name: "OpenAI OAuth",
-    providerID: ProviderV2.ID.openai,
-    modelID: "gpt-5.5",
-    cassette: "session/native-openai-oauth-tool-loop",
-    protocol: "openai-responses",
-    tags: ["vector", "native", "oauth", "tool-loop"],
+    ...SYNTHETIC_OPENAI_SCENARIO,
+    id: "openai-api-key-with-stale-oauth",
+    name: "OpenAI API key with ignored stale OAuth",
     canRecord: () => false,
     replayAuth: replayOpenAIOAuth,
-    stableID: "openai-oauth",
-    config: (model) =>
-      providerConfig({
-        providerID: ProviderV2.ID.openai,
-        name: "OpenAI",
-        env: ["OPENAI_API_KEY"],
-        npm: "@ai-sdk/openai",
-        api: "https://api.openai.com/v1",
-        model,
-        options: { baseURL: "https://api.openai.com/v1" },
-      }),
   },
   {
     id: "anthropic-api-key",
@@ -382,13 +367,13 @@ describe("session.llm native recorded", () => {
   )
 
   policy.instance(
-    "OpenAI OAuth alone resolves a native-session model",
+    "OpenAI OAuth alone cannot resolve a native-session model",
     () =>
       Effect.gen(function* () {
         const provider = yield* Provider.Service
-        expect((yield* provider.list())[ProviderV2.ID.openai]).toBeDefined()
-        const model = yield* provider.getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5.5"))
-        expect(String(model.providerID)).toBe("openai")
+        expect((yield* provider.list())[ProviderV2.ID.openai]).toBeUndefined()
+        const error = yield* provider.getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5.5")).pipe(Effect.flip)
+        expect(Provider.ModelNotFoundError.isInstance(error)).toBe(true)
       }),
     { config: { enabled_providers: [ProviderV2.ID.openai] } },
   )
