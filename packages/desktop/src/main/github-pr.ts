@@ -11,6 +11,7 @@ import {
   type GithubAccess,
   type GithubRepoRef,
 } from "./github-api"
+import { buildWorkflowYaml, WORKFLOW_FILE } from "@vectordevai/core/review/workflow"
 import { githubSignInConfigured, resolveGithubAccess } from "./github-access"
 import {
   requireMergeStrategy,
@@ -22,6 +23,8 @@ import {
   requirePullRequestState,
   requirePullRequestText,
   requireReviewEvent,
+  requireSecretNames,
+  requireWorkflowModel,
 } from "./github-pr-input"
 import { cleanLogLine, failedStepLog, MAX_LOG_BYTES } from "./ci-watch"
 import { redactText } from "./security-redaction"
@@ -491,6 +494,227 @@ export async function putPullRequestMerge(
     throw error
   })
   return { merged: true }
+}
+
+// ---- Automatic reviews ----------------------------------------------------------------------------------------
+// "Set up automatic reviews" opens a pull request that adds the workflow `vector github install` writes. Nothing runs
+// until someone merges it, and no API key goes to GitHub: the user adds the repository secrets it names.
+
+export const AUTO_REVIEW_BRANCH = "vector-automatic-reviews"
+// The monthly review budget `vector github install` suggests.
+const AUTO_REVIEW_MONTHLY_USD = 50
+const VECTOR_TOKEN_URL = "https://vectordev.ai/auth/cli"
+
+export type AutoReviewStatus = {
+  // installed: the default branch has the workflow. pending: a pull request that adds it is open. read-only: this
+  // account cannot push to the repository. needs-scope: this sign-in may not write workflow files.
+  state: "installed" | "pending" | "read-only" | "needs-scope" | "available"
+  repo: string // owner/name
+  defaultBranch: string
+  secretsUrl: string // the repository's Actions secrets settings
+  url?: string // installed: the workflow file; pending: the pull request
+  source: GithubAccess["source"]
+}
+
+export type AutoReviewSecret = { name: string; detail: string; url?: string }
+
+export type AutoReviewWorkflow = {
+  path: string
+  content: string
+  model: string
+  monthlyUsd: number
+  secrets: AutoReviewSecret[]
+}
+
+export type AutoReviewSetup = {
+  url: string
+  number: number
+  branch: string
+  secrets: AutoReviewSecret[]
+  secretsUrl: string
+}
+
+// The file the pull request adds: `vector github install`'s workflow with automatic reviews on, on the given model,
+// with that command's default monthly limit, the repository's own GITHUB_TOKEN and no public sharing.
+export function autoReviewWorkflow(input: { model: unknown; keys: unknown }, version: string): AutoReviewWorkflow {
+  const model = requireWorkflowModel(input.model)
+  // Vector's shared models sign in with VECTOR_CLI_TOKEN, which every workflow already passes.
+  const keys =
+    model.provider === "vector" ? [] : requireSecretNames(input.keys).filter((name) => name !== "VECTOR_CLI_TOKEN")
+  return {
+    path: WORKFLOW_FILE,
+    content: buildWorkflowYaml({
+      provider: model.provider,
+      model: model.model,
+      keys,
+      autoReview: true,
+      auth: "github",
+      share: false,
+      monthlyUsd: AUTO_REVIEW_MONTHLY_USD,
+      version,
+    }),
+    model: `${model.provider}/${model.model}`,
+    monthlyUsd: AUTO_REVIEW_MONTHLY_USD,
+    secrets: [
+      {
+        name: "VECTOR_CLI_TOKEN",
+        detail: "Signs the workflow in to your Vector account. Create one at vectordev.ai/auth/cli.",
+        url: VECTOR_TOKEN_URL,
+      },
+      ...keys.map((name) => ({ name, detail: `Your ${model.provider} API key.` })),
+    ],
+  }
+}
+
+export async function automaticReviewStatus(cwd: string) {
+  const { access, repo } = await pullRequestContext(cwd)
+  return fetchAutoReviewStatus(access, repo)
+}
+
+export async function fetchAutoReviewStatus(access: GithubAccess, repo: GithubRepoRef): Promise<AutoReviewStatus> {
+  const response = await githubFetch(access, repoPath(repo))
+  // OAuth tokens list their scopes here, and writing a file under .github/workflows needs "workflow". A token that
+  // lists none, such as a fine-grained one, is tried as it is.
+  const scopes = response.headers.get("x-oauth-scopes")
+  const info = (await response.json()) as {
+    full_name?: string
+    default_branch: string
+    html_url: string
+    permissions?: { push?: boolean }
+  }
+  const status = {
+    repo: info.full_name ?? `${repo.owner}/${repo.name}`,
+    defaultBranch: info.default_branch,
+    secretsUrl: `${info.html_url}/settings/secrets/actions`,
+    source: access.source,
+  }
+  const installed = await githubJson<{ html_url?: string }>(
+    access,
+    `${repoPath(repo)}/contents/${WORKFLOW_FILE}?ref=${encodeURIComponent(info.default_branch)}`,
+  ).catch((error: unknown) => {
+    if (error instanceof GithubRequestError && error.status === 404) return undefined
+    throw error
+  })
+  if (installed)
+    return {
+      ...status,
+      state: "installed",
+      url: installed.html_url ?? `${info.html_url}/blob/${info.default_branch}/${WORKFLOW_FILE}`,
+    }
+  const open = await githubJson<{ html_url: string; head: { ref: string; repo?: { full_name?: string } | null } }[]>(
+    access,
+    `${repoPath(repo)}/pulls?state=open&per_page=100`,
+  )
+  const pending = open.find(
+    (pull) =>
+      pull.head.ref.startsWith(AUTO_REVIEW_BRANCH) &&
+      pull.head.repo?.full_name?.toLowerCase() === status.repo.toLowerCase(),
+  )
+  if (pending) return { ...status, state: "pending", url: pending.html_url }
+  if (!info.permissions?.push) return { ...status, state: "read-only" }
+  if (scopes !== null && !scopes.split(",").some((scope) => scope.trim() === "workflow"))
+    return { ...status, state: "needs-scope" }
+  return { ...status, state: "available" }
+}
+
+export async function setUpAutomaticReviews(input: { cwd: string; model: string; keys: string[] }, version: string) {
+  const workflow = autoReviewWorkflow(input, version)
+  const { access, repo } = await pullRequestContext(requirePullRequestDirectory(input.cwd))
+  return openAutoReviewPullRequest(access, repo, workflow)
+}
+
+// Branches from the default branch, commits the workflow, and opens the pull request. The state is read again first,
+// so a second click, or a workflow someone else added meanwhile, never opens a second pull request.
+export async function openAutoReviewPullRequest(
+  access: GithubAccess,
+  repo: GithubRepoRef,
+  workflow: AutoReviewWorkflow,
+): Promise<AutoReviewSetup> {
+  const status = await fetchAutoReviewStatus(access, repo)
+  if (status.state !== "available") throw new Error(autoReviewRefusal(status))
+  const base = await githubJson<{ object: { sha: string } }>(
+    access,
+    `${repoPath(repo)}/git/ref/heads/${refPath(status.defaultBranch)}`,
+  )
+  const branch = await createAutoReviewBranch(access, repo, base.object.sha)
+  await githubJson(access, `${repoPath(repo)}/contents/${workflow.path}`, {
+    method: "PUT",
+    body: {
+      message: "Review pull requests with Vectorscope",
+      content: Buffer.from(workflow.content).toString("base64"),
+      branch,
+    },
+    timeoutMs: 60_000,
+  }).catch(async (error: unknown) => {
+    // The branch exists only for this file, so it is not left behind.
+    await githubFetch(access, `${repoPath(repo)}/git/refs/heads/${refPath(branch)}`, { method: "DELETE" }).catch(
+      () => undefined,
+    )
+    if (error instanceof GithubRequestError && (error.status === 403 || error.status === 404))
+      throw new Error(
+        `GitHub refused to add ${workflow.path} (${error.message}). Your GitHub sign-in may not be allowed to change workflows: sign out of GitHub in Vectorscope and sign in again.`,
+      )
+    throw error
+  })
+  const pull = await githubJson<{ html_url: string; number: number }>(access, `${repoPath(repo)}/pulls`, {
+    method: "POST",
+    body: {
+      title: "Review pull requests with Vectorscope",
+      head: branch,
+      base: status.defaultBranch,
+      body: autoReviewBody(workflow),
+    },
+    timeoutMs: 60_000,
+  })
+  return { url: pull.html_url, number: pull.number, branch, secrets: workflow.secrets, secretsUrl: status.secretsUrl }
+}
+
+// A branch left from an earlier set-up whose pull request was closed is kept; the new one gets a suffix instead.
+async function createAutoReviewBranch(access: GithubAccess, repo: GithubRepoRef, sha: string) {
+  const create = (branch: string) =>
+    githubJson(access, `${repoPath(repo)}/git/refs`, {
+      method: "POST",
+      body: { ref: `refs/heads/${branch}`, sha },
+    }).then(
+      () => true,
+      (error: unknown) => {
+        if (error instanceof GithubRequestError && error.status === 422) return false
+        throw error
+      },
+    )
+  if (await create(AUTO_REVIEW_BRANCH)) return AUTO_REVIEW_BRANCH
+  const fresh = `${AUTO_REVIEW_BRANCH}-${Date.now().toString(36)}`
+  if (await create(fresh)) return fresh
+  throw new Error(`GitHub would not create the branch ${fresh}. Try again.`)
+}
+
+function autoReviewRefusal(status: AutoReviewStatus) {
+  if (status.state === "installed") return `Automatic reviews are already set up in ${status.repo}.`
+  if (status.state === "pending")
+    return `A pull request that sets up automatic reviews is already open in ${status.repo}: ${status.url}`
+  if (status.state === "read-only") return `You need write access to ${status.repo} to add a workflow.`
+  return status.source === "gh"
+    ? "Your GitHub CLI login can't change workflow files. Run `gh auth refresh -s workflow`, then try again."
+    : "Your GitHub sign-in can't change workflow files yet. Sign out of GitHub in Vectorscope and sign in again to allow it."
+}
+
+function autoReviewBody(workflow: AutoReviewWorkflow) {
+  return [
+    `Adds \`${workflow.path}\`, the workflow \`vector github install\` writes, so Vectorscope reviews every pull request when it opens and on every push. Reviews run on \`${workflow.model}\` and stop at $${workflow.monthlyUsd} a month (\`REVIEW_MAX_COST_USD_PER_MONTH\`).`,
+    "",
+    "Before merging, add these repository secrets under Settings → Secrets and variables → Actions:",
+    "",
+    ...workflow.secrets.map((secret) => `- \`${secret.name}\`: ${secret.detail}`),
+    "",
+    "This pull request runs the workflow too, and that run fails until the secrets exist. After adding them, re-run it to see a review. Comment `/vectorscope review` on any pull request to ask for one.",
+    "",
+    "Opened from Vectorscope in Vector.",
+  ].join("\n")
+}
+
+// A branch name in a URL path: each segment encoded, its slashes kept.
+function refPath(branch: string) {
+  return branch.split("/").map(encodeURIComponent).join("/")
 }
 
 async function currentHead(access: GithubAccess, repo: GithubRepoRef, number: number) {

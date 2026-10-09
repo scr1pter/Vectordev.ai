@@ -5,6 +5,7 @@ const REVIEW_EVENTS = new Set(["comment", "approve", "request-changes"])
 const MERGE_STRATEGIES = new Set(["merge", "squash", "rebase"])
 const DIFF_SIDES = new Set(["LEFT", "RIGHT"])
 const MAX_REVIEW_COMMENTS = 60
+const MAX_SECRETS = 8
 
 export function requirePullRequestDirectory(value: unknown) {
   if (typeof value !== "string" || !value || value.length > 4_096 || !isAbsolute(value)) {
@@ -90,4 +91,33 @@ function requireDiffLine(value: unknown, label: string) {
 export function requireMergeStrategy(value: unknown) {
   if (typeof value !== "string" || !MERGE_STRATEGIES.has(value)) throw new Error("Invalid pull request merge strategy.")
   return value as "merge" | "squash" | "rebase"
+}
+
+// The workflow writes the model unquoted as `MODEL: provider/model`, so only characters that keep it one plain YAML
+// scalar are accepted: no spaces, quotes or #, and no trailing colon.
+export function requireWorkflowModel(value: unknown) {
+  if (
+    typeof value !== "string" ||
+    value.length > 200 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._:/@+-]*[A-Za-z0-9._/@+-]$/.test(value)
+  ) {
+    throw new Error("The model for automatic reviews must be written as provider/model.")
+  }
+  const slash = value.indexOf("/")
+  return { provider: value.slice(0, slash), model: value.slice(slash + 1) }
+}
+
+// The environment variables a provider reads its key from. Each becomes a repository secret of the same name, which
+// GitHub allows only without its own GITHUB_ prefix.
+export function requireSecretNames(value: unknown) {
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_SECRETS ||
+    !value.every(
+      (name) => typeof name === "string" && /^[A-Z][A-Z0-9_]{0,99}$/.test(name) && !name.startsWith("GITHUB_"),
+    )
+  ) {
+    throw new Error("Provider key names must be environment variable names, such as ANTHROPIC_API_KEY.")
+  }
+  return [...new Set(value as string[])]
 }

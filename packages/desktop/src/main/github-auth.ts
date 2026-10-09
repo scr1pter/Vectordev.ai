@@ -116,7 +116,8 @@ export async function startDeviceLogin(): Promise<GithubDeviceLoginStart> {
   const res = await fetch("https://github.com/login/device/code", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, scope: "repo" }),
+    // workflow lets Vectorscope's "Set up automatic reviews" add .github/workflows/vector.yml in a pull request.
+    body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, scope: "repo workflow" }),
   }).catch(() => undefined)
   if (!res) throw new Error(NETWORK_ERROR)
   const data = (await res.json().catch(() => undefined)) as

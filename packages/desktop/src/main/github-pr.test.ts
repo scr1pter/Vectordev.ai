@@ -3,16 +3,22 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { afterAll, describe, expect, test } from "bun:test"
+import { buildWorkflowYaml } from "@vectordevai/core/review/workflow"
 
 import type { GithubAccess } from "./github-api"
 import {
+  AUTO_REVIEW_BRANCH,
+  autoReviewWorkflow,
+  fetchAutoReviewStatus,
   fetchPullRequest,
   fetchPullRequestChecks,
   fetchPullRequestDiff,
   fetchPullRequests,
+  openAutoReviewPullRequest,
   postPullRequestReview,
   pushedHead,
   putPullRequestMerge,
+  setUpAutomaticReviews,
   submitPullRequestReview,
 } from "./github-pr"
 
@@ -373,6 +379,212 @@ describe("pull requests over GitHub's API", () => {
     await expect(fetchPullRequests({ ...access, token: "revoked" }, repo, "open", 10)).rejects.toThrow(
       "Sign in to GitHub again",
     )
+  })
+})
+
+describe("automatic reviews", () => {
+  // Repositories in each state "Set up automatic reviews" can find. acme/app still has the branch an earlier set-up
+  // made, whose pull request was closed. scopes is the X-OAuth-Scopes header GitHub sends for OAuth tokens.
+  const REPOS: Record<
+    string,
+    { push: boolean; scopes?: string; installed?: boolean; pending?: boolean; refuseWorkflow?: boolean }
+  > = {
+    app: { push: true, scopes: "repo, workflow" },
+    done: { push: true, scopes: "repo, workflow", installed: true },
+    open: { push: true, scopes: "repo, workflow", pending: true },
+    readonly: { push: false, scopes: "repo, workflow" },
+    noscope: { push: true, scopes: "repo" },
+    finegrained: { push: true },
+    denied: { push: true, scopes: "repo, workflow", refuseWorkflow: true },
+  }
+  const MAIN = "e".repeat(40)
+  const refs = new Set([`app:refs/heads/${AUTO_REVIEW_BRANCH}`])
+  const calls: { method: string; path: string; body?: Record<string, unknown> }[] = []
+  const stand = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url)
+      const body = ["GET", "DELETE"].includes(request.method)
+        ? undefined
+        : ((await request.json()) as Record<string, unknown>)
+      calls.push({ method: request.method, path: url.pathname, body })
+      const match = url.pathname.match(/^\/repos\/acme\/([^/]+)(\/.*)?$/)
+      const name = match?.[1] ?? ""
+      const repo = REPOS[name]
+      const rest = match?.[2] ?? ""
+      const missing = Response.json({ message: "Not Found" }, { status: 404 })
+      if (!repo) return missing
+      if (!rest)
+        return Response.json(
+          {
+            full_name: `acme/${name}`,
+            default_branch: "main",
+            html_url: `https://github.com/acme/${name}`,
+            permissions: { push: repo.push },
+          },
+          { headers: repo.scopes === undefined ? {} : { "x-oauth-scopes": repo.scopes } },
+        )
+      if (rest === "/contents/.github/workflows/vector.yml" && request.method === "GET")
+        return repo.installed && url.searchParams.get("ref") === "main"
+          ? Response.json({ html_url: `https://github.com/acme/${name}/blob/main/.github/workflows/vector.yml` })
+          : missing
+      if (rest === "/pulls" && request.method === "GET")
+        return Response.json([
+          {
+            html_url: `https://github.com/acme/${name}/pull/3`,
+            head: { ref: "fix-typo", repo: { full_name: `acme/${name}` } },
+          },
+          // A fork's branch of the same name is someone else's.
+          {
+            html_url: `https://github.com/acme/${name}/pull/4`,
+            head: { ref: AUTO_REVIEW_BRANCH, repo: { full_name: "mira/fork" } },
+          },
+          ...(repo.pending
+            ? [
+                {
+                  html_url: `https://github.com/acme/${name}/pull/9`,
+                  head: { ref: AUTO_REVIEW_BRANCH, repo: { full_name: `acme/${name}` } },
+                },
+              ]
+            : []),
+        ])
+      if (rest === "/git/ref/heads/main") return Response.json({ object: { sha: MAIN } })
+      if (rest === "/git/refs" && request.method === "POST") {
+        const ref = `${name}:${body?.ref}`
+        if (refs.has(ref)) return Response.json({ message: "Reference already exists" }, { status: 422 })
+        refs.add(ref)
+        return Response.json({ ref: body?.ref, object: { sha: body?.sha } }, { status: 201 })
+      }
+      if (rest.startsWith("/git/refs/heads/") && request.method === "DELETE") {
+        refs.delete(`${name}:refs/heads/${rest.slice("/git/refs/heads/".length)}`)
+        return new Response(null, { status: 204 })
+      }
+      if (rest === "/contents/.github/workflows/vector.yml" && request.method === "PUT")
+        return repo.refuseWorkflow
+          ? missing
+          : Response.json({ content: { path: ".github/workflows/vector.yml" } }, { status: 201 })
+      if (rest === "/pulls" && request.method === "POST")
+        return Response.json({ html_url: `https://github.com/acme/${name}/pull/12`, number: 12 }, { status: 201 })
+      return missing
+    },
+  })
+  afterAll(() => stand.stop(true))
+
+  const owner: GithubAccess = { token: "test-token", source: "vector", apiUrl: `http://127.0.0.1:${stand.port}` }
+  const repository = (name: string) => ({ owner: "acme", name })
+  const workflow = autoReviewWorkflow({ model: "anthropic/claude-sonnet-4-5", keys: ["ANTHROPIC_API_KEY"] }, "1.99.99")
+  const writes = () => calls.filter((call) => call.method !== "GET")
+
+  test("tells set up, open, read-only and missing-permission repositories apart", async () => {
+    const state = async (name: string) => fetchAutoReviewStatus(owner, repository(name))
+    expect(await state("app")).toEqual({
+      state: "available",
+      repo: "acme/app",
+      defaultBranch: "main",
+      secretsUrl: "https://github.com/acme/app/settings/secrets/actions",
+      source: "vector",
+    })
+    expect(await state("done")).toMatchObject({
+      state: "installed",
+      url: "https://github.com/acme/done/blob/main/.github/workflows/vector.yml",
+    })
+    expect(await state("open")).toMatchObject({ state: "pending", url: "https://github.com/acme/open/pull/9" })
+    expect((await state("readonly")).state).toBe("read-only")
+    expect((await state("noscope")).state).toBe("needs-scope")
+    // A token that lists no scopes is tried as it is.
+    expect((await state("finegrained")).state).toBe("available")
+  })
+
+  test("the file is the workflow `vector github install` writes for the same answers", () => {
+    expect(workflow.path).toBe(".github/workflows/vector.yml")
+    expect(workflow.content).toBe(
+      buildWorkflowYaml({
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        keys: ["ANTHROPIC_API_KEY"],
+        autoReview: true,
+        auth: "github",
+        share: false,
+        monthlyUsd: 50,
+        version: "1.99.99",
+      }),
+    )
+    expect(workflow.content).toContain("  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]")
+    expect(workflow.secrets.map((secret) => secret.name)).toEqual(["VECTOR_CLI_TOKEN", "ANTHROPIC_API_KEY"])
+    // Vector's shared models need only the Vector account token.
+    const shared = autoReviewWorkflow({ model: "vector/acme/coder:free", keys: ["VECTOR_CLI_TOKEN"] }, "1.99.99")
+    expect(shared.secrets.map((secret) => secret.name)).toEqual(["VECTOR_CLI_TOKEN"])
+    expect(shared.content).toContain("MODEL: vector/acme/coder:free")
+  })
+
+  test("branches from the default branch, commits only the workflow, and opens the pull request", async () => {
+    calls.length = 0
+    const setup = await openAutoReviewPullRequest(owner, repository("app"), workflow)
+    // The branch an earlier set-up left behind is kept; this one gets a suffix.
+    expect(setup.branch.startsWith(`${AUTO_REVIEW_BRANCH}-`)).toBe(true)
+    expect(setup).toMatchObject({
+      url: "https://github.com/acme/app/pull/12",
+      number: 12,
+      secretsUrl: "https://github.com/acme/app/settings/secrets/actions",
+    })
+    expect(setup.secrets.map((secret) => secret.name)).toEqual(["VECTOR_CLI_TOKEN", "ANTHROPIC_API_KEY"])
+    const [first, second, file, pull, ...rest] = writes()
+    expect(first).toMatchObject({
+      path: "/repos/acme/app/git/refs",
+      body: { ref: `refs/heads/${AUTO_REVIEW_BRANCH}`, sha: MAIN },
+    })
+    expect(second).toMatchObject({
+      path: "/repos/acme/app/git/refs",
+      body: { ref: `refs/heads/${setup.branch}`, sha: MAIN },
+    })
+    expect(file?.method).toBe("PUT")
+    expect(file?.path).toBe("/repos/acme/app/contents/.github/workflows/vector.yml")
+    expect(file?.body?.branch).toBe(setup.branch)
+    expect(Buffer.from(String(file?.body?.content), "base64").toString()).toBe(workflow.content)
+    expect(pull).toMatchObject({ path: "/repos/acme/app/pulls", body: { head: setup.branch, base: "main" } })
+    expect(String(pull?.body?.body)).toContain("- `ANTHROPIC_API_KEY`: Your anthropic API key.")
+    expect(rest).toEqual([])
+    // No secret is ever sent: the user adds them in GitHub.
+    expect(calls.some((call) => call.path.includes("/secrets"))).toBe(false)
+  })
+
+  test("refuses without writing anything when the repository is set up, waiting, or out of reach", async () => {
+    calls.length = 0
+    for (const [name, message] of [
+      ["done", "already set up in acme/done"],
+      ["open", "already open in acme/open: https://github.com/acme/open/pull/9"],
+      ["readonly", "write access to acme/readonly"],
+      ["noscope", "sign in again"],
+    ])
+      await expect(openAutoReviewPullRequest(owner, repository(name), workflow)).rejects.toThrow(message)
+    expect(writes()).toEqual([])
+    await expect(
+      openAutoReviewPullRequest({ ...owner, source: "gh" }, repository("noscope"), workflow),
+    ).rejects.toThrow("gh auth refresh -s workflow")
+  })
+
+  test("deletes its branch when GitHub refuses the workflow file", async () => {
+    calls.length = 0
+    await expect(openAutoReviewPullRequest(owner, repository("denied"), workflow)).rejects.toThrow(
+      "may not be allowed to change workflows",
+    )
+    expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
+      "POST /repos/acme/denied/git/refs",
+      "PUT /repos/acme/denied/contents/.github/workflows/vector.yml",
+      `DELETE /repos/acme/denied/git/refs/heads/${AUTO_REVIEW_BRANCH}`,
+    ])
+    expect(refs.has(`denied:refs/heads/${AUTO_REVIEW_BRANCH}`)).toBe(false)
+  })
+
+  test("refuses a malformed model or key name before calling GitHub", async () => {
+    calls.length = 0
+    await expect(
+      setUpAutomaticReviews({ cwd: "/tmp/project", model: "anthropic/claude sonnet", keys: [] }, "1.99.99"),
+    ).rejects.toThrow("provider/model")
+    await expect(
+      setUpAutomaticReviews({ cwd: "/tmp/project", model: "anthropic/claude", keys: ["GITHUB_TOKEN"] }, "1.99.99"),
+    ).rejects.toThrow("environment variable names")
+    expect(calls).toEqual([])
   })
 })
 

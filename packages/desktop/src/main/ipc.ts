@@ -34,12 +34,15 @@ import {
 } from "./agent-teams"
 import type { TeamCollaborationGraph, TeamTopology } from "./agent-team-model"
 import {
+  automaticReviewStatus,
+  autoReviewWorkflow,
   createPullRequest,
   listPullRequests,
   mergePullRequest,
   pullRequestAccessStatus,
   pullRequestChecks,
   pullRequestDiff,
+  setUpAutomaticReviews,
   submitPullRequestReview,
   viewPullRequest,
 } from "./github-pr"
@@ -338,6 +341,14 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("pr-review", (_event, input: Parameters<typeof submitPullRequestReview>[0]) => submitPullRequestReview(input))
   handle("pr-merge", (_event, input: Parameters<typeof mergePullRequest>[0]) => mergePullRequest(input))
+  // The workflow pins the CLI version this desktop build requires, as development builds of the CLI do.
+  handle("pr-auto-review-status", (_event, cwd: string) => automaticReviewStatus(cwd))
+  handle("pr-auto-review-preview", (_event, input: { model: string; keys: string[] }) =>
+    autoReviewWorkflow(input, import.meta.env.VECTOR_REQUIRED_CLI_VERSION),
+  )
+  handle("pr-auto-review-setup", (_event, input: { cwd: string; model: string; keys: string[] }) =>
+    setUpAutomaticReviews(input, import.meta.env.VECTOR_REQUIRED_CLI_VERSION),
+  )
   handle("updater-unsubscribe", (event) => updaterSubscriptions.delete(event.sender.id))
   handle("updater-check", () => deps.updater.check())
   handle("updater-install", () => deps.updater.install())

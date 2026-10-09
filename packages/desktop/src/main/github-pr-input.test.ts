@@ -8,6 +8,8 @@ import {
   requirePullRequestState,
   requirePullRequestText,
   requireReviewEvent,
+  requireSecretNames,
+  requireWorkflowModel,
 } from "./github-pr-input"
 
 describe("pull request bridge input", () => {
@@ -33,6 +35,55 @@ describe("pull request bridge input", () => {
     expect(() => requirePullRequestLimit(501)).toThrow("between 1 and 500")
     expect(() => requirePullRequestText("", "Title", 256, false)).toThrow("Title is invalid")
     expect(() => requirePullRequestText("x".repeat(257), "Title", 256)).toThrow("Title is invalid")
+  })
+
+  describe("automatic reviews", () => {
+    test("splits provider/model, including model ids that contain slashes, colons and @", () => {
+      expect(requireWorkflowModel("anthropic/claude-sonnet-4-5")).toEqual({
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+      })
+      expect(requireWorkflowModel("openrouter/acme/coder:free")).toEqual({
+        provider: "openrouter",
+        model: "acme/coder:free",
+      })
+      expect(requireWorkflowModel("cloudflare-workers-ai/@cf/meta/llama-3.1-8b-instruct").model).toBe(
+        "@cf/meta/llama-3.1-8b-instruct",
+      )
+    })
+
+    test("rejects anything that would not stay one plain YAML value on the MODEL line", () => {
+      for (const model of [
+        "claude-sonnet-4-5",
+        "anthropic/",
+        "anthropic/claude sonnet",
+        "anthropic/claude#latest",
+        "anthropic/claude:",
+        'anthropic/"claude"',
+        "anthropic/claude\nANTHROPIC_API_KEY: leaked",
+        "-anthropic/claude",
+        `anthropic/${"x".repeat(200)}`,
+        42,
+      ])
+        expect(() => requireWorkflowModel(model)).toThrow("provider/model")
+    })
+
+    test("accepts environment variable names as secret names, once each", () => {
+      expect(requireSecretNames(["ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"])).toEqual(["ANTHROPIC_API_KEY"])
+      expect(requireSecretNames([])).toEqual([])
+    })
+
+    test("rejects names GitHub would refuse or that could change the workflow", () => {
+      for (const keys of [
+        ["GITHUB_TOKEN"],
+        ["anthropic_api_key"],
+        ["KEY: ${{ secrets.OTHER }}"],
+        ["1PASSWORD"],
+        Array.from({ length: 9 }, (_, index) => `KEY_${index}`),
+        "ANTHROPIC_API_KEY",
+      ])
+        expect(() => requireSecretNames(keys)).toThrow("environment variable names")
+    })
   })
 
   describe("line comments", () => {
