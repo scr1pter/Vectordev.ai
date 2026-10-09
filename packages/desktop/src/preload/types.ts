@@ -968,7 +968,7 @@ export type ElectronAPI = {
     publish: (input: GithubPublishInput) => Promise<GithubPublishResult>
     auth: {
       status: () => Promise<GithubAuthStatus>
-      start: () => Promise<GithubDeviceLoginStart>
+      start: (input?: { workflow?: boolean }) => Promise<GithubDeviceLoginStart>
       openVerification: () => Promise<void>
       complete: () => Promise<GithubDeviceLoginResult>
       cancel: () => Promise<void>

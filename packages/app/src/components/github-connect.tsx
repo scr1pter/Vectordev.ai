@@ -83,7 +83,7 @@ export type GithubApi = {
   }): Promise<GithubPublishResult>
   auth?: {
     status(): Promise<GithubAuthStatus>
-    start(): Promise<GithubDeviceCode>
+    start(input?: { workflow?: boolean }): Promise<GithubDeviceCode>
     openVerification(): Promise<void>
     complete(): Promise<{ ok: boolean; login?: string; error?: string }>
     cancel(): Promise<void>
@@ -127,6 +127,7 @@ export function messageOf(error: unknown) {
 export function GithubDeviceSignIn(props: {
   intro: string
   autoStart?: boolean
+  workflow?: boolean // also ask for GitHub's workflow permission
   closeLabel?: string
   onConnected: (login?: string) => void
   onClose: () => void
@@ -151,7 +152,7 @@ export function GithubDeviceSignIn(props: {
     setStarting(true)
     setAuthError(undefined)
     try {
-      setDeviceCode(await auth.start())
+      setDeviceCode(await auth.start(props.workflow ? { workflow: true } : undefined))
       void waitForAuthorization()
     } catch (error) {
       setAuthError(messageOf(error))
@@ -239,6 +240,12 @@ export function GithubDeviceSignIn(props: {
         <Show when={deviceCode()?.expiresIn}>
           <div class="text-11-regular text-text-weak">
             Code expires in about {Math.max(1, Math.round((deviceCode()?.expiresIn ?? 0) / 60))} minutes.
+          </div>
+        </Show>
+        <Show when={props.workflow}>
+          <div class="max-w-[360px] text-12-regular text-text-weak">
+            GitHub also asks to let Vector change workflow files. Approve it so Vector can open the pull request that
+            adds automatic reviews.
           </div>
         </Show>
         <Button type="button" onClick={() => void openVerification()}>
