@@ -52,8 +52,8 @@ async function openVectorscope(page: Page, input: { changes?: () => unknown[]; a
           lastProject: { local: setup.directory },
         }),
       )
-      const calls = { preview: [] as unknown[], setup: [] as unknown[] }
-      const state = { automatic: setup.automatic as string }
+      const calls = { preview: [] as unknown[], setup: [] as unknown[], start: [] as unknown[] }
+      const state = { automatic: setup.automatic as string, signedIn: true }
       const secrets = [
         {
           name: "VECTOR_CLI_TOKEN",
@@ -67,13 +67,10 @@ async function openVectorscope(page: Page, input: { changes?: () => unknown[]; a
         configurable: true,
         value: {
           pullRequests: {
-            status: async () => ({
-              authenticated: true,
-              configured: true,
-              login: "mira",
-              source: "vector",
-              detail: "",
-            }),
+            status: async () =>
+              state.signedIn
+                ? { authenticated: true, configured: true, login: "mira", source: "vector", detail: "" }
+                : { authenticated: false, configured: true, detail: "Sign in to GitHub to load pull requests." },
             list: async () => [],
             autoReview: {
               status: async () => ({
@@ -112,6 +109,21 @@ async function openVectorscope(page: Page, input: { changes?: () => unknown[]; a
             },
           },
           ci: { runs: async () => ({ ok: true, runs: [] }) },
+          github: {
+            auth: {
+              status: async () => ({ configured: true, authenticated: state.signedIn }),
+              start: async (input?: unknown) => {
+                calls.start.push(input ?? null)
+                return { userCode: "WDJB-MJHT", verificationUri: "https://github.com/login/device", expiresIn: 900 }
+              },
+              openVerification: async () => undefined,
+              complete: () => new Promise(() => undefined),
+              cancel: async () => undefined,
+              logout: async () => {
+                state.signedIn = false
+              },
+            },
+          },
         },
       })
     },
@@ -197,4 +209,17 @@ test("Vectorscope says automatic reviews are on instead of offering to set them 
   )
   await expect(panel.getByRole("button", { name: "Open the pull request" })).toHaveCount(0)
   expect((await calls(page)).preview).toEqual([])
+})
+
+test("Vectorscope asks for GitHub's workflow permission only to set up automatic reviews", async ({ page }) => {
+  const panel = await openVectorscope(page, { automatic: "needs-scope" })
+
+  await panel.getByRole("button", { name: /needs permission to change workflows/ }).click()
+  await expect(panel).toContainText("Vector needs permission to change workflows")
+  expect((await calls(page)).start).toEqual([])
+  await panel.getByRole("button", { name: "Sign in again" }).click()
+  // The sign-in that follows starts by itself and is the only one that asks for the workflow permission.
+  await expect(panel.getByText("WDJB-MJHT")).toBeVisible()
+  await expect(panel).toContainText("GitHub also asks to let Vector change workflow files")
+  expect((await calls(page)).start).toEqual([{ workflow: true }])
 })

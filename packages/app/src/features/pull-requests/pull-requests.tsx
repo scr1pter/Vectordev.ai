@@ -667,6 +667,8 @@ export function PullRequests(props: {
   const [checkout, setCheckout] = createSignal<{ mode: ReviewCheckout["mode"]; label: string }>()
   const [estimate, setEstimate] = createSignal<{ value: ReviewEstimate; answer: (go: boolean) => void }>()
   const [busy, setBusy] = createSignal<string>()
+  // Set by "Sign in again" for automatic reviews: the next GitHub sign-in also asks for the workflow permission.
+  const [workflowSignIn, setWorkflowSignIn] = createSignal(false)
   const [error, setError] = createSignal<string>()
   const [posted, setPosted] = createSignal(false)
   const [postedNote, setPostedNote] = createSignal<string>()
@@ -1727,12 +1729,13 @@ export function PullRequests(props: {
                   type="button"
                   class={`${PRIMARY} mt-3`}
                   disabled={Boolean(busy())}
-                  onClick={() =>
+                  onClick={() => {
+                    setWorkflowSignIn(true)
                     void githubApi()
                       ?.auth?.logout()
                       .catch(() => undefined)
                       .then(() => refresh(props.projectPath))
-                  }
+                  }}
                 >
                   Sign in again
                 </button>
@@ -1963,8 +1966,13 @@ export function PullRequests(props: {
                 >
                   <GithubDeviceSignIn
                     intro="Vector works with pull requests through your own GitHub account. Sign in once, and Vector encrypts the token with your system's keychain."
+                    autoStart={workflowSignIn()}
+                    workflow={workflowSignIn()}
                     closeLabel="Not now"
-                    onConnected={() => void refresh(props.projectPath)}
+                    onConnected={() => {
+                      setWorkflowSignIn(false)
+                      void refresh(props.projectPath)
+                    }}
                     onClose={props.onClose}
                   />
                 </Show>

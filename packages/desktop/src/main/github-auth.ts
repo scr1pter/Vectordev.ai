@@ -104,7 +104,13 @@ export function apiHeaders(token: string): Record<string, string> {
   }
 }
 
-export async function startDeviceLogin(): Promise<GithubDeviceLoginStart> {
+// Pull requests and reviews need repo. workflow lets a token change workflow files in every repository the account can
+// push to, so it is asked for only when someone sets up Vectorscope's automatic reviews.
+export function deviceLoginScope(input?: { workflow?: boolean }) {
+  return input?.workflow === true ? "repo workflow" : "repo"
+}
+
+export async function startDeviceLogin(input?: { workflow?: boolean }): Promise<GithubDeviceLoginStart> {
   if (!GITHUB_CLIENT_ID) {
     throw new Error("GitHub sign-in isn't configured in this build of Vector.")
   }
@@ -116,8 +122,7 @@ export async function startDeviceLogin(): Promise<GithubDeviceLoginStart> {
   const res = await fetch("https://github.com/login/device/code", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    // workflow lets Vectorscope's "Set up automatic reviews" add .github/workflows/vector.yml in a pull request.
-    body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, scope: "repo workflow" }),
+    body: JSON.stringify({ client_id: GITHUB_CLIENT_ID, scope: deviceLoginScope(input) }),
   }).catch(() => undefined)
   if (!res) throw new Error(NETWORK_ERROR)
   const data = (await res.json().catch(() => undefined)) as

@@ -313,7 +313,7 @@ const api: ElectronAPI = {
     publish: (input) => ipcRenderer.invoke("github-publish", input),
     auth: {
       status: () => ipcRenderer.invoke("github-auth-status"),
-      start: () => ipcRenderer.invoke("github-auth-start"),
+      start: (input) => ipcRenderer.invoke("github-auth-start", input),
       openVerification: () => ipcRenderer.invoke("github-auth-open-verification"),
       complete: () => ipcRenderer.invoke("github-auth-complete"),
       cancel: () => ipcRenderer.invoke("github-auth-cancel"),

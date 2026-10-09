@@ -472,7 +472,9 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("github-publish", (_event: IpcMainInvokeEvent, input: GithubPublishInput) => publishToGithub(input))
   handle("github-auth-status", () => getAuthStatus())
-  handle("github-auth-start", () => startDeviceLogin())
+  handle("github-auth-start", (_event, input?: { workflow?: boolean }) =>
+    startDeviceLogin({ workflow: input?.workflow === true }),
+  )
   handle("github-auth-open-verification", () => openVerification())
   handle("github-auth-complete", () => completeDeviceLogin())
   handle("github-auth-cancel", () => cancelDeviceLogin())
