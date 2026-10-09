@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
@@ -99,6 +99,39 @@ type PullRequestsApi = {
     strategy: "merge" | "squash" | "rebase"
     head?: string
   }) => Promise<{ merged: boolean }>
+  autoReview?: {
+    status: (cwd: string) => Promise<AutoReviewStatus>
+    preview: (input: { model: string; keys: string[] }) => Promise<AutoReviewWorkflow>
+    setup: (input: { cwd: string; model: string; keys: string[] }) => Promise<AutoReviewSetup>
+  }
+}
+
+// Automatic reviews in GitHub Actions: whether the repository's default branch has the workflow `vector github install`
+// writes, a pull request that adds it is open, or why this sign-in cannot add it.
+type AutoReviewStatus = {
+  state: "installed" | "pending" | "read-only" | "needs-scope" | "available"
+  repo: string
+  defaultBranch: string
+  secretsUrl: string
+  url?: string // installed: the workflow file; pending: the pull request
+  source: "vector" | "gh"
+}
+type AutoReviewSecret = { name: string; detail: string; url?: string }
+type AutoReviewWorkflow = {
+  path: string
+  content: string
+  model: string
+  monthlyUsd: number
+  secrets: AutoReviewSecret[]
+}
+type AutoReviewSetup = { url: string; number: number; branch: string; secrets: AutoReviewSecret[]; secretsUrl: string }
+
+const AUTOMATIC_STATE: Record<AutoReviewStatus["state"], string> = {
+  installed: "On: every pull request is reviewed",
+  pending: "A pull request that turns them on is open",
+  available: "Off: one pull request turns them on",
+  "read-only": "Off: needs write access to the repository",
+  "needs-scope": "Off: needs permission to change workflows",
 }
 
 function api(): PullRequestsApi | undefined {
@@ -554,6 +587,36 @@ function FindingCard(props: {
   )
 }
 
+// The repository secrets an automatic-review workflow reads. The user adds them in GitHub; Vector never sends a key.
+function SecretList(props: { secrets: readonly AutoReviewSecret[] }) {
+  return (
+    <ul class="mt-2 flex flex-col gap-1.5">
+      <For each={props.secrets}>
+        {(secret) => (
+          <li class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px] text-[color:var(--vx-text-subtle)]">
+            <code class="rounded-[3px] bg-[color:var(--vx-control)] px-1 font-mono text-[11.5px] text-[color:var(--vx-text)]">
+              {secret.name}
+            </code>
+            <span>{secret.detail}</span>
+            <Show when={secret.url}>
+              {(url) => (
+                <a
+                  class="text-[color:var(--vx-purple-bright)] underline underline-offset-2"
+                  href={url()}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Create one ↗
+                </a>
+              )}
+            </Show>
+          </li>
+        )}
+      </For>
+    </ul>
+  )
+}
+
 function capital(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
@@ -579,6 +642,8 @@ export function PullRequests(props: {
   onReview: (input: ReviewRequest) => Promise<ReviewOutcomeLite | undefined>
   // The open project's uncommitted changes, for "Review my changes"; undefined when the engine cannot say.
   onChanges?: () => Promise<WorkingTreeChanges | undefined>
+  // The model automatic reviews would run on, with its provider's key variables (see workflowModel).
+  automaticReviewModel?: () => { model: string; keys: string[]; reason?: string } | undefined
 }) {
   const [status, setStatus] = createSignal<AccessStatus>()
   const [list, setList] = createSignal<PullRequest[]>([])
@@ -586,9 +651,19 @@ export function PullRequests(props: {
   const [review, setReview] = createSignal<ReviewOutcomeLite>()
   // What a running review reads: a pull request's number, or the open project's uncommitted changes.
   const [reviewRun, setReviewRun] = createSignal<{ controller: AbortController; subject: number | "changes" }>()
-  // view "changes" shows the open project's uncommitted changes in place of a pull request. Objects are replaced
-  // with setPanel({ … }), since setting one by path merges it into the one before.
-  const [panel, setPanel] = createStore<{ view?: "changes"; changes?: WorkingTreeChanges; checking?: boolean }>({})
+  // view "changes" shows the open project's uncommitted changes in place of a pull request, and "automatic-reviews"
+  // the set-up of reviews in GitHub Actions. chosen is the model and keys the shown workflow file was built from, so
+  // the pull request adds exactly what was confirmed. Objects are replaced with setPanel({ … }), since setting one by
+  // path merges it into the one before.
+  const [panel, setPanel] = createStore<{
+    view?: "changes" | "automatic-reviews"
+    changes?: WorkingTreeChanges
+    checking?: boolean
+    automatic?: AutoReviewStatus
+    chosen?: { model: string; keys: string[] }
+    preview?: AutoReviewWorkflow
+    opened?: AutoReviewSetup
+  }>({})
   const [checkout, setCheckout] = createSignal<{ mode: ReviewCheckout["mode"]; label: string }>()
   const [estimate, setEstimate] = createSignal<{ value: ReviewEstimate; answer: (go: boolean) => void }>()
   const [busy, setBusy] = createSignal<string>()
@@ -696,7 +771,14 @@ export function PullRequests(props: {
     setCreateDraft(false)
     setCreatedUrl(undefined)
     setConfirmingMerge(false)
-    setPanel({ view: undefined, changes: undefined })
+    setPanel({
+      view: undefined,
+      changes: undefined,
+      automatic: undefined,
+      chosen: undefined,
+      preview: undefined,
+      opened: undefined,
+    })
   }
 
   // The open project's uncommitted changes. Reading them needs no GitHub sign-in.
@@ -747,6 +829,12 @@ export function PullRequests(props: {
     if (!current()) return
     setList(prs)
     setBusy(undefined)
+    void bridge.autoReview
+      ?.status(projectPath)
+      .catch(() => undefined)
+      .then((automatic) => {
+        if (current()) setPanel({ automatic })
+      })
     // CI shares the same GitHub sign-in the panel just confirmed, so load it after
     // the PR list rather than gating the whole panel on it — a repo with no
     // workflows should still show its pull requests.
@@ -838,6 +926,50 @@ export function PullRequests(props: {
     if (review()?.pr !== undefined) resetReview()
     setPanel({ view: "changes" })
     void loadChanges()
+  }
+
+  // Shows what setting up automatic reviews would do, with the workflow file it would add. Nothing reaches GitHub
+  // until the user confirms.
+  const openAutomaticReviews = async () => {
+    if (reviewRun()) return
+    selectionRequests.invalidate()
+    setBusy(undefined)
+    setSelected(undefined)
+    setCreateOpen(false)
+    setPanel({ view: "automatic-reviews", chosen: undefined, preview: undefined, opened: undefined })
+    const chosen = props.automaticReviewModel?.()
+    const bridge = api()?.autoReview
+    if (!chosen || chosen.reason || !bridge || panel.automatic?.state !== "available") return
+    const workflow = await bridge.preview({ model: chosen.model, keys: chosen.keys }).catch((cause: unknown) => {
+      setError(pullRequestErrorMessage(cause))
+      return undefined
+    })
+    if (workflow && panel.view === "automatic-reviews")
+      setPanel({ chosen: { model: chosen.model, keys: chosen.keys }, preview: workflow })
+  }
+
+  const setUpAutomaticReviews = async () => {
+    const bridge = api()?.autoReview
+    const projectPath = props.projectPath
+    const chosen = panel.chosen
+    const request = { path: projectPath, revision: projectRevision }
+    if (!bridge || !projectPath || !chosen || busy()) return
+    const current = () =>
+      props.open && pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision })
+    setBusy("Opening the pull request…")
+    setError(undefined)
+    const opened = await bridge
+      .setup({ cwd: projectPath, model: chosen.model, keys: [...chosen.keys] })
+      .catch((cause: unknown) => {
+        if (current()) setError(pullRequestErrorMessage(cause))
+        return undefined
+      })
+    if (!current()) return
+    setBusy(undefined)
+    if (!opened) return
+    setPanel({ opened })
+    // The new pull request joins the list, and the state becomes "a pull request that turns them on is open".
+    await refresh(projectPath)
   }
 
   const openPr = async (number: number) => {
@@ -1473,6 +1605,225 @@ export function PullRequests(props: {
     </div>
   )
 
+  // Reviews of every pull request in GitHub Actions: what setting them up does before the user confirms it, the
+  // secrets to add once the pull request is open, or why they cannot be set up from here.
+  const AutomaticReviewsView = () => (
+    <div class="mx-auto max-w-[760px] px-6 pb-10 pt-5">
+      <h2 class="text-[19px] font-semibold leading-snug">Automatic reviews</h2>
+      <p class="mt-2 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+        Vectorscope reviews every pull request in {panel.automatic?.repo ?? "this repository"} when it opens and on
+        every push, in GitHub Actions, and comments with what it finds.
+      </p>
+      <Switch fallback={<p class="mt-5 text-[12.5px] text-[color:var(--vx-text-muted)]">Checking this repository…</p>}>
+        <Match when={panel.opened}>
+          {(opened) => (
+            <section class="mt-5 overflow-hidden rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)]">
+              <div class="flex items-center gap-2 border-b border-[color:var(--vx-line)] bg-[color:color-mix(in_srgb,var(--vx-green)_8%,transparent)] px-4 py-2.5 text-[12.5px] text-[color:var(--vx-green)]">
+                <Icon name="check" />
+                <span class="flex-1">Pull request #{opened().number} is open.</span>
+                <a class="underline underline-offset-2" href={opened().url} target="_blank" rel="noreferrer">
+                  Open on GitHub ↗
+                </a>
+              </div>
+              <div class="px-4 py-4">
+                <h3 class="text-[13px] font-semibold">Add these repository secrets, then merge it</h3>
+                <p class="mt-1 text-[12px] leading-relaxed text-[color:var(--vx-text-muted)]">
+                  Vector doesn't send any key to GitHub. The workflow also runs on this pull request and fails until the
+                  secrets exist; re-run it after adding them to see a review.
+                </p>
+                <SecretList secrets={opened().secrets} />
+                <a class={`${PRIMARY} mt-4`} href={opened().secretsUrl} target="_blank" rel="noreferrer">
+                  Open Actions secrets
+                  <Icon name="external" />
+                </a>
+              </div>
+            </section>
+          )}
+        </Match>
+        <Match when={panel.automatic?.state === "installed" && panel.automatic}>
+          {(automatic) => (
+            <section class="mt-5 rounded-[10px] border border-[color:color-mix(in_srgb,var(--vx-green)_35%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-green)_8%,transparent)] px-4 py-3.5">
+              <div class="flex items-center gap-2 text-[13px] font-semibold text-[color:var(--vx-green)]">
+                <Icon name="check" />
+                Automatic reviews are set up
+              </div>
+              <p class="mt-1.5 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                <CodeText
+                  text={`\`${automatic().defaultBranch}\` has \`.github/workflows/vector.yml\`, so every pull request is reviewed when it opens and on every push.`}
+                />
+              </p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noreferrer">
+                  View the workflow
+                  <Icon name="external" />
+                </a>
+                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noreferrer">
+                  Actions secrets
+                  <Icon name="external" />
+                </a>
+              </div>
+            </section>
+          )}
+        </Match>
+        <Match when={panel.automatic?.state === "pending" && panel.automatic}>
+          {(automatic) => (
+            <section class="mt-5 rounded-[10px] border border-[color:color-mix(in_srgb,var(--vx-amber)_35%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-amber)_8%,transparent)] px-4 py-3.5">
+              <div class="text-[13px] font-semibold text-[color:var(--vx-amber)]">
+                A pull request that turns on automatic reviews is open
+              </div>
+              <p class="mt-1.5 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                <CodeText text="Add the repository secrets it lists, `VECTOR_CLI_TOKEN` and your model provider's API key, then merge it." />
+              </p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noreferrer">
+                  Open the pull request
+                  <Icon name="external" />
+                </a>
+                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noreferrer">
+                  Actions secrets
+                  <Icon name="external" />
+                </a>
+              </div>
+            </section>
+          )}
+        </Match>
+        <Match when={panel.automatic?.state === "read-only" && panel.automatic}>
+          {(automatic) => (
+            <section class="mt-5 rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-4 py-3.5">
+              <div class="text-[13px] font-semibold">You can't add a workflow to {automatic().repo}</div>
+              <p class="mt-1.5 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                <CodeText text="Setting up automatic reviews needs write access. Ask a maintainer to set them up here or with `vector github install`." />
+              </p>
+            </section>
+          )}
+        </Match>
+        <Match when={panel.automatic?.state === "needs-scope" && panel.automatic}>
+          {(automatic) => (
+            <section class="mt-5 rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-4 py-3.5">
+              <div class="text-[13px] font-semibold">Vector needs permission to change workflows</div>
+              <Show
+                when={automatic().source === "vector"}
+                fallback={
+                  <>
+                    <p class="mt-1.5 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                      <CodeText text="Your GitHub CLI login can't add files under `.github/workflows`. Run `gh auth refresh -s workflow` in a terminal, then check again." />
+                    </p>
+                    <button
+                      type="button"
+                      class={`${SECONDARY} mt-3`}
+                      disabled={Boolean(busy())}
+                      onClick={() => void refresh(props.projectPath)}
+                    >
+                      <Icon name="refresh" />
+                      Check again
+                    </button>
+                  </>
+                }
+              >
+                <p class="mt-1.5 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                  <CodeText text="Adding `.github/workflows/vector.yml` needs GitHub's workflow permission, which your sign-in in Vector doesn't have yet. Sign in again and approve it." />
+                </p>
+                <button
+                  type="button"
+                  class={`${PRIMARY} mt-3`}
+                  disabled={Boolean(busy())}
+                  onClick={() =>
+                    void githubApi()
+                      ?.auth?.logout()
+                      .catch(() => undefined)
+                      .then(() => refresh(props.projectPath))
+                  }
+                >
+                  Sign in again
+                </button>
+              </Show>
+            </section>
+          )}
+        </Match>
+        <Match when={panel.automatic?.state === "available" && panel.automatic}>
+          {(automatic) => (
+            <section class="mt-5 overflow-hidden rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)]">
+              <header class="border-b border-[color:var(--vx-line)] px-4 py-3">
+                <div class="text-[13px] font-semibold">Set up automatic reviews</div>
+                <div class="text-[11.5px] text-[color:var(--vx-text-muted)]">
+                  Nothing changes in {automatic().repo} until someone merges the pull request.
+                </div>
+              </header>
+              <Show when={!props.automaticReviewModel?.()}>
+                <p class="px-4 pt-4 text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                  Connect a model provider in Settings → Providers first: automatic reviews run on your agent's model.
+                </p>
+              </Show>
+              <Show when={props.automaticReviewModel?.()?.reason}>
+                {(reason) => (
+                  <p class="mx-4 mt-4 rounded-[6px] border border-[color:color-mix(in_srgb,var(--vx-amber)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-amber)_8%,transparent)] px-3 py-2 text-[12px] leading-relaxed text-[color:var(--vx-amber)]">
+                    <CodeText text={reason()} />
+                  </p>
+                )}
+              </Show>
+              <Show when={panel.preview}>
+                {(workflow) => (
+                  <>
+                    <ol class="list-decimal space-y-2 py-4 pl-9 pr-4 text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                      <li>
+                        <CodeText
+                          text={`Creates a branch from \`${automatic().defaultBranch}\` with one commit that adds \`${workflow().path}\`, the workflow \`vector github install\` writes.`}
+                        />
+                      </li>
+                      <li>
+                        <CodeText
+                          text={`Opens a pull request into \`${automatic().defaultBranch}\`${status()?.login ? ` as @${status()!.login}` : ""}, for you or a teammate to merge.`}
+                        />
+                      </li>
+                      <li>
+                        <CodeText
+                          text={`Once it is merged, every pull request is reviewed on \`${workflow().model}\`, your agent's model, up to $${workflow().monthlyUsd} a month. Change \`MODEL\` or \`REVIEW_MAX_COST_USD_PER_MONTH\` in the file to adjust.`}
+                        />
+                      </li>
+                    </ol>
+                    <div class="mx-4 rounded-[8px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] px-3.5 py-3">
+                      <p class="text-[12px] text-[color:var(--vx-text)]">
+                        Vector doesn't send any API key to GitHub. You add these repository secrets there yourself:
+                      </p>
+                      <SecretList secrets={workflow().secrets} />
+                    </div>
+                    <details class="mx-4 mt-3">
+                      <summary class="cursor-pointer text-[12px] text-[color:var(--vx-text-subtle)]">
+                        Show the workflow file
+                      </summary>
+                      <pre class="mt-2 max-h-80 overflow-auto rounded-[6px] border border-[color:var(--vx-line)] bg-[color:var(--vx-canvas)] p-3 font-mono text-[11px] leading-[1.5] text-[color:var(--vx-text-subtle)]">
+                        {workflow().content}
+                      </pre>
+                    </details>
+                  </>
+                )}
+              </Show>
+              <footer class="mt-4 flex flex-wrap items-center gap-2 border-t border-[color:var(--vx-line)] bg-[color:var(--vx-stage)] px-4 py-3">
+                <button
+                  type="button"
+                  class={PRIMARY}
+                  disabled={!panel.preview || Boolean(busy())}
+                  onClick={() => void setUpAutomaticReviews()}
+                >
+                  <Icon name="pull" />
+                  Open the pull request
+                </button>
+                <button
+                  type="button"
+                  class={GHOST}
+                  disabled={Boolean(busy())}
+                  onClick={() => setPanel({ view: undefined })}
+                >
+                  Cancel
+                </button>
+              </footer>
+            </section>
+          )}
+        </Match>
+      </Switch>
+    </div>
+  )
+
   return (
     <Show when={props.open}>
       <div
@@ -1760,6 +2111,44 @@ export function PullRequests(props: {
                 </Show>
               </div>
 
+              <Show when={panel.automatic}>
+                {(automatic) => (
+                  <div class="shrink-0 border-t border-[color:var(--vx-line)] p-2">
+                    <button
+                      type="button"
+                      disabled={Boolean(reviewRun())}
+                      aria-current={panel.view === "automatic-reviews" ? "true" : undefined}
+                      class="relative flex w-full items-center gap-2.5 rounded-[7px] px-2.5 py-2 text-left transition disabled:cursor-default"
+                      classList={{
+                        "bg-[color:var(--vx-surface-raised)]": panel.view === "automatic-reviews",
+                        "hover:enabled:bg-[color:var(--vx-surface)]": panel.view !== "automatic-reviews",
+                      }}
+                      onClick={() => void openAutomaticReviews()}
+                    >
+                      <span
+                        class="size-1.5 shrink-0 rounded-full"
+                        style={{
+                          background:
+                            automatic().state === "installed"
+                              ? "var(--vx-green)"
+                              : automatic().state === "pending"
+                                ? "var(--vx-amber)"
+                                : "var(--vx-text-muted)",
+                        }}
+                      />
+                      <span class="min-w-0 flex-1">
+                        <span class="block text-[12px] font-medium text-[color:var(--vx-text)]">
+                          {automatic().state === "available" ? "Set up automatic reviews" : "Automatic reviews"}
+                        </span>
+                        <span class="block truncate text-[11px] text-[color:var(--vx-text-muted)]">
+                          {AUTOMATIC_STATE[automatic().state]}
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </Show>
+
               <section class="max-h-[42%] shrink-0 overflow-y-auto border-t border-[color:var(--vx-line)] p-3">
                 <div class="mb-2 flex items-baseline justify-between gap-2">
                   <span class={SECTION_TITLE}>Checks</span>
@@ -1925,6 +2314,10 @@ export function PullRequests(props: {
 
               <Show when={!createOpen() && panel.view === "changes"}>
                 <ChangesView />
+              </Show>
+
+              <Show when={!createOpen() && panel.view === "automatic-reviews"}>
+                <AutomaticReviewsView />
               </Show>
 
               <Show
