@@ -23,6 +23,7 @@ import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
 import { Filesystem } from "@/util/filesystem"
+import { isRecord } from "@/util/record"
 import { createVectorClient, type VectorClient, type ToolPart } from "@vectordevai/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
@@ -716,6 +717,9 @@ export const RunCommand = effectCmd({
           process.exit(1)
         }
         const sessionID = sess.id
+        // Background subagents this run launches record a later start than this.
+        const runStartedAt = Date.now()
+        const backgroundWait = flags.runBackgroundWaitMs ?? BACKGROUND_WAIT_MS
 
         function emit(type: string, data: Record<string, unknown>) {
           if (args.format === "json") {
@@ -759,8 +763,52 @@ export const RunCommand = effectCmd({
             return true
           }
           let error: string | undefined
+          // A background subagent reports back in a follow-up turn after this session goes idle, and exiting would stop
+          // it, so the run waits for each one it launched and for the turn that answers it. A stopped one starts no
+          // turn. Notes seen in a turn count as answered once the session is idle again.
+          const background = {
+            running: new Set<string>(),
+            unanswered: new Set<string>(),
+            noted: new Set<string>(),
+          }
+          let idle = false
+          let activeAt = Date.now()
+          const waited = () => background.running.size === 0 && background.unanswered.size === 0
 
           for await (const event of events.stream) {
+            // The server sends a heartbeat every few seconds, which the typed union leaves out, so a wait that nothing
+            // else moves still gets checked.
+            const type: string = event.type
+            if (type !== "server.heartbeat") activeAt = Date.now()
+            // Exiting stops what is still running, so giving up fails the run.
+            if (idle && Date.now() - activeAt > backgroundWait) {
+              const message = `Stopped waiting for ${background.running.size + background.unanswered.size} background subagent(s) after ${Math.round(backgroundWait / 1000)}s without activity`
+              error = error ? error + EOL + message : message
+              if (!emit("error", { error: { name: "BackgroundSubagentTimeout", data: { message } } })) UI.error(message)
+              break
+            }
+
+            if (
+              (event.type === "session.created" || event.type === "session.updated") &&
+              event.properties.info.parentID === sessionID
+            ) {
+              const status = backgroundStatus(event.properties.info, runStartedAt)
+              const id = event.properties.info.id
+              if (status === "running" || status === "queued") {
+                background.running.add(id)
+                background.unanswered.delete(id)
+              }
+              if (status === "completed" || status === "error") {
+                background.running.delete(id)
+                background.unanswered.add(id)
+              }
+              if (status === "cancelled") {
+                background.running.delete(id)
+                background.unanswered.delete(id)
+              }
+              if (status && idle && waited()) break
+            }
+
             if (
               event.type === "message.updated" &&
               event.properties.sessionID === sessionID &&
@@ -776,6 +824,8 @@ export const RunCommand = effectCmd({
 
             if (event.type === "message.part.updated") {
               const part = event.properties.part
+              const note = part.sessionID === sessionID && part.type === "text" ? part.metadata?.taskNotification : undefined
+              if (isRecord(note) && typeof note.taskID === "string") background.noted.add(note.taskID)
               if (part.sessionID !== sessionID) {
                 // A subagent's steps bill this run too. JSON output reports them, marked as a subagent's, so a
                 // consumer that totals step_finish records gets what the run spent.
@@ -864,12 +914,13 @@ export const RunCommand = effectCmd({
               UI.error(err)
             }
 
-            if (
-              event.type === "session.status" &&
-              event.properties.sessionID === sessionID &&
-              event.properties.status.type === "idle"
-            ) {
-              break
+            if (event.type === "session.status" && event.properties.sessionID === sessionID) {
+              idle = event.properties.status.type === "idle"
+              if (idle) {
+                for (const id of background.noted) background.unanswered.delete(id)
+                background.noted.clear()
+                if (waited()) break
+              }
             }
 
             if (event.type === "permission.asked") {
@@ -1049,6 +1100,17 @@ export const RunCommand = effectCmd({
     })
   }),
 })
+
+// How long a run that is waiting on background subagents goes without any activity before it stops waiting.
+const BACKGROUND_WAIT_MS = 10 * 60 * 1000
+
+// The lifecycle status of a background subagent this run launched, from the record the task tool keeps on its session.
+function backgroundStatus(info: { metadata?: Record<string, unknown> }, since: number) {
+  const record = info.metadata?.subagent
+  if (!isRecord(record) || record.background !== true) return undefined
+  if (typeof record.startedAt !== "number" || record.startedAt < since) return undefined
+  return typeof record.status === "string" ? record.status : undefined
+}
 
 type MiniCommandInput = {
   directory?: string

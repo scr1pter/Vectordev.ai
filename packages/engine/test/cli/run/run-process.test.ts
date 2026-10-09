@@ -8,6 +8,24 @@ import { Effect } from "effect"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+function lastUserText(body: Record<string, unknown>) {
+  const messages: unknown[] = Array.isArray(body.messages) ? body.messages : []
+  const user = messages.findLast((message) => isRecord(message) && message.role === "user")
+  const content = isRecord(user) ? user.content : undefined
+  if (typeof content === "string") return content
+  const parts: unknown[] = Array.isArray(content) ? content : []
+  return parts.map((part) => (isRecord(part) && typeof part.text === "string" ? part.text : "")).join("\n")
+}
+
+// Resolves a while after something first waits on it, not after it is made.
+function later(ms: number): PromiseLike<void> {
+  return {
+    then: (fulfilled, rejected) => new Promise<void>((resolve) => setTimeout(resolve, ms)).then(fulfilled, rejected),
+  }
+}
+
 describe("vector run (non-interactive subprocess)", () => {
   // Happy path: prompt completes, output reaches stdout, process exits 0.
   // If this fails, all the others likely will too — debug here first.
@@ -356,6 +374,75 @@ describe("vector run (non-interactive subprocess)", () => {
         expect(result.stderr).toContain("Cannot attach local directory without a shared filesystem")
       }),
     30_000,
+  )
+
+  // A background subagent reports back in a follow-up turn after the parent goes idle. The run used to exit at that
+  // first idle, stopping the subagent and losing the follow-up.
+  cliIt.concurrent(
+    "waits for a background subagent and prints the turn that answers it before exiting",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        const toolResults = (hit: { body: Record<string, unknown> }) =>
+          (Array.isArray(hit.body.messages) ? hit.body.messages : []).some(
+            (message) => isRecord(message) && message.role === "tool",
+          )
+        const asking = (text: string) => (hit: { body: Record<string, unknown> }) => lastUserText(hit.body).includes(text)
+        yield* llm.pushMatch(
+          (hit) => asking("launch the survey")(hit) && !toolResults(hit),
+          reply().tool("task", {
+            description: "survey",
+            prompt: "SURVEY_BRIEF: list the handlers.",
+            subagent_type: "general",
+            background: true,
+          }),
+        )
+        yield* llm.pushMatch((hit) => asking("launch the survey")(hit) && toolResults(hit), reply().text("launched it"))
+        // The subagent outlasts the parent's turn: its answer starts only once its request has waited a while.
+        yield* llm.pushMatch(asking("SURVEY_BRIEF"), reply().wait(later(3_000)).text("found two handlers").stop())
+        yield* llm.pushMatch(asking("task-notification"), reply().text("the survey found two handlers"))
+
+        const result = yield* vector.run("launch the survey", {
+          extraArgs: ["--dangerously-skip-permissions"],
+          env: { VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true" },
+          timeoutMs: 50_000,
+        })
+
+        vector.expectExit(result, 0)
+        expect(result.stdout).toBe("launched it\nthe survey found two handlers\n")
+      }),
+    60_000,
+  )
+
+  cliIt.concurrent(
+    "stops waiting on a background subagent that shows no activity, and fails the run",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        const asking = (text: string) => (hit: { body: Record<string, unknown> }) => lastUserText(hit.body).includes(text)
+        yield* llm.pushMatch(
+          asking("launch the survey"),
+          reply().tool("task", {
+            description: "survey",
+            prompt: "SURVEY_BRIEF: list the handlers.",
+            subagent_type: "general",
+            background: true,
+          }),
+        )
+        yield* llm.pushMatch(asking("launch the survey"), reply().text("launched it"))
+        // The subagent's provider never answers.
+        yield* llm.pushMatch(asking("SURVEY_BRIEF"), reply().hang())
+
+        const result = yield* vector.run("launch the survey", {
+          extraArgs: ["--dangerously-skip-permissions"],
+          env: { VECTOR_EXPERIMENTAL_BACKGROUND_SUBAGENTS: "true", VECTOR_RUN_BACKGROUND_WAIT_MS: "1000" },
+          timeoutMs: 50_000,
+        })
+
+        expect(result.timedOut).toBe(false)
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stdout).toBe("launched it\n")
+        expect(result.stderr).toContain("Stopped waiting for 1 background subagent(s)")
+      }),
+    60_000,
   )
 
   cliIt.live(
