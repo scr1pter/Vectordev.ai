@@ -70,7 +70,7 @@ export function providerOptions(
         providerID: provider.id,
         description: {
           anthropic: "(API key)",
-          openai: "(ChatGPT Plus/Pro or API key)",
+          openai: "(API key)",
         }[provider.id],
         category: provider.id in PROVIDER_PRIORITY ? "Popular" : "Providers",
       })),
