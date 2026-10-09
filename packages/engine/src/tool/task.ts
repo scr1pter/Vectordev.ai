@@ -4,6 +4,7 @@ import { ToolJsonSchema } from "./json-schema"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
+import { SessionStatus } from "@/session/status"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
@@ -44,11 +45,18 @@ const BACKGROUND_STARTED = [
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.",
 ].join("\n")
-const BACKGROUND_UPDATED = [
-  "Additional context sent to the running background task.",
-  "The task is still working in the background. You will be notified automatically when it finishes.",
+const BACKGROUND_STILL_WORKING = [
+  "You will be notified once, when it finishes, with every report it wrote.",
   "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
   "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
+]
+const BACKGROUND_DELIVERED = [
+  "Your message was added to the running background task's conversation. It reads it at its next step and carries on with it.",
+  ...BACKGROUND_STILL_WORKING,
+].join("\n")
+const BACKGROUND_QUEUED = [
+  "Your message is queued: the background task reads it after its current run finishes, then carries on in the same session.",
+  ...BACKGROUND_STILL_WORKING,
 ].join("\n")
 const BACKGROUND_CANCELLED = [
   "The subagent was stopped before it finished, so its work may be partial.",
@@ -186,6 +194,14 @@ function renderOutput(input: {
   ].join("\n")
 }
 
+// What a job's runs wrote, numbered when there was more than one: a message added to a running task is answered on
+// top of the report before it, not instead of it. Runs that joined one loop return the same reply, kept once.
+function reports(info: BackgroundJob.Info) {
+  const texts = [...new Set(info.outputs ?? (info.output === undefined ? [] : [info.output]))]
+  if (texts.length <= 1) return texts[0] ?? ""
+  return texts.map((text, index) => `Report ${index + 1} of ${texts.length}:\n${text}`).join("\n\n")
+}
+
 // How a child's run ends, from its last message: a stopped child cancels the job, and a failed one fails it while
 // keeping what it wrote.
 const settleRun = Effect.fnUntraced(function* (result: SessionV1.WithParts) {
@@ -208,6 +224,7 @@ export const TaskTool = Tool.define(
     const database = yield* Database.Service
     const provider = yield* Provider.Service
     const truncate = yield* Truncate.Service
+    const statuses = yield* SessionStatus.Service
     // Ownership claimed by task calls that have not registered their job yet. Sibling calls
     // in one message run concurrently, so the job list alone cannot see each other's paths.
     const claims = new Set<{
@@ -760,10 +777,10 @@ export const TaskTool = Tool.define(
               yield* finish(info.status, info.error, true)
               // The settled outcome, not the job's status: a job that returned
               // normally can still have failed or been stopped inside the child.
-              if (outcome.status === "completed") return yield* inject("completed", info.output ?? "")
+              if (outcome.status === "completed") return yield* inject("completed", reports(info))
               // Whatever the child wrote before it failed is kept, as the foreground path keeps it.
               if (outcome.status === "error")
-                return yield* inject("error", [outcome.error ?? info.error, info.output].filter(Boolean).join("\n\n"))
+                return yield* inject("error", [outcome.error ?? info.error, reports(info)].filter(Boolean).join("\n\n"))
               return yield* inject("cancelled", BACKGROUND_CANCELLED)
             }),
           ),
@@ -773,7 +790,7 @@ export const TaskTool = Tool.define(
       })
 
       // This call adds to a run that is still working; its card settles when that run does.
-      const joined = Effect.fn("TaskTool.joined")(function* () {
+      const joined = Effect.fn("TaskTool.joined")(function* (added: "delivered" | "queued") {
         // The job still lists only the paths it started with, so paths this update hands the running task stay
         // reserved against sibling launches until that run settles.
         if (ownedPaths.length > 0) {
@@ -814,8 +831,11 @@ export const TaskTool = Tool.define(
           output: renderOutput({
             sessionID: nextSession.id,
             state: "running",
-            summary: "Background task updated",
-            text: BACKGROUND_UPDATED,
+            summary:
+              added === "delivered"
+                ? "Message delivered to the running background task"
+                : "Message queued for the background task",
+            text: added === "delivered" ? BACKGROUND_DELIVERED : BACKGROUND_QUEUED,
           }),
         }
       })
@@ -824,7 +844,14 @@ export const TaskTool = Tool.define(
       // when the child was stopped or failed, so the job settles from the child's last message, not as completed.
       const guardedRun = () =>
         runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id)), Effect.flatMap(settleRun))
-      const extendRun = () => background.extend({ id: nextSession.id, run: guardedRun() })
+      // A message for a background task that is mid-run joins the child's running loop, as a prompt sent to a busy
+      // session does, so the child reads it at its next step. One that is queued behind its dependencies, or between
+      // runs, waits for the run before it.
+      const extendRun = Effect.fn("TaskTool.extendRun")(function* () {
+        const busy = (yield* statuses.get(nextSession.id)).type !== "idle"
+        if (!(yield* background.extend({ id: nextSession.id, run: guardedRun(), concurrent: busy }))) return undefined
+        return busy ? ("delivered" as const) : ("queued" as const)
+      })
       // A foreground run reports its result to the call that started it, so another call cannot add to it and be told
       // it will be notified later.
       const foreground = Effect.fn("TaskTool.foreground")(function* (job: BackgroundJob.Info | undefined) {
@@ -834,7 +861,8 @@ export const TaskTool = Tool.define(
         )
       })
       yield* foreground(yield* background.get(nextSession.id))
-      if (yield* extendRun()) return yield* joined()
+      const added = yield* extendRun()
+      if (added) return yield* joined(added)
 
       // A resumed child starts a new run: point its record at this call.
       if (session) {
@@ -875,7 +903,8 @@ export const TaskTool = Tool.define(
             background: info.metadata?.background === true,
           })
         yield* foreground(info)
-        if (yield* extendRun()) return yield* joined()
+        const late = yield* extendRun()
+        if (late) return yield* joined(late)
         return yield* Effect.fail(
           new Error(`Task ${nextSession.id} was resumed by another call that has already finished; resume it again.`),
         )

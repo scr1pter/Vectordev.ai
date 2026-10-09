@@ -22,7 +22,10 @@ export type Info = {
   status: Status
   started_at: number
   completed_at?: number
+  /** What the last run wrote. */
   output?: string
+  /** What every run wrote, in the order the runs were added, when the job ran more than once. */
+  outputs?: string[]
   error?: string
   metadata?: Record<string, unknown>
 }
@@ -34,7 +37,7 @@ type Active = {
   token: object
   pending: number
   next: number
-  output?: { sequence: number; text: string }
+  outputs: { sequence: number; text: string }[]
   tail: Deferred.Deferred<void>
   promoted: Deferred.Deferred<Info>
   onPromote?: Effect.Effect<void>
@@ -82,6 +85,11 @@ export type StartInput = {
 export type ExtendInput = {
   id: string
   run: Effect.Effect<string, unknown>
+  /**
+   * Start now, alongside the run already going, instead of after it. The job still settles only once every run has
+   * returned.
+   */
+  concurrent?: boolean
 }
 
 export type WaitInput = {
@@ -111,6 +119,7 @@ function snapshot(job: Active): Info {
   return {
     ...job.info,
     ...(job.info.metadata ? { metadata: { ...job.info.metadata } } : {}),
+    ...(job.info.outputs ? { outputs: [...job.info.outputs] } : {}),
   }
 }
 
@@ -146,30 +155,31 @@ export const make = Effect.gen(function* () {
       if (job.info.status !== "running") return [{ info: snapshot(job) }, jobs]
       const pending = job.pending - 1
       const failed = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
-      const output =
-        Exit.isSuccess(exit) && (!job.output || sequence > job.output.sequence)
-          ? { sequence, text: exit.value }
-          : failed instanceof RunFailed
-            ? { sequence, text: failed.output }
-            : job.output
+      // Every run's output is kept: a run added to a job reports on top of the ones before it, not instead of them.
+      const text = Exit.isSuccess(exit) ? exit.value : failed instanceof RunFailed ? failed.output : undefined
+      const outputs = (text === undefined ? job.outputs : [...job.outputs, { sequence, text }]).toSorted(
+        (a, b) => a.sequence - b.sequence,
+      )
       if (Exit.isSuccess(exit) && pending > 0) {
-        return [{}, new Map(jobs).set(id, { ...job, pending, output })]
+        return [{}, new Map(jobs).set(id, { ...job, pending, outputs })]
       }
       const status: Exclude<Status, "running"> = Exit.isSuccess(exit)
         ? "completed"
         : Cause.hasInterruptsOnly(exit.cause)
           ? "cancelled"
           : "error"
+      const output = outputs.at(-1)
       const next = {
         ...job,
         onPromote: undefined,
         pending: 0,
-        output,
+        outputs,
         info: {
           ...job.info,
           status,
           completed_at,
           ...(output ? { output: output.text } : {}),
+          ...(outputs.length > 1 ? { outputs: outputs.map((item) => item.text) } : {}),
           ...(status === "error" ? { error: errorText(failed) } : {}),
         },
       }
@@ -241,6 +251,7 @@ export const make = Effect.gen(function* () {
               token,
               pending: 1,
               next: 1,
+              outputs: [],
               tail,
               promoted,
               onPromote: input.onPromote,
@@ -279,7 +290,8 @@ export const make = Effect.gen(function* () {
                 ...job,
                 pending: job.pending + 1,
                 next: job.next + 1,
-                tail,
+                // A concurrent run leaves the queue as it is, so a run queued later waits only on the queued ones.
+                tail: input.concurrent ? job.tail : tail,
               }),
             ]
           },
@@ -290,10 +302,12 @@ export const make = Effect.gen(function* () {
           input.id,
           result.token,
           result.sequence,
-          Deferred.await(result.previous).pipe(
-            Effect.andThen(restore(input.run)),
-            Effect.ensuring(Deferred.succeed(result.tail, undefined)),
-          ),
+          input.concurrent
+            ? restore(input.run)
+            : Deferred.await(result.previous).pipe(
+                Effect.andThen(restore(input.run)),
+                Effect.ensuring(Deferred.succeed(result.tail, undefined)),
+              ),
         )
         return true
       }),

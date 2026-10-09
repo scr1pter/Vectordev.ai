@@ -114,6 +114,51 @@ describe("BackgroundJob", () => {
     }).pipe(Effect.provide(jobsLayer)),
   )
 
+  it.live("keeps what every run wrote when a job is extended, not just the last", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const first = yield* Deferred.make<void>()
+      const job = yield* jobs.start({ type: "test", run: Deferred.await(first).pipe(Effect.as("first report")) })
+      yield* jobs.extend({ id: job.id, run: Effect.succeed("second report") })
+
+      yield* Deferred.succeed(first, undefined)
+      expect((yield* jobs.wait({ id: job.id })).info).toMatchObject({
+        status: "completed",
+        output: "second report",
+        outputs: ["first report", "second report"],
+      })
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
+  it.live("a concurrent extension starts alongside the running run and the job settles after both", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const first = yield* Deferred.make<void>()
+      const started = yield* Deferred.make<void>()
+      const second = yield* Deferred.make<void>()
+      const job = yield* jobs.start({ type: "test", run: Deferred.await(first).pipe(Effect.as("first report")) })
+      yield* jobs.extend({
+        id: job.id,
+        concurrent: true,
+        run: Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(second)),
+          Effect.as("second report"),
+        ),
+      })
+
+      // It started while the first run is still going.
+      yield* Deferred.await(started).pipe(Effect.timeout("1 second"))
+      yield* Deferred.succeed(first, undefined)
+      expect((yield* jobs.wait({ id: job.id, timeout: 50 })).info?.status).toBe("running")
+
+      yield* Deferred.succeed(second, undefined)
+      expect((yield* jobs.wait({ id: job.id })).info).toMatchObject({
+        status: "completed",
+        outputs: ["first report", "second report"],
+      })
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
   it.live("an extension racing the job's completion is either refused or runs before the job settles", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
