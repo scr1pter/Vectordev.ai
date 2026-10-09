@@ -58,6 +58,9 @@ import type {
 import type { AgentTaskPreparation } from "../main/context-budget"
 import type { VoiceSpeechResult } from "../main/voice-synthesis"
 import type {
+  AutoReviewSetup,
+  AutoReviewStatus,
+  AutoReviewWorkflow,
   PullRequestAccessStatus,
   PullRequestChecks,
   PullRequestDetail,
@@ -96,6 +99,10 @@ export type { AgentTeam, TeamCollaborationGraph, TeamLink, TeamMessage, TeamTopo
 export type { LocalMemoryState } from "../main/local-memory"
 export type { CustomInstructionsState } from "../main/custom-instructions"
 export type {
+  AutoReviewSecret,
+  AutoReviewSetup,
+  AutoReviewStatus,
+  AutoReviewWorkflow,
   PullRequestAccessStatus,
   PullRequestChecks,
   PullRequestDetail,
@@ -322,6 +329,14 @@ export type PullRequestsAPI = {
     // The commit the user last saw. GitHub refuses the merge if anything was pushed since.
     head?: string
   }) => Promise<{ merged: boolean }>
+  // "Set up automatic reviews": a pull request that adds the workflow `vector github install` writes. model is
+  // provider/model and keys are the provider's key variables, which become repository secrets the user adds.
+  autoReview: {
+    status: (cwd: string) => Promise<AutoReviewStatus>
+    // The file the pull request would add, and the secrets it needs. Nothing is sent to GitHub.
+    preview: (input: { model: string; keys: string[] }) => Promise<AutoReviewWorkflow>
+    setup: (input: { cwd: string; model: string; keys: string[] }) => Promise<AutoReviewSetup>
+  }
 }
 
 // Nothing here rejects: `gh` missing, `gh` signed out, or a project that is not

@@ -98,6 +98,11 @@ const api: ElectronAPI = {
     create: (input) => ipcRenderer.invoke("pr-create", input),
     review: (input) => ipcRenderer.invoke("pr-review", input),
     merge: (input) => ipcRenderer.invoke("pr-merge", input),
+    autoReview: {
+      status: (cwd) => ipcRenderer.invoke("pr-auto-review-status", cwd),
+      preview: (input) => ipcRenderer.invoke("pr-auto-review-preview", input),
+      setup: (input) => ipcRenderer.invoke("pr-auto-review-setup", input),
+    },
   },
   ci: {
     status: (projectPath) => ipcRenderer.invoke("ci-status", projectPath),
