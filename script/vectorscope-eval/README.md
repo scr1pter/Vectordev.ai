@@ -14,6 +14,10 @@ bun script/vectorscope-eval/run.ts --model openai/gpt-5 --fixture order-search-s
 bun script/vectorscope-eval/run.ts --model my-model --base-url http://localhost:8080/v1/chat/completions --api-key-env LOCAL_KEY
 ```
 
+To run it without a local key, add the repository secret `OPENROUTER_API_KEY` and start the
+**vectorscope eval** workflow from the Actions tab with a comma-separated list of models. Each model's
+table lands in the run summary, and the JSON reports are kept as the run's artifact for 30 days.
+
 | Flag                   | Meaning                                                                                |
 | ---------------------- | -------------------------------------------------------------------------------------- |
 | `--model <id>`         | Model id sent to the endpoint (required unless `--dry-run` or `--list`)                |
