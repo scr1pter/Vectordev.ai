@@ -199,6 +199,10 @@ export function Session() {
         )
       : [],
   )
+  // Stop on the main turn leaves background subagents running, so they have a command of their own to stop them.
+  const backgroundSessions = createMemo(() =>
+    session()?.parentID ? [] : liveBackgroundTasks(messages().flatMap((message) => sync.data.part[message.id] ?? [])),
+  )
   // Every session under this one at any depth. Requests are answered only from the root view, so a nested
   // subagent's request has to show there too, or the whole run waits on a prompt no view renders.
   const tree = createMemo(() => {
@@ -945,6 +949,21 @@ export function Session() {
         void sdk.client.experimental.session.background({
           sessionID: route.sessionID,
           workspace: project.workspace.current(),
+        })
+        dialog.clear()
+      },
+    },
+    {
+      title: "Stop background subagents",
+      value: "session.background.stop",
+      category: "Session",
+      enabled: backgroundSessions().length > 0,
+      run: () => {
+        const ids = backgroundSessions()
+        for (const sessionID of ids) void sdk.client.session.abort({ sessionID }).catch(() => undefined)
+        toast.show({
+          message: `Stopping ${ids.length} background subagent${ids.length === 1 ? "" : "s"}`,
+          variant: "info",
         })
         dialog.clear()
       },
@@ -2276,6 +2295,20 @@ export function formatSubagentRetry(attempt: number, message: string) {
 export function formatSubagentOutcome(outcome: "error" | "cancelled" | undefined, error: string | undefined) {
   if (outcome === "cancelled") return "Stopped"
   if (outcome === "error") return error ? `Failed · ${error}` : "Failed"
+}
+
+/** Sessions of the background subagents still running among a session's parts. */
+export function liveBackgroundTasks(parts: readonly Part[]) {
+  return [
+    ...new Set(
+      parts.flatMap((part) => {
+        if (part.type !== "tool" || part.tool !== "task" || part.state.status === "pending") return []
+        const metadata = part.state.metadata
+        if (metadata?.background !== true || typeof metadata.sessionId !== "string") return []
+        return metadata.status === "running" || metadata.status === "queued" ? [metadata.sessionId] : []
+      }),
+    ),
+  ]
 }
 
 export function formatCompletedSubagentDetail(toolcalls: number, duration: string) {

@@ -25,6 +25,7 @@ import {
   isDismissed,
   isLive,
   liveAgentCount,
+  liveBackgroundSessions,
   runningAgentCount,
   type TaskAgent,
   type TaskCard,
@@ -47,6 +48,10 @@ export type BackgroundTasks = {
   now: Accessor<number>
   locate(partID: string): TaskLocation | undefined
   stop(card: TaskCard): Promise<void>
+  /** Sessions of the background agents still running, which Stop on the main turn leaves alone. */
+  liveBackground: Accessor<readonly string[]>
+  /** Stops every background agent still running in this session's family. */
+  stopAllBackground(): Promise<void>
   openAgent(agent: TaskAgent): void
   clearFinished(): void
   /** Brings back a card the trash hid, when a chip asks for it. */
@@ -229,9 +234,8 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     saveDismissed(root, next)
   }
 
-  const stop = async (card: TaskCard) => {
+  const stopSessions = async (ids: readonly string[]) => {
     const client = sdk().client
-    const ids = card.agents.filter((agent) => isLive(agent.status) && agent.sessionID).map((agent) => agent.sessionID!)
     const results = await Promise.allSettled(
       ids.map((sessionID) =>
         Promise.resolve(client.session.abort({ sessionID })).then((result) => {
@@ -247,6 +251,13 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
       description: "Try again, or stop the whole session from the composer.",
     })
   }
+
+  const stop = (card: TaskCard) =>
+    stopSessions(
+      card.agents.filter((agent) => isLive(agent.status) && agent.sessionID).map((agent) => agent.sessionID!),
+    )
+  const liveBackground = createMemo(() => liveBackgroundSessions(state.cards))
+  const stopAllBackground = () => stopSessions(liveBackground())
 
   const href = (sessionID: string) =>
     params.serverKey
@@ -297,6 +308,8 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     now,
     locate: (partID) => index().get(partID),
     stop,
+    liveBackground,
+    stopAllBackground,
     openAgent,
     clearFinished,
     undismiss,
