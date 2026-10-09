@@ -706,7 +706,7 @@ function isTaskPart(part: Part): part is ToolPart {
 /**
  * A task_id call on a job that is still running adds to that run rather than
  * starting one: the engine leaves the child's record on the launching call and
- * returns a second part for the same child ("Background task updated"). That
+ * returns a second part for the same child (its message delivered or queued). That
  * part folds into the agent that owns the run. A resume of a finished child
  * rewrites the record to its own call, so it stays a run of its own.
  */
