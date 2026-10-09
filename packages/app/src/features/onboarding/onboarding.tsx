@@ -36,6 +36,8 @@ export type ProgressStep = {
   done: boolean
   cta: string
   onGo: () => void
+  /** A quieter alternative to the primary action, such as using an existing key. */
+  secondary?: { label: string; onGo: () => void }
 }
 
 // ---- Feature guide ---------------------------------------------------------
@@ -305,9 +307,18 @@ export function OnboardingProgress(props: {
                       <div class="vprogress-step-detail">{step.detail}</div>
                     </div>
                     <Show when={!step.done}>
-                      <button type="button" class="vprogress-go" onClick={step.onGo}>
-                        {step.cta} →
-                      </button>
+                      <div class="vprogress-actions">
+                        <button type="button" class="vprogress-go" onClick={step.onGo}>
+                          {step.cta} →
+                        </button>
+                        <Show when={step.secondary}>
+                          {(secondary) => (
+                            <button type="button" class="vprogress-alt" onClick={secondary().onGo}>
+                              {secondary().label}
+                            </button>
+                          )}
+                        </Show>
+                      </div>
                     </Show>
                   </div>
                 )}

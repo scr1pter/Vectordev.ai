@@ -21,6 +21,8 @@ import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
 import { modelDisplayName } from "@/utils/provider-brand"
+import { bestOwnFreeModel } from "@/utils/free-model"
+import { freeModelName } from "@vectordevai/core/free-model-choice"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
 import { sessionIDFromEvent } from "@/utils/session-event"
@@ -2929,17 +2931,37 @@ export default function NewLayout(props: ParentProps) {
   const onboardingSteps = () => [
     {
       id: "provider",
-      title: "Verify a model provider",
+      title: "Connect a model",
       detail: onboardingProviderVerified()
         ? "Vector completed a real model response with your selected provider."
         : onboardingProviderConnected()
           ? "Connected. Run the safe first task below to see the model answer end to end."
-          : "Connect a supported provider with your API key, or configure a local model server.",
+          : "Start free with your own OpenRouter account, with no payment or credits needed. Or use an API key you already have.",
       done: onboardingProviderDone(),
-      cta: "Connect",
-      onGo: () => {
+      cta: "Start free",
+      onGo: async () => {
+        const { DialogConnectProvider } = await import("@/components/dialog-connect-provider")
         setOnboardingOpen(false)
-        openProviderSettings()
+        // Come back to the checklist so the next step is one click away.
+        dialog.show(() => (
+          <DialogConnectProvider
+            provider="openrouter"
+            preferredMethod="oauth"
+            onConnected={() => {
+              setOnboardingOpen(true)
+              const best = bestOwnFreeModel(byokProviders.connected().flatMap((item) => Object.values(item.models)))
+              if (!best) return language.t("freeModels.start.unavailable")
+              return language.t("freeModels.start.readyForProject", { model: freeModelName(best) })
+            }}
+          />
+        ))
+      },
+      secondary: {
+        label: "Use my own API key",
+        onGo: () => {
+          setOnboardingOpen(false)
+          openProviderSettings()
+        },
       },
     },
     {

@@ -378,8 +378,8 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
     {
       id: "settings-providers",
       section: "Settings",
-      title: "Providers: bring your own keys.",
-      body: "Connect OpenAI, Anthropic, Google, or another provider with your API key. Keys stay on your machine.",
+      title: "Providers: start free or bring your own keys.",
+      body: "Connect your own free OpenRouter account with no payment or credits needed, or connect OpenAI, Anthropic, Google, or another provider with your API key. Keys stay on your machine.",
       target: settingsTab("providers"),
       placement: "right",
       group: "settings",
@@ -446,7 +446,7 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       id: "finale",
       section: "You're set",
       title: "You know every button now.",
-      body: "That's the whole workspace: Home, the composer, the sidebar, project tools, connections, Cloud Services, and Settings. Next up is a short checklist — connect a provider, open a repository, run your first task.",
+      body: "That's the whole workspace: Home, the composer, the sidebar, project tools, connections, Cloud Services, and Settings. Next up is a short checklist — connect a model, open a repository, run your first task.",
       tip: "Replay this tour any time from Getting started (the ? in the sidebar footer).",
       prepare: () => {
         host.closeSettingsDialog()
