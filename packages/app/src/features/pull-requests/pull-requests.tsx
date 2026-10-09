@@ -1566,7 +1566,7 @@ export function PullRequests(props: {
           <h2 class="text-[19px] font-semibold leading-snug">Your changes</h2>
           <p class="mt-2 text-[12px] text-[color:var(--vx-text-subtle)]">
             {changesSummary()}
-            <Show when={panel.changes?.files}> · not committed yet, reviewed against your last commit</Show>
+            <Show when={panel.changes?.files}> · compared with your last commit</Show>
           </p>
         </div>
         <button
