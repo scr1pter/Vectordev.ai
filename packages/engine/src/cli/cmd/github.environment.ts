@@ -1,6 +1,5 @@
+import { GITHUB_WORKFLOW_VERSION } from "@vectordevai/core/review/workflow"
 import { PublicSession } from "@vectordevai/schema/public-session"
-
-export const GITHUB_WORKFLOW_VERSION = "2"
 
 export function prepareGithubEnvironment(env: Record<string, string | undefined>, review: boolean) {
   const stale =

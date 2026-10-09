@@ -3,7 +3,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { parseReviewCommand } from "@vectordevai/core/review/command"
-import { buildWorkflowYaml } from "../../src/cli/cmd/github.workflow"
+import { buildWorkflowYaml } from "@vectordevai/core/review/workflow"
 
 type Script = (github: unknown, context: unknown, core: unknown) => Promise<void>
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (...args: string[]) => Script

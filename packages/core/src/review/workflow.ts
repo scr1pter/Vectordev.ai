@@ -1,14 +1,16 @@
-// The workflow `vector github install` writes (section 2.1) and the route job's script (section 2.2). Pure, so the
-// tests can parse the YAML and run the script.
+// The workflow `vector github install` writes (section 2.1) and the route job's script (section 2.2). The desktop's
+// "Set up automatic reviews" commits the same file, so both build it here. Pure, so the tests can parse the YAML and
+// run the script.
 
-import release from "../../../../desktop/package.json"
-import { GITHUB_WORKFLOW_VERSION } from "./github.environment"
-import { DEFAULT_MENTIONS, parseReviewCommand } from "@vectordevai/core/review/command"
-import { PAUSED_LABEL } from "@vectordevai/core/review/skip"
+import release from "../../../desktop/package.json"
+import { DEFAULT_MENTIONS, parseReviewCommand } from "./command"
+import { PAUSED_LABEL } from "./skip"
 import { PublicSession } from "@vectordevai/schema/public-session"
 
 export const WORKFLOW_FILE = ".github/workflows/vector.yml"
 export const CLI_PACKAGE = "@vectordevai/cli"
+// Written into every job as VECTOR_WORKFLOW_VERSION; the CLI asks for a reinstall when a workflow's differs.
+export const GITHUB_WORKFLOW_VERSION = "2"
 
 export interface WorkflowOptions {
   provider: string

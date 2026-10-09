@@ -1,6 +1,6 @@
 // Which job an Actions event belongs to (sections 2.2 and 3.14). Pure, so the review job, the task job and the
 // tests read the same answer. The route job in the workflow runs core's parseReviewCommand directly
-// (github.workflow.ts); this is the CLI side of the same rules.
+// (@vectordevai/core/review/workflow); this is the CLI side of the same rules.
 
 import { DEFAULT_MENTIONS, parseReviewCommand } from "@vectordevai/core/review/command"
 

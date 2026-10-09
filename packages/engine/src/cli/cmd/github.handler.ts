@@ -41,7 +41,7 @@ import { extractResponseText, formatPromptTooLargeError } from "./github.shared"
 import { buildEvidenceBody, judgeTextFromMessages, parseNumstat, type EvidenceChange } from "./github.evidence"
 import { sameLogin } from "./github.review-api"
 import { TASK_MENTIONS, mentionsFrom, routeGithubEvent, type GithubRoute } from "./github.route"
-import { WORKFLOW_FILE, buildWorkflowYaml } from "./github.workflow"
+import { WORKFLOW_FILE, buildWorkflowYaml } from "@vectordevai/core/review/workflow"
 import { PublicSession } from "@vectordevai/schema/public-session"
 import { PublicSessionShare } from "@vectordevai/core/public-session-share"
 import { resolveGithubAuth, type GithubAuth } from "./github.auth"
@@ -369,7 +369,7 @@ export const githubInstall = Effect.fn("Cli.github.install")(function* () {
       async function addWorkflowFiles() {
         const keys = provider === "amazon-bedrock" ? [] : providers[provider].env
         // No composite action: the published CLI is installed from npm and run directly, on the repo's
-        // GITHUB_TOKEN. The route, review and task jobs are in github.workflow.ts.
+        // GITHUB_TOKEN. The route, review and task jobs are in @vectordevai/core/review/workflow.
         await Filesystem.write(
           path.join(app.root, WORKFLOW_FILE),
           buildWorkflowYaml({
