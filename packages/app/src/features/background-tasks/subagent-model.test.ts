@@ -14,6 +14,7 @@ import {
   isDismissed,
   kindLabel,
   liveAgentCount,
+  liveBackgroundSessions,
   locateTaskPart,
   modelShortName,
   phaseName,
@@ -953,6 +954,24 @@ describe("chips, counts and dismissal", () => {
     expect(liveAgentCount([])).toBe(0)
     expect(runningAgentCount(twoPhaseCards())).toBe(1)
     expect(runningAgentCount([])).toBe(0)
+  })
+
+  test("Stop all reaches every live background agent once and leaves foreground and finished ones", () => {
+    const cards = [
+      {
+        agents: [
+          { sessionID: "ses_bg_running", status: "running" as const, background: true },
+          { sessionID: "ses_bg_waiting", status: "waiting" as const, background: true },
+          { sessionID: "ses_fg_running", status: "running" as const, background: false },
+          { sessionID: "ses_bg_done", status: "done" as const, background: true },
+          { sessionID: undefined, status: "pending" as const, background: true },
+        ],
+      },
+      // A task_id call that added to a live run shows the same session again.
+      { agents: [{ sessionID: "ses_bg_running", status: "running" as const, background: true }] },
+    ]
+    expect(liveBackgroundSessions(cards)).toEqual(["ses_bg_running", "ses_bg_waiting"])
+    expect(liveBackgroundSessions([])).toEqual([])
   })
 
   test("counts are per child session: two parts driving one child are one agent", () => {

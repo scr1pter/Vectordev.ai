@@ -214,6 +214,13 @@ function Pane(props: { tasks: BackgroundTasks }) {
     previous = { root, statuses }
   })
 
+  const [stoppingAll, setStoppingAll] = createSignal(false)
+  const stopAll = async () => {
+    if (stoppingAll()) return
+    setStoppingAll(true)
+    await tasks.stopAllBackground().finally(() => setStoppingAll(false))
+  }
+
   const toggleFinished = () => {
     const next = !finishedOpen()
     setFinishedOpen(next)
@@ -329,9 +336,24 @@ function Pane(props: { tasks: BackgroundTasks }) {
             Finished, whose label is its toggle and carries the Clear button. */}
         <div class="vector-bg-tasks-list">
           <section class="vector-bg-tasks-section" aria-labelledby="vector-bg-tasks-running">
-            <h3 id="vector-bg-tasks-running" class="vector-bg-tasks-section-label">
-              Running
-            </h3>
+            <div class="vector-bg-tasks-section-head">
+              <h3 id="vector-bg-tasks-running" class="vector-bg-tasks-section-label">
+                Running
+              </h3>
+              {/* Stop on the main turn leaves background agents running, so they are stopped together here. */}
+              <Show when={tasks.liveBackground().length > 0}>
+                <button
+                  type="button"
+                  class="vector-bg-tasks-icon-btn"
+                  aria-label="Stop all background tasks"
+                  title="Stop all background tasks"
+                  aria-busy={stoppingAll()}
+                  onClick={stopAll}
+                >
+                  <StopIcon />
+                </button>
+              </Show>
+            </div>
             <Show
               when={tasks.live().length > 0}
               fallback={<p class="vector-bg-tasks-idle">Nothing running right now</p>}

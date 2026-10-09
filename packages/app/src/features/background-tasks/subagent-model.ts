@@ -838,6 +838,24 @@ export function runningAgentCount(cards: readonly CountedCard[]) {
 }
 
 /**
+ * Sessions of the background agents still live, for Stop all. Stopping the main turn leaves these running, so the
+ * pane is where they are stopped together. Foreground agents stop with the turn that waits on them.
+ */
+export function liveBackgroundSessions(
+  cards: readonly { agents: readonly Pick<TaskAgent, "sessionID" | "status" | "background">[] }[],
+) {
+  return [
+    ...new Set(
+      cards.flatMap((card) =>
+        card.agents.flatMap((agent) =>
+          agent.background && agent.sessionID && isLive(agent.status) ? [agent.sessionID] : [],
+        ),
+      ),
+    ),
+  ]
+}
+
+/**
  * Hidden-finished bookkeeping: the trash records when each finished card was
  * cleared. A card that finishes again later (a resumed task) shows again.
  */

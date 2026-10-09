@@ -9,6 +9,7 @@ import {
   formatSubagentTitle,
   formatSubagentToolcalls,
   InlineToolRow,
+  liveBackgroundTasks,
   parseApplyPatchFiles,
   parseDiagnostics,
   parseQuestionAnswers,
@@ -286,6 +287,29 @@ describe("TUI inline tool wrapping", () => {
     expect(formatSubagentOutcome("error", undefined)).toBe("Failed")
     expect(formatSubagentOutcome("cancelled", undefined)).toBe("Stopped")
     expect(formatSubagentOutcome(undefined, undefined)).toBeUndefined()
+  })
+
+  test("lists the background subagents still running, for Stop background subagents", () => {
+    const task = (id: string, metadata: Record<string, unknown>) =>
+      ({
+        id,
+        type: "tool",
+        tool: "task",
+        callID: id,
+        messageID: "msg_parent",
+        sessionID: "ses_parent",
+        state: { status: "completed", input: {}, output: "", title: id, metadata, time: { start: 0, end: 1 } },
+      }) as unknown as Parameters<typeof liveBackgroundTasks>[0][number]
+    expect(
+      liveBackgroundTasks([
+        task("a", { background: true, status: "running", sessionId: "ses_a" }),
+        task("b", { background: true, status: "queued", sessionId: "ses_b" }),
+        task("c", { background: true, status: "completed", sessionId: "ses_c" }),
+        task("d", { background: false, status: "running", sessionId: "ses_d" }),
+        // A task_id call that added to a's live run.
+        task("e", { background: true, status: "running", sessionId: "ses_a" }),
+      ]),
+    ).toEqual(["ses_a", "ses_b"])
   })
 
   test("keeps background state attached to the subagent identity", () => {
