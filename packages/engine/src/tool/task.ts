@@ -186,6 +186,16 @@ function renderOutput(input: {
   ].join("\n")
 }
 
+// How a child's run ends, from its last message: a stopped child cancels the job, and a failed one fails it while
+// keeping what it wrote.
+const settleRun = Effect.fnUntraced(function* (result: SessionV1.WithParts) {
+  const text = result.parts.findLast((item) => item.type === "text")?.text ?? ""
+  const failed = result.info.role === "assistant" ? SubagentLifecycle.failure(result.info.error) : undefined
+  if (!failed) return text
+  if (failed.status === "cancelled") return yield* Effect.interrupt
+  return yield* new BackgroundJob.RunFailed({ message: failed.error ?? "Task failed", output: text })
+})
+
 export const TaskTool = Tool.define(
   id,
   Effect.gen(function* () {
@@ -656,7 +666,7 @@ export const TaskTool = Tool.define(
         const parts = (yield* ops.resolvePromptParts(assignmentPrompt(params, ownedPaths))).filter(
           (part) => part.type !== "agent",
         )
-        const result = yield* ops.prompt({
+        return yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,
           model: {
@@ -667,7 +677,6 @@ export const TaskTool = Tool.define(
           agent: next.name,
           parts,
         })
-        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
       })
 
       const inject = Effect.fn("TaskTool.injectBackgroundResult")(function* (
@@ -811,8 +820,10 @@ export const TaskTool = Tool.define(
         }
       })
       // The child's loop runs in its own scope, so interrupting the job's fiber alone would leave it calling the
-      // provider after a stop; every run, first or added, stops the child when interrupted.
-      const guardedRun = () => runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id)))
+      // provider after a stop; every run, first or added, stops the child when interrupted. The loop returns normally
+      // when the child was stopped or failed, so the job settles from the child's last message, not as completed.
+      const guardedRun = () =>
+        runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id)), Effect.flatMap(settleRun))
       const extendRun = () => background.extend({ id: nextSession.id, run: guardedRun() })
       // A foreground run reports its result to the call that started it, so another call cannot add to it and be told
       // it will be notified later.
@@ -916,17 +927,21 @@ export const TaskTool = Tool.define(
               background.waitForPromotion(nextSession.id),
             )
             if (result?.metadata?.background === true) return backgroundResult()
-            if (result?.status === "error") {
+            // A run that never reached the child (a dependency that failed, a brief that could not be read) fails the
+            // call. A child that failed kept what it wrote as the job's output, and reports it below.
+            if (result?.status === "error" && result.output === undefined) {
               yield* finish("error", result.error, true)
               return yield* Effect.fail(new Error(result.error ?? "Task failed"))
             }
             // The returned metadata carries the outcome, so the part needs no later
             // patch. A stopped subagent returns the cancelled note instead of failing.
-            yield* finish(
-              result?.status === "cancelled" || ctx.abort.aborted ? "cancelled" : "completed",
-              undefined,
-              false,
-            )
+            const settled =
+              result?.status === "cancelled" || ctx.abort.aborted
+                ? "cancelled"
+                : result?.status === "error"
+                  ? "error"
+                  : "completed"
+            yield* finish(settled, settled === "error" ? result?.error : undefined, false)
             // The settled outcome, not the job's status: a run that returned
             // normally can still have failed or been stopped inside the child.
             const state = outcome.status === "error" || outcome.status === "cancelled" ? outcome.status : "completed"

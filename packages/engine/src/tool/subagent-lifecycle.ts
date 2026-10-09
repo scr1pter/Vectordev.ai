@@ -69,7 +69,10 @@ export function update(sessions: Session.Interface, sessionID: SessionID, patch:
   )
 }
 
-function failure(error: SessionV1.Assistant["error"]): { status: "error" | "cancelled"; error?: string } | undefined {
+/** How a run ended, read from the error its last assistant message carries; undefined when it did not fail. */
+export function failure(
+  error: SessionV1.Assistant["error"],
+): { status: "error" | "cancelled"; error?: string } | undefined {
   if (!error) return undefined
   if (error.name === "MessageAbortedError") return { status: "cancelled" }
   const data: unknown = (error as { data?: unknown }).data

@@ -31,6 +31,21 @@ describe("BackgroundJob", () => {
     }).pipe(Effect.provide(jobsLayer)),
   )
 
+  it.live("a run that fails with output settles as an error and keeps what it wrote", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const job = yield* jobs.start({
+        type: "test",
+        run: Effect.fail(new BackgroundJob.RunFailed({ message: "rate limited", output: "partial notes" })),
+      })
+
+      expect(yield* jobs.wait({ id: job.id })).toMatchObject({
+        timedOut: false,
+        info: { status: "error", error: "rate limited", output: "partial notes" },
+      })
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
   it.live("settles a running job as cancelled when its service shuts down", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
