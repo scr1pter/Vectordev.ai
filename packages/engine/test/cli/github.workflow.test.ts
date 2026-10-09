@@ -1,7 +1,7 @@
 import release from "../../../desktop/package.json"
 import { githubShareConsent, prepareGithubEnvironment } from "../../src/cli/cmd/github.environment"
 import { describe, expect, test } from "bun:test"
-import { buildRouteScript, buildWorkflowYaml, cliVersionSpec } from "../../src/cli/cmd/github.workflow"
+import { buildRouteScript, buildWorkflowYaml, cliVersionSpec } from "@vectordevai/core/review/workflow"
 
 // The route script is the embedded parser and is covered by github.route-script.test.ts.
 function withoutScript(yaml: string) {
