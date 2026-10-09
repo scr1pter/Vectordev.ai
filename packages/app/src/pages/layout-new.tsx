@@ -28,7 +28,7 @@ import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope
 import { sessionIDFromEvent } from "@/utils/session-event"
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
-import { reviewCatalog, runPullRequestReview } from "@/features/pull-requests/ai-review"
+import { reviewCatalog, runReview, workingTreeChanges } from "@/features/pull-requests/ai-review"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useProviders } from "@/hooks/use-providers"
@@ -6459,7 +6459,7 @@ export default function NewLayout(props: ParentProps) {
           const directory = activeWorkspaceScope().sourcePath
           if (!directory) throw new Error("Open a project before running a review.")
           const config = serverSync().data.config
-          return runPullRequestReview(
+          return runReview(
             {
               ...input,
               directory,
@@ -6478,6 +6478,12 @@ export default function NewLayout(props: ParentProps) {
             },
             serverSDK().createClient({ directory, throwOnError: true }),
           )
+        }}
+        onChanges={() => {
+          const directory = activeWorkspaceScope().sourcePath
+          return directory
+            ? workingTreeChanges(serverSDK().createClient({ directory, throwOnError: true }), directory)
+            : Promise.resolve(undefined)
         }}
       />
 

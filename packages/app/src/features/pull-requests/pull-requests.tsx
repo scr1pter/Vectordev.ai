@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX } from "solid-js"
+import { createStore } from "solid-js/store"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
   buildDesktopReview,
@@ -22,6 +23,8 @@ import {
   type PullRequestChecks,
   type ReviewOutcomeLite,
   type ReviewRequest,
+  type ReviewTarget,
+  type WorkingTreeChanges,
 } from "./ai-review"
 import {
   buildPullRequestCreateInput,
@@ -110,7 +113,7 @@ function rulesApi(): RepoRulesApi | undefined {
   return (globalThis.window as unknown as { api?: { repoRules?: RepoRulesApi } } | undefined)?.api?.repoRules
 }
 
-const DISMISS_REASONS = ["Not a bug", "Intended behaviour", "Fixed elsewhere", "Won't fix in this pull request"]
+const DISMISS_REASONS = ["Not a bug", "Intended behaviour", "Fixed elsewhere"]
 const REMEMBER = "Don't flag this again"
 const REMEMBERED = "Won't be flagged again · saved to Project rules"
 
@@ -370,6 +373,8 @@ function Grounding(props: { outcome: ReviewOutcomeLite }) {
 
 function FindingCard(props: {
   finding: ReviewFindingView
+  // From a review of uncommitted changes, which has no pull request and nothing to post.
+  uncommitted?: boolean
   dismissed?: string
   menuOpen: boolean
   canFix: boolean
@@ -438,7 +443,11 @@ function FindingCard(props: {
               </span>
               <Show when={props.finding.place !== "changed"}>
                 <span class="font-sans text-[color:var(--vx-text-muted)]">
-                  {props.finding.place === "outside" ? "outside the changed lines" : "elsewhere in this pull request"}
+                  {props.finding.place === "outside"
+                    ? "outside the changed lines"
+                    : props.uncommitted
+                      ? "elsewhere in these changes"
+                      : "elsewhere in this pull request"}
                 </span>
               </Show>
             </div>
@@ -506,9 +515,16 @@ function FindingCard(props: {
                     classList={{ "top-full mt-1": !menuUp(), "bottom-full mb-1": menuUp() }}
                   >
                     <p class="px-2.5 pb-1 pt-1.5 text-[10.5px] text-[color:var(--vx-text-muted)]">
-                      Dismiss with a reason. It is left out of what you post.
+                      {props.uncommitted
+                        ? "Dismiss with a reason."
+                        : "Dismiss with a reason. It is left out of what you post."}
                     </p>
-                    <For each={DISMISS_REASONS}>
+                    <For
+                      each={[
+                        ...DISMISS_REASONS,
+                        props.uncommitted ? "Won't fix now" : "Won't fix in this pull request",
+                      ]}
+                    >
                       {(reason) => (
                         <button type="button" role="menuitem" class={MENU_ITEM} onClick={() => props.onDismiss(reason)}>
                           {reason}
@@ -561,12 +577,18 @@ export function PullRequests(props: {
   projectPath?: string
   onClose: () => void
   onReview: (input: ReviewRequest) => Promise<ReviewOutcomeLite | undefined>
+  // The open project's uncommitted changes, for "Review my changes"; undefined when the engine cannot say.
+  onChanges?: () => Promise<WorkingTreeChanges | undefined>
 }) {
   const [status, setStatus] = createSignal<AccessStatus>()
   const [list, setList] = createSignal<PullRequest[]>([])
   const [selected, setSelected] = createSignal<PullRequestDetail>()
   const [review, setReview] = createSignal<ReviewOutcomeLite>()
-  const [reviewRun, setReviewRun] = createSignal<{ controller: AbortController; number: number }>()
+  // What a running review reads: a pull request's number, or the open project's uncommitted changes.
+  const [reviewRun, setReviewRun] = createSignal<{ controller: AbortController; subject: number | "changes" }>()
+  // view "changes" shows the open project's uncommitted changes in place of a pull request. Objects are replaced
+  // with setPanel({ … }), since setting one by path merges it into the one before.
+  const [panel, setPanel] = createStore<{ view?: "changes"; changes?: WorkingTreeChanges; checking?: boolean }>({})
   const [checkout, setCheckout] = createSignal<{ mode: ReviewCheckout["mode"]; label: string }>()
   const [estimate, setEstimate] = createSignal<{ value: ReviewEstimate; answer: (go: boolean) => void }>()
   const [busy, setBusy] = createSignal<string>()
@@ -638,7 +660,7 @@ export function PullRequests(props: {
   }
   const reviewing = () => {
     const run = reviewRun()
-    return Boolean(run) && run!.number === selected()?.number
+    return Boolean(run) && run!.subject === (panel.view === "changes" ? "changes" : selected()?.number)
   }
 
   // A review of another project's pull request is stopped, not left running for a panel that moved on.
@@ -674,11 +696,29 @@ export function PullRequests(props: {
     setCreateDraft(false)
     setCreatedUrl(undefined)
     setConfirmingMerge(false)
+    setPanel({ view: undefined, changes: undefined })
+  }
+
+  // The open project's uncommitted changes. Reading them needs no GitHub sign-in.
+  const loadChanges = async (projectPath = props.projectPath) => {
+    if (!projectPath || !props.onChanges) return
+    setPanel({ checking: true })
+    const changes = await props.onChanges().catch(() => undefined)
+    if (props.projectPath === projectPath) setPanel({ changes, checking: false })
+  }
+
+  const changesSummary = () => {
+    const changes = panel.changes
+    if (!props.projectPath) return "Open a project to review its changes"
+    if (!changes) return panel.checking ? "Checking for changes…" : "Staged, unstaged and new files"
+    if (!changes.files) return "No uncommitted changes"
+    return `${changes.files} uncommitted ${changes.files === 1 ? "file" : "files"} · +${changes.additions} −${changes.deletions}`
   }
 
   const refresh = async (projectPath = props.projectPath) => {
     const request = ++refreshRequest
     const current = () => request === refreshRequest && props.open && props.projectPath === projectPath
+    void loadChanges(projectPath)
     const bridge = api()
     if (!bridge) {
       if (current()) {
@@ -775,6 +815,31 @@ export function PullRequests(props: {
     }),
   )
 
+  // A review belongs to what it read, so opening something else starts with none.
+  const resetReview = () => {
+    setReview(undefined)
+    setCheckout(undefined)
+    setSeverityFilter("all")
+    setDismissed({})
+    setMenuFor(undefined)
+    setPosted(false)
+    setPostedNote(undefined)
+    setConfirmingMerge(false)
+  }
+
+  const openChanges = () => {
+    if (reviewRun()) return
+    // A pull request still loading must not take the view back.
+    selectionRequests.invalidate()
+    setBusy(undefined)
+    setSelected(undefined)
+    setCreateOpen(false)
+    // A review of the changes stays when they are opened again; a pull request's does not.
+    if (review()?.pr !== undefined) resetReview()
+    setPanel({ view: "changes" })
+    void loadChanges()
+  }
+
   const openPr = async (number: number) => {
     const bridge = api()
     const projectPath = props.projectPath
@@ -784,14 +849,8 @@ export function PullRequests(props: {
     setBusy(`Loading #${number}…`)
     setError(undefined)
     setSelected(undefined)
-    setReview(undefined)
-    setCheckout(undefined)
-    setSeverityFilter("all")
-    setDismissed({})
-    setMenuFor(undefined)
-    setPosted(false)
-    setPostedNote(undefined)
-    setConfirmingMerge(false)
+    setPanel({ view: undefined })
+    resetReview()
     const detail = await bridge.view(projectPath, number).catch((cause: unknown) => {
       if (current()) setError(pullRequestErrorMessage(cause))
       return undefined
@@ -813,7 +872,7 @@ export function PullRequests(props: {
       props.open &&
       pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
       reviewRun()?.controller === controller
-    setReviewRun({ controller, number: opened.number })
+    setReviewRun({ controller, subject: opened.number })
     setSeverityFilter("all")
     setDismissed({})
     setMenuFor(undefined)
@@ -848,8 +907,8 @@ export function PullRequests(props: {
         : undefined
     const outcome =
       pr && diff && !controller.signal.aborted
-        ? await props
-            .onReview({
+        ? await requestReview(
+            {
               pr: {
                 number: pr.number,
                 title: pr.title,
@@ -865,29 +924,10 @@ export function PullRequests(props: {
               },
               diff,
               ...(checks?.length ? { checks } : {}),
-              signal: controller.signal,
-              confirm: (value) =>
-                new Promise<boolean>((resolve) => {
-                  if (controller.signal.aborted) return resolve(false)
-                  setBusy("Waiting for you to start the review…")
-                  setEstimate({
-                    value,
-                    answer: (go) => {
-                      setEstimate(undefined)
-                      resolve(go)
-                    },
-                  })
-                }),
-              onProgress: (progress) => {
-                if (!current() || controller.signal.aborted) return
-                if (progress.type === "status") setBusy(progress.text)
-                else setCheckout({ mode: progress.checkout.mode, label: progress.label })
-              },
-            })
-            .catch((cause: unknown) => {
-              if (current()) setError(pullRequestErrorMessage(cause))
-              return undefined
-            })
+            },
+            controller,
+            current,
+          )
         : undefined
     const active = current()
     if (reviewRun()?.controller === controller) setReviewRun(undefined)
@@ -895,6 +935,58 @@ export function PullRequests(props: {
     setReview(outcome)
     setBusy(undefined)
   }
+
+  // The open project's uncommitted changes, read by the engine; no pull request and no GitHub sign-in needed.
+  const reviewChanges = async () => {
+    const projectPath = props.projectPath
+    const request = { path: projectPath, revision: projectRevision }
+    if (!projectPath || reviewRun()) return
+    const controller = new AbortController()
+    const current = () =>
+      props.open &&
+      pullRequestProjectIsCurrent(request, { path: props.projectPath, revision: projectRevision }) &&
+      reviewRun()?.controller === controller
+    setReviewRun({ controller, subject: "changes" })
+    resetReview()
+    setBusy("Reading your changes…")
+    setError(undefined)
+    const outcome = await requestReview({ uncommitted: true }, controller, current)
+    const active = current()
+    if (reviewRun()?.controller === controller) setReviewRun(undefined)
+    if (!active) return
+    setReview(outcome)
+    setBusy(undefined)
+    void loadChanges(projectPath)
+  }
+
+  // Hands one review to the layout. The cost estimate waits for the user, and progress shows while the run is current.
+  const requestReview = (target: ReviewTarget, controller: AbortController, current: () => boolean) =>
+    props
+      .onReview({
+        ...target,
+        signal: controller.signal,
+        confirm: (value) =>
+          new Promise<boolean>((resolve) => {
+            if (controller.signal.aborted) return resolve(false)
+            setBusy("Waiting for you to start the review…")
+            setEstimate({
+              value,
+              answer: (go) => {
+                setEstimate(undefined)
+                resolve(go)
+              },
+            })
+          }),
+        onProgress: (progress) => {
+          if (!current() || controller.signal.aborted) return
+          if (progress.type === "status") setBusy(progress.text)
+          else setCheckout({ mode: progress.checkout.mode, label: progress.label })
+        },
+      })
+      .catch((cause: unknown) => {
+        if (current()) setError(pullRequestErrorMessage(cause))
+        return undefined
+      })
 
   // Stop ends the review early; what the reviewers confirmed so far still comes back.
   const stopReview = () => {
@@ -984,7 +1076,7 @@ export function PullRequests(props: {
   // the user starts it there.
   const fixWithAgent = (finding: ReviewFindingView) => {
     const pr = selected()
-    if (!pr) return
+    if (!pr && panel.view !== "changes") return
     globalThis.window?.dispatchEvent(
       new CustomEvent("vector:delegate-parallel", { detail: { missions: [fixMission(pr, finding)] } }),
     )
@@ -1066,6 +1158,320 @@ export function PullRequests(props: {
     setCheckout(undefined)
     await refresh(projectPath)
   }
+
+  // The AI review of what the main view shows: the selected pull request, or the open project's uncommitted
+  // changes (no pr), which have nothing to post.
+  const ReviewSection = (subject: { pr?: PullRequestDetail }) => (
+    <section
+      aria-label="AI review"
+      class="mt-5 overflow-hidden rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)]"
+    >
+      <header class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[color:var(--vx-line)] px-4 py-3">
+        <span class="grid size-7 shrink-0 place-items-center rounded-[7px] bg-[image:var(--vx-gradient)] text-white">
+          <Icon name="scope" />
+        </span>
+        <div class="min-w-0 flex-1">
+          <div class="text-[13px] font-semibold">AI review</div>
+          <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
+            {reviewing()
+              ? "Reviewing…"
+              : review()
+                ? `Reviewed ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · ${reviewFooter(review()!)}`
+                : "Not reviewed yet"}
+          </div>
+        </div>
+        <Show
+          when={reviewing()}
+          fallback={
+            <button
+              type="button"
+              disabled={Boolean(busy()) || (!subject.pr && !panel.changes?.files)}
+              class={review() ? SECONDARY : PRIMARY}
+              onClick={() => void (subject.pr ? runReview() : reviewChanges())}
+            >
+              <Icon name={review() ? "refresh" : "scope"} />
+              {review() ? "Review again" : subject.pr ? "Review with Vector" : "Review my changes"}
+            </button>
+          }
+        >
+          <button type="button" class={DANGER} onClick={stopReview}>
+            <Icon name="stop" />
+            Stop review
+          </button>
+        </Show>
+      </header>
+
+      <Show when={estimate()}>
+        {(pending) => (
+          <div class="flex flex-wrap items-center gap-3 border-b border-[color:var(--vx-line)] bg-[color:var(--vx-purple-soft)] px-4 py-3">
+            <p class="min-w-[240px] flex-1 text-[12.5px] leading-relaxed">{estimateText(pending().value)}</p>
+            <button type="button" class={PRIMARY} onClick={() => pending().answer(true)}>
+              Start review
+            </button>
+            <button type="button" class={GHOST} onClick={() => pending().answer(false)}>
+              Cancel
+            </button>
+          </div>
+        )}
+      </Show>
+
+      <Show when={reviewing() && !estimate()}>
+        <div class="px-4 py-4">
+          <div class="flex items-center gap-2 text-[12.5px] text-[color:var(--vx-text-subtle)]">
+            <Spinner />
+            {busy() ?? "Reviewing…"}
+          </div>
+          <div class="mt-3 h-1 overflow-hidden rounded-full bg-[color:var(--vx-control)]">
+            <div class="h-full w-1/3 rounded-full bg-[image:var(--vx-gradient)] motion-safe:animate-[vx-indeterminate_1.6s_var(--vx-ease)_infinite]" />
+          </div>
+        </div>
+      </Show>
+
+      <Show when={checkout()}>
+        {(info) => (
+          <p class="border-b border-[color:var(--vx-line)] px-4 py-2.5 text-[11.5px] leading-relaxed text-[color:var(--vx-text-muted)]">
+            <CodeText text={info().label} />
+            <Show when={info().mode === "rebuilt"}>
+              <span> {REBUILT_HINT}</span>
+            </Show>
+          </p>
+        )}
+      </Show>
+
+      <Show when={!reviewing() && !review()}>
+        <p class="px-4 py-4 text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+          {subject.pr
+            ? "A reviewer reads the diff and the code around it, a security reviewer joins when sensitive files change, and nothing is posted to GitHub until you choose to."
+            : "A reviewer reads your staged, unstaged and untracked changes against your last commit, and the code around them. A security reviewer joins when sensitive files change. Nothing is posted anywhere."}
+        </p>
+      </Show>
+
+      <Show when={!reviewing() && review()}>
+        {(outcome) => (
+          <>
+            <div class="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,1fr)_220px]">
+              <div class="min-w-0">
+                <Show
+                  when={outcome().report.summary}
+                  fallback={
+                    <p class="text-[12.5px] text-[color:var(--vx-text-muted)]">The reviewers returned no summary.</p>
+                  }
+                >
+                  <p class="text-[13px] leading-relaxed">
+                    <CodeText text={outcome().report.summary} />
+                  </p>
+                </Show>
+                <Grounding outcome={outcome()} />
+                <For each={[...outcome().banners, ...outcome().notes]}>
+                  {(note) => (
+                    <p class="mt-2.5 rounded-[6px] border border-[color:color-mix(in_srgb,var(--vx-amber)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-amber)_8%,transparent)] px-3 py-2 text-[12px] leading-relaxed text-[color:var(--vx-amber)]">
+                      <CodeText text={note.replaceAll("**", "")} />
+                    </p>
+                  )}
+                </For>
+              </div>
+              <RiskMeter risk={outcome().selection.risk} counts={counts()} />
+            </div>
+
+            <Show
+              when={groups().length}
+              fallback={
+                <Show when={outcome().notes.length === 0}>
+                  <div class="mx-4 mb-4 flex items-center gap-2 rounded-[8px] border border-[color:color-mix(in_srgb,var(--vx-green)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-green)_8%,transparent)] px-3 py-2.5 text-[12.5px] text-[color:var(--vx-green)]">
+                    <Icon name="check" />
+                    No issues found on the changed lines.
+                  </div>
+                </Show>
+              }
+            >
+              <div class="flex flex-wrap items-center gap-1 border-t border-[color:var(--vx-line)] px-4 py-2.5">
+                <span class={`${SECTION_TITLE} mr-2`}>Findings</span>
+                <div
+                  role="group"
+                  aria-label="Filter findings by severity"
+                  class="flex flex-wrap gap-1 rounded-[7px] bg-[color:var(--vx-canvas)] p-0.5"
+                >
+                  <For each={["all", "blocking", "concern", "nit"] as const}>
+                    {(value) => (
+                      <button
+                        type="button"
+                        aria-pressed={severityFilter() === value}
+                        disabled={value !== "all" && counts()[value] === 0}
+                        class="inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-[11.5px] transition disabled:cursor-default disabled:opacity-40"
+                        classList={{
+                          "bg-[color:var(--vx-surface-raised)] text-[color:var(--vx-text)]": severityFilter() === value,
+                          "text-[color:var(--vx-text-muted)] hover:enabled:text-[color:var(--vx-text)]":
+                            severityFilter() !== value,
+                        }}
+                        onClick={() => setSeverityFilter(value)}
+                      >
+                        <Show when={value !== "all"}>
+                          <span
+                            class="size-1.5 rounded-full"
+                            style={{ background: value === "all" ? undefined : SEVERITY[value].tone }}
+                          />
+                        </Show>
+                        {value === "all" ? "All" : SEVERITY[value].label}
+                        <span class="text-[color:var(--vx-text-muted)]">
+                          {value === "all" ? counts().blocking + counts().concern + counts().nit : counts()[value]}
+                        </span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+              <div class="flex flex-col gap-2 px-4 pb-4">
+                <For each={visibleFindings()}>
+                  {(finding) => (
+                    <FindingCard
+                      finding={finding}
+                      dismissed={dismissed()[finding.id]}
+                      menuOpen={menuFor() === finding.id}
+                      uncommitted={!subject.pr}
+                      canFix={canFix()}
+                      canRemember={Boolean(rulesApi() && props.projectPath)}
+                      onMenu={(open) => setMenuFor(open ? finding.id : undefined)}
+                      onDismiss={(reason) => void dismiss(finding, reason)}
+                      onRestore={() => restore(finding)}
+                      onFix={() => fixWithAgent(finding)}
+                    />
+                  )}
+                </For>
+              </div>
+            </Show>
+
+            <Show when={outcome().skipped.length}>
+              <p class="px-4 pb-3 text-[11.5px] leading-relaxed text-[color:var(--vx-text-muted)]">
+                Not reviewed: {skippedText(outcome().skipped)}
+              </p>
+            </Show>
+
+            <Show when={subject.pr}>
+              {(pr) => (
+                <footer class="flex flex-wrap items-center gap-2 border-t border-[color:var(--vx-line)] bg-[color:var(--vx-stage)] px-4 py-3">
+                  <Show
+                    when={!posted()}
+                    fallback={
+                      <>
+                        <span class="inline-flex items-center gap-1.5 text-[12.5px] text-[color:var(--vx-green)]">
+                          <Icon name="check" />
+                          Review posted
+                          <Show when={postedNote()}>
+                            <span class="text-[color:var(--vx-text-muted)]">{postedNote()}</span>
+                          </Show>
+                        </span>
+                        <a
+                          class="ml-auto text-[12px] text-[color:var(--vx-purple-bright)] underline underline-offset-2"
+                          href={pr().url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          See it on GitHub ↗
+                        </a>
+                      </>
+                    }
+                  >
+                    <button
+                      type="button"
+                      disabled={Boolean(busy())}
+                      class={PRIMARY}
+                      onClick={() => void postReview("comment")}
+                    >
+                      <Icon name="comment" />
+                      Comment
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(busy())}
+                      class={SECONDARY}
+                      onClick={() => void postReview("request-changes")}
+                    >
+                      Request changes
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(busy()) || !events()?.approve}
+                      title={events()?.approve ? undefined : "Approve is off while a blocking finding stands."}
+                      class={SECONDARY}
+                      onClick={() => void postReview("approve")}
+                    >
+                      <Icon name="check" />
+                      Approve
+                    </button>
+                    <span class="ml-auto text-[11.5px] text-[color:var(--vx-text-muted)]">
+                      {events()?.approve
+                        ? status()?.login
+                          ? `Posting as @${status()!.login}`
+                          : "Posting with your GitHub sign-in"
+                        : "Approve is off while a blocking finding stands."}
+                    </span>
+                  </Show>
+                </footer>
+              )}
+            </Show>
+          </>
+        )}
+      </Show>
+    </section>
+  )
+
+  // The open project's uncommitted changes, reviewed in place of a pull request. A review that has finished stays
+  // after the changes are committed.
+  const ChangesView = () => (
+    <div class="mx-auto max-w-[960px] px-6 pb-10 pt-5">
+      <Show when={!status()?.authenticated}>
+        <button
+          type="button"
+          class={`${GHOST} -ml-3 mb-2`}
+          disabled={Boolean(reviewRun())}
+          onClick={() => setPanel({ view: undefined })}
+        >
+          Back to GitHub sign-in
+        </button>
+      </Show>
+      <div class="flex items-start gap-4">
+        <div class="min-w-0 flex-1">
+          <h2 class="text-[19px] font-semibold leading-snug">Your changes</h2>
+          <p class="mt-2 text-[12px] text-[color:var(--vx-text-subtle)]">
+            {changesSummary()}
+            <Show when={panel.changes?.files}> · not committed yet, reviewed against your last commit</Show>
+          </p>
+        </div>
+        <button
+          type="button"
+          class={SECONDARY}
+          disabled={reviewing() || panel.checking}
+          onClick={() => void loadChanges()}
+        >
+          <Icon name="refresh" />
+          Check again
+        </button>
+      </div>
+      <Show
+        when={panel.changes?.files || review() || reviewing()}
+        fallback={
+          <div class="mt-5 flex flex-col items-center gap-3 rounded-[10px] border border-dashed border-[color:var(--vx-line)] px-6 py-10 text-center">
+            <span class="grid size-11 place-items-center rounded-[12px] bg-[color:var(--vx-surface)] text-[color:var(--vx-text-muted)]">
+              <Icon name={panel.changes ? "check" : "scope"} class="size-5" />
+            </span>
+            <p class="text-[13px] font-medium">
+              {panel.checking
+                ? "Checking for changes…"
+                : panel.changes
+                  ? "No uncommitted changes"
+                  : "Vector couldn't read this project's changes"}
+            </p>
+            <p class="max-w-[380px] text-[12px] leading-relaxed text-[color:var(--vx-text-muted)]">
+              Vectorscope reviews what you haven't committed yet: staged and unstaged edits, and new files git doesn't
+              ignore. Change something in this project, then check again.
+            </p>
+          </div>
+        }
+      >
+        <ReviewSection />
+      </Show>
+    </div>
+  )
 
   return (
     <Show when={props.open}>
@@ -1173,7 +1579,13 @@ export function PullRequests(props: {
           </div>
         </Show>
 
-        <Show when={status() && !status()!.authenticated}>
+        <Show when={status() && !status()!.authenticated && panel.view === "changes"}>
+          <main class="min-h-0 flex-1 overflow-y-auto">
+            <ChangesView />
+          </main>
+        </Show>
+
+        <Show when={status() && !status()!.authenticated && panel.view !== "changes"}>
           <div class="grid min-h-0 flex-1 place-items-center overflow-y-auto px-5 py-8">
             <div class="w-full max-w-[520px]">
               <div class="mb-5 flex flex-col items-center gap-3 text-center">
@@ -1206,6 +1618,29 @@ export function PullRequests(props: {
                   />
                 </Show>
               </div>
+              <Show when={props.onChanges && props.projectPath}>
+                <div class="mt-3 flex flex-wrap items-center gap-3 rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)] px-4 py-3">
+                  <div class="min-w-[200px] flex-1">
+                    <div class="text-[12.5px] font-medium">Review your uncommitted changes</div>
+                    <p class="mt-0.5 text-[11.5px] text-[color:var(--vx-text-muted)]">
+                      {changesSummary()} · no GitHub sign-in needed
+                    </p>
+                  </div>
+                  <Show when={panel.changes?.files}>
+                    <button
+                      type="button"
+                      class={SECONDARY}
+                      onClick={() => {
+                        openChanges()
+                        void reviewChanges()
+                      }}
+                    >
+                      <Icon name="scope" />
+                      Review my changes
+                    </button>
+                  </Show>
+                </div>
+              </Show>
             </div>
           </div>
         </Show>
@@ -1226,6 +1661,36 @@ export function PullRequests(props: {
                   />
                 </label>
               </div>
+              <Show when={props.onChanges}>
+                <div class="border-b border-[color:var(--vx-line)] p-2">
+                  <button
+                    type="button"
+                    disabled={!props.projectPath || Boolean(reviewRun())}
+                    aria-current={panel.view === "changes" ? "true" : undefined}
+                    class="relative flex w-full gap-2.5 rounded-[7px] px-2.5 py-2.5 text-left transition disabled:cursor-default"
+                    classList={{
+                      "bg-[color:var(--vx-surface-raised)]": panel.view === "changes",
+                      "hover:enabled:bg-[color:var(--vx-surface)]": panel.view !== "changes",
+                    }}
+                    onClick={openChanges}
+                  >
+                    <Show when={panel.view === "changes"}>
+                      <span class="absolute inset-y-2 left-0 w-[2px] rounded-full bg-[color:var(--vx-purple)]" />
+                    </Show>
+                    <span class="mt-px shrink-0 text-[color:var(--vx-purple-bright)]">
+                      <Icon name="scope" />
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block text-[12.5px] font-medium leading-snug text-[color:var(--vx-text)]">
+                        Your changes
+                      </span>
+                      <span class="mt-1 block truncate text-[11px] text-[color:var(--vx-text-muted)]">
+                        {changesSummary()}
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              </Show>
               <div class="min-h-0 flex-1 overflow-y-auto p-2">
                 <Show
                   when={shown().length}
@@ -1458,10 +1923,14 @@ export function PullRequests(props: {
                 </div>
               </Show>
 
+              <Show when={!createOpen() && panel.view === "changes"}>
+                <ChangesView />
+              </Show>
+
               <Show
                 when={!createOpen() && selected()}
                 fallback={
-                  <Show when={!createOpen()}>
+                  <Show when={!createOpen() && !panel.view}>
                     <div class="grid h-full place-items-center px-6 text-center">
                       <div class="flex max-w-[340px] flex-col items-center gap-3">
                         <span class="grid size-11 place-items-center rounded-[12px] bg-[color:var(--vx-surface)] text-[color:var(--vx-text-muted)]">
@@ -1521,260 +1990,7 @@ export function PullRequests(props: {
                       </a>
                     </div>
 
-                    <section
-                      aria-label="AI review"
-                      class="mt-5 overflow-hidden rounded-[10px] border border-[color:var(--vx-line)] bg-[color:var(--vx-surface)]"
-                    >
-                      <header class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[color:var(--vx-line)] px-4 py-3">
-                        <span class="grid size-7 shrink-0 place-items-center rounded-[7px] bg-[image:var(--vx-gradient)] text-white">
-                          <Icon name="scope" />
-                        </span>
-                        <div class="min-w-0 flex-1">
-                          <div class="text-[13px] font-semibold">AI review</div>
-                          <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
-                            {reviewing()
-                              ? "Reviewing…"
-                              : review()
-                                ? `Reviewed ${review()!.head.slice(0, 7)} · ${reviewFooter(review()!)}`
-                                : "Not reviewed yet"}
-                          </div>
-                        </div>
-                        <Show
-                          when={reviewing()}
-                          fallback={
-                            <button
-                              type="button"
-                              disabled={Boolean(busy())}
-                              class={review() ? SECONDARY : PRIMARY}
-                              onClick={() => void runReview()}
-                            >
-                              <Icon name={review() ? "refresh" : "scope"} />
-                              {review() ? "Review again" : "Review with Vector"}
-                            </button>
-                          }
-                        >
-                          <button type="button" class={DANGER} onClick={stopReview}>
-                            <Icon name="stop" />
-                            Stop review
-                          </button>
-                        </Show>
-                      </header>
-
-                      <Show when={estimate()}>
-                        {(pending) => (
-                          <div class="flex flex-wrap items-center gap-3 border-b border-[color:var(--vx-line)] bg-[color:var(--vx-purple-soft)] px-4 py-3">
-                            <p class="min-w-[240px] flex-1 text-[12.5px] leading-relaxed">
-                              {estimateText(pending().value)}
-                            </p>
-                            <button type="button" class={PRIMARY} onClick={() => pending().answer(true)}>
-                              Start review
-                            </button>
-                            <button type="button" class={GHOST} onClick={() => pending().answer(false)}>
-                              Cancel
-                            </button>
-                          </div>
-                        )}
-                      </Show>
-
-                      <Show when={reviewing() && !estimate()}>
-                        <div class="px-4 py-4">
-                          <div class="flex items-center gap-2 text-[12.5px] text-[color:var(--vx-text-subtle)]">
-                            <Spinner />
-                            {busy() ?? "Reviewing…"}
-                          </div>
-                          <div class="mt-3 h-1 overflow-hidden rounded-full bg-[color:var(--vx-control)]">
-                            <div class="h-full w-1/3 rounded-full bg-[image:var(--vx-gradient)] motion-safe:animate-[vx-indeterminate_1.6s_var(--vx-ease)_infinite]" />
-                          </div>
-                        </div>
-                      </Show>
-
-                      <Show when={checkout()}>
-                        {(info) => (
-                          <p class="border-b border-[color:var(--vx-line)] px-4 py-2.5 text-[11.5px] leading-relaxed text-[color:var(--vx-text-muted)]">
-                            <CodeText text={info().label} />
-                            <Show when={info().mode === "rebuilt"}>
-                              <span> {REBUILT_HINT}</span>
-                            </Show>
-                          </p>
-                        )}
-                      </Show>
-
-                      <Show when={!reviewing() && !review()}>
-                        <p class="px-4 py-4 text-[12.5px] leading-relaxed text-[color:var(--vx-text-subtle)]">
-                          A reviewer reads the diff and the code around it, a security reviewer joins when sensitive
-                          files change, and nothing is posted to GitHub until you choose to.
-                        </p>
-                      </Show>
-
-                      <Show when={!reviewing() && review()}>
-                        {(outcome) => (
-                          <>
-                            <div class="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,1fr)_220px]">
-                              <div class="min-w-0">
-                                <Show
-                                  when={outcome().report.summary}
-                                  fallback={
-                                    <p class="text-[12.5px] text-[color:var(--vx-text-muted)]">
-                                      The reviewers returned no summary.
-                                    </p>
-                                  }
-                                >
-                                  <p class="text-[13px] leading-relaxed">
-                                    <CodeText text={outcome().report.summary} />
-                                  </p>
-                                </Show>
-                                <Grounding outcome={outcome()} />
-                                <For each={[...outcome().banners, ...outcome().notes]}>
-                                  {(note) => (
-                                    <p class="mt-2.5 rounded-[6px] border border-[color:color-mix(in_srgb,var(--vx-amber)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-amber)_8%,transparent)] px-3 py-2 text-[12px] leading-relaxed text-[color:var(--vx-amber)]">
-                                      <CodeText text={note.replaceAll("**", "")} />
-                                    </p>
-                                  )}
-                                </For>
-                              </div>
-                              <RiskMeter risk={outcome().selection.risk} counts={counts()} />
-                            </div>
-
-                            <Show
-                              when={groups().length}
-                              fallback={
-                                <Show when={outcome().notes.length === 0}>
-                                  <div class="mx-4 mb-4 flex items-center gap-2 rounded-[8px] border border-[color:color-mix(in_srgb,var(--vx-green)_30%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-green)_8%,transparent)] px-3 py-2.5 text-[12.5px] text-[color:var(--vx-green)]">
-                                    <Icon name="check" />
-                                    No issues found on the changed lines.
-                                  </div>
-                                </Show>
-                              }
-                            >
-                              <div class="flex flex-wrap items-center gap-1 border-t border-[color:var(--vx-line)] px-4 py-2.5">
-                                <span class={`${SECTION_TITLE} mr-2`}>Findings</span>
-                                <div
-                                  role="group"
-                                  aria-label="Filter findings by severity"
-                                  class="flex flex-wrap gap-1 rounded-[7px] bg-[color:var(--vx-canvas)] p-0.5"
-                                >
-                                  <For each={["all", "blocking", "concern", "nit"] as const}>
-                                    {(value) => (
-                                      <button
-                                        type="button"
-                                        aria-pressed={severityFilter() === value}
-                                        disabled={value !== "all" && counts()[value] === 0}
-                                        class="inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-[11.5px] transition disabled:cursor-default disabled:opacity-40"
-                                        classList={{
-                                          "bg-[color:var(--vx-surface-raised)] text-[color:var(--vx-text)]":
-                                            severityFilter() === value,
-                                          "text-[color:var(--vx-text-muted)] hover:enabled:text-[color:var(--vx-text)]":
-                                            severityFilter() !== value,
-                                        }}
-                                        onClick={() => setSeverityFilter(value)}
-                                      >
-                                        <Show when={value !== "all"}>
-                                          <span
-                                            class="size-1.5 rounded-full"
-                                            style={{ background: value === "all" ? undefined : SEVERITY[value].tone }}
-                                          />
-                                        </Show>
-                                        {value === "all" ? "All" : SEVERITY[value].label}
-                                        <span class="text-[color:var(--vx-text-muted)]">
-                                          {value === "all"
-                                            ? counts().blocking + counts().concern + counts().nit
-                                            : counts()[value]}
-                                        </span>
-                                      </button>
-                                    )}
-                                  </For>
-                                </div>
-                              </div>
-                              <div class="flex flex-col gap-2 px-4 pb-4">
-                                <For each={visibleFindings()}>
-                                  {(finding) => (
-                                    <FindingCard
-                                      finding={finding}
-                                      dismissed={dismissed()[finding.id]}
-                                      menuOpen={menuFor() === finding.id}
-                                      canFix={canFix()}
-                                      canRemember={Boolean(rulesApi() && props.projectPath)}
-                                      onMenu={(open) => setMenuFor(open ? finding.id : undefined)}
-                                      onDismiss={(reason) => void dismiss(finding, reason)}
-                                      onRestore={() => restore(finding)}
-                                      onFix={() => fixWithAgent(finding)}
-                                    />
-                                  )}
-                                </For>
-                              </div>
-                            </Show>
-
-                            <Show when={outcome().skipped.length}>
-                              <p class="px-4 pb-3 text-[11.5px] leading-relaxed text-[color:var(--vx-text-muted)]">
-                                Not reviewed: {skippedText(outcome().skipped)}
-                              </p>
-                            </Show>
-
-                            <footer class="flex flex-wrap items-center gap-2 border-t border-[color:var(--vx-line)] bg-[color:var(--vx-stage)] px-4 py-3">
-                              <Show
-                                when={!posted()}
-                                fallback={
-                                  <>
-                                    <span class="inline-flex items-center gap-1.5 text-[12.5px] text-[color:var(--vx-green)]">
-                                      <Icon name="check" />
-                                      Review posted
-                                      <Show when={postedNote()}>
-                                        <span class="text-[color:var(--vx-text-muted)]">{postedNote()}</span>
-                                      </Show>
-                                    </span>
-                                    <a
-                                      class="ml-auto text-[12px] text-[color:var(--vx-purple-bright)] underline underline-offset-2"
-                                      href={pr().url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                    >
-                                      See it on GitHub ↗
-                                    </a>
-                                  </>
-                                }
-                              >
-                                <button
-                                  type="button"
-                                  disabled={Boolean(busy())}
-                                  class={PRIMARY}
-                                  onClick={() => void postReview("comment")}
-                                >
-                                  <Icon name="comment" />
-                                  Comment
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={Boolean(busy())}
-                                  class={SECONDARY}
-                                  onClick={() => void postReview("request-changes")}
-                                >
-                                  Request changes
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={Boolean(busy()) || !events()?.approve}
-                                  title={
-                                    events()?.approve ? undefined : "Approve is off while a blocking finding stands."
-                                  }
-                                  class={SECONDARY}
-                                  onClick={() => void postReview("approve")}
-                                >
-                                  <Icon name="check" />
-                                  Approve
-                                </button>
-                                <span class="ml-auto text-[11.5px] text-[color:var(--vx-text-muted)]">
-                                  {events()?.approve
-                                    ? status()?.login
-                                      ? `Posting as @${status()!.login}`
-                                      : "Posting with your GitHub sign-in"
-                                    : "Approve is off while a blocking finding stands."}
-                                </span>
-                              </Show>
-                            </footer>
-                          </>
-                        )}
-                      </Show>
-                    </section>
+                    <ReviewSection pr={pr()} />
 
                     <Show when={pr().body.trim()}>
                       <section class="mt-6">
