@@ -45,14 +45,25 @@ describe("composer prompts", () => {
     expect(requestComposerPrompt({ text: "nobody listening", send: true })).toBe(false)
     const first: ComposerPrompt[] = []
     const second: ComposerPrompt[] = []
-    const stopFirst = onComposerPrompt((request) => first.push(request))
-    const stopSecond = onComposerPrompt((request) => second.push(request))
+    const stopFirst = onComposerPrompt((request) => first.push(request) > 0)
+    const stopSecond = onComposerPrompt((request) => second.push(request) > 0)
     expect(requestComposerPrompt({ text: "Fix the deploy", send: true })).toBe(true)
     expect(first).toEqual([{ text: "Fix the deploy", send: true }])
     expect(second).toEqual([])
     stopFirst()
     stopSecond()
     expect(requestComposerPrompt({ text: "after", send: false })).toBe(false)
+  })
+
+  test("a composer that declines (it holds an unsent draft) leaves the request to the next, or to the caller", () => {
+    const taken: string[] = []
+    const stopBusy = onComposerPrompt(() => false)
+    expect(requestComposerPrompt({ text: "Set up the database", send: true })).toBe(false)
+    const stopFree = onComposerPrompt((request) => taken.push(request.text) > 0)
+    expect(requestComposerPrompt({ text: "Set up the database", send: true })).toBe(true)
+    expect(taken).toEqual(["Set up the database"])
+    stopBusy()
+    stopFree()
   })
 })
 

@@ -86,7 +86,14 @@ export default function NewSessionPage() {
     })
   })
 
-  onCleanup(onComposerPrompt((request) => takePrompt(request.text, request.send)))
+  // An unsent draft is never replaced: the surface starts another session instead.
+  onCleanup(
+    onComposerPrompt((request) => {
+      if (prompt.dirty()) return false
+      takePrompt(request.text, request.send)
+      return true
+    }),
+  )
 
   createEffect(() => {
     if (!prompt.ready()) return

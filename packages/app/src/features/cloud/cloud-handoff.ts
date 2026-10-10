@@ -28,13 +28,16 @@ export function requestComposerPrompt(request: ComposerPrompt) {
   return !(globalThis.window?.dispatchEvent(event) ?? true)
 }
 
-/** Lets a composer take the prompts other surfaces hand it. Returns the unsubscribe. */
-export function onComposerPrompt(take: (request: ComposerPrompt) => void) {
+/**
+ * Lets a composer take the prompts other surfaces hand it. `take` returns false
+ * to decline one (a composer holding an unsent draft keeps it), and the surface
+ * then starts a new session with the prompt instead. Returns the unsubscribe.
+ */
+export function onComposerPrompt(take: (request: ComposerPrompt) => boolean) {
   const listener = (event: Event) => {
     // One composer takes each request, so two mounted at once never both send it.
     if (event.defaultPrevented || !(event instanceof CustomEvent)) return
-    event.preventDefault()
-    take(event.detail)
+    if (take(event.detail)) event.preventDefault()
   }
   globalThis.window?.addEventListener(COMPOSER_PROMPT_EVENT, listener)
   return () => globalThis.window?.removeEventListener(COMPOSER_PROMPT_EVENT, listener)
