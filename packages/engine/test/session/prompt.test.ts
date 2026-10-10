@@ -11,7 +11,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
-import { fileURLToPath } from "url"
+import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
@@ -2363,11 +2363,67 @@ unixNoLLMServer(
 
 test("command arguments cannot inject shell interpolation", () => {
   const injected = "!`touch slash-argument-injection`"
-  const prepared = SessionPrompt.prepareCommandTemplate("Inspect: $ARGUMENTS", injected)
+  const prepared = SessionPrompt.prepareCommandTemplate("Inspect: $ARGUMENTS", injected, "/bin/sh")
 
   expect(prepared.shellCommands).toEqual([])
   expect(prepared.render([])).toContain(injected)
 })
+
+test("command snippets receive each argument as a quoted literal word", () => {
+  const prepared = SessionPrompt.prepareCommandTemplate(
+    "Diff: !`gh pr diff $1` all: !`echo $ARGUMENTS`\nAbout $1 and $2",
+    `42 "it's; touch pwned"`,
+    "/bin/sh",
+  )
+
+  expect(prepared.shellCommands).toEqual([`gh pr diff '42'`, `echo '42' 'it'\\''s; touch pwned'`])
+  // Output is inserted as is: a placeholder printed by a snippet is not the template's.
+  expect(prepared.render(["diff says $1", "echo says $ARGUMENTS"])).toBe(
+    "Diff: diff says $1 all: echo says $ARGUMENTS\nAbout 42 and it's; touch pwned",
+  )
+})
+
+test("command snippets quote arguments for PowerShell and refuse what cmd.exe cannot keep literal", () => {
+  expect(SessionPrompt.prepareCommandTemplate("!`echo $1`", `"it's"`, "pwsh").shellCommands).toEqual([`echo 'it''s'`])
+  expect(SessionPrompt.prepareCommandTemplate("!`echo $1`", "plain", "cmd").shellCommands).toEqual([`echo "plain"`])
+  expect(() => SessionPrompt.prepareCommandTemplate("!`echo $1`", "%PATH%", "cmd")).toThrow("cmd")
+  // A snippet that never uses the arguments is unaffected by one cmd.exe cannot quote.
+  expect(SessionPrompt.prepareCommandTemplate("!`echo hi` $1", "%PATH%", "cmd").shellCommands).toEqual(["echo hi"])
+})
+
+unix(
+  "command ! snippets from the user's config keep their arguments and run without asking",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const { llm } = yield* useServerConfig((url) => ({
+          ...providerCfg(url),
+          permission: { bash: "ask" },
+          command: {
+            greet: {
+              template: "Said: !`printf '%s|' $1 $2`",
+            },
+          },
+        }))
+
+        const { prompt, chat } = yield* boot()
+        yield* llm.text("done")
+
+        const result = yield* prompt.command({
+          sessionID: chat.id,
+          command: "greet",
+          arguments: `"a b" '$(touch slash-argument-injection)'`,
+        })
+
+        expect(result.info.role).toBe("assistant")
+        const inputs = yield* llm.inputs
+        expect(JSON.stringify(inputs.at(-1)?.messages)).toContain("a b|$(touch slash-argument-injection)|")
+        expect(yield* Effect.promise(() => Bun.file(path.join(dir, "slash-argument-injection")).exists())).toBe(false)
+      }),
+    ),
+  30_000,
+)
 
 unixNoLLMServer(
   "cancel interrupts shell and resolves cleanly",
@@ -2776,6 +2832,47 @@ noLLMServer.instance(
       expect(exit.value.parts).toEqual([
         expect.objectContaining({ id, type: "text", text: expect.stringContaining("Read tool failed to read") }),
       ])
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
+  "the user's own attachments outside the project attach without asking",
+  () =>
+    Effect.gen(function* () {
+      const external = yield* tmpdirScoped()
+      const binary = path.join(external, "photo.bin")
+      const text = path.join(external, "notes.txt")
+      const afs = yield* FSUtil.Service
+      yield* afs.writeWithDirs(binary, "user-binary")
+      yield* afs.writeWithDirs(text, "user-notes")
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+
+      const msg = yield* prompt.prompt(
+        {
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [
+            { type: "file", mime: "application/octet-stream", filename: "photo.bin", url: pathToFileURL(binary).href },
+            { type: "file", mime: "text/plain", filename: "notes.txt", url: pathToFileURL(text).href },
+          ],
+        },
+        { userFile: () => true },
+      )
+
+      expect(yield* permission.list()).toEqual([])
+      expect(msg.parts).toContainEqual(
+        expect.objectContaining({
+          type: "file",
+          url: `data:application/octet-stream;base64,${Buffer.from("user-binary").toString("base64")}`,
+        }),
+      )
+      expect(JSON.stringify(msg.parts)).toContain("user-notes")
     }),
   { config: cfg },
 )

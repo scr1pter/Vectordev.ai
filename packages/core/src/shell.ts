@@ -215,6 +215,16 @@ export function args(file: string, command: string, cwd: string) {
   return ["-c", command]
 }
 
+/**
+ * Quotes one value as a single literal word for the shell that will run it. cmd.exe expands %VAR% and ! even inside
+ * quotes, so a value it cannot keep literal returns undefined and the caller refuses it.
+ */
+export function quote(file: string, value: string) {
+  if (ps(file)) return `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, (char) => char + char)}'`
+  if (name(file) === "cmd") return /["%!\r\n]/.test(value) ? undefined : `"${value}"`
+  return `'${value.replaceAll("'", `'\\''`)}'`
+}
+
 let defaultPreferred: string | undefined
 let defaultAcceptable: string | undefined
 

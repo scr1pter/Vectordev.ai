@@ -122,7 +122,7 @@ export class FreeModelsResumeError extends Schema.TaggedErrorClass<FreeModelsRes
 export interface Interface {
   readonly awaitTitles: () => Effect.Effect<void>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly prompt: (input: PromptInput, options?: PromptOptions) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly resumeFreeModels: (
     input: ResumeFreeModelsInput,
@@ -726,7 +726,10 @@ const layer = Layer.effect(
       return yield* provider.defaultModel().pipe(Effect.orDie)
     })
 
-    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (
+      input: PromptInput,
+      options?: PromptOptions,
+    ) {
       const agentName = input.agent
       const ag = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
       if (!ag) {
@@ -907,21 +910,27 @@ const layer = Layer.effect(
 
               const { read } = yield* registry.named()
               const controller = new AbortController()
+              // A file the user attached is theirs to share, wherever it lives. A file part written by a model, a
+              // subagent brief or a guest goes through the Read tool's workspace boundary and read permission.
+              const attachedByUser = options?.userFile?.(part.url) === true
               const readContext: Tool.Context = {
                 sessionID: input.sessionID,
                 abort: controller.signal,
                 agent: input.agent!,
                 messageID: info.id,
+                extra: attachedByUser ? { bypassCwdCheck: true } : undefined,
                 messages: [],
                 metadata: () => Effect.void,
                 ask: (request) =>
-                  permission
-                    .ask({
-                      ...request,
-                      sessionID: input.sessionID,
-                      ruleset: Permission.merge(ag.permission, current.permission ?? []),
-                    })
-                    .pipe(Effect.orDie),
+                  attachedByUser
+                    ? Effect.void
+                    : permission
+                        .ask({
+                          ...request,
+                          sessionID: input.sessionID,
+                          ruleset: Permission.merge(ag.permission, current.permission ?? []),
+                        })
+                        .pipe(Effect.orDie),
               }
               const execRead = (args: Parameters<typeof read.execute>[0]) =>
                 read.execute(args, readContext).pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())))
@@ -1060,7 +1069,7 @@ const layer = Layer.effect(
               // outside-directory and read permission checks run before any byte leaves the disk.
               const bytes = yield* Effect.gen(function* () {
                 const instance = yield* InstanceState.context
-                yield* assertExternalDirectoryEffect(readContext, filepath)
+                yield* assertExternalDirectoryEffect(readContext, filepath, { bypass: attachedByUser })
                 yield* readContext.ask({
                   permission: "read",
                   patterns: [path.relative(instance.worktree, filepath)],
@@ -1191,14 +1200,12 @@ const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
-      "SessionPrompt.prompt",
-    )(function* (input: PromptInput) {
+    const prompt = Effect.fn("SessionPrompt.prompt")(function* (input: PromptInput, options?: PromptOptions) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       // Read before the message exists: a prompt sent while a run is going joins that run.
       const joined = (yield* status.get(input.sessionID)).type !== "idle"
       yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
+      const message = yield* createUserMessage(input, options)
       yield* sessions.touch(input.sessionID)
 
       const permissions: PermissionV1.Rule[] = []
@@ -1660,10 +1667,25 @@ const layer = Layer.effect(
       const currentSession = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       const messageID = input.messageID ?? MessageID.ascending()
 
-      const prepared = prepareCommandTemplate(yield* Effect.promise(async () => cmd.template), input.arguments)
+      const prepared = prepareCommandTemplate(
+        yield* Effect.promise(async () => cmd.template),
+        input.arguments,
+        Shell.acceptable((yield* config.get()).shell),
+      )
+      // A command from the user's own config (global, or a project they trusted) runs its snippets when they invoke
+      // it, without a prompt; only an explicit deny stops one. Snippets from an MCP prompt or a skill came from
+      // elsewhere and are asked for like any other shell command.
+      const ruleset = Permission.merge(agent.permission, currentSession.permission ?? [])
+      const snippetRuleset =
+        cmd.source === "command"
+          ? [
+              { permission: "*", pattern: "*", action: "allow" as const },
+              ...ruleset.map((rule) => (rule.action === "ask" ? { ...rule, action: "allow" as const } : rule)),
+            ]
+          : ruleset
 
-      // Shell snippets belong to the command template. Resolve them before inserting user arguments so an argument
-      // cannot create a new snippet or become executable shell syntax inside one.
+      // Shell snippets belong to the command template: an argument never creates a new snippet, and inside one each
+      // argument is a quoted literal, so it cannot become shell syntax.
       const shellOutputs = yield* Effect.gen(function* () {
         if (prepared.shellCommands.length === 0) return []
         const shellTool = (yield* registry.all()).find((item) => item.id === ShellID.ToolID)
@@ -1684,11 +1706,7 @@ const layer = Layer.effect(
                   metadata: () => Effect.void,
                   ask: (request) =>
                     permission
-                      .ask({
-                        ...request,
-                        sessionID: input.sessionID,
-                        ruleset: Permission.merge(agent.permission, currentSession.permission ?? []),
-                      })
+                      .ask({ ...request, sessionID: input.sessionID, ruleset: snippetRuleset })
                       .pipe(Effect.orDie),
                 },
               )
@@ -1745,15 +1763,20 @@ const layer = Layer.effect(
         { parts },
       )
 
-      const result = yield* prompt({
-        sessionID: input.sessionID,
-        messageID,
-        model: userModel,
-        agent: userAgent,
-        parts,
-        variant: input.variant,
-        executionMode: input.executionMode,
-      })
+      const attached = new Set(input.parts?.map((part) => part.url))
+      const result = yield* prompt(
+        {
+          sessionID: input.sessionID,
+          messageID,
+          model: userModel,
+          agent: userAgent,
+          parts,
+          variant: input.variant,
+          executionMode: input.executionMode,
+        },
+        // @file references in an MCP prompt or a skill are not the user's choice; the user's own attachments are.
+        { userFile: (url) => attached.has(url) || cmd.source === "command" },
+      )
       yield* events.publish(Command.Event.Executed, {
         name: input.command,
         sessionID: input.sessionID,
@@ -1810,6 +1833,15 @@ export const PromptInput = Schema.Struct({
 })
 export type PromptInput = Schema.Schema.Type<typeof PromptInput>
 
+export type PromptOptions = {
+  /**
+   * Whether a file:// part's URL is one the user attached themselves (the app's composer, `vector run -f`, a command
+   * from their own config). Those are read without asking; every other file part, including all of them when this is
+   * omitted, goes through the Read tool's workspace boundary and read permission.
+   */
+  readonly userFile?: (url: string) => boolean
+}
+
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,
 }) {}
@@ -1853,26 +1885,50 @@ export const CommandInput = Schema.Struct({
 export type CommandInput = Schema.Schema.Type<typeof CommandInput>
 
 /** @internal Exported for focused command-template security tests. */
-export function prepareCommandTemplate(templateCommand: string, inputArguments: string) {
-  const shellMatches = ConfigMarkdown.shell(templateCommand)
-  return {
-    shellCommands: shellMatches.map(([, command]) => command),
-    render(shellOutputs: string[]) {
-      if (shellOutputs.length !== shellMatches.length) throw new Error("Missing slash-command shell output")
-      let index = 0
-      const shellResolved = templateCommand.replace(bashRegex, () => shellOutputs[index++])
-      const args = (inputArguments.match(argsRegex) ?? []).map((arg) => arg.replace(quoteTrimRegex, ""))
-      const placeholders = shellResolved.match(placeholderRegex) ?? []
-      const last = Math.max(0, ...placeholders.map((item) => Number(item.slice(1))))
-      const withArgs = shellResolved.replaceAll(placeholderRegex, (_, value) => {
+export function prepareCommandTemplate(templateCommand: string, inputArguments: string, shell: string) {
+  const args = (inputArguments.match(argsRegex) ?? []).map((arg) => arg.replace(quoteTrimRegex, ""))
+  const placeholders = templateCommand.match(placeholderRegex) ?? []
+  const last = Math.max(0, ...placeholders.map((item) => Number(item.slice(1))))
+  const substitute = (text: string, words: (values: string[]) => string, all: () => string) =>
+    text
+      .replaceAll(placeholderRegex, (_, value) => {
         const position = Number(value)
         const argIndex = position - 1
         if (argIndex >= args.length) return ""
-        if (position === last) return args.slice(argIndex).join(" ")
-        return args[argIndex]
+        return words(position === last ? args.slice(argIndex) : [args[argIndex]])
       })
-      const template = withArgs.replaceAll("$ARGUMENTS", inputArguments)
-      if (placeholders.length === 0 && !shellResolved.includes("$ARGUMENTS") && inputArguments.trim())
+      .replaceAll("$ARGUMENTS", all)
+  const quoted = (values: string[]) =>
+    values
+      .map((value) => {
+        const literal = Shell.quote(shell, value)
+        if (literal === undefined)
+          throw new Error(`The argument ${JSON.stringify(value)} cannot be passed to ${Shell.name(shell)} safely`)
+        return literal
+      })
+      .join(" ")
+  // split() with the capturing group interleaves text with snippet bodies: odd indexes are snippets.
+  const segments = templateCommand.split(bashRegex)
+  const shellCommands = segments.flatMap((segment, index) =>
+    index % 2 === 1 ? [substitute(segment, quoted, () => quoted(args))] : [],
+  )
+  return {
+    shellCommands,
+    render(shellOutputs: string[]) {
+      if (shellOutputs.length !== shellCommands.length) throw new Error("Missing slash-command shell output")
+      // A snippet's output is inserted as is: placeholders in it are not the template's, so they stay untouched.
+      const template = segments
+        .map((segment, index) =>
+          index % 2 === 1
+            ? shellOutputs[(index - 1) / 2]
+            : substitute(
+                segment,
+                (values) => values.join(" "),
+                () => inputArguments,
+              ),
+        )
+        .join("")
+      if (placeholders.length === 0 && !templateCommand.includes("$ARGUMENTS") && inputArguments.trim())
         return `${template}\n\n${inputArguments}`.trim()
       return template.trim()
     },
