@@ -55,6 +55,8 @@ const readResponse = Effect.fnUntraced(function* (input: { app: TestApp; path: s
   }
 })
 
+// These projects are trusted, and trust binds a project's local server only to a command it can pin down, so the
+// fixtures run an interpreter form it recognises (`bun --version`) rather than an arbitrary program such as `echo`.
 describe("mcp HttpApi", () => {
   it.instance(
     "serves status endpoint",
@@ -72,7 +74,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["echo", "demo"],
+            command: ["bun", "--version"],
             enabled: false,
           },
         },
@@ -125,7 +127,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["echo", "demo"],
+            command: ["bun", "--version"],
             enabled: false,
           },
         },
@@ -154,7 +156,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["echo", "demo"],
+            command: ["bun", "--version"],
             enabled: false,
           },
         },
@@ -188,7 +190,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["echo", "demo"],
+            command: ["bun", "--version"],
             enabled: false,
           },
         },

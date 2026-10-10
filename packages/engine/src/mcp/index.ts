@@ -28,7 +28,7 @@ import { withTimeout } from "@/util/timeout"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Redaction } from "@vectordevai/core/redaction"
 import { isRecord } from "@/util/record"
-import { mergeDeep } from "remeda"
+import { isDeepEqual, mergeDeep } from "remeda"
 import { McpOAuthPendingProvider, McpOAuthProvider, OAUTH_CALLBACK_PATH } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
@@ -219,6 +219,17 @@ export function resolveMcpHeaders(
       resolveMcpValue(value, `MCP header "${name}"`, environment, secrets),
     ]),
   )
+}
+
+// A trusted project's local server runs the command its trust approval bound: an absolute
+// executable or a copy in the approved snapshot. A client that sends that command back
+// unchanged keeps the command and cwd its config file declares, instead of writing the
+// bound paths into the file.
+function declaredMcp(mcp: ConfigMCPV1.Info, configured: unknown, onDisk: Record<string, unknown>): ConfigMCPV1.Info {
+  if (mcp.type !== "local" || !isRecord(configured) || !Array.isArray(onDisk.command)) return mcp
+  if (!isDeepEqual(mcp.command, configured.command) || mcp.cwd !== configured.cwd) return mcp
+  if (!onDisk.command.every((item): item is string => typeof item === "string")) return mcp
+  return { ...mcp, command: onDisk.command, cwd: typeof onDisk.cwd === "string" ? onDisk.cwd : undefined }
 }
 
 function remoteURL(value: string) {
@@ -894,7 +905,7 @@ const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       s.removed.delete(name)
       s.config[name] = mcp
-      yield* persistConfig(name, mcp)
+      yield* persistConfig(name, declaredMcp(mcp, configured, onDisk))
       yield* createAndStore(name, mcp)
       yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
       return { status: s.status }
