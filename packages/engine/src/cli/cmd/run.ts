@@ -765,15 +765,26 @@ export const RunCommand = effectCmd({
           let error: string | undefined
           // A background subagent reports back in a follow-up turn after this session goes idle, and exiting would stop
           // it, so the run waits for each one it launched and for the turn that answers it. A stopped one starts no
-          // turn. Notes seen in a turn count as answered once the session is idle again.
+          // turn. A note is answered once an assistant message created after it finishes: one that lands while a turn
+          // is ending is read by the next turn, which starts after the session has briefly gone idle.
           const background = {
             running: new Set<string>(),
             unanswered: new Set<string>(),
-            noted: new Set<string>(),
+            // Task → the message that carried its note.
+            noted: new Map<string, string>(),
+            // The latest assistant message in this session that has finished. Message IDs sort by creation.
+            answered: "",
           }
           let idle = false
           let activeAt = Date.now()
           const waited = () => background.running.size === 0 && background.unanswered.size === 0
+          const settleNotes = () => {
+            for (const [task, messageID] of background.noted) {
+              if (messageID >= background.answered) continue
+              background.unanswered.delete(task)
+              background.noted.delete(task)
+            }
+          }
 
           for await (const event of events.stream) {
             // The server sends a heartbeat every few seconds, which the typed union leaves out, so a wait that nothing
@@ -813,6 +824,18 @@ export const RunCommand = effectCmd({
               event.type === "message.updated" &&
               event.properties.sessionID === sessionID &&
               event.properties.info.role === "assistant" &&
+              event.properties.info.time.completed !== undefined &&
+              event.properties.info.id > background.answered
+            ) {
+              background.answered = event.properties.info.id
+              settleNotes()
+              if (idle && waited()) break
+            }
+
+            if (
+              event.type === "message.updated" &&
+              event.properties.sessionID === sessionID &&
+              event.properties.info.role === "assistant" &&
               args.format !== "json" &&
               toggles.get("start") !== true
             ) {
@@ -825,7 +848,7 @@ export const RunCommand = effectCmd({
             if (event.type === "message.part.updated") {
               const part = event.properties.part
               const note = part.sessionID === sessionID && part.type === "text" ? part.metadata?.taskNotification : undefined
-              if (isRecord(note) && typeof note.taskID === "string") background.noted.add(note.taskID)
+              if (isRecord(note) && typeof note.taskID === "string") background.noted.set(note.taskID, part.messageID)
               if (part.sessionID !== sessionID) {
                 // A subagent's steps bill this run too. JSON output reports them, marked as a subagent's, so a
                 // consumer that totals step_finish records gets what the run spent.
@@ -917,8 +940,7 @@ export const RunCommand = effectCmd({
             if (event.type === "session.status" && event.properties.sessionID === sessionID) {
               idle = event.properties.status.type === "idle"
               if (idle) {
-                for (const id of background.noted) background.unanswered.delete(id)
-                background.noted.clear()
+                settleNotes()
                 if (waited()) break
               }
             }

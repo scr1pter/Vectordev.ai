@@ -412,6 +412,47 @@ describe("vector run (non-interactive subprocess)", () => {
     60_000,
   )
 
+  // A report that joins the parent's running turn is read by that turn, unless the turn ends where it is, as a rejected
+  // permission ends it. The report is then answered by a new turn that starts after the parent went idle once, and the
+  // run used to count it answered at that idle and exit first.
+  cliIt.concurrent(
+    "waits for the turn that answers a report which the parent's turn ended without reading",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        const toolResults = (hit: { body: Record<string, unknown> }) =>
+          (Array.isArray(hit.body.messages) ? hit.body.messages : []).some(
+            (message) => isRecord(message) && message.role === "tool",
+          )
+        const asking = (text: string) => (hit: { body: Record<string, unknown> }) => lastUserText(hit.body).includes(text)
+        yield* llm.pushMatch(
+          (hit) => asking("launch the survey")(hit) && !toolResults(hit),
+          reply().tool("task", {
+            description: "survey",
+            prompt: "SURVEY_BRIEF: list the handlers.",
+            subagent_type: "general",
+            background: true,
+          }),
+        )
+        // The report is admitted while this step is still streaming; the command it ends with is then rejected, which
+        // ends the parent's turn before it reads the report.
+        yield* llm.pushMatch(
+          (hit) => asking("launch the survey")(hit) && toolResults(hit),
+          reply()
+            .wait(later(3_000))
+            .tool("bash", { command: "printf denied", description: "Print deterministic output" }),
+        )
+        yield* llm.pushMatch(asking("SURVEY_BRIEF"), reply().text("found two handlers").stop())
+        yield* llm.pushMatch(asking("task-notification"), reply().text("the survey found two handlers"))
+
+        // The run rejects every permission it is asked for, so the command ends the parent's turn.
+        const result = yield* vector.run("launch the survey", { permission: { bash: "ask" }, timeoutMs: 50_000 })
+
+        expect(result.timedOut).toBe(false)
+        expect(result.stdout).toContain("the survey found two handlers")
+      }),
+    60_000,
+  )
+
   cliIt.concurrent(
     "stops waiting on a background subagent that shows no activity, and fails the run",
     ({ llm, vector }) =>
