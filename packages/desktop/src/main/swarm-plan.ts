@@ -54,9 +54,11 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   if (!Array.isArray(root.tasks)) throw new Error("The planning agent returned no task list.")
 
   const limit = Math.max(2, Number.isFinite(maxTasks) ? Math.floor(maxTasks) : 12)
+  // Dropping tasks or dependency edges can turn dependent work into parallel edits.
+  // Reject the graph so the caller can use the complete fallback workflow.
+  if (root.tasks.length > limit) throw new Error(`The planning agent exceeded the ${limit}-task limit.`)
+  if (!root.tasks.every(isRecord)) throw new Error("The planning agent returned an invalid task.")
   const raw = root.tasks
-    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
-    .slice(0, limit)
   if (raw.length < 2) throw new Error("A swarm plan needs at least two coordinated tasks.")
 
   const ids = raw.map((item, index) => safeTaskID(typeof item.id === "string" ? item.id : `task-${index + 1}`, index))
@@ -75,16 +77,21 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
           ? "strong"
           : "balanced"
     const id = ids[index]
-    const dependsOn = Array.isArray(item.dependsOn)
-      ? [
-          ...new Set(
-            item.dependsOn
-              .filter((dependency): dependency is string => typeof dependency === "string")
-              .map((dependency) => originalIDs.get(dependency.trim()) ?? safeTaskID(dependency, 0))
-              .filter((dependency) => dependency !== id && known.has(dependency)),
-          ),
-        ]
-      : []
+    if (item.dependsOn !== undefined && !Array.isArray(item.dependsOn)) {
+      throw new Error(`Task ${id} returned an invalid dependency list.`)
+    }
+    const dependsOn = [
+      ...new Set(
+        (item.dependsOn ?? []).map((dependency: unknown) => {
+          if (typeof dependency !== "string" || !dependency.trim()) {
+            throw new Error(`Task ${id} returned an invalid dependency.`)
+          }
+          const target = originalIDs.get(dependency.trim()) ?? safeTaskID(dependency, 0)
+          if (!known.has(target)) throw new Error(`Task ${id} depends on unknown task ${dependency}.`)
+          return target
+        }),
+      ),
+    ]
     return {
       id,
       title: stringValue(item.title) || `Task ${index + 1}`,
@@ -142,14 +149,14 @@ export function fallbackSwarmPlan(objective: string, maxTasks = 4): SwarmPlan {
       {
         id: "review-result",
         title: "Review risk and completeness",
-        prompt: `Review the implementation for regressions, security issues, missing edge cases, and incomplete requirements. Make only necessary fixes. Objective: ${objective}`,
+        prompt: `Review the validated implementation for regressions, security issues, missing edge cases, and incomplete requirements. Do not edit files. Report actionable findings to the coordinator. Objective: ${objective}`,
         role: "review",
-        dependsOn: ["implement-objective"],
+        dependsOn: ["validate-result"],
         fileHints: [],
         modelTier: "strong",
       },
     ] satisfies SwarmPlanTask[]
-  ).slice(0, Math.max(2, Math.min(4, Math.floor(maxTasks))))
+  ).slice(0, Math.max(2, Math.min(4, Number.isFinite(maxTasks) ? Math.floor(maxTasks) : 4)))
 
   if (tasks.length === 2) {
     tasks[1] = {
@@ -245,8 +252,8 @@ function modelKey(candidate: SwarmModelCandidate) {
 
 function modelStrength(candidate: SwarmModelCandidate) {
   const name = `${candidate.label ?? ""} ${candidate.model}`.toLowerCase()
-  if (/(opus|gpt-5|o3|o4|pro|max|reasoning|large|ultra)/.test(name)) return 3
   if (/(haiku|flash|mini|lite|small|fast|free|instant|groq)/.test(name)) return 1
+  if (/(opus|gpt-5|o3|o4|pro|max|reasoning|large|ultra)/.test(name)) return 3
   return 2
 }
 

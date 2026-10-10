@@ -603,7 +603,19 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-card-toggle {
 }
 
 .vector-bg-tasks-attention {
+  padding: 0;
+  background: transparent;
+  border: 0;
   color: var(--bgt-wait-text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.vector-bg-tasks-attention:focus-visible {
+  outline: 2px solid var(--bgt-ring);
+  outline-offset: 2px;
 }
 
 .vector-bg-tasks-counts {
@@ -1161,6 +1173,12 @@ html[data-vector-larger-targets="true"] .vector-bg-tasks-card-toggle {
   padding: 2px 3px;
   font: 600 10px/1 var(--vx-mono);
   text-align: center;
+}
+
+[data-vector-session-tool].vector-bg-tasks-launch[data-waiting="true"] [data-vector-session-count],
+.vector-bg-tasks-launch[data-waiting="true"] .vector-bg-tasks-launch-count {
+  background: color-mix(in srgb, var(--vx-amber) 16%, transparent);
+  color: var(--vx-amber);
 }
 
 /* [data-vector-session-tool]:focus-visible drops every ring with !important

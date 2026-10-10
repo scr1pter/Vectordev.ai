@@ -15,6 +15,7 @@ import {
   liveAgentCount,
   liveBackgroundSessions,
   runningAgentCount,
+  waitingAgentCount,
   type TaskAgent,
   type TaskCard,
   type TaskLocation,
@@ -32,6 +33,8 @@ export type BackgroundTasks = {
   liveCount: Accessor<number>
   /** Agents running or waiting on you, for the header badge. Queued ones have not started. */
   runningCount: Accessor<number>
+  /** Agents with an unanswered permission or question. */
+  waitingCount: Accessor<number>
   /** A shared one-second clock that only ticks while something is live. */
   now: Accessor<number>
   locate(partID: string): TaskLocation | undefined
@@ -213,6 +216,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
 
   const liveCount = createMemo(() => liveAgentCount(state.cards))
   const runningCount = createMemo(() => runningAgentCount(state.cards))
+  const waitingCount = createMemo(() => waitingAgentCount(state.cards))
   const [now, setNow] = createSignal(Date.now())
   createEffect(() => {
     if (liveCount() === 0) return
@@ -327,6 +331,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     finished,
     liveCount,
     runningCount,
+    waitingCount,
     now,
     locate: (partID) => index().get(partID),
     stop,

@@ -29,7 +29,7 @@ test("navigates to a subagent child session missing from the session list", asyn
 
 test("shows the not found fallback when the viewed session is deleted", async ({ page }) => {
   const events: EventPayload[] = []
-  await setup(page, () => events.splice(0, 1))
+  await setup(page, { events: () => events.splice(0, 1) })
   await openChildFromParent(page)
   await expectSessionTitle(page, childTitle)
 
@@ -43,7 +43,28 @@ test("shows the not found fallback when the viewed session is deleted", async ({
   await expect(page.locator("[data-vector-session-title]")).toHaveCount(0)
 })
 
-async function setup(page: Page, events?: () => EventPayload[]) {
+test("surfaces a blocked subagent alongside running siblings and opens its question", async ({ page }) => {
+  await setup(page, { blocked: true })
+  await page.goto(sessionHref(parentID))
+  await expectSessionTitle(page, parentTitle)
+
+  const launch = page.getByRole("button", { name: "Background tasks, 2 active, 1 waiting on you", exact: true })
+  await expect(launch).toHaveAttribute("data-waiting", "true")
+  const chip = page.getByRole("button", { name: /Inspect child navigation.*Show in Background tasks/ })
+  await expect(chip).toHaveAttribute("data-status", "waiting")
+  await expect(chip.getByText("Needs you", { exact: true })).toBeVisible()
+  await launch.click()
+
+  const panel = page.getByRole("complementary", { name: "Background tasks", exact: true })
+  await panel.getByRole("button", { name: `Respond to ${taskDescription}`, exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/server/.+/session/${childID}$`))
+  await expectSessionTitle(page, childTitle)
+  await expect(page.locator('[data-component="dock-prompt"][data-kind="question"]')).toContainText(
+    "Which module should I inspect?",
+  )
+})
+
+async function setup(page: Page, options: { events?: () => EventPayload[]; blocked?: boolean } = {}) {
   await mockVectorServer(page, {
     directory,
     project: {
@@ -68,9 +89,25 @@ async function setup(page: Page, events?: () => EventPayload[]) {
       default: { providerID: "anthropic", modelID: "claude-opus-4-6" },
     },
     sessions: [session(parentID, parentTitle, 1700000000000), childSession()],
-    pageMessages: (sessionID) => ({ items: sessionID === parentID ? parentMessages() : [] }),
-    events,
-    eventRetry: events ? 16 : undefined,
+    pageMessages: (sessionID) => ({ items: sessionID === parentID ? parentMessages(options.blocked) : [] }),
+    events: options.events,
+    eventRetry: options.events ? 16 : undefined,
+    sessionStatus: options.blocked ? { [childID]: { type: "busy" }, ses_sibling: { type: "busy" } } : {},
+    questions: options.blocked
+      ? [
+          {
+            id: "question-subagent",
+            sessionID: childID,
+            questions: [
+              {
+                header: "Scope",
+                question: "Which module should I inspect?",
+                options: [{ label: "Navigation", description: "Review child session navigation" }],
+              },
+            ],
+          },
+        ]
+      : [],
   })
   // The child session resolves via /session/:id but is absent from the /session list,
   // matching a subagent session that has not been loaded into the list cache yet.
@@ -116,7 +153,7 @@ function childSession() {
   return session(childID, childTitle, 1700000001000, { parentID })
 }
 
-function parentMessages() {
+function parentMessages(blocked = false) {
   const userID = "msg_user_0001"
   const assistantID = "msg_assistant_0001"
   return [
@@ -168,10 +205,30 @@ function parentMessages() {
             input: { description: taskDescription, subagent_type: "explore" },
             output: "Subagent finished",
             title: taskDescription,
-            metadata: { sessionId: childID },
+            metadata: { sessionId: childID, ...(blocked ? { status: "running", background: true } : {}) },
             time: { start: 1700000001000, end: 1700000002000 },
           },
         },
+        ...(blocked
+          ? [
+              {
+                id: "prt_tool_task_sibling",
+                sessionID: parentID,
+                messageID: assistantID,
+                type: "tool",
+                callID: "call_task_sibling",
+                tool: "task",
+                state: {
+                  status: "completed",
+                  input: { description: "Review sibling task", subagent_type: "explore" },
+                  output: "Background task started",
+                  title: "Review sibling task",
+                  metadata: { sessionId: "ses_sibling", status: "running", background: true },
+                  time: { start: 1700000001000, end: 1700000002000 },
+                },
+              },
+            ]
+          : []),
       ],
     },
   ]

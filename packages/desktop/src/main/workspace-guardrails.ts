@@ -129,13 +129,20 @@ export async function detectWorkspaceChecks(root: string, changedFiles: string[]
   return checks.slice(0, 5)
 }
 
-async function runCheck(check: GuardrailCheck, root: string, timeoutMs: number): Promise<GuardrailCheckResult> {
+async function runCheck(
+  check: GuardrailCheck,
+  root: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<GuardrailCheckResult> {
+  signal?.throwIfAborted()
   const started = Date.now()
   // npm, pnpm and yarn are .cmd shims on Windows, which a bare-name execFile never finds and Node will not run without
   // cmd.exe, so every check would have been skipped there as "not installed".
   // A runner that is not found keeps its bare name and fails with ENOENT, which counts as skipped below.
   const env = agentEnvironment()
   const launch = shimmedCommand((await resolveAgentPath(check.command, env)) ?? check.command, check.args)
+  signal?.throwIfAborted()
   return new Promise((resolve) => {
     // Node throws a spawn it refuses synchronously instead of passing it to the callback: EFTYPE when the first match
     // for the runner on a Windows PATH is a .ps1 or an extensionless script, EINVAL for a shim it cannot launch. A
@@ -149,6 +156,7 @@ async function runCheck(check: GuardrailCheck, root: string, timeoutMs: number):
           env: untrustedChildEnvironment(env, { CI: "1", FORCE_COLOR: "0", NO_COLOR: "1" }),
           maxBuffer: MAX_OUTPUT_BYTES * 4,
           timeout: timeoutMs,
+          signal,
           windowsVerbatimArguments: launch.windowsVerbatimArguments,
         },
         (error, stdout, stderr) => {
@@ -195,16 +203,19 @@ async function runCheck(check: GuardrailCheck, root: string, timeoutMs: number):
 export async function validateWorkspace(
   root: string,
   changedFiles: string[] = [],
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<WorkspaceValidationReport> {
+  options.signal?.throwIfAborted()
   const startedAt = new Date().toISOString()
   const checks = await detectWorkspaceChecks(root, changedFiles)
   const results: GuardrailCheckResult[] = []
   for (const check of checks) {
-    results.push(await runCheck(check, root, options.timeoutMs ?? DEFAULT_TIMEOUT_MS))
+    results.push(await runCheck(check, root, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.signal))
+    options.signal?.throwIfAborted()
     if (results.at(-1)?.status === "failed") break
   }
   const failures = results.filter((result) => result.status === "failed")
+  options.signal?.throwIfAborted()
   return {
     startedAt,
     completedAt: new Date().toISOString(),

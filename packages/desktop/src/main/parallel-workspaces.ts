@@ -594,8 +594,11 @@ function parallelAgentPrompt(record: ParallelWorkspaceRecord) {
     record.swarmRunId
       ? `You are Vector's ${record.agent || "general"} worker inside an automatically orchestrated engineering swarm.`
       : "You are Vector's Parallel Workspace engineering agent.",
-    `You are operating only inside this isolated workspace: ${record.isolatedPath}`,
-    `The main project at ${record.sourcePath} must remain untouched.`,
+    `You are operating only inside this ${record.isolatedPath === record.sourcePath || teamForWorkspace(record.id)?.topology === "collaborative" ? "shared" : "isolated"} workspace: ${record.isolatedPath}`,
+    record.isolatedPath === record.sourcePath
+      ? "This workspace is the main project. Your edits apply directly; preserve other agents' and the user's changes."
+      : `The main project at ${record.sourcePath} must remain untouched.`,
+    record.teamId ? "Other teammates share this work. Coordinate overlapping edits and preserve their changes." : "",
     record.swarmTaskId ? `Swarm task ID: ${record.swarmTaskId}` : "",
     "Inspect the repository before editing. Make the smallest complete implementation that satisfies the task.",
     record.taskDifficulty === "complex"
@@ -994,7 +997,7 @@ function startTeamSweep(record: ParallelWorkspaceRecord) {
     return
   }
   const timer = setInterval(() => {
-    void sweepTeamOutboxes(team.id)
+    void sweepTeamOutboxes(team.id).catch((error) => console.warn("Unable to sweep teammate messages", error))
   }, TEAM_SWEEP_INTERVAL_MS)
   // A sweep must never hold the process open on its own.
   timer.unref?.()
@@ -1020,12 +1023,20 @@ export async function sweepTeamOutboxes(teamId: string) {
   if (existing) return existing
   const sweep = (async () => {
     const members = readRecords().filter((record) => teamForWorkspace(record.id)?.id === teamId)
-    for (const member of members) await drainTeamOutbox(member)
-    for (const member of members) {
-      const active = activeRuns.get(member.id)
-      if (!active?.sessionId || !active.acceptsTeamMessages || member.runtime !== "vector") continue
-      await admitVectorPrompt(member, active, "", false)
-    }
+    const drained = await Promise.allSettled(members.map((member) => drainTeamOutbox(member)))
+    drained.forEach((result, index) => {
+      if (result.status === "rejected") reportTeamDeliveryFailure(members[index]!, result.reason)
+    })
+    const delivered = await Promise.allSettled(
+      members.map(async (member) => {
+        const active = activeRuns.get(member.id)
+        if (!active?.sessionId || !active.acceptsTeamMessages || member.runtime !== "vector") return
+        await admitVectorPrompt(member, active, "", false)
+      }),
+    )
+    delivered.forEach((result, index) => {
+      if (result.status === "rejected") reportTeamDeliveryFailure(members[index]!, result.reason)
+    })
   })()
   activeTeamSweeps.set(teamId, sweep)
   try {
@@ -1033,6 +1044,15 @@ export async function sweepTeamOutboxes(teamId: string) {
   } finally {
     if (activeTeamSweeps.get(teamId) === sweep) activeTeamSweeps.delete(teamId)
   }
+}
+
+function reportTeamDeliveryFailure(record: ParallelWorkspaceRecord, error: unknown) {
+  if (activeRuns.get(record.id)?.controller.signal.aborted) return
+  const current = getParallelWorkspace(record.id)
+  if (!current || current.mergeState !== "none") return
+  const detail = `Teammate messages remain queued for retry: ${error instanceof Error ? error.message : String(error)}`
+  if (current.logs?.includes(detail)) return
+  updateRecord(record.id, (entry) => ({ ...entry, logs: [detail, ...(entry.logs ?? [])].slice(0, 120) }))
 }
 
 async function admitVectorPrompt(
@@ -1626,6 +1646,7 @@ async function runExternalWorkspacePass(input: {
   resumeSessionId?: string
   runner?: (input: RunExternalAgentInput) => Promise<ExternalAgentRunResult>
 }) {
+  input.controller.signal.throwIfAborted()
   const pendingLogs: string[] = []
   const pendingOutput: string[] = []
   let pendingChat: AgentChat | undefined
@@ -1692,6 +1713,7 @@ async function runExternalWorkspacePass(input: {
       scheduleFlush()
     },
   }).finally(flush)
+  input.controller.signal.throwIfAborted()
   // A CLI that refused the resume FLAGS is not a failed task — the caller
   // retries without resume rather than reporting a broken agent.
   if (result.resumeRejected) return result
@@ -1847,6 +1869,7 @@ async function executeExternalParallelWorkspace(
       source: "parallel",
       totalCostUsd: measuredCosts.length ? totalCost : undefined,
     })
+    controller.signal.throwIfAborted()
     const unchanged = updateRecord(id, (current) => ({
       ...current,
       status: current.changedFilesCount ? "needs review" : "complete",
@@ -1875,8 +1898,11 @@ async function executeExternalParallelWorkspace(
   syncBackgroundTask(record, `${runtimeLabel(record.runtime)} completed. Running deterministic checks.`)
 
   let refreshed = await refreshParallelWorkspace(id)
-  let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+  let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
+    signal: controller.signal,
+  })
   await rememberValidation(refreshed, validation)
+  controller.signal.throwIfAborted()
   record = updateRecord(id, (current) => ({
     ...current,
     validationReport: validation,
@@ -1894,6 +1920,7 @@ async function executeExternalParallelWorkspace(
     // the run above was recorded so the count and the flakiness verdict include
     // it. Empty until a signature has been seen before, hence the filter below.
     const guidance = await priorFor(record.sourcePath, validation, [record.isolatedPath, record.sourcePath])
+    controller.signal.throwIfAborted()
     const repairTurnId = randomUUID()
     record = updateRecord(id, (current) => ({
       ...current,
@@ -1947,10 +1974,11 @@ async function executeExternalParallelWorkspace(
       markTeamMessagesDelivered(repairTeam.id, record.id, repairDelivery.messageIds)
     if (repair.actualCost) costs.push(Number(repair.actualCost.replace("$", "")))
     refreshed = await refreshParallelWorkspace(id)
-    validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+    validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, { signal: controller.signal })
     // The runtime's own account of the repair, so a check that now passes
     // records what actually fixed it instead of a bare file list.
     await rememberValidation(refreshed, validation, repair.summary)
+    controller.signal.throwIfAborted()
     record = updateRecord(id, (current) => ({
       ...current,
       status: "testing",
@@ -1993,6 +2021,7 @@ async function executeExternalParallelWorkspace(
     source: "parallel",
     totalCostUsd: measuredCosts.length ? totalCost : undefined,
   })
+  controller.signal.throwIfAborted()
   const finalSummary = `${firstRun.summary}\n\nGuardrails: ${validationSummary(validation)}`
   const completed = updateRecord(id, (current) => ({
     ...current,
@@ -2016,6 +2045,7 @@ async function executeExternalParallelWorkspace(
 
 async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEngine, controller: AbortController) {
   try {
+    controller.signal.throwIfAborted()
     const persisted = readRecords().find((record) => record.id === id)
     if (!persisted) throw new Error("Parallel workspace was not found.")
     // One run is one execution of this workspace, not the workspace itself, so
@@ -2052,6 +2082,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       )
     }
     const initial = await ensureParallelWorkspaceIsolation(persisted)
+    controller.signal.throwIfAborted()
     // Started before either runtime branch: every member of a team has to be
     // swept while the others are still working, which is the only window in
     // which a queued message can reach anybody.
@@ -2161,8 +2192,11 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     syncBackgroundTask(record, "Agent became idle. Running deterministic checks in the isolated workspace.")
 
     let refreshed = await refreshParallelWorkspace(id)
-    let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+    let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
+      signal: controller.signal,
+    })
     await rememberValidation(refreshed, validation)
+    controller.signal.throwIfAborted()
     record = updateRecord(id, (current) => ({
       ...current,
       validationReport: validation,
@@ -2180,6 +2214,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       // the run above was recorded so the count and the flakiness verdict
       // include it. Empty until a signature has been seen before.
       const guidance = await priorFor(record.sourcePath, validation, [record.isolatedPath, record.sourcePath])
+      controller.signal.throwIfAborted()
       record = updateRecord(id, (current) => ({
         ...current,
         status: "editing",
@@ -2215,7 +2250,9 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       if (repairFailure) throw new Error(repairFailure)
 
       refreshed = await refreshParallelWorkspace(id)
-      validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles)
+      validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
+        signal: controller.signal,
+      })
       // The agent's own account of this repair pass, so a check that now passes
       // records what actually fixed it rather than a bare list of edited files.
       const repairContext = await engineRequest<{ data?: unknown }>(
@@ -2224,6 +2261,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
         { signal: controller.signal },
       ).catch(() => undefined)
       await rememberValidation(refreshed, validation, collectText(repairContext?.data).at(-1) ?? "")
+      controller.signal.throwIfAborted()
       record = updateRecord(id, (current) => ({
         ...current,
         status: "testing",
@@ -2263,6 +2301,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       model: refreshed.model,
       source: "parallel",
     })
+    controller.signal.throwIfAborted()
     const agentSummary =
       summaries.at(-1) ||
       (refreshed.changedFilesCount
@@ -2306,7 +2345,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     // this bookkeeping has nothing left to write to. updateRecord throws on a
     // missing id, so without this the failure handler itself raised an
     // unhandled rejection out of a background run.
-    if (!readRecords().some((record) => record.id === id)) return
+    if (!readRecords().some((record) => record.id === id && record.mergeState === "none")) return
     const failed = updateRecord(id, (current) => ({
       ...current,
       status: stopped ? "stopped" : "failed",

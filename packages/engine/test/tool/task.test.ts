@@ -636,6 +636,59 @@ describe("tool.task", () => {
     }),
   )
 
+  it.instance("returns every visible text part from the child's final answer", () =>
+    Effect.gen(function* () {
+      const seeded = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const result = yield* def.execute(
+        { description: "inspect auth flow", prompt: "Report findings and validation." },
+        taskContext({
+          sessionID: seeded.chat.id,
+          messageID: seeded.assistant.id,
+          promptOps: {
+            ...stubOps(),
+            prompt: (input) => {
+              const answer = reply(input, "Found the cache issue.\nUpdated the invalidation path.")
+              return Effect.succeed({
+                ...answer,
+                parts: [
+                  ...answer.parts,
+                  {
+                    id: PartID.ascending(),
+                    messageID: answer.info.id,
+                    sessionID: input.sessionID,
+                    type: "reasoning" as const,
+                    text: "Internal reasoning",
+                    time: { start: Date.now() },
+                  },
+                  ...[
+                    { text: "Internal context", synthetic: true },
+                    { text: "Discarded text", ignored: true },
+                    { text: "Validation:\n- Auth tests pass.\n- No secrets logged." },
+                  ].map((part) => ({
+                    ...part,
+                    id: PartID.ascending(),
+                    messageID: answer.info.id,
+                    sessionID: input.sessionID,
+                    type: "text" as const,
+                  })),
+                ],
+              })
+            },
+          },
+        }),
+      )
+
+      expect(result.output).toContain(
+        "Found the cache issue.\nUpdated the invalidation path.\n\nValidation:\n- Auth tests pass.\n- No secrets logged.",
+      )
+      expect(result.output).not.toContain("Internal reasoning")
+      expect(result.output).not.toContain("Internal context")
+      expect(result.output).not.toContain("Discarded text")
+    }),
+  )
+
   it.instance("stopping a foreground subagent returns the cancelled note", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
@@ -940,6 +993,64 @@ describe("tool.task", () => {
     }),
   )
 
+  for (const status of ["error", "cancelled"] as const)
+    background.instance(`a later ${status} dependency settles a queued task without waiting on earlier work`, () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const seeded = yield* seed()
+        const tool = yield* TaskTool
+        const def = yield* tool.init()
+        const failed = yield* Deferred.make<void>()
+        const notes = yield* Deferred.make<SessionPrompt.PromptInput>()
+        const prompted: SessionID[] = []
+        yield* jobs.start({
+          id: "dependency-still-running",
+          type: "task",
+          metadata: { parentSessionId: seeded.chat.id },
+          run: Effect.never,
+        })
+        yield* jobs.start({
+          id: "dependency-stops",
+          type: "task",
+          metadata: { parentSessionId: seeded.chat.id },
+          run: Deferred.await(failed).pipe(Effect.andThen(Effect.fail(new Error("Validation failed")))),
+        })
+
+        const result = yield* def.execute(
+          {
+            description: "integrate auth flow",
+            prompt: "Integrate after both prerequisites succeed.",
+            depends_on: ["dependency-still-running", "dependency-stops"],
+            background: true,
+          },
+          taskContext({
+            sessionID: seeded.chat.id,
+            messageID: seeded.assistant.id,
+            promptOps: {
+              ...stubOps(),
+              prompt: (input) => {
+                if (input.sessionID === seeded.chat.id)
+                  return Deferred.succeed(notes, input).pipe(Effect.as(reply(input, "noted")))
+                prompted.push(input.sessionID)
+                return Effect.succeed(reply(input, "integrated"))
+              },
+            },
+          }),
+        )
+
+        if (status === "cancelled") yield* jobs.cancel("dependency-stops")
+        if (status === "error") yield* Deferred.succeed(failed, undefined)
+        const settled = yield* jobs.wait({ id: result.metadata.sessionId, timeout: 1_000 })
+        expect(settled.timedOut).toBe(false)
+        expect(settled.info?.status).toBe(status)
+        expect((yield* jobs.get("dependency-still-running"))?.status).toBe("running")
+        expect(prompted).toHaveLength(0)
+        const note = yield* awaitWithTimeout(Deferred.await(notes), "the dependency outcome was not reported")
+        expect(note.noReply).toBe(status === "cancelled" ? true : undefined)
+        expect(note.parts[0]?.type === "text" ? note.parts[0].text : "").toContain(`state="${status}"`)
+      }),
+    )
+
   background.instance("a background result gets the cap a tool result gets", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()
@@ -1178,6 +1289,65 @@ describe("tool.task", () => {
       )
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("ownership overlaps")
+    }),
+  )
+
+  background.instance("concurrent follow-ups cannot create a cycle through newly added prerequisites", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const seeded = yield* seed()
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const context = taskContext({
+        sessionID: seeded.chat.id,
+        messageID: seeded.assistant.id,
+        promptOps: {
+          ...stubOps(),
+          prompt: (input) =>
+            input.sessionID === seeded.chat.id ? Effect.succeed(reply(input, "noted")) : Effect.never,
+        },
+      })
+      const launch = (description: string) =>
+        def.execute({ description, prompt: description, background: true }, context)
+      const first = yield* launch("Inspect auth")
+      const second = yield* launch("Inspect routes")
+      const followUp = (taskID: string, dependency: string) =>
+        def.execute(
+          {
+            description: "Integrate findings",
+            prompt: "Use the other report.",
+            task_id: taskID,
+            depends_on: [dependency],
+          },
+          context,
+        )
+      const attempts = yield* Effect.all(
+        [
+          followUp(first.metadata.sessionId, second.metadata.sessionId).pipe(Effect.exit),
+          followUp(second.metadata.sessionId, first.metadata.sessionId).pipe(Effect.exit),
+        ],
+        { concurrency: "unbounded" },
+      )
+      expect(attempts.filter(Exit.isSuccess)).toHaveLength(1)
+      expect(attempts.filter(Exit.isFailure)).toHaveLength(1)
+      const rejected = attempts.find(Exit.isFailure)
+      if (rejected) expect(Cause.pretty(rejected.cause)).toContain("would create a task cycle")
+      const accepted = attempts.find(Exit.isSuccess)
+      if (!accepted) throw new Error("Expected one follow-up to be queued")
+      expect(accepted.value.output).toContain("Message queued for the background task")
+      expect((yield* jobs.get(first.metadata.sessionId))?.status).toBe("running")
+      expect((yield* jobs.get(second.metadata.sessionId))?.status).toBe("running")
+
+      // Cancelling before the queued follow-up starts releases its edge for a later run of the same task.
+      const completed = accepted.value.metadata.sessionId
+      const remaining = completed === first.metadata.sessionId ? second.metadata.sessionId : first.metadata.sessionId
+      yield* jobs.cancel(completed)
+      yield* def.execute(
+        { description: "Inspect again", prompt: "Start a new inspection.", task_id: completed, background: true },
+        context,
+      )
+      const retried = yield* followUp(remaining, completed)
+      expect(retried.output).toContain("Message queued for the background task")
     }),
   )
 
