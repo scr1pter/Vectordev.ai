@@ -509,6 +509,17 @@ export function CloudConsole(props: {
     }
   }
 
+  // Forgets a release from Vector's history; the deployment stays on Vercel.
+  const forgetDeployment = async (deployment: CloudDeployment) => {
+    if (!api) return
+    try {
+      setDeployments(await api.deployments.remove(props.projectPath, props.taskId, deployment.id))
+      setNotice({ tone: "info", text: `Removed ${deployment.name} from Vector's history. It stays on Vercel.` })
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not remove that release." })
+    }
+  }
+
   const checkAllDeployments = async () => {
     if (!api || !props.projectPath || !deployments().length) return
     setCheckingAll(true)
@@ -1445,6 +1456,22 @@ export function CloudConsole(props: {
                             onClick={() => void checkDeployment(deployment)}
                           >
                             {checkingId() === deployment.id ? "Checking…" : "Check"}
+                          </button>
+                          <button
+                            class="cloud-button"
+                            data-variant="danger"
+                            type="button"
+                            disabled={!api || deployment.releaseStatus === "current"}
+                            title={
+                              deployment.releaseStatus === "current"
+                                ? "The release serving production stays in the history."
+                                : "Remove from Vector's history; the deployment stays on Vercel."
+                            }
+                            onClick={() =>
+                              requestConfirm(`forget-${deployment.id}`, () => void forgetDeployment(deployment))
+                            }
+                          >
+                            {confirmId() === `forget-${deployment.id}` ? "Confirm remove?" : "Remove"}
                           </button>
                         </div>
                       )
