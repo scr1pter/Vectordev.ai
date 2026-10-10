@@ -18,6 +18,7 @@ import {
   type CloudGitMetadata,
 } from "./cloud-console"
 import { scanProjectSecrets } from "./secret-scanner"
+import { supabaseReleaseCheck } from "./cloud-supabase-security"
 import {
   cachedCloudProviderConnection,
   getCloudProviderProjectLink,
@@ -694,11 +695,39 @@ export async function promoteDeployment(
     target: "vercel",
     runId: input.runId,
   }
+  await requireSupabaseSecurity(deployment, (level, message) =>
+    emitProgress(progressInput, emit, "checking", level, message),
+  )
   emitProgress(progressInput, emit, "promoting", "info", `Promoting ${deployment.url} to production.`)
   const productionUrl = await vercelDeploymentCommand(deployment, "promote")
   const promoted = markDeploymentPromoted(input.projectPath, input.taskId, input.id, { productionUrl })
   emitProgress(progressInput, emit, "promoting", "success", `Production now points to ${productionUrl}`)
   return promoted
+}
+
+// Production only moves while the linked Supabase project passes its security
+// check: Supabase's advisors plus a scan of the public env and the built bundle
+// for server credentials. The result is kept on the release either way, so the
+// console shows why production did not change.
+async function requireSupabaseSecurity(
+  deployment: CloudDeployment,
+  report: (level: PublishProgressEvent["level"], message: string) => void,
+) {
+  const settings = getBuildSettings(deployment.projectPath, deployment.taskId)
+  const check = await supabaseReleaseCheck({
+    projectPath: deployment.projectPath,
+    taskId: deployment.taskId,
+    deployRoot: await resolveDeployRoot(deployment.deploymentPath ?? deployment.projectPath, settings?.outputDirectory),
+    required: settings?.requiredChecks.secrets ?? true,
+  })
+  if (!check) return
+  updateDeployment(deployment.projectPath, deployment.taskId, deployment.id, {
+    checks: upsertDeploymentCheck(deployment.checks, check),
+  })
+  report(check.status === "failed" ? "error" : "success", `Supabase security: ${check.details}`)
+  if (check.required && check.status === "failed") {
+    throw new Error(`The Supabase security check failed, so production was not changed. ${check.details}`)
+  }
 }
 
 export async function rollbackDeployment(

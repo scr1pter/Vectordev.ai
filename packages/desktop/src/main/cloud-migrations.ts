@@ -65,7 +65,7 @@ export type CloudMigrationReport = {
 // it is, a bare `migrations/` at the repo root could belong to any tool.
 export const MIGRATION_DIRECTORIES = ["supabase/migrations", "db/migrations", "database/migrations", "migrations"]
 
-const TRACKING_TABLE = "vector.schema_migrations"
+export const TRACKING_TABLE = "vector.schema_migrations"
 // Vector's tracking lives in its own schema, outside what Supabase's Data API
 // exposes (public by default), with row level security on and no policies, and
 // the anon and authenticated roles get no access to it. Older releases kept it
@@ -109,6 +109,26 @@ const SELECT_LEGACY = "select name from public.vector_migrations order by name;"
 const SELECT_CLI_VERSIONS = "select version from supabase_migrations.schema_migrations;"
 const MIGRATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.sql$/
 const MAX_MIGRATION_CHARS = 1_000_000
+// A rollback lives in a paired <name>.down.sql, or after a line reading
+// `-- down` (or dbmate's `-- migrate:down`) in the migration itself.
+const DOWN_FILE = /\.down\.sql$/i
+const DOWN_MARKER = /^--\s*(?:migrate:)?down\s*$/im
+
+// What a forward run executes: everything above a `-- down` section.
+export function upSection(sql: string): string {
+  const marker = DOWN_MARKER.exec(sql)
+  return marker ? sql.slice(0, marker.index) : sql
+}
+
+export function downSection(sql: string): string | undefined {
+  const marker = DOWN_MARKER.exec(sql)
+  const down = marker ? sql.slice(marker.index + marker[0].length).trim() : ""
+  return down || undefined
+}
+
+export function isDownMigration(name: string): boolean {
+  return DOWN_FILE.test(name)
+}
 
 function stringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined
@@ -126,7 +146,8 @@ export async function discoverMigrations(projectPath: string): Promise<Migration
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => undefined)
     if (!entries) continue
     const names = entries
-      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".sql"))
+      // A paired .down.sql is a rollback, never a forward migration.
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".sql") && !isDownMigration(entry.name))
       .map((entry) => entry.name)
       // Plain code-unit order, the same order the Supabase CLI applies them in:
       // timestamp-prefixed filenames sort into the order they were written.
@@ -164,18 +185,18 @@ export function planMigrations<File extends MigrationFile & { checksum: string }
   }
 }
 
-function rows(result: unknown): unknown[] {
+export function rows(result: unknown): unknown[] {
   if (Array.isArray(result)) return result
   if (!result || typeof result !== "object") return []
   const nested = Reflect.get(result, "result")
   return Array.isArray(nested) ? nested : []
 }
 
-function quoted(value: string): string {
+export function quoted(value: string): string {
   return `'${value.split("'").join("''")}'`
 }
 
-async function readApplied(runner: SupabaseSqlRunner, dryRun: boolean): Promise<AppliedMigrations> {
+export async function readApplied(runner: SupabaseSqlRunner, dryRun: boolean): Promise<AppliedMigrations> {
   if (!dryRun) await runner(SETUP_TRACKING)
   const exists = rows(await runner(DETECT_TRACKING))[0]
   const has = (key: string) => Boolean(exists && typeof exists === "object" && Reflect.get(exists, key) === true)
@@ -251,7 +272,7 @@ export async function applyMigrationFiles(input: {
       // is never recorded without its schema or applied without its record.
       // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-MULTI-STATEMENT
       await input.runner(
-        `${file.sql}\n;\ninsert into ${TRACKING_TABLE} (name, checksum) values (${quoted(file.name)}, ${quoted(file.checksum)}) on conflict (name) do update set checksum = excluded.checksum;`,
+        `${upSection(file.sql)}\n;\ninsert into ${TRACKING_TABLE} (name, checksum) values (${quoted(file.name)}, ${quoted(file.checksum)}) on conflict (name) do update set checksum = excluded.checksum;`,
       )
       outcome.applied.push(file.name)
     } catch (error) {
@@ -270,7 +291,14 @@ export async function applyMigrationFiles(input: {
 
 // Request and response shapes follow the Management API's run-a-query
 // endpoint: https://supabase.com/docs/reference/api/v1-run-a-query
-export function supabaseSqlRunner(projectRef: string, token: string, request: CloudFetch = fetch): SupabaseSqlRunner {
+// `readOnly` runs the query as Supabase's read-only role, so a statement that
+// would change data fails instead of running.
+export function supabaseSqlRunner(
+  projectRef: string,
+  token: string,
+  request: CloudFetch = fetch,
+  options: { readOnly?: boolean } = {},
+): SupabaseSqlRunner {
   const url = `https://api.supabase.com/v1/projects/${encodeURIComponent(projectRef)}/database/query`
   return async (sql: string) => {
     const response = await request(url, {
@@ -281,7 +309,7 @@ export function supabaseSqlRunner(projectRef: string, token: string, request: Cl
         "content-type": "application/json",
         "user-agent": VECTOR_USER_AGENT,
       },
-      body: JSON.stringify({ query: sql }),
+      body: JSON.stringify(options.readOnly ? { query: sql, read_only: true } : { query: sql }),
       // Schema changes take locks and rebuild indexes; the 20s used for reads
       // elsewhere would abandon a migration that is still succeeding.
       signal: AbortSignal.timeout(60_000),

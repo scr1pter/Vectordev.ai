@@ -103,6 +103,7 @@ import {
   verifyCloudProviderDomain,
   type CloudProviderId,
 } from "./cloud-connections"
+import { runSupabaseCommand } from "./cloud-supabase"
 import {
   detectGithub,
   publishToGithub,
@@ -159,6 +160,7 @@ import {
   mergeParallelWorkspace,
   mergeParallelWorkspaceSelection,
   openParallelWorkspacePullRequest,
+  parallelWorkspaceCloudScopes,
   refreshParallelWorkspace,
   removeParallelWorkspaceRecord,
   runParallelWorkspace,
@@ -591,6 +593,16 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("cloud-supabase-services", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getSupabaseServiceSnapshot(projectPath, taskId),
+  )
+  // Every Supabase control in the console, through the same commands the agent uses.
+  handle("cloud-supabase", (event: IpcMainInvokeEvent, command: unknown, input: unknown) =>
+    runSupabaseCommand(command, input, {
+      caller: "console",
+      workspaces: parallelWorkspaceCloudScopes,
+      progress: (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send("cloud-supabase-progress", progress)
+      },
+    }),
   )
   handle("cloud-deployments-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listDeployments(projectPath, taskId),

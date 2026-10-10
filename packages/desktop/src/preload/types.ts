@@ -25,6 +25,7 @@ import type {
   CloudProviderSyncResult,
   CloudSupabaseServices,
 } from "../main/cloud-connections"
+import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
   GithubAuthStatus,
@@ -947,6 +948,13 @@ export type ElectronAPI = {
     }
     services: {
       supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
+    }
+    supabase: {
+      run: (
+        command: SupabaseCommand,
+        input: Record<string, unknown>,
+      ) => Promise<{ ok: boolean; error?: string; needsSetup?: boolean; nextStep?: string } & Record<string, unknown>>
+      subscribe: (cb: (event: SupabaseProgressEvent) => void) => () => void
     }
     build: {
       get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>

@@ -14,6 +14,8 @@ import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
 import { createCloudDatabase } from "./cloud-provision"
 import { resolveCloudScope, type CloudScope, type CloudWorkspace } from "./cloud-scope"
+import { describeSupabaseCommand, isSupabaseCommand, runSupabaseCommand } from "./cloud-supabase"
+import type { CloudFetch } from "./cloud-supabase-api"
 import { publishProject } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
@@ -73,6 +75,8 @@ type CloudBridgeOptions = {
   publish?: typeof publishProject
   /** The desktop's parallel workspaces, so an agent's worktree resolves to its project. */
   workspaces?: () => CloudWorkspace[] | Promise<CloudWorkspace[]>
+  /** Provider HTTP for the Supabase commands; tests point it at a local fake. */
+  request?: CloudFetch
 }
 
 export async function startCloudBridge(options: CloudBridgeOptions = {}) {
@@ -107,8 +111,7 @@ export async function startCloudBridge(options: CloudBridgeOptions = {}) {
     }
 
     const result = await Promise.resolve()
-      .then(() => parseCloudCommandInput(JSON.parse(Buffer.concat(chunks).toString("utf8"))))
-      .then((input) => runCloudCommand(input, options))
+      .then(() => routeCloudCommand(JSON.parse(Buffer.concat(chunks).toString("utf8")), options))
       .catch((error) => ({
         ok: false,
         error: error instanceof Error ? error.message : String(error),
@@ -134,6 +137,21 @@ export async function stopCloudBridge() {
   bridgeToken = ""
   if (!current) return
   await new Promise<void>((resolve) => current.close(() => resolve()))
+}
+
+// Everything Vector does with a linked Supabase project beyond the original
+// commands runs through the same entry point as the Cloud console, as the agent.
+async function routeCloudCommand(body: unknown, options: CloudBridgeOptions) {
+  const command = body && typeof body === "object" ? Reflect.get(body, "command") : undefined
+  const action = body && typeof body === "object" ? Reflect.get(body, "action") : undefined
+  const original = (value: unknown) => COMMANDS.some((item) => item === value)
+  if (command === "describe" && isSupabaseCommand(action) && !original(action)) {
+    return describeSupabaseCommand(action, body, (await options.workspaces?.()) ?? [])
+  }
+  if (isSupabaseCommand(command) && !original(command)) {
+    return runSupabaseCommand(command, body, { caller: "agent", workspaces: options.workspaces, request: options.request })
+  }
+  return runCloudCommand(parseCloudCommandInput(body), options)
 }
 
 function parseCloudCommandInput(value: unknown): CloudCommandInput {
@@ -318,7 +336,13 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
       targets,
       build: getBuildSettings(input.projectPath, input.taskId),
       database: database
-        ? { connected: true, provider: database.provider, host: new URL(database.url).hostname }
+        ? {
+            connected: true,
+            provider: database.provider,
+            host: new URL(database.url).hostname,
+            projectRef: database.projectRef,
+            projectName: database.projectName,
+          }
         : { connected: false },
       deployments: deploymentSummaries(input),
       connections,
@@ -331,7 +355,13 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     return {
       ok: true,
       database: database
-        ? { connected: true, provider: database.provider, host: new URL(database.url).hostname }
+        ? {
+            connected: true,
+            provider: database.provider,
+            host: new URL(database.url).hostname,
+            projectRef: database.projectRef,
+            projectName: database.projectName,
+          }
         : { connected: false },
       nextStep: database
         ? "The project database is ready through Vector Cloud."

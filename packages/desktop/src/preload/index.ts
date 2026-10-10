@@ -285,6 +285,14 @@ const api: ElectronAPI = {
     services: {
       supabase: (projectPath, taskId) => ipcRenderer.invoke("cloud-supabase-services", projectPath, taskId),
     },
+    supabase: {
+      run: (command, input) => ipcRenderer.invoke("cloud-supabase", command, input),
+      subscribe: (cb) => {
+        const handler = (_: unknown, event: Parameters<typeof cb>[0]) => cb(event)
+        ipcRenderer.on("cloud-supabase-progress", handler)
+        return () => ipcRenderer.removeListener("cloud-supabase-progress", handler)
+      },
+    },
     build: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-build-get", projectPath, taskId),
       detect: (projectPath, taskId) => ipcRenderer.invoke("cloud-build-detect", projectPath, taskId),

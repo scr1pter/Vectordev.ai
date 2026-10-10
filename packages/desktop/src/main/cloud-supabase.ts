@@ -1,0 +1,486 @@
+import { getCloudProviderProjectLink } from "./cloud-connections"
+import { getDatabase, listEnv } from "./cloud-console"
+import { applyCloudMigrations } from "./cloud-migrations"
+import type { CloudProvisionProgress } from "./cloud-provision"
+import { resolveCloudScope, type CloudWorkspace } from "./cloud-scope"
+import {
+  errorMessage,
+  scrub,
+  SupabaseApiError,
+  supabaseContext,
+  SupabaseSetupError,
+  type SupabaseOptions,
+} from "./cloud-supabase-api"
+import {
+  AUTH_PROVIDERS,
+  deleteAuthUser,
+  getAuthConfig,
+  inviteAuthUser,
+  listAuthUsers,
+  updateAuthConfig,
+  vercelRedirectSuggestions,
+  type AuthUpdate,
+} from "./cloud-supabase-auth"
+import { createMigrationFile, migrationStatus, rollbackMigration, runSql } from "./cloud-supabase-database"
+import {
+  deleteFunction,
+  deleteFunctionSecrets,
+  deployFunction,
+  listFunctions,
+  listFunctionSecrets,
+  setFunctionSecrets,
+} from "./cloud-supabase-functions"
+import { rotateDatabasePassword, writeDatabaseUrl } from "./cloud-supabase-keys"
+import { isLogService, LOG_SERVICES, readSupabaseLogs } from "./cloud-supabase-logs"
+import {
+  createSupabaseProject,
+  linkSupabaseProject,
+  listSupabaseProjects,
+  pauseSupabaseProject,
+  restoreSupabaseProject,
+  SUPABASE_REGIONS,
+  unlinkSupabaseProject,
+} from "./cloud-supabase-projects"
+import { securityCheck } from "./cloud-supabase-security"
+import { createBucket, deleteBucket, listBuckets, updateBucket } from "./cloud-supabase-storage"
+
+// One entry point for everything Vector does with a linked Supabase project,
+// shared by the Cloud console (IPC) and the agent (the loopback bridge), so a
+// feature that works in one works in the other. Every command answers with a
+// report: { ok: true, ...data } or { ok: false, error, needsSetup?, nextStep? }.
+// The agent's tool asks permission for each changing command first, using the
+// scope `describeSupabaseCommand` gives it.
+
+const READS = [
+  "supabase_projects",
+  "regions",
+  "migration_status",
+  "auth_config",
+  "auth_users",
+  "vercel_redirect_urls",
+  "buckets",
+  "functions",
+  "function_secrets",
+  "supabase_logs",
+  "security_check",
+] as const
+
+const CHANGES = [
+  "create_project",
+  "link_database",
+  "unlink_database",
+  "pause_database",
+  "restore_database",
+  "write_database_url",
+  "rotate_database_password",
+  "apply_migrations",
+  "rollback_migration",
+  "run_sql",
+  "update_auth",
+  "invite_user",
+  "delete_user",
+  "create_bucket",
+  "update_bucket",
+  "delete_bucket",
+  "deploy_function",
+  "delete_function",
+  "set_function_secrets",
+  "delete_function_secrets",
+] as const
+
+// Writes a file into the repository, as the agent's own edits do; it touches no
+// cloud account.
+const LOCAL = ["create_migration"] as const
+
+export const SUPABASE_COMMANDS = [...READS, ...CHANGES, ...LOCAL] as const
+export type SupabaseCommand = (typeof SUPABASE_COMMANDS)[number]
+
+export type SupabaseCaller = "console" | "agent"
+
+export type SupabaseProgressEvent = CloudProvisionProgress & { projectPath: string }
+
+export type SupabaseRunOptions = SupabaseOptions & {
+  caller: SupabaseCaller
+  workspaces?: () => CloudWorkspace[] | Promise<CloudWorkspace[]>
+  progress?: (event: SupabaseProgressEvent) => void
+}
+
+export function isSupabaseCommand(value: unknown): value is SupabaseCommand {
+  return SUPABASE_COMMANDS.some((item) => item === value)
+}
+
+export function isSupabaseChange(value: unknown) {
+  return CHANGES.some((item) => item === value)
+}
+
+type Input = Record<string, unknown>
+
+export async function runSupabaseCommand(command: unknown, raw: unknown, options: SupabaseRunOptions) {
+  if (!isSupabaseCommand(command)) return { ok: false, error: "Unsupported Supabase command." }
+  const input: Input = raw && typeof raw === "object" ? (raw as Input) : {}
+  const requested = text(input, "projectPath")
+  if (!requested) return { ok: false, error: "Open a project before using Supabase." }
+  // State belongs to the main project; files live where the agent works.
+  const scope = await resolveCloudScope(requested, (await options.workspaces?.()) ?? [])
+  const project = { projectPath: scope.projectPath, taskId: text(input, "taskId") }
+  try {
+    const data = await run(command, input, { ...project, directory: scope.directory }, options)
+    if (data && typeof data === "object" && "ok" in data) return data
+    return { ok: true, ...data }
+  } catch (error) {
+    if (error instanceof SupabaseSetupError) {
+      return { ok: false, needsSetup: true, error: error.message, nextStep: error.nextStep }
+    }
+    const message = scrub({ ...project, secrets: [] }, errorMessage(error))
+    return {
+      ok: false,
+      error: message,
+      nextStep:
+        error instanceof SupabaseApiError && error.status === 401
+          ? "Supabase rejected Vector's saved credentials. Reconnect Supabase in Cloud Services > Integrations."
+          : undefined,
+    }
+  }
+}
+
+async function run(
+  command: SupabaseCommand,
+  input: Input,
+  project: { projectPath: string; taskId?: string; directory: string },
+  options: SupabaseRunOptions,
+) {
+  const agent = options.caller === "agent"
+  if (command === "supabase_projects") return listSupabaseProjects(project, options)
+  if (command === "regions") return { regions: SUPABASE_REGIONS }
+  if (command === "create_project") {
+    return createSupabaseProject(
+      { ...project, organizationId: text(input, "organizationId"), region: text(input, "region") },
+      { ...options, progress: (event) => options.progress?.({ ...event, projectPath: project.projectPath }) },
+    )
+  }
+  if (command === "link_database") {
+    return linkSupabaseProject({ ...project, projectRef: required(input, "projectRef") }, options)
+  }
+  if (command === "unlink_database") return unlinkSupabaseProject(project)
+  if (command === "migration_status") return migrationStatus(project, options)
+  if (command === "create_migration") {
+    return createMigrationFile({
+      directory: project.directory,
+      name: required(input, "name"),
+      sql: required(input, "sql"),
+      downSql: text(input, "downSql"),
+    })
+  }
+  if (command === "apply_migrations") {
+    return applyCloudMigrations({ ...project, dryRun: bool(input, "dryRun") === true }, options.request ?? fetch)
+  }
+  if (command === "vercel_redirect_urls") return vercelRedirectSuggestions(project.projectPath, options.request)
+  // Reports "skipped" by itself when Supabase is not linked or connected.
+  if (command === "security_check") return { security: await securityCheck(project, options) }
+
+  const context = await supabaseContext(project, options)
+  if (command === "pause_database") return pauseSupabaseProject(context)
+  if (command === "restore_database") return restoreSupabaseProject(context)
+  if (command === "write_database_url") {
+    // The agent's permission prompt for this action is the user's consent; the
+    // console sends it after its own confirmation.
+    return writeDatabaseUrl(context, { directory: project.directory, consent: agent || bool(input, "consent") === true })
+  }
+  if (command === "rotate_database_password") {
+    return rotateDatabasePassword(context, {
+      directory: project.directory,
+      writeDatabaseUrl: bool(input, "writeDatabaseUrl"),
+      syncVercel: bool(input, "syncVercel"),
+    })
+  }
+  if (command === "rollback_migration") {
+    return rollbackMigration(context, { directory: project.directory, name: text(input, "name") })
+  }
+  if (command === "run_sql") {
+    return runSql(context, {
+      sql: required(input, "sql"),
+      write: bool(input, "write"),
+      maxRows: num(input, "maxRows"),
+      caller: options.caller,
+    })
+  }
+  if (command === "auth_config") return { auth: await getAuthConfig(context) }
+  if (command === "update_auth") {
+    const update = authUpdate(input, agent)
+    if (bool(input, "addVercelUrls") === true) {
+      const suggestions = await vercelRedirectSuggestions(project.projectPath, options.request)
+      if (!suggestions.redirectUrls.length) throw new SupabaseSetupError("No Vercel addresses to add.", suggestions.detail ?? "")
+      update.addRedirectUrls = [...(update.addRedirectUrls ?? []), ...suggestions.redirectUrls]
+    }
+    return updateAuthConfig(context, update)
+  }
+  if (command === "auth_users") return listAuthUsers(context, { page: num(input, "page"), perPage: num(input, "perPage") })
+  if (command === "invite_user") {
+    return inviteAuthUser(context, { email: required(input, "email"), redirectTo: text(input, "redirectTo") })
+  }
+  if (command === "delete_user") return deleteAuthUser(context, { userId: required(input, "userId") })
+  if (command === "buckets") return listBuckets(context)
+  if (command === "create_bucket" || command === "update_bucket") {
+    const bucket = {
+      name: required(input, "bucket"),
+      public: bool(input, "public"),
+      fileSizeLimit: input.fileSizeLimit === null ? null : num(input, "fileSizeLimit"),
+      allowedMimeTypes: input.allowedMimeTypes === null ? null : list(input, "allowedMimeTypes"),
+    }
+    return command === "create_bucket" ? createBucket(context, bucket) : updateBucket(context, bucket)
+  }
+  if (command === "delete_bucket") {
+    return deleteBucket(context, { name: required(input, "bucket"), empty: bool(input, "empty") })
+  }
+  if (command === "functions") return listFunctions(context, project.directory)
+  if (command === "deploy_function") {
+    return deployFunction(context, { directory: project.directory, name: required(input, "functionName") })
+  }
+  if (command === "delete_function") return deleteFunction(context, { slug: required(input, "functionName") })
+  if (command === "function_secrets") return listFunctionSecrets(context)
+  if (command === "set_function_secrets") {
+    if (agent && input.secrets !== undefined) {
+      throw new Error("Secret values are entered in Cloud Services > Edge functions, never through chat. Pass names from this project's environment instead.")
+    }
+    return setFunctionSecrets(context, { secrets: secretPairs(input), fromEnv: list(input, "secretNames") })
+  }
+  if (command === "delete_function_secrets") {
+    return deleteFunctionSecrets(context, { names: list(input, "secretNames") ?? [] })
+  }
+  if (command === "supabase_logs") {
+    const service = input.service
+    if (!isLogService(service)) {
+      throw new Error(`Choose a log service: ${Object.keys(LOG_SERVICES).join(", ")}.`)
+    }
+    return readSupabaseLogs(context, {
+      service,
+      minutes: num(input, "minutes"),
+      limit: num(input, "limit"),
+      search: text(input, "search"),
+    })
+  }
+  return { ok: false, error: `Unsupported Supabase command: ${command}.` }
+}
+
+function authUpdate(input: Input, agent: boolean): AuthUpdate {
+  const providers: AuthUpdate["providers"] = {}
+  const raw = input.providers && typeof input.providers === "object" ? (input.providers as Input) : {}
+  for (const name of AUTH_PROVIDERS) {
+    const value = raw[name]
+    if (!value || typeof value !== "object") continue
+    const change = value as Input
+    if (agent && change.secret !== undefined) {
+      throw new Error(
+        "OAuth client secrets are entered in Cloud Services > Authentication, never through chat, so they stay out of the conversation.",
+      )
+    }
+    providers[name] = { enabled: bool(change, "enabled"), clientId: text(change, "clientId"), secret: text(change, "secret") }
+  }
+  return {
+    siteUrl: text(input, "siteUrl"),
+    redirectUrls: agent ? undefined : list(input, "redirectUrls"),
+    addRedirectUrls: list(input, agent ? "redirectUrls" : "addRedirectUrls"),
+    removeRedirectUrls: list(input, "removeRedirectUrls"),
+    emailEnabled: bool(input, "emailEnabled"),
+    providers,
+  }
+}
+
+function secretPairs(input: Input) {
+  if (!Array.isArray(input.secrets)) return undefined
+  return input.secrets.map((item) => {
+    if (!item || typeof item !== "object") throw new Error("Each secret needs a name and a value.")
+    const pair = item as Input
+    return { name: required(pair, "name"), value: typeof pair.value === "string" ? pair.value : "" }
+  })
+}
+
+function text(input: Input, key: string) {
+  const value = input[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "string") throw new Error(`${key} must be text.`)
+  return value.trim() || undefined
+}
+
+function required(input: Input, key: string) {
+  const value = text(input, key)
+  if (!value) throw new Error(`${key} is required.`)
+  return value
+}
+
+function bool(input: Input, key: string) {
+  const value = input[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "boolean") throw new Error(`${key} must be true or false.`)
+  return value
+}
+
+function num(input: Input, key: string) {
+  const value = input[key]
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${key} must be a number.`)
+  return value
+}
+
+function list(input: Input, key: string) {
+  const value = input[key]
+  if (value === undefined || value === null) return undefined
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(`${key} must be a list of text.`)
+  }
+  return value.map((item: string) => item.trim()).filter(Boolean)
+}
+
+// What a changing command would do, worded for the agent's permission prompt:
+// provider, project, environment and a one-line summary. `repeatable` is false
+// for anything destructive, billed or credential-bearing, so "always allow"
+// never covers it and each run asks again.
+export async function describeSupabaseCommand(command: SupabaseCommand, raw: unknown, workspaces: CloudWorkspace[]) {
+  const input: Input = raw && typeof raw === "object" ? (raw as Input) : {}
+  const scope = await resolveCloudScope(text(input, "projectPath") ?? "", workspaces)
+  const database = getDatabase(scope.projectPath, text(input, "taskId"))
+  const name = database ? (database.projectName ?? database.projectRef ?? database.url) : ""
+  const describe = (summary: string, repeatable: boolean, project = name) => ({
+    ok: true,
+    repeatable,
+    scope: { provider: "Supabase", project, environment: "production", summary },
+  })
+  try {
+    if (command === "link_database") {
+      const ref = required(input, "projectRef")
+      return describe(
+        `Link the Supabase project ${ref} to this repository and write its public URL and publishable key to .env.`,
+        true,
+        ref,
+      )
+    }
+    if (command === "create_project") {
+      return describe(
+        `Create a new Supabase project${text(input, "organizationId") ? ` in organization ${text(input, "organizationId")}` : ""} in ${text(input, "region") ?? "us-east-1"}. Supabase bills it to that organization.`,
+        false,
+        "a new project",
+      )
+    }
+    if (!database) {
+      return {
+        ok: false,
+        needsSetup: true,
+        error: "No Supabase project is linked to this project.",
+        nextStep:
+          "Create one with create_database, or link an existing project with link_database (supabase_projects lists them).",
+      }
+    }
+    if (command === "unlink_database") {
+      return describe(`Unlink ${name} from this repository. The Supabase project itself is not changed.`, true)
+    }
+    if (command === "pause_database") {
+      return describe(`Pause ${name}. The live app loses its database, auth and storage until it is restored.`, false)
+    }
+    if (command === "restore_database") {
+      return describe(`Restore the paused project ${name}. Supabase bills its organization while it runs.`, false)
+    }
+    if (command === "write_database_url") {
+      return describe(
+        `Write a server-only DATABASE_URL for ${name} (transaction pooler) to this project's environment and .env. It contains the database password; its value is never shown.`,
+        false,
+      )
+    }
+    if (command === "rotate_database_password") {
+      const vercel = bool(input, "syncVercel") ? getCloudProviderProjectLink(scope.projectPath, undefined, "vercel") : undefined
+      return describe(
+        [
+          `Reset the database password of ${name}; anything still using the old password stops working.`,
+          bool(input, "writeDatabaseUrl") ? "Write the new DATABASE_URL to this project's environment." : "",
+          vercel ? `Push this project's environment to the Vercel project ${vercel.projectName} (production, preview and development).` : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        false,
+      )
+    }
+    if (command === "apply_migrations") {
+      return describe(`Apply this project's pending migrations to ${name}. This changes its live database.`, true)
+    }
+    if (command === "rollback_migration") {
+      return describe(
+        `Roll back the most recently applied migration${text(input, "name") ? ` (${text(input, "name")})` : ""} on ${name} with its down migration. This changes the live database.`,
+        false,
+      )
+    }
+    if (command === "run_sql") {
+      return bool(input, "write")
+        ? describe(`Run SQL that can change data in ${name}, the live database.`, false)
+        : describe(`Run a read-only SQL query against ${name}; the rows come back to the agent.`, true)
+    }
+    if (command === "update_auth") {
+      const parts = [
+        text(input, "siteUrl") ? `set the site URL to ${text(input, "siteUrl")}` : "",
+        list(input, "redirectUrls")?.length ? `allow redirects to ${list(input, "redirectUrls")?.join(", ")}` : "",
+        list(input, "removeRedirectUrls")?.length ? `stop allowing ${list(input, "removeRedirectUrls")?.join(", ")}` : "",
+        bool(input, "addVercelUrls") ? "allow the linked Vercel production and preview addresses" : "",
+        bool(input, "emailEnabled") !== undefined ? `turn email sign-in ${bool(input, "emailEnabled") ? "on" : "off"}` : "",
+        ...AUTH_PROVIDERS.map((provider) => {
+          const change = input.providers && typeof input.providers === "object" ? (input.providers as Input)[provider] : undefined
+          if (!change || typeof change !== "object") return ""
+          const enabled = bool(change as Input, "enabled")
+          return `${enabled === undefined ? "update" : enabled ? "turn on" : "turn off"} ${provider} sign-in`
+        }),
+      ].filter(Boolean)
+      return describe(`Change Supabase Auth on ${name}: ${parts.join("; ") || "no changes"}.`, true)
+    }
+    if (command === "invite_user") {
+      return describe(`Send a sign-up invitation email to ${required(input, "email")} from ${name}.`, false)
+    }
+    if (command === "delete_user") {
+      return describe(`Delete the user ${required(input, "userId")} from ${name}. This cannot be undone.`, false)
+    }
+    if (command === "create_bucket") {
+      const visibility = bool(input, "public") ? "public" : "private"
+      return describe(`Create a ${visibility} storage bucket ${required(input, "bucket")} in ${name}.`, visibility === "private")
+    }
+    if (command === "update_bucket") {
+      const visibility = bool(input, "public")
+      return describe(
+        `Change the storage bucket ${required(input, "bucket")} in ${name}${visibility === undefined ? "" : visibility ? ": make it public, so anyone with a file's URL can read it" : ": make it private"}.`,
+        visibility !== true,
+      )
+    }
+    if (command === "delete_bucket") {
+      return describe(
+        `Delete the storage bucket ${required(input, "bucket")} from ${name}${bool(input, "empty") ? ", and every file in it first" : ""}. This cannot be undone.`,
+        false,
+      )
+    }
+    if (command === "deploy_function") {
+      return describe(
+        `Deploy supabase/functions/${required(input, "functionName")} to ${name} as a live Edge Function.`,
+        true,
+      )
+    }
+    if (command === "delete_function") {
+      return describe(`Delete the Edge Function ${required(input, "functionName")} from ${name}.`, false)
+    }
+    if (command === "set_function_secrets") {
+      const names = list(input, "secretNames") ?? []
+      const missing = names.filter((key) => !listEnv(scope.projectPath).some((item) => item.key === key))
+      if (missing.length) {
+        return {
+          ok: false,
+          needsSetup: true,
+          error: `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not in this project's environment.`,
+          nextStep: "Ask the user to add the value in Cloud Services > Environment variables or Edge functions; never ask for it in chat.",
+        }
+      }
+      return describe(
+        `Set the Edge Function secrets ${names.join(", ")} on ${name} from this project's stored environment. Their values are never shown.`,
+        true,
+      )
+    }
+    if (command === "delete_function_secrets") {
+      return describe(`Delete the Edge Function secrets ${(list(input, "secretNames") ?? []).join(", ")} from ${name}.`, false)
+    }
+    return { ok: false, error: `${command} does not change anything, so it needs no approval.` }
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) }
+  }
+}
