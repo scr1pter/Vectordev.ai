@@ -351,6 +351,19 @@ describe("migrations", () => {
     connect()
     linkDatabase()
     const database = trackingDatabase()
+    // The agent's edit prompt names the files before anything is written.
+    const planned = await describeSupabaseCommand(
+      "create_migration",
+      { projectPath: project, name: "Add profiles!", downSql: "drop table profiles;" },
+      [],
+    )
+    expect(planned).toEqual({
+      ok: true,
+      files: [
+        expect.stringMatching(/^supabase\/migrations\/\d{14}_add_profiles\.sql$/),
+        expect.stringMatching(/^supabase\/migrations\/down\/\d{14}_add_profiles\.down\.sql$/),
+      ],
+    })
     const created = await run("create_migration", {
       name: "Add profiles!",
       sql: "create table profiles (id uuid primary key);",

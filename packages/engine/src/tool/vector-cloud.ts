@@ -1,6 +1,9 @@
+import { createTwoFilesPatch } from "diff"
 import { Effect, Schema } from "effect"
+import path from "path"
 
 import { InstanceState } from "@/effect/instance-state"
+import { trimDiff } from "./edit"
 import { Tool } from "./tool"
 
 const Action = Schema.Literals([
@@ -534,6 +537,33 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
           region: params.region,
           force: params.force,
           ...(supabase ? supabaseFields(params) : {}),
+        }
+        // A new migration is a file in the repository, so it asks like any other
+        // edit (plan mode refuses it) and the prompt shows the SQL it writes.
+        if (params.action === "create_migration") {
+          const planned = yield* Effect.promise(() =>
+            bridgeRequest({ ...request, command: "describe", action: params.action }, ctx.abort),
+          )
+          const files = Array.isArray(planned.files)
+            ? planned.files.filter((item): item is string => typeof item === "string")
+            : []
+          if (!planned.ok || !files.length) {
+            return {
+              title: toolTitle(params.action),
+              metadata: { action: params.action, projectPath: instance.directory },
+              output: formatReport(params.action, planned),
+            }
+          }
+          const filepath = path.join(instance.directory, files[0])
+          yield* ctx.ask({
+            permission: "edit",
+            patterns: files.map((file) => path.relative(instance.worktree, path.join(instance.directory, file))),
+            always: ["*"],
+            metadata: {
+              filepath,
+              diff: trimDiff(createTwoFilesPatch(filepath, filepath, "", `${params.sql?.trim() ?? ""}\n`)),
+            },
+          })
         }
         // Publishing, database changes and host environment writes act on the
         // user's own accounts, so each asks first. The bridge describes the

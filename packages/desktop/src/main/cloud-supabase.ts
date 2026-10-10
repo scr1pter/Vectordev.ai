@@ -21,7 +21,13 @@ import {
   vercelRedirectSuggestions,
   type AuthUpdate,
 } from "./cloud-supabase-auth"
-import { createMigrationFile, migrationStatus, rollbackMigration, runSql } from "./cloud-supabase-database"
+import {
+  createMigrationFile,
+  migrationStatus,
+  plannedMigration,
+  rollbackMigration,
+  runSql,
+} from "./cloud-supabase-database"
 import {
   deleteFunction,
   deleteFunctionSecrets,
@@ -88,8 +94,8 @@ const CHANGES = [
   "delete_function_secrets",
 ] as const
 
-// Writes a file into the repository, as the agent's own edits do; it touches no
-// cloud account.
+// Writes a file into the repository, as the agent's own edits do, and asks under
+// the agent's edit permission; it touches no cloud account.
 const LOCAL = ["create_migration"] as const
 
 export const SUPABASE_COMMANDS = [...READS, ...CHANGES, ...LOCAL] as const
@@ -357,6 +363,12 @@ export async function describeSupabaseCommand(command: SupabaseCommand, raw: unk
     scope: { provider: "Supabase", project, environment: "production", summary },
   })
   try {
+    // A file in the repository, not the cloud account: the agent asks for it
+    // under its edit permission, so plan mode and edit rules still apply.
+    if (command === "create_migration") {
+      const planned = await plannedMigration(scope.directory, required(input, "name"))
+      return { ok: true, files: text(input, "downSql") ? [planned.file, planned.downFile] : [planned.file] }
+    }
     if (command === "link_database") {
       const ref = required(input, "projectRef")
       return describe(

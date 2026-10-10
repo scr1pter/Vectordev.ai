@@ -69,39 +69,46 @@ async function findDown(discovery: MigrationDiscovery, file: MigrationFile) {
 // Timestamped like the Supabase CLI writes them (YYYYMMDDHHMMSS_name.sql), so
 // both tools agree on the order. A down migration goes into down/, where the
 // CLI, which reads only the top level, never mistakes it for a forward one.
-export async function createMigrationFile(input: { directory: string; name: string; sql: string; downSql?: string }) {
-  const slug = input.name
+// The agent's permission prompt names these paths before anything is written.
+export async function plannedMigration(directory: string, name: string) {
+  const slug = name
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 60)
   if (!slug) throw new Error("Give the migration a short name, such as add_profiles.")
-  const sql = input.sql.trim()
-  if (!sql) throw new Error("A migration needs the SQL it should run.")
-  if (sql.length > MAX_SQL_CHARS || (input.downSql?.length ?? 0) > MAX_SQL_CHARS) {
-    throw new Error(`Keep a migration under ${MAX_SQL_CHARS} characters; split it into several.`)
-  }
-  const discovery = await discoverMigrations(input.directory)
-  const relative = discovery.directory ?? MIGRATION_DIRECTORIES[0]
-  const folder = join(input.directory, relative)
-  await mkdir(folder, { recursive: true })
-  const taken = new Set((await readdir(folder).catch(() => [])).map((name) => name.split("_")[0]))
+  const folder = (await discoverMigrations(directory)).directory ?? MIGRATION_DIRECTORIES[0]
+  const taken = new Set((await readdir(join(directory, folder)).catch(() => [])).map((item) => item.split("_")[0]))
   const start = Date.now()
   const version = Array.from({ length: 120 }, (_, offset) =>
     new Date(start + offset * 1000).toISOString().replace(/\D/g, "").slice(0, 14),
   ).find((candidate) => !taken.has(candidate))
   if (!version) throw new Error("Too many migrations were created this minute; try again shortly.")
-  const name = `${version}_${slug}.sql`
-  await writeFile(join(folder, name), `${sql}\n`, { encoding: "utf8", flag: "wx" })
+  return {
+    folder,
+    file: join(folder, `${version}_${slug}.sql`),
+    downFile: join(folder, "down", `${version}_${slug}.down.sql`),
+  }
+}
+
+export async function createMigrationFile(input: { directory: string; name: string; sql: string; downSql?: string }) {
+  const sql = input.sql.trim()
+  if (!sql) throw new Error("A migration needs the SQL it should run.")
+  if (sql.length > MAX_SQL_CHARS || (input.downSql?.length ?? 0) > MAX_SQL_CHARS) {
+    throw new Error(`Keep a migration under ${MAX_SQL_CHARS} characters; split it into several.`)
+  }
+  const planned = await plannedMigration(input.directory, input.name)
+  await mkdir(join(input.directory, planned.folder), { recursive: true })
+  await writeFile(join(input.directory, planned.file), `${sql}\n`, { encoding: "utf8", flag: "wx" })
   const down = input.downSql?.trim()
   if (down) {
-    await mkdir(join(folder, "down"), { recursive: true })
-    await writeFile(join(folder, "down", `${version}_${slug}.down.sql`), `${down}\n`, { encoding: "utf8", flag: "wx" })
+    await mkdir(join(input.directory, planned.folder, "down"), { recursive: true })
+    await writeFile(join(input.directory, planned.downFile), `${down}\n`, { encoding: "utf8", flag: "wx" })
   }
   return {
-    file: join(relative, name),
-    downFile: down ? join(relative, "down", `${version}_${slug}.down.sql`) : undefined,
+    file: planned.file,
+    downFile: down ? planned.downFile : undefined,
     nextStep: down
       ? "Apply it with apply_migrations when it is ready."
       : "Apply it with apply_migrations when it is ready. Without a down migration it cannot be rolled back from Vector.",

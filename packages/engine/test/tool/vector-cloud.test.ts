@@ -346,6 +346,40 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
+  it.instance("writes a new migration only after the edit permission, which plan mode refuses", () =>
+    Effect.gen(function* () {
+      const files = ["supabase/migrations/20261010120000_add_profiles.sql"]
+      const params = {
+        action: "create_migration",
+        migrationName: "add profiles",
+        sql: "create table profiles (id uuid primary key);",
+      } as const
+      const requests = yield* bridge({ ok: true, file: files[0] }, 200, { report: { ok: true, files } })
+      const asks = recordAsks()
+      const result = yield* execute(params, asks.ask)
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "edit",
+          patterns: [expect.stringMatching(/supabase\/migrations\/20261010120000_add_profiles\.sql$/)],
+          metadata: expect.objectContaining({
+            filepath: expect.stringContaining(files[0]),
+            diff: expect.stringContaining("+create table profiles (id uuid primary key);"),
+          }),
+        }),
+      ])
+      expect(requests.map((item) => item.command)).toEqual(["describe", "create_migration"])
+      expect(requests[1]).toMatchObject({ name: "add profiles", sql: params.sql })
+      expect(result.output).toContain(files[0])
+
+      const refused = yield* bridge({ ok: true }, 200, { report: { ok: true, files } })
+      const denied = yield* execute(params, () => Effect.die(new Error("edit is denied in plan mode"))).pipe(
+        Effect.exit,
+      )
+      expect(Exit.isFailure(denied)).toBe(true)
+      expect(refused.map((item) => item.command)).toEqual(["describe"])
+    }),
+  )
+
   it.instance("reads Supabase logs, query results and the security check without asking", () =>
     Effect.gen(function* () {
       const asks = recordAsks()
