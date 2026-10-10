@@ -1,4 +1,3 @@
-import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomUUID, createHash } from "node:crypto"
 import { chmodSync, constants } from "node:fs"
 import { lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
@@ -58,8 +57,14 @@ export type CloudDeployment = {
   statusCode?: number
   latencyMs?: number
   healthError?: string
+  /** How the last health probe ended; "protected" means Deployment Protection kept Vector out. */
+  probe?: "ok" | "failed" | "protected"
   checks: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  /** Vercel's own id (dpl_...) for this release. */
+  providerDeploymentId?: string
+  /** The stable per-branch preview address of an agent workspace's release. */
+  alias?: string
 }
 
 // "public" values may reach browser code; "server" values must not, so they can
@@ -120,23 +125,6 @@ type PackageManifest = {
   nodeVersion: string
 }
 
-export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vercel"
-
-export type CloudDomain = {
-  id: string
-  domain: string
-  projectPath?: string
-  provider: CloudDomainProvider
-  providerProjectId?: string
-  providerProjectName?: string
-  cnameTarget: string
-  status: CloudDomainStatus
-  lastCheckedAt?: string
-  detail?: string
-  createdAt: string
-}
-
 export type CloudDatabaseConnection = {
   provider: "supabase"
   url: string
@@ -194,8 +182,11 @@ function readDeployments(): CloudDeployment[] {
       statusCode: typeof item.statusCode === "number" ? item.statusCode : undefined,
       latencyMs: typeof item.latencyMs === "number" ? item.latencyMs : undefined,
       healthError: typeof item.healthError === "string" ? item.healthError : undefined,
+      probe: item.probe === "ok" || item.probe === "failed" || item.probe === "protected" ? item.probe : undefined,
       checks: Array.isArray(item.checks) ? item.checks.filter(isCloudDeploymentCheck) : [],
       git: isCloudGitMetadata(item.git) ? item.git : undefined,
+      providerDeploymentId: typeof item.providerDeploymentId === "string" ? item.providerDeploymentId : undefined,
+      alias: typeof item.alias === "string" ? cleanDeploymentUrl(item.alias) : undefined,
     }))
 }
 
@@ -244,6 +235,7 @@ export function recordDeployment(input: {
   durationMs?: number
   checks?: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  providerDeploymentId?: string
 }): CloudDeployment {
   const records = readDeployments()
   const environment = input.environment ?? "production"
@@ -272,6 +264,7 @@ export function recordDeployment(input: {
       output: check.output ? redactCloudLog(input.projectPath, input.taskId, check.output).slice(-20_000) : undefined,
     })),
     git: input.git,
+    providerDeploymentId: input.providerDeploymentId,
   }
   const rest =
     environment === "production"
@@ -346,6 +339,50 @@ export function markDeploymentPromoted(
   return updated.find((item) => item.id === selected.id)!
 }
 
+// The release Vector recorded for a Vercel deployment, when Vector made it:
+// matched by Vercel's id, or by address for releases recorded before the id was.
+export function releaseForProviderDeployment(projectPath: string, deployment: { id: string; url: string }) {
+  const host = (value: string) => (URL.canParse(value) ? new URL(value).host : value)
+  return listDeployments(projectPath).find(
+    (item) => item.providerDeploymentId === deployment.id || host(item.url) === host(deployment.url),
+  )
+}
+
+// Production moved on Vercel (a promote or rollback from Cloud Services or the
+// agent). Vector's release for that deployment becomes current; the release
+// that was current is superseded or rolled back, even when Vercel now serves a
+// deployment Vector did not make.
+export function recordProductionMove(
+  projectPath: string,
+  deployment: { id: string; url: string },
+  input: { productionUrl?: string; rollback?: boolean },
+) {
+  const at = now()
+  const release = releaseForProviderDeployment(projectPath, deployment)
+  const records = readDeployments()
+  if (release) {
+    writeDeployments(
+      transitionReleaseRecords(records, release.id, {
+        productionUrl: input.productionUrl,
+        rollback: Boolean(input.rollback),
+        at,
+      }),
+    )
+    return
+  }
+  writeDeployments(
+    records.map((item) =>
+      item.projectPath === projectPath && supportedDeployment(item) && item.releaseStatus === "current"
+        ? {
+            ...item,
+            releaseStatus: input.rollback ? ("rolled-back" as const) : ("superseded" as const),
+            rolledBackAt: input.rollback ? at : item.rolledBackAt,
+          }
+        : item,
+    ),
+  )
+}
+
 export function removeDeployment(projectPath: string, taskId: string | undefined, id: string): CloudDeployment[] {
   const records = readDeployments()
   const removed = records.find((item) => item.id === id && item.projectPath === projectPath)
@@ -357,60 +394,6 @@ export function removeDeployment(projectPath: string, taskId: string | undefined
   return next.filter((record) => record.projectPath === projectPath && supportedDeployment(record))
 }
 
-export async function checkDeployment(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-): Promise<CloudDeployment> {
-  const records = readDeployments()
-  const deployment = records.find((item) => item.id === id && item.projectPath === projectPath)
-  if (!deployment) throw new Error("That deployment is no longer in this project's history.")
-
-  const startedAt = Date.now()
-  const checkedAt = now()
-  const settings = getBuildSettings(projectPath, taskId)
-  const healthUrl = new URL(settings?.healthPath ?? "/", deployment.url).toString()
-  const probe = await fetch(healthUrl, {
-    method: "GET",
-    redirect: "follow",
-    headers: { "user-agent": VECTOR_USER_AGENT },
-    signal: AbortSignal.timeout(12_000),
-  })
-    .then(async (response) => {
-      await response.body?.cancel().catch(() => undefined)
-      return {
-        status: response.ok ? ("ready" as const) : ("degraded" as const),
-        statusCode: response.status,
-        healthError: response.ok ? undefined : `HTTP ${response.status} ${response.statusText}`.trim(),
-      }
-    })
-    .catch((error) => ({
-      status: "unreachable" as const,
-      statusCode: undefined,
-      healthError: error instanceof Error ? error.message : String(error),
-    }))
-
-  const updated: CloudDeployment = {
-    ...deployment,
-    ...probe,
-    lastCheckedAt: checkedAt,
-    latencyMs: Date.now() - startedAt,
-    checks: upsertDeploymentCheck(deployment.checks, {
-      id: "health",
-      type: "health",
-      label: `Health check ${settings?.healthPath ?? "/"}`,
-      status: probe.status === "ready" ? "passed" : "failed",
-      required: settings?.requiredChecks.health ?? true,
-      details:
-        probe.status === "ready" ? `HTTP ${probe.statusCode} in ${Date.now() - startedAt} ms` : probe.healthError,
-      durationMs: Date.now() - startedAt,
-      checkedAt,
-    }),
-  }
-  writeDeployments(records.map((item) => (item.id === updated.id ? updated : item)))
-  return updated
-}
-
 export function upsertDeploymentCheck(
   checks: CloudDeploymentCheck[],
   check: CloudDeploymentCheck,
@@ -418,22 +401,15 @@ export function upsertDeploymentCheck(
   return [...checks.filter((item) => item.id !== check.id), check]
 }
 
-export async function checkAllDeployments(projectPath: string, taskId?: string): Promise<CloudDeployment[]> {
-  const deployments = listDeployments(projectPath, taskId)
-  await Promise.all(deployments.map((item) => checkDeployment(projectPath, taskId, item.id)))
-  return listDeployments(projectPath, taskId)
-}
-
 // ---- Per-project data (env vars + database) -------------------------------
 
 type ProjectData = {
   env: StoredEnvVar[]
   database: CloudDatabaseConnection
-  domains: CloudDomain[]
   build: CloudBuildSettings | null
 }
 
-// A project's cloud state (env, database, domains, build settings) belongs to
+// A project's cloud state (env, database, build settings) belongs to
 // the project, not to whichever chat session touched it. The Cloud Console
 // renders with no taskId while the vector_cloud tool passes its session id, so
 // keying on taskId gave the agent an empty second copy of everything the user
@@ -449,7 +425,7 @@ export function cloudProjectScopeKey(projectPath: string): string {
 
 function readProject(projectPath: string): ProjectData {
   const raw = getStore(PROJECTS_STORE).get(cloudProjectScopeKey(projectPath))
-  if (!raw || typeof raw !== "object") return { env: [], database: null, domains: [], build: null }
+  if (!raw || typeof raw !== "object") return { env: [], database: null, build: null }
   const data = raw as Partial<ProjectData>
   const stored: unknown[] = Array.isArray(data.env) ? data.env : []
   const env = stored
@@ -475,15 +451,6 @@ function readProject(projectPath: string): ProjectData {
     .filter((item): item is StoredEnvVar => Boolean(item))
   const database =
     data.database && typeof data.database === "object" && data.database.provider === "supabase" ? data.database : null
-  // Only Vercel domains are shown. Domains attached through a retired host
-  // (Netlify, or the scrapped hosted publish service's DNS target) cannot be
-  // verified or detached by Vector any more; the provider still owns them.
-  const domains = Array.isArray(data.domains)
-    ? data.domains.filter(
-        (item): item is CloudDomain =>
-          typeof item?.id === "string" && typeof item?.domain === "string" && item.provider === "vercel",
-      )
-    : []
   const build =
     data.build &&
     typeof data.build === "object" &&
@@ -499,7 +466,7 @@ function readProject(projectPath: string): ProjectData {
             : defaultRequiredChecks(),
         }
       : null
-  const project = { env, database, domains, build }
+  const project = { env, database, build }
   if (stored.some((item) => item && typeof item === "object" && typeof Reflect.get(item, "value") === "string")) {
     writeProject(projectPath, project)
   }
@@ -899,8 +866,8 @@ function formatViteEnvValue(value: string) {
 
 // ---- Custom domains -------------------------------------------------------
 
-// Lowercase, strip protocol/path/trailing slash, drop a leading "www.", and
-// require something that looks like a real hostname with at least one dot.
+// Lowercase, strip protocol/path/trailing dot, and require something that
+// looks like a real hostname with at least one dot.
 export function normalizeCloudDomain(raw: string): string {
   let domain = (raw ?? "").trim().toLowerCase()
   domain = domain.replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
@@ -914,75 +881,8 @@ export function normalizeCloudDomain(raw: string): string {
 
 function requireProject(projectPath: string): string {
   const path = (projectPath ?? "").trim()
-  if (!path) throw new Error("Open a project before managing its domains.")
+  if (!path) throw new Error("Open a project first.")
   return path
-}
-
-// Domains are scoped to a project (a Vector task's workspace), so each app
-// manages its own custom domains instead of a single global pool.
-export function listDomains(projectPath: string, taskId?: string): CloudDomain[] {
-  if (!(projectPath ?? "").trim()) return []
-  return readProject(projectPath).domains
-}
-
-export function addDomain(
-  projectPath: string,
-  taskId: string | undefined,
-  input: {
-    domain: string
-    provider: CloudDomainProvider
-    providerProjectId: string
-    providerProjectName: string
-    cnameTarget: string
-    status: CloudDomainStatus
-    detail?: string
-  },
-): CloudDomain {
-  const path = requireProject(projectPath)
-  const domain = normalizeCloudDomain(input.domain)
-  const data = readProject(path)
-  if (data.domains.find((item) => item.domain === domain)) {
-    throw new Error(`${domain} is already connected to this project.`)
-  }
-  const record: CloudDomain = {
-    id: randomUUID(),
-    domain,
-    projectPath: path,
-    provider: input.provider,
-    providerProjectId: input.providerProjectId,
-    providerProjectName: input.providerProjectName,
-    cnameTarget: input.cnameTarget,
-    status: input.status,
-    detail: input.detail?.trim() || undefined,
-    createdAt: now(),
-  }
-  writeProject(path, { ...data, domains: [record, ...data.domains] })
-  return record
-}
-
-export function updateDomainRecord(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-  patch: Partial<Omit<CloudDomain, "id" | "domain" | "projectPath" | "createdAt">>,
-): CloudDomain {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const index = data.domains.findIndex((item) => item.id === id)
-  if (index === -1) throw new Error("That domain is no longer connected to this project.")
-  const updated = { ...data.domains[index], ...patch }
-  const domains = [...data.domains]
-  domains[index] = updated
-  writeProject(path, { ...data, domains })
-  return updated
-}
-
-export function removeDomain(projectPath: string, taskId: string | undefined, id: string): CloudDomain[] {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const domains = data.domains.filter((item) => item.id !== id)
-  writeProject(path, { ...data, domains })
-  return domains
 }
 
 // ---- Database connector (Supabase) ----------------------------------------

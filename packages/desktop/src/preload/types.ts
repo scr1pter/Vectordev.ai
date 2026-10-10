@@ -2,18 +2,11 @@ import type { VectorAccountPlatform } from "@vectordevai/app/vector-account"
 import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
 import type { WslServersPlatform } from "@vectordevai/app/wsl/types"
 import type { UpdaterState } from "@vectordevai/app/updater"
-import type {
-  CloudRuntimeLogResult,
-  PublishProgressEvent,
-  PublishProjectInput,
-  PublishResult,
-  PublishTarget,
-} from "../main/publish"
+import type { PublishProgressEvent, PublishProjectInput, PublishResult, PublishTarget } from "../main/publish"
 import type {
   CloudBuildSettings,
   CloudDatabaseConnection,
   CloudDeployment,
-  CloudDomain,
   CloudEnvVar,
   CloudEnvVisibility,
 } from "../main/cloud-console"
@@ -22,9 +15,9 @@ import type {
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudProviderSyncResult,
   CloudSupabaseServices,
 } from "../main/cloud-connections"
+import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
   GithubAuthStatus,
@@ -109,32 +102,23 @@ export type {
   PullRequestReviewComment,
   PullRequestSummary,
 } from "../main/github-pr"
-export type {
-  CloudRuntimeLogResult,
-  PublishProgressEvent,
-  PublishProjectInput,
-  PublishResult,
-  PublishTarget,
-} from "../main/publish"
+export type { PublishProgressEvent, PublishProjectInput, PublishResult, PublishTarget } from "../main/publish"
 export type {
   CloudBuildSettings,
   CloudDatabaseConnection,
   CloudDeployment,
   CloudDeploymentCheck,
-  CloudDomain,
-  CloudDomainProvider,
-  CloudDomainStatus,
   CloudEnvVar,
   CloudEnvVisibility,
   CloudGitMetadata,
   CloudRequiredChecks,
 } from "../main/cloud-console"
+export type { VercelCloudApi } from "../main/cloud-vercel-ipc"
 export type {
   CloudProviderConnection,
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudProviderSyncResult,
   CloudSupabaseBucket,
   CloudSupabaseFunction,
   CloudSupabaseServices,
@@ -573,6 +557,8 @@ export type ParallelWorkspaceRecord = {
   diff: string
   checkpointPath?: string
   pullRequestUrl?: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
   baselineHashes?: Record<string, string>
   contextFiles?: string[]
   contextIndexedFiles?: number
@@ -874,39 +860,13 @@ export type ElectronAPI = {
     providers: {
       resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>
       links: (projectPath: string, taskId?: string) => Promise<CloudProviderProjectLink[]>
-      link: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-        projectId: string,
-      ) => Promise<CloudProviderProjectLink>
-      unlink: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-      ) => Promise<CloudProviderProjectLink[]>
-      syncEnvironment: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-      ) => Promise<CloudProviderSyncResult>
-      addDomain: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-        domain: string,
-      ) => Promise<CloudDomain>
-      verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-      removeDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
     }
+    vercel: VercelCloudApi
     deployments: {
       list: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
       remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment[]>
       check: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
       checkAll: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
-      promote: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-      rollback: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-      logs: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudRuntimeLogResult>
       rerunChecks: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
     }
     env: {
@@ -920,9 +880,6 @@ export type ElectronAPI = {
       ) => Promise<CloudEnvVar[]>
       remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
       apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
-    }
-    domains: {
-      list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
     }
     database: {
       get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>

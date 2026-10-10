@@ -157,6 +157,8 @@ export type ParallelWorkspaceRecord = {
   diff: string
   checkpointPath?: string
   pullRequestUrl?: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
   baselineHashes?: Record<string, string>
   contextFiles?: string[]
   contextIndexedFiles?: number
@@ -1336,6 +1338,18 @@ export function parallelWorkspaceCloudScopes() {
     name: record.name,
     sourcePath: record.sourcePath,
     isolatedPath: record.isolatedPath,
+  }))
+}
+
+// Called when a preview of this workspace's worktree is published, from the
+// Cloud console or by the workspace's own agent.
+export function recordParallelWorkspacePreview(id: string, url: string) {
+  if (!readRecords().some((record) => record.id === id)) return
+  updateRecord(id, (current) => ({
+    ...current,
+    previewUrl: url,
+    lastActivityAt: now(),
+    logs: [`Published a preview: ${url}`, ...current.logs].slice(0, 120),
   }))
 }
 

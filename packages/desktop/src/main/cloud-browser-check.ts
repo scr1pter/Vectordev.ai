@@ -3,6 +3,8 @@ import { join } from "node:path"
 
 import { app, BrowserWindow } from "electron"
 
+import { bypassHeadersFor } from "./cloud-vercel-checks"
+
 export type CloudBrowserCheckResult = {
   ok: boolean
   details: string
@@ -11,7 +13,14 @@ export type CloudBrowserCheckResult = {
   screenshotPath?: string
 }
 
-export async function runCloudBrowserCheck(url: string, deploymentId: string): Promise<CloudBrowserCheckResult> {
+// `headers` (a Vercel protection bypass) go with every request to the checked
+// deployment's own origin and with none to any other host, so a redirect to a
+// sign-in provider or a third-party script never receives the secret.
+export async function runCloudBrowserCheck(
+  url: string,
+  deploymentId: string,
+  headers: Record<string, string> = {},
+): Promise<CloudBrowserCheckResult> {
   const startedAt = Date.now()
   const errors: string[] = []
   const window = new BrowserWindow({
@@ -25,6 +34,11 @@ export async function runCloudBrowserCheck(url: string, deploymentId: string): P
       partition: `vector-cloud-check-${deploymentId}`,
     },
   })
+
+  // The check's partition is its own session, so this listener sees only its requests.
+  window.webContents.session.webRequest.onBeforeSendHeaders((details, callback) =>
+    callback({ requestHeaders: { ...details.requestHeaders, ...bypassHeadersFor(details.url, url, headers) } }),
+  )
 
   window.webContents.on("console-message", (details, level, message, line, source) => {
     const resolvedLevel = typeof details.level === "string" ? details.level : level >= 2 ? "error" : "info"
@@ -40,9 +54,10 @@ export async function runCloudBrowserCheck(url: string, deploymentId: string): P
 
   let timeout: ReturnType<typeof setTimeout> | undefined
   const loadError = await Promise.race([
-    window.loadURL(url).then(() => undefined).catch((error: unknown) =>
-      error instanceof Error ? error.message : String(error),
-    ),
+    window
+      .loadURL(url)
+      .then(() => undefined)
+      .catch((error: unknown) => (error instanceof Error ? error.message : String(error))),
     new Promise<string>((resolve) => {
       timeout = setTimeout(() => {
         window.webContents.stop()
@@ -56,11 +71,13 @@ export async function runCloudBrowserCheck(url: string, deploymentId: string): P
   const page = loadError
     ? undefined
     : await window.webContents
-        .executeJavaScript(`(() => ({
+        .executeJavaScript(
+          `(() => ({
           title: document.title,
           text: (document.body?.innerText || "").trim().slice(0, 500),
           htmlLength: document.documentElement?.outerHTML.length || 0
-        }))()`)
+        }))()`,
+        )
         .then((value: unknown) => value)
         .catch((error: unknown) => {
           errors.push(error instanceof Error ? error.message : String(error))
@@ -70,20 +87,17 @@ export async function runCloudBrowserCheck(url: string, deploymentId: string): P
   const screenshotDirectory = join(app.getPath("userData"), "cloud-checks")
   await mkdir(screenshotDirectory, { recursive: true })
   const screenshotPath = join(screenshotDirectory, `${deploymentId}.png`)
-  const screenshot = loadError
-    ? undefined
-    : await window.webContents.capturePage().catch(() => undefined)
+  const screenshot = loadError ? undefined : await window.webContents.capturePage().catch(() => undefined)
   if (screenshot) await writeFile(screenshotPath, screenshot.toPNG()).catch(() => undefined)
 
-  const title = page && typeof page === "object" && typeof Reflect.get(page, "title") === "string"
-    ? Reflect.get(page, "title")
-    : ""
-  const text = page && typeof page === "object" && typeof Reflect.get(page, "text") === "string"
-    ? Reflect.get(page, "text")
-    : ""
-  const htmlLength = page && typeof page === "object" && typeof Reflect.get(page, "htmlLength") === "number"
-    ? Reflect.get(page, "htmlLength")
-    : 0
+  const title =
+    page && typeof page === "object" && typeof Reflect.get(page, "title") === "string" ? Reflect.get(page, "title") : ""
+  const text =
+    page && typeof page === "object" && typeof Reflect.get(page, "text") === "string" ? Reflect.get(page, "text") : ""
+  const htmlLength =
+    page && typeof page === "object" && typeof Reflect.get(page, "htmlLength") === "number"
+      ? Reflect.get(page, "htmlLength")
+      : 0
   const blank = !loadError && htmlLength < 40 && !text
   if (blank) errors.push("The deployed page rendered no meaningful HTML or text.")
 

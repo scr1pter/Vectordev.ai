@@ -29,8 +29,14 @@ export type CloudDeployment = {
   statusCode?: number
   latencyMs?: number
   healthError?: string
+  /** How the last health probe ended; "protected" means Deployment Protection kept Vector out. */
+  probe?: "ok" | "failed" | "protected"
   checks: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  /** Vercel's own id (dpl_...) for this release. */
+  providerDeploymentId?: string
+  /** The stable per-branch preview address of an agent workspace's release. */
+  alias?: string
 }
 
 // "public" values may reach browser code; "server" values never use a name a
@@ -81,23 +87,6 @@ export type CloudBuildSettings = {
   updatedAt: string
 }
 
-export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vercel"
-
-export type CloudDomain = {
-  id: string
-  domain: string
-  projectPath?: string
-  provider: CloudDomainProvider
-  providerProjectId?: string
-  providerProjectName?: string
-  cnameTarget: string
-  status: CloudDomainStatus
-  lastCheckedAt?: string
-  detail?: string
-  createdAt: string
-}
-
 export type CloudDatabaseConnection = {
   provider: "supabase"
   url: string
@@ -139,17 +128,10 @@ export type CloudProviderProjectLink = {
   projectName: string
   accountId?: string
   accountName?: string
+  teamId?: string
   url?: string
+  linkedFrom?: string
   linkedAt: string
-}
-
-export type CloudProviderSyncResult = {
-  provider: "vercel"
-  projectId: string
-  projectName: string
-  changed: number
-  syncedAt: string
-  detail: string
 }
 
 export type CloudSupabaseBucket = {
@@ -191,39 +173,12 @@ export type CloudApi = {
   providers: {
     resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>
     links: (projectPath: string, taskId?: string) => Promise<CloudProviderProjectLink[]>
-    link: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel",
-      projectId: string,
-    ) => Promise<CloudProviderProjectLink>
-    unlink: (projectPath: string, taskId: string | undefined, provider: "vercel") => Promise<CloudProviderProjectLink[]>
-    syncEnvironment: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel",
-    ) => Promise<CloudProviderSyncResult>
-    addDomain: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel",
-      domain: string,
-    ) => Promise<CloudDomain>
-    verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-    removeDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
   }
   deployments: {
     list: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
     remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment[]>
     check: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
     checkAll: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
-    promote: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-    rollback: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-    logs: (
-      projectPath: string,
-      taskId: string | undefined,
-      id: string,
-    ) => Promise<{ log: string; fetchedAt: string; source: "provider" | "build" }>
     rerunChecks: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
   }
   env: {
@@ -237,9 +192,6 @@ export type CloudApi = {
     ) => Promise<CloudEnvVar[]>
     remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
     apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
-  }
-  domains: {
-    list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
   }
   database: {
     get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
@@ -290,6 +242,8 @@ export type PublishTarget = {
   loginHint: string
   available: boolean
   account?: string
+  /** What stops publishing on this machine. */
+  problem?: "no_node" | "not_connected"
 }
 
 export type PublishResult = {
@@ -298,8 +252,15 @@ export type PublishResult = {
   target: string
   log: string
   error?: string
+  errorCode?: string
   deploymentId?: string
+  providerDeploymentId?: string
+  environment?: "preview" | "production"
+  productionUrl?: string
+  alias?: string
   checks?: CloudDeploymentCheck[]
+  protectedChecks?: "skipped"
+  notes?: string[]
 }
 
 export type PublishProgressEvent = {
@@ -352,6 +313,8 @@ export type CloudAgentWorkspace = {
   status: string
   changedFilesCount: number
   lastAction: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
 }
 
 type CloudAgentWorkspaceApi = {

@@ -3,9 +3,7 @@ import { createStore } from "solid-js/store"
 import type { CloudApi, CloudEnvVar, CloudEnvVisibility } from "./cloud-api"
 
 type Scope = { projectPath: string; taskId?: string }
-type EnvironmentApi = Pick<CloudApi, "env"> & {
-  providers: Pick<CloudApi["providers"], "syncEnvironment">
-}
+type EnvironmentApi = Pick<CloudApi, "env">
 type Notice = { tone: "success" | "error"; text: string }
 
 export function createCloudEnvironment(input: {
@@ -125,11 +123,5 @@ export function createCloudEnvironment(input: {
           }),
       )
     },
-    sync: (provider: "vercel") =>
-      perform(
-        provider,
-        (api, scope) => api.providers.syncEnvironment(scope.projectPath, scope.taskId, provider),
-        (result) => input.notice({ tone: "success", text: result.detail }),
-      ),
   }
 }

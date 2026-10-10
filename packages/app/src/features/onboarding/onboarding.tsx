@@ -104,7 +104,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Deployments",
         where: "Cloud Services → Deployments.",
-        body: "Publish your app to the web in one click. Vector runs the whole deploy on your own Vercel account — authorize once (for example, vercel login in the Terminal), and every deploy after that is a single click. Your code is never proxied through Vector: the build runs on your account, and finished deployments are listed with their live URLs. If no publisher is detected, the panel tells you exactly what to install and run.",
+        body: "Publish your app to the web in one click. Connect your Vercel account in Cloud Services → Integrations and link the project once; every deploy after that is a single click. Publish makes a preview, and production asks you first. Your code is never proxied through Vector: the build runs on your account. Every deployment Vercel has for the project is listed, git pushes included, with logs, promote and roll back.",
         tip: "Deploy early, even half-finished — a live URL makes every change after it feel real.",
       },
       {
@@ -116,13 +116,13 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Domains",
         where: "Cloud Services → Domains.",
-        body: "Point a domain you own at the project. Add the domain and Vector shows the exact CNAME record to create at your registrar; click Verify and Vector checks your DNS live. Domains are scoped per project, so each app manages its own list.",
+        body: "Point a domain you own at the linked Vercel project. Add the domain and Vector shows the exact records Vercel asks for: an A record for an apex domain, a CNAME for a subdomain, and a TXT record when ownership needs verifying. Click Verify and Vector checks them and reports the certificate.",
         tip: "DNS changes can take a few minutes to propagate — if verification doesn't pass immediately, wait a little and verify again.",
       },
       {
         title: "Environment variables",
         where: "Cloud Services → Environment.",
-        body: "Manage the project's configuration as key–value pairs. Add or remove variables in the panel, then apply them and Vector writes them into the project's .env file, where your app — and the code the agent writes — can read them. It's the right home for the API keys and service URLs your app needs at runtime.",
+        body: "Manage the project's configuration as key–value pairs. Add or remove variables in the panel, then apply them and Vector writes them into the project's .env file, where your app — and the code the agent writes — can read them. Below them, manage the linked Vercel project's variables per environment: compare with yours, review a sync plan before anything is written, or pull development values.",
         tip: "Keep secrets out of chat messages — put them here and just tell the agent the variable name.",
       },
       {
@@ -185,7 +185,8 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       },
       {
         title: "Rewind code + chat",
-        where: "Command palette (⌘⇧P, or Ctrl+Shift+P on Windows/Linux) inside a session, or type /undo or /redo in the message box.",
+        where:
+          "Command palette (⌘⇧P, or Ctrl+Shift+P on Windows/Linux) inside a session, or type /undo or /redo in the message box.",
         body: "Undo an agent's work one request at a time. Rewind code + chat restores the files and the conversation to before your last request. If the agent is still working, Vector stops it first, and that request's text goes back into the message box so you can edit it and send it again. Run it again to go back further. Move rewind forward (or /redo) restores the next request; at the latest one, everything is back.",
         tip: "When a request took the project the wrong way, rewind and re-prompt instead of asking the agent to repair its own change.",
       },

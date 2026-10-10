@@ -1,20 +1,32 @@
 import { randomUUID } from "node:crypto"
 import { createServer, type Server } from "node:http"
 
-import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments, listEnv } from "./cloud-console"
+import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments } from "./cloud-console"
 import {
   cachedCloudProviderConnection,
   getCloudProviderProjectLink,
   getSupabaseServiceSnapshot,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
-  syncCloudProviderEnvironment,
 } from "./cloud-connections"
 import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
 import { createCloudDatabase } from "./cloud-provision"
 import { resolveCloudScope, type CloudScope, type CloudWorkspace } from "./cloud-scope"
-import { publishProject } from "./publish"
+import { publishProject, type PublishResult } from "./publish"
+import {
+  describeVercelAction,
+  parseVercelFields,
+  runVercelCommand,
+  vercelStatusSummary,
+  VERCEL_COMMANDS,
+  VERCEL_DESCRIBABLE,
+  type VercelBridgeOptions,
+  type VercelCommandFields,
+} from "./cloud-vercel-bridge"
+import { vercelLinkContext, type VercelFetch } from "./cloud-vercel-api"
+import { protectsDeployment } from "./cloud-vercel-checks"
+import { readVercelProject, vercelProjectCandidate } from "./cloud-vercel-projects"
 
 const MAX_BODY_BYTES = 64 * 1024
 
@@ -33,6 +45,7 @@ const COMMANDS = [
   "logs",
   "apply_migrations",
   "describe",
+  ...VERCEL_COMMANDS,
 ] as const
 
 // The actions that change something in the user's cloud accounts or project.
@@ -45,12 +58,13 @@ const DESCRIBABLE = [
   "prepare_database",
   "prepare_auth",
   "apply_migrations",
+  ...VERCEL_DESCRIBABLE,
 ] as const
 
 type CloudCommand = (typeof COMMANDS)[number]
 type CloudAction = (typeof DESCRIBABLE)[number]
 
-type CloudCommandInput = {
+type CloudCommandInput = VercelCommandFields & {
   command: CloudCommand
   action?: CloudAction
   projectPath: string
@@ -59,6 +73,7 @@ type CloudCommandInput = {
   provider?: "vercel"
   deploymentId?: string
   limit?: number
+  source?: "build" | "runtime"
   dryRun?: boolean
   organizationId?: string
   region?: string
@@ -71,6 +86,8 @@ let bridgeToken = ""
 
 type CloudBridgeOptions = {
   publish?: typeof publishProject
+  /** A fake Vercel API, for tests. */
+  vercel?: VercelBridgeOptions
   /** The desktop's parallel workspaces, so an agent's worktree resolves to its project. */
   workspaces?: () => CloudWorkspace[] | Promise<CloudWorkspace[]>
 }
@@ -150,6 +167,7 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   const organizationId = Reflect.get(value, "organizationId")
   const region = Reflect.get(value, "region")
   const force = Reflect.get(value, "force")
+  const source = Reflect.get(value, "source")
   const known = COMMANDS.find((item) => item === command)
   if (!known) throw new Error("Unsupported Vector Cloud command.")
   const describable = DESCRIBABLE.find((item) => item === action)
@@ -173,7 +191,10 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     throw new Error("Invalid database region.")
   }
   if (force !== undefined && typeof force !== "boolean") throw new Error("Invalid database creation mode.")
+  if (source !== undefined && source !== "build" && source !== "runtime") throw new Error("Invalid log source.")
   return {
+    ...parseVercelFields(value),
+    source,
     command: known,
     action: describable,
     projectPath,
@@ -200,7 +221,9 @@ function configuredPublishTargets(input: CloudCommandInput) {
 // What a changing action would touch, worded for the permission prompt: the
 // provider, the provider-side project and the environment. A report that is not
 // ok means the action cannot run yet, so the tool relays it without asking.
-function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
+async function describeCloudAction(input: CloudCommandInput, workspace: CloudScope, request?: VercelFetch) {
+  // Vector's local Supabase and publish descriptions are below; every Vercel
+  // action, including the environment sync, describes itself.
   const scope = (provider: "Vercel" | "Supabase", project: string, environment: string, summary: string) => ({
     ok: true,
     scope: { provider, project, environment, summary },
@@ -208,39 +231,60 @@ function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
   if (input.action === "publish") {
     const target = configuredPublishTargets(input)[0]
     if (!target) return publishSetup()
+    // Vercel makes a project's first deployment production whatever it was
+    // asked for, so that publish is described as the production release it is.
+    const project = await vercelLinkContext(input.projectPath)
+      .then((context) => readVercelProject(context, request))
+      .catch(() => undefined)
+    if (project && !project.productionDeploymentId) {
+      return scope(
+        "Vercel",
+        target.projectName,
+        "production",
+        `Publish ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"} to the Vercel project ${target.projectName}. It has never been deployed, and Vercel makes a project's first deployment production, so this goes live at its production address; release checks run after.`,
+      )
+    }
     if (workspace.directory !== workspace.projectPath) {
       return scope(
         "Vercel",
         target.projectName,
         "preview",
-        `Publish this agent workspace to the Vercel project ${target.projectName} as a preview release. Production changes only after it is merged into the main project.`,
+        `Publish this agent workspace to the Vercel project ${target.projectName} as a preview at its branch address. Production changes only after it is merged into the main project.`,
       )
     }
-    const environment = input.production === false ? "preview" : "production"
-    return scope(
-      "Vercel",
-      target.projectName,
-      environment,
-      `Publish this project to the Vercel project ${target.projectName} as a ${environment} release.`,
-    )
-  }
-  if (input.action === "sync_environment") {
-    const link = getCloudProviderProjectLink(input.projectPath, input.taskId, "vercel")
-    if (!link) {
+    // Nothing to approve when Deployment Protection would keep the checks out
+    // of the production build: production would not move.
+    const settings = getBuildSettings(input.projectPath, input.taskId)
+    const checked = (settings?.requiredChecks.health ?? true) || (settings?.requiredChecks.browser ?? true)
+    if (
+      input.production === true &&
+      project &&
+      checked &&
+      !project.protection.bypassReady &&
+      protectsDeployment(project.protection, "production")
+    ) {
       return {
         ok: false,
         needsSetup: true,
-        error: "No Vercel project is linked to this project.",
-        nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
+        errorCode: "checks_blocked",
+        error: `Vercel Deployment Protection covers the production builds of ${target.projectName}, and Vector has no Protection Bypass for Automation secret, so its release checks could not open the build and production would not move.`,
+        nextStep:
+          "Offer enable_protection_bypass (the user approves it) so the checks can open protected builds, then publish to production again.",
       }
     }
-    const count = listEnv(input.projectPath, input.taskId).length
-    return scope(
-      "Vercel",
-      link.projectName,
-      "production, preview and development",
-      `Write ${count} environment ${count === 1 ? "variable" : "variables"} to the Vercel project ${link.projectName} for production, preview and development.`,
-    )
+    return input.production === true
+      ? scope(
+          "Vercel",
+          target.projectName,
+          "production",
+          `Build this project for production on the Vercel project ${target.projectName} and run the release checks on that build. Production traffic moves to it only if they pass.`,
+        )
+      : scope(
+          "Vercel",
+          target.projectName,
+          "preview",
+          `Publish this project to the Vercel project ${target.projectName} as a preview. Production does not change.`,
+        )
   }
   const database = getDatabase(input.projectPath, input.taskId)
   const name = database ? (database.projectName ?? database.projectRef ?? new URL(database.url).hostname) : ""
@@ -307,11 +351,26 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   // directory the agent is working in, which is a worktree for a parallel agent.
   const scope = await resolveCloudScope(request.projectPath, (await options.workspaces?.()) ?? [])
   const input = { ...request, projectPath: scope.projectPath }
-  if (input.command === "describe") return describeCloudAction(input, scope)
+  if (input.command === "describe") {
+    if (input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)) {
+      return describeVercelAction(input, scope, options.vercel)
+    }
+    return describeCloudAction(input, scope, options.vercel?.request)
+  }
+  if (
+    VERCEL_COMMANDS.some((item) => item === input.command) ||
+    ["sync_environment", "list_deployments"].includes(input.command)
+  ) {
+    return runVercelCommand(input, scope, options.vercel)
+  }
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
     const connections = (["vercel", "supabase"] as const).map(cachedCloudProviderConnection)
     const targets = configuredPublishTargets(input)
+    // A .vercel/project.json is only a suggestion: linking asks the user first.
+    const candidate = getCloudProviderProjectLink(input.projectPath, input.taskId, "vercel")
+      ? undefined
+      : await vercelProjectCandidate(input.projectPath, scope.directory)
     return {
       ok: true,
       configured: targets.length > 0,
@@ -322,6 +381,10 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
         : { connected: false },
       deployments: deploymentSummaries(input),
       connections,
+      vercel: vercelStatusSummary(input.projectPath),
+      nextStep: candidate
+        ? `This repository's .vercel/project.json names the Vercel project ${candidate.projectId}${candidate.teamId ? ` (teamId ${candidate.teamId})` : ""}. Link it with link_project, which the user approves, before publishing.`
+        : undefined,
     }
   }
   if (input.command === "detect_build") {
@@ -375,21 +438,13 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   if (input.command === "supabase_services") {
     return { ok: true, services: await getSupabaseServiceSnapshot(input.projectPath, input.taskId) }
   }
-  if (input.command === "sync_environment") {
-    return {
-      ok: true,
-      sync: await syncCloudProviderEnvironment(input.projectPath, input.taskId, input.provider ?? "vercel"),
-    }
-  }
-  if (input.command === "list_deployments") {
-    return { ok: true, deployments: deploymentSummaries(input) }
-  }
   if (input.command === "logs") {
     return fetchCloudLogs({
       projectPath: input.projectPath,
       taskId: input.taskId,
       deploymentId: input.deploymentId,
       limit: input.limit,
+      source: input.source,
     })
   }
   if (input.command === "apply_migrations") {
@@ -401,8 +456,9 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     })
   }
   if (!configuredPublishTargets(input).length) return publishSetup()
-  // An agent workspace publishes a preview from its worktree. Production only
-  // moves once the work is merged into the main project.
+  // An agent workspace publishes a preview from its worktree, at its branch's
+  // stable address. Production only moves once the work is merged and the
+  // user asked for production.
   const isolated = scope.directory !== scope.projectPath
   const result = await (options.publish ?? publishProject)({
     projectPath: scope.directory,
@@ -412,15 +468,46 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     workspaceId: scope.workspace?.id,
     workspaceName: scope.workspace?.name,
     target: "vercel",
-    production: !isolated && input.production !== false,
+    production: !isolated && input.production === true,
     runId: randomUUID(),
   })
-  if (!isolated) return result
   return {
     ...result,
-    nextStep:
-      "This agent workspace was published as a preview. Merge it into the main project before promoting it to production.",
+    needsSetup: result.errorCode ? SETUP_CODES.includes(result.errorCode) : undefined,
+    nextStep: publishNextStep(result, isolated),
   }
+}
+
+const SETUP_CODES = ["not_connected", "not_linked", "no_node", "token_rejected"]
+
+function publishNextStep(result: PublishResult, isolated: boolean) {
+  if (result.ok) {
+    if (result.environment === "production") {
+      return isolated
+        ? `Vercel made this agent workspace's release production, because it was the project's first deployment: it is live at ${result.url}. Tell the user.`
+        : undefined
+    }
+    return isolated
+      ? `This agent workspace's preview is at ${result.url}; tell the user. Merge the workspace into the main project before promoting it to production.`
+      : "This is a preview; production did not change. Publish with production: true only when the user asks to ship to production."
+  }
+  if (result.errorCode === "no_node")
+    return "Ask the user to install Node.js 18 or later (nodejs.org), then publish again."
+  if (result.errorCode === "token_rejected")
+    return "Ask the user to reconnect Vercel with a new token in Cloud Services > Integrations."
+  if (result.errorCode === "not_linked" || result.errorCode === "not_connected") {
+    return "Link a project with link_project (see vercel_projects) or create_project, or ask the user to connect Vercel in Cloud Services > Integrations."
+  }
+  if (result.errorCode === "build_failed") return "Read the build output above, fix the cause, and publish again."
+  if (result.errorCode === "checks_blocked") {
+    return "Production did not change. Offer enable_protection_bypass (the user approves it) so the checks can open protected builds, then publish to production again."
+  }
+  if (result.errorCode === "checks_failed") {
+    return result.environment === "production"
+      ? "Production is serving a release whose checks failed. Offer to roll back with rollback (with no deploymentId it returns to the last deployment that served production and passed Vector's checks), then fix and publish again."
+      : "Read the failed checks above, fix the cause, and publish again."
+  }
+  return "Read the error and log above before trying again."
 }
 
 function deploymentSummaries(input: CloudCommandInput) {

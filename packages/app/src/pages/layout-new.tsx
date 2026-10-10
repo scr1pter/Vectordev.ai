@@ -224,6 +224,8 @@ type ParallelWorkspaceRecord = {
   diff: string
   checkpointPath?: string
   pullRequestUrl?: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
   contextFiles?: string[]
   contextIndexedFiles?: number
   contextTokenEstimate?: number
@@ -3571,6 +3573,19 @@ export default function NewLayout(props: ParentProps) {
                 View PR
               </a>
             </Show>
+            <Show when={record().previewUrl}>
+              {(url) => (
+                <a
+                  href={url()}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={url()}
+                  class="inline-flex h-9 items-center rounded-[9px] border border-[color:var(--vx-line)] px-3 text-[11.5px] text-white/65 transition hover:bg-white/[0.05] hover:text-white"
+                >
+                  View preview
+                </a>
+              )}
+            </Show>
             <div class="flex-1" />
             <Show when={record().mergeState === "none" && !isParallelWorkspaceRunning(record())}>
               <Show when={record().isolation === "git-worktree" && !record().pullRequestUrl}>
@@ -4827,6 +4842,19 @@ export default function NewLayout(props: ParentProps) {
                     >
                       View PR
                     </a>
+                  </Show>
+                  <Show when={record().previewUrl}>
+                    {(url) => (
+                      <a
+                        href={url()}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={url()}
+                        class="inline-flex h-9 items-center rounded-[10px] border border-[color:var(--vx-line)] px-3 text-[12px] text-white/65 transition hover:bg-white/[0.05] hover:text-white"
+                      >
+                        View preview
+                      </a>
+                    )}
                   </Show>
                   <div class="flex-1" />
                   <Show when={record().mergeState === "none" && !isParallelWorkspaceRunning(record())}>

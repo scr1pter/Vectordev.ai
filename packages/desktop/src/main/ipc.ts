@@ -61,25 +61,21 @@ import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
 import { cancelBackgroundTask, clearCompletedBackgroundTasks, listBackgroundTasks } from "./background-tasks"
 import {
+  checkAllDeploymentHealth,
+  checkDeploymentHealth,
   detectPublishTargets,
-  fetchDeploymentRuntimeLogs,
-  promoteDeployment,
   publishProject,
   rerunDeploymentChecks,
-  rollbackDeployment,
   type PublishProjectInput,
 } from "./publish"
 import {
   applyEnv,
-  checkAllDeployments,
-  checkDeployment,
   connectDatabase,
   detectBuildSettings,
   disconnectDatabase,
   getBuildSettings,
   getDatabase,
   listDeployments,
-  listDomains,
   listEnv,
   removeDeployment,
   removeEnv,
@@ -87,22 +83,17 @@ import {
   setEnv,
 } from "./cloud-console"
 import {
-  addCloudProviderDomain,
   connectCloudProvider,
   connectCloudProviderWithToken,
   connectSupabaseProject,
   disconnectCloudProvider,
   getSupabaseServiceSnapshot,
-  linkCloudProviderProject,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
   listCloudProviderResources,
-  removeCloudProviderDomain,
-  syncCloudProviderEnvironment,
-  unlinkCloudProviderProject,
-  verifyCloudProviderDomain,
   type CloudProviderId,
 } from "./cloud-connections"
+import { vercelIpc, VERCEL_IPC_PREFIX } from "./cloud-vercel-ipc"
 import {
   detectGithub,
   publishToGithub,
@@ -549,41 +540,13 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-provider-links-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listCloudProviderProjectLinks(projectPath, taskId),
   )
-  handle(
-    "cloud-provider-links-set",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel",
-      projectId: string,
-    ) => linkCloudProviderProject(projectPath, taskId, provider, projectId),
-  )
-  handle(
-    "cloud-provider-links-remove",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel") =>
-      unlinkCloudProviderProject(projectPath, taskId, provider),
-  )
-  handle(
-    "cloud-provider-env-sync",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel") =>
-      syncCloudProviderEnvironment(projectPath, taskId, provider),
-  )
-  handle(
-    "cloud-provider-domains-add",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel", domain: string) =>
-      addCloudProviderDomain(projectPath, taskId, provider, domain),
-  )
-  handle(
-    "cloud-provider-domains-verify",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      verifyCloudProviderDomain(projectPath, taskId, id),
-  )
-  handle(
-    "cloud-provider-domains-remove",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      removeCloudProviderDomain(projectPath, taskId, id),
-  )
+  // The Vercel controls in Cloud Services (window.api.cloud.vercel), one
+  // channel each; the agent's vector_cloud actions call the same functions.
+  for (const [name, listener] of Object.entries(vercelIpc)) {
+    const call = listener as (...args: unknown[]) => unknown
+    handle(`${VERCEL_IPC_PREFIX}${name}`, (_event: IpcMainInvokeEvent, ...args: unknown[]) => call(...args))
+  }
+
   handle(
     "cloud-supabase-project-connect",
     (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, projectRef: string) =>
@@ -603,25 +566,10 @@ export function registerIpcHandlers(deps: Deps) {
   handle(
     "cloud-deployments-check",
     (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      checkDeployment(projectPath, taskId, id),
+      checkDeploymentHealth({ projectPath, taskId, id }),
   )
   handle("cloud-deployments-check-all", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    checkAllDeployments(projectPath, taskId),
-  )
-  handle(
-    "cloud-deployments-promote",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      promoteDeployment({ projectPath, taskId, id }),
-  )
-  handle(
-    "cloud-deployments-rollback",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      rollbackDeployment({ projectPath, taskId, id }),
-  )
-  handle(
-    "cloud-deployments-logs",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      fetchDeploymentRuntimeLogs({ projectPath, taskId, id }),
+    checkAllDeploymentHealth(projectPath, taskId),
   )
   handle(
     "cloud-deployments-rerun-checks",
@@ -657,9 +605,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-env-apply", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     applyEnv(projectPath, taskId),
   )
-  handle("cloud-domains-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    listDomains(projectPath, taskId),
-  )
+
   handle("cloud-db-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getDatabase(projectPath, taskId),
   )
