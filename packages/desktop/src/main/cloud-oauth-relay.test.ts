@@ -3,7 +3,6 @@ import { cloudOAuthAuthorizeUrl } from "./cloud-oauth-relay"
 
 test.each([
   ["vercel", "https://vercel.com/integrations/vector/new?state=fixture"],
-  ["netlify", "https://app.netlify.com/authorize?state=fixture"],
   ["supabase", "https://api.supabase.com/v1/oauth/authorize?state=fixture"],
 ] as const)("allows the expected HTTPS authorization origin for %s", (provider, url) => {
   expect(cloudOAuthAuthorizeUrl(provider, url)).toBe(url)

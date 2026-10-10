@@ -1,12 +1,10 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
-export type CloudProviderId = "vercel" | "netlify" | "supabase"
+export type CloudProviderId = "vercel" | "supabase"
 
 type CloudFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
 function providerLabel(provider: CloudProviderId) {
-  if (provider === "vercel") return "Vercel"
-  if (provider === "netlify") return "Netlify"
-  return "Supabase"
+  return provider === "vercel" ? "Vercel" : "Supabase"
 }
 
 function stringField(value: unknown, key: string): string | undefined {
@@ -61,13 +59,6 @@ async function loadProviderIdentity(
     return {
       account: stringField(user, "username") ?? stringField(user, "name") ?? stringField(user, "email"),
       accountId: teamId ?? stringField(user, "id"),
-    }
-  }
-  if (provider === "netlify") {
-    const body = await providerJson(token, "https://api.netlify.com/api/v1/user", request)
-    return {
-      account: stringField(body, "full_name") ?? stringField(body, "email"),
-      accountId: stringField(body, "id"),
     }
   }
   const body = await providerJson(token, "https://api.supabase.com/v1/organizations", request)

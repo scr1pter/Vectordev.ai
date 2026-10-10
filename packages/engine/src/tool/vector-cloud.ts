@@ -26,12 +26,12 @@ export const Parameters = Schema.Struct({
   production: Schema.optional(Schema.Boolean).annotate({
     description: "For publish, promote the verified deployment to production. Defaults to true.",
   }),
-  target: Schema.optional(Schema.Literals(["vector-cloud", "vercel", "netlify"])).annotate({
+  target: Schema.optional(Schema.Literals(["vector-cloud", "vercel"])).annotate({
     description:
-      "For publish, select Vector Cloud, Vercel, or Netlify. When omitted, use the project's single configured destination; multiple destinations require a choice.",
+      "For publish, select Vector Cloud or Vercel. When omitted, use the project's single configured destination; multiple destinations require a choice.",
   }),
-  provider: Schema.optional(Schema.Literals(["vercel", "netlify"])).annotate({
-    description: "For sync_environment, the linked hosting provider to update.",
+  provider: Schema.optional(Schema.Literals(["vercel"])).annotate({
+    description: "For sync_environment, the linked hosting provider to update. Vercel is the only hosting provider.",
   }),
   deploymentId: Schema.optional(Schema.String).annotate({
     description: "For logs, a deployment id from list_deployments. Defaults to the most recent deployment.",
@@ -154,7 +154,7 @@ function nameList(values?: string[]) {
 // What the user has to do before this action can work. Cloud actions depend on
 // an account Vector cannot connect on the user's behalf, so an unfinished setup
 // has to read as an instruction rather than as a failed run.
-const SETUP_HINT = "Connect an account in Vector Cloud > Connections (Vercel, Netlify, or Supabase), then try again."
+const SETUP_HINT = "Connect an account in Vector Cloud > Connections (Vercel or Supabase), then try again."
 
 function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudReport) {
   if (action === "publish" && report.needsChoice) {

@@ -18,23 +18,18 @@ describe("manual cloud provider tokens", () => {
     expect(JSON.stringify(identity)).not.toContain("secret-token")
   })
 
-  test("uses each provider's own identity endpoint", async () => {
+  test("uses Supabase's own identity endpoint", async () => {
     const urls: string[] = []
     const request = async (input: string | URL | Request) => {
       urls.push(String(input))
-      if (String(input).includes("netlify")) return Response.json({ id: "netlify_1", email: "dev@example.com" })
       return Response.json([{ id: "supabase_1", name: "Vector Org" }])
     }
 
-    expect(await validateCloudProviderToken("netlify", "netlify-token", request)).toEqual({
-      account: "dev@example.com",
-      accountId: "netlify_1",
-    })
     expect(await validateCloudProviderToken("supabase", "supabase-token", request)).toEqual({
       account: "Vector Org",
       accountId: "supabase_1",
     })
-    expect(urls).toEqual(["https://api.netlify.com/api/v1/user", "https://api.supabase.com/v1/organizations"])
+    expect(urls).toEqual(["https://api.supabase.com/v1/organizations"])
   })
 
   test("rejects invalid tokens without echoing their secret value", async () => {

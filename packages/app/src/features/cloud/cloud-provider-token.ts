@@ -19,14 +19,6 @@ export function cloudProviderTokenGuide(provider: CloudProviderId) {
       placeholder: "Paste your Vercel access token",
     }
   }
-  if (provider === "netlify") {
-    return {
-      url: "https://app.netlify.com/user/applications#personal-access-tokens",
-      location: "Netlify → User settings → Applications → Personal access tokens",
-      instruction: "Create a personal access token for the account and sites you want Vector to manage.",
-      placeholder: "Paste your Netlify personal access token",
-    }
-  }
   return {
     url: "https://supabase.com/dashboard/account/tokens",
     location: "Supabase → Account → Access Tokens",

@@ -13,7 +13,6 @@ import {
   type CloudBuildSettings,
   type CloudDeployment,
   type CloudDomain,
-  type CloudDomainProvider,
   type CloudDatabaseConnection,
   type CloudProviderConnection,
   type CloudProviderId,
@@ -317,7 +316,7 @@ function cleanDeploymentUrl(value: string) {
 }
 
 function isPublishTargetId(value: string): value is PublishTargetId {
-  return value === "vector-cloud" || value === "vercel" || value === "netlify"
+  return value === "vector-cloud" || value === "vercel"
 }
 
 function isPackageManager(value: string): value is BuildDraft["packageManager"] {
@@ -325,9 +324,7 @@ function isPackageManager(value: string): value is BuildDraft["packageManager"] 
 }
 
 function providerLabel(provider: CloudProviderId) {
-  if (provider === "vercel") return "Vercel"
-  if (provider === "netlify") return "Netlify"
-  return "Supabase"
+  return provider === "vercel" ? "Vercel" : "Supabase"
 }
 
 export function CloudConsole(props: {
@@ -392,7 +389,6 @@ export function CloudConsole(props: {
   })
 
   const [domainDraft, setDomainDraft] = createSignal("")
-  const [domainProvider, setDomainProvider] = createSignal<Exclude<CloudDomainProvider, "vector-cloud">>("vercel")
   const [verifyingId, setVerifyingId] = createSignal("")
   const [confirmId, setConfirmId] = createSignal("")
   const [copiedId, setCopiedId] = createSignal("")
@@ -456,10 +452,6 @@ export function CloudConsole(props: {
     setAgentWorkspaces(nextWorkspaces)
     setConnections(nextConnections)
     setProviderLinks(nextLinks)
-    if (!nextLinks.some((item) => item.provider === domainProvider())) {
-      const first = nextLinks.find((item) => item.provider === "vercel" || item.provider === "netlify")
-      if (first) setDomainProvider(first.provider)
-    }
     const connectedProviders = nextConnections.filter((item) => item.connected).map((item) => item.provider)
     const resources = await Promise.all(
       connectedProviders.map(async (provider) => ({
@@ -512,7 +504,7 @@ export function CloudConsole(props: {
         text:
           deployment.target === "vector-cloud"
             ? `Unpublished ${deployment.name}.`
-            : `Removed ${deployment.name} from Vector's deployment history. Manage the live site in ${deployment.target === "vercel" ? "Vercel" : "Netlify"}.`,
+            : `Removed ${deployment.name} from Vector's deployment history. Manage the live site in Vercel.`,
       })
     } catch {
       setNotice({ tone: "error", text: `Could not remove ${deployment.name} — try again.` })
@@ -777,18 +769,17 @@ export function CloudConsole(props: {
   // --- Domains -------------------------------------------------------------
   const addDomain = async () => {
     if (!api || !props.projectPath || !domainDraft().trim()) return
-    const provider = domainProvider()
-    if (!providerLink(provider)) {
-      setNotice({ tone: "error", text: `Link a ${providerLabel(provider)} project before adding a domain.` })
+    if (!providerLink("vercel")) {
+      setNotice({ tone: "error", text: "Link a Vercel project before adding a domain." })
       return
     }
     try {
-      await api.providers.addDomain(props.projectPath, props.taskId, provider, domainDraft().trim())
+      await api.providers.addDomain(props.projectPath, props.taskId, "vercel", domainDraft().trim())
       setDomainDraft("")
       setDomains(await api.domains.list(props.projectPath, props.taskId))
       setNotice({
         tone: "success",
-        text: `Domain attached to ${providerLabel(provider)}. Configure the DNS record shown, then verify.`,
+        text: "Domain attached to Vercel. Configure the DNS record shown, then verify.",
       })
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not add domain." })
@@ -845,7 +836,7 @@ export function CloudConsole(props: {
 
   // --- Provider connections ------------------------------------------------
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
-  const providerLink = (provider: "vercel" | "netlify") => providerLinks().find((item) => item.provider === provider)
+  const providerLink = (provider: "vercel") => providerLinks().find((item) => item.provider === provider)
 
   const supabaseDashboard = (pathname = "") => {
     const ref = database()?.projectRef
@@ -853,15 +844,10 @@ export function CloudConsole(props: {
     return `https://supabase.com/dashboard/project/${encodeURIComponent(ref)}${pathname}`
   }
 
-  const deploymentDashboard = (provider: "vercel" | "netlify", pathname = "") => {
-    const link = providerLink(provider)
-    if (!link) return provider === "vercel" ? "https://vercel.com/dashboard" : "https://app.netlify.com/"
-    if (provider === "vercel" && link.accountName) {
-      return `https://vercel.com/${encodeURIComponent(link.accountName)}/${encodeURIComponent(link.projectName)}${pathname}`
-    }
-    return provider === "vercel"
-      ? "https://vercel.com/dashboard"
-      : `https://app.netlify.com/sites/${encodeURIComponent(link.projectName)}${pathname}`
+  const deploymentDashboard = (pathname = "") => {
+    const link = providerLink("vercel")
+    if (!link?.accountName) return "https://vercel.com/dashboard"
+    return `https://vercel.com/${encodeURIComponent(link.accountName)}/${encodeURIComponent(link.projectName)}${pathname}`
   }
 
   const refreshSupabaseServices = async () => {
@@ -1169,7 +1155,7 @@ export function CloudConsole(props: {
                 <button class="cloud-metric" type="button" onClick={() => setSection("connections")}>
                   <span class="cloud-metric-value">{connections().filter((item) => item.connected).length}</span>
                   <strong>Cloud accounts</strong>
-                  <small>Vercel, Netlify, and Supabase connections</small>
+                  <small>Vercel and Supabase connections</small>
                 </button>
                 <button class="cloud-metric" type="button" onClick={() => setSection("environment")}>
                   <span class="cloud-metric-value">{envVars().length}</span>
@@ -1252,7 +1238,7 @@ export function CloudConsole(props: {
                 </div>
               </section>
               <div class="cloud-connection-list">
-                <For each={["vercel", "netlify", "supabase"] as CloudProviderId[]}>
+                <For each={["vercel", "supabase"] as CloudProviderId[]}>
                   {(provider) => {
                     const connection = () => providerConnection(provider)
                     const connectionMode = () => cloudProviderConnectionMode(connection())
@@ -1262,7 +1248,7 @@ export function CloudConsole(props: {
                     return (
                       <section class="cloud-panel cloud-connection-card">
                         <div class="cloud-provider-mark" data-provider={provider}>
-                          {provider === "vercel" ? "V" : provider === "netlify" ? "N" : "S"}
+                          {provider === "vercel" ? "V" : "S"}
                         </div>
                         <div class="cloud-connection-main">
                           <div class="flex items-center gap-2">
@@ -1509,8 +1495,8 @@ export function CloudConsole(props: {
                 <div class="cloud-panel mb-3">
                   <div class="cloud-panel-title">Publish this project</div>
                   <p class="cloud-muted mt-1 text-[12px]">
-                    Vector runs the whole deploy on your own Vercel or Netlify account — authorize once, then it's a
-                    single click. Your code is never proxied through Vector.
+                    Vector runs the whole deploy on your own Vercel account — authorize once, then it's a single click.
+                    Your code is never proxied through Vector.
                   </p>
                   <div class="cloud-segment mt-3" aria-label="Deployment environment">
                     <button
@@ -2010,7 +1996,7 @@ export function CloudConsole(props: {
                 </div>
               </div>
               <section class="cloud-service-list mt-4">
-                <button type="button" onClick={() => platform.openLink(deploymentDashboard("vercel", "/analytics"))}>
+                <button type="button" onClick={() => platform.openLink(deploymentDashboard("/analytics"))}>
                   <span class="cloud-service-icon">V</span>
                   <span>
                     <strong>Vercel Analytics</strong>
@@ -2018,10 +2004,7 @@ export function CloudConsole(props: {
                   </span>
                   <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => platform.openLink(deploymentDashboard("vercel", "/speed-insights"))}
-                >
+                <button type="button" onClick={() => platform.openLink(deploymentDashboard("/speed-insights"))}>
                   <span class="cloud-service-icon">
                     <Icon name="status" />
                   </span>
@@ -2030,14 +2013,6 @@ export function CloudConsole(props: {
                     <small>Inspect Core Web Vitals in the provider dashboard.</small>
                   </span>
                   <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
-                </button>
-                <button type="button" onClick={() => platform.openLink(deploymentDashboard("netlify", "/analytics"))}>
-                  <span class="cloud-service-icon">N</span>
-                  <span>
-                    <strong>Netlify Analytics</strong>
-                    <small>Open analytics for the linked Netlify site.</small>
-                  </span>
-                  <em>{providerLink("netlify") ? "Open" : "Connect first"}</em>
                 </button>
               </section>
             </Show>
@@ -2140,8 +2115,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Bring your own domain</div>
                   <h1>Domains</h1>
                   <p>
-                    Attach a domain you own to the linked Vercel or Netlify project for <strong>{projectName()}</strong>
-                    . Vector performs the provider action and checks the result.
+                    Attach a domain you own to the linked Vercel project for <strong>{projectName()}</strong>. Vector
+                    performs the provider action and checks the result.
                   </p>
                 </div>
               </div>
@@ -2163,7 +2138,7 @@ export function CloudConsole(props: {
                     when={providerLinks().length}
                     fallback={
                       <div class="cloud-inline-empty mt-3">
-                        <span>Link a Vercel or Netlify project before connecting a domain.</span>
+                        <span>Link a Vercel project before connecting a domain.</span>
                         <button class="cloud-button" type="button" onClick={() => setSection("connections")}>
                           Open Connections
                         </button>
@@ -2171,23 +2146,12 @@ export function CloudConsole(props: {
                     }
                   >
                     <form
-                      class="mt-3 grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)_auto]"
+                      class="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
                       onSubmit={(event) => {
                         event.preventDefault()
                         void addDomain()
                       }}
                     >
-                      <select
-                        class="cloud-input"
-                        value={domainProvider()}
-                        onChange={(event) =>
-                          setDomainProvider(event.currentTarget.value as Exclude<CloudDomainProvider, "vector-cloud">)
-                        }
-                      >
-                        <For each={providerLinks()}>
-                          {(link) => <option value={link.provider}>{providerLabel(link.provider)}</option>}
-                        </For>
-                      </select>
                       <input
                         class="cloud-input min-w-0"
                         value={domainDraft()}
@@ -2198,9 +2162,7 @@ export function CloudConsole(props: {
                         class="cloud-button"
                         data-variant="primary"
                         type="submit"
-                        disabled={
-                          !api || !props.projectPath || !domainDraft().trim() || !providerLink(domainProvider())
-                        }
+                        disabled={!api || !props.projectPath || !domainDraft().trim() || !providerLink("vercel")}
                       >
                         Add domain
                       </button>
@@ -2278,7 +2240,7 @@ export function CloudConsole(props: {
                   <h1>Environment variables</h1>
                   <p>
                     Manage variables for <strong>{projectName()}</strong>. Write them locally, or securely sync them to
-                    a linked Vercel or Netlify project through your authorized account.
+                    a linked Vercel project through your authorized account.
                   </p>
                 </div>
               </div>
@@ -2842,7 +2804,7 @@ export function CloudConsole(props: {
                   ]}
                 >
                   {(service) => (
-                    <button type="button" onClick={() => platform.openLink(deploymentDashboard("vercel"))}>
+                    <button type="button" onClick={() => platform.openLink(deploymentDashboard())}>
                       <span class="cloud-service-icon">
                         <Icon name={service.icon} />
                       </span>
@@ -2855,17 +2817,6 @@ export function CloudConsole(props: {
                   )}
                 </For>
               </section>
-              <Show when={providerLink("netlify")}>
-                <div class="mt-4 flex justify-end">
-                  <button
-                    class="cloud-button"
-                    type="button"
-                    onClick={() => platform.openLink(deploymentDashboard("netlify"))}
-                  >
-                    Open linked Netlify site
-                  </button>
-                </div>
-              </Show>
             </Show>
 
             {/* AWS */}

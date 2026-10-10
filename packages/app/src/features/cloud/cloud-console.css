@@ -230,9 +230,6 @@
 .cloud-provider-mark[data-provider="supabase"] {
   color: #8ddbb0;
 }
-.cloud-provider-mark[data-provider="netlify"] {
-  color: #7dd8d1;
-}
 .cloud-connection-main {
   min-width: 0;
 }

@@ -6,7 +6,7 @@ export const prerender = true
 
 <DocsPage id="cloud-services">
   <p>
-    Cloud Services connects the repositories you work on to your own Vercel, Netlify and Supabase accounts. AWS views
+    Cloud Services connects the repositories you work on to your own Vercel and Supabase accounts. AWS views
     use a profile you already configured for the AWS CLI. Resources remain in those accounts, with their own billing,
     quotas and terms. Free model inference does not make hosting or database operations free.
   </p>
@@ -23,9 +23,8 @@ export const prerender = true
     account before showing it as connected.
   </p>
   <p>
-    Link the existing Vercel or Netlify project that this repository should use, or choose its Supabase project in
-    Database. From 1.99.99, the desktop uses an encrypted temporary callback relay for Vercel and Netlify, and PKCE for
-    Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
+    Link the existing Vercel project that this repository should use, or choose its Supabase project in Database.
+    From 1.99.99, the desktop uses an encrypted temporary callback relay for Vercel, and PKCE for Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
   </p>
 
   <h2 id="project-environment">Manage project variables</h2>
@@ -42,7 +41,7 @@ export const prerender = true
     Other frameworks retain their existing serialization.
   </p>
   <p>
-    Sync to Vercel or Netlify sends the configured values to the linked host. Local .env changes and remote provider
+    Sync to Vercel sends the configured values to the linked project. Local .env changes and remote provider
     values are separate: removing a local entry does not confirm remote deletion. Supabase setup adds public client
     values, including the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY aliases used by the generated client. Secret,
     service-role, management and user-session keys are rejected for that browser configuration.

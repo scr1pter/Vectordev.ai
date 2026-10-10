@@ -120,7 +120,7 @@ export function createCloudEnvironment(input: {
           }),
       )
     },
-    sync: (provider: "vercel" | "netlify") =>
+    sync: (provider: "vercel") =>
       perform(
         provider,
         (api, scope) => api.providers.syncEnvironment(scope.projectPath, scope.taskId, provider),

@@ -115,7 +115,7 @@ type PackageManifest = {
 }
 
 export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vector-cloud" | "vercel" | "netlify"
+export type CloudDomainProvider = "vector-cloud" | "vercel"
 
 export type CloudDomain = {
   id: string
@@ -453,14 +453,15 @@ function readProject(projectPath: string): ProjectData {
     : []
   const database =
     data.database && typeof data.database === "object" && data.database.provider === "supabase" ? data.database : null
+  // Domains attached through a retired host (Netlify) are not shown: Vector can
+  // no longer verify or detach them, and the provider still owns them.
   const domains = Array.isArray(data.domains)
     ? data.domains
-        .filter((item): item is CloudDomain => typeof item?.id === "string" && typeof item?.domain === "string")
-        .map((item) => ({
-          ...item,
-          provider:
-            item.provider === "vercel" || item.provider === "netlify" ? item.provider : ("vector-cloud" as const),
-        }))
+        .filter(
+          (item): item is CloudDomain =>
+            typeof item?.id === "string" && typeof item?.domain === "string" && String(item.provider) !== "netlify",
+        )
+        .map((item) => ({ ...item, provider: item.provider === "vercel" ? item.provider : ("vector-cloud" as const) }))
     : []
   const build =
     data.build &&
@@ -507,8 +508,8 @@ function writeProject(projectPath: string, data: ProjectData) {
 export function redactCloudLog(projectPath: string, taskId: string | undefined, value: string): string {
   // Two layers, and both are needed: the stored env values catch the user's own
   // secrets verbatim, and redactText catches everything a build or provider CLI
-  // prints that Vector never stored — including the VERCEL_TOKEN /
-  // NETLIFY_AUTH_TOKEN that publish injects into the build child's environment.
+  // prints that Vector never stored, such as bearer headers and token-shaped
+  // strings.
   return redactText(
     readProject(projectPath).env.reduce(
       (output, item) => (item.value.length >= 4 ? output.split(item.value).join("[redacted]") : output),

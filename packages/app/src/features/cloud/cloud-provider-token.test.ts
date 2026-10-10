@@ -44,15 +44,6 @@ describe("cloudProviderTokenGuide", () => {
     })
   })
 
-  test("points to the exact Netlify token settings", () => {
-    expect(cloudProviderTokenGuide("netlify")).toEqual({
-      url: "https://app.netlify.com/user/applications#personal-access-tokens",
-      location: "Netlify → User settings → Applications → Personal access tokens",
-      instruction: "Create a personal access token for the account and sites you want Vector to manage.",
-      placeholder: "Paste your Netlify personal access token",
-    })
-  })
-
   test("points to the exact Supabase token settings", () => {
     expect(cloudProviderTokenGuide("supabase")).toEqual({
       url: "https://supabase.com/dashboard/account/tokens",

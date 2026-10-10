@@ -5,9 +5,9 @@ export function GET(request: Request): Response {
     return jsonResponse(405, { ok: false, error: "Method not allowed. Use GET." })
   }
   // Older desktops hide their manual-token form when configured is true, but
-  // cannot create or decrypt the versioned Vercel/Netlify relay.
+  // cannot create or decrypt the versioned Vercel relay.
   const relay = new URL(request.url).searchParams.get("relay") === "v1"
-  const providers: CloudOAuthProvider[] = ["vercel", "netlify", "supabase"]
+  const providers: CloudOAuthProvider[] = ["vercel", "supabase"]
   return jsonResponse(200, {
     ok: true,
     providers: providers.map((provider) => {

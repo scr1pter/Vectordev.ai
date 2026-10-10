@@ -345,7 +345,7 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       id: "cloud-home",
       section: "Cloud Services",
       title: "Ship it from here.",
-      body: "Pick a repository and Cloud Services becomes its release console: publish to your own Vercel or Netlify account, check live health, point domains, manage .env variables, wire a Supabase database, and tune build settings. Your code never proxies through Vector.",
+      body: "Pick a repository and Cloud Services becomes its release console: publish to your own Vercel account, check live health, point domains, manage .env variables, wire a Supabase database, and tune build settings. Your code never proxies through Vector.",
       tip: "Deploy early, even half-finished — a live URL makes every change after it feel real.",
       target: "[data-vector-cloud-home]",
       placement: "auto",

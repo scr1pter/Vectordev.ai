@@ -559,29 +559,24 @@ export function registerIpcHandlers(deps: Deps) {
       _event: IpcMainInvokeEvent,
       projectPath: string,
       taskId: string | undefined,
-      provider: "vercel" | "netlify",
+      provider: "vercel",
       projectId: string,
     ) => linkCloudProviderProject(projectPath, taskId, provider, projectId),
   )
   handle(
     "cloud-provider-links-remove",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel" | "netlify") =>
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel") =>
       unlinkCloudProviderProject(projectPath, taskId, provider),
   )
   handle(
     "cloud-provider-env-sync",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel" | "netlify") =>
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel") =>
       syncCloudProviderEnvironment(projectPath, taskId, provider),
   )
   handle(
     "cloud-provider-domains-add",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-      domain: string,
-    ) => addCloudProviderDomain(projectPath, taskId, provider, domain),
+    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel", domain: string) =>
+      addCloudProviderDomain(projectPath, taskId, provider, domain),
   )
   handle(
     "cloud-provider-domains-verify",

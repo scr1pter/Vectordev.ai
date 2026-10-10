@@ -104,7 +104,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Deployments",
         where: "Cloud Services → Deployments.",
-        body: "Publish your app to the web in one click. Vector runs the whole deploy on your own Vercel or Netlify account — authorize once (for example, vercel login in the Terminal), and every deploy after that is a single click. Your code is never proxied through Vector: the build runs on your account, and finished deployments are listed with their live URLs. If no publisher is detected, the panel tells you exactly what to install and run.",
+        body: "Publish your app to the web in one click. Vector runs the whole deploy on your own Vercel account — authorize once (for example, vercel login in the Terminal), and every deploy after that is a single click. Your code is never proxied through Vector: the build runs on your account, and finished deployments are listed with their live URLs. If no publisher is detected, the panel tells you exactly what to install and run.",
         tip: "Deploy early, even half-finished — a live URL makes every change after it feel real.",
       },
       {

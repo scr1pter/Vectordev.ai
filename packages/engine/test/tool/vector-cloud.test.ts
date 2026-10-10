@@ -86,7 +86,7 @@ describe("vector_cloud bridge", () => {
           needsChoice: true,
           targets: [
             { id: "vercel", label: "Vercel", projectName: "website" },
-            { id: "netlify", label: "Netlify", projectName: "landing" },
+            { id: "vector-cloud", label: "Vector Cloud", projectName: "landing" },
           ],
           nextStep: "Choose one of these destinations.",
         },
@@ -96,7 +96,7 @@ describe("vector_cloud bridge", () => {
       expect(requests).toHaveLength(1)
       expect(requests[0]).not.toHaveProperty("target")
       expect(result.output).toContain("target vercel, project website")
-      expect(result.output).toContain("target netlify, project landing")
+      expect(result.output).toContain("target vector-cloud, project landing")
       expect(result.output).toContain("Choose one of these destinations.")
       expect(result.output).not.toContain("publish completed")
     }),
@@ -135,7 +135,7 @@ describe("vector_cloud bridge", () => {
   it.instance("does not report success from an HTTP failure", () =>
     Effect.gen(function* () {
       yield* bridge({ ok: true, url: "https://example.invalid" }, 502)
-      const result = yield* execute({ action: "publish", target: "netlify" }).pipe(Effect.exit)
+      const result = yield* execute({ action: "publish", target: "vercel" }).pipe(Effect.exit)
       expect(Exit.isFailure(result)).toBe(true)
       if (Exit.isFailure(result)) expect(Cause.pretty(result.cause)).toContain("Vector Cloud command failed (502)")
     }),

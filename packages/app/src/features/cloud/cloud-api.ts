@@ -79,7 +79,7 @@ export type CloudBuildSettings = {
 }
 
 export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vector-cloud" | "vercel" | "netlify"
+export type CloudDomainProvider = "vector-cloud" | "vercel"
 
 export type CloudDomain = {
   id: string
@@ -106,7 +106,7 @@ export type CloudDatabaseConnection = {
   connectedAt: string
 } | null
 
-export type CloudProviderId = "vercel" | "netlify" | "supabase"
+export type CloudProviderId = "vercel" | "supabase"
 
 export type CloudProviderConnection = {
   provider: CloudProviderId
@@ -132,7 +132,7 @@ export type CloudProviderResource = {
 }
 
 export type CloudProviderProjectLink = {
-  provider: "vercel" | "netlify"
+  provider: "vercel"
   projectId: string
   projectName: string
   accountId?: string
@@ -142,7 +142,7 @@ export type CloudProviderProjectLink = {
 }
 
 export type CloudProviderSyncResult = {
-  provider: "vercel" | "netlify"
+  provider: "vercel"
   projectId: string
   projectName: string
   changed: number
@@ -227,23 +227,19 @@ export type CloudApi = {
     link: (
       projectPath: string,
       taskId: string | undefined,
-      provider: "vercel" | "netlify",
+      provider: "vercel",
       projectId: string,
     ) => Promise<CloudProviderProjectLink>
-    unlink: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-    ) => Promise<CloudProviderProjectLink[]>
+    unlink: (projectPath: string, taskId: string | undefined, provider: "vercel") => Promise<CloudProviderProjectLink[]>
     syncEnvironment: (
       projectPath: string,
       taskId: string | undefined,
-      provider: "vercel" | "netlify",
+      provider: "vercel",
     ) => Promise<CloudProviderSyncResult>
     addDomain: (
       projectPath: string,
       taskId: string | undefined,
-      provider: "vercel" | "netlify",
+      provider: "vercel",
       domain: string,
     ) => Promise<CloudDomain>
     verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
@@ -322,9 +318,9 @@ export function cloudApi(): CloudApi | undefined {
   return (globalThis.window?.api as (Record<string, unknown> & { cloud?: CloudApi }) | undefined)?.cloud
 }
 
-// Publishing runs through the user's own Vercel / Netlify CLI (or the token-gated
+// Publishing runs through the user's own Vercel CLI (or the token-gated
 // Vector Cloud service). Exposed as window.api.publish by the desktop main.
-export type PublishTargetId = "vector-cloud" | "vercel" | "netlify"
+export type PublishTargetId = "vector-cloud" | "vercel"
 
 export type PublishTarget = {
   id: PublishTargetId

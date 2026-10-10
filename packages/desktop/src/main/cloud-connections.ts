@@ -23,12 +23,7 @@ import {
   type CloudDomain,
 } from "./cloud-console"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
-import {
-  addNetlifyDomainAlias,
-  netlifyEnvironmentPayload,
-  removeNetlifyDomainAlias,
-  vercelEnvironmentPayload,
-} from "./cloud-provider-payloads"
+import { vercelEnvironmentPayload } from "./cloud-provider-payloads"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { validateCloudProviderToken, type CloudProviderId } from "./cloud-provider-token"
 
@@ -149,7 +144,7 @@ const CONNECTION_STORE = "cloud-provider-connections"
 const LINKS_STORE = "cloud-provider-links"
 const STORE_KEY = "records"
 const DEFAULT_BROKER_URL = "https://vectordev.ai/api/cloud/oauth"
-const PROVIDERS: CloudProviderId[] = ["vercel", "netlify", "supabase"]
+const PROVIDERS: CloudProviderId[] = ["vercel", "supabase"]
 const activeFlows = new Map<CloudProviderId, ActiveOAuthFlow>()
 
 function brokerUrl(): string {
@@ -161,7 +156,7 @@ function now(): string {
 }
 
 function isProvider(value: unknown): value is CloudProviderId {
-  return value === "vercel" || value === "netlify" || value === "supabase"
+  return value === "vercel" || value === "supabase"
 }
 
 function readConnections(): StoredConnection[] {
@@ -189,10 +184,23 @@ function saveConnection(record: StoredConnection): void {
   writeConnections([record, ...readConnections().filter((item) => item.provider !== record.provider)])
 }
 
+// Netlify is no longer a supported provider, so nothing can use or revoke a
+// Netlify credential that an older release saved. readConnections already
+// ignores it; this deletes it from the vault so it does not linger on disk.
+export function forgetRetiredCloudProviders(): number {
+  const store = getStore(CONNECTION_STORE)
+  const raw = store.get(STORE_KEY)
+  if (!Array.isArray(raw)) return 0
+  const kept = raw.filter(
+    (value) => !value || typeof value !== "object" || Reflect.get(value, "provider") !== "netlify",
+  )
+  if (kept.length === raw.length) return 0
+  store.set(STORE_KEY, kept)
+  return raw.length - kept.length
+}
+
 function connectionLabel(provider: CloudProviderId): string {
-  if (provider === "vercel") return "Vercel"
-  if (provider === "netlify") return "Netlify"
-  return "Supabase"
+  return provider === "vercel" ? "Vercel" : "Supabase"
 }
 
 async function brokerRequest<T>(path: string, init?: RequestInit, request: CloudFetch = fetch): Promise<T> {
@@ -387,13 +395,9 @@ async function providerJson(
   return body
 }
 
-function providerApiUrl(
-  provider: Exclude<CloudProviderId, "supabase">,
-  pathname: string,
-  record: StoredConnection,
-): URL {
-  const url = new URL(pathname, provider === "vercel" ? "https://api.vercel.com" : "https://api.netlify.com")
-  if (provider === "vercel" && record.teamId) url.searchParams.set("teamId", record.teamId)
+function vercelApiUrl(pathname: string, record: StoredConnection): URL {
+  const url = new URL(pathname, "https://api.vercel.com")
+  if (record.teamId) url.searchParams.set("teamId", record.teamId)
   return url
 }
 
@@ -405,41 +409,30 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
   const authorization = readCloudOAuthCallback(providerValue, url, flow)
   const returnedState = flow.state
 
-  let accessToken = ""
-  let refreshToken: string | undefined
-  let expiresIn: number | undefined
-  let teamId = url.searchParams.get("teamId") ?? undefined
-  if (providerValue === "netlify") {
-    accessToken = authorization
-  } else {
-    const token = await brokerRequest<{
-      accessToken: string
-      refreshToken?: string
-      expiresIn?: number
-      teamId?: string
-    }>("/exchange", {
-      method: "POST",
-      body: JSON.stringify({
-        provider: providerValue,
-        code: authorization,
-        state: returnedState,
-        codeVerifier: flow.codeVerifier,
-      }),
-    })
-    accessToken = token.accessToken
-    refreshToken = token.refreshToken
-    expiresIn = token.expiresIn
-    teamId = token.teamId ?? teamId
-  }
-  if (!accessToken) throw new Error(`${connectionLabel(providerValue)} did not return an access token.`)
+  const token = await brokerRequest<{
+    accessToken: string
+    refreshToken?: string
+    expiresIn?: number
+    teamId?: string
+  }>("/exchange", {
+    method: "POST",
+    body: JSON.stringify({
+      provider: providerValue,
+      code: authorization,
+      state: returnedState,
+      codeVerifier: flow.codeVerifier,
+    }),
+  })
+  const teamId = token.teamId ?? url.searchParams.get("teamId") ?? undefined
+  if (!token.accessToken) throw new Error(`${connectionLabel(providerValue)} did not return an access token.`)
 
-  const identity = await validateCloudProviderToken(providerValue, accessToken, fetch, teamId)
+  const identity = await validateCloudProviderToken(providerValue, token.accessToken, fetch, teamId)
   const connectedAt = now()
   saveConnection({
     provider: providerValue,
-    accessToken: encryptCloudCredential(accessToken),
-    refreshToken: refreshToken ? encryptCloudCredential(refreshToken) : undefined,
-    expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+    accessToken: encryptCloudCredential(token.accessToken),
+    refreshToken: token.refreshToken ? encryptCloudCredential(token.refreshToken) : undefined,
+    expiresAt: token.expiresIn ? new Date(Date.now() + token.expiresIn * 1000).toISOString() : undefined,
     account: identity.account,
     accountId: identity.accountId,
     teamId,
@@ -598,26 +591,6 @@ export async function listCloudProviderResources(provider: CloudProviderId): Pro
       })
       .filter((project): project is CloudProviderResource => Boolean(project))
   }
-  if (provider === "netlify") {
-    const body = await providerJson(auth.token, "https://api.netlify.com/api/v1/sites?per_page=100")
-    if (!Array.isArray(body)) return []
-    return body
-      .map((site): CloudProviderResource | undefined => {
-        const id = stringField(site, "id")
-        const name = stringField(site, "name")
-        if (!id || !name) return
-        return {
-          provider,
-          id,
-          name,
-          accountId: stringField(site, "account_id"),
-          accountName: stringField(site, "account_name") ?? auth.record.account,
-          url: stringField(site, "ssl_url") ?? stringField(site, "url"),
-          status: stringField(site, "state"),
-        }
-      })
-      .filter((site): site is CloudProviderResource => Boolean(site))
-  }
   const body = await providerJson(auth.token, "https://api.supabase.com/v1/projects")
   if (!Array.isArray(body)) return []
   return body
@@ -649,9 +622,10 @@ function readLinks(projectPath: string): CloudProviderProjectLink[] {
   if (!Array.isArray(raw)) return []
   return raw.filter((value): value is CloudProviderProjectLink => {
     if (!value || typeof value !== "object") return false
-    const provider = Reflect.get(value, "provider")
+    // Links to retired hosts (Netlify) stay in the store untouched but are
+    // never surfaced: only Vercel is a supported hosting provider.
     return (
-      (provider === "vercel" || provider === "netlify") &&
+      Reflect.get(value, "provider") === "vercel" &&
       typeof Reflect.get(value, "projectId") === "string" &&
       typeof Reflect.get(value, "projectName") === "string" &&
       typeof Reflect.get(value, "linkedAt") === "string"
@@ -721,26 +695,6 @@ function requireProjectLink(
   return link
 }
 
-async function netlifySite(
-  token: string,
-  siteId: string,
-  request: CloudFetch = fetch,
-): Promise<{ accountId?: string; name?: string; customDomain?: string; aliases: string[] }> {
-  const site = await providerJson(
-    token,
-    `https://api.netlify.com/api/v1/sites/${encodeURIComponent(siteId)}`,
-    undefined,
-    request,
-  )
-  const aliases = site && typeof site === "object" ? Reflect.get(site, "domain_aliases") : undefined
-  return {
-    accountId: stringField(site, "account_id"),
-    name: stringField(site, "name"),
-    customDomain: stringField(site, "custom_domain"),
-    aliases: Array.isArray(aliases) ? aliases.filter((value): value is string => typeof value === "string") : [],
-  }
-}
-
 export async function syncCloudProviderEnvironment(
   projectPath: string,
   taskId: string | undefined,
@@ -752,70 +706,25 @@ export async function syncCloudProviderEnvironment(
   if (!variables.length) throw new Error("Add at least one environment variable before syncing.")
   const auth = await accessToken(provider, request)
 
-  if (provider === "vercel") {
-    const url = providerApiUrl(provider, `/v10/projects/${encodeURIComponent(link.projectId)}/env`, auth.record)
-    url.searchParams.set("upsert", "true")
-    const result = await providerJson(
-      auth.token,
-      url.toString(),
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(vercelEnvironmentPayload(variables)),
-      },
-      request,
+  const url = vercelApiUrl(`/v10/projects/${encodeURIComponent(link.projectId)}/env`, auth.record)
+  url.searchParams.set("upsert", "true")
+  const result = await providerJson(
+    auth.token,
+    url.toString(),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(vercelEnvironmentPayload(variables)),
+    },
+    request,
+  )
+  const failed = result && typeof result === "object" ? Reflect.get(result, "failed") : undefined
+  if (Array.isArray(failed) && failed.length) {
+    // Bulk upserts may return HTTP 201 with rejected entries. Provider error
+    // payloads can contain submitted values, so report no raw entry details.
+    throw new Error(
+      `Vercel rejected ${failed.length} environment-variable ${failed.length === 1 ? "operation" : "operations"}. Some variables may already be updated. Check project access and manage variables owned outside this integration in Vercel before syncing again.`,
     )
-    const failed = result && typeof result === "object" ? Reflect.get(result, "failed") : undefined
-    if (Array.isArray(failed) && failed.length) {
-      // Bulk upserts may return HTTP 201 with rejected entries. Provider error
-      // payloads can contain submitted values, so report no raw entry details.
-      throw new Error(
-        `Vercel rejected ${failed.length} environment-variable ${failed.length === 1 ? "operation" : "operations"}. Some variables may already be updated. Check project access and manage variables owned outside this integration in Vercel before syncing again.`,
-      )
-    }
-  } else {
-    const site = await netlifySite(auth.token, link.projectId, request)
-    const accountId = link.accountId ?? site.accountId
-    if (!accountId) throw new Error("Netlify did not return the account that owns this site.")
-    const listUrl = providerApiUrl(provider, `/api/v1/accounts/${encodeURIComponent(accountId)}/env`, auth.record)
-    listUrl.searchParams.set("site_id", link.projectId)
-    const existing = await providerJson(auth.token, listUrl.toString(), undefined, request)
-    const existingKeys = new Set(
-      Array.isArray(existing)
-        ? existing.map((item) => stringField(item, "key")).filter((key): key is string => Boolean(key))
-        : [],
-    )
-    const create = variables.filter((variable) => !existingKeys.has(variable.key))
-    if (create.length) {
-      await providerJson(
-        auth.token,
-        listUrl.toString(),
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(netlifyEnvironmentPayload(create)),
-        },
-        request,
-      )
-    }
-    for (const variable of variables.filter((item) => existingKeys.has(item.key))) {
-      const updateUrl = providerApiUrl(
-        provider,
-        `/api/v1/accounts/${encodeURIComponent(accountId)}/env/${encodeURIComponent(variable.key)}`,
-        auth.record,
-      )
-      updateUrl.searchParams.set("site_id", link.projectId)
-      await providerJson(
-        auth.token,
-        updateUrl.toString(),
-        {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(netlifyEnvironmentPayload([variable])[0]),
-        },
-        request,
-      )
-    }
   }
 
   return {
@@ -872,53 +781,28 @@ export async function addCloudProviderDomain(
     throw new Error(`${domain} is already connected to this project.`)
   }
   const auth = await accessToken(provider)
-
-  if (provider === "vercel") {
-    const url = providerApiUrl(provider, `/v10/projects/${encodeURIComponent(link.projectId)}/domains`, auth.record)
-    const response = await providerJson(auth.token, url.toString(), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: domain }),
-    })
-    const configUrl = providerApiUrl(provider, `/v6/domains/${encodeURIComponent(domain)}/config`, auth.record)
-    const config = await providerJson(auth.token, configUrl.toString()).catch(() => undefined)
-    const verified = booleanField(response, "verified") === true
-    const misconfigured = booleanField(config, "misconfigured")
-    return addDomain(projectPath, taskId, {
-      domain,
-      provider,
-      providerProjectId: link.projectId,
-      providerProjectName: link.projectName,
-      cnameTarget: recommendedCname(config) ?? "cname.vercel-dns.com",
-      status: verified && misconfigured === false ? "verified" : "pending",
-      detail:
-        verificationDetail(response) ??
-        (misconfigured === true
-          ? "The domain is attached in Vercel. Update its DNS records, then verify again."
-          : undefined),
-    })
-  }
-
-  const site = await netlifySite(auth.token, link.projectId)
-  const aliases = addNetlifyDomainAlias(site.aliases, domain)
-  await providerJson(auth.token, `https://api.netlify.com/api/v1/sites/${encodeURIComponent(link.projectId)}`, {
-    method: "PATCH",
+  const url = vercelApiUrl(`/v10/projects/${encodeURIComponent(link.projectId)}/domains`, auth.record)
+  const response = await providerJson(auth.token, url.toString(), {
+    method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ domain_aliases: aliases }),
+    body: JSON.stringify({ name: domain }),
   })
-  const target = link.url
-    ? new URL(link.url).hostname
-    : site.name
-      ? `${site.name}.netlify.app`
-      : `${link.projectName}.netlify.app`
+  const configUrl = vercelApiUrl(`/v6/domains/${encodeURIComponent(domain)}/config`, auth.record)
+  const config = await providerJson(auth.token, configUrl.toString()).catch(() => undefined)
+  const verified = booleanField(response, "verified") === true
+  const misconfigured = booleanField(config, "misconfigured")
   return addDomain(projectPath, taskId, {
     domain,
     provider,
     providerProjectId: link.projectId,
     providerProjectName: link.projectName,
-    cnameTarget: target,
-    status: "pending",
-    detail: "The domain is attached in Netlify. Point its CNAME at the target shown, then verify.",
+    cnameTarget: recommendedCname(config) ?? "cname.vercel-dns.com",
+    status: verified && misconfigured === false ? "verified" : "pending",
+    detail:
+      verificationDetail(response) ??
+      (misconfigured === true
+        ? "The domain is attached in Vercel. Update its DNS records, then verify again."
+        : undefined),
   })
 }
 
@@ -930,26 +814,25 @@ export async function verifyCloudProviderDomain(
   const domain = listDomains(projectPath, taskId).find((item) => item.id === id)
   if (!domain) throw new Error("That domain is no longer connected to this project.")
   if (domain.provider === "vector-cloud") return verifyDomain(projectPath, taskId, id)
-  const provider = domain.provider
-  const link = requireProjectLink(projectPath, taskId, provider)
-  const auth = await accessToken(provider)
-  if (provider === "netlify") return verifyDomain(projectPath, taskId, id)
-
-  const getUrl = providerApiUrl(
-    provider,
+  const link = requireProjectLink(projectPath, taskId, domain.provider)
+  const auth = await accessToken(domain.provider)
+  const getUrl = vercelApiUrl(
     `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}`,
     auth.record,
   )
-  let response = await providerJson(auth.token, getUrl.toString())
-  if (booleanField(response, "verified") !== true) {
-    const verifyUrl = providerApiUrl(
-      provider,
-      `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}/verify`,
-      auth.record,
-    )
-    response = await providerJson(auth.token, verifyUrl.toString(), { method: "POST" }).catch(() => response)
-  }
-  const configUrl = providerApiUrl(provider, `/v6/domains/${encodeURIComponent(domain.domain)}/config`, auth.record)
+  const current = await providerJson(auth.token, getUrl.toString())
+  const response =
+    booleanField(current, "verified") === true
+      ? current
+      : await providerJson(
+          auth.token,
+          vercelApiUrl(
+            `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}/verify`,
+            auth.record,
+          ).toString(),
+          { method: "POST" },
+        ).catch(() => current)
+  const configUrl = vercelApiUrl(`/v6/domains/${encodeURIComponent(domain.domain)}/config`, auth.record)
   const config = await providerJson(auth.token, configUrl.toString()).catch(() => undefined)
   const verified = booleanField(response, "verified") === true
   const misconfigured = booleanField(config, "misconfigured")
@@ -975,27 +858,13 @@ export async function removeCloudProviderDomain(
   const domain = listDomains(projectPath, taskId).find((item) => item.id === id)
   if (!domain) return listDomains(projectPath, taskId)
   if (domain.provider === "vector-cloud") return removeDomain(projectPath, taskId, id)
-  const provider = domain.provider
-  const link = requireProjectLink(projectPath, taskId, provider)
-  const auth = await accessToken(provider)
-
-  if (provider === "vercel") {
-    const url = providerApiUrl(
-      provider,
-      `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}`,
-      auth.record,
-    )
-    await providerJson(auth.token, url.toString(), { method: "DELETE" })
-  } else {
-    const site = await netlifySite(auth.token, link.projectId)
-    await providerJson(auth.token, `https://api.netlify.com/api/v1/sites/${encodeURIComponent(link.projectId)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        domain_aliases: removeNetlifyDomainAlias(site.aliases, domain.domain),
-      }),
-    })
-  }
+  const link = requireProjectLink(projectPath, taskId, domain.provider)
+  const auth = await accessToken(domain.provider)
+  const url = vercelApiUrl(
+    `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}`,
+    auth.record,
+  )
+  await providerJson(auth.token, url.toString(), { method: "DELETE" })
   return removeDomain(projectPath, taskId, id)
 }
 

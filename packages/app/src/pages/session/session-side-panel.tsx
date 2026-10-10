@@ -3970,11 +3970,11 @@ export function PreviewPanel(props: {
         | (Record<string, unknown> & {
             publish?: {
               targets: () => Promise<
-                { id: "vector-cloud" | "vercel" | "netlify"; label: string; loginHint: string; available: boolean }[]
+                { id: "vector-cloud" | "vercel"; label: string; loginHint: string; available: boolean }[]
               >
               run: (input: {
                 projectPath: string
-                target: "vector-cloud" | "vercel" | "netlify"
+                target: "vector-cloud" | "vercel"
                 production?: boolean
               }) => Promise<{
                 ok: boolean
@@ -4002,7 +4002,7 @@ export function PreviewPanel(props: {
     if (!target) {
       setPublish({
         phase: "error",
-        error: "No deploy tool found. Install the Vercel or Netlify CLI, log in once, then publish.",
+        error: "No deploy tool found. Install the Vercel CLI, log in once, then publish.",
       })
       return
     }

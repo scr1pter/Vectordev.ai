@@ -312,7 +312,7 @@ window.LAB_IDEAS = [
     title: "Security check while the agent writes",
     from: "Claude Code",
     what: "After each turn, review that turn's diff for security problems in the background (injection, missing auth checks, SSRF, unsafe HTML, hard-coded secrets) and hand any findings back to the agent to fix in the same session, with a quick pattern check on every edit.",
-    why: "Many Vector users ship agent-written code straight to Vercel, Netlify or Supabase. Catching a missing auth check before the pull request is far cheaper than after it's live.",
+    why: "Many Vector users ship agent-written code straight to Vercel or Supabase. Catching a missing auth check before the pull request is far cheaper than after it's live.",
     today: "Vectorscope reviews a branch or pull request on demand or on GitHub (`vector vectorscope`, `packages/core/src/review`), and publishing scans for leaked secrets (`packages/desktop/src/main/secret-scanner.ts`). Neither runs inside the session while the agent writes.",
     status: "Partly in Vector",
     effort: "M",

@@ -30,9 +30,7 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { boundLogLines, fetchCloudLogs, netlifyLogEntries, truncateLogTail, vercelLogEntries } = await import(
-  "./cloud-logs"
-)
+const { boundLogLines, fetchCloudLogs, truncateLogTail, vercelLogEntries } = await import("./cloud-logs")
 const { cloudProjectScopeKey } = await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
 
@@ -128,24 +126,6 @@ describe("provider log parsing", () => {
     ).toEqual([
       { at: 1, text: "ready" },
       { at: 2, text: "[stderr] boom" },
-    ])
-  })
-
-  test("composes a Netlify tail from the deploy state, summary and build error", () => {
-    expect(
-      netlifyLogEntries(
-        {
-          state: "error",
-          error_message: "Build script returned non-zero exit code: 2",
-          summary: { messages: [{ type: "error", title: "Build failed", description: "tsc found 3 errors" }] },
-        },
-        { error: "Command failed with exit code 2: bun run build" },
-      ),
-    ).toEqual([
-      { text: "state: error" },
-      { text: "[error] Build failed — tsc found 3 errors" },
-      { text: "[error] Build script returned non-zero exit code: 2" },
-      { text: "[error] Command failed with exit code 2: bun run build" },
     ])
   })
 })

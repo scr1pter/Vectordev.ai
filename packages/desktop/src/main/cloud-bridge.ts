@@ -39,8 +39,8 @@ type CloudCommandInput = {
   projectPath: string
   taskId?: string
   production?: boolean
-  target?: "vector-cloud" | "vercel" | "netlify"
-  provider?: "vercel" | "netlify"
+  target?: "vector-cloud" | "vercel"
+  provider?: "vercel"
   deploymentId?: string
   limit?: number
   dryRun?: boolean
@@ -156,10 +156,10 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     throw new Error("Open a project before using Vector Cloud.")
   if (taskId !== undefined && typeof taskId !== "string") throw new Error("Invalid project session.")
   if (production !== undefined && typeof production !== "boolean") throw new Error("Invalid publish mode.")
-  if (target !== undefined && target !== "vector-cloud" && target !== "vercel" && target !== "netlify") {
+  if (target !== undefined && target !== "vector-cloud" && target !== "vercel") {
     throw new Error("Invalid publish target.")
   }
-  if (provider !== undefined && provider !== "vercel" && provider !== "netlify") {
+  if (provider !== undefined && provider !== "vercel") {
     throw new Error("Invalid cloud provider.")
   }
   if (deploymentId !== undefined && typeof deploymentId !== "string") throw new Error("Invalid deployment.")
@@ -196,11 +196,9 @@ function configuredPublishTargets(input: CloudCommandInput) {
   if (process.env.VECTOR_CLOUD_URL && process.env.VECTOR_CLOUD_TOKEN) {
     targets.push({ id: "vector-cloud", label: "Vector Cloud" })
   }
-  for (const provider of ["vercel", "netlify"] as const) {
-    const link = links.find((item) => item.provider === provider)
-    if (link && cachedCloudProviderConnection(provider).connected) {
-      targets.push({ id: provider, label: provider === "vercel" ? "Vercel" : "Netlify", projectName: link.projectName })
-    }
+  const link = links.find((item) => item.provider === "vercel")
+  if (link && cachedCloudProviderConnection("vercel").connected) {
+    targets.push({ id: "vercel", label: "Vercel", projectName: link.projectName })
   }
   return targets
 }
@@ -208,7 +206,7 @@ function configuredPublishTargets(input: CloudCommandInput) {
 async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOptions) {
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
-    const connections = (["vercel", "netlify", "supabase"] as const).map(cachedCloudProviderConnection)
+    const connections = (["vercel", "supabase"] as const).map(cachedCloudProviderConnection)
     const targets = configuredPublishTargets(input)
     const aws = await (options.awsStatus ?? getCloudAwsStatus)().catch(() => undefined)
     return {
@@ -275,10 +273,9 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
     return { ok: true, services: await getSupabaseServiceSnapshot(input.projectPath, input.taskId) }
   }
   if (input.command === "sync_environment") {
-    if (!input.provider) return { ok: false, error: "Choose vercel or netlify before syncing environment variables." }
     return {
       ok: true,
-      sync: await syncCloudProviderEnvironment(input.projectPath, input.taskId, input.provider),
+      sync: await syncCloudProviderEnvironment(input.projectPath, input.taskId, input.provider ?? "vercel"),
     }
   }
   if (input.command === "aws_status") return { ok: true, aws: await getCloudAwsStatus() }
@@ -311,7 +308,7 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
       targets,
       error: targets.length
         ? "Choose a publish target: more than one hosting destination is configured for this project."
-        : "Connect and link a Vercel or Netlify project in Vector Cloud before publishing.",
+        : "Connect and link a Vercel project in Vector Cloud before publishing.",
     }
   }
   return (options.publish ?? publishProject)({

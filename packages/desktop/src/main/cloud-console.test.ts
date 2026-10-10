@@ -253,7 +253,8 @@ describe("cloud bridge publish target resolution", () => {
 
   test("requires a choice for multiple linked hosts and never falls back after an explicit failure", async () => {
     seedHost("vercel")
-    seedHost("netlify")
+    process.env.VECTOR_CLOUD_URL = "https://fixture.invalid"
+    process.env.VECTOR_CLOUD_TOKEN = "fixture-only-host-token"
     const published: string[] = []
     const bridge = await startCloudBridge({
       publish: async (input) => {
@@ -272,7 +273,7 @@ describe("cloud bridge publish target resolution", () => {
     expect(await command()).toMatchObject({
       ok: false,
       needsChoice: true,
-      targets: [{ id: "vercel" }, { id: "netlify" }],
+      targets: [{ id: "vector-cloud" }, { id: "vercel" }],
     })
     expect(published).toEqual([])
     expect(await command("vercel")).toMatchObject({ ok: false, target: "vercel", error: "fixture provider rejection" })
@@ -300,13 +301,33 @@ describe("cloud bridge publish target resolution", () => {
     process.env.VECTOR_CLOUD_URL = "https://fixture.invalid"
     process.env.VECTOR_CLOUD_TOKEN = "fixture-only-host-token"
     expect(await command()).toMatchObject({ ok: true, target: "vector-cloud" })
-    seedHost("netlify")
-    expect(await command()).toMatchObject({
-      ok: false,
-      needsChoice: true,
-      targets: [{ id: "vector-cloud" }, { id: "netlify" }],
-    })
     expect(published).toEqual(["vector-cloud"])
+  })
+
+  test("ignores a Netlify connection and link saved by an older release", async () => {
+    seedHost("netlify")
+    const bridge = await startCloudBridge({ publish: async (input) => ({ ok: true, target: input.target, log: "" }) })
+    const command = async (input: Record<string, unknown>) =>
+      (
+        await fetch(`${bridge.url}/command`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${bridge.token}` },
+          body: JSON.stringify({ projectPath: project, ...input }),
+        })
+      ).json()
+    const status = await command({ command: "status" })
+    expect(status.targets).toEqual([])
+    expect(status.connections.map((item: { provider: string }) => item.provider)).toEqual(["vercel", "supabase"])
+    expect(await command({ command: "publish" })).toMatchObject({ ok: false, needsSetup: true, targets: [] })
+    expect(await command({ command: "publish", target: "netlify" })).toMatchObject({
+      ok: false,
+      error: "Invalid publish target.",
+    })
+    const { forgetRetiredCloudProviders, listCloudProviderProjectLinks } = await import("./cloud-connections")
+    expect(listCloudProviderProjectLinks(project)).toEqual([])
+    expect(forgetRetiredCloudProviders()).toBe(1)
+    expect(stores.get("cloud-provider-connections")?.get("records")).toEqual([])
+    expect(forgetRetiredCloudProviders()).toBe(0)
   })
 })
 

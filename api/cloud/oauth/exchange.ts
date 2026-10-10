@@ -11,7 +11,7 @@ export async function POST(request: Request): Promise<Response> {
   const body = (await request.json().catch(() => undefined)) as
     | { provider?: unknown; code?: unknown; state?: unknown; codeVerifier?: unknown }
     | undefined
-  if (!isCloudOAuthProvider(body?.provider) || body.provider === "netlify") {
+  if (!isCloudOAuthProvider(body?.provider)) {
     return jsonResponse(400, { ok: false, error: "This exchange supports Vercel and Supabase." })
   }
   if (typeof body?.code !== "string") {

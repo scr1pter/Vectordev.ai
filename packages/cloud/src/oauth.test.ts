@@ -22,15 +22,14 @@ const credentials = {
   VECTOR_VERCEL_INTEGRATION_SLUG: "vector",
   VECTOR_VERCEL_CLIENT_ID: "client-id",
   VECTOR_VERCEL_CLIENT_SECRET: "client-secret",
-  VECTOR_NETLIFY_CLIENT_ID: "client-id",
   VECTOR_SUPABASE_CLIENT_ID: "client-id",
   VECTOR_SUPABASE_CLIENT_SECRET: "client-secret",
   VECTOR_OAUTH_STATE_SECRET: stateSecret,
 }
 
 // Execute the actual hosted page with Web Crypto, without replacing process globals.
-async function browserCallback(provider: "vercel" | "netlify", input: URL) {
-  const html = await createOAuthCallbackResponse(provider, input.toString()).text()
+async function browserCallback(input: URL) {
+  const html = await createOAuthCallbackResponse("vercel", input.toString()).text()
   const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1]
   if (!script) throw new Error("The callback page is missing its relay script.")
   const output = { link: "", status: "", detail: "" }
@@ -103,7 +102,7 @@ await Bun.write(Bun.stdout, JSON.stringify(results))
         status: 200,
         body: {
           ok: true,
-          providers: ["vercel", "netlify", "supabase"].map((provider) => ({
+          providers: ["vercel", "supabase"].map((provider) => ({
             provider,
             configured: provider === "supabase" || compatible,
             callbackUrl: `https://vectordev.ai/api/cloud/oauth/callback-${provider}`,
@@ -172,7 +171,20 @@ await Bun.write(Bun.stdout, JSON.stringify(results))
     },
   )
 
-  test.each(["vercel", "netlify"] as const)("requires a desktop relay key for %s", (provider) => {
+  test("rejects Netlify, which is no longer a supported provider", async () => {
+    const { POST } = await import("../../../api/cloud/oauth/start")
+    const response = await POST(
+      new Request("https://vectordev.ai/api/cloud/oauth/start", {
+        method: "POST",
+        body: JSON.stringify({ provider: "netlify", state: relay.state }),
+      }),
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ ok: false, error: "Choose vercel or supabase." })
+  })
+
+  test("requires a desktop relay key for Vercel", () => {
+    const provider = "vercel"
     expect(() => createOAuthAuthorizeUrl({ provider, state: "legacy-state" }, requestUrl, credentials)).toThrow(
       "secure desktop OAuth relay key",
     )
@@ -212,62 +224,52 @@ describe("cloud OAuth callbacks", () => {
     expect(html).not.toContain("is connected")
   })
 
-  test.each(["vercel", "netlify"] as const)(
-    "encrypts %s authorization for the initiating desktop only",
-    async (provider) => {
-      const state = createOAuthAuthorizeUrl({ provider, state: relay.state }, requestUrl, credentials).state
-      const input = new URL(`https://vectordev.ai/api/cloud/oauth/callback-${provider}`)
-      const values = new URLSearchParams({
-        state,
-        [provider === "vercel" ? "code" : "access_token"]: "secret-authorization".repeat(150),
-        teamId: "team_1",
-        configurationId: "config_1",
-      })
-      if (provider === "netlify") input.hash = values.toString()
-      if (provider === "vercel") input.search = values.toString()
-      const result = await browserCallback(provider, input)
-      expect(result.url.searchParams.get("state")).toBe(state)
-      expect(result.url.searchParams.get("encrypted")).toBeTruthy()
-      expect(result.url.searchParams.has("code")).toBe(false)
-      expect(result.url.searchParams.has("access_token")).toBe(false)
-      expect(result.link).not.toContain("secret-authorization".repeat(150))
-      expect(result.url.searchParams.get("teamId")).toBe("team_1")
-      expect(result.url.searchParams.get("configurationId")).toBe("config_1")
-      expect(result.location.href).toBe(result.link)
-      for (const index of [1, 2, 3]) {
-        const tampered = new URL(result.link)
-        const parts = tampered.searchParams.get("encrypted")!.split(".")
-        const bytes = Buffer.from(parts[index], "base64url")
-        bytes[0] ^= 1
-        parts[index] = bytes.toString("base64url")
-        tampered.searchParams.set("encrypted", parts.join("."))
-        expect(() => readCloudOAuthCallback(provider, tampered, { state, privateKey: relay.privateKey })).toThrow()
-      }
-      expect(readCloudOAuthCallback(provider, result.url, { state, privateKey: relay.privateKey })).toBe(
-        "secret-authorization".repeat(150),
-      )
-      expect(() =>
-        readCloudOAuthCallback(provider, result.url, { state, privateKey: createCloudOAuthRelay().privateKey }),
-      ).toThrow()
-      expect(() =>
-        readCloudOAuthCallback(provider === "vercel" ? "netlify" : "vercel", result.url, {
-          state,
-          privateKey: relay.privateKey,
-        }),
-      ).toThrow()
-      expect(() =>
-        readCloudOAuthCallback(provider, result.url, { state: "other-state", privateKey: relay.privateKey }),
-      ).toThrow("security state")
-    },
-  )
+  test("encrypts Vercel authorization for the initiating desktop only", async () => {
+    const provider = "vercel"
+    const state = createOAuthAuthorizeUrl({ provider, state: relay.state }, requestUrl, credentials).state
+    const input = new URL("https://vectordev.ai/api/cloud/oauth/callback-vercel")
+    input.search = new URLSearchParams({
+      state,
+      code: "secret-authorization".repeat(150),
+      teamId: "team_1",
+      configurationId: "config_1",
+    }).toString()
+    const result = await browserCallback(input)
+    expect(result.url.searchParams.get("state")).toBe(state)
+    expect(result.url.searchParams.get("encrypted")).toBeTruthy()
+    expect(result.url.searchParams.has("code")).toBe(false)
+    expect(result.url.searchParams.has("access_token")).toBe(false)
+    expect(result.link).not.toContain("secret-authorization".repeat(150))
+    expect(result.url.searchParams.get("teamId")).toBe("team_1")
+    expect(result.url.searchParams.get("configurationId")).toBe("config_1")
+    expect(result.location.href).toBe(result.link)
+    for (const index of [1, 2, 3]) {
+      const tampered = new URL(result.link)
+      const parts = tampered.searchParams.get("encrypted")!.split(".")
+      const bytes = Buffer.from(parts[index], "base64url")
+      bytes[0] ^= 1
+      parts[index] = bytes.toString("base64url")
+      tampered.searchParams.set("encrypted", parts.join("."))
+      expect(() => readCloudOAuthCallback(provider, tampered, { state, privateKey: relay.privateKey })).toThrow()
+    }
+    expect(readCloudOAuthCallback(provider, result.url, { state, privateKey: relay.privateKey })).toBe(
+      "secret-authorization".repeat(150),
+    )
+    expect(() =>
+      readCloudOAuthCallback(provider, result.url, { state, privateKey: createCloudOAuthRelay().privateKey }),
+    ).toThrow()
+    expect(() => readCloudOAuthCallback("supabase", result.url, { state, privateKey: relay.privateKey })).toThrow()
+    expect(() =>
+      readCloudOAuthCallback(provider, result.url, { state: "other-state", privateKey: relay.privateKey }),
+    ).toThrow("security state")
+  })
 
-  test.each(["vercel", "netlify"] as const)("preserves state when %s consent is denied", async (provider) => {
+  test("preserves state when Vercel consent is denied", async () => {
+    const provider = "vercel"
     const state = signOAuthState(provider, relay.state, credentials)
-    const input = new URL(`https://vectordev.ai/api/cloud/oauth/callback-${provider}`)
-    const values = new URLSearchParams({ state, error: "access_denied" })
-    if (provider === "netlify") input.hash = values.toString()
-    if (provider === "vercel") input.search = values.toString()
-    const result = await browserCallback(provider, input)
+    const input = new URL("https://vectordev.ai/api/cloud/oauth/callback-vercel")
+    input.search = new URLSearchParams({ state, error: "access_denied" }).toString()
+    const result = await browserCallback(input)
     expect(result.url.searchParams.get("state")).toBe(state)
     expect(result.url.searchParams.get("error")).toBe("access_denied")
     expect(result.status).toBe("Connection was not completed")
@@ -276,25 +278,18 @@ describe("cloud OAuth callbacks", () => {
     expect(() => readCloudOAuthCallback(provider, result.url, { state: "other-state" })).toThrow("security state")
   })
 
-  test.each(["vercel", "netlify"] as const)(
-    "does not fall back to plaintext when the %s relay is missing",
-    async (provider) => {
-      const input = new URL(`https://vectordev.ai/api/cloud/oauth/callback-${provider}`)
-      const values = new URLSearchParams({
-        state: "legacy-state",
-        [provider === "vercel" ? "code" : "access_token"]: "secret-authorization".repeat(150),
-      })
-      if (provider === "netlify") input.hash = values.toString()
-      if (provider === "vercel") input.search = values.toString()
-      const result = await browserCallback(provider, input)
-      expect(result.url.searchParams.get("error")).toContain("secure return state")
-      expect(result.link).not.toContain("secret-authorization".repeat(150))
-      const plain = new URL("vector://cloud/oauth?state=state&code=plain&access_token=plain")
-      expect(() => readCloudOAuthCallback(provider, plain, { state: "state", privateKey: relay.privateKey })).toThrow(
-        "secure authorization result",
-      )
-    },
-  )
+  test("does not fall back to plaintext when the Vercel relay is missing", async () => {
+    const provider = "vercel"
+    const input = new URL("https://vectordev.ai/api/cloud/oauth/callback-vercel")
+    input.search = new URLSearchParams({ state: "legacy-state", code: "secret-authorization".repeat(150) }).toString()
+    const result = await browserCallback(input)
+    expect(result.url.searchParams.get("error")).toContain("secure return state")
+    expect(result.link).not.toContain("secret-authorization".repeat(150))
+    const plain = new URL("vector://cloud/oauth?state=state&code=plain&access_token=plain")
+    expect(() => readCloudOAuthCallback(provider, plain, { state: "state", privateKey: relay.privateKey })).toThrow(
+      "secure authorization result",
+    )
+  })
 })
 
 describe("cloud OAuth token exchange", () => {

@@ -5,9 +5,10 @@
 The Cloud completion changes described here are prepared for **1.99.99** and
 are not a published desktop release. Provider application registration, hosted
 configuration and a real browser-to-desktop consent check are separate release
-steps. No Vercel, Netlify or Supabase registration has been confirmed complete
+steps. No Vercel or Supabase registration has been confirmed complete
 for this checkpoint. Do not infer readiness from a successful build or test.
 
+Vector Cloud supports two providers: Vercel for hosting and Supabase for data.
 Vector connects accounts and resources that belong to the user. Provider
 billing, quotas and terms still apply; guarded free OpenRouter inference does
 not make hosting or database operations free. Never upgrade a plan, add payment,
@@ -16,12 +17,12 @@ or retry resource creation in another organization automatically.
 ## Authorization and credential boundaries
 
 The hosted broker signs provider-bound OAuth state with a ten-minute expiry.
-For Vercel and Netlify, the browser callback returns an encrypted authorization
-result to the pending desktop flow: the Vercel authorization code and Netlify
-access token are protected by an ephemeral desktop relay. The private key stays
-with that flow; there is no plaintext custom-URL fallback. The relay format is
-versioned. Current desktops advertise `relay=v1` when checking hosted readiness.
-An absent or unknown relay capability keeps Vercel and Netlify unconfigured in
+For Vercel, the browser callback returns an encrypted authorization result to
+the pending desktop flow: the Vercel authorization code is protected by an
+ephemeral desktop relay. The private key stays with that flow; there is no
+plaintext custom-URL fallback. The relay format is versioned. Current desktops
+advertise `relay=v1` when checking hosted readiness. An absent or unknown relay
+capability keeps Vercel unconfigured in
 that response, preserving the manual-token form in desktop 1.99.8 even after
 their server credentials are installed. A direct incompatible start still fails
 with an update instruction; it never falls back to plaintext.
@@ -52,14 +53,11 @@ VECTOR_VERCEL_INTEGRATION_SLUG=<registered Vercel integration slug>
 VECTOR_VERCEL_CLIENT_ID=<Vercel integration client ID>
 VECTOR_VERCEL_CLIENT_SECRET=<Vercel integration client secret>
 
-VECTOR_NETLIFY_CLIENT_ID=<Netlify OAuth application client ID>
-
 VECTOR_SUPABASE_CLIENT_ID=<Supabase OAuth application client ID>
 VECTOR_SUPABASE_CLIENT_SECRET=<Supabase OAuth application client secret>
 ```
 
-The Netlify flow currently uses its client ID and encrypted token relay; it
-does not consume a Netlify client-secret variable. Generate the signing secret
+Generate the signing secret
 with a cryptographically secure generator, store it through the deployment
 secret manager, and keep it stable. Rotating it invalidates in-progress flows.
 Use separate provider applications and secrets for development and preview.
@@ -85,7 +83,6 @@ Register these exact HTTPS callback URLs:
 
 ```text
 https://vectordev.ai/api/cloud/oauth/callback-vercel
-https://vectordev.ai/api/cloud/oauth/callback-netlify
 https://vectordev.ai/api/cloud/oauth/callback-supabase
 ```
 
@@ -93,8 +90,6 @@ Grant only the management access required for the selected operations:
 
 - Vercel: user identity (`/v2/user`, including User read), selected team/project
   listing, deployment, environment variables and project domains.
-- Netlify: user identity (`/api/v1/user`), selected site listing, deployment,
-  environment variables and site domains.
 - Supabase: organization identity/listing (`/v1/organizations`), selected
   projects, public client keys and the database operations the user approves.
 
@@ -135,7 +130,7 @@ listing may contain privileged keys, but Vector does not select them for the
 client, return them as its database connection, or write them to the scaffold.
 Public client keys still require appropriate database access policies.
 
-Vercel/Netlify synchronization sends the configured variables to the linked
+Vercel synchronization sends the configured variables to the linked
 provider project. It is separate from writing local `.env`. Removing a local
 variable is not proof that a previously synchronized remote value was deleted;
 manage remote deletion explicitly.

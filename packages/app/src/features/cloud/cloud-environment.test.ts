@@ -26,7 +26,7 @@ function fixture() {
       },
     },
     providers: {
-      syncEnvironment: async (projectPath: string, _taskId: string | undefined, provider: "vercel" | "netlify") => ({
+      syncEnvironment: async (projectPath: string, _taskId: string | undefined, provider: "vercel") => ({
         provider,
         projectId: projectPath,
         projectName: projectPath,

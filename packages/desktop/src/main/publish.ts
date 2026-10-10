@@ -29,10 +29,10 @@ import { agentEnvironment, resolveAgentPath, runCli, shimmedCommand } from "./ex
 export { normalizeDeployUrl } from "./publish-url"
 
 // Publish the user's app straight from the Preview panel — Lovable-style, but
-// BYOK like everything else in Vector: deploys go to the USER's own Vercel or
-// Netlify account through their CLI login. Vector never proxies the code.
+// BYOK like everything else in Vector: deploys go to the USER's own Vercel
+// account through their CLI login. Vector never proxies the code.
 
-export type PublishTargetId = "vector-cloud" | "vercel" | "netlify"
+export type PublishTargetId = "vector-cloud" | "vercel"
 
 export type PublishTarget = {
   id: PublishTargetId
@@ -40,7 +40,7 @@ export type PublishTarget = {
   command: string[]
   loginHint: string
   available: boolean
-  /** The logged-in account (e.g. Vercel/Netlify username), when detectable. */
+  /** The logged-in account (e.g. Vercel username), when detectable. */
   account?: string
 }
 
@@ -112,7 +112,7 @@ function emitProgress(
   emit({ runId: input.runId, stage, level, message, at: new Date().toISOString() })
 }
 
-// `path` is what resolveAgentPath found. npm installs vercel, netlify and npx as .cmd shims on Windows: a bare name
+// `path` is what resolveAgentPath found. npm installs vercel and npx as .cmd shims on Windows: a bare name
 // never finds them there (libuv's PATH search only tries .com and .exe), and Node will not run a .cmd itself, so
 // runCli launches it through cmd.exe.
 function execOk(path: string | undefined, args: string[]) {
@@ -173,25 +173,19 @@ function runProcess(input: {
 
 export async function detectPublishTargets(): Promise<PublishTarget[]> {
   const vercelConnection = cachedCloudProviderConnection("vercel")
-  const netlifyConnection = cachedCloudProviderConnection("netlify")
   // Each is the CLI's resolved path when it runs, so a deploy launches exactly what was detected.
-  const [vercel, netlify, npx] = await Promise.all(
-    ["vercel", "netlify", "npx"].map(async (cli) => {
+  const [vercel, npx] = await Promise.all(
+    ["vercel", "npx"].map(async (cli) => {
       const path = await resolveAgentPath(cli, agentEnvironment())
       return (await execOk(path, ["--version"])) ? path : undefined
     }),
   )
   // Only ask who's logged in when the CLI is actually installed.
-  const [vercelAccount, netlifyAccount] = await Promise.all([
-    vercel
-      ? execOut(vercel, ["whoami"])
-      : npx
-        ? execOut(npx, ["--yes", "vercel", "whoami"])
-        : Promise.resolve(undefined),
-    netlify
-      ? execOut(netlify, ["status"]).then((out) => out?.match(/Email:\s*(\S+)/i)?.[1])
-      : Promise.resolve(undefined),
-  ])
+  const vercelAccount = vercel
+    ? await execOut(vercel, ["whoami"])
+    : npx
+      ? await execOut(npx, ["--yes", "vercel", "whoami"])
+      : undefined
   return [
     {
       // Vector's own hosting (alpha): a token-gated static publish service.
@@ -211,16 +205,6 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
         : "Connect Vercel in Vector Cloud, or sign in with the Vercel CLI.",
       available: Boolean(vercel || npx) && Boolean(vercelConnection.connected || vercelAccount),
       account: vercelConnection.account ?? vercelAccount,
-    },
-    {
-      id: "netlify",
-      label: netlify ? "Netlify" : "Netlify (via npx)",
-      command: netlify ? [netlify] : [npx ?? "npx", "--yes", "netlify-cli"],
-      loginHint: netlifyConnection.connected
-        ? "Connected through Vector Cloud."
-        : "Connect Netlify in Vector Cloud, or sign in with the Netlify CLI.",
-      available: Boolean(netlify || npx) && Boolean(netlifyConnection.connected || netlifyAccount),
-      account: netlifyConnection.account ?? netlifyAccount,
     },
   ]
 }
@@ -283,7 +267,7 @@ const TEXT_EXTENSIONS = new Set([
   ".xml",
   ".webmanifest",
 ])
-const SKIP_DIRECTORIES = new Set(["node_modules", ".git", ".vercel", ".netlify", "dist", ".next", ".turbo"])
+const SKIP_DIRECTORIES = new Set(["node_modules", ".git", ".vercel", "dist", ".next", ".turbo"])
 // Any framework build with code splitting and images clears a few hundred files,
 // so this is a real ceiling rather than a working limit — but it is enforced by
 // throwing, because the previous cap stopped the walk mid-directory and shipped
@@ -756,7 +740,7 @@ export async function publishProject(
       error: `${input.target} is not available on this machine. ${target?.loginHint ?? ""}`.trim(),
     }
   }
-  if (target.id !== "vercel" && target.id !== "netlify") {
+  if (target.id !== "vercel") {
     return { ok: false, target: target.id, log: "", error: "Unsupported publish target." }
   }
   const providerAuth = await getCloudProviderRuntimeAuth(target.id)
@@ -769,14 +753,7 @@ export async function publishProject(
       error: `Choose a ${target.label.replace(" (via npx)", "")} project in Vector Cloud before publishing.`,
     }
   }
-  const providerEnv: NodeJS.ProcessEnv =
-    target.id === "vercel"
-      ? providerAuth.token
-        ? { VERCEL_TOKEN: providerAuth.token }
-        : {}
-      : providerAuth.token
-        ? { NETLIFY_AUTH_TOKEN: providerAuth.token }
-        : {}
+  const providerEnv: NodeJS.ProcessEnv = providerAuth.token ? { VERCEL_TOKEN: providerAuth.token } : {}
 
   const startedAt = Date.now()
   const settings = getBuildSettings(scope.projectPath, scope.taskId)
@@ -801,38 +778,11 @@ export async function publishProject(
   }
 
   await injectVectorBadge(directory).catch(() => "skipped")
-  const directProduction = target.id === "netlify" && input.production !== false
-  const destinationArgs =
-    target.id === "vercel"
-      ? providerLink
-        ? [
-            "--project",
-            providerLink.projectId,
-            ...(providerLink.accountId ? ["--scope", providerLink.accountId] : []),
-          ]
-        : []
-      : providerLink
-        ? ["--site", providerLink.projectId]
-        : []
-  const args =
-    target.id === "vercel"
-      ? [...target.command.slice(1), "--yes", ...destinationArgs]
-      : [
-          ...target.command.slice(1),
-          "deploy",
-          "--build",
-          ...destinationArgs,
-          ...(directProduction ? ["--prod"] : []),
-        ]
-  emitProgress(
-    input,
-    emit,
-    "uploading",
-    "info",
-    directProduction
-      ? `Deploying directly to ${target.label} production.`
-      : `Creating an immutable ${target.label} preview.`,
-  )
+  const destinationArgs = providerLink
+    ? ["--project", providerLink.projectId, ...(providerLink.accountId ? ["--scope", providerLink.accountId] : [])]
+    : []
+  const args = [...target.command.slice(1), "--yes", ...destinationArgs]
+  emitProgress(input, emit, "uploading", "info", `Creating an immutable ${target.label} preview.`)
 
   const launch = shimmedCommand(target.command[0], args)
   const command = await new Promise<{ ok: boolean; code: number | null; signal: NodeJS.Signals | null; log: string }>(
@@ -872,10 +822,11 @@ export async function publishProject(
     emitProgress(input, emit, "failed", "error", "Publish timed out after 10 minutes.")
     return { ok: false, target: target.id, log, checks: preflight.checks, error: "Publish timed out after 10 minutes." }
   }
-  const url = extractDeployUrl(command.log, target.id)
+  const url = extractDeployUrl(command.log)
   if (!command.ok || !url) {
-    const needsLogin =
-      /not (?:logged|authenticated)|no existing credentials|please login|vercel login|netlify login/i.test(command.log)
+    const needsLogin = /not (?:logged|authenticated)|no existing credentials|please login|vercel login/i.test(
+      command.log,
+    )
     const error = needsLogin
       ? `You are not logged in to ${target.label}. ${target.loginHint} Then publish again.`
       : command.ok
@@ -896,7 +847,7 @@ export async function publishProject(
     workspaceId: input.workspaceId,
     workspaceName: input.workspaceName,
     target: target.id,
-    environment: directProduction ? "production" : "preview",
+    environment: "preview",
     log,
     durationMs: Date.now() - startedAt,
     checks: preflight.checks,
@@ -905,9 +856,7 @@ export async function publishProject(
   emitProgress(input, emit, "uploading", "success", `Deployment available at ${url}`)
   deployment = await runPostDeployChecks(input, deployment, settings, emit)
   if (!requiredChecksPassed(deployment.checks)) {
-    const error = directProduction
-      ? "The production deployment completed, but required checks failed. Review the evidence and repair immediately."
-      : "The preview deployed, but required release checks failed. Production was not changed."
+    const error = "The preview deployed, but required release checks failed. Production was not changed."
     emitProgress(input, emit, "failed", "error", error)
     return {
       ok: false,
@@ -919,7 +868,7 @@ export async function publishProject(
       error,
     }
   }
-  if (target.id === "vercel" && input.production !== false) {
+  if (input.production !== false) {
     deployment = await promoteDeployment(
       { projectPath: scope.projectPath, taskId: scope.taskId, id: deployment.id, runId: input.runId },
       emit,
@@ -977,7 +926,7 @@ async function vercelDeploymentCommand(deployment: CloudDeployment, action: "pro
     env: auth.token ? { VERCEL_TOKEN: auth.token } : undefined,
   })
   if (!result.ok) throw new Error(redactCloudLog(deployment.projectPath, deployment.taskId, result.log).slice(-4_000))
-  return extractDeployUrl(result.log, "vercel") ?? deployment.url
+  return extractDeployUrl(result.log) ?? deployment.url
 }
 
 export async function promoteDeployment(
@@ -1057,9 +1006,7 @@ export async function fetchDeploymentRuntimeLogs(input: DeploymentActionInput): 
     return { log, fetchedAt, source: "build" }
   }
   if (deployment.target !== "vercel") {
-    throw new Error(
-      "Runtime log streaming is currently available for Vercel. Netlify deployments keep their build log in Vector.",
-    )
+    throw new Error("Runtime log streaming is available for Vercel deployments.")
   }
   const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
   if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
@@ -1103,5 +1050,5 @@ export async function rerunDeploymentChecks(input: DeploymentActionInput): Promi
 }
 
 function isPublishTargetId(value: string): value is PublishTargetId {
-  return value === "vector-cloud" || value === "vercel" || value === "netlify"
+  return value === "vector-cloud" || value === "vercel"
 }

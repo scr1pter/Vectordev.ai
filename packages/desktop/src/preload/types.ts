@@ -877,23 +877,23 @@ export type ElectronAPI = {
       link: (
         projectPath: string,
         taskId: string | undefined,
-        provider: "vercel" | "netlify",
+        provider: "vercel",
         projectId: string,
       ) => Promise<CloudProviderProjectLink>
       unlink: (
         projectPath: string,
         taskId: string | undefined,
-        provider: "vercel" | "netlify",
+        provider: "vercel",
       ) => Promise<CloudProviderProjectLink[]>
       syncEnvironment: (
         projectPath: string,
         taskId: string | undefined,
-        provider: "vercel" | "netlify",
+        provider: "vercel",
       ) => Promise<CloudProviderSyncResult>
       addDomain: (
         projectPath: string,
         taskId: string | undefined,
-        provider: "vercel" | "netlify",
+        provider: "vercel",
         domain: string,
       ) => Promise<CloudDomain>
       verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>

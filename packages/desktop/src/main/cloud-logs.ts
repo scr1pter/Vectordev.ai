@@ -1,5 +1,5 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
-import { getCloudProviderProjectLink, getCloudProviderRuntimeAuth } from "./cloud-connections"
+import { getCloudProviderRuntimeAuth } from "./cloud-connections"
 import { listDeployments, redactCloudLog, type CloudDeployment } from "./cloud-console"
 
 // The read side of a shipped app. An agent cannot fix what it cannot see, and
@@ -176,31 +176,6 @@ export function vercelLogEntries(body: unknown): CloudLogEntry[] {
     .filter((entry): entry is CloudLogEntry => Boolean(entry))
 }
 
-// Netlify's REST API exposes a deploy's state and its build summary rather than
-// a raw log stream, so the tail is composed from what it does return — that is
-// still the failure reason an agent needs.
-export function netlifyLogEntries(deploy: unknown, build?: unknown): CloudLogEntry[] {
-  const entries: CloudLogEntry[] = []
-  const state = stringField(deploy, "state")
-  if (state) entries.push({ text: `state: ${state}` })
-  const branch = stringField(deploy, "branch")
-  if (branch) entries.push({ text: `branch: ${branch}` })
-  for (const message of arrayField(objectField(deploy, "summary"), "messages")) {
-    const title = stringField(message, "title")
-    const description = stringField(message, "description")
-    const details = stringField(message, "details")
-    const text = [title, description, details].filter(Boolean).join(" — ")
-    if (text) entries.push({ text: levelled(stringField(message, "type"), text) })
-  }
-  const errorMessage = stringField(deploy, "error_message")
-  if (errorMessage) entries.push({ text: levelled("error", errorMessage) })
-  const buildError = stringField(build, "error")
-  if (buildError) entries.push({ text: levelled("error", buildError) })
-  const buildLog = stringField(build, "log")
-  if (buildLog) entries.push({ text: buildLog })
-  return entries
-}
-
 function recordedLogEntries(deployment: CloudDeployment): CloudLogEntry[] {
   const entries: CloudLogEntry[] = []
   if (deployment.runtimeLog) entries.push({ text: deployment.runtimeLog })
@@ -230,37 +205,6 @@ async function vercelEntries(deployment: CloudDeployment, lines: number, request
   return vercelLogEntries(await providerJson(auth.token, url, request))
 }
 
-async function netlifyEntries(deployment: CloudDeployment, input: CloudLogsInput, request: CloudFetch) {
-  const auth = await getCloudProviderRuntimeAuth("netlify")
-  if (!auth.token) throw new Error("Connect Netlify in Vector Cloud > Connections to read its deployment logs.")
-  const link = getCloudProviderProjectLink(input.projectPath, input.taskId, "netlify")
-  if (!link) throw new Error("Link a Netlify site in Vector Cloud > Connections to read its deployment logs.")
-  const site = encodeURIComponent(link.projectId)
-  const deploys = arrayField(
-    await providerJson(auth.token, `https://api.netlify.com/api/v1/sites/${site}/deploys?per_page=20`, request),
-  )
-  const host = deploymentHost(deployment)
-  const deploy =
-    deploys.find((item) =>
-      [stringField(item, "deploy_ssl_url"), stringField(item, "deploy_url"), stringField(item, "ssl_url")].some(
-        (value) => value && URL.canParse(value) && new URL(value).host === host,
-      ),
-    ) ?? deploys[0]
-  if (!deploy) throw new Error("Netlify has no deploy history for that site yet.")
-  const deployId = stringField(deploy, "id")
-  // The build record carries the failure text for a deploy that never shipped;
-  // it is a nice-to-have, so a site whose builds are not readable still gets the
-  // deploy summary rather than an error.
-  const build = await providerJson(
-    auth.token,
-    `https://api.netlify.com/api/v1/sites/${site}/builds?per_page=20`,
-    request,
-  )
-    .then((body) => arrayField(body).find((item) => stringField(item, "deploy_id") === deployId))
-    .catch(() => undefined)
-  return netlifyLogEntries(deploy, build)
-}
-
 export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch = fetch): Promise<CloudLogReport> {
   const deployments = [...listDeployments(input.projectPath, input.taskId)].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
@@ -287,19 +231,16 @@ export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch 
   let source: "provider" | "build" = "provider"
   let detail: string | undefined
   let entries: CloudLogEntry[] = []
-  if (deployment.target === "vercel" || deployment.target === "netlify") {
+  if (deployment.target === "vercel") {
     try {
-      entries =
-        deployment.target === "vercel"
-          ? await vercelEntries(deployment, lines, request)
-          : await netlifyEntries(deployment, input, request)
+      entries = await vercelEntries(deployment, lines, request)
     } catch (error) {
       detail = error instanceof Error ? error.message : String(error)
     }
   }
   if (!entries.length) {
     source = "build"
-    if (deployment.target === "vercel" || deployment.target === "netlify") {
+    if (deployment.target === "vercel") {
       detail = detail
         ? `${detail} Falling back to the build output Vector recorded.`
         : "The provider returned no log events; showing the build output Vector recorded."

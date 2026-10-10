@@ -6,8 +6,8 @@ test("normalizes deployment links copied from structured CLI output", () => {
   expect(normalizeDeployUrl('{"url":"https://vector-demo.vercel.app","ready":true}')).toBe(
     "https://vector-demo.vercel.app/",
   )
-  expect(normalizeDeployUrl('Deploy URL: "https://vector-demo.netlify.app",')).toBe(
-    "https://vector-demo.netlify.app/",
+  expect(normalizeDeployUrl('Preview: "https://vector-demo-git-main.vercel.app",')).toBe(
+    "https://vector-demo-git-main.vercel.app/",
   )
 })
 
