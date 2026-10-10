@@ -16,17 +16,14 @@ export function normalizeServerUrl(input: string) {
   if (!trimmed) return
   const explicit = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
   const candidate = explicit ? trimmed : `https://${trimmed}`
-  try {
-    const url = new URL(candidate)
-    if (url.protocol !== "http:" && url.protocol !== "https:") return
-    if (url.username || url.password || hasCredentialQuery(url)) return
-    // `vector serve` speaks plain HTTP, so an address on this machine or the user's network keeps it; anything else
-    // typed without a scheme is reached over HTTPS.
-    if (!explicit && isLocalNetworkHostname(url.hostname)) url.protocol = "http:"
-    return url.toString().replace(/\/+$/, "")
-  } catch {
-    return
-  }
+  if (!URL.canParse(candidate)) return
+  const url = new URL(candidate)
+  if (url.protocol !== "http:" && url.protocol !== "https:") return
+  if (url.username || url.password || hasCredentialQuery(url)) return
+  // `vector serve` speaks plain HTTP, so an address on this machine or the user's network keeps it; anything else
+  // typed without a scheme is reached over HTTPS.
+  if (!explicit && isLocalNetworkHostname(url.hostname)) url.protocol = "http:"
+  return url.toString().replace(/\/+$/, "")
 }
 
 export function serverName(conn?: ServerConnection.Any, ignoreDisplayName = false) {
@@ -65,11 +62,7 @@ export function isLocalNetworkHostname(hostname: string) {
 }
 
 export function isLoopbackServerUrl(input: string) {
-  try {
-    return isLoopbackHostname(new URL(input).hostname)
-  } catch {
-    return false
-  }
+  return URL.canParse(input) && isLoopbackHostname(new URL(input).hostname)
 }
 
 /**
@@ -77,13 +70,10 @@ export function isLoopbackServerUrl(input: string) {
  * machine or the user's own network; anywhere else it needs HTTPS.
  */
 export function insecurePasswordReason(input: ServerConnection.HttpBase) {
-  try {
-    const url = new URL(input.url)
-    if (url.username || url.password || hasCredentialQuery(url)) return "server.insecure.credentialsInUrl" as const
-    if (!input.password || url.protocol === "https:" || isLocalNetworkHostname(url.hostname)) return
-  } catch {
-    return "server.insecure.invalidAddress" as const
-  }
+  if (!URL.canParse(input.url)) return "server.insecure.invalidAddress" as const
+  const url = new URL(input.url)
+  if (url.username || url.password || hasCredentialQuery(url)) return "server.insecure.credentialsInUrl" as const
+  if (!input.password || url.protocol === "https:" || isLocalNetworkHostname(url.hostname)) return
   return "server.insecure.httpsRequired" as const
 }
 

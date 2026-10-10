@@ -468,12 +468,9 @@ async function captureFile(file: string): Promise<CapturedFile> {
   }
 }
 
+// jsonc-parser recovers from malformed input instead of throwing.
 function readConfig(content: Buffer) {
-  try {
-    return parse(content.toString("utf8")) as unknown
-  } catch {
-    return undefined
-  }
+  return parse(content.toString("utf8")) as unknown
 }
 
 function fileInputs(config: unknown, source: string) {
