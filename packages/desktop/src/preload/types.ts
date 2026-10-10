@@ -25,6 +25,7 @@ import type {
   CloudProviderSyncResult,
   CloudSupabaseServices,
 } from "../main/cloud-connections"
+import type { CloudOverview } from "../main/cloud-overview"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
   GithubAuthStatus,
@@ -865,6 +866,10 @@ export type ElectronAPI = {
     subscribe: (cb: (event: PublishProgressEvent) => void) => () => void
   }
   cloud: {
+    /** The live summary for the session's Cloud card; `directory` may be an agent workspace. */
+    overview: (directory: string) => Promise<CloudOverview>
+    /** Fires whenever cloud state changes; returns the unsubscribe. */
+    onChange: (cb: () => void) => () => void
     connections: {
       list: () => Promise<CloudProviderConnection[]>
       connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>

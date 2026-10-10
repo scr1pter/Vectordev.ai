@@ -12,6 +12,7 @@ import {
 } from "./cloud-connections"
 import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
+import { recordPublishAttempt } from "./cloud-overview"
 import { createCloudDatabase } from "./cloud-provision"
 import { resolveCloudScope, type CloudScope, type CloudWorkspace } from "./cloud-scope"
 import { publishProject } from "./publish"
@@ -417,6 +418,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     production,
     runId: randomUUID(),
   })
+  recordPublishAttempt(scope.projectPath, production, result)
   const environment = production ? "production" : "preview"
   if (!isolated) return { ...result, environment }
   return {

@@ -60,6 +60,7 @@ import { runBrowserAgent } from "./browser-agent"
 import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
 import { cancelBackgroundTask, clearCompletedBackgroundTasks, listBackgroundTasks } from "./background-tasks"
+import { cloudOverview, recordPublishAttempt, watchCloudChanges } from "./cloud-overview"
 import {
   detectPublishTargets,
   fetchDeploymentRuntimeLogs,
@@ -159,6 +160,7 @@ import {
   mergeParallelWorkspace,
   mergeParallelWorkspaceSelection,
   openParallelWorkspacePullRequest,
+  parallelWorkspaceCloudScopes,
   refreshParallelWorkspace,
   removeParallelWorkspaceRecord,
   runParallelWorkspace,
@@ -461,7 +463,20 @@ export function registerIpcHandlers(deps: Deps) {
   handle("publish-project", (event: IpcMainInvokeEvent, input: PublishProjectInput) =>
     publishProject(input, (progress) => {
       if (!event.sender.isDestroyed()) event.sender.send("cloud-publish-progress", progress)
+    }).then((result) => {
+      recordPublishAttempt(input.scopeProjectPath ?? input.projectPath, input.production === true, result)
+      return result
     }),
+  )
+  // Every window's Cloud card refreshes when cloud state changes, whether a
+  // Cloud screen, the preview panel or the agent changed it.
+  watchCloudChanges(() =>
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send("cloud-changed")
+    }),
+  )
+  handle("cloud-overview", (_event: IpcMainInvokeEvent, directory: string) =>
+    cloudOverview(directory, parallelWorkspaceCloudScopes()),
   )
   handle("github-detect", (_event, options?: { refresh?: boolean }) =>
     detectGithub(options?.refresh === true ? refreshAgentEnvironment() : undefined),

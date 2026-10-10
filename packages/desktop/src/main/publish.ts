@@ -257,7 +257,7 @@ function runBuild(command: string, projectPath: string, onOutput?: (output: stri
   return runProcess({ command, cwd: projectPath, shell: true, onOutput })
 }
 
-async function readGitMetadata(projectPath: string): Promise<CloudGitMetadata | undefined> {
+export async function readGitMetadata(projectPath: string): Promise<CloudGitMetadata | undefined> {
   const read = (args: string[]) =>
     runProcess({ command: "git", args, cwd: projectPath, timeoutMs: 10_000 }).then((result) =>
       result.ok ? result.log.trim() : "",
