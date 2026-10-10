@@ -107,7 +107,11 @@ export function SupabaseFunctions(props: SupabasePanelProps & { icon: JSX.Elemen
           <div class="cloud-list mt-3">
             <For
               each={local()}
-              fallback={<p class="cloud-muted text-[12px]">No functions in supabase/functions yet. Ask the agent to write one.</p>}
+              fallback={
+                <p class="cloud-muted text-[12px]">
+                  No functions in supabase/functions yet. Ask the agent to write one.
+                </p>
+              }
             >
               {(name) => (
                 <div class="cloud-row">

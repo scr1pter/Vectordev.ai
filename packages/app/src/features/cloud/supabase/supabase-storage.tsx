@@ -105,7 +105,12 @@ export function SupabaseStorage(props: SupabasePanelProps & { icon: JSX.Element 
           <div class="sb-grid mt-3">
             <label class="sb-field">
               <span>Name</span>
-              <input class="cloud-input" placeholder="avatars" value={name()} onInput={(event) => setName(event.currentTarget.value)} />
+              <input
+                class="cloud-input"
+                placeholder="avatars"
+                value={name()}
+                onInput={(event) => setName(event.currentTarget.value)}
+              />
             </label>
             <label class="sb-field">
               <span>Largest file (MB, optional)</span>
@@ -127,7 +132,11 @@ export function SupabaseStorage(props: SupabasePanelProps & { icon: JSX.Element 
               />
             </label>
             <label class="sb-check" style={{ "align-self": "end", "min-height": "38px" }}>
-              <input type="checkbox" checked={makePublic()} onChange={(event) => setMakePublic(event.currentTarget.checked)} />
+              <input
+                type="checkbox"
+                checked={makePublic()}
+                onChange={(event) => setMakePublic(event.currentTarget.checked)}
+              />
               Public bucket
             </label>
           </div>
@@ -151,7 +160,10 @@ export function SupabaseStorage(props: SupabasePanelProps & { icon: JSX.Element 
             </button>
           </PanelHead>
           <div class="cloud-list mt-3">
-            <For each={buckets() ?? []} fallback={<p class="cloud-muted text-[12px]">{buckets() ? "No buckets yet." : "Loading…"}</p>}>
+            <For
+              each={buckets() ?? []}
+              fallback={<p class="cloud-muted text-[12px]">{buckets() ? "No buckets yet." : "Loading…"}</p>}
+            >
               {(bucket) => (
                 <div class="cloud-row">
                   <span class="min-w-0 flex-1">
@@ -170,10 +182,16 @@ export function SupabaseStorage(props: SupabasePanelProps & { icon: JSX.Element 
                     type="button"
                     disabled={Boolean(busy())}
                     onClick={() =>
-                      bucket.public ? void toggle(bucket) : confirm.ask(`public-${bucket.id}`, () => void toggle(bucket))
+                      bucket.public
+                        ? void toggle(bucket)
+                        : confirm.ask(`public-${bucket.id}`, () => void toggle(bucket))
                     }
                   >
-                    {bucket.public ? "Make private" : confirm.armed() === `public-${bucket.id}` ? "Anyone can read it. Sure?" : "Make public"}
+                    {bucket.public
+                      ? "Make private"
+                      : confirm.armed() === `public-${bucket.id}`
+                        ? "Anyone can read it. Sure?"
+                        : "Make public"}
                   </button>
                   <button
                     class="cloud-button"

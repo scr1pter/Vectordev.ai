@@ -41,7 +41,9 @@ function readPasswordRecord(projectPath: string): PasswordRecord | undefined {
 function databasePassword(context: SupabaseContext): string | undefined {
   const record = readPasswordRecord(context.projectPath)
   const encrypted =
-    record?.projectRef === context.projectRef ? record.password : provisionedPassword(context.projectPath, context.projectRef)
+    record?.projectRef === context.projectRef
+      ? record.password
+      : provisionedPassword(context.projectPath, context.projectRef)
   if (!encrypted) return
   const password = decryptCloudCredential(encrypted)
   context.secrets.push(password)
@@ -90,7 +92,13 @@ export async function writeDatabaseUrl(context: SupabaseContext, input: { direct
   const ignored = await ensureEnvIgnored(input.directory)
   await applyEnv(context.projectPath, context.taskId, input.directory)
   return {
-    variable: { key: DATABASE_URL, visibility: "server" as const, host: pooler.host, port: pooler.port, mode: "transaction" },
+    variable: {
+      key: DATABASE_URL,
+      visibility: "server" as const,
+      host: pooler.host,
+      port: pooler.port,
+      mode: "transaction",
+    },
     replaced,
     gitignoreUpdated: ignored.added,
     detail: `DATABASE_URL now points at ${context.projectName} through the transaction pooler. It is server-only and written to .env; its value is never shown.`,
@@ -135,7 +143,10 @@ export async function rotateDatabasePassword(
     input.syncVercel === true && (databaseUrl === "written" || databaseUrl === "updated") && link
       ? await syncCloudProviderEnvironment(context.projectPath, context.taskId, "vercel", context.request).then(
           (result) => ({ synced: true, projectName: result.projectName, changed: result.changed, detail: undefined }),
-          (error: unknown) => ({ synced: false, detail: `Vercel was not updated: ${scrub(context, errorMessage(error))}` }),
+          (error: unknown) => ({
+            synced: false,
+            detail: `Vercel was not updated: ${scrub(context, errorMessage(error))}`,
+          }),
         )
       : {
           synced: false,

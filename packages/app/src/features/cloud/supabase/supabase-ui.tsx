@@ -16,7 +16,10 @@ export type SupabasePanelProps = {
 // the user can take next.
 export function failed(notice: SupabaseNotice, report: SupabaseReport) {
   if (report.ok) return false
-  notice({ tone: "error", text: [report.error ?? "Supabase did not complete that.", report.nextStep].filter(Boolean).join(" ") })
+  notice({
+    tone: "error",
+    text: [report.error ?? "Supabase did not complete that.", report.nextStep].filter(Boolean).join(" "),
+  })
   return true
 }
 

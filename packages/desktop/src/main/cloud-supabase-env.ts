@@ -92,7 +92,11 @@ export async function ensureEnvIgnored(directory: string): Promise<{ added: bool
   const text = existing ? await readFile(path, "utf8") : ""
   if (ignored === undefined && /^\s*\/?(?:\.env|\.env\*|\*\.env|\.env\.?\*)\s*$/m.test(text)) return { added: false }
   const separator = text && !text.endsWith("\n") ? "\n" : ""
-  await writeFile(path, `${text}${separator}${text ? "\n" : ""}# Local environment written by Vector Cloud\n.env\n`, "utf8")
+  await writeFile(
+    path,
+    `${text}${separator}${text ? "\n" : ""}# Local environment written by Vector Cloud\n.env\n`,
+    "utf8",
+  )
   return { added: true }
 }
 

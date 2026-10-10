@@ -104,7 +104,9 @@ export async function updateAuthConfig(context: SupabaseContext, input: AuthUpda
     if (change.enabled !== undefined) body[`external_${name}_enabled`] = change.enabled
   }
   if (!Object.keys(body).length) return { auth: current, changed: [] as string[] }
-  const updated = summarize(await management(context, refPath(context, "/config/auth"), { method: "PATCH", json: body }))
+  const updated = summarize(
+    await management(context, refPath(context, "/config/auth"), { method: "PATCH", json: body }),
+  )
   return {
     auth: updated,
     // Field names only: a secret's value never appears in a result.
@@ -153,10 +155,7 @@ export async function vercelRedirectSuggestions(projectPath: string, request: Cl
         .filter((item) => item.environment === "preview")
         .map((item) => item.url),
     ) ?? (await remotePreviewScope(link.projectId, link.projectName, request))
-  const redirectUrls = [
-    ...production.map((url) => `${url}/**`),
-    ...(scope ? [`https://*-${scope}.vercel.app/**`] : []),
-  ]
+  const redirectUrls = [...production.map((url) => `${url}/**`), ...(scope ? [`https://*-${scope}.vercel.app/**`] : [])]
   return {
     siteUrl: production[0],
     redirectUrls: Array.from(new Set(redirectUrls)),
@@ -172,9 +171,7 @@ export function previewScope(projectName: string, urls: string[]) {
     if (!URL.canParse(url)) continue
     const host = new URL(url).hostname.toLowerCase()
     if (!host.endsWith(".vercel.app") || !host.startsWith(prefix)) continue
-    const scope = host
-      .slice(prefix.length, -".vercel.app".length)
-      .match(/^[a-z0-9]{9}-([a-z0-9-]+)$/)?.[1]
+    const scope = host.slice(prefix.length, -".vercel.app".length).match(/^[a-z0-9]{9}-([a-z0-9-]+)$/)?.[1]
     if (scope && !scope.startsWith("git-")) return scope
   }
 }

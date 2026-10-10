@@ -232,14 +232,20 @@ export function SupabaseDatabase(
               </Show>
               <Show when={mode() === "link"}>
                 <div class="cloud-provider-linker mt-3">
-                  <select class="cloud-input" value={selection()} onChange={(event) => setSelection(event.currentTarget.value)}>
+                  <select
+                    class="cloud-input"
+                    value={selection()}
+                    onChange={(event) => setSelection(event.currentTarget.value)}
+                  >
                     <option value="">Choose a Supabase project</option>
                     <For each={projects()?.projects ?? []}>
                       {(project) => (
                         <option value={project.ref}>
                           {project.name}
                           {project.region ? ` · ${project.region}` : ""}
-                          {project.status && project.status !== "ACTIVE_HEALTHY" ? ` · ${project.status.toLowerCase()}` : ""}
+                          {project.status && project.status !== "ACTIVE_HEALTHY"
+                            ? ` · ${project.status.toLowerCase()}`
+                            : ""}
                         </option>
                       )}
                     </For>
@@ -259,7 +265,11 @@ export function SupabaseDatabase(
                 <div class="sb-grid mt-3">
                   <label class="sb-field">
                     <span>Organization (billed for the project)</span>
-                    <select class="cloud-input" value={organization()} onChange={(event) => setOrganization(event.currentTarget.value)}>
+                    <select
+                      class="cloud-input"
+                      value={organization()}
+                      onChange={(event) => setOrganization(event.currentTarget.value)}
+                    >
                       <option value="">Choose an organization</option>
                       <For each={projects()?.organizations ?? []}>
                         {(item) => (
@@ -273,7 +283,11 @@ export function SupabaseDatabase(
                   </label>
                   <label class="sb-field">
                     <span>Region</span>
-                    <select class="cloud-input" value={region()} onChange={(event) => setRegion(event.currentTarget.value)}>
+                    <select
+                      class="cloud-input"
+                      value={region()}
+                      onChange={(event) => setRegion(event.currentTarget.value)}
+                    >
                       <For each={projects()?.regions ?? []}>
                         {(item) => (
                           <option value={item.id}>
@@ -323,7 +337,9 @@ export function SupabaseDatabase(
                 class="cloud-button"
                 type="button"
                 onClick={() =>
-                  props.openLink(`https://supabase.com/dashboard/project/${encodeURIComponent(projects()?.linked?.ref ?? "")}`)
+                  props.openLink(
+                    `https://supabase.com/dashboard/project/${encodeURIComponent(projects()?.linked?.ref ?? "")}`,
+                  )
                 }
               >
                 Open in Supabase
@@ -372,11 +388,19 @@ export function SupabaseDatabase(
             </PanelHead>
             <div class="sb-actions mt-3">
               <label class="sb-check">
-                <input type="checkbox" checked={writeUrl()} onChange={(event) => setWriteUrl(event.currentTarget.checked)} />
+                <input
+                  type="checkbox"
+                  checked={writeUrl()}
+                  onChange={(event) => setWriteUrl(event.currentTarget.checked)}
+                />
                 Write DATABASE_URL with the new password
               </label>
               <label class="sb-check">
-                <input type="checkbox" checked={syncVercel()} onChange={(event) => setSyncVercel(event.currentTarget.checked)} />
+                <input
+                  type="checkbox"
+                  checked={syncVercel()}
+                  onChange={(event) => setSyncVercel(event.currentTarget.checked)}
+                />
                 Push the environment to Vercel
               </label>
               <button
@@ -404,7 +428,12 @@ export function SupabaseDatabase(
                   : "Write .sql files in supabase/migrations (or ask the agent to), then apply them here."
               }
             >
-              <button class="cloud-button" type="button" disabled={Boolean(busy())} onClick={() => void loadMigrations()}>
+              <button
+                class="cloud-button"
+                type="button"
+                disabled={Boolean(busy())}
+                onClick={() => void loadMigrations()}
+              >
                 Refresh
               </button>
               <Show when={migrations()?.migrations?.pending.length}>
@@ -493,7 +522,9 @@ export function SupabaseDatabase(
             />
             <Show when={pendingWrite()}>
               <div class="sb-confirm mt-3">
-                <span>This query changes data in {props.projectName ?? "the linked project"} (production). Run it?</span>
+                <span>
+                  This query changes data in {props.projectName ?? "the linked project"} (production). Run it?
+                </span>
                 <span class="sb-actions">
                   <button class="cloud-button" type="button" onClick={() => setPendingWrite("")}>
                     Cancel

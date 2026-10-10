@@ -366,7 +366,9 @@ describe("vector_cloud bridge", () => {
         security: {
           status: "failed",
           detail: "1 security problem must be fixed before a production release.",
-          advisors: [{ level: "ERROR", title: "RLS Disabled in Public", entity: "public.orders", remediation: "Enable RLS" }],
+          advisors: [
+            { level: "ERROR", title: "RLS Disabled in Public", entity: "public.orders", remediation: "Enable RLS" },
+          ],
           environment: [],
           bundle: [{ level: "ERROR", where: "assets/index.js", reason: "ships a Supabase secret key" }],
         },
@@ -386,7 +388,16 @@ describe("vector_cloud bridge", () => {
         {
           ok: true,
           project: { ref: "shopref", name: "shop-db" },
-          result: { columns: ["id", "email"], rows: [[1, "a@example.com"], [2, null]], rowCount: 2, truncated: false, readOnly: true },
+          result: {
+            columns: ["id", "email"],
+            rows: [
+              [1, "a@example.com"],
+              [2, null],
+            ],
+            rowCount: 2,
+            truncated: false,
+            readOnly: true,
+          },
         },
         200,
         described,
@@ -406,7 +417,9 @@ describe("vector_cloud bridge", () => {
         described,
       )
       const refused = yield* execute({ action: "run_sql", sql: "delete from profiles" })
-      expect(refused.output).toContain("Vector Cloud could not run run_sql: Supabase refused this query in read-only mode.")
+      expect(refused.output).toContain(
+        "Vector Cloud could not run run_sql: Supabase refused this query in read-only mode.",
+      )
       expect(refused.output).toContain("allowWrite")
     }),
   )

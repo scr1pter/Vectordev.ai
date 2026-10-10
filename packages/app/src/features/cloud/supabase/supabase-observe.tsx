@@ -34,7 +34,11 @@ export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element }) 
     if (!props.linked || busy()) return
     setBusy(true)
     try {
-      const report = await props.client.logs({ service: service(), minutes: minutes(), search: search().trim() || undefined })
+      const report = await props.client.logs({
+        service: service(),
+        minutes: minutes(),
+        search: search().trim() || undefined,
+      })
       if (failed(props.notice, report)) return
       setEntries(report.entries ?? [])
       setTruncated(report.truncated === true)
@@ -43,13 +47,22 @@ export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element }) 
     }
   }
 
-  createEffect(on(() => [props.linked, service(), minutes()] as const, () => void load()))
+  createEffect(
+    on(
+      () => [props.linked, service(), minutes()] as const,
+      () => void load(),
+    ),
+  )
 
   return (
     <Show
       when={props.linked}
       fallback={
-        <NotLinked onOpenDatabase={props.onOpenDatabase} what="Logs come from the Supabase project this repository uses." icon={props.icon} />
+        <NotLinked
+          onOpenDatabase={props.onOpenDatabase}
+          what="Logs come from the Supabase project this repository uses."
+          icon={props.icon}
+        />
       }
     >
       <div class="cloud-panel">
@@ -95,7 +108,9 @@ export function SupabaseLogs(props: SupabasePanelProps & { icon: JSX.Element }) 
                   : "No log lines in this window."}
               </pre>
               <Show when={truncated()}>
-                <p class="cloud-muted mt-2 text-[12px]">Older lines in this window are not shown; narrow it or filter.</p>
+                <p class="cloud-muted mt-2 text-[12px]">
+                  Older lines in this window are not shown; narrow it or filter.
+                </p>
               </Show>
             </>
           )}
@@ -150,7 +165,13 @@ export function SupabaseSecurity(props: SupabasePanelProps & { icon: JSX.Element
             title="Security check"
             detail="Supabase's security advisors plus a scan of public environment variables and the last build for server keys. Promoting a release to production requires it to pass."
           >
-            <button class="cloud-button" data-variant="primary" type="button" disabled={busy()} onClick={() => void run()}>
+            <button
+              class="cloud-button"
+              data-variant="primary"
+              type="button"
+              disabled={busy()}
+              onClick={() => void run()}
+            >
               {busy() ? "Checking…" : "Run check"}
             </button>
           </PanelHead>
@@ -159,7 +180,9 @@ export function SupabaseSecurity(props: SupabasePanelProps & { icon: JSX.Element
               <div class="sb-actions mt-3">
                 <span
                   class="cloud-status"
-                  data-tone={current().status === "passed" ? "success" : current().status === "failed" ? "error" : "warning"}
+                  data-tone={
+                    current().status === "passed" ? "success" : current().status === "failed" ? "error" : "warning"
+                  }
                 >
                   {current().status}
                 </span>

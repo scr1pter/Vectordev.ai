@@ -173,7 +173,8 @@ async function builtOutput(input: { projectPath: string; taskId?: string; direct
   const configured = getBuildSettings(input.projectPath, input.taskId)?.outputDirectory
   const candidates = configured && configured !== "." ? [configured] : ["dist", "build", "out"]
   for (const candidate of candidates) {
-    if ((await stat(join(directory, candidate)).catch(() => undefined))?.isDirectory()) return join(directory, candidate)
+    if ((await stat(join(directory, candidate)).catch(() => undefined))?.isDirectory())
+      return join(directory, candidate)
   }
 }
 

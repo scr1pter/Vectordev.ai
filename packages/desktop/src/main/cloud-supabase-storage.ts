@@ -1,4 +1,11 @@
-import { booleanField, numberField, projectService, responseArray, stringField, type SupabaseContext } from "./cloud-supabase-api"
+import {
+  booleanField,
+  numberField,
+  projectService,
+  responseArray,
+  stringField,
+  type SupabaseContext,
+} from "./cloud-supabase-api"
 
 // Storage buckets of the linked project, through its own Storage API with the
 // service-role key held in this process.
@@ -34,7 +41,9 @@ function summarize(bucket: unknown): StorageBucket | undefined {
     name: stringField(bucket, "name") ?? id,
     public: booleanField(bucket, "public") === true,
     fileSizeLimit: numberField(bucket, "file_size_limit"),
-    allowedMimeTypes: Array.isArray(mimes) ? mimes.filter((item): item is string => typeof item === "string") : undefined,
+    allowedMimeTypes: Array.isArray(mimes)
+      ? mimes.filter((item): item is string => typeof item === "string")
+      : undefined,
     createdAt: stringField(bucket, "created_at"),
     updatedAt: stringField(bucket, "updated_at"),
   }
@@ -84,7 +93,9 @@ export async function createBucket(context: SupabaseContext, input: BucketInput)
   return {
     bucket: name,
     detail: `${input.public === true ? "Public" : "Private"} bucket ${name} created in ${context.projectName}.${
-      input.public === true ? " Anyone with a file's URL can read it." : " Reads and writes follow its storage policies."
+      input.public === true
+        ? " Anyone with a file's URL can read it."
+        : " Reads and writes follow its storage policies."
     }`,
   }
 }

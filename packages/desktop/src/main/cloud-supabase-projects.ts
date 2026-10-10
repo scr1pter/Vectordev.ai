@@ -66,7 +66,10 @@ async function accountContext(options: SupabaseOptions): Promise<SupabaseContext
   }
 }
 
-export async function listSupabaseProjects(input: { projectPath: string; taskId?: string }, options: SupabaseOptions = {}) {
+export async function listSupabaseProjects(
+  input: { projectPath: string; taskId?: string },
+  options: SupabaseOptions = {},
+) {
   const context = await accountContext(options)
   const [organizations, projects] = await Promise.all([
     management(context, "/organizations"),
@@ -78,7 +81,11 @@ export async function listSupabaseProjects(input: { projectPath: string; taskId?
       .map((item): SupabaseOrganizationSummary | undefined => {
         const id = stringField(item, "id") ?? stringField(item, "slug")
         if (!id) return
-        return { id, name: stringField(item, "name") ?? id, plan: stringField(item, "plan") ?? stringField(item, "tier") }
+        return {
+          id,
+          name: stringField(item, "name") ?? id,
+          plan: stringField(item, "plan") ?? stringField(item, "tier"),
+        }
       })
       .filter((item): item is SupabaseOrganizationSummary => Boolean(item)),
     projects: responseArray(projects)
@@ -175,7 +182,8 @@ export function unlinkSupabaseProject(input: { projectPath: string; taskId?: str
   disconnectDatabase(input.projectPath, input.taskId)
   return {
     unlinked: { ref: database.projectRef, name: database.projectName ?? database.projectRef },
-    detail: "The project is no longer linked. Its values in .env were left in place and the Supabase project itself was not changed.",
+    detail:
+      "The project is no longer linked. Its values in .env were left in place and the Supabase project itself was not changed.",
   }
 }
 

@@ -171,7 +171,10 @@ export function SupabaseAuth(props: SupabasePanelProps & { icon: JSX.Element }) 
               <div class="sb-confirm mt-3">
                 <span>
                   Allow {found().redirectUrls.join(", ")}
-                  {found().siteUrl && found().siteUrl !== auth()?.siteUrl ? `, and use ${found().siteUrl} as the site URL` : ""}?
+                  {found().siteUrl && found().siteUrl !== auth()?.siteUrl
+                    ? `, and use ${found().siteUrl} as the site URL`
+                    : ""}
+                  ?
                 </span>
                 <span class="sb-actions">
                   <button class="cloud-button" type="button" onClick={() => setSuggestions(undefined)}>
@@ -240,7 +243,10 @@ export function SupabaseAuth(props: SupabasePanelProps & { icon: JSX.Element }) 
         </div>
 
         <div class="cloud-panel">
-          <PanelHead title="Sign-in methods" detail="Turn methods on or off. Client secrets are sent to Supabase and never shown again." />
+          <PanelHead
+            title="Sign-in methods"
+            detail="Turn methods on or off. Client secrets are sent to Supabase and never shown again."
+          />
           <div class="cloud-list mt-3">
             <div class="cloud-row">
               <span class="min-w-0 flex-1">
@@ -269,7 +275,10 @@ export function SupabaseAuth(props: SupabasePanelProps & { icon: JSX.Element }) 
               {(provider) => {
                 const settings = () => auth()?.providers[provider.id]
                 return (
-                  <div class="cloud-row cloud-row-block" style={{ "flex-direction": "column", "align-items": "stretch" }}>
+                  <div
+                    class="cloud-row cloud-row-block"
+                    style={{ "flex-direction": "column", "align-items": "stretch" }}
+                  >
                     <div class="sb-panel-head">
                       <strong class="text-[13px]">{provider.label}</strong>
                       <span class="sb-actions">
@@ -381,11 +390,21 @@ export function SupabaseAuth(props: SupabasePanelProps & { icon: JSX.Element }) 
           </div>
           <Show when={page() > 1 || hasMore()}>
             <div class="sb-actions mt-3">
-              <button class="cloud-button" type="button" disabled={page() <= 1} onClick={() => void loadUsers(page() - 1)}>
+              <button
+                class="cloud-button"
+                type="button"
+                disabled={page() <= 1}
+                onClick={() => void loadUsers(page() - 1)}
+              >
                 Previous
               </button>
               <span class="cloud-muted text-[12px]">Page {page()}</span>
-              <button class="cloud-button" type="button" disabled={!hasMore()} onClick={() => void loadUsers(page() + 1)}>
+              <button
+                class="cloud-button"
+                type="button"
+                disabled={!hasMore()}
+                onClick={() => void loadUsers(page() + 1)}
+              >
                 Next
               </button>
             </div>

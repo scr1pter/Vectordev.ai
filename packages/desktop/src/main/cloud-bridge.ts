@@ -149,7 +149,11 @@ async function routeCloudCommand(body: unknown, options: CloudBridgeOptions) {
     return describeSupabaseCommand(action, body, (await options.workspaces?.()) ?? [])
   }
   if (isSupabaseCommand(command) && !original(command)) {
-    return runSupabaseCommand(command, body, { caller: "agent", workspaces: options.workspaces, request: options.request })
+    return runSupabaseCommand(command, body, {
+      caller: "agent",
+      workspaces: options.workspaces,
+      request: options.request,
+    })
   }
   return runCloudCommand(parseCloudCommandInput(body), options)
 }

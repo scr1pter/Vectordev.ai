@@ -337,10 +337,15 @@ async function linkCreatedProject(
   request: CloudFetch,
   progress?: (event: CloudProvisionProgress) => void,
 ): Promise<CloudProvisionReport> {
-  progress?.({ stage: "linking", projectRef: record.projectRef, message: `Connecting ${record.projectName} to this project.` })
+  progress?.({
+    stage: "linking",
+    projectRef: record.projectRef,
+    message: `Connecting ${record.projectName} to this project.`,
+  })
   const anonKey = await fetchAnonKey(token, record.projectRef, request)
-  // The manual flow's own helper: it writes SUPABASE_URL/SUPABASE_ANON_KEY into
-  // the project's managed env, scaffolds src/lib/supabase.js and flushes .env.
+  // The manual flow's own helper: it writes the project URL and public key into
+  // the project's managed env under the framework's public names, scaffolds the
+  // client (supabase.ts or .js), keeps .env out of git and flushes .env.
   const connection = await connectDatabase(
     input.projectPath,
     input.taskId,

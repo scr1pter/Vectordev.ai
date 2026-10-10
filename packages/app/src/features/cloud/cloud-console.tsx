@@ -2132,7 +2132,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Data for your app</div>
                   <h1>Database</h1>
                   <p>
-                    The Supabase project this repository uses: link or create it, keep its server credentials, apply and roll back migrations, and query it.
+                    The Supabase project this repository uses: link or create it, keep its server credentials, apply and
+                    roll back migrations, and query it.
                   </p>
                 </div>
               </div>
@@ -2153,7 +2154,8 @@ export function CloudConsole(props: {
                   connected={Boolean(providerConnection("supabase")?.connected)}
                   onOpenConnections={() => {
                     setSection("connections")
-                    if (cloudProviderConnectionMode(providerConnection("supabase")) === "token") openManualToken("supabase")
+                    if (cloudProviderConnectionMode(providerConnection("supabase")) === "token")
+                      openManualToken("supabase")
                   }}
                   onDatabaseChange={refreshDatabase}
                   openLink={(url) => platform.openLink(url)}
@@ -2166,9 +2168,7 @@ export function CloudConsole(props: {
                 <div>
                   <div class="cloud-kicker">Supabase identity</div>
                   <h1>Authentication</h1>
-                  <p>
-                    Where sign-in may return to, which sign-in methods are on, and who has an account.
-                  </p>
+                  <p>Where sign-in may return to, which sign-in methods are on, and who has an account.</p>
                 </div>
               </div>
               <SupabaseAuth {...supabasePanel} icon={sectionIcon("authentication")} />
@@ -2179,9 +2179,7 @@ export function CloudConsole(props: {
                 <div>
                   <div class="cloud-kicker">Supabase objects</div>
                   <h1>Storage</h1>
-                  <p>
-                    Buckets for the files your app stores, public or private.
-                  </p>
+                  <p>Buckets for the files your app stores, public or private.</p>
                 </div>
               </div>
               <SupabaseStorage {...supabasePanel} icon={sectionIcon("storage")} />
@@ -2192,9 +2190,7 @@ export function CloudConsole(props: {
                 <div>
                   <div class="cloud-kicker">Serverless logic</div>
                   <h1>Edge functions</h1>
-                  <p>
-                    Deploy the functions in supabase/functions and manage the secrets they read.
-                  </p>
+                  <p>Deploy the functions in supabase/functions and manage the secrets they read.</p>
                 </div>
               </div>
               <SupabaseFunctions {...supabasePanel} icon={sectionIcon("functions")} />
@@ -2205,9 +2201,7 @@ export function CloudConsole(props: {
                 <div>
                   <div class="cloud-kicker">Supabase services</div>
                   <h1>Database logs</h1>
-                  <p>
-                    Recent logs from the API gateway, Postgres, Auth, Storage and Edge Functions.
-                  </p>
+                  <p>Recent logs from the API gateway, Postgres, Auth, Storage and Edge Functions.</p>
                 </div>
               </div>
               <SupabaseLogs {...supabasePanel} icon={sectionIcon("logs")} />
@@ -2218,9 +2212,7 @@ export function CloudConsole(props: {
                 <div>
                   <div class="cloud-kicker">Before you ship</div>
                   <h1>Security</h1>
-                  <p>
-                    Supabase's security advisors and a scan for server keys in what Vector would publish.
-                  </p>
+                  <p>Supabase's security advisors and a scan for server keys in what Vector would publish.</p>
                 </div>
               </div>
               <SupabaseSecurity {...supabasePanel} icon={sectionIcon("authentication")} />

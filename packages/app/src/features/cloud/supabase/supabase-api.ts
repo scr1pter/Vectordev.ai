@@ -76,7 +76,14 @@ export type StorageBucket = {
   updatedAt?: string
 }
 
-export type DeployedFunction = { id: string; slug: string; name: string; status?: string; version?: number; updatedAt?: string }
+export type DeployedFunction = {
+  id: string
+  slug: string
+  name: string
+  status?: string
+  version?: number
+  updatedAt?: string
+}
 
 export type FunctionSecret = { name: string; updatedAt?: string; reserved: boolean }
 
@@ -86,7 +93,14 @@ export type SecurityFinding = { where: string; reason: string; level: "ERROR" | 
 
 export type SecurityReport = {
   status: "passed" | "failed" | "skipped"
-  advisors: { name: string; title: string; level: "ERROR" | "WARN" | "INFO"; detail?: string; remediation?: string; entity?: string }[]
+  advisors: {
+    name: string
+    title: string
+    level: "ERROR" | "WARN" | "INFO"
+    detail?: string
+    remediation?: string
+    entity?: string
+  }[]
   advisorsError?: string
   environment: SecurityFinding[]
   bundle: SecurityFinding[]
@@ -102,7 +116,9 @@ export type SupabaseBridge = {
 }
 
 function desktopBridge(): SupabaseBridge | undefined {
-  const api = globalThis.window?.api as (Record<string, unknown> & { cloud?: { supabase?: SupabaseBridge } }) | undefined
+  const api = globalThis.window?.api as
+    | (Record<string, unknown> & { cloud?: { supabase?: SupabaseBridge } })
+    | undefined
   return api?.cloud?.supabase
 }
 
@@ -114,7 +130,8 @@ export function supabaseClient(
 ) {
   const run = async <T extends object>(command: string, input: Record<string, unknown> = {}) => {
     const api = bridge()
-    if (!api) return { ok: false, error: "Supabase controls run in the Vector desktop app." } as SupabaseReport & Partial<T>
+    if (!api)
+      return { ok: false, error: "Supabase controls run in the Vector desktop app." } as SupabaseReport & Partial<T>
     return (await api.run(command, { ...scope(), ...input }).catch((error: unknown) => ({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
@@ -142,9 +159,11 @@ export function supabaseClient(
     migrationStatus: () => run<MigrationState>("migration_status"),
     applyMigrations: () => run<MigrationState>("apply_migrations"),
     rollback: (name: string) => run<{ rolledBack: string; nextStep: string }>("rollback_migration", { name }),
-    runSql: (sql: string, write = false) => run<{ result: SqlResult; needsConfirmation: boolean }>("run_sql", { sql, write }),
+    runSql: (sql: string, write = false) =>
+      run<{ result: SqlResult; needsConfirmation: boolean }>("run_sql", { sql, write }),
     auth: () => run<{ auth: AuthSettings }>("auth_config"),
-    updateAuth: (input: Record<string, unknown>) => run<{ auth: AuthSettings; changed: string[] }>("update_auth", input),
+    updateAuth: (input: Record<string, unknown>) =>
+      run<{ auth: AuthSettings; changed: string[] }>("update_auth", input),
     vercelRedirects: () => run<{ siteUrl?: string; redirectUrls: string[]; detail?: string }>("vercel_redirect_urls"),
     users: (page: number) => run<{ users: AuthUser[]; hasMore: boolean; page: number }>("auth_users", { page }),
     inviteUser: (email: string) => run<{ detail: string }>("invite_user", { email }),
@@ -152,8 +171,12 @@ export function supabaseClient(
     buckets: () => run<{ buckets: StorageBucket[] }>("buckets"),
     createBucket: (input: { bucket: string; public: boolean; fileSizeLimit?: number; allowedMimeTypes?: string[] }) =>
       run<{ detail: string }>("create_bucket", input),
-    updateBucket: (input: { bucket: string; public?: boolean; fileSizeLimit?: number | null; allowedMimeTypes?: string[] | null }) =>
-      run<{ detail: string }>("update_bucket", input),
+    updateBucket: (input: {
+      bucket: string
+      public?: boolean
+      fileSizeLimit?: number | null
+      allowedMimeTypes?: string[] | null
+    }) => run<{ detail: string }>("update_bucket", input),
     deleteBucket: (bucket: string, empty: boolean) => run<{ detail: string }>("delete_bucket", { bucket, empty }),
     functions: () => run<{ deployed: DeployedFunction[]; local: string[] }>("functions"),
     deployFunction: (functionName: string) => run<{ detail: string; url: string }>("deploy_function", { functionName }),

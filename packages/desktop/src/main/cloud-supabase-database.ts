@@ -16,7 +16,13 @@ import {
   type MigrationDiscovery,
   type MigrationFile,
 } from "./cloud-migrations"
-import { errorMessage, scrub, SupabaseSetupError, type SupabaseContext, type SupabaseOptions } from "./cloud-supabase-api"
+import {
+  errorMessage,
+  scrub,
+  SupabaseSetupError,
+  type SupabaseContext,
+  type SupabaseOptions,
+} from "./cloud-supabase-api"
 
 // The database side of a linked Supabase project beyond applying migrations:
 // what is applied, writing a new migration, rolling the latest one back with
@@ -43,15 +49,16 @@ export async function migrationStatus(
   const down = last ? await findDown(discovery, last) : undefined
   return {
     ...report,
-    rollback: last
-      ? { name: last.name, available: Boolean(down), source: down?.source }
-      : undefined,
+    rollback: last ? { name: last.name, available: Boolean(down), source: down?.source } : undefined,
   }
 }
 
 async function findDown(discovery: MigrationDiscovery, file: MigrationFile) {
   const base = file.name.replace(/\.sql$/i, "")
-  for (const candidate of [join(file.path, "..", `${base}.down.sql`), join(file.path, "..", "down", `${base}.down.sql`)]) {
+  for (const candidate of [
+    join(file.path, "..", `${base}.down.sql`),
+    join(file.path, "..", "down", `${base}.down.sql`),
+  ]) {
     const sql = await readFile(candidate, "utf8").catch(() => undefined)
     if (sql?.trim()) return { sql, source: "file" as const, path: candidate }
   }
@@ -150,7 +157,10 @@ export async function rollbackMigration(context: SupabaseContext, input: { direc
   try {
     await runner(`${down.sql}\n;\ndo $$\nbegin\n${history}\nend\n$$;`)
   } catch (error) {
-    return { ok: false, error: `Rolling back ${last.name} failed and nothing changed: ${scrub(context, errorMessage(error))}` }
+    return {
+      ok: false,
+      error: `Rolling back ${last.name} failed and nothing changed: ${scrub(context, errorMessage(error))}`,
+    }
   }
   return {
     ok: true,
@@ -181,7 +191,8 @@ export async function runSql(
   const sql = input.sql.trim()
   if (!sql) throw new Error("Enter a SQL query to run.")
   if (sql.length > MAX_SQL_CHARS) throw new Error(`Queries are limited to ${MAX_SQL_CHARS} characters.`)
-  const limits = input.caller === "agent" ? { rows: 200, rowsDefault: 50, cell: 300 } : { rows: 1000, rowsDefault: 500, cell: 4000 }
+  const limits =
+    input.caller === "agent" ? { rows: 200, rowsDefault: 50, cell: 300 } : { rows: 1000, rowsDefault: 500, cell: 4000 }
   const maxRows = Math.min(limits.rows, Math.max(1, Math.trunc(input.maxRows ?? limits.rowsDefault)))
   const readOnly = input.write !== true
   const runner = supabaseSqlRunner(context.projectRef, context.token, context.request, { readOnly })

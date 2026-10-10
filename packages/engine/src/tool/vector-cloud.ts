@@ -138,7 +138,8 @@ export const Parameters = Schema.Struct({
     description: "For update_auth, the site URL Supabase Auth sends users back to by default.",
   }),
   redirectUrls: Schema.optional(Schema.Array(Schema.String)).annotate({
-    description: "For update_auth, redirect URLs to add to the allow list (Supabase globs such as https://app.example.com/** work).",
+    description:
+      "For update_auth, redirect URLs to add to the allow list (Supabase globs such as https://app.example.com/** work).",
   }),
   removeRedirectUrls: Schema.optional(Schema.Array(Schema.String)).annotate({
     description: "For update_auth, redirect URLs to remove from the allow list.",
@@ -198,8 +199,7 @@ export const Parameters = Schema.Struct({
     description: "For rotate_database_password, also write the new server-only DATABASE_URL.",
   }),
   syncVercel: Schema.optional(Schema.Boolean).annotate({
-    description:
-      "For rotate_database_password, also push this project's environment to the linked Vercel project.",
+    description: "For rotate_database_password, also push this project's environment to the linked Vercel project.",
   }),
 })
 
@@ -449,7 +449,9 @@ function formatSupabase(action: Action, report: CloudReport) {
     const entries = (report.entries as { at: string; message: string }[] | undefined) ?? []
     return lines(
       `${report.label} logs from ${report.from} to ${report.to}: ${entries.length} line(s)${report.truncated ? ", older lines not shown" : ""}.`,
-      entries.length ? `--- newest last ---\n${entries.map((entry) => `${entry.at} ${entry.message}`).join("\n")}` : "No log lines in that window.",
+      entries.length
+        ? `--- newest last ---\n${entries.map((entry) => `${entry.at} ${entry.message}`).join("\n")}`
+        : "No log lines in that window.",
     )
   }
   if (action === "security_check") {
@@ -466,7 +468,8 @@ function formatSupabase(action: Action, report: CloudReport) {
     return lines(
       `Supabase security check: ${security.status}. ${security.detail}`,
       ...security.advisors.map(
-        (item) => `${item.level} · ${item.title}${item.entity ? ` · ${item.entity}` : ""}${item.remediation ? ` (${item.remediation})` : ""}`,
+        (item) =>
+          `${item.level} · ${item.title}${item.entity ? ` · ${item.entity}` : ""}${item.remediation ? ` (${item.remediation})` : ""}`,
       ),
       ...[...security.environment, ...security.bundle].map((item) => `${item.level} · ${item.where} ${item.reason}`),
     )

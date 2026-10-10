@@ -184,7 +184,10 @@ async function run(
   if (command === "write_database_url") {
     // The agent's permission prompt for this action is the user's consent; the
     // console sends it after its own confirmation.
-    return writeDatabaseUrl(context, { directory: project.directory, consent: agent || bool(input, "consent") === true })
+    return writeDatabaseUrl(context, {
+      directory: project.directory,
+      consent: agent || bool(input, "consent") === true,
+    })
   }
   if (command === "rotate_database_password") {
     return rotateDatabasePassword(context, {
@@ -209,12 +212,14 @@ async function run(
     const update = authUpdate(input, agent)
     if (bool(input, "addVercelUrls") === true) {
       const suggestions = await vercelRedirectSuggestions(project.projectPath, options.request)
-      if (!suggestions.redirectUrls.length) throw new SupabaseSetupError("No Vercel addresses to add.", suggestions.detail ?? "")
+      if (!suggestions.redirectUrls.length)
+        throw new SupabaseSetupError("No Vercel addresses to add.", suggestions.detail ?? "")
       update.addRedirectUrls = [...(update.addRedirectUrls ?? []), ...suggestions.redirectUrls]
     }
     return updateAuthConfig(context, update)
   }
-  if (command === "auth_users") return listAuthUsers(context, { page: num(input, "page"), perPage: num(input, "perPage") })
+  if (command === "auth_users")
+    return listAuthUsers(context, { page: num(input, "page"), perPage: num(input, "perPage") })
   if (command === "invite_user") {
     return inviteAuthUser(context, { email: required(input, "email"), redirectTo: text(input, "redirectTo") })
   }
@@ -240,7 +245,9 @@ async function run(
   if (command === "function_secrets") return listFunctionSecrets(context)
   if (command === "set_function_secrets") {
     if (agent && input.secrets !== undefined) {
-      throw new Error("Secret values are entered in Cloud Services > Edge functions, never through chat. Pass names from this project's environment instead.")
+      throw new Error(
+        "Secret values are entered in Cloud Services > Edge functions, never through chat. Pass names from this project's environment instead.",
+      )
     }
     return setFunctionSecrets(context, { secrets: secretPairs(input), fromEnv: list(input, "secretNames") })
   }
@@ -274,7 +281,11 @@ function authUpdate(input: Input, agent: boolean): AuthUpdate {
         "OAuth client secrets are entered in Cloud Services > Authentication, never through chat, so they stay out of the conversation.",
       )
     }
-    providers[name] = { enabled: bool(change, "enabled"), clientId: text(change, "clientId"), secret: text(change, "secret") }
+    providers[name] = {
+      enabled: bool(change, "enabled"),
+      clientId: text(change, "clientId"),
+      secret: text(change, "secret"),
+    }
   }
   return {
     siteUrl: text(input, "siteUrl"),
@@ -386,12 +397,16 @@ export async function describeSupabaseCommand(command: SupabaseCommand, raw: unk
       )
     }
     if (command === "rotate_database_password") {
-      const vercel = bool(input, "syncVercel") ? getCloudProviderProjectLink(scope.projectPath, undefined, "vercel") : undefined
+      const vercel = bool(input, "syncVercel")
+        ? getCloudProviderProjectLink(scope.projectPath, undefined, "vercel")
+        : undefined
       return describe(
         [
           `Reset the database password of ${name}; anything still using the old password stops working.`,
           bool(input, "writeDatabaseUrl") ? "Write the new DATABASE_URL to this project's environment." : "",
-          vercel ? `Push this project's environment to the Vercel project ${vercel.projectName} (production, preview and development).` : "",
+          vercel
+            ? `Push this project's environment to the Vercel project ${vercel.projectName} (production, preview and development).`
+            : "",
         ]
           .filter(Boolean)
           .join(" "),
@@ -416,11 +431,16 @@ export async function describeSupabaseCommand(command: SupabaseCommand, raw: unk
       const parts = [
         text(input, "siteUrl") ? `set the site URL to ${text(input, "siteUrl")}` : "",
         list(input, "redirectUrls")?.length ? `allow redirects to ${list(input, "redirectUrls")?.join(", ")}` : "",
-        list(input, "removeRedirectUrls")?.length ? `stop allowing ${list(input, "removeRedirectUrls")?.join(", ")}` : "",
+        list(input, "removeRedirectUrls")?.length
+          ? `stop allowing ${list(input, "removeRedirectUrls")?.join(", ")}`
+          : "",
         bool(input, "addVercelUrls") ? "allow the linked Vercel production and preview addresses" : "",
-        bool(input, "emailEnabled") !== undefined ? `turn email sign-in ${bool(input, "emailEnabled") ? "on" : "off"}` : "",
+        bool(input, "emailEnabled") !== undefined
+          ? `turn email sign-in ${bool(input, "emailEnabled") ? "on" : "off"}`
+          : "",
         ...AUTH_PROVIDERS.map((provider) => {
-          const change = input.providers && typeof input.providers === "object" ? (input.providers as Input)[provider] : undefined
+          const change =
+            input.providers && typeof input.providers === "object" ? (input.providers as Input)[provider] : undefined
           if (!change || typeof change !== "object") return ""
           const enabled = bool(change as Input, "enabled")
           return `${enabled === undefined ? "update" : enabled ? "turn on" : "turn off"} ${provider} sign-in`
@@ -436,7 +456,10 @@ export async function describeSupabaseCommand(command: SupabaseCommand, raw: unk
     }
     if (command === "create_bucket") {
       const visibility = bool(input, "public") ? "public" : "private"
-      return describe(`Create a ${visibility} storage bucket ${required(input, "bucket")} in ${name}.`, visibility === "private")
+      return describe(
+        `Create a ${visibility} storage bucket ${required(input, "bucket")} in ${name}.`,
+        visibility === "private",
+      )
     }
     if (command === "update_bucket") {
       const visibility = bool(input, "public")
@@ -468,7 +491,8 @@ export async function describeSupabaseCommand(command: SupabaseCommand, raw: unk
           ok: false,
           needsSetup: true,
           error: `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not in this project's environment.`,
-          nextStep: "Ask the user to add the value in Cloud Services > Environment variables or Edge functions; never ask for it in chat.",
+          nextStep:
+            "Ask the user to add the value in Cloud Services > Environment variables or Edge functions; never ask for it in chat.",
         }
       }
       return describe(
@@ -477,7 +501,10 @@ export async function describeSupabaseCommand(command: SupabaseCommand, raw: unk
       )
     }
     if (command === "delete_function_secrets") {
-      return describe(`Delete the Edge Function secrets ${(list(input, "secretNames") ?? []).join(", ")} from ${name}.`, false)
+      return describe(
+        `Delete the Edge Function secrets ${(list(input, "secretNames") ?? []).join(", ")} from ${name}.`,
+        false,
+      )
     }
     return { ok: false, error: `${command} does not change anything, so it needs no approval.` }
   } catch (error) {

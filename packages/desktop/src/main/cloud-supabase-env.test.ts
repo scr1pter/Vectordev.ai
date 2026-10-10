@@ -32,7 +32,10 @@ describe("public Supabase names per framework", () => {
     expect(await supabaseFramework(directory)).toBe("next")
     await writeFile(join(directory, "package.json"), JSON.stringify({ devDependencies: { vite: "6.0.0" } }))
     expect(await supabaseFramework(directory)).toBe("vite")
-    expect(supabasePublicEnvNames("next")).toEqual({ url: "NEXT_PUBLIC_SUPABASE_URL", key: "NEXT_PUBLIC_SUPABASE_ANON_KEY" })
+    expect(supabasePublicEnvNames("next")).toEqual({
+      url: "NEXT_PUBLIC_SUPABASE_URL",
+      key: "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    })
     expect(supabasePublicEnvNames("vite")).toEqual({ url: "VITE_SUPABASE_URL", key: "VITE_SUPABASE_ANON_KEY" })
     expect(supabasePublicEnvNames("other")).toEqual({ url: "SUPABASE_URL", key: "SUPABASE_ANON_KEY" })
   })
@@ -60,7 +63,9 @@ describe("client scaffold", () => {
     await manifest({ vite: "6.0.0" })
     const scaffold = await scaffoldSupabaseClient(directory, "vite")
     expect(scaffold).toEqual({ path: join("src", "lib", "supabase.js"), created: true, dependencyMissing: true })
-    expect(await readFile(join(directory, "src", "lib", "supabase.js"), "utf8")).toContain("import.meta.env.VITE_SUPABASE_URL")
+    expect(await readFile(join(directory, "src", "lib", "supabase.js"), "utf8")).toContain(
+      "import.meta.env.VITE_SUPABASE_URL",
+    )
   })
 
   test("never replaces a client the project already has, in either language", async () => {
@@ -93,7 +98,9 @@ describe(".env stays out of git", () => {
 
   test("outside a repository it reads .gitignore itself and creates one when missing", async () => {
     expect(await ensureEnvIgnored(directory)).toEqual({ added: true })
-    expect(await readFile(join(directory, ".gitignore"), "utf8")).toBe("# Local environment written by Vector Cloud\n.env\n")
+    expect(await readFile(join(directory, ".gitignore"), "utf8")).toBe(
+      "# Local environment written by Vector Cloud\n.env\n",
+    )
     expect(await ensureEnvIgnored(directory)).toEqual({ added: false })
   })
 })
