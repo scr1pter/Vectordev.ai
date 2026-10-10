@@ -56,6 +56,39 @@ describe("global reload", () => {
     }),
   )
 
+  it.instance("waits for the report of a background subagent that just finished to reach its parent", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const job = yield* jobs.start({ type: "task", metadata: { background: true }, run: Effect.succeed("found it") })
+      yield* jobs.wait({ id: job.id })
+
+      yield* disposeAllInstancesAndEmitGlobalDisposed()
+      // The report is batched and admitted to the parent after the job settles, so the instance is kept meanwhile.
+      expect((yield* jobs.get(job.id))?.status).toBe("completed")
+      yield* reloaded(jobs, job.id)
+    }),
+  )
+
+  it.instance("does not wait for a session that is only retrying a provider call", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const statuses = yield* SessionStatus.Service
+      const marker = yield* jobs.start({ type: "marker", run: Effect.succeed("done") })
+      yield* jobs.wait({ id: marker.id })
+      // A session stuck retrying on a key the user just replaced in Settings.
+      yield* statuses.set(SessionID.make("ses_global_reload_retry"), {
+        type: "retry",
+        attempt: 3,
+        message: "Rate limited",
+        next: Date.now() + 60_000,
+      })
+
+      yield* disposeAllInstancesAndEmitGlobalDisposed()
+
+      expect(yield* jobs.get(marker.id)).toBeUndefined()
+    }),
+  )
+
   it.instance("reloads an idle instance right away", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
