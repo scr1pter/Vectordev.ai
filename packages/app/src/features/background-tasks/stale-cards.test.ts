@@ -133,10 +133,7 @@ function engine() {
     // What happened while the stream was down: the child finished, its record settled and so did the task part.
     finish(options: { part: boolean }) {
       const done = { status: "completed", completedAt: 9_000 }
-      sessions.set(
-        CHILD,
-        session(CHILD, 9_000, { parentID: ROOT, metadata: { subagent: record({ ...done }) } }),
-      )
+      sessions.set(CHILD, session(CHILD, 9_000, { parentID: ROOT, metadata: { subagent: record(done) } }))
       messages.set(CHILD, [
         { info: user("msg_cu", CHILD), parts: [] },
         { info: assistant("msg_ca", CHILD, "msg_cu", { created: 2_000, completed: 9_000 }), parts: [] },

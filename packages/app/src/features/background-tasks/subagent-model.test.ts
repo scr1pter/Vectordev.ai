@@ -1038,7 +1038,9 @@ describe("cards the event stream left behind", () => {
         taskPart({ id: "prt_1", callID: "call_1", metadata: running("ses_c1", "call_1") }),
       ])
       data.sessions.ses_c1 = child("ses_c1", {
-        metadata: { subagent: { callID: "call_1", status, startedAt: 1_000, completedAt: 5_000, error: "Rate limited" } },
+        metadata: {
+          subagent: { callID: "call_1", status, startedAt: 1_000, completedAt: 5_000, error: "Rate limited" },
+        },
       })
       const agent = buildTaskCards(source(data))[0]!.agents[0]!
       expect(agent.status).toBe(expected)

@@ -95,10 +95,8 @@ export function startKeepAwake(input: {
     const disposed = Option.getOrUndefined(Schema.decodeUnknownOption(DisposedProperties)(event.payload.properties))
     if (!disposed) return
     // A disposed directory runs nothing, and asking it for statuses on the next connection would start it again.
-    ;[...locations]
-      .filter((entry) => entry[1].directory === disposed.directory)
-      .forEach((entry) => locations.delete(entry[0]))
-    ;[...busy].filter((entry) => !locations.has(entry[1])).forEach((entry) => busy.delete(entry[0]))
+    for (const entry of locations) if (entry[1].directory === disposed.directory) locations.delete(entry[0])
+    for (const entry of busy) if (!locations.has(entry[1])) busy.delete(entry[0])
   }
 
   // Events that arrive while the seed is in flight wait in the stream and apply after it, in order, so the newest
