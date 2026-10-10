@@ -21,7 +21,7 @@ export const upcomingRelease = {
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.104"
+export const publishedDesktopVersion = "1.99.105"
 
 export const releaseSeries: VectorRelease[] = [
   {
@@ -656,8 +656,6 @@ export const release199: VectorRelease[] = [
   {
     version: "1.99.105",
     title: "Subagents keep working in the background",
-    availability:
-      "Upcoming, not published: 1.99.105 is prepared as an unsigned desktop release. Desktop downloads remain at 1.99.104 until its installers are published, and the npm CLI and plugin SDK stay at 1.99.99.",
     summary:
       "Subagents now run in the background by default: the agent hands a task off, keeps working with you, and gets an automated report when the task finishes, and tasks that finish together report in one message. A message sent to a running subagent reaches it at its next step, and one that depends on other tasks waits for them. Stopping the agent's turn leaves the subagents it handed off running; stop them all from the background tasks panel. A settings change, such as a new provider key, no longer stops running subagents: Vector applies it once their work ends. Vectorscope can now review your own changes before you commit: Review my changes reviews the staged, unstaged and new files in the open project, as `vector review --uncommitted` does. Set up automatic reviews opens a pull request that adds the GitHub Actions workflow `vector github install` writes, on your agent's model, and lists the repository secrets to add; no API key is sent to GitHub, and Vector asks GitHub for permission to change workflow files only for this. A repository whose workflow reviews only when someone comments /vector review is shown as such. Branch names and pull request references now show in violet. A new install can start free: Start free with OpenRouter, in the composer and in the getting started checklist, connects your own OpenRouter account and selects its best free model, with your draft kept ready to send. The terminal agent stays at 1.99.99. This release is not yet code-signed, so a new install may show an operating-system warning on first launch.",
   },
