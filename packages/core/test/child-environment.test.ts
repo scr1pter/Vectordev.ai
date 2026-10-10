@@ -16,15 +16,25 @@ describe("untrustedChildEnvironment", () => {
       VECTOR_MCP_AUTH_KEY: "mcp-secret",
       vector_future_bridge_key: "future-secret",
       OPENAI_API_KEY: "provider-secret",
-      BUN_OPTIONS: "--preload=./changed.ts",
-      NODE_OPTIONS: "--require=./changed.cjs",
-      LD_PRELOAD: "./changed.so",
-      lua_init_5_4: "@changed.lua",
       PATH: "/usr/bin:/bin",
       UNDEFINED_VALUE: undefined,
     })
 
     expect(environment).toEqual({ OPENAI_API_KEY: "provider-secret", PATH: "/usr/bin:/bin" })
+  })
+
+  test("keeps the user's own runtime variables for their commands", () => {
+    const user = {
+      NODE_OPTIONS: "--max-old-space-size=8192",
+      PYTHONPATH: "/work/src",
+      LD_LIBRARY_PATH: "/usr/local/cuda/lib64",
+      DYLD_FALLBACK_LIBRARY_PATH: "/opt/homebrew/lib",
+      PERL5LIB: "/home/user/perl5/lib/perl5",
+      CLASSPATH: "/work/lib/app.jar",
+      BUN_OPTIONS: "--smol",
+    }
+
+    expect(untrustedChildEnvironment(user)).toEqual(user)
   })
 
   test("does not expose scrubbed values to a real child process", () => {
