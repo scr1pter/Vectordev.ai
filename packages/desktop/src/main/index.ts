@@ -346,7 +346,14 @@ const main = Effect.gen(function* () {
   const browserBridge = yield* Effect.promise(() => startBrowserBridge())
   process.env.VECTOR_BROWSER_BRIDGE_URL = browserBridge.url
   process.env.VECTOR_BROWSER_BRIDGE_TOKEN = browserBridge.token
-  const cloudBridge = yield* Effect.promise(() => startCloudBridge())
+  const cloudBridge = yield* Effect.promise(() =>
+    startCloudBridge({
+      workspaces: async () => {
+        const { parallelWorkspaceCloudScopes } = await import("./parallel-workspaces")
+        return parallelWorkspaceCloudScopes()
+      },
+    }),
+  )
   process.env.VECTOR_CLOUD_BRIDGE_URL = cloudBridge.url
   process.env.VECTOR_CLOUD_BRIDGE_TOKEN = cloudBridge.token
   if (forgetRetiredCloudProviders()) logger.log("removed a retired Netlify credential from the cloud vault")

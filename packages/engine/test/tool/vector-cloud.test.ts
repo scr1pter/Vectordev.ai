@@ -157,6 +157,24 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
+  it.instance("an agent workspace publish reports its preview and how production moves", () =>
+    Effect.gen(function* () {
+      yield* bridge(
+        {
+          ok: true,
+          url: "https://agent-preview.vercel.app",
+          nextStep:
+            "This agent workspace was published as a preview. Merge it into the main project before promoting it to production.",
+        },
+        200,
+        scope("Vercel", "website", "preview", "Publish this agent workspace to the Vercel project website."),
+      )
+      const result = yield* execute({ action: "publish" })
+      expect(result.output).toContain("URL: https://agent-preview.vercel.app")
+      expect(result.output).toContain("Merge it into the main project before promoting it to production.")
+    }),
+  )
+
   it.instance("a denied publish never reaches the provider", () =>
     Effect.gen(function* () {
       const requests = yield* bridge(

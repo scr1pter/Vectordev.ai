@@ -1328,6 +1328,17 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
   })
 }
 
+// Cloud actions an agent takes from its isolated workspace belong to the
+// project the workspace was created from (see cloud-scope.ts).
+export function parallelWorkspaceCloudScopes() {
+  return readRecords().map((record) => ({
+    id: record.id,
+    name: record.name,
+    sourcePath: record.sourcePath,
+    isolatedPath: record.isolatedPath,
+  }))
+}
+
 export function getParallelWorkspace(id: string) {
   return readRecords().find((record) => record.id === id)
 }

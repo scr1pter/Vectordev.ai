@@ -154,7 +154,10 @@ them, only a rule that names them. A migration dry run only reads, so it uses
 
 Vector publishes to the Vercel project linked to the repository. Without a
 linked project, publishing returns setup instructions; a Vercel failure never
-triggers a deployment elsewhere. This does not establish a provider's current
+triggers a deployment elsewhere. An agent in a parallel workspace uses its
+project's links, variables and database, builds and migrates from its own
+worktree, and publishes only a preview: production moves after the work is
+merged. This does not establish a provider's current
 billing state or authorize a charge.
 
 Before claiming live OAuth or release acceptance:

@@ -220,16 +220,13 @@ function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudRe
     )
   }
   if (action === "publish") {
-    return report.ok
-      ? [
-          "Vector Cloud publish completed.",
-          report.url ? `URL: ${report.url}` : undefined,
-          report.deploymentId ? `Deployment: ${report.deploymentId}` : undefined,
-          report.checks ? `Checks: ${JSON.stringify(report.checks)}` : undefined,
-        ]
-          .filter((line): line is string => Boolean(line))
-          .join("\n")
-      : `Vector Cloud publish did not complete: ${report.error ?? "Unknown error"}`
+    return lines(
+      "Vector Cloud publish completed.",
+      report.url ? `URL: ${report.url}` : undefined,
+      report.deploymentId ? `Deployment: ${report.deploymentId}` : undefined,
+      report.checks ? `Checks: ${JSON.stringify(report.checks)}` : undefined,
+      report.nextStep,
+    )
   }
   if (action === "database_status" || action === "prepare_database") {
     return [

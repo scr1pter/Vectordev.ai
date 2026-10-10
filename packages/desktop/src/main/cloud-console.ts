@@ -520,16 +520,22 @@ export function getBuildSettings(projectPath: string, taskId?: string): CloudBui
   return readProject(projectPath).build
 }
 
-export async function detectBuildSettings(projectPath: string, taskId?: string): Promise<CloudBuildSettings> {
-  const stats = projectPath ? await stat(projectPath).catch(() => undefined) : undefined
+// `directory` is where the files are read from: an agent's worktree detects its
+// own package.json while the settings stay with the project it belongs to.
+export async function detectBuildSettings(
+  projectPath: string,
+  taskId?: string,
+  directory = projectPath,
+): Promise<CloudBuildSettings> {
+  const stats = directory ? await stat(directory).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) throw new Error("Open a project folder before detecting its build settings.")
 
-  const packageJson = await readFile(join(projectPath, "package.json"), "utf8")
+  const packageJson = await readFile(join(directory, "package.json"), "utf8")
     .then(parsePackageManifest)
     .catch(() => undefined)
 
-  const packageManager = await detectPackageManager(projectPath, Boolean(packageJson))
-  const hasNpmLock = Boolean(await stat(join(projectPath, "package-lock.json")).catch(() => undefined))
+  const packageManager = await detectPackageManager(directory, Boolean(packageJson))
+  const hasNpmLock = Boolean(await stat(join(directory, "package-lock.json")).catch(() => undefined))
   const dependencies = { ...packageJson?.dependencies, ...packageJson?.devDependencies }
   const framework =
     "next" in dependencies
@@ -719,9 +725,14 @@ export function removeEnv(projectPath: string, taskId: string | undefined, key: 
 
 // The real payoff: flush the stored vars into the project's actual .env. Any
 // lines the user wrote above the Vector marker are preserved; the managed block
-// below the marker is rewritten from scratch.
-export async function applyEnv(projectPath: string, taskId?: string): Promise<{ written: string }> {
-  const stats = projectPath ? await stat(projectPath).catch(() => undefined) : undefined
+// below the marker is rewritten from scratch. `directory` is where the .env is
+// written: an agent's worktree gets the variables of the project it belongs to.
+export async function applyEnv(
+  projectPath: string,
+  taskId?: string,
+  directory = projectPath,
+): Promise<{ written: string }> {
+  const stats = directory ? await stat(directory).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) {
     throw new Error("Open a project folder before applying environment variables.")
   }
@@ -732,12 +743,12 @@ export async function applyEnv(projectPath: string, taskId?: string): Promise<{ 
       throw new Error(`The value for "${item.key}" contains a line break, which cannot be written to .env.`)
     }
   }
-  const manifest = await readFile(join(projectPath, "package.json"), "utf8")
+  const manifest = await readFile(join(directory, "package.json"), "utf8")
     .then(parsePackageManifest)
     .catch(() => undefined)
   const vite =
     project.build?.framework === "Vite" || Boolean(manifest?.dependencies.vite || manifest?.devDependencies.vite)
-  const envPath = join(projectPath, ".env")
+  const envPath = join(directory, ".env")
   const existingFile = await lstat(envPath).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error
   })
@@ -765,7 +776,7 @@ export async function applyEnv(projectPath: string, taskId?: string): Promise<{ 
   const output = preamble ? `${preamble}\n\n${managed}\n` : `${managed}\n`
   // Replace the directory entry rather than following a link swapped in after
   // the read. A fresh private file also tightens older permissive .env files.
-  const temporary = join(projectPath, `.env.vector-${randomUUID()}`)
+  const temporary = join(directory, `.env.vector-${randomUUID()}`)
   try {
     await writeFile(temporary, output, { encoding: "utf8", flag: "wx", mode: 0o600 })
     await rename(temporary, envPath)
@@ -918,6 +929,7 @@ export async function connectDatabase(
     projectName?: string
     managedByOAuth?: boolean
   },
+  directory = projectPath,
 ): Promise<CloudDatabaseConnection> {
   const url = (input.url ?? "").trim()
   let host = ""
@@ -958,7 +970,7 @@ export async function connectDatabase(
   // Scaffold a minimal client so `import { supabase }` just works. Never
   // clobber an existing file, and don't fail the connection if src/ is locked.
   try {
-    const libDir = join(projectPath, "src", "lib")
+    const libDir = join(directory, "src", "lib")
     const clientPath = join(libDir, "supabase.js")
     const alreadyExists = await stat(clientPath).catch(() => undefined)
     if (!alreadyExists) {
@@ -969,7 +981,7 @@ export async function connectDatabase(
     // Best-effort scaffold; the stored connection + env vars are the real payoff.
   }
 
-  await applyEnv(projectPath, taskId)
+  await applyEnv(projectPath, taskId, directory)
 
   return connection
 }

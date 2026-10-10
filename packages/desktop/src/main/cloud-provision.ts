@@ -54,6 +54,8 @@ export type CloudProvisionReport = {
 export type CloudProvisionInput = {
   projectPath: string
   taskId?: string
+  /** Where the client scaffold and .env are written; defaults to projectPath. */
+  directory?: string
   organizationId?: string
   region?: string
   force?: boolean
@@ -300,21 +302,26 @@ async function linkCreatedProject(
   const anonKey = await fetchAnonKey(token, record.projectRef, request)
   // The manual flow's own helper: it writes SUPABASE_URL/SUPABASE_ANON_KEY into
   // the project's managed env, scaffolds src/lib/supabase.js and flushes .env.
-  const connection = await connectDatabase(input.projectPath, input.taskId, {
-    provider: "supabase",
-    url: `https://${record.projectRef}.supabase.co`,
-    anonKey,
-    projectRef: record.projectRef,
-    projectName: record.projectName,
-    managedByOAuth: true,
-  })
+  const connection = await connectDatabase(
+    input.projectPath,
+    input.taskId,
+    {
+      provider: "supabase",
+      url: `https://${record.projectRef}.supabase.co`,
+      anonKey,
+      projectRef: record.projectRef,
+      projectName: record.projectName,
+      managedByOAuth: true,
+    },
+    input.directory,
+  )
   if (!connection) throw new Error("Vector could not record the new Supabase project for this project.")
   writeProvisionRecord(input.projectPath, { ...record, linkedAt: now() })
   return {
     ok: true,
     createdNow: true,
     database: databaseSummary(connection, poll.region ?? record.region),
-    applied: await applyEnv(input.projectPath, input.taskId),
+    applied: await applyEnv(input.projectPath, input.taskId, input.directory),
     nextStep:
       "The database is live and wired into .env. Write the schema as a .sql file and run apply_migrations to create the tables this feature needs.",
   }

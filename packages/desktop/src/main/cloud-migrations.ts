@@ -38,6 +38,8 @@ export type MigrationOutcome = {
 export type CloudMigrationsInput = {
   projectPath: string
   taskId?: string
+  /** Where the migration files are read from; defaults to projectPath. */
+  directory?: string
   dryRun?: boolean
 }
 
@@ -203,7 +205,7 @@ export async function applyCloudMigrations(
   request: CloudFetch = fetch,
 ): Promise<CloudMigrationReport> {
   const dryRun = input.dryRun === true
-  const discovery = await discoverMigrations(input.projectPath)
+  const discovery = await discoverMigrations(input.directory ?? input.projectPath)
   if (!discovery.directory) {
     return {
       ok: false,

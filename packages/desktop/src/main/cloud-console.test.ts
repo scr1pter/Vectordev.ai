@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { PublishProjectInput } from "./publish"
 
 const userDataPath = join(tmpdir(), "vector-cloud-console-test")
 const stores = new Map<string, Map<string, unknown>>()
@@ -348,6 +349,66 @@ describe("cloud bridge publish destination", () => {
       ok: false,
       error: "Choose a Vector Cloud action to describe.",
     })
+  })
+
+  test("an agent in a parallel workspace uses its project's cloud scope and its own worktree files", async () => {
+    seedHost("vercel")
+    setEnv(project, undefined, "PUBLIC_API", "https://api.fixture.invalid")
+    const worktree = await mkdtemp(join(tmpdir(), "vector-cloud-worktree-"))
+    try {
+      await writeFile(join(worktree, "package.json"), JSON.stringify({ scripts: { build: "vite build" } }))
+      mkdirSync(join(worktree, "supabase", "migrations"), { recursive: true })
+      writeFileSync(join(worktree, "supabase", "migrations", "0001_init.sql"), "create table posts ();")
+      const published: PublishProjectInput[] = []
+      const bridge = await startCloudBridge({
+        workspaces: () => [{ id: "ws-1", name: "Agent 1", sourcePath: project, isolatedPath: worktree }],
+        publish: async (input) => {
+          published.push(input)
+          return { ok: true, target: input.target, log: "", url: "https://agent-preview.vercel.app" }
+        },
+      })
+      const command = async (input: Record<string, unknown>) =>
+        (await bridgeCommand(bridge, { ...input, projectPath: worktree })).json()
+
+      const status = await command({ command: "status" })
+      expect(status.targets).toEqual([{ id: "vercel", label: "Vercel", projectName: "vercel app" }])
+      expect(await command({ command: "describe", action: "publish" })).toMatchObject({
+        ok: true,
+        scope: { project: "vercel app", environment: "preview" },
+      })
+      expect(await command({ command: "publish" })).toMatchObject({
+        ok: true,
+        nextStep: expect.stringContaining("Merge it into the main project"),
+      })
+      expect(published).toEqual([
+        expect.objectContaining({
+          projectPath: worktree,
+          scopeProjectPath: project,
+          workspaceId: "ws-1",
+          workspaceName: "Agent 1",
+          production: false,
+        }),
+      ])
+
+      // Migrations are discovered in the worktree, where the agent wrote them,
+      // and the database is looked up in the project's scope.
+      expect(await command({ command: "apply_migrations", dryRun: true })).toMatchObject({
+        ok: false,
+        error: "No Supabase project is connected to this project.",
+      })
+      await connectDatabase(project, undefined, {
+        provider: "supabase",
+        url: "https://fixtureref.supabase.co",
+        anonKey: "sb_publishable_fixture_key",
+        projectRef: "fixtureref",
+      })
+      expect(await command({ command: "prepare_database" })).toMatchObject({ ok: true })
+      expect(await readFile(join(worktree, ".env"), "utf8")).toContain("PUBLIC_API=https://api.fixture.invalid")
+      expect((await command({ command: "detect_build" })).build.buildCommand).toBe("npm run build")
+      expect(listEnv(worktree)).toEqual([])
+    } finally {
+      await rm(worktree, { recursive: true, force: true })
+    }
   })
 
   test("rejects the removed AWS inventory commands", async () => {

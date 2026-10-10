@@ -13,6 +13,7 @@ import {
 import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
 import { createCloudDatabase } from "./cloud-provision"
+import { resolveCloudScope, type CloudScope, type CloudWorkspace } from "./cloud-scope"
 import { publishProject } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
@@ -70,6 +71,8 @@ let bridgeToken = ""
 
 type CloudBridgeOptions = {
   publish?: typeof publishProject
+  /** The desktop's parallel workspaces, so an agent's worktree resolves to its project. */
+  workspaces?: () => CloudWorkspace[] | Promise<CloudWorkspace[]>
 }
 
 export async function startCloudBridge(options: CloudBridgeOptions = {}) {
@@ -197,7 +200,7 @@ function configuredPublishTargets(input: CloudCommandInput) {
 // What a changing action would touch, worded for the permission prompt: the
 // provider, the provider-side project and the environment. A report that is not
 // ok means the action cannot run yet, so the tool relays it without asking.
-function describeCloudAction(input: CloudCommandInput) {
+function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
   const scope = (provider: "Vercel" | "Supabase", project: string, environment: string, summary: string) => ({
     ok: true,
     scope: { provider, project, environment, summary },
@@ -205,6 +208,14 @@ function describeCloudAction(input: CloudCommandInput) {
   if (input.action === "publish") {
     const target = configuredPublishTargets(input)[0]
     if (!target) return publishSetup()
+    if (workspace.directory !== workspace.projectPath) {
+      return scope(
+        "Vercel",
+        target.projectName,
+        "preview",
+        `Publish this agent workspace to the Vercel project ${target.projectName} as a preview release. Production changes only after it is merged into the main project.`,
+      )
+    }
     const environment = input.production === false ? "preview" : "production"
     return scope(
       "Vercel",
@@ -291,8 +302,12 @@ function publishSetup() {
   }
 }
 
-async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOptions) {
-  if (input.command === "describe") return describeCloudAction(input)
+async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeOptions) {
+  // Cloud state is keyed by the main project; files are read and written in the
+  // directory the agent is working in, which is a worktree for a parallel agent.
+  const scope = await resolveCloudScope(request.projectPath, (await options.workspaces?.()) ?? [])
+  const input = { ...request, projectPath: scope.projectPath }
+  if (input.command === "describe") return describeCloudAction(input, scope)
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
     const connections = (["vercel", "supabase"] as const).map(cachedCloudProviderConnection)
@@ -310,7 +325,7 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
     }
   }
   if (input.command === "detect_build") {
-    return { ok: true, build: await detectBuildSettings(input.projectPath, input.taskId) }
+    return { ok: true, build: await detectBuildSettings(input.projectPath, input.taskId, scope.directory) }
   }
   if (input.command === "database_status") {
     return {
@@ -327,6 +342,7 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
     return createCloudDatabase({
       projectPath: input.projectPath,
       taskId: input.taskId,
+      directory: scope.directory,
       organizationId: input.organizationId,
       region: input.region,
       force: input.force,
@@ -345,7 +361,7 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
     return {
       ok: true,
       database: { connected: true, provider: database.provider, host: new URL(database.url).hostname },
-      applied: await applyEnv(input.projectPath, input.taskId),
+      applied: await applyEnv(input.projectPath, input.taskId, scope.directory),
       purpose: input.command === "prepare_auth" ? "authentication" : "database",
     }
   }
@@ -380,17 +396,31 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
     return applyCloudMigrations({
       projectPath: input.projectPath,
       taskId: input.taskId,
+      directory: scope.directory,
       dryRun: input.dryRun === true,
     })
   }
   if (!configuredPublishTargets(input).length) return publishSetup()
-  return (options.publish ?? publishProject)({
-    projectPath: input.projectPath,
+  // An agent workspace publishes a preview from its worktree. Production only
+  // moves once the work is merged into the main project.
+  const isolated = scope.directory !== scope.projectPath
+  const result = await (options.publish ?? publishProject)({
+    projectPath: scope.directory,
     taskId: input.taskId,
+    scopeProjectPath: scope.projectPath,
+    scopeTaskId: input.taskId,
+    workspaceId: scope.workspace?.id,
+    workspaceName: scope.workspace?.name,
     target: "vercel",
-    production: input.production !== false,
+    production: !isolated && input.production !== false,
     runId: randomUUID(),
   })
+  if (!isolated) return result
+  return {
+    ...result,
+    nextStep:
+      "This agent workspace was published as a preview. Merge it into the main project before promoting it to production.",
+  }
 }
 
 function deploymentSummaries(input: CloudCommandInput) {
