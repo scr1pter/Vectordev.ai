@@ -92,7 +92,9 @@ for (const shared of [true, false])
         Effect.provideService(ModelPlans.Service, plans),
         Effect.provideService(FreeModels.CredentialsService, credentials),
       )
-      expect((yield* catalog.model.available()).map((model) => model.providerID)).toContain(ModelPlans.PROVIDER_ID)
+      expect((yield* catalog.model.available()).map((model) => String(model.providerID))).toContain(
+        ModelPlans.PROVIDER_ID,
+      )
       const resolved = yield* Effect.gen(function* () {
         const resolver = yield* SessionRunnerModel.Service
         return yield* resolver.resolve(session)
@@ -109,9 +111,9 @@ for (const shared of [true, false])
         expect(Exit.isFailure(resolved)).toBe(true)
         return
       }
-      expect((yield* catalog.model.default())?.providerID).toBe("vector")
+      expect(String((yield* catalog.model.default())?.providerID)).toBe("vector")
       if (!Exit.isSuccess(resolved)) throw new Error("Expected the shared free model to be resolved")
-      expect(resolved.value.provider).toBe("vector")
+      expect(String(resolved.value.provider)).toBe("vector")
       expect(String(resolved.value.id)).toBe(FREE_MODEL_FALLBACKS[0].id)
     }),
   )

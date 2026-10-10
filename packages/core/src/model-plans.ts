@@ -1,9 +1,12 @@
 export * as ModelPlans from "./model-plans"
 
-import { createHash } from "node:crypto"
+import path from "node:path"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { makeGlobalNode } from "./effect/app-node"
 import { Flag } from "./flag/flag"
+import { Global } from "./global"
 import { ModelPlanStatus } from "./model-plan-status"
 
 export const PROVIDER_ID = ModelPlanStatus.PROVIDER_ID
@@ -26,6 +29,9 @@ const Catalog = Schema.Struct({ enabled: Schema.Boolean, models: Schema.Array(Mo
 /** enabled: vectordev.ai offers Codium to this signed-in account. Each chat request checks the balance itself. */
 export type Catalog = typeof Catalog.Type
 const OFF: Catalog = { enabled: false, models: [] }
+// The last answer, kept on disk for the account it belongs to, so a fresh engine has a catalog before vectordev.ai
+// answers. The digest identifies the account without storing its token.
+const Saved = Schema.Struct({ account: Schema.String, catalog: Catalog })
 const TTL = 60_000
 // A refresh that got no answer is tried again sooner than an answered one.
 const RETRY = 10_000
@@ -38,8 +44,11 @@ export type CatalogOptions = {
   wait?: boolean
 }
 
+type Entry = { digest: string; value?: Catalog; expires: number; pending?: Promise<Catalog>; restored: Promise<void> }
+
 export function createClient(
   input: {
+    file?: string
     request?: (url: string, init: RequestInit) => Promise<Response>
     now?: () => number
     disabled?: () => boolean
@@ -48,17 +57,37 @@ export function createClient(
 ) {
   const request = input.request ?? fetch
   const now = input.now ?? Date.now
-  const accounts = new Map<string, { value?: Catalog; expires: number; pending?: Promise<Catalog> }>()
+  const accounts = new Map<string, Entry>()
   const account = (token: string) => {
     // Keyed by digest so the account token is never kept as a map key.
     const digest = createHash("sha256").update(token).digest("hex")
-    const current = accounts.get(digest) ?? { expires: 0 }
+    const current = accounts.get(digest) ?? restore(digest)
     accounts.delete(digest)
     if (accounts.size >= MAX_ACCOUNTS) accounts.delete(accounts.keys().next().value!)
     accounts.set(digest, current)
     return current
   }
-  const load = (token: string, current: { value?: Catalog; expires: number; pending?: Promise<Catalog> }) =>
+  // A restored catalog is stale from the start: it is served only until vectordev.ai answers.
+  const restore = (digest: string): Entry => {
+    const current: Entry = { digest, expires: 0, restored: Promise.resolve() }
+    if (!input.file) return current
+    current.restored = readFile(input.file, "utf8")
+      .then((text) => Option.getOrUndefined(Schema.decodeUnknownOption(Schema.fromJsonString(Saved))(text)))
+      .then((saved) => {
+        if (saved?.account === digest) current.value ??= parse(saved.catalog)
+      })
+      .catch(() => undefined)
+    return current
+  }
+  const save = async (file: string, saved: typeof Saved.Type) => {
+    const temporary = `${file}.${randomUUID()}.tmp`
+    // This optional cache must never fail or slow a catalog read.
+    await mkdir(path.dirname(file), { recursive: true })
+      .then(() => writeFile(temporary, JSON.stringify(saved), { mode: 0o600 }))
+      .then(() => rename(temporary, file))
+      .catch(() => rm(temporary, { force: true }).catch(() => undefined))
+  }
+  const load = (token: string, current: Entry) =>
     request(CATALOG_URL, {
       headers: { Authorization: `Bearer ${token}`, accept: "application/json" },
       redirect: "error",
@@ -72,22 +101,24 @@ export function createClient(
             : undefined,
       )
       .catch(() => undefined)
-      .then((answer) => {
+      .then(async (answer) => {
         // Only an answer replaces the catalog: a refused token, enabled:false or a valid list. A slow, failed or
         // garbled refresh keeps serving the last catalog this account received, so a paid turn never fails on it.
         current.pending = undefined
         current.expires = now() + (answer ? TTL : RETRY)
         if (answer) current.value = answer
+        if (answer && input.file) await save(input.file, { account: current.digest, catalog: answer })
         return current.value ?? OFF
       })
-  const catalog = (token: string | undefined, options: CatalogOptions = {}): Promise<Catalog> => {
-    if (!token || input.disabled?.()) return Promise.resolve(OFF)
+  const catalog = async (token: string | undefined, options: CatalogOptions = {}): Promise<Catalog> => {
+    if (!token || input.disabled?.()) return OFF
     const current = account(token)
-    if (!options.force && current.value && current.expires > now()) return Promise.resolve(current.value)
+    await current.restored
+    if (!options.force && current.value && current.expires > now()) return current.value
     current.pending ??= load(token, current)
     if (options.force || (options.wait && !current.value)) return current.pending
-    // Provider listing never waits long on vectordev.ai: it answers with the last catalog seen, or OFF on a first
-    // read, and the refresh lands for the next caller.
+    // Provider listing never waits long on vectordev.ai: it answers with the last catalog seen, here or on disk, or
+    // OFF on a first read, and the refresh lands for the next caller.
     const fallback = Promise.withResolvers<Catalog>()
     // This deadline settles an awaited operation; keep it alive until the race finishes.
     const timer = setTimeout(() => fallback.resolve(current.value ?? OFF), input.timeout ?? 1_500)
@@ -137,7 +168,10 @@ export class Service extends Context.Service<
 export const node = makeGlobalNode({
   service: Service,
   layer: Layer.sync(Service, () => {
-    const client = createClient({ disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH })
+    const client = createClient({
+      file: path.join(Global.Path.cache, "codium-models.json"),
+      disabled: () => Flag.VECTOR_DISABLE_MODELS_FETCH,
+    })
     return Service.of({
       catalog: (token, options) => Effect.promise(() => client.catalog(token, options)),
       request: (url, init) => fetch(url, init),

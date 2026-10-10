@@ -1,4 +1,7 @@
 import { afterAll, expect, test } from "bun:test"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { Effect, Layer, Stream } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { LLM, LLMError } from "@vectordevai/llm"
@@ -127,6 +130,25 @@ test("a chat request waits for the first catalog, and a slow refresh later never
   clock.now = 61_000
   expect((await turn()).status).toBe(200)
   expect(sent).toEqual([ModelPlans.CHAT_URL, ModelPlans.CHAT_URL])
+})
+
+test("a fresh engine lists the account's last catalog while vectordev.ai is slow, and only for that account", async () => {
+  const file = path.join(await mkdtemp(path.join(tmpdir(), "codium-catalog-")), "codium-models.json")
+  const account = "vct_cached-account.token"
+  await ModelPlans.createClient({ file, request: async () => Response.json(active) }).catalog(account, { force: true })
+  // The file names the account by digest; the token itself is never written.
+  expect(await Bun.file(file).text()).not.toContain(account)
+  // Next launch: vectordev.ai answers after the listing deadline.
+  const slow = () => Bun.sleep(50).then(() => Response.json(active))
+  const restarted = ModelPlans.createClient({ file, timeout: 5, request: slow })
+  expect(await restarted.catalog(account)).toEqual(active)
+  expect(await restarted.catalog("vct_another-account.token")).toEqual(off)
+  // A refused token replaces what was saved.
+  await ModelPlans.createClient({ file, request: async () => new Response("revoked", { status: 403 }) }).catalog(
+    account,
+    { force: true },
+  )
+  expect(await ModelPlans.createClient({ file, timeout: 5, request: slow }).catalog(account)).toEqual(off)
 })
 
 test("catalog caches are bounded and disabled mode makes no requests", async () => {
