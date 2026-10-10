@@ -6,9 +6,9 @@ On 10 October 2026 the owner asked in writing to bring the sign-in back: "please
 
 This supersedes the record that disabled the sign-in pending provider authorization (commit `b37300270`, PR #8). That record turned the sign-in off because OpenAI has not authorized the borrowed Codex client for Vector, citing the public statement below, and required older sign-ins without a registration stamp to sign in again; this change reverses both. That commit's LGPL and licensing changes are unaffected.
 
-## Owner confirmation pending
+## Owner confirmation (10 October 2026)
 
-The request above does not record that the owner was told why `b37300270` turned the sign-in off or that the owner accepts the risks below. Before the next desktop release ships it, ask the owner to confirm both, and add their words and the date here.
+Before this change was made, the owner was told why `b37300270` turned the sign-in off: the client ID is OpenAI's Codex CLI registration and OpenAI has not authorized Vector to use it; OpenAI can block it at any time, which would break every user's GPT access at once; it likely conflicts with OpenAI's terms; and investors' technical diligence may flag it. The owner was offered running the installed Codex CLI inside Vector, an OpenAI API key, or applying for Vector's own registration, and chose, in writing, to re-enable the borrowed sign-in anyway. Do not remove it again on compliance grounds without asking the owner; if OpenAI objects, use the remote off-switch below and tell the owner.
 
 ## Risk
 
