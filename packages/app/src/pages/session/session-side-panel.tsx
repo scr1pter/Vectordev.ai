@@ -135,6 +135,23 @@ import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/brow
 import { boundInlineCompletionContext, sanitizeInlineCompletion } from "@/utils/codespace-ai"
 import { notifyWorkspaceFileSaved } from "@/utils/workspace-file-saved"
 import { announceWorkspaceMode } from "@/utils/workspace-mode"
+import { useNavigate } from "@solidjs/router"
+import { useServer } from "@/context/server"
+import { useTabs } from "@/context/tabs"
+import {
+  cloudApi,
+  publishApi,
+  type CloudOverview,
+  type PublishProgressEvent,
+  type PublishResult,
+} from "@/features/cloud/cloud-api"
+import {
+  cloudHref,
+  deployRepairPrompt,
+  publishPlan,
+  requestComposerPrompt,
+  type DeployEvidence,
+} from "@/features/cloud/cloud-handoff"
 
 const DialogSelectFile = lazy(() =>
   import("@/components/dialog-select-file").then((module) => ({ default: module.DialogSelectFile })),
@@ -3816,11 +3833,18 @@ async function probePreviewUrl(candidate: string, timeoutMs = 1200) {
   }
 }
 
+// Publish from the preview makes a preview release: the sheet names where it
+// goes before anything runs, and production changes only through Promote.
+type PublishPlace = { overview: CloudOverview; project: string; account?: string }
 type PublishPhase =
   | { phase: "idle" }
-  | { phase: "working"; target: string }
-  | { phase: "done"; url: string; target: string }
-  | { phase: "error"; error: string }
+  | { phase: "checking" }
+  | ({ phase: "confirm" } & PublishPlace)
+  | { phase: "blocked"; reason: string; projectPath?: string }
+  | ({ phase: "working"; message: string } & PublishPlace)
+  | ({ phase: "done"; url: string; deploymentId?: string; promote?: "confirm" | "working" } & PublishPlace)
+  | ({ phase: "live"; url: string } & PublishPlace)
+  | { phase: "error"; error: string; evidence?: DeployEvidence }
 
 export function PreviewPanel(props: {
   sessionKey: string
@@ -3829,6 +3853,9 @@ export function PreviewPanel(props: {
   onClose: () => void
 }) {
   const command = useCommand()
+  const navigate = useNavigate()
+  const server = useServer()
+  const tabs = useTabs()
   const storageKey = () => `${PREVIEW_URL_STORAGE_PREFIX}${props.sessionKey}`
   const readSavedUrl = () => {
     try {
@@ -3853,7 +3880,8 @@ export function PreviewPanel(props: {
   const viewportBounds = () => {
     const rect = viewportRef?.getBoundingClientRect()
     if (!rect) return
-    const publishReserve = publish().phase === "idle" ? 0 : 150
+    // The browser is a native view, so the publish sheet needs its own room.
+    const publishReserve = publish().phase === "idle" ? 0 : publish().phase === "confirm" ? 240 : 170
     return { x: rect.x, y: rect.y, width: rect.width, height: Math.max(0, rect.height - publishReserve) }
   }
 
@@ -3964,51 +3992,165 @@ export function PreviewPanel(props: {
     requestAnimationFrame(syncBrowserBounds)
   })
 
-  const publishApi = () =>
-    (
-      globalThis.window?.api as
-        | (Record<string, unknown> & {
-            publish?: {
-              targets: () => Promise<{ id: "vercel"; label: string; loginHint: string; available: boolean }[]>
-              run: (input: { projectPath: string; target: "vercel"; production?: boolean }) => Promise<{
-                ok: boolean
-                url?: string
-                error?: string
-                target: string
-              }>
-            }
-          })
-        | undefined
-    )?.publish
-
-  const runPublish = async () => {
-    const api = publishApi()
-    if (!api) {
-      setPublish({ phase: "error", error: "Publishing activates once Vector connects to this workspace." })
+  // Where a preview would go, read before anything runs. The overview names
+  // the main project even when this session works in an agent's worktree.
+  const preparePublish = async () => {
+    const cloud = cloudApi()
+    const publisher = publishApi()
+    if (!cloud || !publisher) {
+      setPublish({ phase: "error", error: "Publishing runs in the Vector desktop app." })
       return
     }
     if (!props.directory) {
       setPublish({ phase: "error", error: "Open a project before publishing." })
       return
     }
-    const targets = await api.targets().catch(() => [])
-    const target = targets.find((item) => item.available)
-    if (!target) {
-      setPublish({
-        phase: "error",
-        error: "No deploy tool found. Install the Vercel CLI, log in once, then publish.",
-      })
+    setPublish({ phase: "checking" })
+    const [overview, targets] = await Promise.all([
+      cloud.overview(props.directory).catch(() => undefined),
+      publisher.targets().catch(() => []),
+    ])
+    if (!overview) {
+      setPublish({ phase: "error", error: "Vector Cloud could not read this project. Try again in a moment." })
       return
     }
-    setPublish({ phase: "working", target: target.label })
-    const result = await api.run({ projectPath: props.directory, target: target.id }).catch((error) => ({
-      ok: false as const,
-      error: error instanceof Error ? error.message : String(error),
-      target: target.id,
-    }))
-    if (result.ok && result.url) setPublish({ phase: "done", url: result.url, target: target.label })
-    else setPublish({ phase: "error", error: result.error ?? "Publish failed." })
+    const plan = publishPlan(
+      overview,
+      targets.find((item) => item.id === "vercel"),
+    )
+    if (!plan.ready) {
+      setPublish({ phase: "blocked", reason: plan.reason, projectPath: overview.projectPath })
+      return
+    }
+    setPublish({ phase: "confirm", overview, project: plan.project, account: plan.account })
   }
+
+  let stopProgress: (() => void) | undefined
+  onCleanup(() => stopProgress?.())
+
+  const runPublish = async (place: PublishPlace) => {
+    const publisher = publishApi()
+    if (!publisher) return
+    const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`
+    setPublish({ phase: "working", message: "Preparing the build…", ...place })
+    stopProgress?.()
+    stopProgress = publisher.subscribe((event: PublishProgressEvent) => {
+      const current = publish()
+      if (event.runId !== runId || current.phase !== "working") return
+      setPublish({ ...current, message: event.message.split("\n").at(-1)?.slice(0, 160) || current.message })
+    })
+    const result = await publisher
+      .run({
+        projectPath: place.overview.directory,
+        scopeProjectPath: place.overview.projectPath,
+        workspaceId: place.overview.workspace?.id,
+        workspaceName: place.overview.workspace?.name,
+        target: "vercel",
+        production: false,
+        runId,
+      })
+      .catch(
+        (error): PublishResult => ({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          target: "vercel",
+          log: "",
+        }),
+      )
+      .finally(() => {
+        stopProgress?.()
+        stopProgress = undefined
+      })
+    if (result.ok && result.url) {
+      setPublish({ phase: "done", url: result.url, deploymentId: result.deploymentId, ...place })
+      return
+    }
+    const error = result.error ?? "Publish failed."
+    setPublish({
+      phase: "error",
+      error,
+      evidence: {
+        project: place.project,
+        environment: "preview",
+        url: result.url,
+        error,
+        git: place.overview.git,
+        checks: result.checks ?? [],
+        log: result.log,
+      },
+    })
+  }
+
+  // Release the preview that just passed its checks, without building again.
+  const promote = async () => {
+    const current = publish()
+    const cloud = cloudApi()
+    if (current.phase !== "done" || !current.deploymentId || !cloud) return
+    setPublish({ ...current, promote: "working" })
+    await cloud.deployments
+      .promote(current.overview.projectPath, undefined, current.deploymentId)
+      .then((released) => setPublish({ ...current, phase: "live", url: released.productionUrl ?? released.url }))
+      .catch((error) =>
+        setPublish({
+          phase: "error",
+          error: error instanceof Error ? error.message : "Vercel did not promote the preview.",
+        }),
+      )
+  }
+
+  // Starts the agent on the failure in this session, with the redacted
+  // evidence as its message; a new session on the project when no composer
+  // is on screen (an external agent's workspace).
+  const fixDeploy = (evidence: DeployEvidence) => {
+    const text = deployRepairPrompt(evidence)
+    setPublish({ phase: "idle" })
+    if (requestComposerPrompt({ text, send: true })) return
+    if (props.directory) tabs.newDraft({ server: server.key, directory: props.directory }, text, { send: true })
+  }
+
+  // The publish phase narrowed to one state, for a <Match> to render.
+  const publishState = <P extends PublishPhase["phase"]>(phase: P) => {
+    const current = publish()
+    return current.phase === phase ? (current as Extract<PublishPhase, { phase: P }>) : undefined
+  }
+
+  const deployLink = (url: string) => (
+    <div class="mt-2.5 flex items-center gap-2">
+      <a
+        ref={deployLinkRef}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="min-w-0 flex-1 truncate rounded-[10px] border border-[var(--vx-purple)]/40 bg-[rgba(147,116,236,0.12)] px-3 py-2 font-mono text-[12.5px] text-[var(--vx-purple-bright)] transition hover:bg-[rgba(147,116,236,0.2)]"
+      >
+        {url}
+      </a>
+      <button
+        type="button"
+        class="h-9 shrink-0 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+        onClick={() => void copyDeployUrl()}
+      >
+        {copiedDeployUrl() ? "Copied" : "Copy"}
+      </button>
+      <button
+        type="button"
+        class="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] px-3 text-[12.5px] font-semibold text-white/75 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
+        onClick={() => globalThis.window?.open(url, "_blank", "noopener,noreferrer")}
+      >
+        <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
+          <path
+            d="M6.5 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v7.5a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V9.5M9.5 2.75h3.75V6.5M13 3 7.75 8.25"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.25"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        Open
+      </button>
+    </div>
+  )
 
   const selectDeployLinkText = () => {
     if (!deployLinkRef) return
@@ -4208,9 +4350,9 @@ export function PreviewPanel(props: {
           <button
             type="button"
             class="h-7 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12px] font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--vx-stage,#242428)] disabled:opacity-50"
-            disabled={publish().phase === "working"}
-            aria-busy={publish().phase === "working"}
-            onClick={() => void runPublish()}
+            disabled={publish().phase === "working" || publish().phase === "checking"}
+            aria-busy={publish().phase === "working" || publish().phase === "checking"}
+            onClick={() => void preparePublish()}
           >
             {publish().phase === "working" ? "Publishing…" : "Publish"}
           </button>
@@ -4240,12 +4382,13 @@ export function PreviewPanel(props: {
           </Show>
         </div>
 
-        <Show when={publish().phase === "done" || publish().phase === "error" || publish().phase === "working"}>
+        <Show when={publish().phase !== "idle"}>
           <div
             class="absolute inset-x-0 bottom-0 z-20 border-t border-[color:var(--vx-line)] bg-[color-mix(in_srgb,var(--vx-surface,#232228)_92%,transparent)] p-4 shadow-[0_-24px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl"
             aria-live="polite"
+            data-vector-publish-sheet
           >
-            <Show when={publish().phase !== "working"}>
+            <Show when={publish().phase !== "working" && publish().phase !== "checking"}>
               <button
                 type="button"
                 class="absolute right-3 top-3 grid size-6 place-items-center rounded-[7px] text-white/40 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
@@ -4263,81 +4406,188 @@ export function PreviewPanel(props: {
                 </svg>
               </button>
             </Show>
-            <Show
-              when={publish().phase === "working"}
-              fallback={
-                <Show
-                  when={publish().phase === "done"}
-                  fallback={
-                    <>
-                      <div class="text-[13px] font-semibold text-rose-300">Couldn't publish</div>
-                      <p class="mt-1 max-w-[90%] text-[12.5px] leading-5 text-white/65">
-                        {(publish() as { error?: string }).error}
+            <Switch>
+              <Match when={publish().phase === "checking"}>
+                <div class="flex items-center gap-3">
+                  <span class="size-4 shrink-0 rounded-full border-2 border-[color:var(--vx-line)] border-t-[var(--vx-purple-bright)] motion-safe:animate-spin" />
+                  <div class="text-[13px] font-semibold text-white">Checking where this project publishes…</div>
+                </div>
+              </Match>
+              <Match when={publishState("confirm")}>
+                {(place) => (
+                  <>
+                    <div class="text-[13px] font-semibold text-white">Publish a preview</div>
+                    <dl class="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-[12.5px]">
+                      <dt class="text-white/45">Provider</dt>
+                      <dd class="truncate text-white/85">Vercel{place().account ? ` · ${place().account}` : ""}</dd>
+                      <dt class="text-white/45">Project</dt>
+                      <dd class="truncate text-white/85">{place().project}</dd>
+                      <dt class="text-white/45">Environment</dt>
+                      <dd class="text-white/85">Preview. Production stays as it is until you promote.</dd>
+                      <Show when={place().overview.workspace}>
+                        {(workspace) => (
+                          <>
+                            <dt class="text-white/45">From</dt>
+                            <dd class="truncate text-white/85">Agent workspace {workspace().name}</dd>
+                          </>
+                        )}
+                      </Show>
+                    </dl>
+                    <Show when={place().overview.git?.dirty}>
+                      <p class="mt-2.5 rounded-[10px] border border-amber-300/25 bg-amber-300/[0.07] px-3 py-2 text-[12px] leading-5 text-amber-100/85">
+                        This folder has uncommitted changes. The preview is built from the files as they are on disk,
+                        not from {place().overview.git?.branch} at {place().overview.git?.commit}.
                       </p>
-                    </>
-                  }
-                >
-                  <div class="flex items-center gap-2">
-                    <span class="inline-block size-2 rounded-full bg-emerald-400" />
-                    <span class="text-[13px] font-semibold text-white">
-                      Your app is live — share this link with anyone
-                    </span>
+                    </Show>
+                    <div class="mt-3 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        class="h-8 rounded-full border border-[color:var(--vx-line)] px-3.5 text-[12.5px] font-semibold text-white/75 transition hover:bg-white/[0.07] hover:text-white"
+                        onClick={() => setPublish({ phase: "idle" })}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        class="h-8 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110"
+                        onClick={() => void runPublish(place())}
+                      >
+                        Publish preview
+                      </button>
+                    </div>
+                  </>
+                )}
+              </Match>
+              <Match when={publishState("blocked")}>
+                {(blocked) => (
+                  <>
+                    <div class="text-[13px] font-semibold text-white">Set up hosting first</div>
+                    <p class="mt-1 max-w-[90%] text-[12.5px] leading-5 text-white/65">{blocked().reason}</p>
+                    <Show when={blocked().projectPath}>
+                      <button
+                        type="button"
+                        class="mt-3 h-8 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110"
+                        onClick={() => navigate(cloudHref(blocked().projectPath, "connections"))}
+                      >
+                        Open Vector Cloud
+                      </button>
+                    </Show>
+                  </>
+                )}
+              </Match>
+              <Match when={publishState("working")}>
+                {(working) => (
+                  <div class="flex items-center gap-3">
+                    <span class="size-4 shrink-0 rounded-full border-2 border-[color:var(--vx-line)] border-t-[var(--vx-purple-bright)] motion-safe:animate-spin" />
+                    <div class="min-w-0">
+                      <div class="text-[13px] font-semibold text-white">
+                        Publishing a preview to Vercel project {working().project}…
+                      </div>
+                      <div class="mt-0.5 truncate text-[12px] text-white/50">{working().message}</div>
+                    </div>
                   </div>
-                  <div class="mt-2.5 flex items-center gap-2">
-                    <a
-                      ref={deployLinkRef}
-                      href={(publish() as { url?: string }).url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="min-w-0 flex-1 truncate rounded-[10px] border border-[var(--vx-purple)]/40 bg-[rgba(147,116,236,0.12)] px-3 py-2 font-mono text-[12.5px] text-[var(--vx-purple-bright)] transition hover:bg-[rgba(147,116,236,0.2)]"
-                    >
-                      {(publish() as { url?: string }).url}
-                    </a>
-                    <button
-                      type="button"
-                      class="h-9 shrink-0 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
-                      onClick={() => void copyDeployUrl()}
-                    >
-                      {copiedDeployUrl() ? "Copied" : "Copy"}
-                    </button>
-                    <button
-                      type="button"
-                      class="flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] px-3 text-[12.5px] font-semibold text-white/75 transition hover:bg-white/[0.07] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(147,116,236,0.55)]"
-                      onClick={() =>
-                        globalThis.window?.open((publish() as { url?: string }).url, "_blank", "noopener,noreferrer")
+                )}
+              </Match>
+              <Match when={publishState("done")}>
+                {(done) => (
+                  <>
+                    <div class="flex items-center gap-2">
+                      <span class="inline-block size-2 rounded-full bg-emerald-400" />
+                      <span class="text-[13px] font-semibold text-white">
+                        Preview is live. Production is unchanged.
+                      </span>
+                    </div>
+                    {deployLink(done().url)}
+                    <Show
+                      when={done().deploymentId && !done().overview.workspace}
+                      fallback={
+                        <p class="mt-2 text-[11.5px] text-white/45">
+                          {done().overview.workspace
+                            ? "Merge this agent workspace into the project before releasing it to production."
+                            : "Promote it from Vector Cloud > Deployments."}
+                        </p>
                       }
                     >
-                      <svg viewBox="0 0 16 16" class="size-3.5" aria-hidden="true">
-                        <path
-                          d="M6.5 3.5H3.75A1.25 1.25 0 0 0 2.5 4.75v7.5a1.25 1.25 0 0 0 1.25 1.25h7.5a1.25 1.25 0 0 0 1.25-1.25V9.5M9.5 2.75h3.75V6.5M13 3 7.75 8.25"
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.25"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                        />
-                      </svg>
-                      Open
-                    </button>
-                  </div>
-                  <p class="mt-2 text-[11px] text-white/45">
-                    Carries a small "Deployed with Vector" badge linking back to vectordev.ai.
-                  </p>
-                </Show>
-              }
-            >
-              <div class="flex items-center gap-3">
-                <span class="size-4 shrink-0 rounded-full border-2 border-[color:var(--vx-line)] border-t-[var(--vx-purple-bright)] motion-safe:animate-spin" />
-                <div>
-                  <div class="text-[13px] font-semibold text-white">
-                    Publishing to {(publish() as { target: string }).target}…
-                  </div>
-                  <div class="mt-0.5 text-[12px] text-white/50">
-                    This can take a minute or two for the first deploy.
-                  </div>
-                </div>
-              </div>
-            </Show>
+                      <div class="mt-2.5 flex flex-wrap items-center justify-end gap-2">
+                        <Show
+                          when={done().promote}
+                          fallback={
+                            <button
+                              type="button"
+                              class="h-8 rounded-full border border-[color:var(--vx-line)] px-3.5 text-[12.5px] font-semibold text-white/80 transition hover:bg-white/[0.07] hover:text-white"
+                              onClick={() => setPublish({ ...done(), promote: "confirm" })}
+                            >
+                              Promote to production
+                            </button>
+                          }
+                        >
+                          <span class="mr-auto text-[12px] text-white/65">
+                            Release this preview to production on Vercel project {done().project}?
+                          </span>
+                          <button
+                            type="button"
+                            class="h-8 rounded-full border border-[color:var(--vx-line)] px-3.5 text-[12.5px] font-semibold text-white/75 transition hover:bg-white/[0.07] hover:text-white disabled:opacity-50"
+                            disabled={done().promote === "working"}
+                            onClick={() => setPublish({ ...done(), promote: undefined })}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            class="h-8 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+                            disabled={done().promote === "working"}
+                            onClick={() => void promote()}
+                          >
+                            {done().promote === "working" ? "Promoting…" : "Promote to production"}
+                          </button>
+                        </Show>
+                      </div>
+                    </Show>
+                  </>
+                )}
+              </Match>
+              <Match when={publishState("live")}>
+                {(live) => (
+                  <>
+                    <div class="flex items-center gap-2">
+                      <span class="inline-block size-2 rounded-full bg-emerald-400" />
+                      <span class="text-[13px] font-semibold text-white">
+                        Live in production on Vercel project {live().project}
+                      </span>
+                    </div>
+                    {deployLink(live().url)}
+                  </>
+                )}
+              </Match>
+              <Match when={publishState("error")}>
+                {(failed) => (
+                  <>
+                    <div class="text-[13px] font-semibold text-rose-300">Couldn't publish</div>
+                    <p class="mt-1 max-w-[90%] text-[12.5px] leading-5 text-white/65">{failed().error}</p>
+                    <Show when={failed().evidence?.checks.filter((check) => check.status === "failed").length}>
+                      <p class="mt-1 text-[12px] text-white/50">
+                        Failed:{" "}
+                        {failed()
+                          .evidence!.checks.filter((check) => check.status === "failed")
+                          .map((check) => check.label)
+                          .join(", ")}
+                      </p>
+                    </Show>
+                    <Show when={failed().evidence}>
+                      {(evidence) => (
+                        <button
+                          type="button"
+                          class="mt-3 h-8 rounded-full bg-[var(--vx-purple)] px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110"
+                          onClick={() => fixDeploy(evidence())}
+                        >
+                          Fix this deploy
+                        </button>
+                      )}
+                    </Show>
+                  </>
+                )}
+              </Match>
+            </Switch>
           </div>
         </Show>
       </div>
