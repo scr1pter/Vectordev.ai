@@ -1729,6 +1729,57 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("a message for a running background task from a stopped turn is not delivered", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const runState = yield* SessionRunState.Service
+      const statuses = yield* SessionStatus.Service
+      const { chat, assistant } = yield* seed()
+      const def = yield* (yield* TaskTool).init()
+      const release = yield* Deferred.make<void>()
+      const received: string[] = []
+      const promptOps: TaskPromptOps = {
+        ...stubOps(),
+        prompt: (input) => {
+          if (input.sessionID === chat.id) return Effect.succeed(reply(input, "noted"))
+          received.push(input.parts.map((part) => (part.type === "text" ? part.text : "")).join(""))
+          const work = statuses.set(input.sessionID, { type: "busy" }).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.map(() => reply(input, "done")),
+          )
+          return runState.ensureRunning(input.sessionID, Effect.succeed(stopped(input)), work)
+        },
+      }
+      const started = yield* def.execute(
+        { description: "inspect", prompt: "Inspect the cache.", subagent_type: "general", background: true },
+        taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }),
+      )
+      const child = SessionID.make(started.metadata.sessionId)
+      yield* pollWithTimeout(
+        statuses.get(child).pipe(Effect.map((status) => (status.type === "busy" ? true : undefined))),
+        "the background task never started",
+        "2 seconds",
+      )
+
+      // The user pressed Stop while the follow-up call was still setting up.
+      const stop = new AbortController()
+      stop.abort()
+      const exit = yield* def
+        .execute(
+          { description: "inspect", prompt: "Also delete the cache.", subagent_type: "general", task_id: child },
+          { ...taskContext({ sessionID: chat.id, messageID: assistant.id, promptOps }), abort: stop.signal },
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : "").toContain(
+        "Stopped before the message reached the background task",
+      )
+      expect((yield* jobs.get(child))?.status).toBe("running")
+      yield* Deferred.succeed(release, undefined)
+      expect((yield* jobs.wait({ id: child })).info?.status).toBe("completed")
+      expect(received).toEqual(["Inspect the cache."])
+    }),
+  )
+
   background.instance("a message with its own dependencies waits for them, and one failing never stops the run going", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service

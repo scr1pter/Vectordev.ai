@@ -952,7 +952,9 @@ export const TaskTool = Tool.define(
       // runs, waits for the run before it: a message with its own dependencies is not delivered until they finish, and
       // one of them failing must not stop the run already going.
       const extendRun = Effect.fn("TaskTool.extendRun")(function* () {
-        // A Stop pressed while this call was setting up is meant for its message too.
+        if ((yield* background.get(nextSession.id))?.status !== "running") return undefined
+        // A Stop pressed while this call was setting up is meant for its message too. A launch is started and then
+        // cancelled below instead, so the job it would have joined is never touched.
         if (ctx.abort.aborted)
           return yield* Effect.fail(new Error("Stopped before the message reached the background task."))
         const busy = dependencies.length === 0 && (yield* statuses.get(nextSession.id)).type !== "idle"
