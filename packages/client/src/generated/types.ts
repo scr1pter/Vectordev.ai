@@ -912,6 +912,11 @@ export type SessionsContextOutput = {
               readonly resetAt: number
               readonly message: string
             }
+          | {
+              readonly type: "codium"
+              readonly action: "credits" | "sign-in" | "unavailable"
+              readonly message: string
+            }
       }
     | {
         readonly type: "compaction"
@@ -1139,6 +1144,11 @@ export type SessionsHistoryOutput = {
                       readonly code: "VECTOR_FREE_MODELS_LIMIT"
                       readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
                       readonly resetAt: number
+                      readonly message: string
+                    }
+                  | {
+                      readonly type: "codium"
+                      readonly action: "credits" | "sign-in" | "unavailable"
                       readonly message: string
                     }
               }
@@ -1381,6 +1391,11 @@ export type SessionsHistoryOutput = {
                 readonly code: "VECTOR_FREE_MODELS_LIMIT"
                 readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
                 readonly resetAt: number
+                readonly message: string
+              }
+            | {
+                readonly type: "codium"
+                readonly action: "credits" | "sign-in" | "unavailable"
                 readonly message: string
               }
         }
@@ -1884,6 +1899,11 @@ export type SessionsEventsOutput =
                     readonly resetAt: number
                     readonly message: string
                   }
+                | {
+                    readonly type: "codium"
+                    readonly action: "credits" | "sign-in" | "unavailable"
+                    readonly message: string
+                  }
             }
           | {
               readonly type: "compaction"
@@ -2124,6 +2144,11 @@ export type SessionsEventsOutput =
               readonly code: "VECTOR_FREE_MODELS_LIMIT"
               readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
               readonly resetAt: number
+              readonly message: string
+            }
+          | {
+              readonly type: "codium"
+              readonly action: "credits" | "sign-in" | "unavailable"
               readonly message: string
             }
       }
@@ -2577,6 +2602,11 @@ export type SessionsMessageOutput = {
               readonly resetAt: number
               readonly message: string
             }
+          | {
+              readonly type: "codium"
+              readonly action: "credits" | "sign-in" | "unavailable"
+              readonly message: string
+            }
       }
     | {
         readonly type: "compaction"
@@ -2764,6 +2794,11 @@ export type MessagesListOutput = {
               readonly code: "VECTOR_FREE_MODELS_LIMIT"
               readonly reason: "user_daily" | "user_minute" | "shared_daily" | "upstream" | "balance"
               readonly resetAt: number
+              readonly message: string
+            }
+          | {
+              readonly type: "codium"
+              readonly action: "credits" | "sign-in" | "unavailable"
               readonly message: string
             }
       }
