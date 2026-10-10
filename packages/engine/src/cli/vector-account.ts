@@ -2,6 +2,8 @@ import fs from "fs/promises"
 import path from "path"
 import open from "open"
 import { Global } from "@vectordevai/core/global"
+import { truthy } from "@vectordevai/core/flag/flag"
+import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { UI } from "./ui"
 import { VectorAccount } from "@vectordevai/core/vector-account"
 
@@ -18,8 +20,8 @@ export const readVectorToken = VectorAccount.readVectorToken
 
 const AUTH_FILE = path.join(Global.Path.data, "cli-auth.json")
 const SITE = (process.env.VECTOR_SITE_URL ?? "https://vectordev.ai").replace(/\/+$/, "")
-const VERIFY_INTERVAL = 24 * 60 * 60 * 1000
-const OFFLINE_GRACE = 7 * 24 * 60 * 60 * 1000
+const DAY = 24 * 60 * 60 * 1000
+const OFFLINE_GRACE = 7 * DAY
 
 type CliUser = { id: string; email: string }
 type StoredAuth = { token: string; user: CliUser; verifiedAt: number }
@@ -63,10 +65,18 @@ type VerifyResult = { status: "ok"; user: CliUser } | { status: "invalid"; messa
 // portals, proxies, rate limits, and outages must never sign a user out.
 const REJECTION_CODES = new Set(["CLI_TOKEN_INVALID", "CLI_TOKEN_EXPIRED"])
 
+// The verification at the first command of each UTC day doubles as the CLI's usage count: the server records one row
+// per account per UTC day from these headers unless VECTOR_DISABLE_USAGE turns that off. Nothing else is sent.
 async function verifyToken(token: string): Promise<VerifyResult> {
   const response = await fetch(`${SITE}/api/account/cli-verify`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "x-vector-version": InstallationVersion,
+      "x-vector-platform": `${process.platform}-${process.arch}`,
+      ...(truthy("VECTOR_DISABLE_USAGE") ? { "x-vector-usage": "off" } : {}),
+    },
     body: JSON.stringify({ token }),
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined)
@@ -158,7 +168,8 @@ export async function ensureVectorAccount(): Promise<void> {
   const stored = await load()
   if (stored) {
     const age = Date.now() - stored.verifiedAt
-    if (age < VERIFY_INTERVAL) return
+    // Once per UTC day rather than once per 24 hours, because the server counts the CLI's active days from this check.
+    if (Math.floor(stored.verifiedAt / DAY) === Math.floor(Date.now() / DAY)) return
     const verified = await verifyToken(stored.token)
     if (verified.status === "ok") {
       await save({ token: stored.token, user: verified.user, verifiedAt: Date.now() })

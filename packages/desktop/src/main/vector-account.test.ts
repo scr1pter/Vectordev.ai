@@ -109,6 +109,19 @@ test("desktop owns PKCE exchange and only ciphertext/status cross persistence an
   expect(app.controller.status()).toEqual({ authenticated: false, pending: false })
 })
 
+test("the main-process token is available only while signed in and unexpired", async () => {
+  const app = fixture()
+  expect(await app.controller.token()).toBeUndefined()
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  expect(await app.controller.token()).toBe(app.token)
+  app.state.secure = false
+  expect(await app.controller.token()).toBeUndefined()
+  app.state.secure = true
+  app.state.now += 100_000
+  expect(await app.controller.token()).toBeUndefined()
+})
+
 test("mismatched, duplicate, expired and cancelled callbacks never forward or exchange credentials", async () => {
   const app = fixture()
   await app.controller.start()

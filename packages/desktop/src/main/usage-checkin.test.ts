@@ -1,0 +1,310 @@
+import { afterEach, expect, test } from "bun:test"
+import { createUsageCheckin, usageCheckinEndpoint } from "./usage-checkin"
+
+const DAY = 24 * 60 * 60 * 1000
+const TODAY = Date.UTC(2026, 9, 9, 15, 30)
+const TOKEN = "vct_placeholder-account-token"
+const servers: ReturnType<typeof Bun.serve>[] = []
+
+afterEach(() => {
+  servers.splice(0).forEach((server) => server.stop(true))
+})
+
+/** A UTC time on the test day; hours of 24 and more fall on the following days. */
+function at(hours: number, minutes = 0) {
+  return Date.UTC(2026, 9, 9, hours, minutes)
+}
+
+function fixture(input: { listStatus?: number; checkinStatus?: number; pageSize?: number } = {}) {
+  const state = {
+    now: TODAY,
+    enabled: true,
+    token: TOKEN as string | undefined,
+    listStatus: input.listStatus,
+    checkinStatus: input.checkinStatus ?? 204,
+    sessions: [] as Array<{ id: string; parentID?: string; updated: number }>,
+  }
+  const lists: Array<{ query: URLSearchParams; authorization: string | null }> = []
+  const checkins: Array<{ body: unknown; authorization: string | null }> = []
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (request) => {
+      const url = new URL(request.url)
+      if (url.pathname === "/experimental/session") {
+        lists.push({ query: url.searchParams, authorization: request.headers.get("authorization") })
+        if (state.listStatus) return new Response("unavailable", { status: state.listStatus })
+        // Stands in for the engine's list: newest first, updated at or after `start` and before `cursor`, one page at a
+        // time with the next cursor in a header.
+        const start = Number(url.searchParams.get("start"))
+        const cursor = url.searchParams.has("cursor") ? Number(url.searchParams.get("cursor")) : Infinity
+        const limit = Math.min(input.pageSize ?? Infinity, Number(url.searchParams.get("limit")))
+        const rows = state.sessions
+          .filter((session) => session.updated >= start && session.updated < cursor)
+          .sort((a, b) => b.updated - a.updated)
+        const page = rows.slice(0, limit)
+        return Response.json(
+          page.map((session) => ({
+            id: session.id,
+            parentID: session.parentID,
+            title: "private title",
+            directory: "/private/repo",
+            time: { updated: session.updated },
+          })),
+          { headers: rows.length > limit ? { "x-next-cursor": String(page[page.length - 1].updated) } : {} },
+        )
+      }
+      if (url.pathname === "/api/usage/checkin") {
+        checkins.push({ body: await request.json(), authorization: request.headers.get("authorization") })
+        return new Response(null, { status: state.checkinStatus })
+      }
+      return new Response("missing", { status: 404 })
+    },
+  })
+  servers.push(server)
+  const store = new Map<string, unknown>()
+  const options = {
+    endpoint: new URL("/api/usage/checkin", server.url).href as string | undefined,
+    store: { get: (key: string) => store.get(key), set: (key: string, value: unknown) => store.set(key, value) },
+    enabled: () => state.enabled,
+    engine: { url: server.url.href, username: "vector", password: "placeholder-password" },
+    token: async () => state.token,
+    fetch: (url: string, init: RequestInit) => fetch(url, init),
+    now: () => state.now,
+    version: "1.99.105",
+    platform: "darwin",
+    arch: "arm64",
+  }
+  return { state, lists, checkins, store, options, usage: createUsageCheckin(options) }
+}
+
+async function until(condition: () => boolean) {
+  for (let count = 0; count < 400 && !condition(); count++) await Bun.sleep(5)
+}
+
+test("sends the root and subagent sessions updated since UTC midnight, across every page", async () => {
+  const app = fixture({ pageSize: 2 })
+  app.state.sessions.push(
+    { id: "ses_yesterday", updated: at(-2) },
+    { id: "ses_a", updated: at(9) },
+    { id: "ses_b", parentID: "ses_a", updated: at(10) },
+    { id: "ses_c", updated: at(11) },
+    { id: "ses_d", parentID: "ses_c", updated: at(12) },
+    { id: "ses_e", parentID: "ses_c", updated: at(13) },
+  )
+
+  expect(await app.usage.checkin()).toBe(true)
+
+  expect(app.lists.map((list) => list.query.get("start"))).toEqual(Array(3).fill(String(at(0))))
+  expect(app.lists.map((list) => list.query.get("cursor"))).toEqual([null, String(at(12)), String(at(10))])
+  expect(app.lists[0].query.get("archived")).toBe("true")
+  expect(app.lists[0].authorization).toBe(`Basic ${Buffer.from("vector:placeholder-password").toString("base64")}`)
+  expect(app.checkins).toHaveLength(1)
+  expect(app.checkins[0].authorization).toBe(`Bearer ${TOKEN}`)
+  const installId = app.store.get("installId")
+  expect(installId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  expect(app.checkins[0].body).toEqual({
+    installId,
+    client: "desktop",
+    version: "1.99.105",
+    platform: "darwin",
+    arch: "arm64",
+    sessions: 2,
+    subagentSessions: 3,
+  })
+})
+
+test("sends the day's counts again whenever they grow and starts over at the next UTC day", async () => {
+  const app = fixture()
+  const sent = () =>
+    app.checkins.map((checkin) => checkin.body as { installId: string; sessions: number; subagentSessions: number })
+
+  // Opening the app before any work marks the install active with nothing counted yet.
+  app.state.now = at(9, 1)
+  expect(await app.usage.checkin()).toBe(true)
+
+  app.state.sessions.push({ id: "ses_a", updated: at(10) }, { id: "ses_b", parentID: "ses_a", updated: at(11) })
+  app.state.now = at(12, 1)
+  expect(await app.usage.checkin()).toBe(true)
+
+  app.state.now = at(15, 1)
+  expect(await app.usage.checkin()).toBe(false)
+
+  app.state.sessions.push({ id: "ses_c", parentID: "ses_a", updated: at(16) }, { id: "ses_d", updated: at(17) })
+  app.state.now = at(23, 55)
+  expect(await app.usage.checkin()).toBe(true)
+
+  app.state.now = at(24, 1)
+  expect(await app.usage.checkin()).toBe(true)
+
+  app.state.sessions[0].updated = at(24, 30)
+  app.state.now = at(25, 1)
+  expect(await app.usage.checkin()).toBe(true)
+
+  expect(sent().map((body) => [body.sessions, body.subagentSessions])).toEqual([
+    [0, 0],
+    [1, 1],
+    [2, 2],
+    [0, 0],
+    [1, 0],
+  ])
+  expect(app.lists.at(-1)?.query.get("start")).toBe(String(at(24)))
+  expect(new Set(sent().map((body) => body.installId)).size).toBe(1)
+})
+
+test("a failed count reports the install once with zero counts and the next working count replaces them", async () => {
+  const app = fixture({ listStatus: 503 })
+  const failing = createUsageCheckin({
+    ...app.options,
+    token: async () => {
+      throw new Error("credential store locked")
+    },
+  })
+
+  expect(await failing.checkin()).toBe(true)
+  expect(app.checkins[0].authorization).toBeNull()
+  expect(app.checkins[0].body).toMatchObject({ sessions: 0, subagentSessions: 0 })
+
+  expect(await failing.checkin()).toBe(false)
+  expect(app.checkins).toHaveLength(1)
+
+  app.state.listStatus = undefined
+  app.state.sessions.push({ id: "ses_a", updated: at(14) }, { id: "ses_b", parentID: "ses_a", updated: at(15) })
+  expect(await failing.checkin()).toBe(true)
+  expect(app.checkins[1].body).toMatchObject({ sessions: 1, subagentSessions: 1 })
+})
+
+test("leaves out the account header when signed out", async () => {
+  const app = fixture()
+  app.state.token = undefined
+
+  expect(await app.usage.checkin()).toBe(true)
+
+  expect(app.checkins[0].authorization).toBeNull()
+})
+
+test("retries later the same day when the check-in is not accepted", async () => {
+  const app = fixture({ checkinStatus: 503 })
+
+  expect(await app.usage.checkin()).toBe(false)
+  expect(app.store.has("sent")).toBe(false)
+
+  app.state.checkinStatus = 204
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.checkins).toHaveLength(2)
+  expect(app.store.get("sent")).toEqual({ day: "2026-10-09", sessions: 0, subagentSessions: 0 })
+})
+
+test("never throws when the site is unreachable", async () => {
+  const app = fixture()
+  const offline = createUsageCheckin({ ...app.options, endpoint: "http://127.0.0.1:9/api/usage/checkin" })
+
+  expect(await offline.checkin()).toBe(false)
+  expect(app.store.has("sent")).toBe(false)
+})
+
+test("sends nothing and creates no install ID while sharing is off", async () => {
+  const app = fixture()
+  app.state.enabled = false
+
+  expect(await app.usage.checkin()).toBe(false)
+
+  expect(app.lists).toHaveLength(0)
+  expect(app.checkins).toHaveLength(0)
+  expect(app.store.size).toBe(0)
+})
+
+test("sends nothing without an endpoint", async () => {
+  const app = fixture()
+  const development = createUsageCheckin({ ...app.options, endpoint: undefined })
+
+  expect(await development.checkin()).toBe(false)
+
+  expect(app.lists).toHaveLength(0)
+  expect(app.checkins).toHaveLength(0)
+})
+
+test("keeps a stored install ID and replaces a malformed one", async () => {
+  const app = fixture()
+  app.store.set("installId", "not-a-uuid")
+
+  await app.usage.checkin()
+  const replaced = app.store.get("installId")
+  expect(replaced).not.toBe("not-a-uuid")
+
+  app.state.now = TODAY + DAY
+  await app.usage.checkin()
+  expect(app.checkins.map((checkin) => (checkin.body as { installId: string }).installId)).toEqual([replaced, replaced])
+})
+
+test("concurrent triggers share one check-in", async () => {
+  const app = fixture()
+
+  expect(await Promise.all([app.usage.checkin(), app.usage.checkin()])).toEqual([true, true])
+
+  expect(app.checkins).toHaveLength(1)
+})
+
+test("start checks in after the delay, keeps checking on the interval and stop ends it", async () => {
+  const app = fixture()
+  const usage = createUsageCheckin({ ...app.options, delay: 1, interval: 20 })
+  usage.start()
+  await until(() => app.checkins.length === 1)
+  expect(app.checkins).toHaveLength(1)
+
+  app.state.sessions.push({ id: "ses_a", updated: at(15) })
+  await until(() => app.checkins.length === 2)
+  usage.stop()
+  // Joins a tick still in flight, so nothing is left running once it resolves.
+  await usage.checkin()
+  expect(app.checkins[1].body).toMatchObject({ sessions: 1, subagentSessions: 0 })
+
+  const listed = app.lists.length
+  await Bun.sleep(80)
+  expect(app.lists).toHaveLength(listed)
+})
+
+test("the last tick of a UTC day lands just before midnight instead of a full interval later", async () => {
+  const evening = fixture()
+  evening.state.now = at(24) - 5 * 60 * 1000 - 30
+  const late = createUsageCheckin({ ...evening.options, delay: 1, interval: 60_000 })
+  late.start()
+  await until(() => evening.lists.length >= 2)
+  late.stop()
+  await late.checkin()
+  expect(evening.lists.length).toBeGreaterThanOrEqual(2)
+
+  const afternoon = fixture()
+  const early = createUsageCheckin({ ...afternoon.options, delay: 1, interval: 60_000 })
+  early.start()
+  await until(() => afternoon.checkins.length === 1)
+  await Bun.sleep(100)
+  early.stop()
+  expect(afternoon.lists).toHaveLength(1)
+})
+
+test("stop cancels a pending start", async () => {
+  const app = fixture()
+  const usage = createUsageCheckin({ ...app.options, delay: 20, interval: 60_000 })
+  usage.start()
+  usage.stop()
+  await Bun.sleep(60)
+
+  expect(app.lists).toHaveLength(0)
+  expect(app.checkins).toHaveLength(0)
+})
+
+test("only packaged release builds report to vectordev.ai unless a development URL is set", () => {
+  expect(usageCheckinEndpoint({ packaged: true, channel: "prod", override: undefined })).toBe(
+    "https://vectordev.ai/api/usage/checkin",
+  )
+  expect(usageCheckinEndpoint({ packaged: true, channel: "beta", override: "http://localhost:3000/x" })).toBe(
+    "https://vectordev.ai/api/usage/checkin",
+  )
+  expect(usageCheckinEndpoint({ packaged: true, channel: "dev", override: undefined })).toBeUndefined()
+  expect(usageCheckinEndpoint({ packaged: false, channel: "prod", override: undefined })).toBeUndefined()
+  expect(usageCheckinEndpoint({ packaged: false, channel: "prod", override: "not a url" })).toBeUndefined()
+  expect(
+    usageCheckinEndpoint({ packaged: false, channel: "dev", override: "http://localhost:3000/api/usage/checkin" }),
+  ).toBe("http://localhost:3000/api/usage/checkin")
+})

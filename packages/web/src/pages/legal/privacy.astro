@@ -241,9 +241,11 @@ export const prerender = true
       versions and platforms to support, the desktop application and the command-line tool report usage counts
       to Vector. The desktop application sends a random install identifier created on your computer, your
       account identifier when you are signed in, the application version, the operating system and CPU
-      architecture, and the number of sessions and subagent sessions started that day. The command-line
+      architecture, and the number of sessions and subagent sessions active that day (in UTC). It reports
+      shortly after it opens each day and again, checked about once an hour, whenever a count has gone up. The command-line
       tool's daily account check, which already identifies your account, also reports the tool's version,
-      operating system and CPU architecture, and counts that day as a day of command-line use.
+      operating system and CPU architecture at the first command of each UTC day, and counts that day as a day
+      of command-line use.
     </p>
     <p>
       Usage counts never include prompts, code, file names or paths, model output, provider names or keys,
@@ -335,7 +337,9 @@ export const prerender = true
     <h2>13. Your choices and privacy rights</h2>
     <p>
       You can choose models and integrations, limit permissions, stop background work or computer use,
-      disconnect providers, turn off diagnostics, usage counts, and automatic sharing, unshare public sessions, edit or erase
+      disconnect providers, turn off diagnostics, usage counts (<strong>Share usage counts</strong> in the desktop
+      application, or <code>VECTOR_DISABLE_USAGE=1</code> for the command-line tool), and automatic sharing,
+      unshare public sessions, edit or erase
       local memory, and remove local sessions and other data. Removing a local session alone does not remove
       its public copy. Use the relevant provider's controls to revoke its credentials or manage records it holds.
       Deleting an account, deleting local data, and deleting provider-held content are

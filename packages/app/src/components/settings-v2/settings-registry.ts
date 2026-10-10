@@ -33,7 +33,7 @@ export const settingsGroups: readonly SettingsGroup[] = [
         value: "general",
         label: "General",
         icon: "sliders",
-        keywords: ["data", "memory", "judge", "routing", "diagnostics"],
+        keywords: ["data", "memory", "judge", "routing", "diagnostics", "privacy"],
       },
       {
         value: "usage",
