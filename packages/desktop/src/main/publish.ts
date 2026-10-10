@@ -634,10 +634,29 @@ export async function publishProject(
     }
   }
   if (input.production !== false) {
-    deployment = await promoteDeployment(
+    // A refused promotion (the Supabase security check, or Vercel itself) still
+    // leaves a working preview, so its URL and checks are reported with why.
+    const promoted = await promoteDeployment(
       { projectPath: scope.projectPath, taskId: scope.taskId, id: deployment.id, runId: input.runId },
       emit,
+    ).then(
+      (value) => ({ value, error: undefined }),
+      (error: unknown) => ({ value: undefined, error: error instanceof Error ? error.message : String(error) }),
     )
+    if (!promoted.value) {
+      const error = `The preview is live at ${deployment.url}, but promoting it to production failed: ${promoted.error}`
+      emitProgress(input, emit, "failed", "error", error)
+      return {
+        ok: false,
+        target: target.id,
+        url: deployment.url,
+        log,
+        deploymentId: deployment.id,
+        checks: getDeployment(scope.projectPath, scope.taskId, deployment.id).checks,
+        error,
+      }
+    }
+    deployment = promoted.value
   }
   emitProgress(
     input,

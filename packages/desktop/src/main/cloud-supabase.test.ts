@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -39,12 +39,11 @@ mock.module("./store", () => ({
 }))
 
 const { describeSupabaseCommand, runSupabaseCommand } = await import("./cloud-supabase")
-const { cloudProjectScopeKey, getDatabase, getDeployment, listEnv, recordDeployment, setEnv } = await import(
-  "./cloud-console"
-)
+const { cloudProjectScopeKey, getDatabase, getDeployment, listEnv, recordDeployment, setBuildSettings, setEnv } =
+  await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
 const { startCloudBridge, stopCloudBridge } = await import("./cloud-bridge")
-const { promoteDeployment } = await import("./publish")
+const { promoteDeployment, publishProject } = await import("./publish")
 const { ANON_KEY, MANAGEMENT_TOKEN, SERVICE_KEY, startSupabaseFake } = await import("../../test/supabase-fake")
 
 type Fake = Awaited<ReturnType<typeof startSupabaseFake>>
@@ -808,6 +807,51 @@ describe("security check", () => {
     ])
     expect(getDeployment(project, undefined, deployment.id).releaseStatus).toBe("preview")
   })
+
+  test.skipIf(process.platform === "win32")(
+    "a production publish the check refuses still reports its preview and why",
+    async () => {
+      linkDatabase()
+      const jwt = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ role: "service_role" })).toString("base64url")}.signaturesignature`
+      setEnv(project, undefined, "VITE_SUPABASE_KEY", jwt, "public")
+      await writeFile(join(project, "index.html"), "<!doctype html><h1>Shop</h1>")
+      setBuildSettings(project, undefined, {
+        framework: "Static",
+        packageManager: "static",
+        installCommand: "",
+        testCommand: "",
+        buildCommand: "",
+        outputDirectory: ".",
+        nodeVersion: "",
+        healthPath: "/",
+        requiredChecks: { test: false, secrets: true, health: false, browser: false },
+      })
+      // A stand-in Vercel CLI that deploys a preview; promoting would call it again.
+      const cli = join(project, "..", `vercel-${Date.now()}`)
+      await writeFile(
+        cli,
+        '#!/bin/sh\nprintf "args %s\\n" "$*"\nprintf "Preview: https://shop-a1b2c3d4e-team.vercel.app\\n"\n',
+      )
+      await chmod(cli, 0o755)
+      const stages: string[] = []
+      const result = await publishProject(
+        { projectPath: project, target: "vercel", production: true, runId: "run-1" },
+        (event) => stages.push(event.stage),
+        async () => [{ id: "vercel", label: "Vercel", command: [cli], loginHint: "", available: true }],
+      )
+      await rm(cli, { force: true })
+      expect(result.error).toBe(
+        "The preview is live at https://shop-a1b2c3d4e-team.vercel.app/, but promoting it to production failed: The Supabase security check failed, so production was not changed. 1 security problem must be fixed before a production release.",
+      )
+      expect(result).toMatchObject({
+        ok: false,
+        url: "https://shop-a1b2c3d4e-team.vercel.app/",
+        checks: expect.arrayContaining([expect.objectContaining({ id: "supabase-security", status: "failed" })]),
+      })
+      expect(stages.at(-1)).toBe("failed")
+      expect(getDeployment(project, undefined, result.deploymentId ?? "").releaseStatus).toBe("preview")
+    },
+  )
 })
 
 describe("agent bridge", () => {
