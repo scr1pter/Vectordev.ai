@@ -34,6 +34,7 @@ import { color, printHeader, printResults } from "./report"
 import { coverageResult, parseOptions, routeKey, routeKeys, selectedScenarios } from "./routing"
 import { runScenario } from "./runner"
 import { call, disposeApps } from "./backend"
+import { Config } from "../../../src/config/config"
 import { runtime } from "./runtime"
 import { type Scenario } from "./types"
 import { workspaceScenarios } from "./workspace-scenarios"
@@ -450,9 +451,7 @@ const scenarios: Scenario[] = [
       Effect.gen(function* () {
         object(body)
         check(body.success === true, "MCP removal should report success")
-        const config = yield* Effect.promise(() =>
-          Bun.file(path.join(ctx.state.directory, ".vector", "vector.local.json")).json(),
-        )
+        const config = yield* Effect.promise(() => Bun.file(Config.integrationStore(ctx.state.directory)).json())
         object(config)
         check(
           config.mcp === undefined || (isRecord(config.mcp) && config.mcp["httpapi-remove"] === undefined),

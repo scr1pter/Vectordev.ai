@@ -810,7 +810,7 @@ const layer = Layer.effect(
     })
 
     // add/connect/disconnect mutate instance state only; mirror the intent into the
-    // project-local config layer so it survives a backend restart. Persistence failure
+    // project's integration store so it survives a backend restart. Persistence failure
     // must not undo the runtime change, so surface it instead of failing the request.
     const persistConfig = Effect.fnUntraced(function* (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) {
       yield* cfgSvc.updateMcpLocal(name, entry).pipe(
@@ -823,7 +823,7 @@ const layer = Layer.effect(
               events
                 .publish(TuiEvent.ToastShow, {
                   title: "MCP config not saved",
-                  message: `Could not write "${name}" to .vector/vector.local.json; the change may not survive a restart.`,
+                  message: `Could not save "${name}"; the change may not survive a restart.`,
                   variant: "warning",
                   duration: 8000,
                 })

@@ -5,6 +5,7 @@ import { pathToFileURL } from "url"
 import { Global } from "@vectordevai/core/global"
 import { Redaction } from "@vectordevai/core/redaction"
 import { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
+import { Config } from "../../src/config/config"
 import { Server } from "../../src/server/server"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
@@ -351,7 +352,7 @@ describe("config and provider responses", () => {
     })
     expect(response.status).toBe(200)
 
-    const saved = await Bun.file(path.join(tmp.path, ".vector", "vector.local.json")).json()
+    const saved = await Bun.file(Config.integrationStore(tmp.path)).json()
     expect(saved.mcp.tools.environment).toEqual({ GITHUB_TOKEN: "env-secret", DEBUG: "1" })
     expect(saved.mcp.tools.command).toEqual(boundTools.command)
     expect(saved.mcp.tools.cwd).toBeUndefined()
@@ -407,7 +408,7 @@ describe("config and provider responses", () => {
         expect(response.status).toBe(200)
       }
 
-      const saved = await Bun.file(path.join(tmp.path, ".vector", "vector.local.json")).text()
+      const saved = await Bun.file(Config.integrationStore(tmp.path)).text()
       expect(saved).not.toContain("env-reference-secret")
       expect(saved).not.toContain(Redaction.MARKER)
       expect(JSON.parse(saved).mcp.tools.environment.GITHUB_TOKEN).toBe("{env:VECTOR_TEST_MCP_SECRET}")

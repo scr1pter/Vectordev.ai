@@ -293,6 +293,7 @@ beforeEach(() => {
 
 // Import after mocks
 const { MCP } = await import("../../src/mcp/index")
+const { Config } = await import("../../src/config/config")
 const { McpOAuthCallback } = await import("../../src/mcp/oauth-callback")
 
 const it = testEffect(LayerNode.compile(MCP.node))
@@ -741,7 +742,7 @@ it.instance(
 // Test: add()/connect()/disconnect() persist to the project-local config
 // ========================================================================
 
-it.instance("add persists the server to .vector/vector.local.json and toggles persist enabled", () =>
+it.instance("add persists the server outside the workspace and toggles persist enabled", () =>
   MCP.Service.use((mcp: MCPNS.Interface) =>
     Effect.gen(function* () {
       const { directory } = yield* TestInstance
@@ -754,7 +755,11 @@ it.instance("add persists the server to .vector/vector.local.json and toggles pe
         environment: { TOKEN: "secret" },
       })
 
-      const file = path.join(directory, ".vector", "vector.local.json")
+      // The integration is the user's, not the repository's, so nothing is written into the workspace.
+      expect(yield* Effect.promise(() => Bun.file(path.join(directory, ".vector", "vector.local.json")).exists())).toBe(
+        false,
+      )
+      const file = Config.integrationStore(directory)
       const written = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
       expect(written.mcp["persist-server"]).toEqual({
         type: "local",
@@ -769,9 +774,6 @@ it.instance("add persists the server to .vector/vector.local.json and toggles pe
       yield* mcp.connect("persist-server")
       const afterConnect = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
       expect(afterConnect.mcp["persist-server"].enabled).toBe(true)
-
-      const gitignore = yield* Effect.promise(() => Bun.file(path.join(directory, ".vector", ".gitignore")).text())
-      expect(gitignore).toContain("vector.local.json")
     }),
   ),
 )
@@ -797,7 +799,7 @@ it.instance("vault placeholders resolve only in the child process and removal cl
       expect(options?.args).toEqual(["resolved-argument"])
       expect(options?.env?.TOKEN).toBe("resolved-token")
 
-      const file = path.join(directory, ".vector", "vector.local.json")
+      const file = Config.integrationStore(directory)
       const written = yield* Effect.promise(() => Bun.file(file).text())
       expect(written).toContain("{vault:argument}")
       expect(written).toContain("{vault:token}")

@@ -3,6 +3,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import path from "path"
+import { createHash } from "node:crypto"
 import { fileURLToPath, pathToFileURL } from "url"
 import os from "os"
 import { mergeDeep } from "remeda"
@@ -362,6 +363,19 @@ export const use = serviceUse(Service)
 // tokens/headers) are written here instead of the committable vector.json, so the files
 // must stay gitignored.
 const LOCAL_CONFIG_FILES = ["vector.local.json", "vector.local.jsonc"]
+
+/**
+ * Where the integrations a user adds from the app are kept for one project. They are the user's choice, not the
+ * repository's, so they live outside the workspace: trust neither drops them nor is revoked when they change, and a
+ * cloned repository cannot plant one.
+ */
+export function integrationStore(root: string) {
+  return path.join(
+    Global.Path.state,
+    "integrations",
+    `${createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 32)}.json`,
+  )
+}
 
 function globalConfigFile() {
   const candidates = ["vector.jsonc", "vector.json", "config.json"].map((file) => path.join(Global.Path.config, file))
@@ -820,6 +834,11 @@ const layer = Layer.effect(
           yield* mergePluginOrigins(dir, list)
         }
 
+        if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
+          const store = integrationStore(workspace)
+          yield* merge(store, yield* loadFile(store, authEnv), "global")
+        }
+
         if (Flag.VECTOR_CONFIG_CONTENT) {
           const source = "VECTOR_CONFIG_CONTENT"
           const next = yield* loadConfig(
@@ -989,7 +1008,7 @@ const layer = Layer.effect(
       yield* invalidateGlobal
     })
 
-    // Persists a runtime MCP mutation into the project's machine-local config layer so it
+    // Persists a runtime MCP mutation into the project's integration store so it
     // survives a backend restart. A full entry replaces the server's config wholesale (a
     // deep patch could leave e.g. a stale `command` behind a type switch to "remote");
     // an { enabled } entry only flips the flag, layering over configs defined elsewhere.
@@ -999,10 +1018,7 @@ const layer = Layer.effect(
     ) {
       const ctx = yield* InstanceState.context
       // Non-git projects have worktree "/", which is not a usable project root.
-      const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
-      const dir = path.join(root, ".vector")
-      const jsonc = path.join(dir, "vector.local.jsonc")
-      const file = (yield* fs.existsSafe(jsonc)) ? jsonc : path.join(dir, "vector.local.json")
+      const file = integrationStore(ctx.worktree === "/" ? ctx.directory : ctx.worktree)
       const before =
         (yield* readConfigFile(file)) ?? JSON.stringify({ $schema: "https://vectordev.ai/config.json" }, null, 2)
       const edits = modify(
@@ -1012,18 +1028,6 @@ const layer = Layer.effect(
         { formattingOptions: { insertSpaces: true, tabSize: 2 } },
       )
       yield* fs.writeWithDirs(file, applyEdits(before, edits)).pipe(Effect.orDie)
-      yield* ensureGitignore(dir).pipe(Effect.orDie)
-      // The generated .gitignore covers the local files, but a .gitignore that predates
-      // this layer may not; the file can hold tokens, so append the entries when missing.
-      const gitignore = path.join(dir, ".gitignore")
-      const existing = (yield* fs.readFileStringSafe(gitignore).pipe(Effect.orDie)) ?? ""
-      const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()))
-      const missing = LOCAL_CONFIG_FILES.filter((item) => !present.has(item))
-      if (missing.length) {
-        yield* fs
-          .writeFileString(gitignore, [existing.replace(/\n$/, ""), ...missing].filter(Boolean).join("\n") + "\n")
-          .pipe(Effect.orDie)
-      }
     })
 
     // The MCP entry as the config files hold it, merged in load order. get() has
@@ -1046,6 +1050,9 @@ const layer = Layer.effect(
         ...dirs
           .filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR)
           .flatMap((dir) => ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES].map((file) => path.join(dir, file))),
+        ...(Flag.VECTOR_DISABLE_PROJECT_CONFIG
+          ? []
+          : [integrationStore(ctx.worktree === "/" ? ctx.directory : ctx.worktree)]),
         ...["vector.json", "vector.jsonc"].map((file) => path.join(ConfigManaged.managedConfigDir(), file)),
       ]
       const entries = yield* Effect.forEach(files, (file) =>
@@ -1062,17 +1069,18 @@ const layer = Layer.effect(
     const removeMcpLocal = Effect.fn("Config.removeMcpLocal")(function* (name: string) {
       const ctx = yield* InstanceState.context
       const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
-      for (const dir of [path.join(root, ".vector")]) {
-        for (const nameOfFile of LOCAL_CONFIG_FILES) {
-          const file = path.join(dir, nameOfFile)
-          const before = yield* readConfigFile(file)
-          if (!before) continue
-          const edits = modify(before, ["mcp", name], undefined, {
-            formattingOptions: { insertSpaces: true, tabSize: 2 },
-          })
-          if (!edits.length) continue
-          yield* fs.writeFileString(file, applyEdits(before, edits)).pipe(Effect.orDie)
-        }
+      // Integrations added before the store existed were written into the project's .vector directory.
+      for (const file of [
+        integrationStore(root),
+        ...LOCAL_CONFIG_FILES.map((item) => path.join(root, ".vector", item)),
+      ]) {
+        const before = yield* readConfigFile(file)
+        if (!before) continue
+        const edits = modify(before, ["mcp", name], undefined, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        })
+        if (!edits.length) continue
+        yield* fs.writeFileString(file, applyEdits(before, edits)).pipe(Effect.orDie)
       }
     })
 

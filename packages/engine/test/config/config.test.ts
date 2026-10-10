@@ -2514,27 +2514,29 @@ describe("machine-local config layer", () => {
       yield* Config.use.updateMcpLocal("github", { type: "remote", url: "https://github.example/mcp" })
       yield* Config.use.updateMcpLocal("linear", { enabled: false })
 
-      const file = path.join(test.directory, ".vector", "vector.local.json")
-      const parsed = JSON.parse((yield* FSUtil.use.readFileStringSafe(file))!)
+      const parsed = JSON.parse((yield* FSUtil.use.readFileStringSafe(Config.integrationStore(test.directory)))!)
       expect(parsed.mcp.github).toEqual({ type: "remote", url: "https://github.example/mcp" })
       expect(parsed.mcp.linear).toEqual({ enabled: false })
 
-      yield* trustWorkspaceEffect(test.directory)
+      // The project is not trusted, and an integration the user added still loads: it is the user's, not the
+      // repository's.
       expect((yield* Config.use.get()).mcp?.["github"]).toMatchObject({ url: "https://github.example/mcp" })
     }),
   )
 
-  it.instance("updateMcpLocal keeps the local file out of version control", () =>
+  it.instance("updateMcpLocal writes nothing into the workspace, so trust survives it", () =>
     Effect.gen(function* () {
       const test = yield* TestInstance
-      const dir = path.join(test.directory, ".vector")
-      yield* FSUtil.use.writeWithDirs(path.join(dir, ".gitignore"), "node_modules\n")
-      yield* Config.use.updateMcpLocal("github", { type: "remote", url: "https://github.example/mcp" })
+      yield* trustWorkspaceEffect(test.directory)
+      yield* Config.use.updateMcpLocal("github", { type: "local", command: ["npx", "-y", "@example/github-mcp@1.2.3"] })
 
-      const gitignore = yield* FSUtil.use.readFileStringSafe(path.join(dir, ".gitignore"))
-      expect(gitignore).toContain("node_modules")
-      expect(gitignore).toContain("vector.local.json")
-      expect(gitignore).toContain("vector.local.jsonc")
+      expect(yield* FSUtil.use.existsSafe(path.join(test.directory, ".vector"))).toBe(false)
+      const config = yield* Config.Service
+      expect((yield* config.trust!()).trusted).toBe(true)
+      // Package runners are kept as the user wrote them, since the user, not the repository, chose them.
+      expect((yield* Config.use.get()).mcp?.["github"]).toMatchObject({
+        command: ["npx", "-y", "@example/github-mcp@1.2.3"],
+      })
     }),
   )
 })
