@@ -298,3 +298,172 @@ describe("vector_cloud bridge", () => {
     }),
   )
 })
+
+describe("vector_cloud Vercel actions", () => {
+  it.instance("asks before moving production, naming the action in what 'always' approves", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge(
+        { ok: true, text: "Production now serves https://shop-abc.vercel.app (dpl_abc).", url: "https://shop.example" },
+        200,
+        scope("Vercel", "shop", "production", "Point production traffic of the Vercel project shop at dpl_abc."),
+      )
+      const asks = recordAsks()
+      const result = yield* execute({ action: "promote", deploymentId: "dpl_abc" }, asks.ask)
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "vector_cloud_publish",
+          patterns: ["vercel/shop/production/promote"],
+          always: ["vercel/shop/production/promote"],
+          metadata: expect.objectContaining({
+            provider: "Vercel",
+            project: "shop",
+            environment: "production",
+            action: "promote",
+          }),
+        }),
+      ])
+      expect(requests.map((item) => item.command)).toEqual(["describe", "promote"])
+      expect(requests[1]).toMatchObject({ deploymentId: "dpl_abc" })
+      expect(result.output).toBe("Production now serves https://shop-abc.vercel.app (dpl_abc).")
+    }),
+  )
+
+  it.instance("puts project, protection and domain changes under hosting settings", () =>
+    Effect.gen(function* () {
+      for (const params of [
+        { action: "add_domain", domain: "shop.example" },
+        { action: "create_project", name: "shop" },
+        { action: "update_project_settings", nodeVersion: "22.x" },
+        { action: "enable_protection_bypass" },
+      ] as const) {
+        yield* bridge({ ok: true, text: "done" }, 200, scope("Vercel", "shop", "production", "Change shop."))
+        const asks = recordAsks()
+        yield* execute(params, asks.ask)
+        expect(asks.permissions.map((item) => item.permission)).toEqual(["vector_cloud_hosting"])
+      }
+    }),
+  )
+
+  it.instance("sends a variable's value to the bridge but never shows it", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge(
+        {
+          ok: true,
+          text: "Created STRIPE_KEY on shop for production.",
+          nextStep: "Redeploy for the new value to take effect.",
+        },
+        200,
+        scope("Vercel", "shop", "production", "Set STRIPE_KEY on the Vercel project shop for production."),
+      )
+      const asks = recordAsks()
+      const result = yield* execute(
+        { action: "set_env", key: "STRIPE_KEY", value: "sk_test_fixture", targets: ["production"] },
+        asks.ask,
+      )
+      expect(asks.permissions.map((item) => item.permission)).toEqual(["vector_cloud_environment"])
+      expect(JSON.stringify(asks.permissions)).not.toContain("sk_test_fixture")
+      expect(requests[1]).toMatchObject({ command: "set_env", value: "sk_test_fixture", targets: ["production"] })
+      expect(result.output).not.toContain("sk_test_fixture")
+      expect(result.output).toContain("Redeploy")
+    }),
+  )
+
+  it.instance("applies the environment plan the user approved, and asks nothing when there is none", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge({ ok: true, text: "Applied the plan to shop: create API_URL (preview)." }, 200, {
+        report: {
+          ok: true,
+          scope: {
+            provider: "Vercel",
+            project: "shop",
+            environment: "preview",
+            summary: "Sync: create API_URL (preview).",
+          },
+          carry: { planId: "plan-fixture", targets: ["preview"] },
+        },
+      })
+      const result = yield* execute({ action: "sync_environment", targets: ["preview"] })
+      expect(requests[1]).toMatchObject({ command: "sync_environment", planId: "plan-fixture", targets: ["preview"] })
+      expect(result.output).toContain("Applied the plan")
+
+      const idle = yield* bridge({ ok: true, text: "never runs" }, 200, {
+        report: { ok: true, noop: true, text: "Sync plan for shop: Nothing to change." },
+      })
+      const asks = recordAsks()
+      const nothing = yield* execute({ action: "sync_environment" }, asks.ask)
+      expect(asks.permissions).toEqual([])
+      expect(idle.map((item) => item.command)).toEqual(["describe"])
+      expect(nothing.output).toBe("Sync plan for shop: Nothing to change.")
+    }),
+  )
+
+  it.instance("reads Vercel state without asking", () =>
+    Effect.gen(function* () {
+      for (const action of ["list_env", "vercel_projects", "list_domains", "env_plan", "inspect_deployment"] as const) {
+        const requests = yield* bridge({ ok: true, text: `${action} report` })
+        const asks = recordAsks()
+        const result = yield* execute({ action }, asks.ask)
+        expect(asks.permissions).toEqual([])
+        expect(requests.map((item) => item.command)).toEqual([action])
+        expect(result.output).toBe(`${action} report`)
+      }
+    }),
+  )
+
+  it.instance("a failed publish shows the failed check and the end of the log, not a setup hint", () =>
+    Effect.gen(function* () {
+      yield* bridge(
+        {
+          ok: false,
+          error: "Required pre-deploy checks failed.",
+          errorCode: "checks_failed",
+          checks: [
+            {
+              label: "Production build",
+              status: "failed",
+              required: true,
+              details: "Production build failed.",
+              output: "src/app.ts(3,1): error TS2304",
+            },
+            { label: "Install dependencies", status: "passed", required: true },
+          ],
+          log: "line 1\nnpm ERR! build failed",
+          nextStep: "Read the failed checks above, fix the cause, and publish again.",
+        },
+        200,
+        scope("Vercel", "shop", "preview", "Publish a preview."),
+      )
+      const result = yield* execute({ action: "publish" })
+      expect(result.output).toContain("Vector Cloud publish failed: Required pre-deploy checks failed.")
+      expect(result.output).toContain("FAILED Production build: Production build failed.")
+      expect(result.output).toContain("error TS2304")
+      expect(result.output).toContain("npm ERR! build failed")
+      expect(result.output).toContain("fix the cause")
+      expect(result.output).not.toContain("Connect an account")
+    }),
+  )
+
+  it.instance("labels runtime logs as the running app's output", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge({
+        ok: true,
+        deploymentId: "dpl_abc",
+        url: "https://shop.vercel.app",
+        logs: {
+          provider: "vercel",
+          source: "runtime",
+          environment: "production",
+          status: "ready",
+          createdAt: "2026-10-10",
+          lines: 1,
+          droppedLines: 0,
+          tail: "[error] GET /cart 500 · boom",
+        },
+      })
+      const result = yield* execute({ action: "logs", source: "runtime" })
+      expect(requests[0]).toMatchObject({ command: "logs", source: "runtime" })
+      expect(result.output).toContain("Source: Vercel runtime logs.")
+      expect(result.output).toContain("GET /cart 500")
+    }),
+  )
+})

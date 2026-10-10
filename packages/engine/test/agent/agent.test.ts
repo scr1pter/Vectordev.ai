@@ -643,6 +643,7 @@ it.instance("Vector Cloud publishing, database and host environment changes ask 
       expect(evalPerm(agent, "vector_cloud_publish")).toBe("ask")
       expect(evalPerm(agent, "vector_cloud_database")).toBe("ask")
       expect(evalPerm(agent, "vector_cloud_environment")).toBe("ask")
+      expect(evalPerm(agent, "vector_cloud_hosting")).toBe("ask")
     }
     // A dry run only reads which migrations a database has applied.
     const build = yield* load((svc) => svc.get("build"))
@@ -659,6 +660,7 @@ it.instance(
         expect(evalPerm(agent, "vector_cloud_publish")).toBe("ask")
         expect(evalPerm(agent, "vector_cloud_database")).toBe("ask")
         expect(evalPerm(agent, "vector_cloud_environment")).toBe("ask")
+        expect(evalPerm(agent, "vector_cloud_hosting")).toBe("ask")
         expect(evalPerm(agent, "edit")).toBe("allow")
       }
     }),
@@ -682,6 +684,8 @@ it.instance(
       expect(evalPerm(deployer, "vector_cloud_publish")).toBe("allow")
       expect(evalPerm(deployer, "vector_cloud_database")).toBe("allow")
       expect(evalPerm(deployer, "vector_cloud_environment")).toBe("allow")
+      expect(evalPerm(deployer, "vector_cloud_hosting")).toBe("allow")
+      expect(evalPerm(build, "vector_cloud_hosting")).toBe("ask")
     }),
   {
     config: {

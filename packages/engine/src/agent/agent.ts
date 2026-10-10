@@ -64,9 +64,15 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
-// Permissions whose Vector Cloud actions publish, change a database or write a
-// host's environment. Only a rule that names one of them can allow it.
-const CLOUD_MUTATIONS = ["vector_cloud_publish", "vector_cloud_database", "vector_cloud_environment"]
+// Permissions whose Vector Cloud actions publish, change a database, write a
+// host's environment or change hosting settings (projects, protection and
+// domains). Only a rule that names one of them can allow it.
+const CLOUD_MUTATIONS = [
+  "vector_cloud_publish",
+  "vector_cloud_database",
+  "vector_cloud_environment",
+  "vector_cloud_hosting",
+]
 
 const GeneratedAgent = Schema.Struct({
   identifier: Schema.String,
@@ -159,6 +165,7 @@ const layer = Layer.effect(
           vector_cloud_publish: "ask",
           vector_cloud_database: "ask",
           vector_cloud_environment: "ask",
+          vector_cloud_hosting: "ask",
           external_directory: {
             "*": "ask",
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
