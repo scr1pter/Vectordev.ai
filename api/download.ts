@@ -10,6 +10,7 @@ import {
   type ApiResponse,
 } from "./_lib/http.js"
 import { currentInstaller } from "./_lib/release-downloads.js"
+import { afterResponse, recordDownload } from "./_lib/usage.js"
 
 export const maxDuration = 300
 
@@ -27,13 +28,16 @@ export async function handleDownload(
   response: ApiResponse,
   loadInstaller: typeof currentInstaller,
   authorize: typeof requireAccountUser = requireAccountUser,
+  record: typeof recordDownload = recordDownload,
 ) {
   try {
     requireMethod(request, "GET")
-    await authorize(request)
+    const user = await authorize(request)
     const userAgent = request.headers?.["user-agent"]
     const target = queryValue(request, "target") ?? suggestedTarget(Array.isArray(userAgent) ? userAgent[0] : userAgent)
     const release = await loadInstaller(target)
+    // Counted against the signed-in account without delaying or changing the answer.
+    afterResponse(record({ accountId: user.id, target, version: release.manifest.version }))
 
     response.setHeader("x-content-type-options", "nosniff")
     response.setHeader("x-vector-release", release.manifest.version)
