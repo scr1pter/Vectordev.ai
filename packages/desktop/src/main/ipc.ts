@@ -454,7 +454,12 @@ export function registerIpcHandlers(deps: Deps) {
     publishProject(input, (progress) => {
       if (!event.sender.isDestroyed()) event.sender.send("cloud-publish-progress", progress)
     }).then((result) => {
-      recordPublishAttempt(input.scopeProjectPath ?? input.projectPath, input.production === true, result)
+      // A first deployment reaches production whatever was asked.
+      recordPublishAttempt(
+        input.scopeProjectPath ?? input.projectPath,
+        input.production === true || result.environment === "production",
+        result,
+      )
       return result
     }),
   )
