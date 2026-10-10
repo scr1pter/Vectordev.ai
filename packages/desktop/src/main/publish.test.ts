@@ -37,7 +37,9 @@ mock.module("./store", () => ({
 }))
 
 const { publishProject, runVercel } = await import("./publish")
-const { listDeployments, setBuildSettings, setEnv } = await import("./cloud-console")
+const { cloudProjectScopeKey, listDeployments, setBuildSettings, setEnv } = await import("./cloud-console")
+const { encryptCloudCredential } = await import("./cloud-connections")
+const { getStore } = await import("./store")
 
 let directory = ""
 
@@ -69,6 +71,22 @@ async function fakeVercel() {
   )
   await chmod(path, 0o755)
   return path
+}
+
+// Vercel connected in Vector Cloud with a placeholder token and, unless told
+// otherwise, a Vercel project linked to this one.
+function connectVercel(project: string, link = true) {
+  getStore("cloud-provider-connections").set("records", [
+    {
+      provider: "vercel",
+      accessToken: encryptCloudCredential("fixture-vercel-token"),
+      connectedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ])
+  if (!link) return
+  getStore("cloud-provider-links").set(cloudProjectScopeKey(project), [
+    { provider: "vercel", projectId: "prj_shop", projectName: "shop", linkedAt: "2026-01-01T00:00:00.000Z" },
+  ])
 }
 
 describe.skipIf(process.platform === "win32")("Vercel CLI runs", () => {
@@ -118,6 +136,7 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
         healthPath: "/",
         requiredChecks: { test: false, secrets: true, health: false, browser: false },
       })
+      connectVercel(project)
       const cli = await fakeVercel()
       const result = await publishProject(
         { projectPath: project, target: "vercel", production: false },
@@ -125,6 +144,8 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
         async () => [{ id: "vercel", label: "Vercel", command: [cli], loginHint: "", available: true }],
       )
       expect(result).toMatchObject({ ok: true, target: "vercel", url: "https://fixture-app-abc123.vercel.app/" })
+      expect(result.log).toContain("args --yes --project prj_shop")
+      expect(result.log).not.toContain("fixture-vercel-token")
       expect(await readFile(join(project, "index.html"), "utf8")).toBe(page)
       expect(await readFile(join(project, "public", "index.html"), "utf8")).toBe(page)
       expect((await readdir(project)).sort()).toEqual(["index.html", "public"])
@@ -141,6 +162,7 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
     try {
       await writeFile(join(project, "index.html"), "<h1>Shop</h1>\n")
       setBuildSettings(project, undefined, staticSettings(""))
+      connectVercel(project)
       const cli = await fakeVercel()
       const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, async () => [
         { id: "vercel", label: "Vercel", command: [cli], loginHint: "", available: true },
@@ -149,6 +171,36 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
       expect(listDeployments(project)).toEqual([
         expect.objectContaining({ environment: "preview", releaseStatus: "preview", promotedAt: undefined }),
       ])
+    } finally {
+      await rm(project, { recursive: true, force: true })
+    }
+  })
+
+  test("refuses a Vercel CLI login alone, and a connected account with no linked project", async () => {
+    const project = await mkdtemp(join(tmpdir(), "vector-publish-project-"))
+    try {
+      await writeFile(join(project, "index.html"), "<h1>Shop</h1>\n")
+      setBuildSettings(project, undefined, staticSettings(""))
+      const cli = await fakeVercel()
+      // A machine signed in with the CLI reports the target available, but a
+      // deploy without a linked project would create or link one nobody chose.
+      const targets = async () => [
+        { id: "vercel" as const, label: "Vercel", command: [cli], loginHint: "", available: true, account: "cli-user" },
+      ]
+      expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, targets)).toEqual({
+        ok: false,
+        target: "vercel",
+        log: "",
+        error: "Connect Vercel in Vector Cloud > Connections with an access token.",
+      })
+      connectVercel(project, false)
+      expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, targets)).toEqual({
+        ok: false,
+        target: "vercel",
+        log: "",
+        error: "Link a Vercel project in Vector Cloud > Connections before publishing.",
+      })
+      expect(listDeployments(project)).toEqual([])
     } finally {
       await rm(project, { recursive: true, force: true })
     }
@@ -164,6 +216,7 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
         undefined,
         staticSettings('echo "connecting with fixture-payments-value-123" && exit 3'),
       )
+      connectVercel(project)
       const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, async () => [
         { id: "vercel", label: "Vercel", command: ["never-run"], loginHint: "", available: true },
       ])

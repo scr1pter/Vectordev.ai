@@ -540,9 +540,21 @@ export async function publishProject(
   if (target.id !== "vercel") {
     return { ok: false, target: target.id, log: "", error: "Unsupported publish target." }
   }
+  // Every publish goes through the Vercel account connected in Vector Cloud and
+  // the project linked to this one, the way the agent's publish does. A Vercel
+  // CLI login alone is not enough: `vercel --yes` without a project would
+  // create or link one nobody chose.
   const providerAuth = await getCloudProviderRuntimeAuth(target.id)
+  if (!providerAuth.token) {
+    return {
+      ok: false,
+      target: target.id,
+      log: "",
+      error: "Connect Vercel in Vector Cloud > Connections with an access token.",
+    }
+  }
   const providerLink = getCloudProviderProjectLink(scope.projectPath, scope.taskId, target.id)
-  if (providerAuth.token && !providerLink) {
+  if (!providerLink) {
     return {
       ok: false,
       target: target.id,
@@ -573,9 +585,11 @@ export async function publishProject(
     }
   }
 
-  const destinationArgs = providerLink
-    ? ["--project", providerLink.projectId, ...(providerLink.accountId ? ["--scope", providerLink.accountId] : [])]
-    : []
+  const destinationArgs = [
+    "--project",
+    providerLink.projectId,
+    ...(providerLink.accountId ? ["--scope", providerLink.accountId] : []),
+  ]
   emitProgress(input, emit, "uploading", "info", `Creating an immutable ${target.label} preview.`)
 
   activePublishes.add(publishKey)
@@ -602,9 +616,7 @@ export async function publishProject(
       command.log,
     )
     const error = needsLogin
-      ? providerAuth.token
-        ? "Vercel rejected the saved access token. Reconnect Vercel in Vector Cloud > Connections, then publish again."
-        : "You are not signed in to Vercel. Connect Vercel in Vector Cloud > Connections with an access token, then publish again."
+      ? "Vercel rejected the saved access token. Reconnect Vercel in Vector Cloud > Connections, then publish again."
       : command.ok
         ? "The deploy finished but no URL was found in the output."
         : `${target.label} exited with code ${command.code}.`

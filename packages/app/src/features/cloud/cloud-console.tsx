@@ -468,9 +468,11 @@ export function CloudConsole(props: {
   const runPublish = async (workspace?: CloudAgentWorkspace) => {
     if (!publish || !props.projectPath) return
     const environment = workspace ? "preview" : deploymentEnvironment()
-    const target = vercelTarget()
-    if (target && !target.available) {
-      setNotice({ tone: "error", text: target.loginHint || `${target.label} is not available on this machine.` })
+    // The same rule as the agent's publish: the Vercel account connected in
+    // Vector Cloud, a linked project, and a machine that can run the deploy.
+    const hosting = hostingState()
+    if (!hosting.ready) {
+      setNotice({ tone: "error", text: hosting.detail })
       return
     }
     const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`
@@ -1536,6 +1538,9 @@ export function CloudConsole(props: {
                       </div>
                       <span class="cloud-status">{agentWorkspaces().length} workspaces</span>
                     </div>
+                    <Show when={publish && !hostingState().ready}>
+                      <p class="cloud-muted mt-2 text-[11px]">{hostingState().detail}</p>
+                    </Show>
                     <div class="cloud-workspace-grid mt-3">
                       <For
                         each={agentWorkspaces().filter(
@@ -1568,7 +1573,7 @@ export function CloudConsole(props: {
                                 class="cloud-button"
                                 data-variant="primary"
                                 type="button"
-                                disabled={!publish || publishing()}
+                                disabled={!publish || publishing() || !hostingState().ready}
                                 onClick={() => void runPublish(workspace)}
                               >
                                 {preview() ? "Redeploy preview" : "Publish preview"}
