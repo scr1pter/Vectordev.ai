@@ -1,6 +1,14 @@
 import { Context } from "effect"
 
-export type CorsOptions = { readonly cors?: ReadonlyArray<string> }
+export type CorsOptions = {
+  readonly cors?: ReadonlyArray<string>
+  /**
+   * Whether any http page on this machine counts as a trusted origin. Defaults to true, but a listener without a
+   * password turns it off unless asked: it would run whatever another local page (a repository's dev server, say)
+   * sends it, so it trusts only its own origin, the app's origins, and the `cors` list.
+   */
+  readonly loopbackOrigins?: boolean
+}
 
 export const CorsConfig = Context.Reference<CorsOptions | undefined>("@vector/ServerCorsConfig", {
   defaultValue: () => undefined,
@@ -11,9 +19,10 @@ export function isAllowedCorsOrigin(input: string | undefined, opts?: CorsOption
   if (!URL.canParse(input)) return false
   const url = new URL(input)
   if (url.username || url.password) return false
-  if (url.protocol === "http:" && url.hostname === "localhost") return true
-  if (url.protocol === "http:" && /^127\.\d+\.\d+\.\d+$/.test(url.hostname)) return true
-  if (url.protocol === "http:" && url.hostname === "[::1]") return true
+  const loopback =
+    url.protocol === "http:" &&
+    (url.hostname === "localhost" || /^127\.\d+\.\d+\.\d+$/.test(url.hostname) || url.hostname === "[::1]")
+  if (loopback && opts?.loopbackOrigins !== false) return true
   if (input === "oc://renderer") return true
   if (input === "tauri://localhost" || input === "http://tauri.localhost" || input === "https://tauri.localhost")
     return true

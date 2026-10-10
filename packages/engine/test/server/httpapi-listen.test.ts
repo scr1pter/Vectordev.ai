@@ -38,12 +38,12 @@ async function startListener() {
   return Server.listen({ hostname: "127.0.0.1", port: 0 })
 }
 
-async function startNoAuthListener() {
+async function startNoAuthListener(options: { cors?: string[]; loopbackOrigins?: boolean } = {}) {
   Flag.VECTOR_SERVER_PASSWORD = undefined
   Flag.VECTOR_SERVER_USERNAME = auth.username
   delete process.env.VECTOR_SERVER_PASSWORD
   process.env.VECTOR_SERVER_USERNAME = auth.username
-  return Server.listen({ hostname: "127.0.0.1", port: 0 })
+  return Server.listen({ hostname: "127.0.0.1", port: 0, ...options })
 }
 
 function authorization() {
@@ -476,6 +476,28 @@ describe("Server.listen Host check", () => {
       expect((await fetch(config, { headers: { "x-vector-directory": tmp.path } })).status).toBe(200)
     } finally {
       await stop(listener, "timed out cleaning up host-checked listener").catch(() => undefined)
+    }
+  })
+
+  test("a passwordless listener refuses other local pages as origins", async () => {
+    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    // A release build: running from source keeps trusting every local page for the app's dev server.
+    const listener = await startNoAuthListener({ cors: ["http://localhost:3000"], loopbackOrigins: false })
+    try {
+      const create = (origin: string) =>
+        fetch(new URL("/session", listener.url), {
+          method: "POST",
+          keepalive: false,
+          headers: { origin, "content-type": "application/json", "x-vector-directory": tmp.path },
+          body: "{}",
+        }).then((response) => response.status)
+      // A repository's dev server on another port cannot drive the passwordless listener.
+      expect(await create("http://localhost:5173")).toBe(403)
+      expect(await create("http://127.0.0.1:8080")).toBe(403)
+      expect(await create(`http://127.0.0.1:${listener.port}`)).toBe(200)
+      expect(await create("http://localhost:3000")).toBe(200)
+    } finally {
+      await stop(listener, "timed out cleaning up origin-checked listener").catch(() => undefined)
     }
   })
 

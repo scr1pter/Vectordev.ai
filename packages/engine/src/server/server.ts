@@ -14,6 +14,7 @@ import { PublicApi } from "./routes/instance/httpapi/public"
 import type { CorsOptions } from "@vectordevai/server/cors"
 import { lazy } from "@/util/lazy"
 import { assertSecurityEnvironment } from "@vectordevai/core/flag/security"
+import { InstallationLocal } from "@vectordevai/core/installation/version"
 import { ServerAuth } from "./auth"
 import { assertListenSecurity, guardedHostname } from "./listen-policy"
 
@@ -85,7 +86,15 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
     ),
   )
   assertListenSecurity(opts, auth)
-  const listener = await Effect.runPromise(listenEffect({ ...opts, guardedHostname: guardedHostname(opts, auth) }))
+  const listener = await Effect.runPromise(
+    listenEffect({
+      ...opts,
+      guardedHostname: guardedHostname(opts, auth),
+      // A passwordless listener trusts only its own origin among local pages. Running from source keeps every local
+      // page trusted, so the app's dev server on another port can still reach a `bun dev serve` backend.
+      loopbackOrigins: opts.loopbackOrigins ?? InstallationLocal,
+    }),
+  )
   return {
     hostname: listener.hostname,
     port: listener.port,

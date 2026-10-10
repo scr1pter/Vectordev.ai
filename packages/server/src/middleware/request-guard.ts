@@ -31,7 +31,11 @@ export const requestGuard = (options?: Options, authenticationRequired = false) 
       const websocket = request.headers.upgrade?.toLowerCase() === "websocket"
       if (
         (websocket || !authenticationRequired) &&
-        !isAllowedRequestOrigin(request.headers.origin, request.headers.host, options)
+        !isAllowedRequestOrigin(
+          request.headers.origin,
+          request.headers.host,
+          authenticationRequired ? options : { ...options, loopbackOrigins: options?.loopbackOrigins === true },
+        )
       )
         return HttpServerResponse.empty({ status: 403 })
       return yield* effect
