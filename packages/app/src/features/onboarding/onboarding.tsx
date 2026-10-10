@@ -215,7 +215,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Settings",
         where: "The gear at the bottom of the sidebar.",
-        body: "Everything about how Vector runs. Providers is where you connect your own keys for OpenAI, Anthropic, Google, and more. Models manages which models appear in your pickers. Keybinds remaps Vector's shortcuts to fit your fingers, and Appearance sets the theme and workspace colors.",
+        body: "Everything about how Vector runs. Providers is where you sign in with ChatGPT or connect your own keys for OpenAI, Anthropic, Google, and more. Models manages which models appear in your pickers. Keybinds remaps Vector's shortcuts to fit your fingers, and Appearance sets the theme and workspace colors.",
         tip: "Connect a provider with your API key, then switch models per task from the composer's model chip.",
       },
     ],

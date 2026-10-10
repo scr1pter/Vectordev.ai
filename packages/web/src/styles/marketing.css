@@ -1,5 +1,11 @@
 @import "tailwindcss";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/inter";
+
+:root {
+  --font-landing: -apple-system, system-ui, "SF Pro Display", "SF Pro Text", Inter, "Inter Variable", "Helvetica Neue",
+    Arial, sans-serif;
+}
 
 @theme {
   --font-sans: "Geist Variable", Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

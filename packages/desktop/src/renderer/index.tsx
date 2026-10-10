@@ -322,6 +322,10 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
 
     getPinchZoomEnabled: () => window.api.getPinchZoomEnabled(),
 
+    getUsageSharing: () => window.api.getUsageSharing(),
+
+    setUsageSharing: (enabled) => window.api.setUsageSharing(enabled),
+
     setPinchZoomEnabled,
 
     runDesktopMenuAction,

@@ -56,6 +56,11 @@ export const rpc = {
     server = await Server.listen(input)
     return { url: server.url.toString() }
   },
+  // The TUI renders on the main thread, so the day's usage report, which scans every message, is read and sent here.
+  async usageReport(input: { token: string; site: string }) {
+    const { sendUsageReport } = await import("@/cli/usage-report")
+    return sendUsageReport(input)
+  },
   async checkUpgrade(input: { directory: string }) {
     await InstanceRuntime.load({ directory: input.directory })
     await upgrade().catch(() => {})

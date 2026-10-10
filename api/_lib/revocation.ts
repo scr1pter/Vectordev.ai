@@ -45,7 +45,7 @@ export async function revokeAccountTokens(accountID: string, fetcher: typeof fet
   }).catch(() => undefined)
   if (!response?.ok) return false
   const body: unknown = await response.json().catch(() => undefined)
-  return Boolean(body && typeof body === "object" && "result" in body && body.result === "OK")
+  return Boolean(body && typeof body === "object" && "result" in body && body.result === "OK" && !("error" in body))
 }
 
 /**

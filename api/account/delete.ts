@@ -10,6 +10,8 @@ import {
   type ApiResponse,
 } from "../_lib/http.js"
 import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js"
+import { cancelModelPlanAccount } from "../_lib/model-plan-account.js"
+import { forgetUsage } from "../_lib/usage.js"
 
 /**
  * Deleting a Vector account. The order matters, because the steps are not
@@ -20,7 +22,10 @@ import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js
  *      misconfigured deployment fails with nothing half-done
  *   3. revoke CLI tokens, which are stateless and would otherwise keep a
  *      terminal signed in for up to ninety days
- *   4. delete the identity itself
+ *   4. close model-plan checkout, subscriptions and inference access
+ *   5. erase usage counts linked to the account, before the identity: once it
+ *      is gone, an install's earlier unlinked days can no longer be found
+ *   6. delete the identity itself
  *
  * The response says which of those actually happened.
  */
@@ -32,9 +37,9 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const user = await requireAccountUser(request)
     await enforceRateLimit(request, response, {
       scope: "account-delete",
+      identifier: user.id,
       limit: 5,
       windowSeconds: 60 * 60,
-      identifier: user.id,
     })
 
     const confirm = typeof body.confirm === "string" ? body.confirm.trim().toLowerCase() : ""
@@ -55,26 +60,25 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       )
     }
 
-    if (!revocationConfigured()) {
+    const tokensRevoked = await revokeAccountTokens(user.id)
+    if (revocationConfigured() && !tokensRevoked)
+      throw new ApiError(503, "REVOCATION_FAILED", "Account access could not be revoked. Retry account deletion.")
+    await cancelModelPlanAccount(user.id).catch(() => {
       throw new ApiError(
         503,
-        "REVOCATION_NOT_CONFIGURED",
-        "Account deletion is temporarily unavailable because existing sessions cannot be revoked safely.",
+        "BILLING_DELETION_FAILED",
+        "Model billing cleanup could not finish. Retry account deletion.",
       )
-    }
-    if (!(await revokeAccountTokens(user.id))) {
-      throw new ApiError(
-        503,
-        "REVOCATION_FAILED",
-        "Account deletion is temporarily unavailable because existing sessions could not be revoked.",
-      )
-    }
+    })
+    const usageForgotten = await forgetUsage(user.id)
     await deleteAccountUser(admin, user.id)
 
     json(response, 200, {
       deleted: true,
       email: user.email,
-      cliTokens: "revoked",
+      cliTokens: tokensRevoked ? "revoked" : revocationConfigured() ? "revocation-failed" : "expire-within-90-days",
+      // Linked days also go with the identity through the database's foreign keys.
+      usageCounts: usageForgotten ? "deleted" : "deletion-failed",
     })
   } catch (error) {
     handleApiError(response, error)
@@ -102,8 +106,8 @@ async function deleteAccountUser(
   if (!result.ok && result.status !== 404) {
     throw new ApiError(
       502,
-      "DELETION_PARTIAL",
-      "Vector revoked existing CLI sessions but could not delete the account. Retry deletion or contact support.",
+      "DELETION_FAILED",
+      "Model billing was closed, but Vector could not delete the identity. Retry account deletion.",
     )
   }
 }

@@ -7,7 +7,7 @@ export const prerender = true
   eyebrow="Terms"
   title="Terms of Service"
   description="The agreement for Vector accounts, software, and connected services."
-  updated="October 7, 2026"
+  updated="October 10, 2026"
 >
   <section>
     <h2>1. This agreement</h2>
@@ -36,16 +36,43 @@ export const prerender = true
     </p>
   </section>
 
-  <section>
+  <section id="codium">
     <h2>3. Cost</h2>
     <p>
-      Vector is free to download and use. Model providers, external agents, hosting, and other
-      services you connect charge you directly under their own terms. Free models a provider offers through
-      your own account, such as OpenRouter's zero-price models, are subject to that provider's quotas, rate
-      limits, and availability, and Vector does not promise that any of them stays available.
+      Vector is free to download and use. Optional Vector Codium purchases provide credits for the coding
+      models offered through Codium. Services you connect through your own accounts, including model
+      providers, external agents and hosting, may charge you separately under their own terms. Free models
+      are subject to quotas, rate limits and availability; continued free access is not guaranteed.
     </p>
     <p>
-      Records of earlier purchases are retained as required by law.
+      When Codium purchases are available, the purchase screen shows the price, included Codium credits,
+      estimated tokens and whether the purchase is a monthly subscription or a one-time top-up. Any applicable
+      taxes and the total payable are shown before payment. Monthly subscriptions renew automatically at the
+      disclosed price until canceled. You can cancel through account billing before renewal; cancellation
+      stops future renewals and leaves access to the remainder of the paid period. Monthly credits expire at
+      the end of that period and do not roll over. One-time top-ups do not renew, and unused purchased credits
+      carry forward separately from your subscription. There are no automatic top-ups or overage charges.
+    </p>
+    <p>
+      Codium credits measure usage of Codium's models; they are not a promise of a fixed number of tokens,
+      requests, completed tasks or successful results. Token figures are estimates using the stated assumptions.
+      Actual consumption varies with the selected model, input and output, reasoning, conversation history,
+      repeated project context, tool use and the number of agents or model calls. Large tasks and parallel agents
+      can consume credits quickly. Your displayed balance may lag requests still being processed. Review usage
+      and model selection in your account and supervise automated work. Access pauses when the available
+      allowance cannot cover a request; additional use requires available credits or a new purchase you authorize.
+    </p>
+    <p>
+      To the extent permitted by law, accurately metered usage is not refundable solely because credits ran out
+      sooner than expected, an estimate differed from actual usage, or AI output did not complete your task.
+      This does not excuse incorrect charges, duplicate billing or a failure to provide purchased credits.
+      Contact us about suspected errors so we can investigate and correct confirmed billing errors. Any refund,
+      cancellation, service guarantee or other consumer right required by applicable law continues to apply.
+      Credits have no cash value and are not transferable, except where applicable law requires otherwise.
+    </p>
+    <p>
+      Changes to subscription prices or renewal allowances will be communicated before they apply, with an
+      opportunity to cancel and any consent required by law. Records of purchases are retained as required by law.
     </p>
   </section>
 
@@ -143,7 +170,20 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>9. Availability and changes to the service</h2>
+    <h2>9. Usage data</h2>
+    <p>
+      The desktop application and the command-line tool send usage counts to Vector, including token totals,
+      recorded model cost, and the models and providers used, as described in the
+      <a href="/legal/privacy">Privacy Policy</a>. Usage counts never include your prompts, code, or files, and
+      you can turn them off at any time: Settings → General → “Share usage counts” in the desktop application,
+      or <code>VECTOR_DISABLE_USAGE=1</code> for the command-line tool. Vector may use usage data to operate,
+      secure, and improve the service, and may share aggregated, de-identified statistics, such as the number of
+      active users, tokens processed, or popular models, with investors, partners, and the public.
+    </p>
+  </section>
+
+  <section>
+    <h2>10. Availability and changes to the service</h2>
     <p>
       Features and compatibility may change, and maintenance or provider outages may interrupt service.
       Experimental features may be less reliable. No service-level commitment applies unless separately
@@ -152,7 +192,7 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>10. Suspension and termination</h2>
+    <h2>11. Suspension and termination</h2>
     <p>
       We may restrict access when reasonably necessary to address fraud, a material breach, a
       security threat, or a legal requirement. Where practicable, we will explain the reason and allow you to
@@ -163,7 +203,7 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>11. Warranties and responsibility</h2>
+    <h2>12. Warranties and responsibility</h2>
     <p>
       To the extent permitted by law, Vector is provided “as is” and “as available,” without implied warranties
       of merchantability, fitness for a particular purpose, or noninfringement. We do not promise that output
@@ -180,7 +220,7 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>12. Disputes and general provisions</h2>
+    <h2>13. Disputes and general provisions</h2>
     <p>
       Contact us first so we can try to resolve a concern. This does not prevent you from contacting a
       regulator, seeking urgent relief, or bringing a claim in a court available to you under applicable law.
@@ -192,7 +232,7 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>13. Changes and contact</h2>
+    <h2>14. Changes and contact</h2>
     <p>
       We may update these Terms prospectively. Material changes will be identified by a revised effective
       date and communicated through the service or an account contact where appropriate. We will obtain

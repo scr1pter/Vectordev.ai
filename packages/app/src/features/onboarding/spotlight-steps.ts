@@ -379,7 +379,7 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       id: "settings-providers",
       section: "Settings",
       title: "Providers: start free or bring your own keys.",
-      body: "Connect your own free OpenRouter account with no payment or credits needed, or connect OpenAI, Anthropic, Google, or another provider with your API key. Keys stay on your machine.",
+      body: "Connect your own free OpenRouter account with no payment or credits needed, sign in with ChatGPT to use the GPT models your plan includes, or connect OpenAI, Anthropic, Google, or another provider with your API key. Keys stay on your machine.",
       target: settingsTab("providers"),
       placement: "right",
       group: "settings",

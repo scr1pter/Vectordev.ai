@@ -33,7 +33,7 @@ for (const stubborn of [false, true]) {
       const binary = path.join(home, "native")
       await Bun.write(
         binary,
-        `#!/bin/bash\n${stubborn ? "trap '' TERM" : ":"}\nsleep 60 &\nprintf 'ready:%s:%s:%s\\n' "$$" "$!" "$VECTOR_CLI_TOKEN"\nwait\n`,
+        `#!/bin/bash\n${stubborn ? "trap '' TERM" : ":"}\nsleep 60 &\nprintf 'ready:%s:%s:%s:%s\\n' "$$" "$!" "$VECTOR_CLI_TOKEN" "$VECTOR_DISABLE_USAGE"\nwait\n`,
       )
       await chmod(binary, 0o755)
       const child = spawn("/bin/bash", ["--noprofile", "--norc", "-se"], {
@@ -54,10 +54,11 @@ for (const stubborn of [false, true]) {
         }),
       )
       try {
-        await waitFor(() => output.join("").includes("ready:"))
+        await waitFor(() => /ready:.*\n/.test(output.join("")))
         expect(child.spawnargs.join(" ")).not.toContain("vct_fixture")
         expect(errors.join("")).not.toContain("vct_fixture")
-        const [, pid, descendant] = output.join("").match(/ready:(\d+):(\d+):vct_fixture/)!
+        // The server never sends usage counts itself, whatever the desktop's Share usage counts switch says.
+        const [, pid, descendant] = output.join("").match(/ready:(\d+):(\d+):vct_fixture:1\n/)!
         expect(Number(pid)).not.toBe(process.pid)
         await lifetime.stop()
         await waitFor(() => !alive(Number(pid)) && !alive(Number(descendant)))

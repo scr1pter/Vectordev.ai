@@ -65,6 +65,12 @@ export function createVectorAccount(deps: Dependencies) {
 
   return {
     status,
+    /** Main process only: the signed-in token for requests to vectordev.ai, never sent to a renderer. */
+    async token() {
+      const account = stored()
+      if (!account || account.expiresAt <= now() || !(await deps.available())) return
+      return deps.decrypt(account.ciphertext)
+    },
     async start() {
       if (!(await deps.available())) return fail(secureStorageError)
       state.error = undefined

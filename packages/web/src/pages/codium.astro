@@ -1,0 +1,119 @@
+---
+import { publicModelPlans } from "../../../../api/_lib/model-plan-config"
+import { ModelPlans } from "../components/marketing/account/ModelPlans"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import MarketingNav from "../components/marketing/MarketingNav.astro"
+import SiteFooter from "../components/marketing/SiteFooter.astro"
+import { readModelPlanConfig } from "../lib/model-plans"
+
+export const prerender = true
+
+const config = readModelPlanConfig(publicModelPlans())
+---
+
+<MarketingLayout
+  title="Vector Codium — coding models with a budget you choose"
+  description="Explore Vector Codium: planned monthly subscriptions and one-time coding model credit packs from $10 to $200, with transparent usage and no automatic overages."
+>
+  <div class="codium-page">
+    <MarketingNav active="codium" />
+    <main>
+      <header class="codium-hero">
+        <p class="codium-eyebrow">Vector Codium · {config.enabled ? "Model subscriptions" : "Coming soon"}</p>
+        <h1>Coding models.<br /><span>A budget you choose.</span></h1>
+        <p class="codium-lead">
+          Affordable model access for your work in Vector. Choose an everyday model for routine edits or an advanced
+          option for demanding tasks, with the same catalog on every plan.
+        </p>
+        <div class="codium-highlights" aria-label="Subscription features">
+          <span>$10–$200 budgets</span>
+          <span>Monthly or one-time</span>
+          <span>Metered model credits</span>
+          <span>No automatic overages</span>
+        </div>
+        {!config.enabled && <p class="codium-preview-note">Proposed launch pricing. Credit purchases and paid model access are not available yet.</p>}
+      </header>
+
+      <ModelPlans accessToken="" publicConfig={config} />
+
+      <section class="codium-details" aria-labelledby="codium-how-heading">
+        <h2 id="codium-how-heading">A clear allowance for actual usage.</h2>
+        <div>
+          <article>
+            <span>01</span>
+            <h3>Choose your budget</h3>
+            <p>Subscribe for fresh credits each month, or buy a one-time credit pack. Both give you the same model catalog. Compare the price, credit amount, and estimated tokens above.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>Pick the model</h3>
+            <p>You choose the model for each task. Input, generated output, and reasoning use credits. A model's usage depends on your task, so token estimates are a guide.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>Track your usage</h3>
+            <p>See monthly and purchased balances separately in your Vector account. Usage pauses when available credits cannot cover a request. There are no automatic overages or top-ups.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="codium-faq" aria-labelledby="codium-faq-heading">
+        <h2 id="codium-faq-heading">Before you choose</h2>
+        <details>
+          <summary>Is Codium an unlimited coding plan?</summary>
+          <p>No. Subscriptions and one-time packs provide a fixed credit budget. Long conversations, large inputs, output, and parallel agent work all consume credits. We do not promise a fixed number of tasks or messages.</p>
+        </details>
+        <details>
+          <summary>Does every plan include the same models?</summary>
+          <p>Yes. Choose your tier for the amount of usage you need. Model availability can change, and higher-cost models consume the allowance faster. Model selection is manual.</p>
+        </details>
+        <details>
+          <summary>What happens to unused credits?</summary>
+          <p>Monthly subscription credits reset at the start of each billing period and do not roll over. Credits bought as a one-time pack carry forward and work without a subscription. There are no automatic credit purchases.</p>
+        </details>
+        <details>
+          <summary>Can I keep using my own provider keys?</summary>
+          <p>Yes. Your own provider connections remain separate from Codium. Charges for those connections are between you and your provider.</p>
+        </details>
+        <details>
+          <summary>How are models served?</summary>
+          <p>Codium model requests are routed through Vector and OpenRouter to the selected model provider. Review the <a href="/legal/privacy">privacy policy</a> before sending code. The catalog shown here describes the planned offering, not a guarantee of coding accuracy.</p>
+        </details>
+      </section>
+    </main>
+    <SiteFooter />
+  </div>
+</MarketingLayout>
+
+<style is:global>
+  .codium-page { min-height: 100vh; background: radial-gradient(ellipse 750px 470px at 50% 110px, #66419d21, transparent), #08060d99; font-family: var(--font-landing); }
+  .codium-page > .site-header { font-family: var(--font-sans); }
+  .codium-page main { --font-sans: var(--font-landing); width: min(1180px, calc(100% - 44px)); margin: 0 auto; padding: 70px 0 90px; }
+  .codium-hero { max-width: 820px; margin: 0 auto 44px; text-align: center; }
+  .codium-eyebrow { margin: 0 0 19px; color: #c9b9ff; font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+  .codium-hero h1 { margin: 0; font-size: clamp(40px, 6vw, 68px); font-weight: 570; line-height: 1.07; letter-spacing: -.035em; }
+  .codium-hero h1 span { color: #c2b0e2; }
+  .codium-lead { max-width: 660px; margin: 24px auto 0; color: #c0b9cc; font-size: 16px; line-height: 1.75; }
+  .codium-highlights { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px 25px; margin-top: 25px; color: #e1d6f2; font-size: 12px; }
+  .codium-highlights span::before { content: "·"; margin-right: 8px; color: #bfa2f3; }
+  .codium-preview-note { margin: 21px 0 0; color: #a99cb9; font-size: 12px; }
+  .codium-details { margin-top: 60px; }
+  .codium-details h2, .codium-faq h2 { margin: 0 0 28px; font-size: 26px; font-weight: 560; letter-spacing: -.015em; }
+  .codium-details > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 34px; }
+  .codium-details article { padding-top: 22px; border-top: 1px solid #e6dbff24; }
+  .codium-details article > span { color: #a590c4; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .codium-details h3 { margin: 11px 0 0; font-size: 16px; font-weight: 560; }
+  .codium-details p, .codium-faq p { margin: 10px 0 0; color: #c0b9cc; font-size: 14px; line-height: 1.75; }
+  .codium-faq { max-width: 800px; margin: 60px auto 0; }
+  .codium-faq details { padding: 20px 0; border-top: 1px solid #e6dbff1a; }
+  .codium-faq summary { color: #e8e0f0; cursor: pointer; font-size: 15px; }
+  .codium-faq a { color: #c9b9ff; text-underline-offset: 3px; }
+  @media (max-width: 760px) {
+    .codium-page main { width: calc(100% - 28px); padding-top: 40px; }
+    .codium-hero { padding: 0 10px; }
+    .codium-lead { font-size: 15px; }
+    .codium-details { padding: 0 10px; }
+    .codium-details > div { grid-template-columns: 1fr; gap: 25px; }
+    .codium-faq { padding: 0 10px; }
+  }
+</style>

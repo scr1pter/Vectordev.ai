@@ -1,7 +1,8 @@
 import { AISDK } from "@vectordevai/core/aisdk"
 import { describe, expect } from "bun:test"
+import os from "os"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
-import { Effect } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { Catalog } from "@vectordevai/core/catalog"
 import { Integration } from "@vectordevai/core/integration"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -9,6 +10,11 @@ import { PluginV2 } from "@vectordevai/core/plugin"
 import { PluginHost } from "@vectordevai/core/plugin/host"
 import { OpenAIPlugin } from "@vectordevai/core/plugin/provider/openai"
 import { ProviderV2 } from "@vectordevai/core/provider"
+import {
+  CHATGPT_CLIENT_ID,
+  CHATGPT_SIGN_IN_UNAVAILABLE,
+  applyRemoteProviderPolicy,
+} from "@vectordevai/core/provider-policy"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
@@ -41,11 +47,22 @@ function fakeSelectorSdk(calls: string[]) {
 }
 
 describe("OpenAIPlugin", () => {
-  it.effect("does not register unapproved browser or headless ChatGPT OAuth methods", () =>
+  it.effect("registers browser and headless ChatGPT OAuth methods", () =>
     Effect.gen(function* () {
       yield* addPlugin()
       const integrations = yield* Integration.Service
-      expect((yield* integrations.get(Integration.ID.make("openai")))?.methods ?? []).toEqual([])
+      expect((yield* integrations.get(Integration.ID.make("openai")))?.methods).toEqual([
+        {
+          id: Integration.MethodID.make("chatgpt-browser"),
+          type: "oauth",
+          label: "ChatGPT Pro/Plus (browser)",
+        },
+        {
+          id: Integration.MethodID.make("chatgpt-headless"),
+          type: "oauth",
+          label: "ChatGPT Pro/Plus (headless)",
+        },
+      ])
     }),
   )
 
@@ -164,18 +181,69 @@ describe("OpenAIPlugin", () => {
     }),
   )
 
-  it.effect("rejects a direct attempt to use the retired ChatGPT browser method", () =>
+  it.effect("the owner's switch refuses a ChatGPT sign-in registered before it turned off, with a clear message", () =>
+    Effect.gen(function* () {
+      const integrations = yield* Integration.Service
+      const integrationID = Integration.ID.make("openai")
+      yield* addPlugin()
+      applyRemoteProviderPolicy({ chatgptSignIn: false })
+      const attempt = yield* integrations.connection
+        .oauth({ integrationID, methodID: Integration.MethodID.make("chatgpt-browser"), inputs: {} })
+        .pipe(Effect.exit, Effect.ensuring(Effect.sync(() => applyRemoteProviderPolicy({ chatgptSignIn: true }))))
+      expect(Exit.isFailure(attempt)).toBe(true)
+      if (Exit.isFailure(attempt)) expect(Cause.pretty(attempt.cause)).toContain(CHATGPT_SIGN_IN_UNAVAILABLE)
+    }),
+  )
+
+  it.effect("a plugin started while the owner's switch is off registers no ChatGPT sign-in", () =>
+    Effect.gen(function* () {
+      applyRemoteProviderPolicy({ chatgptSignIn: false })
+      yield* addPlugin().pipe(Effect.ensuring(Effect.sync(() => applyRemoteProviderPolicy({ chatgptSignIn: true }))))
+      const integrations = yield* Integration.Service
+      expect((yield* integrations.get(Integration.ID.make("openai")))?.methods ?? []).toEqual([])
+    }),
+  )
+
+  it.live("serves the ChatGPT callback on loopback only and ignores requests without the sign-in state", () =>
     Effect.gen(function* () {
       yield* addPlugin()
       const integrations = yield* Integration.Service
-      const attempt = yield* integrations.connection
-        .oauth({
-          integrationID: Integration.ID.make("openai"),
-          methodID: Integration.MethodID.make("chatgpt-browser"),
-          inputs: {},
-        })
-        .pipe(Effect.exit)
-      expect(attempt._tag).toBe("Failure")
+      const attempt = yield* integrations.connection.oauth({
+        integrationID: Integration.ID.make("openai"),
+        methodID: Integration.MethodID.make("chatgpt-browser"),
+        inputs: {},
+      })
+      const url = new URL(attempt.url)
+      const state = url.searchParams.get("state")!
+      // The client ID is the only borrowed part of the request: it identifies itself as Vector.
+      expect(url.searchParams.get("client_id")).toBe(CHATGPT_CLIENT_ID)
+      expect(url.searchParams.get("originator")).toBe("vector")
+      const reachable = (host: string) =>
+        Effect.promise(() =>
+          fetch(`http://${host}:1455/`, { signal: AbortSignal.timeout(2_000) }).then(
+            () => true,
+            () => false,
+          ),
+        )
+      const status = (path: string) =>
+        Effect.promise(() => fetch(`http://127.0.0.1:1455${path}`).then((response) => response.status))
+
+      expect(yield* reachable("127.0.0.1")).toBe(true)
+      // A wildcard listen binds "::" dual-stack and would answer on IPv6 loopback; this check needs no LAN address.
+      expect(yield* reachable("[::1]")).toBe(false)
+      const lan = Object.values(os.networkInterfaces())
+        .flatMap((items) => items ?? [])
+        .find((item) => item.family === "IPv4" && !item.internal)
+      if (lan) expect(yield* reachable(lan.address)).toBe(false)
+
+      expect(yield* status("/auth/callback?error=access_denied&state=wrong")).toBe(400)
+      expect(yield* status("/auth/callback?code=stolen")).toBe(400)
+      expect((yield* integrations.attempt.status(attempt.attemptID))?.status).toBe("pending")
+
+      expect(yield* status(`/auth/callback?error=access_denied&state=${encodeURIComponent(state)}`)).toBe(400)
+      yield* Effect.promise(() => Bun.sleep(50))
+      expect((yield* integrations.attempt.status(attempt.attemptID))?.status).toBe("failed")
+      expect(yield* reachable("127.0.0.1")).toBe(false)
     }),
   )
 })

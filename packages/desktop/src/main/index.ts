@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto"
 import { mkdirSync, rmSync } from "node:fs"
+import { writeFile } from "node:fs/promises"
 import * as http from "node:http"
 import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, BrowserWindow, dialog } from "electron"
+import { app, BrowserWindow, dialog, powerSaveBlocker } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -56,6 +57,11 @@ import {
   setAllScheduledAgentsPaused,
 } from "./scheduled-agents"
 import { createTray, destroyTray, notifyScheduledRunFinished, updateTray } from "./tray"
+import { engineEventSource, startKeepAwake } from "./keep-awake"
+import { getStore } from "./store"
+import { USAGE_STORE } from "./store-keys"
+import { createUsageCheckin, usageCheckinEndpoint } from "./usage-checkin"
+import { UsageReport } from "@vectordevai/schema/usage-report"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Vector Dev",
@@ -72,6 +78,7 @@ const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
+let keepAwake: ReturnType<typeof startKeepAwake> | undefined
 let trayReady = false
 
 const pendingDeepLinks: string[] = []
@@ -195,6 +202,7 @@ const main = Effect.gen(function* () {
   )
   const stopSidecars = async () => {
     unregisterManagedAccount()
+    keepAwake?.stop()
     await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudBridge(), wslServers.stopAll()])
   }
   const relaunch = () => {
@@ -369,6 +377,7 @@ const main = Effect.gen(function* () {
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater({ stop: stopSidecars, relaunch })
+  const usageSharing = () => getStore(USAGE_STORE).get("enabled") !== false
   registerIpcHandlers({
     killSidecar: () => killSidecar(),
     relaunch,
@@ -394,6 +403,8 @@ const main = Effect.gen(function* () {
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
+    getUsageSharing: usageSharing,
+    setUsageSharing: (enabled) => getStore(USAGE_STORE).set("enabled", enabled),
   })
   registerWslIpcHandlers(wslServers)
   void updater.start()
@@ -466,6 +477,16 @@ const main = Effect.gen(function* () {
       ),
     )
 
+    // Idle sleep freezes agents mid-run, so the machine stays awake while the engine has work running.
+    keepAwake = startKeepAwake({
+      source: engineEventSource({ url, username: "vector", password }),
+      blocker: {
+        start: () => powerSaveBlocker.start("prevent-app-suspension"),
+        stop: (id) => powerSaveBlocker.stop(id),
+      },
+      log: (message, meta) => logger.log(message, meta),
+    })
+
     yield* Effect.promise(() => vectorAccount.restore())
     if (process.platform === "win32") {
       yield* Effect.promise(() => wslServers.initialize())
@@ -474,6 +495,37 @@ const main = Effect.gen(function* () {
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)
 
   yield* Fiber.await(loadingTask)
+
+  // The local engine keeps its history in <XDG_DATA_HOME>/vector, which preferAppEnv set above.
+  const engineData = process.env.XDG_DATA_HOME
+  const usage = createUsageCheckin({
+    endpoint: usageCheckinEndpoint({
+      packaged: app.isPackaged,
+      channel: CHANNEL,
+      override: process.env.VECTOR_USAGE_URL,
+    }),
+    store: getStore(USAGE_STORE),
+    enabled: usageSharing,
+    engine: { url, username: "vector", password },
+    token: () => vectorAccount.token(),
+    fetch: (input, init) => fetch(input, init),
+    now: Date.now,
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    // A note beside that history that this check-in reports it. Only a CLI given the same XDG_DATA_HOME, as some Linux
+    // sessions export to both, reads that directory, and it then leaves the history to this check-in rather than
+    // counting it twice.
+    reported: engineData
+      ? () =>
+          writeFile(
+            join(engineData, "vector", UsageReport.DESKTOP_MARKER),
+            `${JSON.stringify({ reportedBy: "Vector desktop usage check-in" })}\n`,
+          )
+      : undefined,
+  })
+  usage.start()
+  app.once("will-quit", () => usage.stop())
 
   // The tray is what makes staying resident survivable: without it a
   // background-mode keep-alive would leave a process the user can see no window

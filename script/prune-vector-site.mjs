@@ -8,6 +8,7 @@ const dist = path.join(root, "packages", "web", "dist")
 const keep = new Set([
   "_astro",
   "account",
+  "codium",
   "auth",
   "design",
   "docs",
@@ -16,6 +17,8 @@ const keep = new Set([
   "login",
   "s",
   "support",
+  // The owner's usage dashboard; api/usage/summary decides who sees any numbers.
+  "usage",
   "install",
   "install.ps1",
   "index.html",
@@ -47,6 +50,9 @@ const keep = new Set([
   "changelog.json",
   // The model catalog every installed app refreshes from (packages/core/src/model-catalog.ts DEFAULT_MIRROR).
   "models",
+  // The owner's off-switch for Sign in with ChatGPT that every installed app reads
+  // (packages/core/src/provider-remote-policy.ts POLICY_URL, docs/vector/owner-actions/chatgpt.md).
+  "policy",
   "vector-logo.png",
   "vector-space-backdrop.png",
 ])

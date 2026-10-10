@@ -1,6 +1,7 @@
 import { enforceRateLimit, requireTrustedJsonRequest } from "../_lib/abuse.js"
 import { verifyCliToken } from "../_lib/cli-token.js"
 import { accountTokensRevoked } from "../_lib/revocation.js"
+import { afterResponse, recordCliUsage } from "../_lib/usage.js"
 import { ApiError, handleApiError, json, readJson, requireMethod, type ApiRequest, type ApiResponse } from "../_lib/http.js"
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
@@ -24,6 +25,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       throw new ApiError(401, "CLI_TOKEN_INVALID", "That CLI token is not valid. Generate a new one.")
     }
     json(response, 200, { ok: true, user })
+    // One day of CLI use, counted after the answer so verification never waits on it.
+    afterResponse(recordCliUsage(request, user.id))
   } catch (error) {
     handleApiError(response, error)
   }
