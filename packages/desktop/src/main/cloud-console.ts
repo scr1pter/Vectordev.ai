@@ -124,23 +124,6 @@ type PackageManifest = {
   nodeVersion: string
 }
 
-export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vercel"
-
-export type CloudDomain = {
-  id: string
-  domain: string
-  projectPath?: string
-  provider: CloudDomainProvider
-  providerProjectId?: string
-  providerProjectName?: string
-  cnameTarget: string
-  status: CloudDomainStatus
-  lastCheckedAt?: string
-  detail?: string
-  createdAt: string
-}
-
 export type CloudDatabaseConnection = {
   provider: "supabase"
   url: string
@@ -437,11 +420,10 @@ export async function checkAllDeployments(projectPath: string, taskId?: string):
 type ProjectData = {
   env: StoredEnvVar[]
   database: CloudDatabaseConnection
-  domains: CloudDomain[]
   build: CloudBuildSettings | null
 }
 
-// A project's cloud state (env, database, domains, build settings) belongs to
+// A project's cloud state (env, database, build settings) belongs to
 // the project, not to whichever chat session touched it. The Cloud Console
 // renders with no taskId while the vector_cloud tool passes its session id, so
 // keying on taskId gave the agent an empty second copy of everything the user
@@ -457,7 +439,7 @@ export function cloudProjectScopeKey(projectPath: string): string {
 
 function readProject(projectPath: string): ProjectData {
   const raw = getStore(PROJECTS_STORE).get(cloudProjectScopeKey(projectPath))
-  if (!raw || typeof raw !== "object") return { env: [], database: null, domains: [], build: null }
+  if (!raw || typeof raw !== "object") return { env: [], database: null, build: null }
   const data = raw as Partial<ProjectData>
   const stored: unknown[] = Array.isArray(data.env) ? data.env : []
   const env = stored
@@ -483,15 +465,6 @@ function readProject(projectPath: string): ProjectData {
     .filter((item): item is StoredEnvVar => Boolean(item))
   const database =
     data.database && typeof data.database === "object" && data.database.provider === "supabase" ? data.database : null
-  // Only Vercel domains are shown. Domains attached through a retired host
-  // (Netlify, or the scrapped hosted publish service's DNS target) cannot be
-  // verified or detached by Vector any more; the provider still owns them.
-  const domains = Array.isArray(data.domains)
-    ? data.domains.filter(
-        (item): item is CloudDomain =>
-          typeof item?.id === "string" && typeof item?.domain === "string" && item.provider === "vercel",
-      )
-    : []
   const build =
     data.build &&
     typeof data.build === "object" &&
@@ -507,7 +480,7 @@ function readProject(projectPath: string): ProjectData {
             : defaultRequiredChecks(),
         }
       : null
-  const project = { env, database, domains, build }
+  const project = { env, database, build }
   if (stored.some((item) => item && typeof item === "object" && typeof Reflect.get(item, "value") === "string")) {
     writeProject(projectPath, project)
   }
@@ -907,8 +880,8 @@ function formatViteEnvValue(value: string) {
 
 // ---- Custom domains -------------------------------------------------------
 
-// Lowercase, strip protocol/path/trailing slash, drop a leading "www.", and
-// require something that looks like a real hostname with at least one dot.
+// Lowercase, strip protocol/path/trailing dot, and require something that
+// looks like a real hostname with at least one dot.
 export function normalizeCloudDomain(raw: string): string {
   let domain = (raw ?? "").trim().toLowerCase()
   domain = domain.replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
@@ -922,75 +895,8 @@ export function normalizeCloudDomain(raw: string): string {
 
 function requireProject(projectPath: string): string {
   const path = (projectPath ?? "").trim()
-  if (!path) throw new Error("Open a project before managing its domains.")
+  if (!path) throw new Error("Open a project first.")
   return path
-}
-
-// Domains are scoped to a project (a Vector task's workspace), so each app
-// manages its own custom domains instead of a single global pool.
-export function listDomains(projectPath: string, taskId?: string): CloudDomain[] {
-  if (!(projectPath ?? "").trim()) return []
-  return readProject(projectPath).domains
-}
-
-export function addDomain(
-  projectPath: string,
-  taskId: string | undefined,
-  input: {
-    domain: string
-    provider: CloudDomainProvider
-    providerProjectId: string
-    providerProjectName: string
-    cnameTarget: string
-    status: CloudDomainStatus
-    detail?: string
-  },
-): CloudDomain {
-  const path = requireProject(projectPath)
-  const domain = normalizeCloudDomain(input.domain)
-  const data = readProject(path)
-  if (data.domains.find((item) => item.domain === domain)) {
-    throw new Error(`${domain} is already connected to this project.`)
-  }
-  const record: CloudDomain = {
-    id: randomUUID(),
-    domain,
-    projectPath: path,
-    provider: input.provider,
-    providerProjectId: input.providerProjectId,
-    providerProjectName: input.providerProjectName,
-    cnameTarget: input.cnameTarget,
-    status: input.status,
-    detail: input.detail?.trim() || undefined,
-    createdAt: now(),
-  }
-  writeProject(path, { ...data, domains: [record, ...data.domains] })
-  return record
-}
-
-export function updateDomainRecord(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-  patch: Partial<Omit<CloudDomain, "id" | "domain" | "projectPath" | "createdAt">>,
-): CloudDomain {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const index = data.domains.findIndex((item) => item.id === id)
-  if (index === -1) throw new Error("That domain is no longer connected to this project.")
-  const updated = { ...data.domains[index], ...patch }
-  const domains = [...data.domains]
-  domains[index] = updated
-  writeProject(path, { ...data, domains })
-  return updated
-}
-
-export function removeDomain(projectPath: string, taskId: string | undefined, id: string): CloudDomain[] {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const domains = data.domains.filter((item) => item.id !== id)
-  writeProject(path, { ...data, domains })
-  return domains
 }
 
 // ---- Database connector (Supabase) ----------------------------------------
