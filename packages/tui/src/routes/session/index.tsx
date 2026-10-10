@@ -199,9 +199,24 @@ export function Session() {
         )
       : [],
   )
-  // Stop on the main turn leaves background subagents running, so they have a command of their own to stop them.
+  // Stop on the main turn leaves background subagents running, so they have a command of their own to stop them. A
+  // task whose row shows its run was lost is not counted.
   const backgroundSessions = createMemo(() =>
-    session()?.parentID ? [] : liveBackgroundTasks(messages().flatMap((message) => sync.data.part[message.id] ?? [])),
+    session()?.parentID
+      ? []
+      : liveBackgroundTasks(
+          messages().flatMap((message) => sync.data.part[message.id] ?? []),
+          (task) =>
+            subagentRowState({
+              part: "completed",
+              background: true,
+              lifecycle: task.status,
+              child: sync.data.session_status[task.sessionID]?.type,
+              started: repliedSince(sync.data.message[task.sessionID] ?? [], task.startedAt),
+              startedAt: task.startedAt,
+              now: Date.now(),
+            }).running,
+        ),
   )
   // Every session under this one at any depth. Requests are answered only from the root view, so a nested
   // subagent's request has to show there too, or the whole run waits on a prompt no view renders.
@@ -2189,6 +2204,10 @@ function Task(props: ToolProps) {
   )
 
   const status = createMemo(() => sync.data.session_status[sessionID() ?? ""])
+  // When this call launched or resumed the task. A resumed child already has replies from its earlier runs.
+  const startedAt = createMemo(() => numberValue(props.metadata.startedAt))
+  // Moves only while the row waits for its subagent's first reply, which never comes when that run was lost.
+  const [now, setNow] = createSignal(Date.now())
   // The subagent's own outcome. The tool call completes even when the subagent failed or was stopped, so the part's
   // status alone would show those as done.
   const row = createMemo(() =>
@@ -2197,9 +2216,17 @@ function Task(props: ToolProps) {
       background: props.metadata.background === true,
       lifecycle: stringValue(props.metadata.status),
       child: status()?.type,
-      started: messages().some((message) => message.role === "assistant"),
+      started: repliedSince(messages(), startedAt()),
+      startedAt: startedAt(),
+      now: now(),
     }),
   )
+  createEffect(() => {
+    const at = row().recheckAt
+    if (at === undefined) return
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, at - Date.now()))
+    onCleanup(() => clearTimeout(timer))
+  })
   const isRunning = createMemo(() => row().running)
   const outcome = createMemo(() => row().outcome)
   const retry = createMemo(() => {
@@ -2298,38 +2325,64 @@ export function formatSubagentOutcome(
   if (outcome === "error") return error ? `Failed · ${error}` : "Failed"
 }
 
+// How long a launched or resumed background subagent may go without a status or a reply before its run counts as lost.
+// A child is busy from the moment its run starts, so this only covers the status event arriving late.
+export const SUBAGENT_START_GRACE_MS = 30_000
+
 /**
  * A task row's state. A background task's call completes as soon as it launches, so its row follows the subagent's
  * lifecycle record and its session status instead. The engine reports only sessions that are not idle, so a record
- * still saying running for a child that has replied before but has no status at all means its run was lost, to an
- * engine restart for one, not that it finished. A child just seen going idle is settling: its record lands next.
+ * still saying running for a child that has replied in this run but has no status at all means its run was lost, to an
+ * engine restart for one, not that it finished. A child just seen going idle after replying is settling: its record
+ * lands next. One that has not replied in this run is starting, and an idle status left from an earlier run does not
+ * end it, unless it stays that way past the grace period. recheckAt is when the state changes on its own.
  */
 export function subagentRowState(input: {
   part: ToolPart["state"]["status"]
   background: boolean
   lifecycle: string | undefined
   child: "idle" | "busy" | "retry" | undefined
+  // Whether the child has begun a reply since this call launched or resumed it.
   started: boolean
-}): { running: boolean; outcome?: "error" | "cancelled" | "interrupted" } {
+  startedAt?: number
+  now?: number
+}): { running: boolean; outcome?: "error" | "cancelled" | "interrupted"; recheckAt?: number } {
   const busy = input.child !== undefined && input.child !== "idle"
-  if (input.part === "running" || (input.background && (input.lifecycle === "queued" || busy)))
-    return { running: true }
-  if (input.lifecycle === "error" || input.lifecycle === "cancelled") return { running: false, outcome: input.lifecycle }
-  if (input.background && input.lifecycle === "running" && input.child === undefined)
-    // Just launched, the child has not started its first reply, and its status may not have arrived yet.
-    return input.started ? { running: false, outcome: "interrupted" } : { running: true }
-  return { running: false }
+  if (input.part === "running" || (input.background && (input.lifecycle === "queued" || busy))) return { running: true }
+  if (input.lifecycle === "error" || input.lifecycle === "cancelled")
+    return { running: false, outcome: input.lifecycle }
+  if (!input.background || input.lifecycle !== "running") return { running: false }
+  if (input.started) return input.child === undefined ? { running: false, outcome: "interrupted" } : { running: false }
+  if (input.startedAt === undefined || input.now === undefined) return { running: true }
+  const recheckAt = input.startedAt + SUBAGENT_START_GRACE_MS
+  if (input.now < recheckAt) return { running: true, recheckAt }
+  return { running: false, outcome: "interrupted" }
 }
 
-/** Sessions of the background subagents still running among a session's parts. */
-export function liveBackgroundTasks(parts: readonly Part[]) {
+/** Whether a subagent's session has a reply that began at or after `since`; any reply when that is unknown. */
+export function repliedSince(messages: readonly { role: string; time: { created: number } }[], since?: number) {
+  return messages.some(
+    (message) => message.role === "assistant" && (since === undefined || message.time.created >= since),
+  )
+}
+
+/**
+ * Sessions of the background subagents still running among a session's parts. `live` decides for a task whose record
+ * says it is running, so a run that was lost is left out the way its row shows it.
+ */
+export function liveBackgroundTasks(
+  parts: readonly Part[],
+  live: (task: { sessionID: string; status: string; startedAt?: number }) => boolean = () => true,
+) {
   return [
     ...new Set(
       parts.flatMap((part) => {
         if (part.type !== "tool" || part.tool !== "task" || part.state.status === "pending") return []
         const metadata = part.state.metadata
         if (metadata?.background !== true || typeof metadata.sessionId !== "string") return []
-        return metadata.status === "running" || metadata.status === "queued" ? [metadata.sessionId] : []
+        if (metadata.status !== "running" && metadata.status !== "queued") return []
+        const startedAt = typeof metadata.startedAt === "number" ? metadata.startedAt : undefined
+        return live({ sessionID: metadata.sessionId, status: metadata.status, startedAt }) ? [metadata.sessionId] : []
       }),
     ),
   ]

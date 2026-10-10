@@ -10,6 +10,8 @@ import {
   formatSubagentToolcalls,
   InlineToolRow,
   liveBackgroundTasks,
+  repliedSince,
+  SUBAGENT_START_GRACE_MS,
   parseApplyPatchFiles,
   parseDiagnostics,
   parseQuestionAnswers,
@@ -307,7 +309,9 @@ describe("TUI inline tool wrapping", () => {
     expect(subagentRowState({ ...background, lifecycle: "running", child: undefined, started: false }).running).toBe(
       true,
     )
-    expect(subagentRowState({ ...background, lifecycle: "queued", child: undefined, started: false }).running).toBe(true)
+    expect(subagentRowState({ ...background, lifecycle: "queued", child: undefined, started: false }).running).toBe(
+      true,
+    )
     // Settled outcomes.
     expect(subagentRowState({ ...background, lifecycle: "error", child: "idle", started: true })).toEqual({
       running: false,
@@ -327,6 +331,41 @@ describe("TUI inline tool wrapping", () => {
     expect(
       subagentRowState({ part: "completed", background: false, lifecycle: "completed", child: "idle", started: true }),
     ).toEqual({ running: false })
+  })
+
+  test("a resumed or just-launched background subagent reads as running until its run is plainly lost", () => {
+    const background = { part: "completed" as const, background: true, lifecycle: "running" }
+    const startedAt = 1_000_000
+    // Resumed: its replies from earlier runs predate this call, and the idle status they left is not this run's end.
+    const earlier = [{ role: "assistant", time: { created: startedAt - 60_000 } }]
+    expect(repliedSince(earlier, startedAt)).toBe(false)
+    expect(repliedSince(earlier, undefined)).toBe(true)
+    expect(repliedSince([...earlier, { role: "assistant", time: { created: startedAt + 10 } }], startedAt)).toBe(true)
+    for (const child of ["idle", undefined] as const)
+      expect(subagentRowState({ ...background, child, started: false, startedAt, now: startedAt + 500 })).toEqual({
+        running: true,
+        recheckAt: startedAt + SUBAGENT_START_GRACE_MS,
+      })
+    // Lost before its first reply, to an engine restart for one: no status and no reply long after it was started.
+    expect(
+      subagentRowState({
+        ...background,
+        child: undefined,
+        started: false,
+        startedAt,
+        now: startedAt + SUBAGENT_START_GRACE_MS,
+      }),
+    ).toEqual({ running: false, outcome: "interrupted" })
+    // Busy is running however long it took to begin replying.
+    expect(
+      subagentRowState({
+        ...background,
+        child: "busy",
+        started: false,
+        startedAt,
+        now: startedAt + 10 * SUBAGENT_START_GRACE_MS,
+      }).running,
+    ).toBe(true)
   })
 
   test("lists the background subagents still running, for Stop background subagents", () => {
@@ -350,6 +389,16 @@ describe("TUI inline tool wrapping", () => {
         task("e", { background: true, status: "running", sessionId: "ses_a" }),
       ]),
     ).toEqual(["ses_a", "ses_b"])
+    // A run that was lost is not offered to Stop, the way its row shows it.
+    expect(
+      liveBackgroundTasks(
+        [
+          task("a", { background: true, status: "running", sessionId: "ses_a", startedAt: 1 }),
+          task("f", { background: true, status: "running", sessionId: "ses_lost", startedAt: 2 }),
+        ],
+        (running) => running.sessionID !== "ses_lost" && running.startedAt === 1,
+      ),
+    ).toEqual(["ses_a"])
   })
 
   test("keeps background state attached to the subagent identity", () => {
