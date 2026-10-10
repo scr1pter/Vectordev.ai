@@ -34,6 +34,7 @@ import type {
   ConfigUpdateErrors,
   ConfigUpdateResponses,
   EventSubscribeData,
+  EventSubscribeErrors,
   EventSubscribeResponses,
   ExperimentalCapabilitiesGetData,
   ExperimentalCapabilitiesGetErrors,
@@ -1192,7 +1193,7 @@ export class Event extends HeyApiClient {
    * Get events
    */
   public subscribe<ThrowOnError extends boolean = false>(options?: Options<EventSubscribeData, ThrowOnError>) {
-    return (options?.client ?? this.client).sse.get<EventSubscribeResponses, unknown, ThrowOnError>({
+    return (options?.client ?? this.client).sse.get<EventSubscribeResponses, EventSubscribeErrors, ThrowOnError>({
       url: "/event",
       ...options,
     })
