@@ -142,6 +142,27 @@ export function currentFailure(overview: CloudOverview) {
   return failure
 }
 
+/**
+ * The preview's publish sheet after a failed Promote. The preview did publish
+ * and is still live, so the sheet keeps its link and Promote can be tried
+ * again. The note carries the last line of what Vercel said: the whole log
+ * would crowd the sheet.
+ */
+export function promoteFailed<T extends { promote?: "confirm" | "working" }>(
+  done: T,
+  error: unknown,
+): Omit<T, "promote"> & { promote?: undefined; promoteError: string } {
+  const said =
+    error instanceof Error
+      ? error.message
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .at(-1)
+      : undefined
+  return { ...done, promote: undefined, promoteError: said || "Vercel did not promote the preview." }
+}
+
 export type PublishPlan =
   | { ready: true; project: string; account?: string }
   /** `connect` is true when Vector Cloud > Connections is where it gets fixed. */

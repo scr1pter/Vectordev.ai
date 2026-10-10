@@ -8,6 +8,7 @@ import {
   deployRepairPrompt,
   holdsHandoff,
   onComposerPrompt,
+  promoteFailed,
   publishPlan,
   releaseActions,
   requestComposerPrompt,
@@ -171,6 +172,27 @@ describe("publish plan", () => {
       reason: noNode,
       connect: false,
     })
+  })
+})
+
+describe("a failed promote", () => {
+  test("keeps the live preview and its link, and lets Promote run again", () => {
+    const done = {
+      phase: "done" as const,
+      url: "https://shop-abc.vercel.app/",
+      deploymentId: "dep_1",
+      promote: "working" as const,
+    }
+    const log = new Error("Vercel CLI 39.0.0\nRetrieving project…\n  Error: You do not have permission to promote.  \n")
+    expect(promoteFailed(done, log)).toEqual({
+      phase: "done",
+      url: "https://shop-abc.vercel.app/",
+      deploymentId: "dep_1",
+      promote: undefined,
+      promoteError: "Error: You do not have permission to promote.",
+    })
+    expect(promoteFailed(done, new Error("")).promoteError).toBe("Vercel did not promote the preview.")
+    expect(promoteFailed(done, "offline").promoteError).toBe("Vercel did not promote the preview.")
   })
 })
 

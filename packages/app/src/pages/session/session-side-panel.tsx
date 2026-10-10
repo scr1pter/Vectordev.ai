@@ -148,6 +148,7 @@ import {
 import {
   cloudHref,
   deployRepairPrompt,
+  promoteFailed,
   publishPlan,
   requestComposerPrompt,
   type DeployEvidence,
@@ -3842,7 +3843,13 @@ type PublishPhase =
   | ({ phase: "confirm" } & PublishPlace)
   | { phase: "blocked"; reason: string; projectPath?: string }
   | ({ phase: "working"; message: string } & PublishPlace)
-  | ({ phase: "done"; url: string; deploymentId?: string; promote?: "confirm" | "working" } & PublishPlace)
+  | ({
+      phase: "done"
+      url: string
+      deploymentId?: string
+      promote?: "confirm" | "working"
+      promoteError?: string
+    } & PublishPlace)
   | ({ phase: "live"; url: string } & PublishPlace)
   | { phase: "error"; error: string; evidence?: DeployEvidence }
 
@@ -4089,16 +4096,11 @@ export function PreviewPanel(props: {
     const current = publish()
     const cloud = cloudApi()
     if (current.phase !== "done" || !current.deploymentId || !cloud) return
-    setPublish({ ...current, promote: "working" })
+    setPublish({ ...current, promote: "working", promoteError: undefined })
     await cloud.deployments
       .promote(current.overview.projectPath, undefined, current.deploymentId)
       .then((released) => setPublish({ ...current, phase: "live", url: released.productionUrl ?? released.url }))
-      .catch((error) =>
-        setPublish({
-          phase: "error",
-          error: error instanceof Error ? error.message : "Vercel did not promote the preview.",
-        }),
-      )
+      .catch((error) => setPublish(promoteFailed(current, error)))
   }
 
   // Starts the agent on the failure in this session, with the redacted
@@ -4518,7 +4520,7 @@ export function PreviewPanel(props: {
                             <button
                               type="button"
                               class="h-8 rounded-full border border-[color:var(--vx-line)] px-3.5 text-[12.5px] font-semibold text-white/80 transition hover:bg-white/[0.07] hover:text-white"
-                              onClick={() => setPublish({ ...done(), promote: "confirm" })}
+                              onClick={() => setPublish({ ...done(), promote: "confirm", promoteError: undefined })}
                             >
                               Promote to production
                             </button>
@@ -4545,6 +4547,24 @@ export function PreviewPanel(props: {
                           </button>
                         </Show>
                       </div>
+                      <Show when={done().promoteError}>
+                        {(error) => (
+                          <div class="mt-2 text-[12px] leading-5">
+                            <p class="text-rose-300">Couldn't promote: {error()}</p>
+                            <p class="text-white/50">
+                              The preview is still live and production is unchanged. Promote again, or{" "}
+                              <button
+                                type="button"
+                                class="text-white/75 underline underline-offset-2 hover:text-white"
+                                onClick={() => navigate(cloudHref(done().overview.projectPath, "deployments"))}
+                              >
+                                open Vector Cloud &gt; Deployments
+                              </button>
+                              .
+                            </p>
+                          </div>
+                        )}
+                      </Show>
                     </Show>
                   </>
                 )}
