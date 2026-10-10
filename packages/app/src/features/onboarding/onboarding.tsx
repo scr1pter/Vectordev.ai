@@ -134,7 +134,7 @@ export const GUIDE_SECTIONS: GuideSection[] = [
       {
         title: "Database",
         where: "Vector Cloud → Database.",
-        body: "Link a project from your connected Supabase account: Vector writes its public URL and key to your .env and adds a ready-configured client, so the agent codes against a real database and auth setup instead of mocks. When a task involves accounts, logins, or stored data, a banner offers to ask Vector to set the database up; the agent can link a project or create a new one on your account, and asks you first.",
+        body: "Link a project from your connected Supabase account: Vector writes its public URL and key to your .env and adds a ready-configured client, so the agent codes against a real database and auth setup instead of mocks. When a task involves accounts, logins, or stored data, a banner offers to ask Vector to set the database up; the agent can create a new one on your account, and asks you first, or send you here to link one you already have.",
         tip: "Set up the database before asking for signup or login features, so the agent builds against the real client on the first pass.",
       },
       {

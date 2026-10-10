@@ -65,7 +65,7 @@ export function holdsHandoff(prompt: readonly { type: string; content?: string }
 }
 
 export const DATABASE_SETUP_PROMPT =
-  "Set up the database for this project with Vector Cloud. Run vector_cloud database_status first. If a database is connected, prepare it (prepare_database, or prepare_auth when this needs sign-in) and continue. If none is connected, ask me whether to link an existing Supabase project or create a new one, then run create_database; Vector asks me to confirm before anything is created."
+  "Set up the database for this project with Vector Cloud. Run vector_cloud database_status first. If a database is connected, prepare it (prepare_database, or prepare_auth when this needs sign-in) and continue. If none is connected, ask me whether to use a Supabase project I already have or create a new one. If I choose one I have, tell me to link it in Vector Cloud > Database and continue once it is linked. If I choose a new one, run create_database; Vector asks me to confirm before anything is created."
 
 export type DeployEvidence = {
   project: string

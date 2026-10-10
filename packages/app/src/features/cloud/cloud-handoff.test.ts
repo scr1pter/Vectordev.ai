@@ -4,6 +4,7 @@ import {
   cloudHref,
   cloudStatus,
   composerTakes,
+  DATABASE_SETUP_PROMPT,
   deployRepairPrompt,
   holdsHandoff,
   onComposerPrompt,
@@ -91,6 +92,15 @@ describe("composer handoff", () => {
     expect(holdsHandoff([part("")], "")).toBe(false)
     expect(holdsHandoff([part(`${text} and also this`)], text)).toBe(false)
     expect(holdsHandoff([part(text), { type: "image" }], text)).toBe(false)
+  })
+})
+
+describe("database setup prompt", () => {
+  test("creates a database through the agent, and links an existing one on the Database screen", () => {
+    // The agent's tool can create a Supabase project but has no action to link one.
+    expect(DATABASE_SETUP_PROMPT).toContain("tell me to link it in Vector Cloud > Database")
+    expect(DATABASE_SETUP_PROMPT).toContain("If I choose a new one, run create_database")
+    expect(DATABASE_SETUP_PROMPT).not.toContain("or create a new one, then run create_database")
   })
 })
 
