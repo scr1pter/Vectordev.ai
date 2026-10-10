@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { mkdirSync, writeFileSync } from "node:fs"
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -36,11 +36,14 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { runVercel } = await import("./publish")
+const { publishProject, runVercel } = await import("./publish")
+const { listDeployments, setBuildSettings } = await import("./cloud-console")
 
 let directory = ""
 
 beforeEach(async () => {
+  stores.clear()
+  process.env.VECTOR_CREDENTIAL_KEY = Buffer.alloc(32, 6).toString("base64")
   directory = await mkdtemp(join(tmpdir(), "vector-publish-cli-"))
 })
 
@@ -93,5 +96,43 @@ describe.skipIf(process.platform === "win32")("Vercel CLI runs", () => {
   test("set no token when the user signed in with the CLI instead", async () => {
     const result = await runVercel({ command: [await fakeVercel()], args: [], cwd: directory })
     expect(result.log).toContain("token-set=\n")
+  })
+})
+
+describe.skipIf(process.platform === "win32")("publishing a project", () => {
+  test("deploys with the Vercel CLI and never rewrites the project's source", async () => {
+    const project = await mkdtemp(join(tmpdir(), "vector-publish-project-"))
+    try {
+      const page = "<!doctype html>\n<html>\n  <body>\n    <h1>Shop</h1>\n  </body>\n</html>\n"
+      await writeFile(join(project, "index.html"), page)
+      await mkdir(join(project, "public"))
+      await writeFile(join(project, "public", "index.html"), page)
+      setBuildSettings(project, undefined, {
+        framework: "Static",
+        packageManager: "static",
+        installCommand: "",
+        testCommand: "",
+        buildCommand: "",
+        outputDirectory: ".",
+        nodeVersion: "",
+        healthPath: "/",
+        requiredChecks: { test: false, secrets: true, health: false, browser: false },
+      })
+      const cli = await fakeVercel()
+      const result = await publishProject(
+        { projectPath: project, target: "vercel", production: false },
+        undefined,
+        async () => [{ id: "vercel", label: "Vercel", command: [cli], loginHint: "", available: true }],
+      )
+      expect(result).toMatchObject({ ok: true, target: "vercel", url: "https://fixture-app-abc123.vercel.app/" })
+      expect(await readFile(join(project, "index.html"), "utf8")).toBe(page)
+      expect(await readFile(join(project, "public", "index.html"), "utf8")).toBe(page)
+      expect((await readdir(project)).sort()).toEqual(["index.html", "public"])
+      expect(listDeployments(project)).toEqual([
+        expect.objectContaining({ target: "vercel", environment: "preview", releaseStatus: "preview" }),
+      ])
+    } finally {
+      await rm(project, { recursive: true, force: true })
+    }
   })
 })

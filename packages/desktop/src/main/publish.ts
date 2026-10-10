@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { readFile, stat, writeFile } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
@@ -232,36 +232,6 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
       account: vercelConnection.account ?? vercelAccount,
     },
   ]
-}
-
-// Every app published from Vector carries a small floating badge linking back
-// to vectordev.ai — the marker comment keeps injection idempotent.
-const BADGE_MARKER = "vector-badge"
-const BADGE_SNIPPET = `    <!-- ${BADGE_MARKER} -->
-    <a href="https://vectordev.ai" target="_blank" rel="noopener" style="position:fixed;right:14px;bottom:14px;z-index:2147483647;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:rgba(16,15,19,0.92);color:#f5f3ff;font:600 12px/1 Inter,system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 24px rgba(0,0,0,0.35);border:1px solid rgba(147,116,236,0.4)">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:linear-gradient(135deg,#f0a36e,#ec7fae,#9374ec,#6ba6dd)"></span>
-      Deployed with Vector
-    </a>
-`
-
-function stampVectorBadge(html: string) {
-  if (html.includes(BADGE_MARKER) || !/<\/body>/i.test(html)) return html
-  return html.replace(/<\/body>/i, `${BADGE_SNIPPET}  </body>`)
-}
-
-async function injectVectorBadge(directory: string) {
-  for (const candidate of ["index.html", join("public", "index.html")]) {
-    const path = join(directory, candidate)
-    const html = await readFile(path, "utf8").catch(() => undefined)
-    if (html === undefined) continue
-    if (html.includes(BADGE_MARKER)) return "present"
-    if (!/<\/body>/i.test(html)) continue
-    await writeFile(path, stampVectorBadge(html), "utf8")
-    return "injected"
-  }
-  // Framework apps without a plain index.html (e.g. Next.js) skip the badge
-  // rather than guessing at build internals.
-  return "skipped"
 }
 
 // The directory that actually ships. Publish-time checks have to look here and
@@ -521,9 +491,11 @@ async function runPostDeployChecks(
   return current
 }
 
+// `targets` is the CLI detection; a test passes a stand-in for the Vercel CLI.
 export async function publishProject(
   input: PublishProjectInput,
   emit?: PublishProgressEmitter,
+  targets: () => Promise<PublishTarget[]> = detectPublishTargets,
 ): Promise<PublishResult> {
   const scope = scopeFor(input)
   const publishKey = `${input.projectPath}:${input.target}`
@@ -546,8 +518,7 @@ export async function publishProject(
     return { ok: false, target: input.target, log: "", error: "A publish is already running for this project." }
   }
 
-  const targets = await detectPublishTargets()
-  const target = targets.find((item) => item.id === input.target)
+  const target = (await targets()).find((item) => item.id === input.target)
   if (!target?.available) {
     return {
       ok: false,
@@ -592,7 +563,6 @@ export async function publishProject(
     }
   }
 
-  await injectVectorBadge(directory).catch(() => "skipped")
   const destinationArgs = providerLink
     ? ["--project", providerLink.projectId, ...(providerLink.accountId ? ["--scope", providerLink.accountId] : [])]
     : []
