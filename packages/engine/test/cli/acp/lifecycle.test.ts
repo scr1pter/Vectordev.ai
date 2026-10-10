@@ -20,7 +20,9 @@ describe("vector acp lifecycle subprocess", () => {
         acp.close()
 
         yield* Effect.gen(function* () {
-          const code = yield* Effect.promise(() => acp.exited).pipe(Effect.timeout(Duration.seconds(5)))
+          // The end of stdin is read once the server listens, which a busy Windows runner took more than 5 seconds to
+          // reach. A process that never exits still fails well inside the test's minute.
+          const code = yield* Effect.promise(() => acp.exited).pipe(Effect.timeout(Duration.seconds(20)))
           expect(code).toBe(0)
         }).pipe(
           Effect.tapCause(() =>
