@@ -281,7 +281,7 @@ export const SettingsGeneralV2: Component<{
           >
             <ToggleRow
               title="Share usage counts"
-              description="Sends a daily count of sessions with your app version and OS. Never your prompts, code or files."
+              description="Sends daily session counts and your token use by model, with your app version and OS. Never your prompts, code or files."
               checked={usageSharing.latest}
               onChange={(enabled) => {
                 setUsageSharing(enabled)

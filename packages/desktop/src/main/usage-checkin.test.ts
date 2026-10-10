@@ -23,8 +23,12 @@ function fixture(input: { listStatus?: number; checkinStatus?: number; pageSize?
     listStatus: input.listStatus,
     checkinStatus: input.checkinStatus ?? 204,
     sessions: [] as Array<{ id: string; parentID?: string; updated: number }>,
+    // The engine's local usage summary; undefined answers 404, as an engine without the route would.
+    usage: undefined as unknown,
+    usageStatus: 200,
   }
   const lists: Array<{ query: URLSearchParams; authorization: string | null }> = []
+  const usageReads: Array<{ authorization: string | null }> = []
   const checkins: Array<{ body: unknown; authorization: string | null }> = []
   const server = Bun.serve({
     port: 0,
@@ -54,6 +58,11 @@ function fixture(input: { listStatus?: number; checkinStatus?: number; pageSize?
           { headers: rows.length > limit ? { "x-next-cursor": String(page[page.length - 1].updated) } : {} },
         )
       }
+      if (url.pathname === "/experimental/session/usage") {
+        usageReads.push({ authorization: request.headers.get("authorization") })
+        if (state.usage === undefined) return new Response("missing", { status: 404 })
+        return Response.json(state.usage, { status: state.usageStatus })
+      }
       if (url.pathname === "/api/usage/checkin") {
         checkins.push({ body: await request.json(), authorization: request.headers.get("authorization") })
         return new Response(null, { status: state.checkinStatus })
@@ -75,7 +84,42 @@ function fixture(input: { listStatus?: number; checkinStatus?: number; pageSize?
     platform: "darwin",
     arch: "arm64",
   }
-  return { state, lists, checkins, store, options, usage: createUsageCheckin(options) }
+  return { state, lists, usageReads, checkins, store, options, usage: createUsageCheckin(options) }
+}
+
+/** The engine's GET /experimental/session/usage, with the fields Settings shows and a few the report leaves out. */
+function summary(input: { lifetimeTokens?: number; modelResponses?: number } = {}) {
+  return {
+    lifetimeTokens: input.lifetimeTokens ?? 1_250_000,
+    lifetimeCost: 18.4212345,
+    unpricedResponses: 2,
+    inputTokens: 800_000,
+    outputTokens: 250_000,
+    reasoningTokens: 50_000,
+    cachedTokens: 150_000,
+    peakTokens: 300_000,
+    longestTaskMs: 912_000,
+    longestTaskTokens: 40_000,
+    averageTaskMs: 41_500,
+    currentStreak: 3,
+    longestStreak: 6,
+    completedChats: 41,
+    conversations: 12,
+    activeDays: 9,
+    averageTokensPerChat: 30_487,
+    modelResponses: input.modelResponses ?? 320,
+    favoriteModels: [
+      { providerID: "anthropic", modelID: "claude-sonnet-4-5", tokens: 900_000, responses: 200, percentage: 72 },
+      { providerID: "my local proxy", modelID: "llama", tokens: 350_000, responses: 120, percentage: 28 },
+    ],
+    effortLevels: [{ id: "default", label: "Default", tokens: 1_250_000, responses: 320, percentage: 100 }],
+    days: Array.from({ length: 9 }, (_, index) => ({
+      date: `2026-10-0${index + 1}`,
+      tokens: 1_000 * (index + 1),
+      cost: 0.5,
+      tasks: index + 1,
+    })),
+  }
 }
 
 async function until(condition: () => boolean) {
@@ -150,6 +194,107 @@ test("sends the day's counts again whenever they grow and starts over at the nex
   ])
   expect(app.lists.at(-1)?.query.get("start")).toBe(String(at(24)))
   expect(new Set(sent().map((body) => body.installId)).size).toBe(1)
+})
+
+test("sends the local usage report with the check-in, read with the same engine credentials", async () => {
+  const app = fixture()
+  app.state.usage = summary()
+
+  expect(await app.usage.checkin()).toBe(true)
+
+  expect(app.usageReads.map((read) => read.authorization)).toEqual([
+    `Basic ${Buffer.from("vector:placeholder-password").toString("base64")}`,
+  ])
+  expect((app.checkins[0].body as { usage: unknown }).usage).toEqual({
+    lifetimeTokens: 1_250_000,
+    lifetimeCost: 18.421235,
+    inputTokens: 800_000,
+    outputTokens: 250_000,
+    reasoningTokens: 50_000,
+    cachedTokens: 150_000,
+    completedChats: 41,
+    conversations: 12,
+    activeDays: 9,
+    currentStreak: 3,
+    longestStreak: 6,
+    averageTaskMs: 41_500,
+    longestTaskMs: 912_000,
+    modelResponses: 320,
+    // The last seven days only.
+    days: Array.from({ length: 7 }, (_, index) => ({
+      date: `2026-10-0${index + 3}`,
+      tokens: 1_000 * (index + 3),
+      tasks: index + 3,
+      cost: 0.5,
+    })),
+    // A provider name the server would refuse is left out, not the whole report.
+    favoriteModels: [{ providerID: "anthropic", modelID: "claude-sonnet-4-5", tokens: 900_000, percentage: 72 }],
+    effortLevels: [{ id: "default", label: "Default", tokens: 1_250_000, responses: 320, percentage: 100 }],
+  })
+  expect(app.store.get("sent")).toEqual({
+    day: "2026-10-09",
+    sessions: 0,
+    subagentSessions: 0,
+    tokens: 1_250_000,
+    responses: 320,
+  })
+})
+
+test("still checks in, without the report, when the summary cannot be read", async () => {
+  for (const [usage, status] of [
+    [summary(), 500],
+    [{ lifetimeTokens: "lots" }, 200],
+    ["not a summary", 200],
+  ] as const) {
+    const app = fixture()
+    app.state.usage = usage
+    app.state.usageStatus = status
+    app.state.sessions.push({ id: "ses_a", updated: at(14) })
+
+    expect(await app.usage.checkin()).toBe(true)
+
+    expect(app.checkins[0].body).toMatchObject({ sessions: 1, subagentSessions: 0 })
+    expect(app.checkins[0].body).not.toHaveProperty("usage")
+  }
+})
+
+test("sends again when the report shows more tokens or responses, and not when only it fails", async () => {
+  const app = fixture()
+  app.state.usage = summary()
+  expect(await app.usage.checkin()).toBe(true)
+
+  // Nothing grew.
+  expect(await app.usage.checkin()).toBe(false)
+
+  app.state.usage = summary({ lifetimeTokens: 1_300_000 })
+  expect(await app.usage.checkin()).toBe(true)
+  app.state.usage = summary({ lifetimeTokens: 1_300_000, modelResponses: 321 })
+  expect(await app.usage.checkin()).toBe(true)
+
+  // A failed read is not growth.
+  app.state.usageStatus = 503
+  expect(await app.usage.checkin()).toBe(false)
+
+  // A count that grows still goes out, without a report, and the accepted report totals are kept.
+  app.state.sessions.push({ id: "ses_a", updated: at(15) })
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.checkins.at(-1)?.body).not.toHaveProperty("usage")
+  expect(app.store.get("sent")).toMatchObject({ sessions: 1, tokens: 1_300_000, responses: 321 })
+
+  app.state.usageStatus = 200
+  expect(await app.usage.checkin()).toBe(false)
+  expect(app.checkins).toHaveLength(4)
+})
+
+test("a failed count later in the day repeats the accepted counts when only the report grew", async () => {
+  const app = fixture()
+  app.state.sessions.push({ id: "ses_a", updated: at(9) }, { id: "ses_b", parentID: "ses_a", updated: at(10) })
+  expect(await app.usage.checkin()).toBe(true)
+
+  app.state.listStatus = 503
+  app.state.usage = summary()
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.checkins[1].body).toMatchObject({ sessions: 1, subagentSessions: 1, usage: { lifetimeTokens: 1_250_000 } })
 })
 
 test("a failed count reports the install once with zero counts and the next working count replaces them", async () => {
