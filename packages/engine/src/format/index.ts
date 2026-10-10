@@ -85,7 +85,7 @@ const layer = Layer.effect(
               const result = yield* appProcess
                 .run(
                   ChildProcess.make(replaced[0]!, replaced.slice(1), {
-                    cwd: item.cwd ?? dir,
+                    cwd: item.cwd ? path.resolve(dir, item.cwd) : dir,
                     env: untrustedChildEnvironment(process.env, item.environment),
                     extendEnv: false,
                     stdin: "ignore",

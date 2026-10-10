@@ -55,6 +55,36 @@ function request(headers: Record<string, string>, variant?: string) {
 const decode = Schema.decodeUnknownSync(Config.Info)
 
 describe("ConfigProviderPlugin.Plugin", () => {
+  it.effect("ignores a default model selected by an untrusted project document", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const global = new Config.Document({
+        type: "document",
+        info: decode({
+          model: "ollama/trusted",
+          providers: {
+            ollama: {
+              api: { type: "aisdk", package: "@ai-sdk/openai", url: "https://custom.example.test/v1" },
+              models: { trusted: {}, untrusted: {} },
+            },
+          },
+        }),
+      })
+      const project = new Config.Document({
+        type: "document",
+        info: decode({ model: "ollama/untrusted" }),
+      })
+      const config = Config.Service.of({
+        entries: () => Effect.succeed([global, project]),
+        executable: (entry) => entry !== project,
+      })
+
+      yield* addPlugin(config)
+
+      expect((yield* catalog.model.default())?.id).toBe(ModelV2.ID.make("trusted"))
+    }),
+  )
+
   it.effect("keeps configured model variant bodies unchanged", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

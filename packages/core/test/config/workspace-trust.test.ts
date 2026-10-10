@@ -27,6 +27,23 @@ describe("WorkspaceTrust", () => {
     expect((await WorkspaceTrust.status(state.path, changed)).trusted).toBe(false)
   })
 
+  test("serializes concurrent approvals without discarding another workspace", async () => {
+    await using first = await tmpdir()
+    await using second = await tmpdir()
+    await using state = await tmpdir()
+    const snapshots = await Promise.all([
+      WorkspaceTrust.snapshot(first.path, []),
+      WorkspaceTrust.snapshot(second.path, []),
+    ])
+
+    await Promise.all(snapshots.map((snapshot) => WorkspaceTrust.approve(state.path, snapshot)))
+
+    expect(await Promise.all(snapshots.map((snapshot) => WorkspaceTrust.status(state.path, snapshot)))).toEqual([
+      { workspace: snapshots[0].workspace, fingerprint: snapshots[0].fingerprint, trusted: true },
+      { workspace: snapshots[1].workspace, fingerprint: snapshots[1].fingerprint, trusted: true },
+    ])
+  })
+
   test("fingerprints sibling configs and local plugin sources but ignores housekeeping files", async () => {
     await using workspace = await tmpdir()
     const config = path.join(workspace.path, "vector.json")

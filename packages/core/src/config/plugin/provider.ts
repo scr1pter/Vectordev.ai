@@ -47,7 +47,7 @@ export const Plugin = define({
         const files = entries.filter(
           (entry): entry is Config.Document => entry.type === "document" && config.executable?.(entry) !== false,
         )
-        const configuredDefault = Config.latest(entries, "model")
+        const configuredDefault = Config.latest(files, "model")
         if (configuredDefault !== undefined) {
           const model = ModelV2.parse(configuredDefault)
           catalog.model.default.set(model.providerID, model.modelID)

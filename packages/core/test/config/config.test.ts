@@ -1083,6 +1083,7 @@ describe("Config", () => {
                   },
                   formatter: {
                     approved: { command: ["node", "server.js"], extensions: [".js"] },
+                    builtin: { cwd: "tools" },
                     preload: {
                       command: ["node", "server.js"],
                       environment: { NODE_OPTIONS: `--require=${server}` },
@@ -1098,6 +1099,7 @@ describe("Config", () => {
                 }),
               ),
               fs.writeFile(server, "console.log('approved')\n"),
+              fs.mkdir(path.join(tmp.path, "tools")),
             ]),
           )
           const approved = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
@@ -1127,6 +1129,9 @@ describe("Config", () => {
               local.command[1],
             )
             expect(formatter && typeof formatter === "object" ? formatter.approved?.cwd : undefined).toBe(local.cwd)
+            const builtin = formatter && typeof formatter === "object" ? formatter.builtin : undefined
+            expect(builtin?.cwd).not.toBe(path.join(tmp.path, "tools"))
+            expect(path.basename(builtin?.cwd ?? "")).toBe("tools")
             expect(formatter && typeof formatter === "object" ? formatter.preload : undefined).toBeUndefined()
             const lsp = project.info.lsp
             const approvedLsp = lsp && typeof lsp === "object" ? lsp.approved : undefined

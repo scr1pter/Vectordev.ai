@@ -363,7 +363,11 @@ function bindTrustedProjectExecutables(
           info.formatter,
           workspace,
           trusted,
-          (entry, command) => new ConfigFormatter.Entry({ ...entry, command: command.command, cwd: command.cwd }),
+          (entry, command) =>
+            new ConfigFormatter.Entry({
+              ...entry,
+              ...(command ? { command: command.command, cwd: command.cwd } : {}),
+            }),
         )
       : info.formatter
   const lsp =
@@ -372,7 +376,8 @@ function bindTrustedProjectExecutables(
           info.lsp,
           workspace,
           trusted,
-          (entry, command) => new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }),
+          (entry, command) =>
+            command ? new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }) : entry,
         )
       : info.lsp
   const mcp = info.mcp
@@ -407,12 +412,17 @@ function rewriteCommandEntries<T extends Record<string, object>>(
   value: T,
   base: string,
   trusted: WorkspaceTrust.TrustedSnapshot,
-  bind: (entry: Record<string, unknown>, command: { command: string[]; cwd: string }) => object,
+  bind: (entry: Record<string, unknown>, command?: { command: string[]; cwd: string }) => object,
 ): T {
   return Object.fromEntries(
     Object.entries(value).flatMap(([name, entry]) => {
       if (!entry || typeof entry !== "object" || !("command" in entry) || !Array.isArray(entry.command)) {
-        return [[name, entry]]
+        if (!entry || typeof entry !== "object" || !("cwd" in entry) || typeof entry.cwd !== "string") {
+          return [[name, entry]]
+        }
+        const cwd = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, entry.cwd))
+        if (!cwd) return []
+        return [[name, bind({ ...entry, cwd })]]
       }
       if (!entry.command.every((item): item is string => typeof item === "string")) return []
       const cwd = "cwd" in entry && typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base

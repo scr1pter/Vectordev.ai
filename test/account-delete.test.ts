@@ -66,7 +66,7 @@ describe("deleting the identity", () => {
         "user",
         (async () => new Response("", { status: 500 })) as unknown as typeof fetch,
       ),
-    ).rejects.toThrow(/could not delete/i)
+    ).rejects.toThrow(/revoked existing CLI sessions but could not delete/i)
   })
 })
 

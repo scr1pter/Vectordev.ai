@@ -100,7 +100,11 @@ async function deleteAccountUser(
     },
   })
   if (!result.ok && result.status !== 404) {
-    throw new ApiError(502, "DELETION_FAILED", "Vector could not delete the account. Nothing else was changed.")
+    throw new ApiError(
+      502,
+      "DELETION_PARTIAL",
+      "Vector revoked existing CLI sessions but could not delete the account. Retry deletion or contact support.",
+    )
   }
 }
 

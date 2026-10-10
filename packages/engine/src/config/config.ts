@@ -89,6 +89,7 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     delete next.model
     delete next.small_model
     delete next.default_agent
+    delete next.skills
     if (next.enabled_providers && base.enabled_providers) {
       const enabled = new Set(base.enabled_providers)
       next.enabled_providers = next.enabled_providers.filter((provider) => enabled.has(provider))
@@ -155,7 +156,12 @@ function bindTrustedProjectExecutables(
 function rewriteCommandEntries(value: Record<string, unknown>, base: string, trusted: WorkspaceTrust.TrustedSnapshot) {
   return Object.fromEntries(
     Object.entries(value).flatMap(([name, entry]) => {
-      if (!isRecord(entry) || !Array.isArray(entry.command)) return [[name, entry]]
+      if (!isRecord(entry) || !Array.isArray(entry.command)) {
+        if (!isRecord(entry) || typeof entry.cwd !== "string") return [[name, entry]]
+        const cwd = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, entry.cwd))
+        if (!cwd) return []
+        return [[name, { ...entry, cwd }]]
+      }
       if (!entry.command.every((item): item is string => typeof item === "string")) return []
       const cwd = typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
       const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
@@ -420,6 +426,7 @@ const layer = Layer.effect(
               preserve: (keys) =>
                 keys[0] === "mcp" ||
                 keys[0] === "provider" ||
+                keys[0] === "skills" ||
                 keys.some((key) => ["headers", "environment", "options", "body"].includes(key)),
             }),
           )

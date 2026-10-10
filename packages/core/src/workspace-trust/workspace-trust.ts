@@ -7,6 +7,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse } from "jsonc-parser"
 import whichPkg from "which"
+import { Flock } from "../util/flock"
 
 const version = 1 as const
 const filename = "workspace-trust.json"
@@ -157,16 +158,22 @@ export async function status(stateDirectory: string, current: Snapshot): Promise
 
 export async function approve(stateDirectory: string, current: Snapshot) {
   if (current[unavailable]) throw new Error(`Workspace trust snapshot unavailable: ${current[unavailable]}`)
-  const store = await readStore(stateDirectory)
-  store.workspaces[key(current.workspace)] = {
-    path: current.workspace,
-    fingerprint: current.fingerprint,
-  }
-  await fs.mkdir(stateDirectory, { recursive: true })
   const target = path.join(stateDirectory, filename)
-  const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`
-  await fs.writeFile(temporary, JSON.stringify(store, null, 2), { mode: 0o600 })
-  await fs.rename(temporary, target)
+  await Flock.withLock(
+    target,
+    async () => {
+      const store = await readStore(stateDirectory)
+      store.workspaces[key(current.workspace)] = {
+        path: current.workspace,
+        fingerprint: current.fingerprint,
+      }
+      await fs.mkdir(stateDirectory, { recursive: true })
+      const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`
+      await fs.writeFile(temporary, JSON.stringify(store, null, 2), { mode: 0o600 })
+      await fs.rename(temporary, target)
+    },
+    { dir: path.join(stateDirectory, "locks") },
+  )
 }
 
 export function readFileString(current: Snapshot, file: string) {
@@ -429,17 +436,19 @@ function commandInputs(config: unknown, base: string) {
 
 function executableDirectories(config: unknown, workspace: string) {
   if (!isRecord(config)) return []
-  const commands = (value: unknown) => {
+  const commands = (value: unknown, cwdWithoutCommand = false) => {
     if (!isRecord(value)) return []
     return Object.values(value).flatMap((entry) => {
-      if (!isRecord(entry) || !Array.isArray(entry.command)) return []
+      if (!isRecord(entry) || (!Array.isArray(entry.command) && !(cwdWithoutCommand && typeof entry.cwd === "string"))) {
+        return []
+      }
       return [typeof entry.cwd === "string" ? path.resolve(workspace, entry.cwd) : workspace]
     })
   }
   const mcp = isRecord(config.mcp) ? config.mcp : {}
   return [
-    ...commands(config.formatter),
-    ...commands(config.lsp),
+    ...commands(config.formatter, true),
+    ...commands(config.lsp, true),
     ...commands(isRecord(mcp.servers) ? mcp.servers : mcp),
   ]
 }
