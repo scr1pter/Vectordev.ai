@@ -100,6 +100,11 @@ function projectExecutableConfig(config: Info, trusted: boolean, base: Info): In
     if (next.disabled_providers) {
       next.disabled_providers = Array.from(new Set([...(base.disabled_providers ?? []), ...next.disabled_providers]))
     }
+    // Sharing and undo snapshots may only get safer: an untrusted project can turn sharing down or off, never on,
+    // and cannot turn snapshots off.
+    if (next.share && (base.share === "disabled" || next.share === "auto")) delete next.share
+    if (next.autoshare) delete next.autoshare
+    if (next.snapshot === false) delete next.snapshot
     return next
   }
   if (next.provider) {
@@ -486,19 +491,10 @@ const layer = Layer.effect(
       const source = "path" in options ? options.path : options.source
       const parseSource =
         "path" in options ? ({ type: "path", path: options.path } as const) : ({ type: "virtual", ...options } as const)
+      // An untrusted project's {env:...} and {file:...} stay as written: reading them is the project's choice, not the
+      // user's, and a device or FIFO path could hang the load.
       const parsed = opaqueCredentials
-        ? yield* Effect.promise(() =>
-            ConfigVariable.substituteUnknown({
-              ...parseSource,
-              value: ConfigParse.jsonc(text, source),
-              env,
-              preserve: (keys) =>
-                keys[0] === "mcp" ||
-                keys[0] === "provider" ||
-                keys[0] === "skills" ||
-                keys.some((key) => ["headers", "environment", "options", "body"].includes(key)),
-            }),
-          )
+        ? ConfigParse.jsonc(text, source)
         : ConfigParse.jsonc(
             yield* Effect.promise(() => ConfigVariable.substitute({ ...parseSource, text, env })),
             source,

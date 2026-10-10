@@ -177,14 +177,19 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     project?: { source: string; trusted?: WorkspaceTrust.TrustedSnapshot },
   ): Effect.Effect<Info> =>
     Effect.gen(function* () {
-      const expanded = yield* Effect.promise(() =>
-        ConfigVariable.substitute({
-          text: project?.trusted ? bindTrustedFileReferences(text, project.trusted, project.source) : text,
-          type: "path",
-          path: configFilepath,
-          missing: "empty",
-        }),
-      )
+      // An untrusted project's {env:...} and {file:...} stay as written: reading them is the project's choice, not the
+      // user's, and a device or FIFO path could hang the load.
+      const expanded =
+        project && !project.trusted
+          ? text
+          : yield* Effect.promise(() =>
+              ConfigVariable.substitute({
+                text: project?.trusted ? bindTrustedFileReferences(text, project.trusted, project.source) : text,
+                type: "path",
+                path: configFilepath,
+                missing: "empty",
+              }),
+            )
       const data = ConfigParse.jsonc(expanded, configFilepath)
       if (!isRecord(data)) return {} as Info
       // Flatten a nested "tui" key so users who wrote `{ "tui": { ... } }` inside tui.json

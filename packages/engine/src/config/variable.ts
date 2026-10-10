@@ -22,12 +22,6 @@ type SubstituteInput = ParseSource & {
   env?: Record<string, string>
 }
 
-type SubstituteUnknownInput = ParseSource & {
-  value: unknown
-  env?: Record<string, string>
-  preserve?: (path: readonly string[]) => boolean
-}
-
 function source(input: ParseSource) {
   return input.type === "path" ? input.path : input.source
 }
@@ -94,18 +88,4 @@ export async function substitute(input: SubstituteInput) {
 
   out += text.slice(cursor)
   return out
-}
-
-/** Substitute parsed config values while leaving credential-bearing subtrees opaque. */
-export async function substituteUnknown(input: SubstituteUnknownInput): Promise<unknown> {
-  const visit = async (value: unknown, keys: string[]): Promise<unknown> => {
-    if (input.preserve?.(keys)) return value
-    if (typeof value === "string") return substitute({ ...input, text: value })
-    if (Array.isArray(value)) return Promise.all(value.map((item, index) => visit(item, [...keys, String(index)])))
-    if (!value || typeof value !== "object") return value
-    return Object.fromEntries(
-      await Promise.all(Object.entries(value).map(async ([key, item]) => [key, await visit(item, [...keys, key])])),
-    )
-  }
-  return visit(input.value, [])
 }

@@ -629,7 +629,7 @@ it.instance("handles environment variable substitution", () =>
     "test-user",
     Effect.gen(function* () {
       const test = yield* TestInstance
-      yield* writeConfigEffect(test.directory, {
+      yield* writeTrustedConfigEffect(test.directory, {
         $schema: "https://vectordev.ai/config.json",
         username: "{env:TEST_VAR}",
       })
@@ -651,7 +651,8 @@ it.instance("preserves env variables when adding $schema to config", () =>
         JSON.stringify({ username: "{env:PRESERVE_VAR}" }),
       )
       const config = yield* Config.use.get()
-      expect(config.username).toBe("secret_value")
+      // Before trust a project's {env:...} is not read, so the value stays as written.
+      expect(config.username).toBe("{env:PRESERVE_VAR}")
 
       // Read the file to verify the env variable was preserved
       const content = yield* FSUtil.use.readFileString(path.join(test.directory, "vector.json"))
@@ -666,7 +667,7 @@ it.instance("handles file inclusion substitution", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     yield* FSUtil.use.writeWithDirs(path.join(test.directory, "included.txt"), "test-user")
-    yield* writeConfigEffect(test.directory, {
+    yield* writeTrustedConfigEffect(test.directory, {
       $schema: "https://vectordev.ai/config.json",
       username: "{file:included.txt}",
     })
@@ -679,7 +680,7 @@ it.instance("handles file inclusion with replacement tokens", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     yield* FSUtil.use.writeWithDirs(path.join(test.directory, "included.md"), "const out = await Bun.$`echo hi`")
-    yield* writeConfigEffect(test.directory, {
+    yield* writeTrustedConfigEffect(test.directory, {
       $schema: "https://vectordev.ai/config.json",
       username: "{file:included.md}",
     })
@@ -1137,7 +1138,7 @@ it.instance("handles command configuration", () =>
 it.instance("migrates the legacy automatic sharing preference without granting publication consent", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
-    yield* writeConfigEffect(test.directory, {
+    yield* writeTrustedConfigEffect(test.directory, {
       $schema: "https://vectordev.ai/config.json",
       autoshare: true,
     })
@@ -1145,6 +1146,47 @@ it.instance("migrates the legacy automatic sharing preference without granting p
     expect(config.share).toBe("auto")
     expect(config.autoshare).toBe(true)
   }),
+)
+
+it.instance("lets an untrusted project make sharing and snapshots only safer", () =>
+  withGlobalConfig({ config: { share: "manual" } }, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeConfigEffect(test.directory, { share: "auto", autoshare: true, snapshot: false })
+      const config = yield* Config.use.get()
+      expect(config.share).toBe("manual")
+      expect(config.autoshare).toBeUndefined()
+      expect(config.snapshot).not.toBe(false)
+    }),
+  ),
+)
+
+it.instance("lets an untrusted project turn sharing off", () =>
+  withGlobalConfig({ config: { share: "auto" } }, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeConfigEffect(test.directory, { share: "disabled" })
+      expect((yield* Config.use.get()).share).toBe("disabled")
+    }),
+  ),
+)
+
+it.instance("reads no {env:...} or {file:...} for an untrusted project", () =>
+  withProcessEnv(
+    "VECTOR_TEST_UNTRUSTED_SECRET",
+    "must-not-resolve",
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* FSUtil.use.writeWithDirs(path.join(test.directory, "included.txt"), "file-contents")
+      yield* writeConfigEffect(test.directory, {
+        username: "{env:VECTOR_TEST_UNTRUSTED_SECRET}",
+        theme: "{file:included.txt}",
+      })
+      const serialized = JSON.stringify(yield* Config.use.get())
+      expect(serialized).not.toContain("must-not-resolve")
+      expect(serialized).not.toContain("file-contents")
+    }),
+  ),
 )
 
 it.instance("migrates mode field to agent field", () =>

@@ -1,6 +1,7 @@
 import { expect, spyOn } from "bun:test"
 import path from "path"
-import { symlink } from "node:fs/promises"
+import { mkdtemp, rm, symlink } from "node:fs/promises"
+import os from "node:os"
 import { fileURLToPath, pathToFileURL } from "url"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -261,13 +262,17 @@ it.instance("rejects a trusted project TUI plugin that was not captured", () =>
   ),
 )
 
-it.instance("rejects a trusted project TUI plugin reached through a symlink", () =>
+it.instance("rejects a trusted project TUI plugin reached through a symlink that leaves the workspace", () =>
   withCleanState(
     Effect.gen(function* () {
       if (process.platform === "win32") return
       const fs = yield* FSUtil.Service
       const test = yield* TestInstance
-      const target = path.join(test.directory, "outside-plugin.ts")
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-outside-plugin-"))),
+        (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+      )
+      const target = path.join(outside, "outside-plugin.ts")
       const linked = path.join(test.directory, "linked-plugin.ts")
       yield* fs.writeFileString(target, 'export default { id: "linked", tui: async () => {} }\n')
       yield* Effect.promise(() => symlink(target, linked, "file"))
@@ -854,6 +859,8 @@ it.instance("applies env and file substitutions in tui.json", () =>
           theme: "{env:TUI_THEME_TEST}",
           keybinds: { app_exit: "{file:keybind.txt}" },
         })
+        // Substitution applies once the project is trusted; before that a project's references stay unread.
+        yield* approveWorkspace(test.directory)
 
         const config = yield* getTuiConfig(test.directory)
         expect(config.theme).toBe("env-theme")
@@ -876,6 +883,7 @@ it.instance("applies file substitutions when first identical token is in a comme
   "theme": "{file:theme.txt}"
 }`,
       )
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       expect(config.theme).toBe("resolved-theme")

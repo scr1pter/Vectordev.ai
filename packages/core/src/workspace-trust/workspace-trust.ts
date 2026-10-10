@@ -4,6 +4,7 @@ import { constants, realpathSync } from "node:fs"
 import { createHash } from "node:crypto"
 import fs from "node:fs/promises"
 import { isIP } from "node:net"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse } from "jsonc-parser"
@@ -487,7 +488,10 @@ function fileInputs(config: unknown, source: string) {
     if (isRecord(value)) Object.values(value).forEach(visit)
   }
   visit(config)
-  return values.flatMap((value) => localPath(value, path.dirname(source)))
+  // A {file:...} reference is always a path, so a bare name such as `notes.txt` is a file next to the config.
+  return values.flatMap((value) =>
+    value.startsWith("~/") ? [path.join(os.homedir(), value.slice(2))] : localPath(value, path.dirname(source), true),
+  )
 }
 
 function commandInputs(config: unknown, base: string) {
