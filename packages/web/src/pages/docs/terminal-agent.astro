@@ -50,6 +50,9 @@ vector whoami</code><button class="doc-cmd-copy" type="button" aria-label="Copy 
           <p class="note">
             The token is verified about once a day and cached with a seven-day offline grace window, so a flaky network never locks you out of your own terminal. Only a definitive invalid or expired answer signs you out. <code>login</code>, <code>logout</code>, <code>whoami</code>, <code>completion</code>, <code>upgrade</code> and <code>uninstall</code> work signed out.
           </p>
+          <p>
+            Each check also counts your account as active that day, with the CLI version, operating system and CPU architecture and never your prompts, code or files; set <code>VECTOR_DISABLE_USAGE=1</code> to keep the check without being counted.
+          </p>
 
           <h2 id="cli-run">One-shot and scripted runs</h2>
           <p>
