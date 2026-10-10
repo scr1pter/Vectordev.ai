@@ -56,7 +56,7 @@ import { Truncate } from "@/tool/truncate"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Format } from "../../src/format"
-import { TestInstance, tmpdirScoped } from "../fixture/fixture"
+import { TestInstance, tmpdirScoped, trustWorkspace } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -3786,6 +3786,8 @@ for (const mode of ["allow", "reject", "cancel", "definition", "override"] as co
             },
           },
         })
+        // The project's provider, model and plugin load only once the workspace is trusted.
+        yield* Effect.promise(() => trustWorkspace(fixture.directory))
         const sessions = yield* Session.Service
         const prompt = yield* SessionPrompt.Service
         const permission = yield* Permission.Service

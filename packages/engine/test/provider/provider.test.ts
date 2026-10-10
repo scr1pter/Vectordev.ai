@@ -836,6 +836,8 @@ it.instance(
     `,
       ),
     )
+    // A project plugin loads only once the workspace, plugin included, is trusted.
+    yield* Effect.promise(() => trustWorkspace(instance.directory))
     yield* set(
       "VECTOR_AUTH_CONTENT",
       JSON.stringify({
