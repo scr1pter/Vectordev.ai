@@ -56,6 +56,9 @@ import {
   setAllScheduledAgentsPaused,
 } from "./scheduled-agents"
 import { createTray, destroyTray, notifyScheduledRunFinished, updateTray } from "./tray"
+import { getStore } from "./store"
+import { USAGE_STORE } from "./store-keys"
+import { createUsageCheckin, usageCheckinEndpoint } from "./usage-checkin"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Vector Dev",
@@ -369,6 +372,7 @@ const main = Effect.gen(function* () {
   registerRendererProtocol()
   setDockIcon()
   const updater = setupAutoUpdater({ stop: stopSidecars, relaunch })
+  const usageSharing = () => getStore(USAGE_STORE).get("enabled") !== false
   registerIpcHandlers({
     killSidecar: () => killSidecar(),
     relaunch,
@@ -394,6 +398,8 @@ const main = Effect.gen(function* () {
     setBackgroundColor: (color) => setBackgroundColor(color),
     exportDebugLogs: () => exportDebugLogs(),
     recordFatalRendererError: (error) => writeLog("renderer", "fatal renderer error", { ...error }, "error"),
+    getUsageSharing: usageSharing,
+    setUsageSharing: (enabled) => getStore(USAGE_STORE).set("enabled", enabled),
   })
   registerWslIpcHandlers(wslServers)
   void updater.start()
@@ -474,6 +480,25 @@ const main = Effect.gen(function* () {
   }).pipe(forwardInitializationFailure(serverReady), Effect.forkChild)
 
   yield* Fiber.await(loadingTask)
+
+  const usage = createUsageCheckin({
+    endpoint: usageCheckinEndpoint({
+      packaged: app.isPackaged,
+      channel: CHANNEL,
+      override: process.env.VECTOR_USAGE_URL,
+    }),
+    store: getStore(USAGE_STORE),
+    enabled: usageSharing,
+    engine: { url, username: "vector", password },
+    token: () => vectorAccount.token(),
+    fetch: (input, init) => fetch(input, init),
+    now: Date.now,
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+  })
+  usage.start()
+  app.once("will-quit", () => usage.stop())
 
   // The tray is what makes staying resident survivable: without it a
   // background-mode keep-alive would leave a process the user can see no window

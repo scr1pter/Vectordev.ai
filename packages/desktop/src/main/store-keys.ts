@@ -4,6 +4,8 @@ export const WSL_SERVERS_KEY = "wslServers"
 export const PINCH_ZOOM_ENABLED_KEY = "pinchZoomEnabled"
 export const WINDOW_IDS_KEY = "windowIds"
 export const GITHUB_CLONE_PARENT_KEY = "githubCloneParent"
+// Main-process store for the usage check-in: its random install ID, the last UTC day sent and the sharing switch.
+export const USAGE_STORE = "usage"
 
 // The renderer's own stores all end in .dat (default.dat, vector.global.dat, vector.workspace.*.dat, ...). Every other
 // store belongs to the main process, including vector.settings and the encrypted sign-in tokens, and the store IPC must
