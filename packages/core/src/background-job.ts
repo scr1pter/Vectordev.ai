@@ -38,6 +38,8 @@ type Active = {
   pending: number
   next: number
   outputs: { sequence: number; text: string }[]
+  // How the latest run added so far ended, which is how the job ends.
+  last?: { sequence: number; exit: Exit.Exit<string, unknown> }
   tail: Deferred.Deferred<void>
   promoted: Deferred.Deferred<Info>
   onPromote?: Effect.Effect<void>
@@ -160,12 +162,15 @@ export const make = Effect.gen(function* () {
       const outputs = (text === undefined ? job.outputs : [...job.outputs, { sequence, text }]).toSorted(
         (a, b) => a.sequence - b.sequence,
       )
-      if (Exit.isSuccess(exit) && pending > 0) {
-        return [{}, new Map(jobs).set(id, { ...job, pending, outputs })]
-      }
-      const status: Exclude<Status, "running"> = Exit.isSuccess(exit)
+      const last = !job.last || sequence > job.last.sequence ? { sequence, exit } : job.last
+      // A run that fails leaves the runs added to the job to finish: a follow-up sent to a subagent whose provider
+      // failed is often what recovers it, and one that failed alongside a running run must not stop that run. The job
+      // settles once every run has returned, as the latest run added ended, whichever returned last.
+      if (pending > 0) return [{}, new Map(jobs).set(id, { ...job, pending, outputs, last })]
+      const final = last.exit
+      const status: Exclude<Status, "running"> = Exit.isSuccess(final)
         ? "completed"
-        : Cause.hasInterruptsOnly(exit.cause)
+        : Cause.hasInterruptsOnly(final.cause)
           ? "cancelled"
           : "error"
       const output = outputs.at(-1)
@@ -180,7 +185,7 @@ export const make = Effect.gen(function* () {
           completed_at,
           ...(output ? { output: output.text } : {}),
           ...(outputs.length > 1 ? { outputs: outputs.map((item) => item.text) } : {}),
-          ...(status === "error" ? { error: errorText(failed) } : {}),
+          ...(status === "error" && Exit.isFailure(final) ? { error: errorText(Cause.squash(final.cause)) } : {}),
         },
       }
       return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]

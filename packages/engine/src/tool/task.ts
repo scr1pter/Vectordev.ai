@@ -76,10 +76,12 @@ const NOTE_GUIDANCE = {
 // Tasks that end within this long of each other reach the parent as one message, and so one turn.
 const NOTE_BATCH_WINDOW = "500 millis"
 // Tags that frame instructions, messages or this tool's own results. A subagent's report is its own text, so it must
-// not be able to open or close one of them.
+// not be able to open or close one of them. Matched exactly as written, lowercase, so code in a report such as
+// `useState<User>` or `Array<Task>` keeps its characters; so do YAML keys such as `user:`, since speaker labels are
+// capitalized.
 const CONTROL_TAG =
-  /<(\/?)(system-reminder|system|task-notification|task|task_result|task_error|summary|orchestration_assignment|env|user|human|assistant|[a-z_]+_policy|[a-z_]+_instructions|vector_[a-z_]+)(?=[\s/>])/gi
-const SPEAKER = /^([ \t]*)(Human|Assistant|System|User):/gim
+  /<(\/?)(system-reminder|system|task-notification|task|task_result|task_error|summary|orchestration_assignment|env|user|human|assistant|[a-z_]+_policy|[a-z_]+_instructions|vector_[a-z_]+)(?=[\s/>])/g
+const SPEAKER = /^([ \t]*)(Human|Assistant|System|User):/gm
 // Not a cap: past this many running siblings the result tells the model, so
 // it can tell the user, because each subagent spends on their keys.
 const BUSY_SUBAGENTS_PER_SESSION = 6
@@ -286,6 +288,8 @@ export const TaskTool = Tool.define(
       {
         state: SubagentLifecycle.FinalStatus
         taskID: SessionID
+        // The parent's message whose call launched the task.
+        launchID: MessageID
         text: string
         ops: TaskPromptOps
         agent: string
@@ -293,9 +297,34 @@ export const TaskTool = Tool.define(
       }[]
     >()
 
+    // Any prompt commits a pending revert, deleting the reverted messages and the redo, so a note never does: it waits
+    // until the user resolves the revert, and is dropped when that removed the call that launched the task. Checks back
+    // at a growing interval, up to a minute, since a revert can stay pending for a long time.
+    const unreverted = (sessionID: SessionID, wait: number): Effect.Effect<Session.Info, Session.NotFound> =>
+      sessions
+        .get(sessionID)
+        .pipe(
+          Effect.flatMap((current) =>
+            current.revert
+              ? Effect.sleep(wait).pipe(Effect.andThen(() => unreverted(sessionID, Math.min(wait * 2, 60_000))))
+              : Effect.succeed(current),
+          ),
+        )
+    const launched = (note: { launchID: MessageID }, sessionID: SessionID) =>
+      MessageV2.get({ sessionID, messageID: note.launchID }).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.option,
+        Effect.map(Option.isSome),
+      )
+
     const deliverNotes = Effect.fn("TaskTool.deliverNotes")(function* (parentID: SessionID) {
-      const batch = notes.get(parentID) ?? []
+      const waiting = notes.get(parentID) ?? []
       notes.delete(parentID)
+      // A revert started while the notes waited for their batch is waited out here too.
+      yield* unreverted(parentID, 1_000)
+      const batch = (yield* Effect.forEach(waiting, (note) =>
+        launched(note, parentID).pipe(Effect.map((kept) => (kept ? [note] : []))),
+      )).flat()
       const first = batch[0]
       if (!first) return
       // Carry the parent's current turn settings: without a model the note would switch the parent to its agent's
@@ -806,32 +835,16 @@ export const TaskTool = Tool.define(
         state: SubagentLifecycle.FinalStatus,
         text: string,
       ) {
-        // Any prompt commits a pending revert, deleting the reverted messages and the redo, so a note never does: it
-        // waits until the user resolves the revert, and is dropped when that removed the call that launched the task.
-        // Checks back at a growing interval, up to a minute, since a revert can stay pending for a long time.
-        const unreverted = (wait: number): Effect.Effect<Session.Info, Session.NotFound> =>
-          sessions
-            .get(ctx.sessionID)
-            .pipe(
-              Effect.flatMap((current) =>
-                current.revert
-                  ? Effect.sleep(wait).pipe(Effect.andThen(() => unreverted(Math.min(wait * 2, 60_000))))
-                  : Effect.succeed(current),
-              ),
-            )
-        const currentParent = yield* unreverted(1_000)
+        const currentParent = yield* unreverted(ctx.sessionID, 1_000)
         // The note stays in the parent's history and is sent again on every later request, so it gets the cap a tool
         // result gets, with the rest saved where the parent can read it.
         const parentAgent = yield* agent.get(currentParent.agent ?? ctx.agent)
         const capped = yield* truncate.output(text, {}, parentAgent)
-        const launch = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
-          Effect.provideService(Database.Service, database),
-          Effect.option,
-        )
-        if (Option.isNone(launch)) return
+        if (!(yield* launched({ launchID: ctx.messageID }, ctx.sessionID))) return
         const note = {
           state,
           taskID: nextSession.id,
+          launchID: ctx.messageID,
           text: renderNote({
             sessionID: nextSession.id,
             title,
@@ -936,9 +949,13 @@ export const TaskTool = Tool.define(
         runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id)), Effect.flatMap(settleRun))
       // A message for a background task that is mid-run joins the child's running loop, as a prompt sent to a busy
       // session does, so the child reads it at its next step. One that is queued behind its dependencies, or between
-      // runs, waits for the run before it.
+      // runs, waits for the run before it: a message with its own dependencies is not delivered until they finish, and
+      // one of them failing must not stop the run already going.
       const extendRun = Effect.fn("TaskTool.extendRun")(function* () {
-        const busy = (yield* statuses.get(nextSession.id)).type !== "idle"
+        // A Stop pressed while this call was setting up is meant for its message too.
+        if (ctx.abort.aborted)
+          return yield* Effect.fail(new Error("Stopped before the message reached the background task."))
+        const busy = dependencies.length === 0 && (yield* statuses.get(nextSession.id)).type !== "idle"
         if (!(yield* background.extend({ id: nextSession.id, run: guardedRun(), concurrent: busy }))) return undefined
         return busy ? ("delivered" as const) : ("queued" as const)
       })

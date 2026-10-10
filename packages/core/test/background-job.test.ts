@@ -159,6 +159,38 @@ describe("BackgroundJob", () => {
     }).pipe(Effect.provide(jobsLayer)),
   )
 
+  it.live("a failed run leaves the runs added after it, or alongside it, to finish", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const failing = yield* Deferred.make<void>()
+      const queued = yield* jobs.start({
+        type: "test",
+        run: Deferred.await(failing).pipe(
+          Effect.andThen(Effect.fail(new BackgroundJob.RunFailed({ message: "rate limited", output: "partial notes" }))),
+        ),
+      })
+      yield* jobs.extend({ id: queued.id, run: Effect.succeed("follow-up report") })
+      yield* Deferred.succeed(failing, undefined)
+      expect((yield* jobs.wait({ id: queued.id })).info).toMatchObject({
+        status: "completed",
+        output: "follow-up report",
+        outputs: ["partial notes", "follow-up report"],
+      })
+
+      // A run added alongside that fails does not stop the run already going; the job ends as that latest run did.
+      const first = yield* Deferred.make<void>()
+      const running = yield* jobs.start({ type: "test", run: Deferred.await(first).pipe(Effect.as("first report")) })
+      yield* jobs.extend({ id: running.id, concurrent: true, run: Effect.fail(new Error("could not deliver")) })
+      expect((yield* jobs.wait({ id: running.id, timeout: 50 })).info?.status).toBe("running")
+      yield* Deferred.succeed(first, undefined)
+      expect((yield* jobs.wait({ id: running.id })).info).toMatchObject({
+        status: "error",
+        error: "could not deliver",
+        output: "first report",
+      })
+    }).pipe(Effect.provide(jobsLayer)),
+  )
+
   it.live("an extension racing the job's completion is either refused or runs before the job settles", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
