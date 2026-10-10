@@ -4015,11 +4015,12 @@ export function PreviewPanel(props: {
       return
     }
     const plan = publishPlan(
-      overview,
+      overview.hosting,
       targets.find((item) => item.id === "vercel"),
     )
     if (!plan.ready) {
-      setPublish({ phase: "blocked", reason: plan.reason, projectPath: overview.projectPath })
+      // Open Vector Cloud only when Connections is where it gets fixed.
+      setPublish({ phase: "blocked", reason: plan.reason, projectPath: plan.connect ? overview.projectPath : undefined })
       return
     }
     setPublish({ phase: "confirm", overview, project: plan.project, account: plan.account })

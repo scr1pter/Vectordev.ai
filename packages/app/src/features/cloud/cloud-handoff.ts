@@ -119,34 +119,28 @@ export function currentFailure(overview: CloudOverview) {
 }
 
 export type PublishPlan =
-  | { ready: true; project: string; account?: string; via: "connection" | "cli" }
-  | { ready: false; reason: string }
+  | { ready: true; project: string; account?: string }
+  /** `connect` is true when Vector Cloud > Connections is where it gets fixed. */
+  | { ready: false; reason: string; connect: boolean }
 
 /**
- * Where a preview would go, or what has to be set up first. A Vercel account
- * connected in Vector publishes to the project linked here; a machine already
- * signed in with the Vercel CLI publishes to the project that folder is linked
- * to, which the CLI creates on its first deploy.
+ * Where a preview would go, or what has to be set up first. Publishing needs
+ * what the agent's publish needs too: the Vercel account connected in Vector
+ * Cloud with an access token, a Vercel project linked to this project, and a
+ * machine that can run the deploy.
  */
-export function publishPlan(overview: CloudOverview, target?: PublishTarget): PublishPlan {
-  if (overview.hosting.connected && overview.hosting.project) {
-    return { ready: true, project: overview.hosting.project.name, account: overview.hosting.account, via: "connection" }
+export function publishPlan(hosting: CloudOverview["hosting"], target?: PublishTarget): PublishPlan {
+  if (!hosting.connected) {
+    return { ready: false, reason: "Connect Vercel in Vector Cloud > Connections with an access token.", connect: true }
   }
-  if (overview.hosting.connected) {
-    return { ready: false, reason: "Link a Vercel project to this project in Vector Cloud > Connections." }
+  if (!hosting.project) {
+    return { ready: false, reason: "Link a Vercel project to this project in Vector Cloud > Connections.", connect: true }
   }
-  if (target?.available) {
-    return {
-      ready: true,
-      project: "the project this folder is linked to on Vercel",
-      account: target.account,
-      via: "cli",
-    }
+  // Connected and linked, but this machine cannot run the deploy (no Node.js, for example).
+  if (target && !target.available) {
+    return { ready: false, reason: target.loginHint || "This machine cannot run the Vercel deploy.", connect: false }
   }
-  return {
-    ready: false,
-    reason: target?.loginHint || "Connect Vercel in Vector Cloud > Connections with an access token.",
-  }
+  return { ready: true, project: hosting.project.name, account: hosting.account }
 }
 
 export type CloudStatus = { tone: "success" | "warning" | "error" | "idle"; label: string }

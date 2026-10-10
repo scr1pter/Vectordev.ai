@@ -23,7 +23,7 @@ import {
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
-import { deploymentEvidence, deployRepairPrompt } from "./cloud-handoff"
+import { deploymentEvidence, deployRepairPrompt, publishPlan } from "./cloud-handoff"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -744,34 +744,28 @@ export function CloudConsole(props: {
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
   const providerLink = (provider: "vercel") => providerLinks().find((item) => item.provider === provider)
 
-  // Whether this project can publish now, from the same state publishing
-  // checks: a connected Vercel account with a linked project, or a machine
-  // already signed in with the Vercel CLI.
+  // Whether this project can publish now, decided the way the preview's
+  // Publish decides it: a connected Vercel account, a linked project, and a
+  // machine that can run the deploy.
   const hostingState = createMemo(() => {
-    const connected = providerConnection("vercel")?.connected
+    const connection = providerConnection("vercel")
     const link = providerLink("vercel")
-    const target = vercelTarget()
-    // Connected but unable to run the deploy: the hint says what this machine lacks.
-    if (connected && target && !target.available) {
-      return { tone: "warning", label: "Cannot publish yet", detail: target.loginHint, fix: false }
-    }
-    if (connected && link) return { tone: "success", label: `Vercel · ${link.projectName}`, detail: "", fix: false }
-    if (connected) {
-      return {
-        tone: "warning",
-        label: "Link a Vercel project",
-        detail: "Vercel is connected. Link one of its projects to this repository in Connections to publish.",
-        fix: true,
-      }
-    }
-    if (target?.available) {
-      return { tone: "success", label: `Vercel CLI · ${target.account ?? "signed in"}`, detail: "", fix: false }
-    }
+    const plan = publishPlan(
+      {
+        provider: "Vercel",
+        connected: connection?.connected === true,
+        account: connection?.account,
+        project: link && { id: link.projectId, name: link.projectName },
+      },
+      vercelTarget(),
+    )
+    if (plan.ready) return { ready: true, tone: "success", label: `Vercel · ${plan.project}`, detail: "", fix: false }
     return {
-      tone: undefined,
-      label: "Not connected",
-      detail: "Connect Vercel in Connections with an access token to publish this project.",
-      fix: true,
+      ready: false,
+      tone: connection?.connected ? "warning" : undefined,
+      label: !connection?.connected ? "Not connected" : plan.connect ? "Link a Vercel project" : "Cannot publish yet",
+      detail: plan.reason,
+      fix: plan.connect,
     }
   })
 
@@ -1424,7 +1418,7 @@ export function CloudConsole(props: {
                       class="cloud-button ml-auto"
                       data-variant="primary"
                       type="button"
-                      disabled={!publish || publishing()}
+                      disabled={!publish || publishing() || !hostingState().ready}
                       onClick={() =>
                         deploymentEnvironment() === "production"
                           ? requestConfirm("publish-production", () => void runPublish())
@@ -1440,24 +1434,19 @@ export function CloudConsole(props: {
                             : "Publish preview →"}
                     </button>
                   </div>
-                  <Show when={publish && vercelTarget()}>
-                    {(target) => (
+                  <Show when={publish && hostingState().ready && providerLink("vercel")}>
+                    {(link) => (
                       <p class="cloud-muted mt-2 text-[11px]">
-                        {target().account ? (
-                          <span>
-                            <span class="text-[color:var(--vx-green)]">●</span> Connected to {target().label} as{" "}
-                            <strong class="text-white/70">{target().account}</strong>.
-                          </span>
-                        ) : (
-                          target().loginHint
-                        )}
+                        <span class="text-[color:var(--vx-green)]">●</span> Publishes to the Vercel project{" "}
+                        <strong class="text-white/70">{link().projectName}</strong>
+                        {providerConnection("vercel")?.account ? ` as ${providerConnection("vercel")?.account}` : ""}.
                       </p>
                     )}
                   </Show>
                   <Show when={!publish}>
                     <p class="cloud-muted mt-2 text-[11px]">Publishing runs in Vector Desktop.</p>
                   </Show>
-                  <Show when={publish && hostingState().tone !== "success"}>
+                  <Show when={publish && !hostingState().ready}>
                     <div class="cloud-inline-empty mt-3">
                       <span>{hostingState().detail}</span>
                       <Show when={hostingState().fix}>

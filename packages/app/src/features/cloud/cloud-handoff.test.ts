@@ -97,23 +97,31 @@ describe("deploy repair prompt", () => {
 
 describe("publish plan", () => {
   test("publishes to the linked Vercel project, or says what to set up", () => {
-    expect(
-      publishPlan(
-        overview({
-          hosting: { provider: "Vercel", connected: true, account: "ana", project: { id: "p", name: "shop" } },
-        }),
-      ),
-    ).toEqual({ ready: true, project: "shop", account: "ana", via: "connection" })
-    expect(publishPlan(overview({ hosting: { provider: "Vercel", connected: true } }))).toEqual({
+    const linked = { provider: "Vercel" as const, connected: true, account: "ana", project: { id: "p", name: "shop" } }
+    const vercel = { id: "vercel" as const, label: "Vercel", loginHint: "", available: true }
+    expect(publishPlan(linked, vercel)).toEqual({ ready: true, project: "shop", account: "ana" })
+    expect(publishPlan({ provider: "Vercel", connected: true })).toEqual({
       ready: false,
       reason: "Link a Vercel project to this project in Vector Cloud > Connections.",
+      connect: true,
     })
-    expect(
-      publishPlan(overview(), { id: "vercel", label: "Vercel", loginHint: "", available: true, account: "cli-user" }),
-    ).toMatchObject({ ready: true, via: "cli", account: "cli-user" })
-    expect(publishPlan(overview())).toEqual({
+    expect(publishPlan(overview().hosting)).toEqual({
       ready: false,
       reason: "Connect Vercel in Vector Cloud > Connections with an access token.",
+      connect: true,
+    })
+    // The agent publishes only through the connected account, so a machine
+    // signed in with the Vercel CLI alone is not a second way in.
+    expect(publishPlan(overview().hosting, { ...vercel, account: "cli-user" })).toMatchObject({
+      ready: false,
+      connect: true,
+    })
+    // What this machine lacks is fixed on the machine, not in Connections.
+    const noNode = "Install Node.js from nodejs.org, then publish again."
+    expect(publishPlan(linked, { ...vercel, available: false, loginHint: noNode })).toEqual({
+      ready: false,
+      reason: noNode,
+      connect: false,
     })
   })
 })
