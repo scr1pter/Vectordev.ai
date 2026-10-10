@@ -30,7 +30,6 @@ export type CloudSection =
   | "connections"
   | "deployments"
   | "logs"
-  | "analytics"
   | "observability"
   | "domains"
   | "environment"
@@ -38,8 +37,6 @@ export type CloudSection =
   | "authentication"
   | "storage"
   | "functions"
-  | "realtime"
-  | "delivery"
   | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
@@ -51,11 +48,9 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
     items: [
       { id: "deployments", label: "Deployments" },
       { id: "logs", label: "Logs" },
-      { id: "analytics", label: "Analytics" },
       { id: "observability", label: "Observability" },
       { id: "domains", label: "Domains" },
       { id: "environment", label: "Environment variables" },
-      { id: "delivery", label: "Delivery & security" },
     ],
   },
   {
@@ -65,7 +60,6 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
       { id: "authentication", label: "Authentication" },
       { id: "storage", label: "Storage" },
       { id: "functions", label: "Edge functions" },
-      { id: "realtime", label: "Realtime" },
     ],
   },
   {
@@ -136,16 +130,6 @@ function sectionIcon(id: CloudSection) {
             stroke-linejoin="round"
           />
         </>
-      )
-    case "analytics":
-      return (
-        <path
-          d="M3 12.8V9.7M6.3 12.8V6.5M9.7 12.8V8M13 12.8V3.4M2.3 13.2h11.4"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.15"
-          stroke-linecap="round"
-        />
       )
     case "domains":
       return (
@@ -236,29 +220,6 @@ function sectionIcon(id: CloudSection) {
           stroke-width="1.1"
           stroke-linecap="round"
         />
-      )
-    case "realtime":
-      return (
-        <path
-          d="M3.2 8a4.8 4.8 0 0 1 8.35-3.2M12.8 8a4.8 4.8 0 0 1-8.35 3.2M10.8 4.8h.75V4M4.45 12v-.8h.75"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.15"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      )
-    case "delivery":
-      return (
-        <>
-          <circle cx="8" cy="8" r="5.3" fill="none" stroke="currentColor" stroke-width="1.1" />
-          <path
-            d="M4.2 4.4c2.1 1.4 5.5 1.4 7.6 0M4.2 11.6c2.1-1.4 5.5-1.4 7.6 0M8 2.7c-1.9 2.9-1.9 7.7 0 10.6 1.9-2.9 1.9-7.7 0-10.6Z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1"
-          />
-        </>
       )
     case "settings":
       return (
@@ -798,12 +759,6 @@ export function CloudConsole(props: {
     return `https://supabase.com/dashboard/project/${encodeURIComponent(ref)}${pathname}`
   }
 
-  const deploymentDashboard = (pathname = "") => {
-    const link = providerLink("vercel")
-    if (!link?.accountName) return "https://vercel.com/dashboard"
-    return `https://vercel.com/${encodeURIComponent(link.accountName)}/${encodeURIComponent(link.projectName)}${pathname}`
-  }
-
   const refreshSupabaseServices = async () => {
     if (!api || !props.projectPath) return
     setSupabaseServicesBusy(true)
@@ -820,7 +775,7 @@ export function CloudConsole(props: {
 
   createEffect(() => {
     const current = section()
-    if (["authentication", "storage", "functions", "realtime"].includes(current) && !supabaseServicesLoaded()) {
+    if (["authentication", "storage", "functions"].includes(current) && !supabaseServicesLoaded()) {
       void refreshSupabaseServices()
     }
   })
@@ -1114,7 +1069,7 @@ export function CloudConsole(props: {
                   </span>
                   <span>
                     <strong>Data services</strong>
-                    <small>Database, authentication, storage, functions, and realtime.</small>
+                    <small>Database, authentication, storage, and functions.</small>
                   </span>
                   <em>{database() ? "Supabase linked" : "Setup needed"}</em>
                 </button>
@@ -1837,84 +1792,6 @@ export function CloudConsole(props: {
               </Show>
             </Show>
 
-            {/* Analytics */}
-            <Show when={section() === "analytics"}>
-              <div class="cloud-heading">
-                <div>
-                  <div class="cloud-kicker">Release performance</div>
-                  <h1>Analytics</h1>
-                  <p>
-                    Vector summarizes the release evidence it owns locally. Traffic analytics and speed insights stay in
-                    your linked hosting account and open directly from here.
-                  </p>
-                </div>
-              </div>
-              <div class="cloud-grid">
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">{deployments().length}</span>
-                  <strong>Total releases</strong>
-                  <small>Preview and production deployments</small>
-                </div>
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">
-                    {deployments().length
-                      ? `${Math.round((deployments().filter((item) => item.status === "ready").length / deployments().length) * 100)}%`
-                      : "—"}
-                  </span>
-                  <strong>Health rate</strong>
-                  <small>Latest reachable release checks</small>
-                </div>
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">
-                    {formatDuration(
-                      deployments().filter((item) => item.durationMs !== undefined).length
-                        ? Math.round(
-                            deployments().reduce((total, item) => total + (item.durationMs ?? 0), 0) /
-                              deployments().filter((item) => item.durationMs !== undefined).length,
-                          )
-                        : undefined,
-                    )}
-                  </span>
-                  <strong>Average build</strong>
-                  <small>Across deployments with recorded duration</small>
-                </div>
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">
-                    {formatDuration(
-                      deployments().filter((item) => item.latencyMs !== undefined).length
-                        ? Math.round(
-                            deployments().reduce((total, item) => total + (item.latencyMs ?? 0), 0) /
-                              deployments().filter((item) => item.latencyMs !== undefined).length,
-                          )
-                        : undefined,
-                    )}
-                  </span>
-                  <strong>Average latency</strong>
-                  <small>From Vector's latest health probes</small>
-                </div>
-              </div>
-              <section class="cloud-service-list mt-4">
-                <button type="button" onClick={() => platform.openLink(deploymentDashboard("/analytics"))}>
-                  <span class="cloud-service-icon">V</span>
-                  <span>
-                    <strong>Vercel Analytics</strong>
-                    <small>Open traffic analytics for the linked Vercel project.</small>
-                  </span>
-                  <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
-                </button>
-                <button type="button" onClick={() => platform.openLink(deploymentDashboard("/speed-insights"))}>
-                  <span class="cloud-service-icon">
-                    <Icon name="status" />
-                  </span>
-                  <span>
-                    <strong>Speed Insights</strong>
-                    <small>Inspect Core Web Vitals in the provider dashboard.</small>
-                  </span>
-                  <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
-                </button>
-              </section>
-            </Show>
-
             {/* Observability */}
             <Show when={section() === "observability"}>
               <div class="cloud-heading">
@@ -2604,115 +2481,6 @@ export function CloudConsole(props: {
                   </button>
                 </div>
               </Show>
-            </Show>
-
-            {/* Realtime */}
-            <Show when={section() === "realtime"}>
-              <div class="cloud-heading">
-                <div>
-                  <div class="cloud-kicker">Live data</div>
-                  <h1>Realtime</h1>
-                  <p>Use the repository's Supabase connection for database changes, broadcast, and presence.</p>
-                </div>
-              </div>
-              <Show
-                when={database()?.projectRef}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("realtime")}
-                    </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect a project from Database to use Realtime.</p>
-                  </div>
-                }
-              >
-                <section class="cloud-service-list">
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/realtime/inspector"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="status" />
-                    </span>
-                    <span>
-                      <strong>Realtime inspector</strong>
-                      <small>Inspect live channels and messages for this project.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/database/replication"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="branch" />
-                    </span>
-                    <span>
-                      <strong>Database replication</strong>
-                      <small>Choose which database changes may be streamed to clients.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                </section>
-              </Show>
-            </Show>
-
-            {/* Delivery & security */}
-            <Show when={section() === "delivery"}>
-              <div class="cloud-heading">
-                <div>
-                  <div class="cloud-kicker">Hosting platform services</div>
-                  <h1>Delivery & security</h1>
-                  <p>
-                    Open CDN, firewall, flags, workflows, sandboxes, and image controls in the hosting account linked to
-                    this repository. Vector keeps the repository association; the provider remains the source of truth.
-                  </p>
-                </div>
-              </div>
-              <section class="cloud-service-list">
-                <For
-                  each={[
-                    {
-                      name: "CDN",
-                      detail: "Caching and global delivery for the linked deployment.",
-                      icon: "cloud-upload" as const,
-                    },
-                    {
-                      name: "Firewall",
-                      detail: "Traffic controls and security rules owned by your provider.",
-                      icon: "shield" as const,
-                    },
-                    {
-                      name: "Feature flags",
-                      detail: "Manage release flags alongside the linked project.",
-                      icon: "sliders" as const,
-                    },
-                    {
-                      name: "Workflows",
-                      detail: "Inspect durable project workflows when your provider supports them.",
-                      icon: "branch" as const,
-                    },
-                    {
-                      name: "Sandboxes",
-                      detail: "Open isolated execution resources in the provider dashboard.",
-                      icon: "terminal" as const,
-                    },
-                    {
-                      name: "Image delivery",
-                      detail: "Configure project image optimization and delivery.",
-                      icon: "photo" as const,
-                    },
-                  ]}
-                >
-                  {(service) => (
-                    <button type="button" onClick={() => platform.openLink(deploymentDashboard())}>
-                      <span class="cloud-service-icon">
-                        <Icon name={service.icon} />
-                      </span>
-                      <span>
-                        <strong>{service.name}</strong>
-                        <small>{service.detail}</small>
-                      </span>
-                      <em>{providerLink("vercel") ? "Open Vercel" : "Connect Vercel"}</em>
-                    </button>
-                  )}
-                </For>
-              </section>
             </Show>
 
             {/* Build and runtime */}

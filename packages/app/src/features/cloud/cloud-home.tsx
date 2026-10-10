@@ -19,7 +19,6 @@ function parseCloudSection(value: string | null): CloudSection | undefined {
     case "connections":
     case "deployments":
     case "logs":
-    case "analytics":
     case "observability":
     case "domains":
     case "environment":
@@ -27,8 +26,6 @@ function parseCloudSection(value: string | null): CloudSection | undefined {
     case "authentication":
     case "storage":
     case "functions":
-    case "realtime":
-    case "delivery":
     case "settings":
       return value
     default:
