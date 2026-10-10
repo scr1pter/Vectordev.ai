@@ -672,6 +672,14 @@ describe("storage", () => {
       ok: true,
       buckets: [{ id: "avatars", public: true, allowedMimeTypes: ["image/*"] }],
     })
+    // The console's limits editor: a size is set, and an empty type list clears it.
+    expect(
+      await run("update_bucket", { bucket: "avatars", fileSizeLimit: 2_097_152, allowedMimeTypes: null }),
+    ).toMatchObject({ ok: true, public: true })
+    expect((await run("buckets")).buckets[0]).toMatchObject({ public: true, fileSizeLimit: 2_097_152 })
+    expect((await run("buckets")).buckets[0].allowedMimeTypes).toBeUndefined()
+    expect(await run("update_bucket", { bucket: "avatars", fileSizeLimit: null })).toMatchObject({ ok: true })
+    expect((await run("buckets")).buckets[0].fileSizeLimit).toBeUndefined()
     fake.state.bucketFiles.avatars = 3
     expect(await run("delete_bucket", { bucket: "avatars" })).toMatchObject({
       ok: false,
