@@ -38,12 +38,18 @@ function sessionLineage(session: { id: string; parentID?: string }[], sessionID:
   return ids
 }
 
+// Vector Cloud actions that publish a site, create or change a database (which
+// the provider may bill), or write a host's settings. The engine asks for these
+// unless a rule names them, so auto-accept leaves them to the user too.
+const ALWAYS_ASK = new Set(["vector_cloud_publish", "vector_cloud_database", "vector_cloud_environment"])
+
 export function autoRespondsPermission(
   autoAccept: Record<string, boolean>,
   session: { id: string; parentID?: string }[],
-  permission: { sessionID: string },
+  permission: { sessionID: string; permission?: string },
   directory?: string,
 ) {
+  if (permission.permission && ALWAYS_ASK.has(permission.permission)) return false
   const value = sessionLineage(session, permission.sessionID)
     .map((id) => accepted(autoAccept, id, directory))
     .find((item): item is boolean => item !== undefined)

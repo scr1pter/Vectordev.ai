@@ -71,6 +71,23 @@ describe("autoRespondsPermission", () => {
     expect(autoRespondsPermission(autoAccept, sessions, permission("root"), directory)).toBe(true)
   })
 
+  test("leaves Vector Cloud publishes, databases and host settings to the user", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" })]
+    const autoAccept = {
+      [`${base64Encode(directory)}/*`]: true,
+      [`${base64Encode(directory)}/root`]: true,
+    }
+    const asked = (name: string) => ({ sessionID: "root", permission: name })
+
+    expect(autoRespondsPermission(autoAccept, sessions, asked("edit"), directory)).toBe(true)
+    // A migration dry run only reads.
+    expect(autoRespondsPermission(autoAccept, sessions, asked("vector_cloud_inspect"), directory)).toBe(true)
+    for (const name of ["vector_cloud_publish", "vector_cloud_database", "vector_cloud_environment"]) {
+      expect(autoRespondsPermission(autoAccept, sessions, asked(name), directory)).toBe(false)
+    }
+  })
+
   test("session-level override takes precedence over directory-level", () => {
     const directory = "/tmp/project"
     const sessions = [session({ id: "root" })]
