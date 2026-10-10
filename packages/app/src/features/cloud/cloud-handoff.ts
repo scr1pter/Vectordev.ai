@@ -43,6 +43,27 @@ export function onComposerPrompt(take: (request: ComposerPrompt) => boolean) {
   return () => globalThis.window?.removeEventListener(COMPOSER_PROMPT_EVENT, listener)
 }
 
+/**
+ * Whether a composer can take a handed-over prompt. It declines while it holds
+ * work the user has not sent (text, images, or line comments, which a submit
+ * sends and then clears), and while its session takes no input: a subagent
+ * session, or one waiting on a permission or a question, shows no message box.
+ */
+export function composerTakes(input: { dirty: boolean; context: readonly { comment?: string }[]; open: boolean }) {
+  return input.open && !input.dirty && !input.context.some((item) => item.comment?.trim())
+}
+
+/**
+ * Whether a composer still holds exactly the prompt handed to it. Only then is
+ * it sent: never a composer the user has changed since, and never an empty
+ * one, which a submit treats as Stop for a running turn.
+ */
+export function holdsHandoff(prompt: readonly { type: string; content?: string }[], text: string) {
+  if (!text.trim()) return false
+  if (prompt.some((part) => part.type !== "text")) return false
+  return prompt.map((part) => part.content ?? "").join("") === text
+}
+
 export const DATABASE_SETUP_PROMPT =
   "Set up the database for this project with Vector Cloud. Run vector_cloud database_status first. If a database is connected, prepare it (prepare_database, or prepare_auth when this needs sign-in) and continue. If none is connected, ask me whether to link an existing Supabase project or create a new one, then run create_database; Vector asks me to confirm before anything is created."
 
@@ -137,7 +158,11 @@ export function publishPlan(hosting: CloudOverview["hosting"], target?: PublishT
     return { ready: false, reason: "Connect Vercel in Vector Cloud > Connections with an access token.", connect: true }
   }
   if (!hosting.project) {
-    return { ready: false, reason: "Link a Vercel project to this project in Vector Cloud > Connections.", connect: true }
+    return {
+      ready: false,
+      reason: "Link a Vercel project to this project in Vector Cloud > Connections.",
+      connect: true,
+    }
   }
   // Connected and linked, but this machine cannot run the deploy (no Node.js, for example).
   if (target && !target.available) {

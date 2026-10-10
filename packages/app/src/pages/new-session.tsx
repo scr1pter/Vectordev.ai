@@ -19,7 +19,7 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
-import { onComposerPrompt } from "@/features/cloud/cloud-handoff"
+import { composerTakes, onComposerPrompt } from "@/features/cloud/cloud-handoff"
 
 const showWorkspaceBar = import.meta.env.VITE_VECTOR_CHANNEL !== "prod"
 
@@ -37,8 +37,9 @@ export default function NewSessionPage() {
   const language = useLanguage()
   const route = useSessionKey()
   const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string; send?: string }>()
-  // Set when a prompt arrives with send (a Fix this deploy handoff, for example).
-  const [autoSubmit, setAutoSubmit] = createSignal(false)
+  // The prompt to send once models load, when one arrives with send (a Fix
+  // this deploy handoff, for example).
+  const [autoSubmit, setAutoSubmit] = createSignal<string>()
 
   useComposerCommands()
 
@@ -73,7 +74,7 @@ export default function NewSessionPage() {
 
   const takePrompt = (text: string, send: boolean) => {
     prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
-    if (send) setAutoSubmit(true)
+    if (send) setAutoSubmit(text)
   }
 
   createEffect(() => {
@@ -86,10 +87,11 @@ export default function NewSessionPage() {
     })
   })
 
-  // An unsent draft is never replaced: the surface starts another session instead.
+  // An unsent draft, line comments included, is never replaced: the surface
+  // starts another session instead.
   onCleanup(
     onComposerPrompt((request) => {
-      if (prompt.dirty()) return false
+      if (!composerTakes({ dirty: prompt.dirty(), context: prompt.context.items(), open: true })) return false
       takePrompt(request.text, request.send)
       return true
     }),
@@ -131,7 +133,7 @@ export default function NewSessionPage() {
                       onNewSessionWorktreeReset={() => setStore("worktree", undefined)}
                       onSubmit={() => comments.clear()}
                       autoSubmit={autoSubmit()}
-                      onAutoSubmit={() => setAutoSubmit(false)}
+                      onAutoSubmit={() => setAutoSubmit(undefined)}
                       toolbar={
                         <Show when={!projectController.selected()}>
                           <PromptProjectAddButton controller={projectController} />

@@ -3,7 +3,9 @@ import type { CloudOverview } from "./cloud-api"
 import {
   cloudHref,
   cloudStatus,
+  composerTakes,
   deployRepairPrompt,
+  holdsHandoff,
   onComposerPrompt,
   publishPlan,
   requestComposerPrompt,
@@ -64,6 +66,30 @@ describe("composer prompts", () => {
     expect(taken).toEqual(["Set up the database"])
     stopBusy()
     stopFree()
+  })
+})
+
+describe("composer handoff", () => {
+  test("a composer takes a prompt only when it is empty and its session shows a message box", () => {
+    expect(composerTakes({ dirty: false, context: [], open: true })).toBe(true)
+    // A selection added to context stays across sends, so it is not a draft.
+    expect(composerTakes({ dirty: false, context: [{}, { comment: "  " }], open: true })).toBe(true)
+    expect(composerTakes({ dirty: true, context: [], open: true })).toBe(false)
+    // A line comment is sent and cleared with the next message, so it is unsent work.
+    expect(composerTakes({ dirty: false, context: [{ comment: "rename this" }], open: true })).toBe(false)
+    // A subagent session, or one waiting on a permission or a question, has no message box.
+    expect(composerTakes({ dirty: false, context: [], open: false })).toBe(false)
+  })
+
+  test("a handed-over prompt is sent only while the composer still holds exactly it", () => {
+    const text = "Fix the deploy"
+    const part = (content: string) => ({ type: "text", content, start: 0, end: content.length })
+    expect(holdsHandoff([part(text)], text)).toBe(true)
+    // An empty composer is never sent: a submit there stops a running turn.
+    expect(holdsHandoff([part("")], text)).toBe(false)
+    expect(holdsHandoff([part("")], "")).toBe(false)
+    expect(holdsHandoff([part(`${text} and also this`)], text)).toBe(false)
+    expect(holdsHandoff([part(text), { type: "image" }], text)).toBe(false)
   })
 })
 

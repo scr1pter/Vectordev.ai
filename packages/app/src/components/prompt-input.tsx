@@ -79,6 +79,7 @@ import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { detectParallelIntent } from "@/features/delegation/delegation"
+import { holdsHandoff } from "@/features/cloud/cloud-handoff"
 import { createOutcomes } from "@/features/economics/economics-repository"
 import { recommendModel } from "@/features/economics/economics-recommender"
 import { categorizeTask } from "@/features/economics/task-categorizer"
@@ -201,8 +202,11 @@ export interface PromptInputProps {
   onAbort?: () => void
   onSubmit?: () => void
   toolbar?: JSX.Element
-  /** Submit the prompt already in the composer as soon as models and agents have loaded. */
-  autoSubmit?: boolean
+  /**
+   * A prompt handed to this composer to send as soon as models and agents have
+   * loaded. It is sent only while the composer still holds exactly this text.
+   */
+  autoSubmit?: string
   /** Called once when that automatic submission starts. */
   onAutoSubmit?: () => void
 }
@@ -1534,13 +1538,17 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   // model, agent and permissions. Without a model, that submission keeps the
   // prompt in the composer and points the user at connecting one.
   createEffect(() => {
-    if (!props.autoSubmit) return
+    const text = props.autoSubmit
+    if (!text) return
     if (!sync().data.provider_loaded || props.controls.model.loading || props.controls.agents.loading) return
     // Wait for the default model to be chosen, unless there is none to choose.
     const selection = props.controls.model.selection
     if (!selection.current() && selection.list().length > 0) return
     untrack(() => {
       props.onAutoSubmit?.()
+      // A composer the user changed since keeps what they wrote, and an empty
+      // one is never submitted, since that would stop a running turn.
+      if (!holdsHandoff(prompt.current(), text)) return
       void handleSubmit(new Event("submit"))
     })
   })

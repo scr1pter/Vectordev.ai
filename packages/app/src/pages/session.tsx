@@ -100,7 +100,7 @@ import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/sessio
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { enqueueSessionFollowup, SESSION_FOLLOWUP_LIMIT } from "./session/followup-queue"
-import { onComposerPrompt } from "@/features/cloud/cloud-handoff"
+import { composerTakes, onComposerPrompt } from "@/features/cloud/cloud-handoff"
 
 type FollowupItem = FollowupDraft & { id: string }
 const emptyFollowups: FollowupItem[] = []
@@ -425,21 +425,6 @@ export default function Page() {
     })
   })
 
-  // Surfaces around the session (the Cloud card, the preview's publish sheet,
-  // the database banner) hand their prompts to this composer. One sent with
-  // `send` goes through the composer's own submission, and queues behind a
-  // running turn the way a typed follow-up does. An unsent draft is never
-  // replaced: the composer declines and the surface starts a new session.
-  const [autoSubmit, setAutoSubmit] = createSignal(false)
-  onCleanup(
-    onComposerPrompt((request) => {
-      if (prompt.dirty()) return false
-      prompt.set([{ type: "text", content: request.text, start: 0, end: request.text.length }], request.text.length)
-      if (request.send) setAutoSubmit(true)
-      return true
-    }),
-  )
-
   const [ui, setUi] = createStore({
     pendingMessage: undefined as string | undefined,
     reviewSnap: false,
@@ -557,6 +542,33 @@ export default function Page() {
 
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
   const isChildSession = createMemo(() => !!info()?.parentID)
+
+  // Surfaces around the session (the Cloud card, the preview's publish sheet,
+  // the database banner) hand their prompts to this composer. One sent with
+  // `send` goes through the composer's own submission, and queues behind a
+  // running turn the way a typed follow-up does. The composer declines when it
+  // holds an unsent draft or shows no message box (a subagent session, or a
+  // permission or question waiting), and the surface starts a new session.
+  // This page stays mounted across sessions, so a pending send belongs to the
+  // session that took it and is dropped on leaving it.
+  const [handoff, setHandoff] = createSignal<{ session?: string; text: string }>()
+  createEffect(
+    on(
+      () => params.id,
+      () => setHandoff(undefined),
+      { defer: true },
+    ),
+  )
+  onCleanup(
+    onComposerPrompt((request) => {
+      const open = !isChildSession() && !composer.blocked()
+      if (!composerTakes({ dirty: prompt.dirty(), context: prompt.context.items(), open })) return false
+      prompt.set([{ type: "text", content: request.text, start: 0, end: request.text.length }], request.text.length)
+      if (request.send) setHandoff({ session: params.id, text: request.text })
+      return true
+    }),
+  )
+
   const diffs = createMemo(() => (params.id ? list(sync().data.session_diff[params.id]) : []))
   const canReview = createMemo(() => !!sync().project)
   const reviewTab = createMemo(() => isDesktop())
@@ -2128,8 +2140,8 @@ export default function Page() {
             }}
             shouldQueue={queueEnabled}
             onQueue={queueFollowup}
-            autoSubmit={autoSubmit()}
-            onAutoSubmit={() => setAutoSubmit(false)}
+            autoSubmit={handoff()?.session === params.id ? handoff()?.text : undefined}
+            onAutoSubmit={() => setHandoff(undefined)}
             onAbort={() => {
               const id = params.id
               if (!id) return
