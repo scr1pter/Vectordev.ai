@@ -592,10 +592,9 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           },
         }
       },
-      // Read on every listing, so the owner's off-switch hides ChatGPT sign-in without a restart.
-      get methods() {
-        return methods.filter((method) => method.type !== "oauth" || chatgptOAuthConfiguration())
-      },
+      // The ChatGPT methods stay in this list so clients' method indexes do not shift when the owner's switch
+      // turns off. Vector hides them wherever it offers sign-in options, and each sign-in reads the switch again.
+      methods,
     },
     "chat.headers": async (input, output) => {
       if (input.model.providerID !== "openai") return

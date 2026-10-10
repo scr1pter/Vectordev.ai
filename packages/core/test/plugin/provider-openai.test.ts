@@ -181,7 +181,7 @@ describe("OpenAIPlugin", () => {
     }),
   )
 
-  it.effect("the owner's switch hides ChatGPT sign-in and refuses a new one with a clear message", () =>
+  it.effect("the owner's switch refuses a ChatGPT sign-in registered before it turned off, with a clear message", () =>
     Effect.gen(function* () {
       const integrations = yield* Integration.Service
       const integrationID = Integration.ID.make("openai")

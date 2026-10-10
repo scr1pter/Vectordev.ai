@@ -1,4 +1,10 @@
-import { CHATGPT_SIGN_IN_UNAVAILABLE, providerEnabled, providerOAuthAllowed } from "@vectordevai/core/provider-policy"
+import {
+  CHATGPT_SIGN_IN,
+  CHATGPT_SIGN_IN_UNAVAILABLE,
+  chatgptOAuthConfiguration,
+  providerEnabled,
+  providerOAuthAllowed,
+} from "@vectordevai/core/provider-policy"
 import { ProviderRemotePolicy } from "@vectordevai/core/provider-remote-policy"
 import { pluginOAuthAllowed } from "../plugin/oauth"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
@@ -90,9 +96,19 @@ export type Error = Auth.AuthError | OauthMissing | OauthCodeMissing | OauthCall
 
 type Hook = NonNullable<Hooks["auth"]>
 
-function visibleMethods(hook: Hook) {
+/** The sign-in methods Vector offers for a provider, as the app, TUI and CLI list them. */
+export function visibleMethods(hook: Hook) {
   if (!providerEnabled(hook.provider)) return []
   return hook.methods.filter((method) => method.type !== "oauth" || pluginOAuthAllowed(hook))
+}
+
+// Clients choose a method by its index in a list they may have read before the owner's remote ChatGPT switch
+// turned off. OpenAI's indexes therefore keep counting the ChatGPT methods while the switch hides them, so a
+// stale choice is refused instead of landing on the method that moved into its place.
+function indexedMethods(hook: Hook) {
+  if (hook.provider !== ProviderV2.ID.openai || !chatgptOAuthConfiguration(process.env, CHATGPT_SIGN_IN))
+    return visibleMethods(hook)
+  return providerEnabled(hook.provider) ? hook.methods : []
 }
 
 export interface Interface {
@@ -178,8 +194,10 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
           message: `${input.providerID} sign-in is currently paused in Vector. Choose another provider.`,
         })
       }
+      // The owner can switch ChatGPT sign-in off from vectordev.ai; read the switch before choosing the method.
+      if (input.providerID === ProviderV2.ID.openai) yield* Effect.promise(() => ProviderRemotePolicy.check(true))
       const method = Object.hasOwn(hooks, input.providerID)
-        ? visibleMethods(hooks[input.providerID])[input.method]
+        ? indexedMethods(hooks[input.providerID])[input.method]
         : undefined
       if (!method) {
         return yield* new ValidationFailed({
@@ -188,12 +206,8 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
         })
       }
       if (method.type !== "oauth") return
-      if (input.providerID === ProviderV2.ID.openai) {
-        // The owner can switch ChatGPT sign-in off from vectordev.ai; read the switch before opening a browser.
-        yield* Effect.promise(() => ProviderRemotePolicy.check(true))
-        if (!pluginOAuthAllowed(hooks[input.providerID]))
-          return yield* new ValidationFailed({ field: "providerID", message: CHATGPT_SIGN_IN_UNAVAILABLE })
-      }
+      if (input.providerID === ProviderV2.ID.openai && !pluginOAuthAllowed(hooks[input.providerID]))
+        return yield* new ValidationFailed({ field: "providerID", message: CHATGPT_SIGN_IN_UNAVAILABLE })
 
       if (method.prompts && input.inputs) {
         for (const prompt of method.prompts) {

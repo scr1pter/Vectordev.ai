@@ -13,6 +13,7 @@ import {
   renderOAuthError,
   type IdTokenClaims,
 } from "../../src/plugin/openai/codex"
+import { ProviderAuth } from "../../src/provider/auth"
 
 function createTestJwt(payload: object): string {
   const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")
@@ -259,7 +260,7 @@ describe("plugin.codex", () => {
     expect(headers.headers["User-Agent"]).toStartWith("vector/")
   })
 
-  test("the owner's off-switch hides ChatGPT sign-in, refuses a new one and stops a saved one", async () => {
+  test("the owner's off-switch hides ChatGPT sign-in, refuses a new one and stops a saved one without shifting method indexes", async () => {
     const requests: string[] = []
     using server = Bun.serve({
       port: 0,
@@ -275,7 +276,9 @@ describe("plugin.codex", () => {
     const oauth = { type: "oauth" as const, refresh: "placeholder", access: "placeholder", expires: 0 }
     applyRemoteProviderPolicy({ chatgptSignIn: false })
     try {
-      expect(hooks.auth!.methods.map((method) => method.label)).toEqual(["Manually enter API Key"])
+      expect(ProviderAuth.visibleMethods(hooks.auth!).map((method) => method.label)).toEqual(["Manually enter API Key"])
+      // Clients pick by index, so the plugin's own list keeps the ChatGPT methods in place.
+      expect(hooks.auth!.methods.map((method) => method.type)).toEqual(["oauth", "oauth", "api"])
       if (browser.type !== "oauth") throw new Error("expected the browser OAuth method")
       await expect(browser.authorize()).rejects.toThrow(CHATGPT_SIGN_IN_UNAVAILABLE)
       expect(await hooks.auth!.loader!(async () => oauth, { models: {} } as never)).toEqual({})
@@ -283,7 +286,7 @@ describe("plugin.codex", () => {
     } finally {
       applyRemoteProviderPolicy({ chatgptSignIn: true })
     }
-    expect(hooks.auth!.methods).toHaveLength(3)
+    expect(ProviderAuth.visibleMethods(hooks.auth!)).toHaveLength(3)
     expect(requests).toEqual([])
   })
 

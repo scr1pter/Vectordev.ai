@@ -13,7 +13,7 @@ import { testEffect } from "../lib/effect"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { Config } from "@/config/config"
-import { applyRemoteProviderPolicy } from "@vectordevai/core/provider-policy"
+import { CHATGPT_SIGN_IN_UNAVAILABLE, applyRemoteProviderPolicy } from "@vectordevai/core/provider-policy"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([CrossSpawnSpawner.node, FSUtil.node])))
 
@@ -75,23 +75,30 @@ describe("plugin.auth-override", () => {
     )
   }
 
-  it.instance("the owner's off-switch hides ChatGPT sign-in from provider auth and refuses its callback", () =>
+  it.instance("the owner's off-switch hides ChatGPT sign-in and refuses a choice from a list read before it", () =>
     Effect.gen(function* () {
       const tmp = yield* TestInstance
       yield* Effect.gen(function* () {
         const auth = yield* ProviderAuth.Service
         const openai = ProviderV2.ID.openai
+        // An open app window or CLI prompt keeps the list it read while the switch was on.
         expect((yield* auth.methods())[openai]?.map((method) => method.type)).toEqual(["oauth", "oauth", "api"])
         applyRemoteProviderPolicy({ chatgptSignIn: false })
         const paused = yield* Effect.gen(function* () {
           const methods = (yield* auth.methods())[openai]
-          // Index 0 is now the API key, which starts no sign-in.
-          const authorization = yield* auth.authorize({ providerID: openai, method: 0 })
+          const browser = yield* auth.authorize({ providerID: openai, method: 0 }).pipe(Effect.exit)
+          const headless = yield* auth.authorize({ providerID: openai, method: 1 }).pipe(Effect.exit)
+          const key = yield* auth.authorize({ providerID: openai, method: 2 })
           const callback = yield* auth.callback({ providerID: openai, method: 0 }).pipe(Effect.exit)
-          return { methods, authorization, callback }
+          return { methods, browser, headless, key, callback }
         }).pipe(Effect.ensuring(Effect.sync(() => applyRemoteProviderPolicy({ chatgptSignIn: true }))))
         expect(paused.methods).toEqual([{ type: "api", label: "Manually enter API Key" }])
-        expect(paused.authorization).toBeUndefined()
+        // The stale indexes still name the ChatGPT methods, which are refused instead of shifting onto the API key.
+        for (const attempt of [paused.browser, paused.headless]) {
+          expect(Exit.isFailure(attempt)).toBe(true)
+          if (Exit.isFailure(attempt)) expect(Cause.pretty(attempt.cause)).toContain(CHATGPT_SIGN_IN_UNAVAILABLE)
+        }
+        expect(paused.key).toBeUndefined()
         expect(Exit.isFailure(paused.callback)).toBe(true)
         if (Exit.isFailure(paused.callback)) expect(Cause.pretty(paused.callback.cause)).toContain("paused in Vector")
         expect((yield* auth.methods())[openai]).toHaveLength(3)

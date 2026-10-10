@@ -35,8 +35,8 @@ Installed Engines, desktop apps and CLIs read it in the background at startup an
 
 When the switch is `false`:
 
-- the ChatGPT methods disappear from the OpenAI sign-in options;
-- a new sign-in is refused with "ChatGPT sign-in is temporarily unavailable; connect OpenAI with an API key.";
+- sign-in option lists read after the change no longer show the ChatGPT methods. A list read earlier keeps showing them: an app window that already opened the OpenAI sign-in options (until a failed attempt rereads them), a CLI prompt already on screen, and V2 Core until its next reload;
+- a new sign-in is refused with "ChatGPT sign-in is temporarily unavailable; connect OpenAI with an API key.", including one chosen from a list read before the change;
 - saved ChatGPT sign-ins are neither used nor refreshed, and Vector shows its sign-in-paused notice with `vector providers logout openai`;
 - OpenAI API keys keep working. Saved sign-ins are not deleted, so turning the switch back on restores them.
 
