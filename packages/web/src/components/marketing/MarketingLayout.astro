@@ -38,6 +38,25 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? "https://vectordev.a
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={image} />
     <title>{title}</title>
+    {/*
+      Cookie-free, first-party visit counts (Vercel Web Analytics). Private pages are skipped: a
+      shared-session path is itself a link to that session. Only the path is counted, because a
+      query can carry a sign-in code or a search.
+    */}
+    {
+      !noindex && (
+        <>
+          <script is:inline>
+            window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments) }
+            window.va("beforeSend", function (event) {
+              var url = new URL(event.url)
+              return Object.assign({}, event, { url: url.origin + url.pathname })
+            })
+          </script>
+          <script is:inline defer src="/_vercel/insights/script.js"></script>
+        </>
+      )
+    }
   </head>
   <body>
     <slot />

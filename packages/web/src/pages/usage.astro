@@ -1,0 +1,16 @@
+---
+import { UsageDashboard } from "../components/marketing/usage/UsageDashboard"
+import MarketingLayout from "../components/marketing/MarketingLayout.astro"
+import "../components/marketing/account/account.css"
+
+// Not linked from the site. The counts are served only to the owner (api/usage/summary).
+export const prerender = true
+---
+
+<MarketingLayout title="Vector" description="Private." noindex>
+  <div class="account-environment">
+    <UsageDashboard client:only="react">
+      <div slot="fallback" class="account-loading" role="status">Checking your session…</div>
+    </UsageDashboard>
+  </div>
+</MarketingLayout>

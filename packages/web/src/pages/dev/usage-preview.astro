@@ -1,0 +1,84 @@
+---
+import { UsageDashboard } from "../../components/marketing/usage/UsageDashboard"
+import MarketingLayout from "../../components/marketing/MarketingLayout.astro"
+import "../../components/marketing/account/account.css"
+
+// Dev-only design harness for the owner's usage dashboard, drawn from made-up counts. Never built for prod.
+if (!import.meta.env.DEV) return Astro.redirect("/usage")
+
+const today = Date.UTC(2026, 9, 9)
+const day = (offset: number) => new Date(today - offset * 86_400_000).toISOString().slice(0, 10)
+const daily = Array.from({ length: 90 }, (_, index) => {
+  const desktop = Math.max(0, Math.round(4 + index * 0.3 + 3 * Math.sin(index / 2.2) - (index % 7 > 4 ? 3 : 0)))
+  const cli = Math.max(0, Math.round(1 + index * 0.1 + 1.5 * Math.cos(index / 3)))
+  return {
+    day: day(89 - index),
+    active: desktop + cli - Math.min(desktop, cli, 2),
+    desktop,
+    cli,
+    sessions: desktop * 5,
+    subagentSessions: desktop * 2,
+  }
+})
+// 2026-10-09 is a Friday, so its ISO week began on Monday 2026-10-05.
+const weekly = Array.from({ length: 26 }, (_, index) => {
+  const active = index === 25 ? 39 : Math.round(6 + index * 1.6 + 2 * Math.sin(index))
+  return { week: day(4 + (25 - index) * 7), active, desktop: Math.round(active * 0.8), cli: Math.round(active * 0.35) }
+}).map((week, index, weeks) => {
+  const previous = weeks[index - 1]?.active
+  return { ...week, growth: previous ? Math.round(((week.active - previous) / previous) * 10_000) / 10_000 : null }
+})
+const preview = {
+  generatedAt: "2026-10-09T12:04:00Z",
+  today: day(0),
+  totals: {
+    accounts: 412,
+    installs: 268,
+    cliAccounts: 74,
+    downloads: 391,
+    downloadAccounts: 301,
+    activeToday: 29,
+    active7: 47,
+    previous7: 41,
+    active30: 96,
+    sessions7: 1_284,
+    subagentSessions7: 377,
+  },
+  daily,
+  weekly,
+  monthly: Array.from({ length: 12 }, (_, index) => ({
+    month: new Date(Date.UTC(2026, 9 - (11 - index), 1)).toISOString().slice(0, 10),
+    active: index < 6 ? 0 : Math.round(12 + (index - 6) * 14),
+  })),
+  retention: Array.from({ length: 12 }, (_, index) => ({
+    cohort: day(4 + (11 - index) * 7),
+    size: Math.round(5 + index * 1.5),
+    weeks: [1, 2, 3, 4].map((week) => (index + week > 10 ? null : Math.round((0.62 - week * 0.08 - (index % 3) * 0.04) * 100) / 100)),
+  })),
+  funnel: Array.from({ length: 12 }, (_, index) => {
+    const signups = Math.round(14 + index * 3 + 4 * Math.sin(index))
+    return { week: day(4 + (11 - index) * 7), signups, downloaded: Math.round(signups * 0.72), active: Math.round(signups * 0.51) }
+  }),
+  versions: [
+    { client: "desktop" as const, version: "1.99.105", active: 31 },
+    { client: "cli" as const, version: "1.99.105", active: 12 },
+    { client: "desktop" as const, version: "1.99.104", active: 9 },
+    { client: "desktop" as const, version: "1.99.99", active: 3 },
+    { client: "cli" as const, version: "1.99.101", active: 2 },
+  ],
+  platforms: [
+    { client: "desktop" as const, platform: "darwin", arch: "arm64", active: 29 },
+    { client: "desktop" as const, platform: "win32", arch: "x64", active: 8 },
+    { client: "cli" as const, platform: "linux", arch: "x64", active: 7 },
+    { client: "cli" as const, platform: "darwin", arch: "arm64", active: 6 },
+    { client: "desktop" as const, platform: "linux", arch: "x64", active: 4 },
+    { client: "desktop" as const, platform: "darwin", arch: "x64", active: 2 },
+  ],
+}
+---
+
+<MarketingLayout title="Usage preview (dev)" description="Design harness" noindex>
+  <div class="account-environment">
+    <UsageDashboard client:only="react" preview={preview} />
+  </div>
+</MarketingLayout>

@@ -1,0 +1,314 @@
+import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test"
+import { SQL } from "bun"
+import { randomUUID } from "node:crypto"
+import { forgetUsage, recordDownload, recordUsage, usageSummary } from "../../../api/_lib/usage"
+
+// Dedicated disposable databases only: these tests execute the real usage SQL through the API code.
+const url = new URL(process.env.VECTOR_TEST_POSTGRES_URL ?? "postgres://127.0.0.1/vector_shares_test")
+if (!["127.0.0.1", "localhost"].includes(url.hostname) || url.pathname !== "/vector_shares_test")
+  throw new Error("Usage SQL tests require a disposable loopback vector_shares_test database")
+const database = new SQL(url.href)
+const results: unknown[] = []
+// Stands in for Supabase's PostgREST: each RPC runs as the service role, exactly as in production.
+const upstream = Bun.serve({
+  hostname: "127.0.0.1",
+  port: 0,
+  async fetch(request): Promise<Response> {
+    expect(request.headers.get("authorization")).toBe("Bearer fixture-service-role")
+    const name = new URL(request.url).pathname.replace("/rest/v1/rpc/", "")
+    const body = (await request.json()) as { request?: Record<string, unknown>; account?: string }
+    const json = body.request ?? {}
+    const rows = await database
+      .begin(async (transaction) => {
+        await transaction`set local role service_role`
+        if (name === "vector_usage_record")
+          return transaction`select public.vector_usage_record(${json}::jsonb) as result`
+        if (name === "vector_usage_download")
+          return transaction`select public.vector_usage_download(${json}::jsonb) as result`
+        if (name === "vector_usage_forget")
+          return transaction`select public.vector_usage_forget(${body.account ?? null}::uuid) as result`
+        if (name === "vector_usage_summary")
+          return transaction`select public.vector_usage_summary(${json}::jsonb) as result`
+        throw new Error(`Unexpected RPC ${name}`)
+      })
+      .catch((error: unknown) => {
+        results.push({ name, error: String(error) })
+        return undefined
+      })
+    if (!rows) return new Response(null, { status: 500 })
+    results.push({ name, result: rows[0].result })
+    return Response.json(rows[0].result)
+  },
+})
+const keys = ["NODE_ENV", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
+const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+const state = { account: "", today: "" }
+
+const desktop = (installId: string, extra: Record<string, unknown> = {}) => ({
+  client: "desktop" as const,
+  installId,
+  version: "1.99.105",
+  platform: "darwin",
+  arch: "arm64",
+  sessions: 3,
+  subagentSessions: 1,
+  ...extra,
+})
+
+beforeAll(async () => {
+  await database
+    .unsafe(
+      `
+    do $$ begin create role anon; exception when duplicate_object then null; end $$;
+    do $$ begin create role authenticated; exception when duplicate_object then null; end $$;
+    do $$ begin create role service_role bypassrls; exception when duplicate_object then null; end $$;
+    create schema if not exists auth;
+    create table if not exists auth.users (id uuid primary key);
+    alter table auth.users add column if not exists created_at timestamptz not null default now();
+  `,
+    )
+    .simple()
+  const migration = await Bun.file(new URL("../../../docs/vector/owner-actions/sql/usage.sql", import.meta.url)).text()
+  // Applying it twice proves the owner can safely re-run it.
+  await database.unsafe(migration).simple()
+  await database.unsafe(migration).simple()
+  Object.assign(process.env, {
+    NODE_ENV: "development",
+    SUPABASE_URL: upstream.url.origin,
+    SUPABASE_SERVICE_ROLE_KEY: "fixture-service-role",
+  })
+})
+
+beforeEach(async () => {
+  results.length = 0
+  await database`truncate public.vector_usage_daily, public.vector_usage_downloads`
+  state.account = randomUUID()
+  await database`insert into auth.users(id) values (${state.account})`
+  state.today = (await database`select ((now() at time zone 'utc')::date)::text as today`)[0].today
+})
+
+afterAll(async () => {
+  upstream.stop(true)
+  await database.close()
+  Object.entries(previous).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  })
+})
+
+const statuses = () =>
+  results.map((entry) => {
+    const value = entry as { result?: { status?: string }; error?: string }
+    return value.result?.status ?? value.error
+  })
+
+test("one row per install per day: counts never drop and an account, once known, stays", async () => {
+  const install = randomUUID()
+  await recordUsage(desktop(install, { accountId: state.account, sessions: 3, subagentSessions: 1 }))
+  await recordUsage(desktop(install, { version: "1.99.106", sessions: 2, subagentSessions: 5 }))
+  expect(statuses()).toEqual(["ok", "ok"])
+  const rows = await database`
+    select key, client, day::text as day, account_id::text as account_id, version, platform, arch, sessions, subagent_sessions
+    from public.vector_usage_daily`
+  expect(rows).toEqual([
+    {
+      key: `install:${install}`,
+      client: "desktop",
+      day: state.today,
+      account_id: state.account,
+      version: "1.99.106",
+      platform: "darwin",
+      arch: "arm64",
+      sessions: 3,
+      subagent_sessions: 5,
+    },
+  ])
+})
+
+test("the CLI counts one day per account, and only for an account that exists", async () => {
+  const cli = { client: "cli" as const, version: "1.99.105", platform: "linux", arch: "x64" }
+  await recordUsage({ ...cli, accountId: state.account })
+  await recordUsage({ ...cli, accountId: state.account })
+  await recordUsage({ ...cli, accountId: randomUUID() })
+  expect(statuses()).toEqual(["ok", "ok", "skipped"])
+  const rows = await database`select key, account_id::text as account from public.vector_usage_daily`
+  expect(rows).toEqual([{ key: `account:${state.account}`, account: state.account }])
+})
+
+test("a deleted account's token still counts the install, without the account", async () => {
+  const install = randomUUID()
+  await recordUsage(desktop(install, { accountId: randomUUID() }))
+  expect(statuses()).toEqual(["ok"])
+  const rows = await database`select key, account_id from public.vector_usage_daily`
+  expect(rows).toEqual([{ key: `install:${install}`, account_id: null }])
+})
+
+test("the database refuses what the API would never send", async () => {
+  const install = randomUUID()
+  for (const request of [
+    desktop("not-a-uuid"),
+    desktop(install.toUpperCase()),
+    desktop(install, { platform: "freebsd" }),
+    desktop(install, { version: "1.2" }),
+    desktop(install, { sessions: -1 }),
+    desktop(install, { sessions: 1.5 }),
+    desktop(install, { subagentSessions: 100_001 }),
+    desktop(install, { sessions: "3" }),
+    desktop(install, { accountId: "someone" }),
+    { client: "cli", version: "1.99.105", platform: "linux", arch: "x64" },
+    { client: "server", version: "1.99.105", platform: "linux", arch: "x64", accountId: state.account },
+  ])
+    await recordUsage(request as Parameters<typeof recordUsage>[0])
+  expect(statuses()).toEqual([...Array(9).fill("invalid"), "skipped", "invalid"])
+  expect((await database`select count(*)::int as count from public.vector_usage_daily`)[0].count).toBe(0)
+})
+
+test("recording removes days older than 400, and downloads older than 400 days", async () => {
+  const old = randomUUID()
+  await database`
+    insert into public.vector_usage_daily (key, client, day, version, platform, arch)
+    values (${`install:${old}`}, 'desktop', (now() at time zone 'utc')::date - 401, '1.0.0', 'linux', 'x64'),
+           (${`install:${old}`}, 'desktop', (now() at time zone 'utc')::date - 399, '1.0.0', 'linux', 'x64')`
+  await database`
+    insert into public.vector_usage_downloads (account_id, target, version, created_at)
+    values (${state.account}, 'linux-x64', '1.0.0', now() - interval '401 days')`
+  await recordUsage(desktop(randomUUID()))
+  await recordDownload({ accountId: state.account, target: "mac-arm64", version: "1.99.105" })
+  expect(statuses()).toEqual(["ok", "ok"])
+  expect(
+    (await database`select count(*)::int as count from public.vector_usage_daily where key = ${`install:${old}`}`)[0].count,
+  ).toBe(1)
+  const downloads = await database`select target from public.vector_usage_downloads`
+  expect(downloads).toEqual([{ target: "mac-arm64" }])
+})
+
+test("forgetting an account removes its CLI days, every day of a linked install, and its downloads", async () => {
+  const linked = randomUUID()
+  const stranger = randomUUID()
+  await database`
+    insert into public.vector_usage_daily (key, client, day, version, platform, arch)
+    values (${`install:${linked}`}, 'desktop', (now() at time zone 'utc')::date - 3, '1.99.100', 'darwin', 'arm64')`
+  await recordUsage(desktop(linked, { accountId: state.account }))
+  await recordUsage({ client: "cli", accountId: state.account, version: "1.99.105", platform: "linux", arch: "x64" })
+  await recordUsage(desktop(stranger))
+  await recordDownload({ accountId: state.account, target: "mac-arm64", version: "1.99.105" })
+  expect(await forgetUsage(state.account)).toBe(true)
+  const rows = await database`select key from public.vector_usage_daily`
+  expect(rows).toEqual([{ key: `install:${stranger}` }])
+  expect((await database`select count(*)::int as count from public.vector_usage_downloads`)[0].count).toBe(0)
+})
+
+test("deleting an identity elsewhere also removes its linked rows", async () => {
+  await recordUsage({ client: "cli", accountId: state.account, version: "1.99.105", platform: "linux", arch: "x64" })
+  await recordDownload({ accountId: state.account, target: "mac-arm64", version: "1.99.105" })
+  await database`delete from auth.users where id = ${state.account}`
+  expect((await database`select count(*)::int as count from public.vector_usage_daily`)[0].count).toBe(0)
+  expect((await database`select count(*)::int as count from public.vector_usage_downloads`)[0].count).toBe(0)
+})
+
+test("the summary counts people once across desktop and CLI, by day, week and cohort", async () => {
+  const signedIn = randomUUID()
+  const anonymous = randomUUID()
+  // Last week this install was not signed in yet; today it is, so both days belong to one person.
+  await database`
+    insert into public.vector_usage_daily (key, client, day, version, platform, arch, sessions)
+    values (${`install:${signedIn}`}, 'desktop', (now() at time zone 'utc')::date - 7, '1.99.100', 'darwin', 'arm64', 9)`
+  await recordUsage(desktop(signedIn, { accountId: state.account, sessions: 4, subagentSessions: 2 }))
+  await recordUsage({ client: "cli", accountId: state.account, version: "1.99.105", platform: "linux", arch: "arm64" })
+  await recordUsage(desktop(anonymous, { platform: "linux", arch: "x64", sessions: 1, subagentSessions: 0 }))
+  await recordDownload({ accountId: state.account, target: "mac-arm64", version: "1.99.105" })
+  expect(statuses()).toEqual(["ok", "ok", "ok", "ok"])
+  const accounts = (await database`select count(*)::int as count from auth.users`)[0].count
+
+  const summary = await usageSummary()
+  expect(summary.today).toBe(state.today)
+  expect(summary.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+  expect(summary.totals).toEqual({
+    accounts,
+    installs: 2,
+    cliAccounts: 1,
+    downloads: 1,
+    downloadAccounts: 1,
+    activeToday: 2,
+    active7: 2,
+    previous7: 1,
+    active30: 2,
+    sessions7: 5,
+    subagentSessions7: 2,
+  })
+  expect(summary.daily).toHaveLength(90)
+  expect(summary.daily.at(-1)).toEqual({ day: state.today, active: 2, desktop: 2, cli: 1, sessions: 5, subagentSessions: 2 })
+  expect(summary.daily.at(-8)).toMatchObject({ active: 1, desktop: 1, cli: 0, sessions: 9 })
+  expect(summary.daily.slice(0, -8).every((day) => day.active === 0)).toBe(true)
+
+  expect(summary.weekly).toHaveLength(26)
+  expect(summary.weekly.at(-1)).toMatchObject({ active: 2, desktop: 2, cli: 1, growth: 1 })
+  expect(summary.weekly.at(-2)).toMatchObject({ active: 1, desktop: 1, cli: 0, growth: null })
+  expect(summary.monthly).toHaveLength(12)
+
+  expect(summary.retention).toHaveLength(12)
+  const lastWeek = summary.weekly.at(-2)?.week
+  const thisWeek = summary.weekly.at(-1)?.week
+  expect(summary.retention.find((cohort) => cohort.cohort === lastWeek)).toMatchObject({
+    size: 1,
+    weeks: [null, null, null, null],
+  })
+  expect(summary.retention.find((cohort) => cohort.cohort === thisWeek)).toMatchObject({ size: 1 })
+
+  expect(summary.funnel).toHaveLength(12)
+  expect(summary.funnel.at(-1)).toMatchObject({ week: thisWeek, downloaded: 1, active: 1 })
+  expect(summary.funnel.at(-1)?.signups).toBeGreaterThanOrEqual(1)
+
+  expect(summary.versions).toEqual([
+    { client: "desktop", version: "1.99.105", active: 2 },
+    { client: "cli", version: "1.99.105", active: 1 },
+  ])
+  expect(summary.platforms).toEqual([
+    { client: "cli", platform: "linux", arch: "arm64", active: 1 },
+    { client: "desktop", platform: "darwin", arch: "arm64", active: 1 },
+    { client: "desktop", platform: "linux", arch: "x64", active: 1 },
+  ])
+})
+
+test("retention fills in a finished week", async () => {
+  const install = randomUUID()
+  await database`
+    insert into public.vector_usage_daily (key, client, day, version, platform, arch)
+    values (${`install:${install}`}, 'desktop', (now() at time zone 'utc')::date - 14, '1.99.100', 'darwin', 'arm64'),
+           (${`install:${install}`}, 'desktop', (now() at time zone 'utc')::date - 7, '1.99.100', 'darwin', 'arm64')`
+  const summary = await usageSummary()
+  const cohort = summary.weekly.at(-3)?.week
+  expect(summary.retention.find((entry) => entry.cohort === cohort)).toMatchObject({
+    size: 1,
+    weeks: [1, null, null, null],
+  })
+})
+
+test("an empty database still yields a complete summary", async () => {
+  const summary = await usageSummary()
+  expect(summary.totals).toMatchObject({ installs: 0, cliAccounts: 0, downloads: 0, active7: 0, previous7: 0 })
+  expect(summary.weekly.every((week) => week.growth === null)).toBe(true)
+  expect(summary.retention.every((cohort) => cohort.size === 0 && cohort.weeks.every((share) => share === null))).toBe(
+    true,
+  )
+  expect(summary.versions).toEqual([])
+})
+
+test("browsers can neither call the functions nor read the tables", async () => {
+  const rows = await database`
+    select
+      has_function_privilege('anon', 'public.vector_usage_record(jsonb)', 'EXECUTE')
+        or has_function_privilege('authenticated', 'public.vector_usage_record(jsonb)', 'EXECUTE')
+        or has_function_privilege('anon', 'public.vector_usage_download(jsonb)', 'EXECUTE')
+        or has_function_privilege('authenticated', 'public.vector_usage_download(jsonb)', 'EXECUTE')
+        or has_function_privilege('anon', 'public.vector_usage_forget(uuid)', 'EXECUTE')
+        or has_function_privilege('authenticated', 'public.vector_usage_forget(uuid)', 'EXECUTE')
+        or has_function_privilege('anon', 'public.vector_usage_summary(jsonb)', 'EXECUTE')
+        or has_function_privilege('authenticated', 'public.vector_usage_summary(jsonb)', 'EXECUTE') as rpc,
+      has_table_privilege('anon', 'public.vector_usage_daily', 'SELECT')
+        or has_table_privilege('authenticated', 'public.vector_usage_daily', 'SELECT')
+        or has_table_privilege('anon', 'public.vector_usage_downloads', 'SELECT')
+        or has_table_privilege('authenticated', 'public.vector_usage_downloads', 'SELECT') as tables,
+      has_function_privilege('service_role', 'public.vector_usage_summary(jsonb)', 'EXECUTE') as server`
+  expect(rows).toEqual([{ rpc: false, tables: false, server: true }])
+})

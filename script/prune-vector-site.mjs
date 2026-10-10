@@ -16,6 +16,8 @@ const keep = new Set([
   "login",
   "s",
   "support",
+  // The owner's usage dashboard; api/usage/summary decides who sees any numbers.
+  "usage",
   "install",
   "install.ps1",
   "index.html",
