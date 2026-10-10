@@ -208,90 +208,95 @@ describe("SessionV2.create", () => {
     }),
   )
 
-  it.effect("replays one prompt lifecycle into a fresh target database", () =>
-    Effect.gen(function* () {
-      const session = yield* SessionV2.Service
-      const sourceEvents = yield* EventV2.Service
-      const sourceDb = (yield* Database.Service).db
-      const created = yield* session.create({ id: SessionV2.ID.make("ses_fresh_target_replay"), location })
-      const admitted = yield* session.prompt({
-        sessionID: created.id,
-        prompt: Prompt.make({ text: "Replay lifecycle" }),
-        resume: false,
-      })
-      yield* SessionInput.promoteSteers(sourceDb, sourceEvents, created.id, Number.MAX_SAFE_INTEGER)
-      const serialized = (yield* sourceDb
-        .select()
-        .from(EventTable)
-        .where(eq(EventTable.aggregate_id, created.id))
-        .orderBy(asc(EventTable.seq))
-        .all()
-        .pipe(Effect.orDie)).map((event) => ({
-        id: event.id,
-        aggregateID: event.aggregate_id,
-        seq: event.seq,
-        type: event.type,
-        data: event.data,
-      }))
-
-      const tmp = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-      )
-      const targetDatabase = Database.layerFromPath(path.join(tmp.path, "target.sqlite"))
-      const targetLayer = AppNodeBuilder.build(
-        LayerNode.group([Database.node, EventV2.node, SessionProjector.node, SessionStore.node]),
-        [[Database.node, targetDatabase]],
-      )
-
-      yield* Effect.gen(function* () {
-        const db = (yield* Database.Service).db
-        const events = yield* EventV2.Service
-        const store = yield* SessionStore.Service
-        yield* db
-          .insert(ProjectTable)
-          .values({ id: ProjectV2.ID.global, worktree: location.directory, sandboxes: [] })
-          .run()
-          .pipe(Effect.orDie)
-
-        expect(yield* store.get(created.id)).toBeUndefined()
-        expect(yield* events.replayAll(serialized.slice(0, 2))).toBe(created.id)
-        expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
-          id: admitted.id,
+  it.effect(
+    "replays one prompt lifecycle into a fresh target database",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* SessionV2.Service
+        const sourceEvents = yield* EventV2.Service
+        const sourceDb = (yield* Database.Service).db
+        const created = yield* session.create({ id: SessionV2.ID.make("ses_fresh_target_replay"), location })
+        const admitted = yield* session.prompt({
           sessionID: created.id,
-          prompt: { text: "Replay lifecycle" },
-          delivery: "steer",
-          admittedSeq: 1,
+          prompt: Prompt.make({ text: "Replay lifecycle" }),
+          resume: false,
         })
-        expect(yield* store.context(created.id)).toEqual([])
+        yield* SessionInput.promoteSteers(sourceDb, sourceEvents, created.id, Number.MAX_SAFE_INTEGER)
+        const serialized = (yield* sourceDb
+          .select()
+          .from(EventTable)
+          .where(eq(EventTable.aggregate_id, created.id))
+          .orderBy(asc(EventTable.seq))
+          .all()
+          .pipe(Effect.orDie)).map((event) => ({
+          id: event.id,
+          aggregateID: event.aggregate_id,
+          seq: event.seq,
+          type: event.type,
+          data: event.data,
+        }))
 
-        expect(yield* events.replayAll(serialized.slice(2))).toBe(created.id)
-        expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
-          id: admitted.id,
-          sessionID: created.id,
-          prompt: { text: "Replay lifecycle" },
-          delivery: "steer",
-          admittedSeq: 1,
-          promotedSeq: 2,
-        })
-        expect(yield* store.context(created.id)).toMatchObject([
-          { id: admitted.id, type: "user", text: "Replay lifecycle" },
-        ])
-        expect(
-          (yield* db
-            .select()
-            .from(EventTable)
-            .where(eq(EventTable.aggregate_id, created.id))
-            .orderBy(asc(EventTable.seq))
-            .all()
-            .pipe(Effect.orDie)).map((event) => [event.seq, event.type]),
-        ).toEqual([
-          [0, EventV2.versionedType(SessionV1.Event.Created.type, 1)],
-          [1, EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1)],
-          [2, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
-        ])
-      }).pipe(Effect.provide(Layer.fresh(targetLayer)))
-    }),
+        const tmp = yield* Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+        )
+        const targetDatabase = Database.layerFromPath(path.join(tmp.path, "target.sqlite"))
+        const targetLayer = AppNodeBuilder.build(
+          LayerNode.group([Database.node, EventV2.node, SessionProjector.node, SessionStore.node]),
+          [[Database.node, targetDatabase]],
+        )
+
+        yield* Effect.gen(function* () {
+          const db = (yield* Database.Service).db
+          const events = yield* EventV2.Service
+          const store = yield* SessionStore.Service
+          yield* db
+            .insert(ProjectTable)
+            .values({ id: ProjectV2.ID.global, worktree: location.directory, sandboxes: [] })
+            .run()
+            .pipe(Effect.orDie)
+
+          expect(yield* store.get(created.id)).toBeUndefined()
+          expect(yield* events.replayAll(serialized.slice(0, 2))).toBe(created.id)
+          expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
+            id: admitted.id,
+            sessionID: created.id,
+            prompt: { text: "Replay lifecycle" },
+            delivery: "steer",
+            admittedSeq: 1,
+          })
+          expect(yield* store.context(created.id)).toEqual([])
+
+          expect(yield* events.replayAll(serialized.slice(2))).toBe(created.id)
+          expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
+            id: admitted.id,
+            sessionID: created.id,
+            prompt: { text: "Replay lifecycle" },
+            delivery: "steer",
+            admittedSeq: 1,
+            promotedSeq: 2,
+          })
+          expect(yield* store.context(created.id)).toMatchObject([
+            { id: admitted.id, type: "user", text: "Replay lifecycle" },
+          ])
+          expect(
+            (yield* db
+              .select()
+              .from(EventTable)
+              .where(eq(EventTable.aggregate_id, created.id))
+              .orderBy(asc(EventTable.seq))
+              .all()
+              .pipe(Effect.orDie)).map((event) => [event.seq, event.type]),
+          ).toEqual([
+            [0, EventV2.versionedType(SessionV1.Event.Created.type, 1)],
+            [1, EventV2.versionedType(SessionEvent.PromptAdmitted.type, 1)],
+            [2, EventV2.versionedType(SessionEvent.Prompted.type, 1)],
+          ])
+        }).pipe(Effect.provide(Layer.fresh(targetLayer)))
+      }),
+    // Migrates a fresh SQLite file for the target, which takes longer than the default 5 seconds on a busy Windows
+    // runner.
+    30_000,
   )
 
   it.effect("does not mask unrelated created projector defects", () =>
