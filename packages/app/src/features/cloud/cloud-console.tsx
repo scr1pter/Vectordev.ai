@@ -23,7 +23,7 @@ import {
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
-import { deploymentEvidence, deployRepairPrompt, publishPlan } from "./cloud-handoff"
+import { deploymentEvidence, deployRepairPrompt, publishPlan, type DeployEvidence } from "./cloud-handoff"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -301,6 +301,9 @@ export function CloudConsole(props: {
   const [publishing, setPublishing] = createSignal(false)
   const [activeRunId, setActiveRunId] = createSignal("")
   const [publishEvents, setPublishEvents] = createSignal<PublishProgressEvent[]>([])
+  // A publish that failed before any release was recorded (a failed build, a
+  // rejected deploy) has no row in the list, so its evidence is kept here.
+  const [failedPublish, setFailedPublish] = createSignal<DeployEvidence>()
 
   const [deployments, setDeployments] = createSignal<CloudDeployment[]>([])
   const [agentWorkspaces, setAgentWorkspaces] = createSignal<CloudAgentWorkspace[]>([])
@@ -465,6 +468,7 @@ export function CloudConsole(props: {
     const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`
     setActiveRunId(runId)
     setPublishEvents([])
+    setFailedPublish(undefined)
     setPublishing(true)
     setNotice({
       tone: "info",
@@ -490,9 +494,16 @@ export function CloudConsole(props: {
           text: `${override?.workspace ? "Workspace preview" : "Release"} live at ${result.url}`,
         })
       } else {
-        setNotice({
-          tone: "error",
-          text: result.error ?? "Publish failed. Open the release's evidence for the cause.",
+        setNotice({ tone: "error", text: result.error ?? "Publish failed." })
+      }
+      if (!result.ok && !result.deploymentId) {
+        setFailedPublish({
+          project: projectName(),
+          environment: override?.workspace ? "preview" : environment,
+          url: result.url,
+          error: result.error,
+          checks: result.checks ?? [],
+          log: result.log,
         })
       }
       if (api && (result.deploymentId || result.url)) {
@@ -1455,6 +1466,29 @@ export function CloudConsole(props: {
                         </button>
                       </Show>
                     </div>
+                  </Show>
+                  <Show when={!publishing() && failedPublish()}>
+                    {(failed) => (
+                      <div class="cloud-inline-empty mt-3">
+                        <span>
+                          {failed().checks.some((check) => check.status === "failed")
+                            ? `Failed: ${failed()
+                                .checks.filter((check) => check.status === "failed")
+                                .map((check) => check.label)
+                                .join(", ")}.`
+                            : "The publish did not finish."}{" "}
+                          No release was recorded.
+                        </span>
+                        <button
+                          class="cloud-button"
+                          data-variant="primary"
+                          type="button"
+                          onClick={() => props.onRepair(deployRepairPrompt(failed()))}
+                        >
+                          Fix this deploy
+                        </button>
+                      </div>
+                    )}
                   </Show>
                   <Show when={publishEvents().length}>
                     <div class="cloud-pipeline mt-4">
