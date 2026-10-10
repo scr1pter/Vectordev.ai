@@ -182,6 +182,7 @@ export function isOwnerOnlyRequest(method: string, pathname: string) {
     canonical.startsWith("/provider/") ||
     canonical.startsWith("/mcp") ||
     canonical === "/config" ||
+    canonical.startsWith("/config/") ||
     canonical === "/instance/dispose"
   )
 }

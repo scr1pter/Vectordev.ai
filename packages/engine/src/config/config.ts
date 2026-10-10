@@ -36,6 +36,8 @@ import { ConfigParse } from "./parse"
 import { ConfigSchema } from "./schema"
 import { ConfigPaths } from "./paths"
 import { ConfigImport } from "./import-settings"
+import { GlobalBus } from "@/bus/global"
+import { TuiEvent } from "@/server/tui-event"
 import { ConfigPlugin } from "./plugin"
 import { ConfigDependencies } from "./dependencies"
 import { ConfigVariable } from "./variable"
@@ -332,6 +334,11 @@ type State = {
   ceiling: PermissionCeiling | undefined
 }
 
+export type TrustStatus = WorkspaceTrust.Status & {
+  /** The project has config or .vector content that is being ignored because it is not trusted. */
+  ignored: boolean
+}
+
 // The permissions the user's own config sources declare, merged without any project file. Set only when a
 // trusted project grants something, because the merged config then lets a project allow replace a user deny.
 export type PermissionCeiling = {
@@ -350,8 +357,8 @@ export interface Interface {
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
-  readonly trust?: () => Effect.Effect<WorkspaceTrust.Status>
-  readonly approve?: () => Effect.Effect<void>
+  readonly trust: () => Effect.Effect<TrustStatus>
+  readonly approve: () => Effect.Effect<void>
   readonly permissionCeiling: () => Effect.Effect<PermissionCeiling | undefined>
 }
 
@@ -632,6 +639,25 @@ const layer = Layer.effect(
             : yield* Effect.promise(captureTrustSnapshot)
         const storedTrust = yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trustSnapshot))
         const trusted = !Flag.VECTOR_PURE && storedTrust.trusted
+        if (!trusted && !Flag.VECTOR_PURE && WorkspaceTrust.hasInputs(trustSnapshot)) {
+          yield* Effect.logWarning("ignoring project config until the workspace is trusted", {
+            workspace: trustWorkspace,
+          })
+          // Without this the project's agents, commands and default model would vanish with no explanation.
+          GlobalBus.emit("event", {
+            directory: "global",
+            payload: {
+              type: TuiEvent.ToastShow.type,
+              properties: {
+                title: "Project settings ignored",
+                message:
+                  "Vector is not loading this project's vector.json or .vector settings until you trust it. Trust it from the app, or run `vector trust approve` in the project.",
+                variant: "warning",
+                duration: 15_000,
+              },
+            },
+          })
+        }
         const trustedSnapshot = trusted
           ? yield* Effect.promise(() => WorkspaceTrust.materialize(Global.Path.state, trustSnapshot))
           : undefined
@@ -972,7 +998,13 @@ const layer = Layer.effect(
 
     const trust = Effect.fn("Config.trust")(function* () {
       return yield* InstanceState.useEffect(state, (s) =>
-        Effect.promise(() => WorkspaceTrust.status(Global.Path.state, s.trust)),
+        Effect.promise(async () => {
+          const status = await WorkspaceTrust.status(Global.Path.state, s.trust)
+          return {
+            ...status,
+            ignored: !status.trusted && !Flag.VECTOR_PURE && WorkspaceTrust.hasInputs(s.trust),
+          }
+        }),
       )
     })
 

@@ -2171,6 +2171,12 @@ export type TeamsError = {
   }
 }
 
+export type ProjectTrustStatus = {
+  workspace: string
+  trusted: boolean
+  ignored: boolean
+}
+
 export type Model = {
   id: string
   providerID: string
@@ -8796,6 +8802,70 @@ export type ConfigUpdateResponses = {
 }
 
 export type ConfigUpdateResponse = ConfigUpdateResponses[keyof ConfigUpdateResponses]
+
+export type ConfigTrustGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/config/trust"
+}
+
+export type ConfigTrustGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ConfigTrustGetError = ConfigTrustGetErrors[keyof ConfigTrustGetErrors]
+
+export type ConfigTrustGetResponses = {
+  /**
+   * Project trust status
+   */
+  200: ProjectTrustStatus
+}
+
+export type ConfigTrustGetResponse = ConfigTrustGetResponses[keyof ConfigTrustGetResponses]
+
+export type ConfigTrustApproveData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/config/trust"
+}
+
+export type ConfigTrustApproveErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ConfigTrustApproveError = ConfigTrustApproveErrors[keyof ConfigTrustApproveErrors]
+
+export type ConfigTrustApproveResponses = {
+  /**
+   * Project trust status after approval
+   */
+  200: ProjectTrustStatus
+}
+
+export type ConfigTrustApproveResponse = ConfigTrustApproveResponses[keyof ConfigTrustApproveResponses]
 
 export type ConfigProvidersData = {
   body?: never

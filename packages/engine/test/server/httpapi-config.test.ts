@@ -31,6 +31,36 @@ afterEach(async () => {
 
 describe("config HttpApi", () => {
   it.live(
+    "reports ignored project config and loads it once the project is trusted",
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirEffect({ config: { model: "test/project-model", formatter: false }, trusted: false })
+      const request = (route: string, init: RequestInit = {}) =>
+        Effect.promise(async () => {
+          const response = await app().request(route, {
+            ...init,
+            headers: { "content-type": "application/json", "x-vector-directory": tmp.path },
+          })
+          return { status: response.status, body: await response.json() }
+        })
+      const notice = yield* waitGlobalBusEvent({
+        message: "timed out waiting for the ignored-config notice",
+        predicate: (event) => event.payload.type === "tui.toast.show",
+      }).pipe(Effect.forkScoped({ startImmediately: true }))
+
+      // The project's settings are not loaded, and clients can see why.
+      expect((yield* request("/config")).body.model).not.toBe("test/project-model")
+      expect((yield* request("/config/trust")).body).toMatchObject({ trusted: false, ignored: true })
+      expect((yield* Fiber.join(notice)).payload.properties).toMatchObject({ title: "Project settings ignored" })
+
+      const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
+      const approved = yield* request("/config/trust", { method: "POST" })
+      expect(approved).toMatchObject({ status: 200, body: { trusted: true, ignored: false } })
+      yield* Fiber.join(disposed)
+      expect((yield* request("/config")).body.model).toBe("test/project-model")
+    }),
+  )
+
+  it.live(
     "serves config update through the default server app",
     Effect.gen(function* () {
       const tmp = yield* tmpdirEffect({ config: { formatter: false, lsp: false } })

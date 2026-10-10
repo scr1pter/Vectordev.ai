@@ -36,6 +36,9 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/api/session/ses_1/permission/per_1/reply")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRequest("GET", "/api/permission/request")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRequest("GET", "/api/question/request")).toBe(true)
+    // Trusting a project lets its config run code, so it is the owner's call too.
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/config/trust")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/config/trust")).toBe(false)
     // A guest still prompts, reads its own pending requests and answers its own questions.
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/message")).toBe(false)
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/prompt_async")).toBe(false)

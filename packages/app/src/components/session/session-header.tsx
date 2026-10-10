@@ -29,6 +29,7 @@ import { hasActiveVerification } from "@/utils/session-activity"
 import { StatusPopover } from "../status-popover"
 import { BranchPicker } from "./branch-picker"
 import { PresenceBanner } from "../presence-banner"
+import { ProjectTrustNotice } from "../project-trust-notice"
 import { BackgroundTasksButton } from "@/features/background-tasks/background-tasks-button"
 
 const OPEN_APPS = [
@@ -318,6 +319,7 @@ export function SessionHeader() {
           </div>
 
           <div data-vector-session-controls>
+            <ProjectTrustNotice />
             <PresenceBanner />
             <Show when={sync().data.vcs?.branch} fallback={<span data-vector-session-branch>{branch()}</span>}>
               <BranchPicker branch={branch()} />
@@ -514,6 +516,7 @@ export function SessionHeader() {
                 </div>
               </Show>
               <div class="flex items-center gap-1">
+                <ProjectTrustNotice />
                 <PresenceBanner />
                 <Show when={status()}>
                   <Tooltip placement="bottom" value={language.t("status.popover.trigger")}>

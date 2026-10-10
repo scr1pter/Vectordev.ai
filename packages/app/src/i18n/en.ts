@@ -739,6 +739,12 @@ export const dict = {
   "session.header.open.ariaLabel": "Open in {{app}}",
   "session.header.open.menu": "Open options",
   "session.header.open.copyPath": "Copy path",
+  "project.trust.ignored": "Project settings ignored",
+  "project.trust.ignored.description":
+    "Vector is not loading this project's vector.json or .vector agents, commands, plugins and MCP servers, because they can run code on this machine. Trust the project to load them as they are now.",
+  "project.trust.approve": "Trust project",
+  "project.trust.approve.failed": "Could not trust this project",
+  "project.trust.approve.failed.description": "Run `vector trust approve` in the project instead.",
   "session.header.open.finder": "Finder",
   "session.header.open.fileExplorer": "File Explorer",
   "session.header.open.fileManager": "File Manager",

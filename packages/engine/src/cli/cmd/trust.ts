@@ -41,11 +41,7 @@ export const TrustCommand = effectCmd({
 
     const { Config } = yield* Effect.promise(() => import("@/config/config"))
     const config = yield* Config.Service
-    if (!config.trust) return yield* fail("Workspace trust is unavailable in this Vector instance.")
-    if (decision.approve) {
-      if (!config.approve) return yield* fail("Workspace trust approval is unavailable in this Vector instance.")
-      yield* config.approve()
-    }
+    if (decision.approve) yield* config.approve()
 
     UI.println(formatTrustStatus(yield* config.trust(), decision.approve, Flag.VECTOR_PURE))
   }),

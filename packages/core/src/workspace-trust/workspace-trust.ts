@@ -147,6 +147,11 @@ export function unavailableReason(current: Snapshot) {
   return current[unavailable]
 }
 
+/** Whether the workspace has any project config or .vector content that trust would decide about. */
+export function hasInputs(current: Snapshot) {
+  return current[captured].size > 0
+}
+
 export async function status(stateDirectory: string, current: Snapshot): Promise<Status> {
   if (current[unavailable]) {
     return { workspace: current.workspace, fingerprint: current.fingerprint, trusted: false }
