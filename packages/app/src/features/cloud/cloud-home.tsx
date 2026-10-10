@@ -29,7 +29,6 @@ function parseCloudSection(value: string | null): CloudSection | undefined {
     case "functions":
     case "realtime":
     case "delivery":
-    case "aws":
     case "settings":
       return value
     default:

@@ -79,13 +79,12 @@ export type CloudBuildSettings = {
 }
 
 export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vector-cloud" | "vercel"
+export type CloudDomainProvider = "vercel"
 
 export type CloudDomain = {
   id: string
   domain: string
   projectPath?: string
-  slug?: string
   provider: CloudDomainProvider
   providerProjectId?: string
   providerProjectName?: string
@@ -179,41 +178,6 @@ export type CloudSupabaseServices = {
   functions: { available: boolean; functions: CloudSupabaseFunction[]; detail?: string }
 }
 
-export type CloudAwsStatus = {
-  installed: boolean
-  configured: boolean
-  version?: string
-  accountId?: string
-  arn?: string
-  profile?: string
-  profiles: string[]
-  region: string
-  detail: string
-}
-
-export type CloudAwsResource = {
-  id: string
-  name: string
-  state?: string
-  detail?: string
-  createdAt?: string
-}
-
-export type CloudAwsService = {
-  id: "s3" | "ec2" | "lambda" | "sagemaker" | "ecs"
-  label: string
-  available: boolean
-  consoleUrl: string
-  resources: CloudAwsResource[]
-  detail?: string
-}
-
-export type CloudAwsSnapshot = {
-  status: CloudAwsStatus
-  services: CloudAwsService[]
-  refreshedAt: string
-}
-
 export type CloudApi = {
   connections: {
     list: () => Promise<CloudProviderConnection[]>
@@ -267,13 +231,6 @@ export type CloudApi = {
   }
   domains: {
     list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
-    add: (
-      projectPath: string,
-      taskId: string | undefined,
-      input: { domain: string; slug?: string },
-    ) => Promise<CloudDomain>
-    verify: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-    remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
   }
   database: {
     get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
@@ -299,10 +256,6 @@ export type CloudApi = {
   services: {
     supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
   }
-  aws: {
-    status: (input?: { profile?: string; region?: string }) => Promise<CloudAwsStatus>
-    resources: (input?: { profile?: string; region?: string }) => Promise<CloudAwsSnapshot>
-  }
   build: {
     get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>
     detect: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings>
@@ -318,9 +271,9 @@ export function cloudApi(): CloudApi | undefined {
   return (globalThis.window?.api as (Record<string, unknown> & { cloud?: CloudApi }) | undefined)?.cloud
 }
 
-// Publishing runs through the user's own Vercel CLI (or the token-gated
-// Vector Cloud service). Exposed as window.api.publish by the desktop main.
-export type PublishTargetId = "vector-cloud" | "vercel"
+// Publishing runs through the user's own Vercel account. Exposed as
+// window.api.publish by the desktop main.
+export type PublishTargetId = "vercel"
 
 export type PublishTarget = {
   id: PublishTargetId

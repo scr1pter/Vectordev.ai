@@ -222,8 +222,20 @@ function seedHost(provider: "vercel" | "netlify", linked = true) {
   )
 }
 
-describe("cloud bridge publish target resolution", () => {
-  test("reports and uses the sole linked host over the authenticated HTTP bridge", async () => {
+async function bridgeCommand(
+  bridge: { url: string; token: string },
+  input: Record<string, unknown>,
+  token = bridge.token,
+) {
+  return fetch(`${bridge.url}/command`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+    body: JSON.stringify({ projectPath: project, ...input }),
+  })
+}
+
+describe("cloud bridge publish destination", () => {
+  test("reports and uses the linked Vercel project over the authenticated HTTP bridge", async () => {
     seedHost("vercel")
     const published: string[] = []
     const bridge = await startCloudBridge({
@@ -231,30 +243,23 @@ describe("cloud bridge publish target resolution", () => {
         published.push(input.target)
         return { ok: true, target: input.target, log: "fixture publication" }
       },
-      awsStatus: async () => {
-        throw new Error("fixture has no AWS")
-      },
     })
-    const command = async (input: Record<string, unknown>, token = bridge.token) =>
-      fetch(`${bridge.url}/command`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}` },
-        body: JSON.stringify({ projectPath: project, ...input }),
-      })
-    expect((await command({ command: "publish" }, "wrong-token")).status).toBe(401)
+    expect((await bridgeCommand(bridge, { command: "publish" }, "wrong-token")).status).toBe(401)
     expect(published).toEqual([])
-    const status = await (await command({ command: "status" })).json()
+    const status = await (await bridgeCommand(bridge, { command: "status" })).json()
     expect(status.configured).toBe(true)
     expect(status.targets).toEqual([{ id: "vercel", label: "Vercel", projectName: "vercel app" }])
+    expect(status).not.toHaveProperty("aws")
     expect(JSON.stringify(status)).not.toContain("never-decrypt-fixture")
-    expect(await (await command({ command: "publish" })).json()).toMatchObject({ ok: true, target: "vercel" })
+    expect(await (await bridgeCommand(bridge, { command: "publish" })).json()).toMatchObject({
+      ok: true,
+      target: "vercel",
+    })
     expect(published).toEqual(["vercel"])
   })
 
-  test("requires a choice for multiple linked hosts and never falls back after an explicit failure", async () => {
+  test("reports a provider failure without falling back to another destination", async () => {
     seedHost("vercel")
-    process.env.VECTOR_CLOUD_URL = "https://fixture.invalid"
-    process.env.VECTOR_CLOUD_TOKEN = "fixture-only-host-token"
     const published: string[] = []
     const bridge = await startCloudBridge({
       publish: async (input) => {
@@ -262,25 +267,15 @@ describe("cloud bridge publish target resolution", () => {
         return { ok: false, target: input.target, log: "", error: "fixture provider rejection" }
       },
     })
-    const command = async (target?: string) =>
-      (
-        await fetch(`${bridge.url}/command`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${bridge.token}` },
-          body: JSON.stringify({ command: "publish", projectPath: project, target }),
-        })
-      ).json()
-    expect(await command()).toMatchObject({
+    expect(await (await bridgeCommand(bridge, { command: "publish" })).json()).toMatchObject({
       ok: false,
-      needsChoice: true,
-      targets: [{ id: "vector-cloud" }, { id: "vercel" }],
+      target: "vercel",
+      error: "fixture provider rejection",
     })
-    expect(published).toEqual([])
-    expect(await command("vercel")).toMatchObject({ ok: false, target: "vercel", error: "fixture provider rejection" })
     expect(published).toEqual(["vercel"])
   })
 
-  test("ignores unlinked connections, and includes configured standalone hosting in choices", async () => {
+  test("asks for setup when Vercel is connected but no project is linked", async () => {
     seedHost("vercel", false)
     const published: string[] = []
     const bridge = await startCloudBridge({
@@ -289,40 +284,44 @@ describe("cloud bridge publish target resolution", () => {
         return { ok: true, target: input.target, log: "" }
       },
     })
-    const command = async () =>
-      (
-        await fetch(`${bridge.url}/command`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${bridge.token}` },
-          body: JSON.stringify({ command: "publish", projectPath: project }),
-        })
-      ).json()
-    expect(await command()).toMatchObject({ ok: false, needsSetup: true, targets: [] })
+    // The scrapped hosted publish service is not a destination, even when its
+    // variables are still set on this machine.
     process.env.VECTOR_CLOUD_URL = "https://fixture.invalid"
     process.env.VECTOR_CLOUD_TOKEN = "fixture-only-host-token"
-    expect(await command()).toMatchObject({ ok: true, target: "vector-cloud" })
-    expect(published).toEqual(["vector-cloud"])
+    expect(await (await bridgeCommand(bridge, { command: "publish" })).json()).toMatchObject({
+      ok: false,
+      needsSetup: true,
+      targets: [],
+    })
+    expect(published).toEqual([])
+  })
+
+  test("rejects the removed AWS inventory commands", async () => {
+    const bridge = await startCloudBridge()
+    for (const command of ["aws_status", "aws_resources"]) {
+      const response = await bridgeCommand(bridge, { command })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({ ok: false, error: "Unsupported Vector Cloud command." })
+    }
   })
 
   test("ignores a Netlify connection and link saved by an older release", async () => {
     seedHost("netlify")
-    const bridge = await startCloudBridge({ publish: async (input) => ({ ok: true, target: input.target, log: "" }) })
-    const command = async (input: Record<string, unknown>) =>
-      (
-        await fetch(`${bridge.url}/command`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${bridge.token}` },
-          body: JSON.stringify({ projectPath: project, ...input }),
-        })
-      ).json()
-    const status = await command({ command: "status" })
+    const published: string[] = []
+    const bridge = await startCloudBridge({
+      publish: async (input) => {
+        published.push(input.target)
+        return { ok: true, target: input.target, log: "" }
+      },
+    })
+    const status = await (await bridgeCommand(bridge, { command: "status" })).json()
     expect(status.targets).toEqual([])
     expect(status.connections.map((item: { provider: string }) => item.provider)).toEqual(["vercel", "supabase"])
-    expect(await command({ command: "publish" })).toMatchObject({ ok: false, needsSetup: true, targets: [] })
-    expect(await command({ command: "publish", target: "netlify" })).toMatchObject({
+    expect(await (await bridgeCommand(bridge, { command: "publish", target: "netlify" })).json()).toMatchObject({
       ok: false,
-      error: "Invalid publish target.",
+      needsSetup: true,
     })
+    expect(published).toEqual([])
     const { forgetRetiredCloudProviders, listCloudProviderProjectLinks } = await import("./cloud-connections")
     expect(listCloudProviderProjectLinks(project)).toEqual([])
     expect(forgetRetiredCloudProviders()).toBe(1)

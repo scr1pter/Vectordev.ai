@@ -70,7 +70,6 @@ import {
   type PublishProjectInput,
 } from "./publish"
 import {
-  addDomain,
   applyEnv,
   checkAllDeployments,
   checkDeployment,
@@ -83,11 +82,9 @@ import {
   listDomains,
   listEnv,
   removeDeployment,
-  removeDomain,
   removeEnv,
   setBuildSettings,
   setEnv,
-  verifyDomain,
 } from "./cloud-console"
 import {
   addCloudProviderDomain,
@@ -106,7 +103,6 @@ import {
   verifyCloudProviderDomain,
   type CloudProviderId,
 } from "./cloud-connections"
-import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
 import {
   detectGithub,
   publishToGithub,
@@ -596,12 +592,6 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-supabase-services", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getSupabaseServiceSnapshot(projectPath, taskId),
   )
-  handle("cloud-aws-status", (_event: IpcMainInvokeEvent, input?: { profile?: string; region?: string }) =>
-    getCloudAwsStatus(input),
-  )
-  handle("cloud-aws-resources", (_event: IpcMainInvokeEvent, input?: { profile?: string; region?: string }) =>
-    listCloudAwsResources(input),
-  )
   handle("cloud-deployments-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listDeployments(projectPath, taskId),
   )
@@ -656,25 +646,6 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("cloud-domains-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listDomains(projectPath, taskId),
-  )
-  handle(
-    "cloud-domains-add",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      input: { domain: string; slug?: string },
-    ) => addDomain(projectPath, taskId, input),
-  )
-  handle(
-    "cloud-domains-verify",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      verifyDomain(projectPath, taskId, id),
-  )
-  handle(
-    "cloud-domains-remove",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      removeDomain(projectPath, taskId, id),
   )
   handle("cloud-db-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getDatabase(projectPath, taskId),

@@ -1,6 +1,5 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomUUID, createHash } from "node:crypto"
-import { resolveCname } from "node:dns/promises"
 import { chmodSync, constants } from "node:fs"
 import { lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
@@ -115,13 +114,12 @@ type PackageManifest = {
 }
 
 export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vector-cloud" | "vercel"
+export type CloudDomainProvider = "vercel"
 
 export type CloudDomain = {
   id: string
   domain: string
   projectPath?: string
-  slug?: string
   provider: CloudDomainProvider
   providerProjectId?: string
   providerProjectName?: string
@@ -289,12 +287,21 @@ function sameDeploymentScope(a: CloudDeployment, b: CloudDeployment): boolean {
   return a.projectPath === b.projectPath && a.target === b.target
 }
 
+// Vercel is the only hosting provider. Releases an older version recorded for a
+// retired host (Netlify, or the scrapped hosted publish service) stay in the
+// store untouched but are not listed, promoted or rolled back.
+function supportedDeployment(record: CloudDeployment): boolean {
+  return record.target === "vercel"
+}
+
 export function listDeployments(projectPath: string, taskId?: string): CloudDeployment[] {
-  return readDeployments().filter((record) => record.projectPath === projectPath)
+  return readDeployments().filter((record) => record.projectPath === projectPath && supportedDeployment(record))
 }
 
 export function getDeployment(projectPath: string, taskId: string | undefined, id: string): CloudDeployment {
-  const deployment = readDeployments().find((item) => item.id === id && item.projectPath === projectPath)
+  const deployment = readDeployments().find(
+    (item) => item.id === id && item.projectPath === projectPath && supportedDeployment(item),
+  )
   if (!deployment) throw new Error("That deployment is no longer in this project's history.")
   return deployment
 }
@@ -340,18 +347,7 @@ export function removeDeployment(projectPath: string, taskId: string | undefined
   }
   const next = removed ? records.filter((item) => item.id !== id) : records
   writeDeployments(next)
-  // Best-effort delete on the remote publish service, if configured. The
-  // endpoint is built by another agent, so tolerate its absence entirely.
-  const endpoint = process.env.VECTOR_CLOUD_URL?.replace(/\/$/, "")
-  const token = process.env.VECTOR_CLOUD_TOKEN
-  if (removed?.target === "vector-cloud" && endpoint && token) {
-    void fetch(`${endpoint}/api/deployments?slug=${encodeURIComponent(removed.slug)}`, {
-      method: "DELETE",
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(10_000),
-    }).catch(() => undefined)
-  }
-  return next.filter((record) => record.projectPath === projectPath)
+  return next.filter((record) => record.projectPath === projectPath && supportedDeployment(record))
 }
 
 export async function checkDeployment(
@@ -453,15 +449,14 @@ function readProject(projectPath: string): ProjectData {
     : []
   const database =
     data.database && typeof data.database === "object" && data.database.provider === "supabase" ? data.database : null
-  // Domains attached through a retired host (Netlify) are not shown: Vector can
-  // no longer verify or detach them, and the provider still owns them.
+  // Only Vercel domains are shown. Domains attached through a retired host
+  // (Netlify, or the scrapped hosted publish service's DNS target) cannot be
+  // verified or detached by Vector any more; the provider still owns them.
   const domains = Array.isArray(data.domains)
-    ? data.domains
-        .filter(
-          (item): item is CloudDomain =>
-            typeof item?.id === "string" && typeof item?.domain === "string" && String(item.provider) !== "netlify",
-        )
-        .map((item) => ({ ...item, provider: item.provider === "vercel" ? item.provider : ("vector-cloud" as const) }))
+    ? data.domains.filter(
+        (item): item is CloudDomain =>
+          typeof item?.id === "string" && typeof item?.domain === "string" && item.provider === "vercel",
+      )
     : []
   const build =
     data.build &&
@@ -803,11 +798,6 @@ function formatViteEnvValue(value: string) {
 
 // ---- Custom domains -------------------------------------------------------
 
-// The CNAME target apps should point at. Configurable for staging/self-host.
-function cnameTarget(): string {
-  return process.env.VECTOR_CLOUD_DOMAIN_TARGET || "cname.vectordev.app"
-}
-
 // Lowercase, strip protocol/path/trailing slash, drop a leading "www.", and
 // require something that looks like a real hostname with at least one dot.
 export function normalizeCloudDomain(raw: string): string {
@@ -839,12 +829,11 @@ export function addDomain(
   taskId: string | undefined,
   input: {
     domain: string
-    slug?: string
-    provider?: CloudDomainProvider
-    providerProjectId?: string
-    providerProjectName?: string
-    cnameTarget?: string
-    status?: CloudDomainStatus
+    provider: CloudDomainProvider
+    providerProjectId: string
+    providerProjectName: string
+    cnameTarget: string
+    status: CloudDomainStatus
     detail?: string
   },
 ): CloudDomain {
@@ -858,12 +847,11 @@ export function addDomain(
     id: randomUUID(),
     domain,
     projectPath: path,
-    slug: input.slug?.trim() || undefined,
-    provider: input.provider ?? "vector-cloud",
-    providerProjectId: input.providerProjectId?.trim() || undefined,
-    providerProjectName: input.providerProjectName?.trim() || undefined,
-    cnameTarget: input.cnameTarget?.trim() || cnameTarget(),
-    status: input.status ?? "pending",
+    provider: input.provider,
+    providerProjectId: input.providerProjectId,
+    providerProjectName: input.providerProjectName,
+    cnameTarget: input.cnameTarget,
+    status: input.status,
     detail: input.detail?.trim() || undefined,
     createdAt: now(),
   }
@@ -886,50 +874,6 @@ export function updateDomainRecord(
   domains[index] = updated
   writeProject(path, { ...data, domains })
   return updated
-}
-
-// Real DNS check: resolve the domain's CNAME records and see whether any point
-// at our target. DNS propagation lag looks like a missing record, not an error.
-export async function verifyDomain(projectPath: string, taskId: string | undefined, id: string): Promise<CloudDomain> {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const index = data.domains.findIndex((item) => item.id === id)
-  if (index === -1) throw new Error("That domain is no longer connected to this project.")
-  const record = data.domains[index]
-  const target = record.cnameTarget.toLowerCase().replace(/\.+$/, "")
-
-  let status: CloudDomainStatus = record.status
-  let detail: string | undefined
-
-  try {
-    const cnames = await resolveCname(record.domain)
-    const matched = cnames.some((entry) => {
-      const value = entry.toLowerCase().replace(/\.+$/, "")
-      return value === target || value.endsWith(target)
-    })
-    if (matched) {
-      status = "verified"
-      detail = undefined
-    } else {
-      status = "pending"
-      detail = "CNAME not found yet — DNS can take a few minutes."
-    }
-  } catch (error) {
-    const code = error && typeof error === "object" ? Reflect.get(error, "code") : undefined
-    if (code === "ENOTFOUND" || code === "ENODATA") {
-      status = "pending"
-      detail = `No CNAME record found for ${record.domain} yet. Add a CNAME pointing at ${target}, then re-check — DNS can take a few minutes.`
-    } else {
-      status = "error"
-      detail = error instanceof Error ? error.message : String(error)
-    }
-  }
-
-  const next: CloudDomain = { ...record, status, detail, lastCheckedAt: now() }
-  const domains = [...data.domains]
-  domains[index] = next
-  writeProject(path, { ...data, domains })
-  return next
 }
 
 export function removeDomain(projectPath: string, taskId: string | undefined, id: string): CloudDomain[] {

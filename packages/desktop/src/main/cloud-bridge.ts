@@ -4,16 +4,16 @@ import { createServer, type Server } from "node:http"
 import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments } from "./cloud-console"
 import {
   cachedCloudProviderConnection,
+  getCloudProviderProjectLink,
   getSupabaseServiceSnapshot,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
   syncCloudProviderEnvironment,
 } from "./cloud-connections"
-import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
 import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
 import { createCloudDatabase } from "./cloud-provision"
-import { publishProject, type PublishTargetId } from "./publish"
+import { publishProject } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
 
@@ -27,8 +27,6 @@ type CloudCommand =
   | "cloud_connections"
   | "supabase_services"
   | "sync_environment"
-  | "aws_status"
-  | "aws_resources"
   | "publish"
   | "list_deployments"
   | "logs"
@@ -39,7 +37,6 @@ type CloudCommandInput = {
   projectPath: string
   taskId?: string
   production?: boolean
-  target?: "vector-cloud" | "vercel"
   provider?: "vercel"
   deploymentId?: string
   limit?: number
@@ -55,7 +52,6 @@ let bridgeToken = ""
 
 type CloudBridgeOptions = {
   publish?: typeof publishProject
-  awsStatus?: typeof getCloudAwsStatus
 }
 
 export async function startCloudBridge(options: CloudBridgeOptions = {}) {
@@ -125,7 +121,6 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   const projectPath = Reflect.get(value, "projectPath")
   const taskId = Reflect.get(value, "taskId")
   const production = Reflect.get(value, "production")
-  const target = Reflect.get(value, "target")
   const provider = Reflect.get(value, "provider")
   const deploymentId = Reflect.get(value, "deploymentId")
   const limit = Reflect.get(value, "limit")
@@ -143,8 +138,6 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     command !== "cloud_connections" &&
     command !== "supabase_services" &&
     command !== "sync_environment" &&
-    command !== "aws_status" &&
-    command !== "aws_resources" &&
     command !== "publish" &&
     command !== "list_deployments" &&
     command !== "logs" &&
@@ -156,9 +149,6 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     throw new Error("Open a project before using Vector Cloud.")
   if (taskId !== undefined && typeof taskId !== "string") throw new Error("Invalid project session.")
   if (production !== undefined && typeof production !== "boolean") throw new Error("Invalid publish mode.")
-  if (target !== undefined && target !== "vector-cloud" && target !== "vercel") {
-    throw new Error("Invalid publish target.")
-  }
   if (provider !== undefined && provider !== "vercel") {
     throw new Error("Invalid cloud provider.")
   }
@@ -179,7 +169,6 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     projectPath,
     taskId,
     production,
-    target,
     provider,
     deploymentId,
     limit,
@@ -190,17 +179,12 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   }
 }
 
+// Vercel is the only hosting destination: a project publishes once Vercel is
+// connected and one of its projects is linked to this repository.
 function configuredPublishTargets(input: CloudCommandInput) {
-  const links = listCloudProviderProjectLinks(input.projectPath, input.taskId)
-  const targets: { id: PublishTargetId; label: string; projectName?: string }[] = []
-  if (process.env.VECTOR_CLOUD_URL && process.env.VECTOR_CLOUD_TOKEN) {
-    targets.push({ id: "vector-cloud", label: "Vector Cloud" })
-  }
-  const link = links.find((item) => item.provider === "vercel")
-  if (link && cachedCloudProviderConnection("vercel").connected) {
-    targets.push({ id: "vercel", label: "Vercel", projectName: link.projectName })
-  }
-  return targets
+  const link = getCloudProviderProjectLink(input.projectPath, input.taskId, "vercel")
+  if (!link || !cachedCloudProviderConnection("vercel").connected) return []
+  return [{ id: "vercel" as const, label: "Vercel", projectName: link.projectName }]
 }
 
 async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOptions) {
@@ -208,7 +192,6 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
   if (input.command === "status") {
     const connections = (["vercel", "supabase"] as const).map(cachedCloudProviderConnection)
     const targets = configuredPublishTargets(input)
-    const aws = await (options.awsStatus ?? getCloudAwsStatus)().catch(() => undefined)
     return {
       ok: true,
       configured: targets.length > 0,
@@ -219,7 +202,6 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
         : { connected: false },
       deployments: deploymentSummaries(input),
       connections,
-      aws,
     }
   }
   if (input.command === "detect_build") {
@@ -278,8 +260,6 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
       sync: await syncCloudProviderEnvironment(input.projectPath, input.taskId, input.provider ?? "vercel"),
     }
   }
-  if (input.command === "aws_status") return { ok: true, aws: await getCloudAwsStatus() }
-  if (input.command === "aws_resources") return { ok: true, aws: await listCloudAwsResources() }
   if (input.command === "list_deployments") {
     return { ok: true, deployments: deploymentSummaries(input) }
   }
@@ -298,23 +278,19 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
       dryRun: input.dryRun === true,
     })
   }
-  const targets = configuredPublishTargets(input)
-  const target = input.target ?? (targets.length === 1 ? targets[0].id : undefined)
-  if (!target) {
+  if (!configuredPublishTargets(input).length) {
     return {
       ok: false,
-      needsChoice: targets.length > 1,
-      needsSetup: targets.length === 0,
-      targets,
-      error: targets.length
-        ? "Choose a publish target: more than one hosting destination is configured for this project."
-        : "Connect and link a Vercel project in Vector Cloud before publishing.",
+      needsSetup: true,
+      targets: [],
+      error: "Connect and link a Vercel project in Vector Cloud before publishing.",
+      nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
     }
   }
   return (options.publish ?? publishProject)({
     projectPath: input.projectPath,
     taskId: input.taskId,
-    target,
+    target: "vercel",
     production: input.production !== false,
     runId: randomUUID(),
   })

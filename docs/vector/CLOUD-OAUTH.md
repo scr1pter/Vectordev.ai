@@ -142,11 +142,10 @@ project listing remain available. See [Vercel's integration scopes](https://verc
 
 ## Publishing and release checks
 
-When an agent omits a publish target, Vector selects the repository's single
-configured destination. Multiple destinations require an explicit choice; zero
-destinations return setup instructions. An explicitly chosen provider's failure
-does not trigger a fallback deployment elsewhere. This does not establish a
-provider's current billing state or authorize a charge.
+Vector publishes to the Vercel project linked to the repository. Without a
+linked project, publishing returns setup instructions; a Vercel failure never
+triggers a deployment elsewhere. This does not establish a provider's current
+billing state or authorize a charge.
 
 Before claiming live OAuth or release acceptance:
 

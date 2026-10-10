@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
-import { readdir, readFile, stat, writeFile } from "node:fs/promises"
-import { basename, extname, join, relative } from "node:path"
+import { readFile, stat, writeFile } from "node:fs/promises"
+import { basename, join } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import {
@@ -23,16 +23,14 @@ import {
   getCloudProviderProjectLink,
   getCloudProviderRuntimeAuth,
 } from "./cloud-connections"
-import { extractDeployUrl, normalizeDeployUrl } from "./publish-url"
+import { extractDeployUrl } from "./publish-url"
 import { agentEnvironment, resolveAgentPath, runCli, shimmedCommand } from "./external-agents"
-
-export { normalizeDeployUrl } from "./publish-url"
 
 // Publish the user's app straight from the Preview panel — Lovable-style, but
 // BYOK like everything else in Vector: deploys go to the USER's own Vercel
 // account through their CLI login. Vector never proxies the code.
 
-export type PublishTargetId = "vector-cloud" | "vercel"
+export type PublishTargetId = "vercel"
 
 export type PublishTarget = {
   id: PublishTargetId
@@ -92,7 +90,6 @@ export type CloudRuntimeLogResult = {
 }
 
 const activePublishes = new Map<string, ReturnType<typeof spawn>>()
-const activeVectorPublishes = new Set<string>()
 
 function scopeFor(input: PublishProjectInput) {
   return {
@@ -188,15 +185,6 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
       : undefined
   return [
     {
-      // Vector's own hosting (alpha): a token-gated static publish service.
-      // Configured via env until cloud accounts exist.
-      id: "vector-cloud",
-      label: "Vector Cloud",
-      command: [],
-      loginHint: "Set VECTOR_CLOUD_URL and VECTOR_CLOUD_TOKEN to enable Vector Cloud publishing.",
-      available: Boolean(process.env.VECTOR_CLOUD_URL && process.env.VECTOR_CLOUD_TOKEN),
-    },
-    {
       id: "vercel",
       label: vercel ? "Vercel" : "Vercel (via npx)",
       command: vercel ? [vercel] : [npx ?? "npx", "--yes", "vercel"],
@@ -239,45 +227,6 @@ async function injectVectorBadge(directory: string) {
   return "skipped"
 }
 
-function parsePublishResponse(value: unknown) {
-  if (!value || typeof value !== "object") return {}
-  const string = (key: string) => {
-    const item = Reflect.get(value, key)
-    return typeof item === "string" ? item : undefined
-  }
-  return {
-    ok: Reflect.get(value, "ok") === true,
-    url: normalizeDeployUrl(string("url")),
-    slug: string("slug"),
-    error: string("error"),
-  }
-}
-
-const TEXT_EXTENSIONS = new Set([
-  ".html",
-  ".htm",
-  ".css",
-  ".js",
-  ".mjs",
-  ".json",
-  ".svg",
-  ".txt",
-  ".md",
-  ".map",
-  ".xml",
-  ".webmanifest",
-])
-const SKIP_DIRECTORIES = new Set(["node_modules", ".git", ".vercel", "dist", ".next", ".turbo"])
-// Any framework build with code splitting and images clears a few hundred files,
-// so this is a real ceiling rather than a working limit — but it is enforced by
-// throwing, because the previous cap stopped the walk mid-directory and shipped
-// whatever half of the site readdir happened to reach.
-const MAX_UPLOAD_FILES = 2_000
-// Hidden entries are excluded by default: .npmrc carries a registry auth token,
-// .git carries the whole history. These are the hidden names a static host
-// genuinely serves, and dropping .well-known broke ACME and app-site-association.
-const PUBLISHABLE_HIDDEN_NAMES = new Set([".htaccess", ".nojekyll", ".well-known"])
-
 // The directory that actually ships. Publish-time checks have to look here and
 // not only at the project root: a bundler bakes VITE_*/NEXT_PUBLIC_* values into
 // these files, and a scan of the source never sees them. Returns undefined when
@@ -293,51 +242,6 @@ async function resolveDeployRoot(projectPath: string, configuredOutput?: string)
     }
   }
   return undefined
-}
-
-// Collect a static bundle for Vector Cloud: prefer a built dist/ (or build/)
-// with an index.html, otherwise the project root for plain static apps.
-async function collectStaticFiles(projectPath: string, configuredOutput?: string) {
-  const root = (await resolveDeployRoot(projectPath, configuredOutput)) ?? projectPath
-  if (configuredOutput && configuredOutput !== "." && !(await stat(join(root, "index.html")).catch(() => undefined))) {
-    throw new Error(
-      `The configured output directory "${configuredOutput}" does not contain index.html. Run the build or update Build & runtime settings.`,
-    )
-  }
-  const files: { path: string; content: string; encoding: "utf8" | "base64" }[] = []
-  let total = 0
-  const walk = async (directory: string) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const full = join(directory, entry.name)
-      if (entry.name.startsWith(".") && !PUBLISHABLE_HIDDEN_NAMES.has(entry.name)) continue
-      if (entry.isDirectory()) {
-        if (root === projectPath && SKIP_DIRECTORIES.has(entry.name)) continue
-        await walk(full)
-        continue
-      }
-      if (!entry.isFile()) continue
-      if (files.length >= MAX_UPLOAD_FILES) {
-        throw new Error(
-          `This app has more than ${MAX_UPLOAD_FILES} files, which is over Vector Cloud's alpha limit. Publish the built output instead.`,
-        )
-      }
-      const buffer = await readFile(full)
-      total += buffer.byteLength
-      if (total > 10 * 1024 * 1024)
-        throw new Error("This app is over Vector Cloud's 10 MB alpha limit. Publish the built output instead.")
-      const utf8 = TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())
-      files.push({
-        path: relative(root, full).split("\\").join("/"),
-        content: buffer.toString(utf8 ? "utf8" : "base64"),
-        encoding: utf8 ? "utf8" : "base64",
-      })
-    }
-  }
-  await walk(root)
-  if (!files.some((file) => file.path === "index.html")) {
-    throw new Error("Vector Cloud needs an index.html at the app root (or in dist/) — build the app first.")
-  }
-  return files
 }
 
 function runBuild(command: string, projectPath: string, onOutput?: (output: string) => void) {
@@ -580,137 +484,12 @@ async function runPostDeployChecks(
   return current
 }
 
-async function publishToVectorCloud(input: PublishProjectInput, emit?: PublishProgressEmitter): Promise<PublishResult> {
-  const endpoint = process.env.VECTOR_CLOUD_URL?.replace(/\/$/, "")
-  const token = process.env.VECTOR_CLOUD_TOKEN
-  if (!endpoint || !token) {
-    return { ok: false, target: "vector-cloud", log: "", error: "Vector Cloud is not configured on this machine." }
-  }
-  const directory = input.projectPath
-  if (!directory || !(await stat(directory).catch(() => undefined))?.isDirectory()) {
-    return { ok: false, target: "vector-cloud", log: "", error: "Open a project before publishing." }
-  }
-  const scope = scopeFor(input)
-  const startedAt = Date.now()
-  const settings = getBuildSettings(scope.projectPath, scope.taskId)
-  emitProgress(
-    input,
-    emit,
-    "preparing",
-    "info",
-    `Preparing ${input.workspaceName ?? basename(directory)} for Vector Cloud.`,
-  )
-  const preflight = await runPreflightChecks(input, settings, emit)
-  const preflightLog = redactCloudLog(scope.projectPath, scope.taskId, preflight.log).slice(-40_000)
-  if (!preflight.ok) {
-    emitProgress(input, emit, "failed", "error", "Required pre-deploy checks failed.")
-    return {
-      ok: false,
-      target: "vector-cloud",
-      log: preflightLog,
-      checks: preflight.checks,
-      error: "Required pre-deploy checks failed. Review the evidence, repair the project, and publish again.",
-    }
-  }
-
-  // Stamp the badge into the copy that ships, never into the project. Writing to
-  // the source index.html here both missed the deploy — the build has already run,
-  // so dist/index.html is what uploads — and left an edit the user never asked for
-  // in a tracked file.
-  const files = (await collectStaticFiles(directory, settings?.outputDirectory)).map((file) =>
-    file.path === "index.html" ? { ...file, content: stampVectorBadge(file.content) } : file,
-  )
-  emitProgress(input, emit, "uploading", "info", `Uploading ${files.length} files to Vector Cloud.`)
-  const response = await fetch(`${endpoint}/api/publish`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      name: input.workspaceName ?? (basename(scope.projectPath) || "app"),
-      project: basename(scope.projectPath) || "app",
-      environment: "preview",
-      files,
-    }),
-    signal: AbortSignal.timeout(120_000),
-  })
-  const body = parsePublishResponse(await response.json().catch(() => undefined))
-  if (!response.ok || !body.ok || !body.url) {
-    const error = body.error ?? `Vector Cloud responded with ${response.status}.`
-    emitProgress(input, emit, "failed", "error", error)
-    return { ok: false, target: "vector-cloud", log: preflightLog, checks: preflight.checks, error }
-  }
-
-  const log = redactCloudLog(
-    scope.projectPath,
-    scope.taskId,
-    [preflightLog.trim(), `Published ${files.length} files to Vector Cloud.`].filter(Boolean).join("\n"),
-  )
-  let deployment = recordDeployment({
-    slug: body.slug ?? body.url.match(/\/s\/([^/]+)/)?.[1] ?? body.url,
-    url: body.url,
-    name: input.workspaceName ?? (basename(scope.projectPath) || "app"),
-    projectPath: scope.projectPath,
-    taskId: scope.taskId,
-    deploymentPath: directory,
-    workspaceId: input.workspaceId,
-    workspaceName: input.workspaceName,
-    target: "vector-cloud",
-    environment: "preview",
-    log,
-    durationMs: Date.now() - startedAt,
-    checks: preflight.checks,
-    git: await readGitMetadata(directory),
-  })
-  emitProgress(input, emit, "uploading", "success", `Preview deployed at ${body.url}`)
-  deployment = await runPostDeployChecks(input, deployment, settings, emit)
-  if (!requiredChecksPassed(deployment.checks)) {
-    const error = "The preview deployed, but required release checks failed. Production was not changed."
-    emitProgress(input, emit, "failed", "error", error)
-    return {
-      ok: false,
-      target: "vector-cloud",
-      url: deployment.url,
-      log,
-      deploymentId: deployment.id,
-      checks: deployment.checks,
-      error,
-    }
-  }
-  if (input.production !== false) {
-    deployment = await promoteDeployment(
-      { projectPath: scope.projectPath, taskId: scope.taskId, id: deployment.id, runId: input.runId },
-      emit,
-    )
-  }
-  emitProgress(
-    input,
-    emit,
-    "complete",
-    "success",
-    input.production === false ? "Preview is ready." : "Production release is live.",
-  )
-  return {
-    ok: true,
-    target: "vector-cloud",
-    url: deployment.productionUrl ?? deployment.url,
-    log,
-    deploymentId: deployment.id,
-    checks: deployment.checks,
-  }
-}
-
 export async function publishProject(
   input: PublishProjectInput,
   emit?: PublishProgressEmitter,
 ): Promise<PublishResult> {
   const scope = scopeFor(input)
   const publishKey = `${input.projectPath}:${input.target}`
-  if (input.target === "vector-cloud") {
-    if (activeVectorPublishes.has(publishKey)) {
-      return { ok: false, target: input.target, log: "", error: "A publish is already running for this project." }
-    }
-    activeVectorPublishes.add(publishKey)
-    return publishToVectorCloud(input, emit).finally(() => activeVectorPublishes.delete(publishKey))
-  }
   const directory = input.projectPath
   if (!directory || !(await stat(directory).catch(() => undefined))?.isDirectory()) {
     return { ok: false, target: input.target, log: "", error: "Open a project before publishing." }
@@ -898,23 +677,6 @@ export type DeploymentActionInput = {
   runId?: string
 }
 
-async function vectorCloudPromotion(deployment: CloudDeployment) {
-  const endpoint = process.env.VECTOR_CLOUD_URL?.replace(/\/$/, "")
-  const token = process.env.VECTOR_CLOUD_TOKEN
-  if (!endpoint || !token) throw new Error("Vector Cloud is not configured on this machine.")
-  const response = await fetch(`${endpoint}/api/promote`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ project: basename(deployment.projectPath) || deployment.name, slug: deployment.slug }),
-    signal: AbortSignal.timeout(30_000),
-  })
-  const body = parsePublishResponse(await response.json().catch(() => undefined))
-  if (!response.ok || !body.ok || !body.url) {
-    throw new Error(body.error ?? `Vector Cloud promotion failed with ${response.status}.`)
-  }
-  return body.url
-}
-
 async function vercelDeploymentCommand(deployment: CloudDeployment, action: "promote" | "rollback") {
   const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
   if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
@@ -944,18 +706,11 @@ export async function promoteDeployment(
     projectPath: deployment.deploymentPath ?? deployment.projectPath,
     scopeProjectPath: deployment.projectPath,
     scopeTaskId: deployment.taskId,
-    target: isPublishTargetId(deployment.target) ? deployment.target : "vector-cloud",
+    target: "vercel",
     runId: input.runId,
   }
   emitProgress(progressInput, emit, "promoting", "info", `Promoting ${deployment.url} to production.`)
-  const productionUrl =
-    deployment.target === "vector-cloud"
-      ? await vectorCloudPromotion(deployment)
-      : deployment.target === "vercel"
-        ? await vercelDeploymentCommand(deployment, "promote")
-        : (() => {
-            throw new Error("Promotion is available for Vector Cloud and Vercel deployments.")
-          })()
+  const productionUrl = await vercelDeploymentCommand(deployment, "promote")
   const promoted = markDeploymentPromoted(input.projectPath, input.taskId, input.id, { productionUrl })
   emitProgress(progressInput, emit, "promoting", "success", `Production now points to ${productionUrl}`)
   return promoted
@@ -974,18 +729,11 @@ export async function rollbackDeployment(
     projectPath: deployment.deploymentPath ?? deployment.projectPath,
     scopeProjectPath: deployment.projectPath,
     scopeTaskId: deployment.taskId,
-    target: isPublishTargetId(deployment.target) ? deployment.target : "vector-cloud",
+    target: "vercel",
     runId: input.runId,
   }
   emitProgress(progressInput, emit, "promoting", "info", `Rolling production back to ${deployment.url}.`)
-  const productionUrl =
-    deployment.target === "vector-cloud"
-      ? await vectorCloudPromotion(deployment)
-      : deployment.target === "vercel"
-        ? await vercelDeploymentCommand(deployment, "rollback")
-        : (() => {
-            throw new Error("Rollback is available for Vector Cloud and Vercel deployments.")
-          })()
+  const productionUrl = await vercelDeploymentCommand(deployment, "rollback")
   const restored = markDeploymentPromoted(input.projectPath, input.taskId, input.id, {
     productionUrl,
     rollback: true,
@@ -997,17 +745,6 @@ export async function rollbackDeployment(
 export async function fetchDeploymentRuntimeLogs(input: DeploymentActionInput): Promise<CloudRuntimeLogResult> {
   const deployment = getDeployment(input.projectPath, input.taskId, input.id)
   const fetchedAt = new Date().toISOString()
-  if (deployment.target === "vector-cloud") {
-    const log = [
-      deployment.log ?? "No build output was recorded.",
-      ...deployment.checks.filter((check) => check.output).map((check) => `\n[${check.label}]\n${check.output}`),
-    ].join("\n")
-    updateDeployment(input.projectPath, input.taskId, input.id, { runtimeLog: log, runtimeLogFetchedAt: fetchedAt })
-    return { log, fetchedAt, source: "build" }
-  }
-  if (deployment.target !== "vercel") {
-    throw new Error("Runtime log streaming is available for Vercel deployments.")
-  }
   const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
   if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
   const auth = await getCloudProviderRuntimeAuth("vercel")
@@ -1043,12 +780,8 @@ export async function rerunDeploymentChecks(input: DeploymentActionInput): Promi
     scopeTaskId: deployment.taskId,
     workspaceId: deployment.workspaceId,
     workspaceName: deployment.workspaceName,
-    target: isPublishTargetId(deployment.target) ? deployment.target : "vector-cloud",
+    target: "vercel",
     runId: input.runId,
   }
   return runPostDeployChecks(progressInput, deployment, settings)
-}
-
-function isPublishTargetId(value: string): value is PublishTargetId {
-  return value === "vector-cloud" || value === "vercel"
 }

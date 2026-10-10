@@ -3969,14 +3969,8 @@ export function PreviewPanel(props: {
       globalThis.window?.api as
         | (Record<string, unknown> & {
             publish?: {
-              targets: () => Promise<
-                { id: "vector-cloud" | "vercel"; label: string; loginHint: string; available: boolean }[]
-              >
-              run: (input: {
-                projectPath: string
-                target: "vector-cloud" | "vercel"
-                production?: boolean
-              }) => Promise<{
+              targets: () => Promise<{ id: "vercel"; label: string; loginHint: string; available: boolean }[]>
+              run: (input: { projectPath: string; target: "vercel"; production?: boolean }) => Promise<{
                 ok: boolean
                 url?: string
                 error?: string

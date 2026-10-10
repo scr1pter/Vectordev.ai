@@ -24,7 +24,6 @@ import type {
   CloudProviderSyncResult,
   CloudSupabaseServices,
 } from "../main/cloud-connections"
-import type { CloudAwsSnapshot, CloudAwsStatus } from "../main/cloud-aws"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
   GithubAuthStatus,
@@ -138,7 +137,6 @@ export type {
   CloudSupabaseFunction,
   CloudSupabaseServices,
 } from "../main/cloud-connections"
-export type { CloudAwsResource, CloudAwsService, CloudAwsSnapshot, CloudAwsStatus } from "../main/cloud-aws"
 export type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 export type {
   GithubAuthStatus,
@@ -917,13 +915,6 @@ export type ElectronAPI = {
     }
     domains: {
       list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
-      add: (
-        projectPath: string,
-        taskId: string | undefined,
-        input: { domain: string; slug?: string },
-      ) => Promise<CloudDomain>
-      verify: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-      remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
     }
     database: {
       get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
@@ -948,10 +939,6 @@ export type ElectronAPI = {
     }
     services: {
       supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
-    }
-    aws: {
-      status: (input?: { profile?: string; region?: string }) => Promise<CloudAwsStatus>
-      resources: (input?: { profile?: string; region?: string }) => Promise<CloudAwsSnapshot>
     }
     build: {
       get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>

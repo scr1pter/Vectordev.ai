@@ -18,7 +18,6 @@ import {
   normalizeCloudDomain,
   removeDomain,
   updateDomainRecord,
-  verifyDomain,
   type CloudDatabaseConnection,
   type CloudDomain,
 } from "./cloud-console"
@@ -813,7 +812,6 @@ export async function verifyCloudProviderDomain(
 ): Promise<CloudDomain> {
   const domain = listDomains(projectPath, taskId).find((item) => item.id === id)
   if (!domain) throw new Error("That domain is no longer connected to this project.")
-  if (domain.provider === "vector-cloud") return verifyDomain(projectPath, taskId, id)
   const link = requireProjectLink(projectPath, taskId, domain.provider)
   const auth = await accessToken(domain.provider)
   const getUrl = vercelApiUrl(
@@ -857,7 +855,6 @@ export async function removeCloudProviderDomain(
 ): Promise<CloudDomain[]> {
   const domain = listDomains(projectPath, taskId).find((item) => item.id === id)
   if (!domain) return listDomains(projectPath, taskId)
-  if (domain.provider === "vector-cloud") return removeDomain(projectPath, taskId, id)
   const link = requireProjectLink(projectPath, taskId, domain.provider)
   const auth = await accessToken(domain.provider)
   const url = vercelApiUrl(

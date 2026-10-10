@@ -78,45 +78,42 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
-  it.instance("preserves an omitted publish destination and reports the choices without a retry", () =>
+  it.instance("relays missing hosting setup without claiming a publish", () =>
     Effect.gen(function* () {
       const requests = yield* bridge(
         {
           ok: false,
-          needsChoice: true,
-          targets: [
-            { id: "vercel", label: "Vercel", projectName: "website" },
-            { id: "vector-cloud", label: "Vector Cloud", projectName: "landing" },
-          ],
-          nextStep: "Choose one of these destinations.",
+          needsSetup: true,
+          targets: [],
+          error: "Connect and link a Vercel project in Vector Cloud before publishing.",
+          nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
         },
         400,
       )
       const result = yield* execute({ action: "publish" })
       expect(requests).toHaveLength(1)
       expect(requests[0]).not.toHaveProperty("target")
-      expect(result.output).toContain("target vercel, project website")
-      expect(result.output).toContain("target vector-cloud, project landing")
-      expect(result.output).toContain("Choose one of these destinations.")
+      expect(result.output).toContain("Connect and link a Vercel project")
+      expect(result.output).toContain("Cloud Services > Integrations")
       expect(result.output).not.toContain("publish completed")
     }),
   )
 
-  it.instance("keeps an explicit target in permission metadata and makes no fallback request", () =>
+  it.instance("keeps the production flag in permission metadata and makes no fallback request", () =>
     Effect.gen(function* () {
       const requests = yield* bridge({ ok: false, error: "The selected Vercel project is unavailable." }, 400)
       const permissions: Parameters<Tool.Context["ask"]>[0][] = []
-      const result = yield* execute({ action: "publish", target: "vercel", production: false }, (input) =>
+      const result = yield* execute({ action: "publish", production: false }, (input) =>
         Effect.sync(() => {
           permissions.push(input)
         }),
       )
       expect(requests).toHaveLength(1)
-      expect(requests[0]).toMatchObject({ command: "publish", target: "vercel", production: false })
+      expect(requests[0]).toMatchObject({ command: "publish", production: false })
       expect(permissions).toHaveLength(1)
       expect(permissions[0]).toMatchObject({
         permission: "vector_cloud_publish",
-        metadata: { target: "vercel", production: false },
+        metadata: { production: false },
       })
       expect(result.output).toContain("The selected Vercel project is unavailable.")
       expect(result.output).not.toContain("publish completed")
@@ -135,7 +132,7 @@ describe("vector_cloud bridge", () => {
   it.instance("does not report success from an HTTP failure", () =>
     Effect.gen(function* () {
       yield* bridge({ ok: true, url: "https://example.invalid" }, 502)
-      const result = yield* execute({ action: "publish", target: "vercel" }).pipe(Effect.exit)
+      const result = yield* execute({ action: "publish" }).pipe(Effect.exit)
       expect(Exit.isFailure(result)).toBe(true)
       if (Exit.isFailure(result)) expect(Cause.pretty(result.cause)).toContain("Vector Cloud command failed (502)")
     }),

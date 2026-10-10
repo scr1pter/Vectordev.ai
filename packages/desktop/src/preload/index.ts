@@ -273,9 +273,6 @@ const api: ElectronAPI = {
     },
     domains: {
       list: (projectPath, taskId) => ipcRenderer.invoke("cloud-domains-list", projectPath, taskId),
-      add: (projectPath, taskId, input) => ipcRenderer.invoke("cloud-domains-add", projectPath, taskId, input),
-      verify: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-domains-verify", projectPath, taskId, id),
-      remove: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-domains-remove", projectPath, taskId, id),
     },
     database: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-db-get", projectPath, taskId),
@@ -286,10 +283,6 @@ const api: ElectronAPI = {
     },
     services: {
       supabase: (projectPath, taskId) => ipcRenderer.invoke("cloud-supabase-services", projectPath, taskId),
-    },
-    aws: {
-      status: (input) => ipcRenderer.invoke("cloud-aws-status", input),
-      resources: (input) => ipcRenderer.invoke("cloud-aws-resources", input),
     },
     build: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-build-get", projectPath, taskId),

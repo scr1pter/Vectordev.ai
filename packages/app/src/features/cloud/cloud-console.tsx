@@ -9,7 +9,6 @@ import {
   cloudApi,
   publishApi,
   type CloudAgentWorkspace,
-  type CloudAwsSnapshot,
   type CloudBuildSettings,
   type CloudDeployment,
   type CloudDomain,
@@ -21,7 +20,6 @@ import {
   type CloudSupabaseServices,
   type PublishProgressEvent,
   type PublishTarget,
-  type PublishTargetId,
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
@@ -42,7 +40,6 @@ export type CloudSection =
   | "functions"
   | "realtime"
   | "delivery"
-  | "aws"
   | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
@@ -75,7 +72,6 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
     label: "Connections",
     items: [
       { id: "connections", label: "Integrations" },
-      { id: "aws", label: "AWS" },
       { id: "settings", label: "Project settings" },
     ],
   },
@@ -264,18 +260,6 @@ function sectionIcon(id: CloudSection) {
           />
         </>
       )
-    case "aws":
-      return (
-        <>
-          <path
-            d="M2.8 5.2 8 2.7l5.2 2.5L8 7.8 2.8 5.2Zm0 0v5.6L8 13.3l5.2-2.5V5.2M8 7.8v5.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.1"
-            stroke-linejoin="round"
-          />
-        </>
-      )
     case "settings":
       return (
         <>
@@ -315,10 +299,6 @@ function cleanDeploymentUrl(value: string) {
   return parsed.toString()
 }
 
-function isPublishTargetId(value: string): value is PublishTargetId {
-  return value === "vector-cloud" || value === "vercel"
-}
-
 function isPackageManager(value: string): value is BuildDraft["packageManager"] {
   return value === "bun" || value === "pnpm" || value === "yarn" || value === "npm" || value === "static"
 }
@@ -345,7 +325,7 @@ export function CloudConsole(props: {
   const [notice, setNotice] = createSignal<Notice>()
 
   const [publishTargets, setPublishTargets] = createSignal<PublishTarget[]>([])
-  const [publishTargetId, setPublishTargetId] = createSignal<PublishTargetId>("vercel")
+  const vercelTarget = () => publishTargets().find((item) => item.id === "vercel")
   const [deploymentEnvironment, setDeploymentEnvironment] = createSignal<"preview" | "production">("production")
   const [publishing, setPublishing] = createSignal(false)
   const [activeRunId, setActiveRunId] = createSignal("")
@@ -371,11 +351,6 @@ export function CloudConsole(props: {
   const [supabaseServices, setSupabaseServices] = createSignal<CloudSupabaseServices>()
   const [supabaseServicesBusy, setSupabaseServicesBusy] = createSignal(false)
   const [supabaseServicesLoaded, setSupabaseServicesLoaded] = createSignal(false)
-  const [awsSnapshot, setAwsSnapshot] = createSignal<CloudAwsSnapshot>()
-  const [awsBusy, setAwsBusy] = createSignal(false)
-  const [awsLoaded, setAwsLoaded] = createSignal(false)
-  const [awsProfile, setAwsProfile] = createSignal("")
-  const [awsRegion, setAwsRegion] = createSignal("")
   const [buildDraft, setBuildDraft] = createSignal<BuildDraft>({
     framework: "",
     packageManager: "npm",
@@ -501,25 +476,17 @@ export function CloudConsole(props: {
       setDeployments(await api.deployments.remove(props.projectPath, props.taskId, deployment.id))
       setNotice({
         tone: "success",
-        text:
-          deployment.target === "vector-cloud"
-            ? `Unpublished ${deployment.name}.`
-            : `Removed ${deployment.name} from Vector's deployment history. Manage the live site in Vercel.`,
+        text: `Removed ${deployment.name} from Vector's deployment history. Manage the live site in Vercel.`,
       })
     } catch {
       setNotice({ tone: "error", text: `Could not remove ${deployment.name} — try again.` })
     }
   }
 
-  const runPublish = async (override?: {
-    target?: PublishTargetId
-    environment?: "preview" | "production"
-    workspace?: CloudAgentWorkspace
-  }) => {
+  const runPublish = async (override?: { environment?: "preview" | "production"; workspace?: CloudAgentWorkspace }) => {
     if (!publish || !props.projectPath) return
-    const targetId = override?.target ?? publishTargetId()
     const environment = override?.environment ?? deploymentEnvironment()
-    const target = publishTargets().find((item) => item.id === targetId)
+    const target = vercelTarget()
     if (target && !target.available) {
       setNotice({ tone: "error", text: target.loginHint || `${target.label} is not available on this machine.` })
       return
@@ -532,7 +499,7 @@ export function CloudConsole(props: {
       tone: "info",
       text: override?.workspace
         ? `Publishing ${override.workspace.name} as an isolated preview…`
-        : `Publishing a ${environment} release to ${target?.label ?? targetId}… this can take a minute.`,
+        : `Publishing a ${environment} release to Vercel… this can take a minute.`,
     })
     try {
       const result = await publish.run({
@@ -542,7 +509,7 @@ export function CloudConsole(props: {
         scopeTaskId: override?.workspace ? props.taskId : undefined,
         workspaceId: override?.workspace?.id,
         workspaceName: override?.workspace?.name,
-        target: targetId,
+        target: "vercel",
         production: override?.workspace ? false : environment === "production",
         runId,
       })
@@ -789,20 +756,11 @@ export function CloudConsole(props: {
     if (!api || !props.projectPath) return
     setVerifyingId(domain.id)
     try {
-      const updated =
-        domain.provider === "vector-cloud"
-          ? await api.domains.verify(props.projectPath, props.taskId, domain.id)
-          : await api.providers.verifyDomain(props.projectPath, props.taskId, domain.id)
+      const updated = await api.providers.verifyDomain(props.projectPath, props.taskId, domain.id)
       setDomains((list) => list.map((item) => (item.id === updated.id ? updated : item)))
       setNotice(
         updated.status === "verified"
-          ? {
-              tone: "success",
-              text:
-                updated.provider === "vector-cloud"
-                  ? `${updated.domain} DNS is verified.`
-                  : `${updated.domain} is verified on ${providerLabel(updated.provider)}.`,
-            }
+          ? { tone: "success", text: `${updated.domain} is verified on Vercel.` }
           : { tone: "info", text: updated.detail ?? "Not verified yet — DNS can take a few minutes." },
       )
     } catch (error) {
@@ -817,11 +775,7 @@ export function CloudConsole(props: {
   const removeDomain = async (domain: CloudDomain) => {
     if (!api || !props.projectPath) return
     try {
-      setDomains(
-        domain.provider === "vector-cloud"
-          ? await api.domains.remove(props.projectPath, props.taskId, domain.id)
-          : await api.providers.removeDomain(props.projectPath, props.taskId, domain.id),
-      )
+      setDomains(await api.providers.removeDomain(props.projectPath, props.taskId, domain.id))
     } catch (error) {
       setNotice({
         tone: "error",
@@ -864,31 +818,11 @@ export function CloudConsole(props: {
     }
   }
 
-  const refreshAws = async () => {
-    if (!api) return
-    setAwsBusy(true)
-    try {
-      const snapshot = await api.aws.resources({
-        profile: awsProfile() || undefined,
-        region: awsRegion() || undefined,
-      })
-      setAwsSnapshot(snapshot)
-      if (!awsProfile() && snapshot.status.profile) setAwsProfile(snapshot.status.profile)
-      if (!awsRegion()) setAwsRegion(snapshot.status.region)
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not inspect AWS." })
-    } finally {
-      setAwsBusy(false)
-      setAwsLoaded(true)
-    }
-  }
-
   createEffect(() => {
     const current = section()
     if (["authentication", "storage", "functions", "realtime"].includes(current) && !supabaseServicesLoaded()) {
       void refreshSupabaseServices()
     }
-    if (current === "aws" && !awsLoaded()) void refreshAws()
   })
 
   const connectProvider = async (provider: CloudProviderId) => {
@@ -1183,16 +1117,6 @@ export function CloudConsole(props: {
                     <small>Database, authentication, storage, functions, and realtime.</small>
                   </span>
                   <em>{database() ? "Supabase linked" : "Setup needed"}</em>
-                </button>
-                <button type="button" onClick={() => setSection("aws")}>
-                  <span class="cloud-service-icon">
-                    <Icon name="providers" />
-                  </span>
-                  <span>
-                    <strong>AWS</strong>
-                    <small>Inspect compute, storage, functions, containers, and model training.</small>
-                  </span>
-                  <em>{awsSnapshot()?.status.configured ? "Connected" : "Open integration"}</em>
                 </button>
               </section>
             </Show>
@@ -1515,20 +1439,6 @@ export function CloudConsole(props: {
                     </button>
                   </div>
                   <div class="mt-3 flex flex-wrap items-center gap-2">
-                    <For each={publishTargets()}>
-                      {(target) => (
-                        <button
-                          type="button"
-                          class="cloud-button"
-                          data-variant={publishTargetId() === target.id ? "primary" : undefined}
-                          title={target.available ? undefined : target.loginHint}
-                          onClick={() => setPublishTargetId(target.id)}
-                        >
-                          {target.label}
-                          {target.available ? "" : " · setup needed"}
-                        </button>
-                      )}
-                    </For>
                     <button
                       class="cloud-button ml-auto"
                       data-variant="primary"
@@ -1539,7 +1449,7 @@ export function CloudConsole(props: {
                       {publishing() ? "Publishing…" : "Publish →"}
                     </button>
                   </div>
-                  <Show when={publish && publishTargets().find((item) => item.id === publishTargetId())}>
+                  <Show when={publish && vercelTarget()}>
                     {(target) => (
                       <p class="cloud-muted mt-2 text-[11px]">
                         {target().account ? (
@@ -1556,9 +1466,7 @@ export function CloudConsole(props: {
                   <Show when={!publish}>
                     <p class="cloud-muted mt-2 text-[11px]">Publishing runs in Vector Desktop.</p>
                   </Show>
-                  <Show
-                    when={publish && publishTargets().length > 0 && !publishTargets().some((item) => item.available)}
-                  >
+                  <Show when={publish && vercelTarget() && !vercelTarget()?.available}>
                     <p class="cloud-muted mt-2 text-[11px]">
                       No publisher detected. Install the Vercel CLI (<code>npm i -g vercel</code>) and run{" "}
                       <code>vercel login</code> in Terminal, then reopen this panel.
@@ -1666,13 +1574,9 @@ export function CloudConsole(props: {
                         deployment.checks.filter((check) => check.required && check.status === "failed")
                       const passedChecks = () => deployment.checks.filter((check) => check.status === "passed")
                       const canPromote = () =>
-                        deployment.releaseStatus === "preview" &&
-                        !deployment.workspaceId &&
-                        (deployment.target === "vector-cloud" || deployment.target === "vercel") &&
-                        failedChecks().length === 0
+                        deployment.releaseStatus === "preview" && !deployment.workspaceId && failedChecks().length === 0
                       const canRollback = () =>
                         (deployment.releaseStatus === "superseded" || deployment.releaseStatus === "rolled-back") &&
-                        (deployment.target === "vector-cloud" || deployment.target === "vercel") &&
                         failedChecks().length === 0
                       return (
                         <div class="cloud-row cloud-row-block">
@@ -1821,20 +1725,14 @@ export function CloudConsole(props: {
                                 Repair with Vector
                               </button>
                             </Show>
-                            <Show when={isPublishTargetId(deployment.target) ? deployment.target : undefined}>
-                              {(targetId) => (
-                                <button
-                                  class="cloud-button"
-                                  type="button"
-                                  disabled={!publish || publishing()}
-                                  onClick={() =>
-                                    void runPublish({ target: targetId(), environment: deployment.environment })
-                                  }
-                                >
-                                  Redeploy
-                                </button>
-                              )}
-                            </Show>
+                            <button
+                              class="cloud-button"
+                              type="button"
+                              disabled={!publish || publishing()}
+                              onClick={() => void runPublish({ environment: deployment.environment })}
+                            >
+                              Redeploy
+                            </button>
                             <button
                               class="cloud-button"
                               type="button"
@@ -2177,9 +2075,7 @@ export function CloudConsole(props: {
                           <div class="min-w-0 flex-1">
                             <div class="flex items-center gap-2">
                               <strong class="text-[13px] text-white/85">{domain.domain}</strong>
-                              <span class="cloud-provider-chip">
-                                {domain.provider === "vector-cloud" ? "Legacy DNS" : providerLabel(domain.provider)}
-                              </span>
+                              <span class="cloud-provider-chip">{providerLabel(domain.provider)}</span>
                               <span
                                 class="cloud-status"
                                 data-tone={
@@ -2817,121 +2713,6 @@ export function CloudConsole(props: {
                   )}
                 </For>
               </section>
-            </Show>
-
-            {/* AWS */}
-            <Show when={section() === "aws"}>
-              <div class="cloud-heading cloud-heading-with-action">
-                <div>
-                  <div class="cloud-kicker">Local AWS account</div>
-                  <h1>AWS integrations</h1>
-                  <p>
-                    Vector uses your locally authenticated AWS CLI. It can inspect S3, EC2, Lambda, ECS, and SageMaker
-                    without copying credentials into the app or its logs.
-                  </p>
-                </div>
-                <button
-                  class="cloud-button"
-                  data-variant="primary"
-                  type="button"
-                  disabled={awsBusy()}
-                  onClick={() => void refreshAws()}
-                >
-                  {awsBusy() ? "Refreshing…" : "Refresh AWS"}
-                </button>
-              </div>
-              <div class="cloud-aws-controls">
-                <label>
-                  <span>Profile</span>
-                  <select
-                    class="cloud-input"
-                    value={awsProfile()}
-                    onChange={(event) => {
-                      setAwsProfile(event.currentTarget.value)
-                      setAwsLoaded(false)
-                      setAwsSnapshot(undefined)
-                    }}
-                  >
-                    <option value="">Default profile</option>
-                    <For each={awsSnapshot()?.status.profiles ?? []}>
-                      {(profile) => <option value={profile}>{profile}</option>}
-                    </For>
-                  </select>
-                </label>
-                <label>
-                  <span>Region</span>
-                  <input
-                    class="cloud-input"
-                    value={awsRegion()}
-                    onInput={(event) => setAwsRegion(event.currentTarget.value)}
-                    placeholder="us-east-1"
-                  />
-                </label>
-                <div class="cloud-aws-identity">
-                  <strong>
-                    {awsSnapshot()?.status.configured
-                      ? `Account ${awsSnapshot()?.status.accountId}`
-                      : "AWS not connected"}
-                  </strong>
-                  <small>{awsSnapshot()?.status.detail ?? "Checking the AWS CLI on this computer…"}</small>
-                </div>
-              </div>
-              <div class="cloud-list mt-4">
-                <For each={awsSnapshot()?.services ?? []}>
-                  {(service) => (
-                    <div class="cloud-row cloud-row-block">
-                      <span class="cloud-service-icon">
-                        <Icon
-                          name={
-                            service.id === "s3"
-                              ? "folder"
-                              : service.id === "lambda"
-                                ? "code"
-                                : service.id === "sagemaker"
-                                  ? "models"
-                                  : "server"
-                          }
-                        />
-                      </span>
-                      <div class="min-w-0 flex-1">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <strong class="text-[13px] text-white/85">{service.label}</strong>
-                          <span class="cloud-status" data-tone={service.available ? "success" : "warning"}>
-                            {service.available ? `${service.resources.length} found` : "Unavailable"}
-                          </span>
-                        </div>
-                        <Show when={service.detail}>
-                          <p class="cloud-muted mt-1 text-[11px]">{service.detail}</p>
-                        </Show>
-                        <Show when={service.resources.length}>
-                          <div class="cloud-resource-chips mt-2">
-                            <For each={service.resources.slice(0, 8)}>
-                              {(resource) => (
-                                <span title={resource.id}>
-                                  {resource.name}
-                                  {resource.state ? ` · ${resource.state}` : ""}
-                                </span>
-                              )}
-                            </For>
-                            <Show when={service.resources.length > 8}>
-                              <span>+{service.resources.length - 8} more</span>
-                            </Show>
-                          </div>
-                        </Show>
-                      </div>
-                      <button class="cloud-button" type="button" onClick={() => platform.openLink(service.consoleUrl)}>
-                        Open AWS
-                      </button>
-                    </div>
-                  )}
-                </For>
-              </div>
-              <Show when={awsSnapshot() && !awsSnapshot()?.status.installed}>
-                <div class="cloud-notice mt-4" data-tone="info">
-                  Install AWS CLI v2, run <code>aws configure</code> or use AWS SSO, then refresh. Vector never asks for
-                  the access key itself.
-                </div>
-              </Show>
             </Show>
 
             {/* Build and runtime */}
