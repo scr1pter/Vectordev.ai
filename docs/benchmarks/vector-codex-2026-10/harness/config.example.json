@@ -1,0 +1,16 @@
+{
+  "vector": {
+    "command": "vector",
+    "model": "openai/gpt-6.1-sol",
+    "variant": "medium"
+  },
+  "codex": {
+    "command": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "medium"
+  },
+  "timeoutSeconds": 600,
+  "metadata": {
+    "purpose": "Manual synthetic benchmark; use your own explicitly configured launchers and credentials."
+  }
+}

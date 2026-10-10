@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "source": "tasks.ts",
+      "file": "harness/tasks.ts",
+      "sha256": "d2d4cefc701933bff39a0a40bf82dad5b937577afcf3499bdcd066473bbd0e22",
+      "bytes": 27770,
+      "transformation": "none"
+    },
+    {
+      "source": "score.ts",
+      "file": "harness/score.ts",
+      "sha256": "7b91cf39a9152b2e0c4a766fa375639df05fc87cc941072a39896cbd40f40a1f",
+      "bytes": 9243,
+      "transformation": "none"
+    },
+    {
+      "source": "meter.ts",
+      "file": "harness/meter.ts",
+      "sha256": "1a11d5cacf5afd569f1e5a8bd83f2ee6d77b0a020e1a8fc0089c94872954a88a",
+      "bytes": 5471,
+      "transformation": "none"
+    },
+    {
+      "source": "runner.ts",
+      "file": "harness/runner.ts",
+      "sha256": "c6b75299e2339bba0bfd6d854198181f5f89b2eb324b44b00b2533541107d0ea",
+      "bytes": 19276,
+      "transformation": "none"
+    },
+    {
+      "source": "runner-self-test.ts",
+      "file": "harness/runner-self-test.ts",
+      "sha256": "210171c99a2cee39f59a7be685ee5c5efb172db0faeee2677104741d08ec1b16",
+      "bytes": 1951,
+      "transformation": "none"
+    },
+    {
+      "source": "analysis.ts",
+      "file": "harness/analysis.ts",
+      "sha256": "542e9f661e324f18db6b10c32d2046021fd8eacdceff3ff14faf6da7bb5d8f62",
+      "bytes": 21832,
+      "transformation": "none"
+    },
+    {
+      "source": "extra-behavior.test.ts",
+      "file": "harness/extra-behavior.test.ts",
+      "sha256": "97fb9b306ba8f56c4654f54ff53477fa0059064966ed803adca447ba5c2456d2",
+      "bytes": 7123,
+      "transformation": "none"
+    },
+    {
+      "source": "collect-validation.ts",
+      "file": "harness/collect-validation.ts",
+      "sha256": "8f570bad5c15554dcda792ce7e9ab88cfb3732935be6f6dc3727ed2ed437910c",
+      "bytes": 4377,
+      "transformation": "none"
+    },
+    {
+      "source": "round3/frozen/tasks.ts",
+      "file": "harness/round3/frozen/tasks.ts",
+      "sha256": "825247d732c4048852b33224a1b33e44f00ec911a81536a069d533317d3fd15e",
+      "bytes": 9467,
+      "transformation": "none"
+    },
+    {
+      "source": "round3/frozen/score.ts",
+      "file": "harness/round3/frozen/score.ts",
+      "sha256": "7b91cf39a9152b2e0c4a766fa375639df05fc87cc941072a39896cbd40f40a1f",
+      "bytes": 9243,
+      "transformation": "none"
+    },
+    {
+      "source": "round3/frozen/meter.ts",
+      "file": "harness/round3/frozen/meter.ts",
+      "sha256": "1a11d5cacf5afd569f1e5a8bd83f2ee6d77b0a020e1a8fc0089c94872954a88a",
+      "bytes": 5471,
+      "transformation": "none"
+    },
+    {
+      "source": "round3/frozen/runner.ts",
+      "file": "harness/round3/frozen/runner.ts",
+      "sha256": "08d938b21d14f197a6b5de402839139e65a53d5814b11df4425d18da1bb1d74e",
+      "bytes": 19311,
+      "transformation": "none"
+    },
+    {
+      "source": "round3/frozen/runner-self-test.ts",
+      "file": "harness/round3/frozen/runner-self-test.ts",
+      "sha256": "9dd330c43f644a60e93d8dc65f1903540175a9aa45f02502c49e73ecaeefcc86",
+      "bytes": 2253,
+      "transformation": "none"
+    },
+    {
+      "source": "round3/frozen/extra-behavior.test.ts",
+      "file": "harness/round3/frozen/extra-behavior.test.ts",
+      "sha256": "97fb9b306ba8f56c4654f54ff53477fa0059064966ed803adca447ba5c2456d2",
+      "bytes": 7123,
+      "transformation": "none"
+    },
+    {
+      "source": "round4/frozen/tasks.ts",
+      "file": "harness/round4/frozen/tasks.ts",
+      "sha256": "825247d732c4048852b33224a1b33e44f00ec911a81536a069d533317d3fd15e",
+      "bytes": 9467,
+      "transformation": "none"
+    },
+    {
+      "source": "round4/frozen/score.ts",
+      "file": "harness/round4/frozen/score.ts",
+      "sha256": "7b91cf39a9152b2e0c4a766fa375639df05fc87cc941072a39896cbd40f40a1f",
+      "bytes": 9243,
+      "transformation": "none"
+    },
+    {
+      "source": "round4/frozen/meter.ts",
+      "file": "harness/round4/frozen/meter.ts",
+      "sha256": "1a11d5cacf5afd569f1e5a8bd83f2ee6d77b0a020e1a8fc0089c94872954a88a",
+      "bytes": 5471,
+      "transformation": "none"
+    },
+    {
+      "source": "round4/frozen/runner.ts",
+      "file": "harness/round4/frozen/runner.ts",
+      "sha256": "97e96d264c0cdb5f8c62925d9dccdad788a03f18832444004da625471bc97903",
+      "bytes": 19332,
+      "transformation": "none"
+    },
+    {
+      "source": "round4/frozen/runner-self-test.ts",
+      "file": "harness/round4/frozen/runner-self-test.ts",
+      "sha256": "9dd330c43f644a60e93d8dc65f1903540175a9aa45f02502c49e73ecaeefcc86",
+      "bytes": 2253,
+      "transformation": "none"
+    },
+    {
+      "source": "round4/frozen/extra-behavior.test.ts",
+      "file": "harness/round4/frozen/extra-behavior.test.ts",
+      "sha256": "97fb9b306ba8f56c4654f54ff53477fa0059064966ed803adca447ba5c2456d2",
+      "bytes": 7123,
+      "transformation": "none"
+    }
+  ],
+  "scope": "Curated runnable original and round3/round4 frozen synthetic fixture harnesses; root analysis and offline validation helpers. Exact copies, no embedded credentials or home paths.",
+  "omitted": "Private-state evidence collectors, machine-bound validation scripts, generated fixture worktrees, binaries and runtime configs are not copied.",
+  "omittedSources": [
+    {
+      "source": "validate-extra.ts",
+      "reason": "machine_specific_compiler_path"
+    },
+    {
+      "source": "collect-evidence.py",
+      "reason": "private_session_state_collector"
+    },
+    {
+      "scope": "generated trial projects, checkout mirrors and per-experiment setup scripts",
+      "reason": "Excluded in favor of authoritative original/frozen runner, task, scoring and metering sources; all selected numerical report records remain exported."
+    }
+  ]
+}

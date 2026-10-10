@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-10-10",
+  "codeCommit": "6e2a7b4f1",
+  "benchmarkActivity": "Stopped by user instruction. Export uses existing artifacts only.",
+  "claim": "No decisive general speed or cost advantage over Codex has been established.",
+  "originalComparison": {
+    "source": "summary.json",
+    "sourceSha256": "5b17466ea4cdf45ee6d30be6fe9dcdf58d74c2813b20ac589c812ba3f5d39cb4",
+    "byRuntime": {
+      "vector": {
+        "runs": 9,
+        "passed": 9,
+        "failed": 0,
+        "unavailable": 0,
+        "normalCompletions": 9,
+        "timeouts": 0,
+        "wallSeconds": {
+          "count": 9,
+          "total": 320.224,
+          "median": 36.43,
+          "min": 20.912,
+          "max": 55.176
+        },
+        "apiEquivalentUsd": {
+          "count": 9,
+          "total": 0.4486732,
+          "median": 0.0440556,
+          "min": 0.0291016,
+          "max": 0.08295480000000001
+        },
+        "sampledPeakProcessTreeMiB": {
+          "count": 9,
+          "total": 7948.28125,
+          "median": 964.046875,
+          "min": 635.390625,
+          "max": 998.671875
+        }
+      },
+      "codex": {
+        "runs": 9,
+        "passed": 9,
+        "failed": 0,
+        "unavailable": 0,
+        "normalCompletions": 9,
+        "timeouts": 0,
+        "wallSeconds": {
+          "count": 9,
+          "total": 161.888,
+          "median": 17.596,
+          "min": 15.908,
+          "max": 20.194
+        },
+        "apiEquivalentUsd": {
+          "count": 9,
+          "total": 0.2685372,
+          "median": 0.0305328,
+          "min": 0.0237324,
+          "max": 0.036720800000000005
+        },
+        "sampledPeakProcessTreeMiB": {
+          "count": 9,
+          "total": 2268.28125,
+          "median": 243.625,
+          "min": 194.734375,
+          "max": 310.3125
+        }
+      }
+    }
+  },
+  "awakeDiscovery": {
+    "source": "round4/discovery-v4-awake-summary.json",
+    "recorded": 54,
+    "expected": 54,
+    "strictPassed": 53,
+    "anyCellMeets15PercentGate": false,
+    "decisiveClaimPermitted": false
+  },
+  "providerStartupLocalFixture": {
+    "source": "round4/provider-startup-benchmark-v1/analysis.json",
+    "passed": 10,
+    "failed": 0,
+    "medianRatio": {
+      "wallMs": 1.0779015024704761,
+      "firstProviderRequestMs": 1.2123356940245327,
+      "firstMainRequestMs": 1.1690632790895326,
+      "peakTreeRssMiB": 0.7509962523952451,
+      "peakCliRssMiB": 0.7495999455244969
+    },
+    "pairedGeometricMeanRatio": {
+      "wallMs": 1.308892465433838,
+      "firstProviderRequestMs": 1.3715579672795204,
+      "firstMainRequestMs": 1.3865330445426176,
+      "peakTreeRssMiB": 0.7569657068745604,
+      "peakCliRssMiB": 0.757067456639789
+    },
+    "paidModelRequests": 0,
+    "localFixtureRequests": 20,
+    "accountVerificationRequestsBeforeTiming": 1,
+    "qualification": "Five matched local fixture pairs; lower sampled RSS accompanied slower median startup. This is not a live coding-agent advantage."
+  },
+  "v11BehaviorEvidence": {
+    "passed": 15,
+    "planned": 18,
+    "inconclusive": 3,
+    "qualification": "Previously recorded task context; does not establish a fully passing behavior gate. User waived further benchmarking."
+  },
+  "currentIntegrationValidation": {
+    "provenance": "Coordinator report during archive export; original logs remain external.",
+    "engineTypecheckExitCode": 0,
+    "targetedRegressionTests": {
+      "passed": 3,
+      "failed": 0,
+      "filtered": 142,
+      "assertions": 19,
+      "coverage": [
+        "OpenAI cache-write accounting",
+        "background runs offered by default"
+      ]
+    },
+    "combinedValidationGreen": false,
+    "historicalUnresolvedResults": [
+      {
+        "suite": "review/task combined",
+        "passed": 163,
+        "failed": 4,
+        "qualification": "Included zero-cost expectation corrected in code, two other timeouts, and a stale task assertion; exact review zero-cost rerun timed out."
+      },
+      {
+        "suite": "prompt seams, later combined run",
+        "passed": 2,
+        "failed": 4,
+        "qualification": "Retained coordinator-reported unresolved failures; not replaced with earlier isolated passing counts."
+      },
+      {
+        "suite": "root engine combined",
+        "passed": 510,
+        "failed": 2,
+        "qualification": "Two stale GPT-6 cache-key expectations were corrected and covered by the later targeted regression run."
+      }
+    ],
+    "earlierIsolatedChecks": {
+      "coreTodo": {
+        "passed": 7,
+        "failed": 0
+      },
+      "taskSdkCompatibility": {
+        "passed": 6,
+        "failed": 0
+      },
+      "qualification": "These isolated results do not supersede later combined-run failures."
+    }
+  },
+  "interpretation": [
+    "API-equivalent USD estimates use historical artifact pricing and are not subscription charges or verified invoices.",
+    "Unknown/null cost, incomplete cohorts, timeouts, unsuccessful runs and failed gates are retained by the same export rules.",
+    "Repeated reports can describe the same trials; do not sum counts across all files.",
+    "Frozen harness source preserves experiment definitions, but exact reproduction also requires original revisions, models, local setup and dependencies.",
+    "No historical result is attributed to the final integration commit unless explicitly listed as its current validation."
+  ]
+}
