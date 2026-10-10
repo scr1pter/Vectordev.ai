@@ -66,7 +66,7 @@ function normalizeLoadedConfig(data: unknown) {
   return copy
 }
 
-function projectExecutableConfig(config: Info, trusted: boolean): Info {
+function projectExecutableConfig(config: Info, trusted: boolean, base: Info): Info {
   const next = { ...config }
   if (!trusted) {
     const permission = authorityNarrowingPermission(next.permission)
@@ -85,6 +85,17 @@ function projectExecutableConfig(config: Info, trusted: boolean): Info {
     delete next.agent
     delete next.mode
     delete next.shell
+    delete next.instructions
+    delete next.model
+    delete next.small_model
+    delete next.default_agent
+    if (next.enabled_providers && base.enabled_providers) {
+      const enabled = new Set(base.enabled_providers)
+      next.enabled_providers = next.enabled_providers.filter((provider) => enabled.has(provider))
+    }
+    if (next.disabled_providers) {
+      next.disabled_providers = Array.from(new Set([...(base.disabled_providers ?? []), ...next.disabled_providers]))
+    }
     return next
   }
   if (next.provider) {
@@ -124,17 +135,14 @@ function bindTrustedProjectExecutables(
         .map(([name, entry]) => {
           if (!("command" in entry) || !Array.isArray(entry.command)) return [name, entry]
           const cwd = "cwd" in entry && typeof entry.cwd === "string" ? path.resolve(workspace, entry.cwd) : workspace
-          const command = entry.command.map((value) => trustedExecutableValue(value, cwd, trusted))
-          if (command.some((value) => value === undefined)) return [name, undefined]
-          const local = command.some((value, index) => value !== entry.command[index])
+          const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, entry.environment)
+          if (!command) return [name, undefined]
           return [
             name,
             {
               ...entry,
-              command,
-              ...(local && "cwd" in entry && typeof entry.cwd === "string"
-                ? { cwd: WorkspaceTrust.materializedPath(trusted, cwd) }
-                : {}),
+              command: command.command,
+              cwd: command.cwd,
             },
           ]
         })
@@ -148,11 +156,21 @@ function rewriteCommandEntries(value: Record<string, unknown>, base: string, tru
   return Object.fromEntries(
     Object.entries(value).flatMap(([name, entry]) => {
       if (!isRecord(entry) || !Array.isArray(entry.command)) return [[name, entry]]
-      const command = entry.command.map((item) => trustedExecutableValue(item, base, trusted))
-      if (command.some((item) => item === undefined)) return []
-      return [[name, { ...entry, command }]]
+      if (!entry.command.every((item): item is string => typeof item === "string")) return []
+      const cwd = typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
+      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
+      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, stringEnvironment(environment))
+      if (!command) return []
+      return [[name, { ...entry, command: command.command, cwd: command.cwd }]]
     }),
   )
+}
+
+function stringEnvironment(value: unknown) {
+  if (!isRecord(value)) return
+  const entries = Object.entries(value)
+  if (entries.some(([, item]) => typeof item !== "string")) return
+  return Object.fromEntries(entries) as Record<string, string>
 }
 
 function trustedExecutableValue(
@@ -164,6 +182,11 @@ function trustedExecutableValue(
   if (typeof value !== "string") return
   if (value.startsWith("file:")) {
     const target = WorkspaceTrust.materializedPathOption(trusted, fileURLToPath(value))
+    if (!target) return
+    return preserveFileUrl ? pathToFileURL(target).href : target
+  }
+  if (/^[A-Za-z]:/.test(value) || value.startsWith("\\\\")) {
+    const target = WorkspaceTrust.materializedPathOption(trusted, value)
     if (!target) return
     return preserveFileUrl ? pathToFileURL(target).href : target
   }
@@ -506,18 +529,26 @@ const layer = Layer.effect(
           if (updated === normalized) return
           yield* fs.writeFileString(filepath, updated).pipe(Effect.catch(() => Effect.void))
         })
+        const trustWorkspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
         const captureTrustSnapshot = () =>
-          WorkspaceTrust.snapshot(ctx.worktree === "/" ? ctx.directory : ctx.worktree, [
+          WorkspaceTrust.snapshot(trustWorkspace, [
             ...projectFiles,
             ...projectTuiFiles,
             ...projectDirectories,
             ...localAgentConfig,
-          ])
+          ]).catch((cause) => WorkspaceTrust.unavailableSnapshot(trustWorkspace, cause))
         const existingTrustSnapshot = yield* Effect.promise(captureTrustSnapshot)
+        const snapshotFailure = WorkspaceTrust.unavailableReason(existingTrustSnapshot)
+        if (snapshotFailure) {
+          yield* Effect.logWarning("disabling project config because workspace trust capture failed", {
+            workspace: trustWorkspace,
+            reason: snapshotFailure,
+          })
+        }
         const existingStoredTrust = yield* Effect.promise(() =>
           WorkspaceTrust.status(Global.Path.state, existingTrustSnapshot),
         )
-        if (!existingStoredTrust.trusted) {
+        if (!snapshotFailure && !existingStoredTrust.trusted) {
           yield* Effect.forEach(
             new Set([
               ...projectFiles,
@@ -530,9 +561,10 @@ const layer = Layer.effect(
             { discard: true },
           )
         }
-        const trustSnapshot = existingStoredTrust.trusted
-          ? existingTrustSnapshot
-          : yield* Effect.promise(captureTrustSnapshot)
+        const trustSnapshot =
+          existingStoredTrust.trusted || snapshotFailure
+            ? existingTrustSnapshot
+            : yield* Effect.promise(captureTrustSnapshot)
         const storedTrust = yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trustSnapshot))
         const trusted = !Flag.VECTOR_PURE && storedTrust.trusted
         const trustedSnapshot = trusted
@@ -588,7 +620,7 @@ const layer = Layer.effect(
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
           const scope = kind ?? (containsPath(source, ctx) ? "local" : "global")
           const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
-          const safe = projectSource ? projectExecutableConfig(next, trusted) : next
+          const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
           result = mergeConfigConcatArrays(result, safe)
           return mergePluginOrigins(source, safe.plugin, scope)
         }

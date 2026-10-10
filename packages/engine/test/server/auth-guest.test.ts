@@ -189,6 +189,22 @@ describe("HttpApi authorization middleware with a guest pair", () => {
     }),
   )
 
+  itGuest.live("rejects encoded owner-only routes before decoded routing", () =>
+    Effect.gen(function* () {
+      const [encoded, doubleEncoded] = yield* Effect.all(
+        ["/api/%70ty", "/api/%2570ty"].map((route) =>
+          HttpClientRequest.get(route).pipe(
+            HttpClientRequest.setHeader("authorization", basic("guest", "guest-secret")),
+            HttpClient.execute,
+          ),
+        ),
+      )
+
+      expect(encoded.status).toBe(403)
+      expect(doubleEncoded.status).not.toBe(200)
+    }),
+  )
+
   itGuest.live("provides the authenticated request principal to handlers", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.get("/principal").pipe(

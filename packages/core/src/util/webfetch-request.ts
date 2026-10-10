@@ -1,6 +1,5 @@
 export * as WebFetchRequest from "./webfetch-request"
 
-import { Agent } from "@effect/platform-node/Undici"
 import { Effect, Exit, Scope } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import type { LookupAddress, LookupAllOptions, LookupOneOptions, LookupOptions } from "node:dns"
@@ -37,21 +36,14 @@ export const execute = (http: HttpClient.HttpClient, request: HttpClientRequest.
       agent: string,
       addresses: readonly string[],
     ) {
-      const candidate = new Agent({ connect: { lookup: pinnedLookup(addresses) } })
-      const dispatcher = hasDispatcher(candidate) ? candidate : undefined
-      if (dispatcher)
-        yield* Effect.addFinalizer(() =>
-          Effect.promise(() => (dispatcher as unknown as { close: () => Promise<void> }).close()),
-        )
       const scope = yield* Scope.make()
       yield* Effect.addFinalizer((exit) => Scope.close(scope, exit))
-      const requestInit = dispatcher ? { redirect: "manual" as const, dispatcher } : { redirect: "manual" as const }
       const response = yield* client
         .execute(HttpClientRequest.setHeader(request, "User-Agent", agent))
         .pipe(
           Effect.provideService(Scope.Scope, scope),
-          Effect.provideService(FetchHttpClient.RequestInit, requestInit),
-          Effect.provideService(FetchHttpClient.Fetch, dispatcher ? globalThis.fetch : pinnedFetch(addresses)),
+          Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+          Effect.provideService(FetchHttpClient.Fetch, pinnedFetch(addresses)),
         )
       return { response, scope }
     })
@@ -231,7 +223,7 @@ function pinnedLookup(addresses: readonly string[]): LookupFunction {
   return resolve as unknown as LookupFunction
 }
 
-function pinnedFetch(addresses: readonly string[]): typeof globalThis.fetch {
+export function pinnedFetch(addresses: readonly string[]): typeof globalThis.fetch {
   const fetch = ((input, init) =>
     new Promise((resolve, reject) => {
       const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url)
@@ -269,8 +261,4 @@ function pinnedFetch(addresses: readonly string[]): typeof globalThis.fetch {
     })) as typeof globalThis.fetch
   fetch.preconnect = globalThis.fetch.preconnect
   return fetch
-}
-
-function hasDispatcher(value: Agent) {
-  return typeof (value as unknown as { dispatch?: unknown }).dispatch === "function"
 }

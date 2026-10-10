@@ -8,6 +8,7 @@ export const Disabled = Schema.Struct({
 
 export class Server extends Schema.Class<Server>("ConfigV2.LSP.Server")({
   command: Schema.String.pipe(Schema.Array),
+  cwd: Schema.String.pipe(Schema.optional),
   extensions: Schema.String.pipe(Schema.Array, Schema.optional),
   disabled: Schema.Boolean.pipe(Schema.optional),
   env: Schema.Record(Schema.String, Schema.String).pipe(Schema.optional),

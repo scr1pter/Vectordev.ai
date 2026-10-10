@@ -148,30 +148,43 @@ export function ownerPrincipal(config: Info): Principal {
 }
 
 export function isOwnerOnlyRequest(method: string, pathname: string) {
-  if (pathname === "/api/session/import" || /\/session\/[^/]+\/share(?:\/|$)/.test(pathname)) return true
-  if (pathname.startsWith("/api/pty") || pathname.startsWith("/pty")) return true
-  if (pathname.startsWith("/api/credential") || pathname.startsWith("/api/permission/saved")) return true
-  if (pathname.startsWith("/experimental/project/") && pathname.includes("/copy")) return true
+  const canonical = canonicalAuthorizationPath(pathname)
+  if (!canonical) return true
+  if (canonical === "/api/session/import" || /\/session\/[^/]+\/share(?:\/|$)/.test(canonical)) return true
+  if (canonical.startsWith("/api/pty") || canonical.startsWith("/pty")) return true
+  if (canonical.startsWith("/api/credential") || canonical.startsWith("/api/permission/saved")) return true
+  if (canonical.startsWith("/experimental/project/") && canonical.includes("/copy")) return true
   if (
-    pathname.startsWith("/global/") ||
-    pathname === "/experimental/console" ||
-    pathname.startsWith("/experimental/console/") ||
-    pathname.startsWith("/experimental/control-plane") ||
-    pathname.startsWith("/experimental/workspace") ||
-    pathname.startsWith("/project") ||
-    pathname.startsWith("/sync") ||
-    pathname.startsWith("/tui")
+    canonical.startsWith("/global/") ||
+    canonical === "/experimental/console" ||
+    canonical.startsWith("/experimental/console/") ||
+    canonical.startsWith("/experimental/control-plane") ||
+    canonical.startsWith("/experimental/workspace") ||
+    canonical.startsWith("/project") ||
+    canonical.startsWith("/sync") ||
+    canonical.startsWith("/tui")
   )
-    return pathname !== "/global/health"
+    return canonical !== "/global/health"
   if (method === "GET" || method === "HEAD") return false
   return (
-    pathname.startsWith("/api/integration") ||
-    pathname.startsWith("/auth/") ||
-    pathname.startsWith("/provider/") ||
-    pathname.startsWith("/mcp") ||
-    pathname === "/config" ||
-    pathname === "/instance/dispose"
+    canonical.startsWith("/api/integration") ||
+    canonical.startsWith("/auth/") ||
+    canonical.startsWith("/provider/") ||
+    canonical.startsWith("/mcp") ||
+    canonical === "/config" ||
+    canonical === "/instance/dispose"
   )
+}
+
+function canonicalAuthorizationPath(pathname: string, remaining = 4): string | undefined {
+  if (!pathname.includes("%")) return pathname
+  if (!remaining) return undefined
+  try {
+    const decoded = decodeURIComponent(pathname)
+    return decoded === pathname ? decoded : canonicalAuthorizationPath(decoded, remaining - 1)
+  } catch {
+    return undefined
+  }
 }
 
 export function assertSecurePasswordTransport(target: string | URL, password: string | undefined) {

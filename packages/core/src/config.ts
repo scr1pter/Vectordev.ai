@@ -246,11 +246,20 @@ const layer = Layer.effect(
         ? location.directory
         : location.project.directory
     const trustSnapshot = yield* Effect.promise(() =>
-      WorkspaceTrust.snapshot(workspace, [...directPaths, ...tuiPaths, ...projectDirectories]),
+      WorkspaceTrust.snapshot(workspace, [...directPaths, ...tuiPaths, ...projectDirectories]).catch((cause) =>
+        WorkspaceTrust.unavailableSnapshot(workspace, cause),
+      ),
     )
+    const snapshotFailure = WorkspaceTrust.unavailableReason(trustSnapshot)
+    if (snapshotFailure) {
+      yield* Effect.logWarning("disabling project config because workspace trust capture failed", {
+        workspace,
+        reason: snapshotFailure,
+      })
+    }
     const trustStatus = yield* Effect.promise(() => WorkspaceTrust.status(global.state, trustSnapshot))
     const trustedSnapshot =
-      !Flag.VECTOR_PURE && trustStatus.trusted
+      !snapshotFailure && !Flag.VECTOR_PURE && trustStatus.trusted
         ? yield* Effect.promise(() => WorkspaceTrust.materialize(global.state, trustSnapshot))
         : undefined
     const direct = yield* Effect.forEach(directPaths, (file) =>
@@ -350,9 +359,22 @@ function bindTrustedProjectExecutables(
   const shell = info.shell ? trustedExecutableValue(info.shell, path.dirname(source), trusted) : undefined
   const formatter =
     info.formatter && typeof info.formatter === "object"
-      ? rewriteCommandEntries(info.formatter, workspace, trusted)
+      ? rewriteCommandEntries(
+          info.formatter,
+          workspace,
+          trusted,
+          (entry, command) => new ConfigFormatter.Entry({ ...entry, command: command.command, cwd: command.cwd }),
+        )
       : info.formatter
-  const lsp = info.lsp && typeof info.lsp === "object" ? rewriteCommandEntries(info.lsp, workspace, trusted) : info.lsp
+  const lsp =
+    info.lsp && typeof info.lsp === "object"
+      ? rewriteCommandEntries(
+          info.lsp,
+          workspace,
+          trusted,
+          (entry, command) => new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }),
+        )
+      : info.lsp
   const mcp = info.mcp
     ? new ConfigMCP.Info({
         ...info.mcp,
@@ -362,15 +384,14 @@ function bindTrustedProjectExecutables(
                 .map(([name, server]): [string, ConfigMCP.Local | ConfigMCP.Remote | undefined] => {
                   if (server.type !== "local") return [name, server]
                   const cwd = server.cwd ? path.resolve(workspace, server.cwd) : workspace
-                  const command = server.command.map((value) => trustedExecutableValue(value, cwd, trusted))
-                  if (command.some((value) => value === undefined)) return [name, undefined]
-                  const local = command.some((value, index) => value !== server.command[index])
+                  const command = WorkspaceTrust.materializedCommand(trusted, server.command, cwd, server.environment)
+                  if (!command) return [name, undefined]
                   return [
                     name,
                     new ConfigMCP.Local({
                       ...server,
-                      command: command as string[],
-                      ...(local && server.cwd ? { cwd: WorkspaceTrust.materializedPath(trusted, cwd) } : {}),
+                      command: command.command,
+                      cwd: command.cwd,
                     }),
                   ]
                 })
@@ -386,22 +407,36 @@ function rewriteCommandEntries<T extends Record<string, object>>(
   value: T,
   base: string,
   trusted: WorkspaceTrust.TrustedSnapshot,
+  bind: (entry: Record<string, unknown>, command: { command: string[]; cwd: string }) => object,
 ): T {
   return Object.fromEntries(
     Object.entries(value).flatMap(([name, entry]) => {
       if (!entry || typeof entry !== "object" || !("command" in entry) || !Array.isArray(entry.command)) {
         return [[name, entry]]
       }
-      const command = entry.command.map((item) => trustedExecutableValue(item, base, trusted))
-      if (command.some((item) => item === undefined)) return []
-      return [[name, { ...entry, command }]]
+      if (!entry.command.every((item): item is string => typeof item === "string")) return []
+      const cwd = "cwd" in entry && typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
+      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
+      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, stringEnvironment(environment))
+      if (!command) return []
+      return [[name, bind(entry as Record<string, unknown>, command)]]
     }),
   ) as T
+}
+
+function stringEnvironment(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return
+  const entries = Object.entries(value)
+  if (entries.some(([, item]) => typeof item !== "string")) return
+  return Object.fromEntries(entries) as Record<string, string>
 }
 
 function trustedExecutableValue(value: unknown, base: string, trusted: WorkspaceTrust.TrustedSnapshot) {
   if (typeof value !== "string") return
   if (value.startsWith("file:")) return WorkspaceTrust.materializedPathOption(trusted, fileURLToPath(value))
+  if (/^[A-Za-z]:/.test(value) || value.startsWith("\\\\")) {
+    return WorkspaceTrust.materializedPathOption(trusted, value)
+  }
   if (URL.canParse(value)) return value
   if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\")) return value
   return WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, value))

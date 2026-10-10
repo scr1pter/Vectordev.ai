@@ -250,8 +250,8 @@ const layer = Layer.effect(
                 extensions: item.extensions ?? existing?.extensions ?? [],
                 spawn: async (root) => ({
                   process: lspspawn(item.command[0], item.command.slice(1), {
-                    cwd: root,
-                    env: { ...process.env, ...item.env },
+                    cwd: item.cwd ?? root,
+                    env: item.env,
                   }),
                   initialization: item.initialization,
                 }),

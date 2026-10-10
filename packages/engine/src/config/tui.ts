@@ -25,6 +25,8 @@ import { ConfigDependencies } from "./dependencies"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 import { TuiConfig } from "@vectordevai/tui/config"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { fileURLToPath, pathToFileURL } from "url"
+import os from "os"
 
 export const Info = TuiConfig.Info
 export type Info = TuiConfig.Info
@@ -84,6 +86,44 @@ function dropUnknownKeybinds(input: Record<string, unknown>) {
   }
 }
 
+function bindTrustedProjectPlugins(config: Info, trusted: WorkspaceTrust.TrustedSnapshot, source: string): Info {
+  if (!config.plugin) return config
+  return {
+    ...config,
+    plugin: config.plugin.flatMap((plugin) => {
+      const spec = ConfigPlugin.pluginSpecifier(plugin)
+      const local =
+        spec.startsWith("file://") || spec.startsWith(".") || path.isAbsolute(spec) || /^[A-Za-z]:[\\/]/.test(spec)
+      if (!local) return [plugin]
+      const input = (() => {
+        if (!spec.startsWith("file://")) return path.isAbsolute(spec) ? spec : path.resolve(path.dirname(source), spec)
+        try {
+          return fileURLToPath(spec)
+        } catch {
+          return undefined
+        }
+      })()
+      if (!input) return []
+      const target = WorkspaceTrust.materializedPathOption(trusted, input)
+      if (!target) return []
+      const mapped = pathToFileURL(target).href
+      return [Array.isArray(plugin) ? [mapped, plugin[1]] : mapped]
+    }),
+  }
+}
+
+function bindTrustedFileReferences(text: string, trusted: WorkspaceTrust.TrustedSnapshot, source: string) {
+  return text.replace(/\{file:([^}]+)\}/g, (_token, value: string) => {
+    const input = value.startsWith("~/")
+      ? path.join(os.homedir(), value.slice(2))
+      : path.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)
+        ? value
+        : path.resolve(path.dirname(source), value)
+    const target = WorkspaceTrust.materializedPathOption(trusted, input)
+    return `{file:${target ?? path.join(trusted.directory, ".uncaptured-input")}}`
+  })
+}
+
 const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: string }) {
   const afs = yield* FSUtil.Service
   let appliedOrder = 0
@@ -100,14 +140,24 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
     : yield* ConfigPaths.files("vector", ctx.directory, git[0] ? workspace : undefined)
   const projectDirectories = allDirectories.filter((directory) => pluginScope(directory, ctx) === "local")
   const trustSnapshot = yield* Effect.promise(() =>
-    WorkspaceTrust.snapshot(workspace, [
-      ...projectFiles,
-      ...projectVectorFiles,
-      ...projectDirectories,
-    ]),
+    WorkspaceTrust.snapshot(workspace, [...projectFiles, ...projectVectorFiles, ...projectDirectories]).catch((cause) =>
+      WorkspaceTrust.unavailableSnapshot(workspace, cause),
+    ),
   )
+  const snapshotFailure = WorkspaceTrust.unavailableReason(trustSnapshot)
+  if (snapshotFailure) {
+    yield* Effect.logWarning("disabling project TUI config because workspace trust capture failed", {
+      workspace,
+      reason: snapshotFailure,
+    })
+  }
   const trusted =
-    !Flag.VECTOR_PURE && (yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trustSnapshot))).trusted
+    !snapshotFailure &&
+    !Flag.VECTOR_PURE &&
+    (yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trustSnapshot))).trusted
+  const trustedSnapshot = trusted
+    ? yield* Effect.promise(() => WorkspaceTrust.materialize(Global.Path.state, trustSnapshot))
+    : undefined
 
   const resolvePlugins = (config: Info, configFilepath: string): Effect.Effect<Info> =>
     Effect.gen(function* () {
@@ -121,10 +171,19 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       }
     })
 
-  const load = (text: string, configFilepath: string): Effect.Effect<Info> =>
+  const load = (
+    text: string,
+    configFilepath: string,
+    project?: { source: string; trusted?: WorkspaceTrust.TrustedSnapshot },
+  ): Effect.Effect<Info> =>
     Effect.gen(function* () {
       const expanded = yield* Effect.promise(() =>
-        ConfigVariable.substitute({ text, type: "path", path: configFilepath, missing: "empty" }),
+        ConfigVariable.substitute({
+          text: project?.trusted ? bindTrustedFileReferences(text, project.trusted, project.source) : text,
+          type: "path",
+          path: configFilepath,
+          missing: "empty",
+        }),
       )
       const data = ConfigParse.jsonc(expanded, configFilepath)
       if (!isRecord(data)) return {} as Info
@@ -141,7 +200,12 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
             },
           }
         : parsed
-      return yield* resolvePlugins(validated, configFilepath)
+      const safe = !project
+        ? validated
+        : project.trusted
+          ? bindTrustedProjectPlugins(validated, project.trusted, project.source)
+          : { ...validated, plugin: undefined }
+      return yield* resolvePlugins(safe, configFilepath)
     }).pipe(
       // catchCause (not tapErrorCause + orElseSucceed) because JSONC parsing and validation
       // can sync-throw — those become defects, which orElseSucceed wouldn't catch.
@@ -171,11 +235,19 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       return yield* load(text, filepath)
     })
 
+  const loadProjectFile = (filepath: string): Effect.Effect<Info> =>
+    Effect.gen(function* () {
+      const text = WorkspaceTrust.readFileString(trustSnapshot, filepath)
+      if (!text) return {} as Info
+      yield* Effect.logInfo("loading captured tui config", { path: filepath })
+      return yield* load(text, filepath, { source: filepath, trusted: trustedSnapshot })
+    })
+
   const mergeFile = (acc: Acc, file: string) =>
     Effect.gen(function* () {
-      const loaded = yield* loadFile(file)
+      const scope = pluginScope(file, ctx)
+      const loaded = yield* scope === "local" ? loadProjectFile(file) : loadFile(file)
       const data = { ...loaded }
-      if (pluginScope(file, ctx) === "local" && !trusted) delete data.plugin
       if (Object.keys(data).length) {
         appliedOrder += 1
         yield* Effect.logInfo("applying tui config", { path: file, order: appliedOrder })
@@ -183,7 +255,6 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
       acc.result = mergeDeep(acc.result, data)
       if (!data.plugin?.length) return
 
-      const scope = pluginScope(file, ctx)
       const plugins = ConfigPlugin.deduplicatePluginOrigins([
         ...acc.plugin_origins,
         ...data.plugin.map((spec) => ({ spec: spec as ConfigPlugin.Origin["spec"], scope, source: file })),

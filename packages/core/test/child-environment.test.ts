@@ -16,6 +16,10 @@ describe("untrustedChildEnvironment", () => {
       VECTOR_MCP_AUTH_KEY: "mcp-secret",
       vector_future_bridge_key: "future-secret",
       OPENAI_API_KEY: "provider-secret",
+      BUN_OPTIONS: "--preload=./changed.ts",
+      NODE_OPTIONS: "--require=./changed.cjs",
+      LD_PRELOAD: "./changed.so",
+      lua_init_5_4: "@changed.lua",
       PATH: "/usr/bin:/bin",
       UNDEFINED_VALUE: undefined,
     })
@@ -53,14 +57,15 @@ describe("untrustedChildEnvironment", () => {
   })
 })
 
-
 test("foreign runtime secret suffixes are stripped without dropping provider keys", () => {
-  expect(untrustedChildEnvironment({
-    LEGACY_FIXTURE_SERVER_PASSWORD: "synthetic",
-    legacy_fixture_server_guest_password: "synthetic",
-    LEGACY_FIXTURE_AUTH_CONTENT: "synthetic",
-    LEGACY_FIXTURE_CONSOLE_TOKEN: "synthetic",
-    OPENAI_API_KEY: "fixture-key",
-    GITHUB_TOKEN: "fixture-git-token",
-  })).toEqual({ OPENAI_API_KEY: "fixture-key", GITHUB_TOKEN: "fixture-git-token" })
+  expect(
+    untrustedChildEnvironment({
+      LEGACY_FIXTURE_SERVER_PASSWORD: "synthetic",
+      legacy_fixture_server_guest_password: "synthetic",
+      LEGACY_FIXTURE_AUTH_CONTENT: "synthetic",
+      LEGACY_FIXTURE_CONSOLE_TOKEN: "synthetic",
+      OPENAI_API_KEY: "fixture-key",
+      GITHUB_TOKEN: "fixture-git-token",
+    }),
+  ).toEqual({ OPENAI_API_KEY: "fixture-key", GITHUB_TOKEN: "fixture-git-token" })
 })

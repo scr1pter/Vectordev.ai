@@ -27,6 +27,14 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/experimental/console/switch")).toBe(true)
   })
 
+  test("encoded owner-only routes remain owner-only", () => {
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/api/%70ty")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/%63onfig")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/m%2563p")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/api/session/ses_%31")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/api/%ZZ")).toBe(true)
+  })
+
   test("reusable passwords require loopback or encrypted transport", () => {
     expect(() => ServerAuth.assertSecurePasswordTransport("127.0.0.1", "secret")).not.toThrow()
     expect(() => ServerAuth.assertSecurePasswordTransport("http://localhost:4096", "secret")).not.toThrow()

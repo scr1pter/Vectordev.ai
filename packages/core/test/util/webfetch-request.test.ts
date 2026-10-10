@@ -65,6 +65,22 @@ test("rejects URL credentials", async () => {
   expect(error.message).toBe("URL credentials are not allowed")
 })
 
+test("the real transport connects only to the pinned address", async () => {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (request) => new Response(request.headers.get("host")),
+  })
+  try {
+    const response = await WebFetchRequest.pinnedFetch(["127.0.0.1"])(
+      `http://dns-must-not-resolve.invalid:${server.port}/`,
+    )
+    expect(await response.text()).toBe(`dns-must-not-resolve.invalid:${server.port}`)
+  } finally {
+    await server.stop(true)
+  }
+})
+
 test("a challenge with an unfinished body is aborted before one successful retry", async () => {
   const sample = fixture((index) =>
     index === 1

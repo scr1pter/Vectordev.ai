@@ -110,7 +110,7 @@ class MockStdioTransport {
   pid = 12345
   command: string
   constructor(opts: any) {
-    this.command = opts.command
+    this.command = path.basename(opts.command)
     if (lastCreatedClientName) stdioOptsByName.set(lastCreatedClientName, opts)
   }
   async start() {
@@ -645,11 +645,15 @@ it.instance(
   {
     config: {
       mcp: {
-        fast: { type: "local", command: ["fast"] },
-        listing: { type: "local", command: ["listing"] },
-        slow: { type: "local", command: ["slow"] },
+        fast: { type: "local", command: ["./fast"] },
+        listing: { type: "local", command: ["./listing"] },
+        slow: { type: "local", command: ["./slow"] },
       },
     },
+    init: (directory) =>
+      Effect.promise(() =>
+        Promise.all(["fast", "listing", "slow"].map((command) => Bun.write(path.join(directory, command), "fixture"))),
+      ).pipe(Effect.asVoid),
   },
 )
 

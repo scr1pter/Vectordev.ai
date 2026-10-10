@@ -1,11 +1,12 @@
 export * as WorkspaceTrust from "./workspace-trust"
 
-import { constants } from "node:fs"
+import { constants, realpathSync } from "node:fs"
 import { createHash } from "node:crypto"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse } from "jsonc-parser"
+import whichPkg from "which"
 
 const version = 1 as const
 const filename = "workspace-trust.json"
@@ -28,7 +29,9 @@ const maxDepth = 64
 const maxDirectoryEntries = 10_000
 const captured = Symbol("WorkspaceTrust.captured")
 const capturedDirectories = Symbol("WorkspaceTrust.capturedDirectories")
+const executionDirectories = Symbol("WorkspaceTrust.executionDirectories")
 const requestedWorkspace = Symbol("WorkspaceTrust.requestedWorkspace")
+const unavailable = Symbol("WorkspaceTrust.unavailable")
 
 type StoredTrust = {
   path: string
@@ -50,7 +53,9 @@ export type Snapshot = {
   fingerprint: string
   readonly [captured]: ReadonlyMap<string, CapturedFile>
   readonly [capturedDirectories]: ReadonlySet<string>
+  readonly [executionDirectories]: ReadonlySet<string>
   readonly [requestedWorkspace]: string
+  readonly [unavailable]?: string
 }
 
 export type TrustedSnapshot = Snapshot & {
@@ -68,6 +73,7 @@ export async function snapshot(workspace: string, inputs: readonly string[]): Pr
   const canonical = await canonicalize(workspace)
   const files = new Map<string, CapturedFile>()
   const directories = new Set<string>()
+  const cwdDirectories = new Set<string>()
   const budget = { files: 0, bytes: 0 }
   const names = Array.from(configNames)
   const normalize = (input: string) => normalizeInput(input, requested, canonical)
@@ -95,6 +101,9 @@ export async function snapshot(workspace: string, inputs: readonly string[]): Pr
     ]) {
       await collect(normalize(input), files, directories, budget)
     }
+    for (const directory of executableDirectories(config, canonical)) {
+      await collectExecutionDirectory(normalize(directory), cwdDirectories)
+    }
   }
 
   const hash = createHash("sha256").update(`workspace\0${canonical}\0`)
@@ -103,16 +112,40 @@ export async function snapshot(workspace: string, inputs: readonly string[]): Pr
     hash.update(value.content)
     hash.update("\0")
   }
+  for (const directory of Array.from(cwdDirectories).sort()) hash.update(`cwd\0${directory}\0`)
   return {
     workspace: canonical,
     fingerprint: hash.digest("hex"),
     [captured]: files,
     [capturedDirectories]: directories,
+    [executionDirectories]: cwdDirectories,
     [requestedWorkspace]: requested,
   }
 }
 
+export async function unavailableSnapshot(workspace: string, cause: unknown): Promise<Snapshot> {
+  const requested = path.resolve(workspace)
+  const canonical = await canonicalize(workspace)
+  const reason = cause instanceof Error ? cause.message : String(cause)
+  return {
+    workspace: canonical,
+    fingerprint: createHash("sha256").update(`unavailable\0${canonical}\0${reason}`).digest("hex"),
+    [captured]: new Map(),
+    [capturedDirectories]: new Set(),
+    [executionDirectories]: new Set(),
+    [requestedWorkspace]: requested,
+    [unavailable]: reason,
+  }
+}
+
+export function unavailableReason(current: Snapshot) {
+  return current[unavailable]
+}
+
 export async function status(stateDirectory: string, current: Snapshot): Promise<Status> {
+  if (current[unavailable]) {
+    return { workspace: current.workspace, fingerprint: current.fingerprint, trusted: false }
+  }
   const store = await readStore(stateDirectory)
   const trusted = store.workspaces[key(current.workspace)]
   return {
@@ -123,6 +156,7 @@ export async function status(stateDirectory: string, current: Snapshot): Promise
 }
 
 export async function approve(stateDirectory: string, current: Snapshot) {
+  if (current[unavailable]) throw new Error(`Workspace trust snapshot unavailable: ${current[unavailable]}`)
   const store = await readStore(stateDirectory)
   store.workspaces[key(current.workspace)] = {
     path: current.workspace,
@@ -140,6 +174,7 @@ export function readFileString(current: Snapshot, file: string) {
 }
 
 export async function materialize(stateDirectory: string, current: Snapshot): Promise<TrustedSnapshot> {
+  if (current[unavailable]) throw new Error(`Workspace trust snapshot unavailable: ${current[unavailable]}`)
   const parent = path.join(stateDirectory, cacheDirectory)
   const target = path.join(parent, current.fingerprint)
   await fs.mkdir(parent, { recursive: true, mode: 0o700 })
@@ -154,7 +189,7 @@ export async function materialize(stateDirectory: string, current: Snapshot): Pr
 
   const temporary = await fs.mkdtemp(path.join(parent, `.${current.fingerprint}.`))
   try {
-    for (const directory of current[capturedDirectories]) {
+    for (const directory of new Set([...current[capturedDirectories], ...current[executionDirectories]])) {
       await fs.mkdir(path.join(temporary, materializedRelativePath(directory)), { recursive: true, mode: 0o700 })
     }
     for (const [file, value] of current[captured]) {
@@ -181,15 +216,16 @@ export function materializedPath(current: TrustedSnapshot, input: string) {
   return target
 }
 
-export function materializedPathOption(current: TrustedSnapshot, input: string) {
+export function materializedPathOption(current: TrustedSnapshot, input: string): string | undefined {
   const resolved = path.resolve(input)
   if (contains(current.directory, resolved)) return resolved
   const source = snapshotPath(current, resolved)
-  if (!hasCapturedPath(current, source)) return
+  if (!hasCapturedPath(current, source) && !current[executionDirectories].has(source)) return undefined
   return path.join(current.directory, materializedRelativePath(source))
 }
 
 export function remoteUrlAllowed(value: string) {
+  if (isWindowsPath(value)) return false
   if (!URL.canParse(value)) return false
   const url = new URL(value)
   if (url.username || url.password) return false
@@ -216,10 +252,71 @@ export function executableInputs(config: unknown, context: { source: string; wor
       ...Object.values(servers).flatMap((server) => {
         if (!isRecord(server) || !Array.isArray(server.command)) return []
         const cwd = typeof server.cwd === "string" ? path.resolve(context.workspace, server.cwd) : context.workspace
-        return server.command.flatMap((value) => localPath(value, cwd))
+        return server.command.flatMap((value, index) => localPath(value, cwd, index > 0))
       }),
     ]),
   )
+}
+
+export function materializedCommand(
+  current: TrustedSnapshot,
+  command: readonly string[],
+  cwd: string,
+  environment?: Readonly<Record<string, string>>,
+): { command: string[]; cwd: string } | undefined {
+  if (
+    !command.length ||
+    packageRunners.has(executableName(command[0])) ||
+    launcherCommands.has(executableName(command[0])) ||
+    unsafeProjectEnvironment(environment)
+  ) {
+    return undefined
+  }
+  const directory = materializedPathOption(current, cwd)
+  if (!directory) return undefined
+  const mapped = command.map((value, index) => materializedCommandValue(current, value, cwd, index > 0))
+  if (!mapped.every((value): value is string => value !== undefined)) return undefined
+  const directExecutable = localPath(command[0], cwd)[0]
+  const script = interpreterScript(command)
+  if (script === "ambiguous") return undefined
+  if (script === "unknown" && (!directExecutable || !materializedPathOption(current, directExecutable))) {
+    return undefined
+  }
+  if (typeof script === "number") {
+    const input = localPath(command[script], cwd, true)[0]
+    if (!input || !materializedPathOption(current, input)) return undefined
+  }
+  const executable = directExecutable ? mapped[0] : hostExecutable(current, command[0])
+  if (!executable) return undefined
+  const bound = [executable, ...mapped.slice(1)]
+  if (executableName(command[0]) === "bun" && typeof script === "number") {
+    return {
+      command: [
+        executable,
+        "--no-env-file",
+        `--config=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
+        ...bound.slice(1),
+      ],
+      cwd: directory,
+    }
+  }
+  return { command: bound, cwd: directory }
+}
+
+function hostExecutable(current: TrustedSnapshot, command: string) {
+  const found = whichPkg.sync(command, {
+    nothrow: true,
+    path: process.env.PATH ?? process.env.Path,
+    pathExt: process.env.PATHEXT ?? process.env.PathExt,
+  })
+  if (typeof found !== "string") return
+  try {
+    const resolved = realpathSync(found)
+    if (!contains(current.workspace, resolved)) return resolved
+    return materializedPathOption(current, resolved)
+  } catch {
+    return
+  }
 }
 
 async function canonicalize(workspace: string) {
@@ -272,6 +369,18 @@ async function collect(
   }
 }
 
+async function collectExecutionDirectory(input: string, directories: Set<string>) {
+  const stat = await fs.lstat(input).catch(() => undefined)
+  if (!stat?.isDirectory() || stat.isSymbolicLink()) return
+  const resolved = path.resolve(input)
+  const real = await fs.realpath(input).catch(() => undefined)
+  if (!real || normalizePath(real) !== normalizePath(resolved)) return
+  directories.add(resolved)
+  if (directories.size > maxDirectories) {
+    throw new Error(`Workspace trust traversal exceeded ${maxDirectories} execution directories`)
+  }
+}
+
 async function captureFile(file: string): Promise<CapturedFile> {
   const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   try {
@@ -313,11 +422,29 @@ function commandInputs(config: unknown, base: string) {
   if (!isRecord(config)) return []
   return Object.values(config).flatMap((entry) => {
     if (!isRecord(entry) || !Array.isArray(entry.command)) return []
-    return entry.command.flatMap((value) => localPath(value, base))
+    const cwd = typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
+    return entry.command.flatMap((value, index) => localPath(value, cwd, index > 0))
   })
 }
 
-function localPath(value: unknown, base: string) {
+function executableDirectories(config: unknown, workspace: string) {
+  if (!isRecord(config)) return []
+  const commands = (value: unknown) => {
+    if (!isRecord(value)) return []
+    return Object.values(value).flatMap((entry) => {
+      if (!isRecord(entry) || !Array.isArray(entry.command)) return []
+      return [typeof entry.cwd === "string" ? path.resolve(workspace, entry.cwd) : workspace]
+    })
+  }
+  const mcp = isRecord(config.mcp) ? config.mcp : {}
+  return [
+    ...commands(config.formatter),
+    ...commands(config.lsp),
+    ...commands(isRecord(mcp.servers) ? mcp.servers : mcp),
+  ]
+}
+
+function localPath(value: unknown, base: string, bare = false) {
   if (typeof value !== "string") return []
   if (value.startsWith("file:")) {
     try {
@@ -326,10 +453,204 @@ function localPath(value: unknown, base: string) {
       return []
     }
   }
+  if (isWindowsPath(value))
+    return [process.platform === "win32" ? path.resolve(base, value) : path.win32.normalize(value)]
   if (URL.canParse(value)) return []
   if (path.isAbsolute(value)) return [value]
   if (value.includes("/") || value.includes("\\")) return [path.resolve(base, value)]
+  if (bare && value) return [path.resolve(base, value)]
   return []
+}
+
+function materializedCommandValue(
+  current: TrustedSnapshot,
+  value: string,
+  base: string,
+  bare: boolean,
+): string | undefined {
+  const input = localPath(value, base, bare)[0]
+  if (input) {
+    const target = materializedPathOption(current, input)
+    if (target) return target
+    if (!bare || path.isAbsolute(value) || isWindowsPath(value) || value.includes("/") || value.includes("\\")) {
+      return undefined
+    }
+  }
+  if (URL.canParse(value)) return value
+  return value
+}
+
+const packageRunners = new Set([
+  "bunx",
+  "corepack",
+  "npm",
+  "npx",
+  "pipx",
+  "pnpm",
+  "pnpx",
+  "uv",
+  "uvx",
+  "yarn",
+  "yarnpkg",
+])
+const launcherCommands = new Set([
+  "busybox",
+  "chrt",
+  "command",
+  "doas",
+  "env",
+  "exec",
+  "ionice",
+  "nice",
+  "nohup",
+  "setsid",
+  "start",
+  "stdbuf",
+  "sudo",
+  "systemd-run",
+  "taskset",
+  "time",
+  "timeout",
+  "xargs",
+])
+
+const unsafeEnvironmentKeys = new Set([
+  "APPDATA",
+  "BASHOPTS",
+  "BASH_ENV",
+  "BUN_OPTIONS",
+  "BUNDLE_GEMFILE",
+  "CDPATH",
+  "CLASSPATH",
+  "COMSPEC",
+  "DOTNET_ADDITIONAL_DEPS",
+  "DOTNET_SHARED_STORE",
+  "DOTNET_STARTUP_HOOKS",
+  "ENV",
+  "GEM_HOME",
+  "GEM_PATH",
+  "GIT_CONFIG_GLOBAL",
+  "GIT_CONFIG_SYSTEM",
+  "GIT_EXEC_PATH",
+  "GIT_SSH",
+  "GIT_SSH_COMMAND",
+  "GIT_TEMPLATE_DIR",
+  "GOENV",
+  "GOPATH",
+  "GOROOT",
+  "GOTOOLDIR",
+  "HOME",
+  "JDK_JAVA_OPTIONS",
+  "JAVA_TOOL_OPTIONS",
+  "LOCALAPPDATA",
+  "LOCPATH",
+  "_JAVA_OPTIONS",
+  "GCONV_PATH",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "NLSPATH",
+  "OLDPWD",
+  "PATH",
+  "PATHEXT",
+  "PERL5DB",
+  "PERL5LIB",
+  "PERL5OPT",
+  "PHPRC",
+  "PHP_INI_SCAN_DIR",
+  "PYTHONHOME",
+  "PYTHONBREAKPOINT",
+  "PYTHONEXECUTABLE",
+  "PYTHONINSPECT",
+  "PYTHONPATH",
+  "PYTHONSTARTUP",
+  "PYTHONUSERBASE",
+  "PWD",
+  "RUSTC_WORKSPACE_WRAPPER",
+  "RUSTC_WRAPPER",
+  "RUBYLIB",
+  "RUBYOPT",
+  "SHELL",
+  "SHELLOPTS",
+  "USERPROFILE",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+  "ZDOTDIR",
+])
+
+function unsafeProjectEnvironment(environment: Readonly<Record<string, string>> | undefined) {
+  if (!environment) return false
+  return Object.keys(environment).some((key) => {
+    const normalized = key.toUpperCase()
+    return (
+      unsafeEnvironmentKeys.has(normalized) ||
+      normalized.startsWith("BASH_FUNC_") ||
+      normalized.startsWith("LD_") ||
+      normalized.startsWith("DYLD_") ||
+      normalized.startsWith("LUA_INIT")
+    )
+  })
+}
+
+function interpreterScript(command: readonly string[]): number | "safe" | "ambiguous" | "unknown" {
+  const first = command[0]
+  if (!first) return "ambiguous"
+  const executable = executableName(first)
+  const argument = command[1]
+  if (["node", "nodejs"].includes(executable)) {
+    if (!argument || ["-h", "--help", "-v", "--version"].includes(argument)) return "safe"
+    if (["-e", "--eval", "-p", "--print"].includes(argument)) return "ambiguous"
+    return argument.startsWith("-") ? "ambiguous" : 1
+  }
+  if (["bun", "tsx", "ts-node", "ts-node-esm"].includes(executable)) {
+    if (!argument || ["-h", "--help", "-v", "--version"].includes(argument)) return "safe"
+    if (["-e", "--eval"].includes(argument)) return "ambiguous"
+    if (["run", "x", "exec", "add", "install", "pm"].includes(argument) || argument.startsWith("-")) {
+      return "ambiguous"
+    }
+    return 1
+  }
+  if (/^python(?:\d+(?:\.\d+)*)?$/.test(executable)) {
+    if (!argument || ["-h", "--help", "-v", "--version"].includes(argument.toLowerCase())) return "safe"
+    if (argument === "-c") return "ambiguous"
+    return argument.startsWith("-") ? "ambiguous" : 1
+  }
+  if (["bash", "dash", "fish", "ksh", "perl", "php", "ruby", "sh", "zsh"].includes(executable)) {
+    if (!argument || ["-h", "--help", "-v", "--version"].includes(argument)) return "safe"
+    if (["-c", "-e", "-r"].includes(argument)) return "ambiguous"
+    return argument.startsWith("-") ? "ambiguous" : 1
+  }
+  if (executable === "deno") {
+    if (!argument || ["help", "lsp", "--help", "--version"].includes(argument)) return "safe"
+    if (argument === "eval") return "ambiguous"
+    if (argument !== "run" || !command[2] || command[2].startsWith("-")) return "ambiguous"
+    return 2
+  }
+  if (executable === "java") {
+    if (!argument || ["-h", "--help", "-version", "--version"].includes(argument)) return "safe"
+    if (argument !== "-jar" || !command[2]) return "ambiguous"
+    return 2
+  }
+  if (executable === "dotnet") {
+    if (!argument || ["-h", "--help", "--info", "--version"].includes(argument)) return "safe"
+    if (argument === "run" || argument.startsWith("-")) return "ambiguous"
+    return 1
+  }
+  if (["cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"].includes(executable)) {
+    return "ambiguous"
+  }
+  return command.length === 1 ? "safe" : "unknown"
+}
+
+function executableName(value: string) {
+  return path.win32
+    .basename(path.basename(value))
+    .toLowerCase()
+    .replace(/\.(?:cmd|exe)$/i, "")
+}
+
+function isWindowsPath(value: string) {
+  return /^[A-Za-z]:/.test(value) || value.startsWith("\\\\")
 }
 
 function normalizeInput(input: string, requested: string, canonical: string) {
@@ -363,7 +684,7 @@ async function verifyMaterialized(directory: string, current: Snapshot) {
       throw new Error(`Trusted workspace cache ${directory} changed at ${file}`)
     }
   }
-  for (const source of current[capturedDirectories]) {
+  for (const source of new Set([...current[capturedDirectories], ...current[executionDirectories]])) {
     const target = path.join(directory, materializedRelativePath(source))
     const stat = await fs.lstat(target).catch(() => undefined)
     if (!stat?.isDirectory() || stat.isSymbolicLink()) {
