@@ -804,6 +804,26 @@ describe("usage summary", () => {
     expect({ ...shared, models: summary.models, efforts: summary.efforts }).toEqual(summary)
   })
 
+  test("a share link leaves out the sessions and model use of a day fewer than three people were active", () => {
+    const quiet = {
+      day: "2026-10-08",
+      active: 2,
+      desktop: 1,
+      cli: 1,
+      sessions: 7,
+      subagentSessions: 3,
+      tokens: 450_000,
+      cost: 6.25,
+      tasks: 9,
+    }
+    const shared = shareableSummary({ ...summary, daily: [quiet, ...summary.daily] })
+    // With about thirty people, a day with one or two active could be one person's day.
+    expect(shared.daily).toEqual([
+      { ...quiet, sessions: 0, subagentSessions: 0, tokens: 0, cost: 0, tasks: 0 },
+      ...summary.daily,
+    ])
+  })
+
   test("an expired, revoked, unknown or malformed link says why and reads nothing", async () => {
     for (const [answer, status, code] of [
       [{ status: "expired" }, 410, "SHARE_EXPIRED"],

@@ -216,6 +216,12 @@ export function Dashboard(props: {
             Shared by Vector · read-only · expires {longDay.format(new Date(props.shared.expiresAt))}
           </p>
         )}
+        {props.shared && (
+          <p className="usage-note">
+            Days with fewer than three people active show no sessions or model use here, so no day shows one person's
+            use.
+          </p>
+        )}
         <p className="acct-meta">
           Counts and totals only: installs, accounts, versions, sessions and model use per day, never what anyone wrote.
           Updated {Number.isNaN(generated.getTime()) ? "just now" : `${clock.format(generated)} UTC`}. Weeks start on
@@ -1104,8 +1110,9 @@ function ShareLinks(props: { authorize: () => Promise<string | undefined> }) {
           <h2 id="usage-shares-title">Share a read-only link</h2>
           <p>
             For investors and partners: these aggregate numbers, read-only, with no names, emails or accounts. Models
-            and custom effort levels that fewer than three accounts use are left off. Only a fingerprint of each link is
-            kept, so copy it when you make it.
+            and custom effort levels that fewer than three accounts use are left off, and so are the sessions and model
+            use of days fewer than three people were active. Only a fingerprint of each link is kept, so copy it when
+            you make it.
           </p>
         </div>
       </div>

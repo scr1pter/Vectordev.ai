@@ -188,6 +188,7 @@ test("a shared view is read-only: the banner and the numbers, no refresh, accoun
     createElement(Dashboard, { summary, shared: { expiresAt: "2026-10-24T09:00:00Z" }, onRefresh: () => undefined }),
   )
   expect(html).toContain("Shared by Vector · read-only · expires Oct 24, 2026")
+  expect(html).toContain("Days with fewer than three people active show no sessions or model use here")
   for (const section of [
     "Model use",
     "Tokens, 7 days",

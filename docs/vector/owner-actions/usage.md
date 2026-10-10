@@ -17,7 +17,7 @@ The owner can make read-only links to the dashboard for investors and partners a
 
 - The link is `https://vectordev.ai/usage#share=<token>`. The token sits in the address fragment, which browsers never send to a server or in a referrer; the page sends it to `/api/usage/summary` in the `x-vector-usage-share` header.
 - Only a SHA-256 hash of the token is stored (`vector_usage_shares`), so a link is shown once, when it is made. The owner's list shows each link's label, expiry, state and how many times it was opened; nothing about the viewer is kept.
-- A link sees the same aggregates as the owner, with no account, install or email in them. Models, and effort levels other than Vector's own, that fewer than three accounts use are left off a shared link, because a custom provider or model name could point at one person or company. Vector's own effort levels are labelled by the server, never by a report.
+- A link sees the same aggregates as the owner, with no account, install or email in them. Models, and effort levels other than Vector's own, that fewer than three accounts use are left off a shared link, because a custom provider or model name could point at one person or company. Vector's own effort levels are labelled by the server, never by a report. A day on which fewer than three people were active shows no sessions, tokens, cost or tasks on a shared link, since it could be one person's day; the shared page says so.
 - Expired and revoked links answer 410 with the reason; an unknown link answers 404. At most 50 links can be live at once, and links that ended more than 90 days ago are removed.
 
 ## Setup

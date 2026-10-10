@@ -171,11 +171,18 @@ export async function usageSummary(fetcher: typeof fetch = fetch) {
 
 /**
  * The summary as a read-only share link shows it: the same aggregates, without the models and custom effort levels
- * fewer than three accounts use (model use is kept only with an account, so its people are accounts). Shares stay fractions of everyone's tokens, so what is left out shows as the remainder.
+ * fewer than three accounts use (model use is kept only with an account, so its people are accounts), and without the
+ * sessions and model use of a day fewer than three people were active, which could be one person's day. Shares stay
+ * fractions of everyone's tokens, so what is left out shows as the remainder.
  */
 export function shareableSummary(summary: UsageSummary.Summary): UsageSummary.Summary {
   return {
     ...summary,
+    daily: summary.daily.map((day) =>
+      day.active >= SHARE_MINIMUM_PEOPLE
+        ? day
+        : { ...day, sessions: 0, subagentSessions: 0, tokens: 0, cost: 0, tasks: 0 },
+    ),
     models: summary.models.filter((model) => model.people >= SHARE_MINIMUM_PEOPLE),
     efforts: summary.efforts.filter(
       (effort) => BUILT_IN_EFFORTS.has(effort.id) || effort.people >= SHARE_MINIMUM_PEOPLE,
