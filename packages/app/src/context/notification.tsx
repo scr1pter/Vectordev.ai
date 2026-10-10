@@ -1,4 +1,5 @@
 import { freeModelsLimitNotice } from "@vectordevai/core/free-model-choice"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createStore, reconcile } from "solid-js/store"
 import { type Accessor, batch, createEffect, createMemo, createRoot, getOwner, onCleanup } from "solid-js"
 import { useParams, useSearchParams } from "@solidjs/router"
@@ -20,6 +21,7 @@ import { requireServerKey } from "@/utils/session-route"
 import type { ServerScope } from "@/utils/server-scope"
 import { formatServerError } from "@/utils/server-errors"
 import { showToast } from "@/utils/toast"
+import { codiumActions } from "@/components/codium-error"
 import { createNotificationEventGate } from "./notification-event-gate"
 
 type NotificationBase = {
@@ -388,11 +390,14 @@ function createServerNotificationState(input: {
       })
       const href = sessionID ? `/${base64Encode(directory)}/session/${sessionID}` : `/${base64Encode(directory)}`
       if (viewedInCurrentSession(directory, sessionID) && !freeModelsLimitNotice(error)) {
+        const codium = ModelPlanStatus.failureAction(error)
         showToast({
           title: language.t("notification.session.error.title"),
           description,
           variant: "error",
           duration: 10_000,
+          // A Codium notice offers what fixes it, such as signing in to Vector again.
+          ...(codium ? { actions: codiumActions(codium, platform) } : {}),
         })
       }
       if (settings.notifications.errors()) {

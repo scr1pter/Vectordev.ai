@@ -1,7 +1,6 @@
 import { afterAll, afterEach, expect, test } from "bun:test"
-import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 import { APICallError } from "ai"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { ModelPlans } from "@vectordevai/core/model-plans"
@@ -13,7 +12,7 @@ import { Provider } from "@/provider/provider"
 import { ProviderError } from "@/provider/error"
 import { Session } from "@/session/session"
 import { SessionRetry } from "@/session/retry"
-import { codiumGateway, codiumModel as model } from "../../../core/test/fixture/codium-gateway"
+import { codiumGateway, codiumModel } from "../../../core/test/fixture/codium-gateway"
 import { disposeAllInstances } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -23,6 +22,7 @@ const token = "vct_synthetic-private-account.token"
 const gateway = codiumGateway(token)
 afterAll(() => gateway.stop())
 const entitlement = { enabled: true }
+const account = { token: token as string | undefined }
 const it = testEffect(
   LayerNode.compile(Provider.node, [
     [
@@ -35,7 +35,7 @@ const it = testEffect(
     [
       FreeModels.credentialsNode,
       Layer.succeed(FreeModels.CredentialsService, {
-        get: (provider) => Effect.succeed(provider === "vector" ? token : undefined),
+        get: (provider) => Effect.succeed(provider === "vector" ? account.token : undefined),
       }),
     ],
     [
@@ -44,7 +44,7 @@ const it = testEffect(
         catalog: (value) =>
           Effect.succeed(
             entitlement.enabled && value === token
-              ? { enabled: true, models: [model] }
+              ? { enabled: true, models: [codiumModel] }
               : { enabled: false, models: [] },
           ),
         request: gateway.forward,
@@ -61,25 +61,31 @@ it.instance(
       const provider = yield* Provider.Service
       const listed = (yield* provider.list())[id]
       expect(listed.name).toBe("Vector Codium")
-      expect(Object.keys(listed.models)).toEqual([model.id])
+      expect(Object.keys(listed.models)).toEqual([codiumModel.id])
       expect(JSON.stringify(listed)).not.toContain(token)
       expect(listed.options).toEqual({})
-      const selected = yield* provider.getModel(id, ModelV2.ID.make(model.id))
+      const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
       expect(selected.api.url).toBe(ModelPlans.API_URL)
       expect(selected.freeModel).toBeUndefined()
-      expect(selected.cost.input).toBe(model.inputPrice)
-      expect(selected.cost.output).toBe(model.outputPrice)
+      expect(selected.cost.input).toBe(codiumModel.inputPrice)
+      expect(selected.cost.output).toBe(codiumModel.outputPrice)
       expect((yield* provider.getLanguage(selected)).provider).toContain(ModelPlans.PROVIDER_ID)
       entitlement.enabled = false
       expect((yield* provider.list())[id]).toBeUndefined()
-      const missing = yield* provider.getModel(id, ModelV2.ID.make(model.id)).pipe(Effect.flip)
-      expect(missing.message).toContain("Vector Codium is unavailable: sign in to Vector")
+      const missing = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id)).pipe(Effect.flip)
+      expect(missing).toMatchObject({ codium: "unavailable" })
+      expect(missing.message).toContain("Vector Codium is not available right now")
       entitlement.enabled = true
-      expect((yield* provider.getModel(id, ModelV2.ID.make(model.id))).api.url).toBe(ModelPlans.API_URL)
+      account.token = undefined
+      const signedOut = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id)).pipe(Effect.flip)
+      expect(signedOut).toMatchObject({ codium: "sign-in" })
+      expect(signedOut.message).toContain("Sign in to Vector to use Vector Codium")
+      account.token = token
+      expect((yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))).api.url).toBe(ModelPlans.API_URL)
     }),
   {
     config: {
-      model: `${ModelPlans.PROVIDER_ID}/${model.id}`,
+      model: `${ModelPlans.PROVIDER_ID}/${codiumModel.id}`,
       provider: {
         [ModelPlans.PROVIDER_ID]: {
           name: "injected",
@@ -95,11 +101,11 @@ it.instance(
 it.instance("a Codium turn streams text and a tool call through the gateway and records the billed cost", () =>
   Effect.gen(function* () {
     const provider = yield* Provider.Service
-    const selected = yield* provider.getModel(id, ModelV2.ID.make(model.id))
+    const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
     const language = yield* provider.getLanguage(selected)
     const before = gateway.seen.length
-    const parts = yield* Effect.promise(async () => {
-      const result = await language.doStream({
+    const result = yield* Effect.promise(() =>
+      language.doStream({
         prompt: [{ role: "user", content: [{ type: "text", text: "read src/a.ts" }] }],
         tools: [
           {
@@ -109,12 +115,11 @@ it.instance("a Codium turn streams text and a tool call through the gateway and 
             inputSchema: { type: "object", properties: { path: { type: "string" } } },
           },
         ],
-      })
-      const reader = result.stream.getReader()
-      const collected: LanguageModelV3StreamPart[] = []
-      for (let next = await reader.read(); !next.done; next = await reader.read()) collected.push(next.value)
-      return collected
-    })
+      }),
+    )
+    const parts = Array.from(
+      yield* Stream.runCollect(Stream.fromReadableStream({ evaluate: () => result.stream, onError: (cause) => cause })),
+    )
     expect(
       parts
         .filter((part) => part.type === "text-delta")
@@ -139,14 +144,14 @@ it.instance("a Codium turn streams text and a tool call through the gateway and 
     const sent = gateway.seen.slice(before)
     expect(sent.map((item) => item.path)).toEqual(["/api/model-plans/chat"])
     expect(sent[0].authorization).toBe(`Bearer ${token}`)
-    expect(sent[0].body).toMatchObject({ model: model.id, stream: true, tools: [{ type: "function" }] })
+    expect(sent[0].body).toMatchObject({ model: codiumModel.id, stream: true, tools: [{ type: "function" }] })
   }),
 )
 
 it.instance("an out-of-credits or disabled gateway fails the turn once, with an action and no retry", () =>
   Effect.gen(function* () {
     const provider = yield* Provider.Service
-    const selected = yield* provider.getModel(id, ModelV2.ID.make(model.id))
+    const selected = yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))
     const language = yield* provider.getLanguage(selected)
     for (const [mode, kind, message] of [
       [
@@ -192,6 +197,61 @@ it.instance("an out-of-credits or disabled gateway fails the turn once, with an 
   }),
 )
 
+it.instance("short Codium capacity is retried like a busy provider, with no purchase prompt", () =>
+  Effect.gen(function* () {
+    const provider = yield* Provider.Service
+    const language = yield* provider.getLanguage(yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id)))
+    gateway.state.mode = "capacity"
+    const error = yield* Effect.promise(() =>
+      language.doStream({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }).then(
+        () => undefined,
+        (cause: unknown) => cause,
+      ),
+    )
+    gateway.state.mode = "ok"
+    if (!APICallError.isInstance(error)) throw error
+    const parsed = ProviderError.parseAPICallError({ providerID: id, error })
+    expect(parsed).toMatchObject({
+      type: "api_error",
+      message: "Vector Codium is short of model capacity for a moment. Vector will try again shortly.",
+      isRetryable: true,
+    })
+    if (parsed.type !== "api_error") throw new Error("Expected an API error")
+    expect(parsed.metadata?.codium).toBeUndefined()
+    const recorded = new SessionV1.APIError({
+      message: parsed.message,
+      statusCode: parsed.statusCode,
+      isRetryable: parsed.isRetryable,
+      metadata: parsed.metadata,
+    }).toObject()
+    expect(SessionRetry.retryable(recorded, id)).toEqual({ message: parsed.message })
+  }),
+)
+
+it.instance("a turn after signing out fails before any request and offers Sign in to Vector", () =>
+  Effect.gen(function* () {
+    const provider = yield* Provider.Service
+    const language = yield* provider.getLanguage(yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id)))
+    const before = gateway.seen.length
+    account.token = undefined
+    const error = yield* Effect.promise(() =>
+      language.doStream({ prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }] }).then(
+        () => undefined,
+        (cause: unknown) => cause,
+      ),
+    )
+    account.token = token
+    if (!APICallError.isInstance(error)) throw error
+    expect(ProviderError.parseAPICallError({ providerID: id, error })).toMatchObject({
+      type: "api_error",
+      message: "Sign in to Vector to use Vector Codium.",
+      isRetryable: false,
+      metadata: { codium: "sign-in" },
+    })
+    expect(gateway.seen.length).toBe(before)
+  }),
+)
+
 it.instance(
   "Codium is never the automatic default while another provider can run",
   () =>
@@ -215,4 +275,17 @@ it.instance(
       },
     },
   },
+)
+
+it.instance(
+  "Codium alone is still not chosen automatically; the person is asked to pick a Codium model",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+      expect(Object.keys(yield* provider.list())).toEqual([id])
+      const error = yield* provider.defaultModel().pipe(Effect.flip)
+      expect(error).toMatchObject({ _tag: "ProviderNoProvidersError", codium: true })
+      expect(error.message).toContain("Vector never chooses it for you")
+    }),
+  { config: { enabled_providers: [ModelPlans.PROVIDER_ID] } },
 )

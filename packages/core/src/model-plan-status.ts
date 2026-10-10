@@ -7,6 +7,8 @@ export const API_URL = `${SITE}/api/model-plans`
 export const STATUS_URL = `${API_URL}/status`
 export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
+// The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
+export const PROVIDER_ID = "vector-plan"
 /** Customer-facing Codium credits per USD of model credit. A display conversion only; the gateway accounts in USD. */
 export const CREDITS_PER_USD = 100
 
@@ -39,11 +41,22 @@ export type Status = {
   purchased: { credits: number; remaining?: number }
   /** Monthly plus purchased credits left, when the gateway could verify both. */
   remaining?: number
+  /** Every credit is spent, including a subscriber's monthly credits before they renew. */
+  empty: boolean
   low: boolean
   error?: string
 }
 
-const EMPTY: Status = { signedIn: false, enabled: false, access: false, purchased: { credits: 0 }, low: false }
+const EMPTY: Status = {
+  signedIn: false,
+  enabled: false,
+  access: false,
+  purchased: { credits: 0 },
+  empty: false,
+  low: false,
+}
+// Running low warns below a tenth of the monthly grant, and never later than at 100 credits ($1 of usage).
+const LOW_FLOOR = 100
 
 /** Reads the signed-in account's Codium plan and balances. The token is only ever sent to vectordev.ai. */
 export async function fetchStatus(
@@ -86,7 +99,6 @@ export function fromRemote(remote: typeof Remote.Type): Status {
   const remaining = known
     ? (plan?.remaining ?? 0) + (purchased.credits === 0 ? 0 : (purchased.remaining ?? 0))
     : undefined
-  const granted = (plan?.credits ?? 0) + purchased.credits
   return {
     signedIn: true,
     enabled: remote.enabled !== false,
@@ -94,8 +106,10 @@ export function fromRemote(remote: typeof Remote.Type): Status {
     plan,
     purchased,
     remaining,
-    // Low means under a tenth of what the account was granted, or under 50 credits, while some remain.
-    low: remaining !== undefined && remaining > 0 && remaining < Math.max(50, granted / 10),
+    // The server still grants access to an active plan whose monthly credits are spent; this says so plainly.
+    empty: remaining === 0,
+    // Purchased credits count every top-up ever bought, so only the monthly grant scales the threshold.
+    low: remaining !== undefined && remaining > 0 && remaining < Math.max(LOW_FLOOR, (plan?.credits ?? 0) / 10),
   }
 }
 
@@ -132,18 +146,65 @@ export function describe(status: Status) {
       ? `Purchased credits: ${status.purchased.remaining === undefined ? "balance unavailable" : `${formatCredits(status.purchased.remaining)} of ${formatCredits(status.purchased.credits)} left`}`
       : "Purchased credits: none",
   ]
-  if (!status.enabled) return [...lines, "Vector Codium is not available yet."]
-  if (!status.access) return [...lines, "You have no Codium credits available. Buy credits to use Codium models."]
-  if (status.low) return [...lines, "You are running low on Codium credits."]
-  return lines
+  const current = notice(status)
+  return current ? [...lines, current.text] : lines
 }
 
-/** The action a failed Vector Codium turn offers, read from the session error the engine recorded. */
-export function failureAction(error: unknown): "credits" | "sign-in" | "unavailable" | undefined {
-  if (!error || typeof error !== "object" || !("name" in error) || error.name !== "APIError" || !("data" in error))
-    return
-  const metadata =
-    error.data && typeof error.data === "object" && "metadata" in error.data ? error.data.metadata : undefined
-  const kind = metadata && typeof metadata === "object" && "codium" in metadata ? metadata.codium : undefined
+/** The one balance message to show next to a signed-in account's Codium balances, if any. */
+export function notice(status: Status): { kind: "unavailable" | "empty" | "low"; text: string } | undefined {
+  if (!status.enabled) return { kind: "unavailable", text: "Vector Codium is not available yet." }
+  const plan = status.plan
+  if (status.empty && plan && !plan.cancelAtPeriodEnd)
+    return {
+      kind: "empty",
+      text: `Your monthly Codium credits are used up. They renew on ${formatDate(plan.renewsAt)}; buy credits to keep using Codium models before then.`,
+    }
+  if (status.empty && plan)
+    return {
+      kind: "empty",
+      text: `Your Codium credits are used up, and your plan ends on ${formatDate(plan.renewsAt)}. Buy credits to keep using Codium models.`,
+    }
+  if (status.empty || !status.access)
+    return { kind: "empty", text: "You have no Codium credits available. Buy credits to use Codium models." }
+  if (status.low)
+    return {
+      kind: "low",
+      text: `You are running low on Codium credits${status.remaining === undefined ? "" : ` (${formatCredits(status.remaining)} left)`}.`,
+    }
+}
+
+export type Action = "credits" | "sign-in" | "unavailable"
+
+/**
+ * The action a failed Vector Codium turn offers: from the engine's recorded APIError (metadata.codium) or from a
+ * Core V2 assistant error ({ type: "codium", action }).
+ */
+export function failureAction(error: unknown): Action | undefined {
+  if (!error || typeof error !== "object") return
+  const kind =
+    "type" in error && error.type === "codium" && "action" in error
+      ? error.action
+      : "name" in error && error.name === "APIError" && "data" in error
+        ? codiumMetadata(error.data)
+        : undefined
   return kind === "credits" || kind === "sign-in" || kind === "unavailable" ? kind : undefined
+}
+
+function codiumMetadata(data: unknown) {
+  const metadata = data && typeof data === "object" && "metadata" in data ? data.metadata : undefined
+  return metadata && typeof metadata === "object" && "codium" in metadata ? metadata.codium : undefined
+}
+
+/**
+ * The providers an automatic model choice may use, best group first: providers the person connected, then Vector's
+ * shared free models. Vector Codium spends the account's credits, so it is never chosen automatically.
+ */
+export function automaticProviders<
+  T extends { id: string; models: Record<string, { freeModel?: { source: string } }> },
+>(providers: readonly T[]) {
+  const others = providers.filter((provider) => provider.id !== PROVIDER_ID)
+  const own = others.filter((provider) =>
+    Object.values(provider.models).some((model) => model.freeModel?.source !== "shared"),
+  )
+  return own.length ? own : others
 }

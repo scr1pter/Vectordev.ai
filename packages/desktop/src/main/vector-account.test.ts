@@ -259,6 +259,7 @@ test("Codium balances are read in the main process and only the result reaches t
     },
     purchased: { credits: 800, remaining: 700 },
     remaining: 1150,
+    empty: false,
     low: false,
   })
   expect(JSON.stringify(status)).not.toContain(app.token)

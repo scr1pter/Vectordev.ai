@@ -21,6 +21,7 @@ export function SettingsVectorCodium() {
           enabled: false,
           access: false,
           purchased: { credits: 0 },
+          empty: false,
           low: false,
           error: "Vector could not load your Codium balance. Try again shortly.",
         }),
@@ -35,7 +36,6 @@ export function SettingsVectorCodium() {
     void refresh()
   })
   const plan = () => status()?.plan
-  const remaining = () => status()?.remaining
   return (
     <Show when={platform.vectorAccount?.codium}>
       <section
@@ -98,19 +98,16 @@ export function SettingsVectorCodium() {
                     </dd>
                   </div>
                 </dl>
-                <Show when={!current().enabled}>
-                  <p class="text-12-regular">Vector Codium is not available yet.</p>
-                </Show>
-                <Show when={current().enabled && !current().access}>
-                  <p role="alert" class="text-12-regular">
-                    You have no Codium credits available. Buy credits or a plan to use Codium models.
-                  </p>
-                </Show>
-                <Show when={current().enabled && current().access && current().low}>
-                  <p role="status" class="text-12-regular" data-slot="codium-low">
-                    You are running low on Codium credits
-                    {remaining() === undefined ? "" : ` (${ModelPlanStatus.formatCredits(remaining()!)} left)`}.
-                  </p>
+                <Show when={ModelPlanStatus.notice(current())}>
+                  {(notice) => (
+                    <p
+                      role={notice().kind === "empty" ? "alert" : "status"}
+                      class="text-12-regular"
+                      data-slot={`codium-${notice().kind}`}
+                    >
+                      {notice().text}
+                    </p>
+                  )}
                 </Show>
               </Show>
             </>

@@ -22,7 +22,15 @@ export const UnknownError = Schema.Struct({
   message: Schema.String,
 }).annotate({ identifier: "Session.Error.Unknown" })
 
-export const AssistantError = Schema.Union([UnknownError, FreeModelLimit]).annotate({
+// A Vector Codium turn that could not run, with the one action that fixes it.
+export interface CodiumError extends Schema.Schema.Type<typeof CodiumError> {}
+export const CodiumError = Schema.Struct({
+  type: Schema.Literal("codium"),
+  action: Schema.Literals(["credits", "sign-in", "unavailable"]),
+  message: Schema.String,
+}).annotate({ identifier: "Session.Error.Codium" })
+
+export const AssistantError = Schema.Union([UnknownError, FreeModelLimit, CodiumError]).annotate({
   identifier: "Session.Error.Assistant",
 })
 export type AssistantError = typeof AssistantError.Type

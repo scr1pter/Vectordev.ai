@@ -1055,6 +1055,8 @@ export class ModelNotFoundError extends Schema.TaggedErrorClass<ModelNotFoundErr
   modelID: ModelV2.ID,
   suggestions: Schema.optional(Schema.Array(Schema.String)),
   unavailable: Schema.optional(ProviderUnavailable),
+  /** For Vector Codium: the action the person can take, offered with the session error. */
+  codium: Schema.optional(Schema.Literals(["sign-in", "unavailable"])),
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message() {
@@ -1081,8 +1083,13 @@ export class InitError extends Schema.TaggedErrorClass<InitError>()("ProviderIni
   }
 }
 
-export class NoProvidersError extends Schema.TaggedErrorClass<NoProvidersError>()("ProviderNoProvidersError", {}) {
+export class NoProvidersError extends Schema.TaggedErrorClass<NoProvidersError>()("ProviderNoProvidersError", {
+  /** Vector Codium is listed, but it is only used when the person chooses one of its models. */
+  codium: Schema.optional(Schema.Boolean),
+}) {
   override get message() {
+    if (this.codium)
+      return "Vector Codium is available, but Vector never chooses it for you. Choose a Codium model, for example with --model vector-plan/<model>."
     return "No providers are available"
   }
 
@@ -1875,11 +1882,11 @@ const layer = Layer.effect(
       }),
     )
 
-    const list = Effect.fn("Provider.list")(function* () {
+    // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
+    const refreshCodium = Effect.fn("Provider.refreshCodium")(function* (options?: ModelPlans.CatalogOptions) {
       const s = yield* InstanceState.get(state)
-      const current = yield* modelPlans.catalog(yield* freeCredentials.get("vector"))
+      const current = yield* modelPlans.catalog(yield* freeCredentials.get("vector"), options)
       const cfg = yield* config.get()
-      // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
       delete s.providers[planID]
       if (
         current.enabled &&
@@ -1889,6 +1896,8 @@ const layer = Layer.effect(
         s.providers[planID] = fromModelPlans(current.models)
       return s.providers
     })
+
+    const list = Effect.fn("Provider.list")(() => refreshCodium())
 
     const unavailable = Effect.fn("Provider.unavailable")(() => InstanceState.use(state, (s) => s.unavailable))
 
@@ -1905,7 +1914,7 @@ const layer = Layer.effect(
             fetch: ModelPlans.createFetch({
               modelID: model.id,
               credential: () => runtimeBridge.promise(freeCredentials.get("vector")),
-              catalog: (token) => runtimeBridge.promise(modelPlans.catalog(token)),
+              catalog: (token) => runtimeBridge.promise(modelPlans.catalog(token, { wait: true })),
               request: modelPlans.request,
             }),
             metadataExtractor: {
@@ -2123,20 +2132,26 @@ const layer = Layer.effect(
     )
 
     const getModel = Effect.fn("Provider.getModel")(function* (providerID: ProviderV2.ID, modelID: ModelV2.ID) {
-      if (providerID === planID) yield* list()
+      // A turn waits for vectordev.ai's answer when this account has no Codium catalog yet.
+      if (providerID === planID) yield* refreshCodium({ wait: true })
       const s = yield* InstanceState.get(state)
       const provider = Object.hasOwn(s.providers, providerID) ? s.providers[providerID] : undefined
-      // Never move a Codium conversation to another provider; say why it cannot run.
-      if (!provider && providerID === planID)
+      // Never move a Codium conversation to another provider; say why it cannot run and what fixes it.
+      if (!provider && providerID === planID) {
+        const signedIn = (yield* freeCredentials.get("vector")) !== undefined
         return yield* new ModelNotFoundError({
           providerID,
           modelID,
+          codium: signedIn ? "unavailable" : "sign-in",
           unavailable: {
             id: providerID,
             reason: "no-models",
-            message: `Vector Codium is unavailable: sign in to Vector, and check ${ModelPlans.PURCHASE_URL}. Choose another model to continue.`,
+            message: signedIn
+              ? `Vector Codium is not available right now; see ${ModelPlans.PURCHASE_URL}. Choose another model to continue.`
+              : "Sign in to Vector to use Vector Codium, or choose another model to continue.",
           },
         })
+      }
       if (!provider) {
         const catalogProvider = s.getCatalog(providerID)
         const suggestions = catalogProvider
@@ -2345,12 +2360,10 @@ const layer = Layer.effect(
       if (free) return { providerID: free.providerID, modelID: free.id }
       if (s.providers[ProviderV2.ID.openrouter])
         return yield* new NoModelsError({ providerID: ProviderV2.ID.openrouter })
-      // Codium spends the account's credits, so it is the automatic choice only when nothing else can run.
-      const provider =
-        providers.find((p) => p.id !== "vector" && p.id !== planID) ??
-        providers.find((p) => p.id !== planID) ??
-        providers[0]
-      if (!provider) return yield* new NoProvidersError()
+      // Codium spends the account's credits, so it is never chosen automatically; the person picks it.
+      const automatic = providers.filter((p) => p.id !== planID)
+      const provider = automatic.find((p) => p.id !== "vector") ?? automatic[0]
+      if (!provider) return yield* new NoProvidersError({ codium: s.providers[planID] !== undefined })
       const [model] = sort(Object.values(provider.models))
       if (!model) return yield* new NoModelsError({ providerID: provider.id })
       return {

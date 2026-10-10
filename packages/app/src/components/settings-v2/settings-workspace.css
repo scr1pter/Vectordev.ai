@@ -697,6 +697,10 @@ html .settings-v2-workspace .settings-v2-nav-search input:focus-visible {
   color: var(--vx-amber);
 }
 
+.settings-v2-workspace [data-component="vector-codium"] [data-slot="codium-empty"] {
+  color: var(--vx-red);
+}
+
 @media (max-width: 860px) {
   .settings-v2--fullscreen[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
     [data-slot="tabs-v2-list"] {

@@ -198,6 +198,17 @@ export function parseAPICallError(input: { providerID: ProviderV2.ID; error: API
   }
 
   const failure = codium ? ModelPlans.gatewayFailure(input.error.statusCode, input.error.responseBody) : undefined
+  // Short capacity is temporary: retried like any busy provider, with no purchase prompt.
+  if (failure?.kind === "capacity")
+    return {
+      type: "api_error",
+      message: failure.message,
+      statusCode: input.error.statusCode,
+      isRetryable: true,
+      responseHeaders: input.error.responseHeaders,
+      responseBody: input.error.responseBody,
+      metadata: { code: failure.code },
+    }
   // The app reads metadata.codium to offer the matching action, and retries skip these errors.
   if (failure)
     return {

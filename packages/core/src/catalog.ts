@@ -5,6 +5,7 @@ import { makeLocationNode } from "./effect/app-node"
 import { Array, Context, Effect, Layer, Option, Order, pipe, Schema } from "effect"
 import { Catalog } from "@vectordevai/schema/catalog"
 import { ModelV2 } from "./model"
+import { ModelPlanStatus } from "./model-plan-status"
 import { ProviderV2 } from "./provider"
 import { EventV2 } from "./event"
 import { Policy } from "./policy"
@@ -277,10 +278,13 @@ const layer = Layer.effect(
           if (free) return free
           if ((yield* result.provider.available()).some((provider) => provider.id === "openrouter"))
             return yield* new FreeModelsUnavailableError()
-          const connected = models.filter((model) => model.providerID !== "vector")
+          // Connected providers first, then Vector's shared free models. Codium spends the account's credits, so it
+          // is never chosen automatically.
+          const runnable = models.filter((model) => model.providerID !== ModelPlanStatus.PROVIDER_ID)
+          const connected = runnable.filter((model) => model.providerID !== "vector")
           return Option.getOrUndefined(
             pipe(
-              connected.length ? connected : models,
+              connected.length ? connected : runnable,
               Array.sortWith((item) => item.time.released, Order.flip(Order.Number)),
               Array.head,
             ),

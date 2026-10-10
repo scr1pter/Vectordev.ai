@@ -322,6 +322,6 @@ export const node = makeLocationNode({
   deps: [Catalog.node, Integration.node, FreeModels.node, FreeModels.credentialsNode, ModelPlans.node],
 })
 
-// Codium spends the account's credits, so it is chosen automatically only when nothing else can run.
+// Codium spends the account's credits, so it is never chosen automatically.
 const automaticModel = (models: readonly ModelV2.Info[]) =>
-  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID) ?? models.find(supported)
+  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID)

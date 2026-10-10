@@ -35,13 +35,20 @@ export const toolCallStream = [
   },
 ]
 
+/** A plain text reply, such as a session title, with a billed cost below the catalog's ceiling price. */
+export const textStream = [
+  { id: "gen-2", choices: [{ index: 0, delta: { role: "assistant", content: "Fix the login redirect" } }] },
+  { id: "gen-2", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+  { id: "gen-2", choices: [], usage: { prompt_tokens: 200, completion_tokens: 6, total_tokens: 206, cost: 0.000031 } },
+]
+
 /**
  * A local stand-in for vectordev.ai/api/model-plans: catalog, status and chat, answering like the hosted gateway.
  * forward() sends a request meant for vectordev.ai here instead, so the real client code runs unchanged.
  */
 export function codiumGateway(token: string) {
   const state = {
-    mode: "ok" as "ok" | "credits" | "disabled" | "context",
+    mode: "ok" as "ok" | "text" | "credits" | "disabled" | "context" | "capacity",
     status: {
       enabled: true,
       active: true,
@@ -94,6 +101,17 @@ export function codiumGateway(token: string) {
           },
           { status: 402 },
         )
+      if (state.mode === "capacity")
+        return Response.json(
+          {
+            error: {
+              code: "MODEL_PLAN_CAPACITY",
+              message:
+                "Your Codium credits or provider capacity are currently unavailable. Check your balance or retry later.",
+            },
+          },
+          { status: 402 },
+        )
       if (state.mode === "context")
         return Response.json(
           {
@@ -106,7 +124,10 @@ export function codiumGateway(token: string) {
           { status: 400 },
         )
       return new Response(
-        [...toolCallStream.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`), "data: [DONE]\n\n"].join(""),
+        [
+          ...(state.mode === "text" ? textStream : toolCallStream).map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`),
+          "data: [DONE]\n\n",
+        ].join(""),
         { headers: { "content-type": "text/event-stream" } },
       )
     },

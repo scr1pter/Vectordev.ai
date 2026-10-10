@@ -1,23 +1,23 @@
 import { expect } from "bun:test"
-import { Effect } from "effect"
+import { DateTime, Effect, Exit } from "effect"
 import { Catalog } from "../src/catalog"
 import { FreeModels } from "../src/free-models"
 import { ModelPlans } from "../src/model-plans"
 import { PluginV2 } from "../src/plugin"
 import { PluginHost } from "../src/plugin/host"
+// Load order matters here: importing VectorPlugin first reaches the provider plugin list before it is initialized.
 import { VectorPlanPlugin } from "../src/plugin/provider/vector-plan"
+import { VectorPlugin } from "../src/plugin/provider/vector"
+import { ProjectV2 } from "../src/project"
+import { AbsolutePath } from "../src/schema"
+import { SessionV2 } from "../src/session"
+import { SessionRunnerModel } from "../src/session/runner/model"
+import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
+import { codiumModel } from "./fixture/codium-gateway"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
 
 const it = testEffect(PluginTestLayer)
-const model = {
-  id: "vendor/coder",
-  name: "Coder",
-  contextLength: 32000,
-  maxOutputTokens: 4096,
-  inputPrice: 0.2,
-  outputPrice: 0.4,
-}
 
 for (const enabled of [true, false])
   it.effect(`managed catalog replaces configuration overrides when enabled=${enabled}`, () =>
@@ -38,7 +38,7 @@ for (const enabled of [true, false])
         Effect.provideService(ModelPlans.Service, {
           catalog: (token) => {
             expect(token).toBe("private-account-token")
-            return Effect.succeed({ enabled, models: enabled ? [model] : [] })
+            return Effect.succeed({ enabled, models: enabled ? [codiumModel] : [] })
           },
           request: () => Promise.reject(new Error("Listing must not call the chat gateway")),
         }),
@@ -47,11 +47,71 @@ for (const enabled of [true, false])
       const listed = (yield* catalog.model.available()).filter((model) => model.providerID === ModelPlans.PROVIDER_ID)
       expect(listed).toHaveLength(enabled ? 1 : 0)
       if (!enabled) return
-      expect(String(listed[0].id)).toBe(model.id)
-      expect(listed[0].name).toBe(model.name)
-      expect(listed[0].cost[0].input).toBe(model.inputPrice)
+      expect(String(listed[0].id)).toBe(codiumModel.id)
+      expect(listed[0].name).toBe(codiumModel.name)
+      expect(listed[0].cost[0].input).toBe(codiumModel.inputPrice)
       expect(listed[0].api.url).toBe(ModelPlans.API_URL)
       expect(JSON.stringify(listed)).not.toContain("private-account-token")
       expect(JSON.stringify(listed)).not.toContain("project-secret")
+    }),
+  )
+
+// Signed in to Vector with no keys: the shared free models and Codium are both listed.
+const credentials = FreeModels.CredentialsService.of({
+  get: (provider) => Effect.succeed(provider === "vector" ? "vct_signed-in.token" : undefined),
+})
+const plans = ModelPlans.Service.of({
+  catalog: () => Effect.succeed({ enabled: true, models: [codiumModel] }),
+  request: () => Promise.reject(new Error("Choosing a model must not call the chat gateway")),
+})
+const session = SessionV2.Info.make({
+  id: SessionV2.ID.make("ses_codium_default"),
+  projectID: ProjectV2.ID.global,
+  title: "default",
+  cost: 0,
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+  location: { directory: AbsolutePath.make("/synthetic-project") },
+})
+
+for (const shared of [true, false])
+  it.effect(`a new V2 session never picks Codium by itself when shared free models are ${shared ? "on" : "off"}`, () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const host = yield* PluginHost.make(yield* PluginV2.Service)
+      const freeModels = FreeModels.Service.of({
+        catalog: () =>
+          Effect.succeed({ enabled: shared, updatedAt: 0, models: shared ? [FREE_MODEL_FALLBACKS[0]] : [] }),
+        forKey: () => Effect.succeed([]),
+      })
+      yield* VectorPlugin.effect(host).pipe(
+        Effect.provideService(FreeModels.Service, freeModels),
+        Effect.provideService(FreeModels.CredentialsService, credentials),
+      )
+      yield* VectorPlanPlugin.effect(host).pipe(
+        Effect.provideService(ModelPlans.Service, plans),
+        Effect.provideService(FreeModels.CredentialsService, credentials),
+      )
+      expect((yield* catalog.model.available()).map((model) => model.providerID)).toContain(ModelPlans.PROVIDER_ID)
+      const resolved = yield* Effect.gen(function* () {
+        const resolver = yield* SessionRunnerModel.Service
+        return yield* resolver.resolve(session)
+      }).pipe(
+        Effect.provide(SessionRunnerModel.locationLayer),
+        Effect.provideService(ModelPlans.Service, plans),
+        Effect.provideService(FreeModels.Service, freeModels),
+        Effect.provideService(FreeModels.CredentialsService, credentials),
+        Effect.exit,
+      )
+      if (!shared) {
+        // Codium alone is not chosen for the person: the session asks for a model instead of spending credits.
+        expect(yield* catalog.model.default()).toBeUndefined()
+        expect(Exit.isFailure(resolved)).toBe(true)
+        return
+      }
+      expect((yield* catalog.model.default())?.providerID).toBe("vector")
+      if (!Exit.isSuccess(resolved)) throw new Error("Expected the shared free model to be resolved")
+      expect(resolved.value.provider).toBe("vector")
+      expect(String(resolved.value.id)).toBe(FREE_MODEL_FALLBACKS[0].id)
     }),
   )
