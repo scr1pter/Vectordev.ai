@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SwarmRunRecord } from "./swarm-orchestrator"
@@ -65,20 +65,26 @@ const inspectTask = {
 describe("swarm lifecycle", () => {
   let server: ReturnType<typeof Bun.serve>
   let prompted = Promise.withResolvers<void>()
+  // A test can answer engine requests itself; anything it returns undefined for gets the planner defaults below.
+  let route: (url: URL) => Response | Promise<Response> | undefined = () => undefined
   const requests: string[] = []
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "vector-swarm-"))
     stores.clear()
     onWrite = () => {}
+    route = () => undefined
     requests.length = 0
     prompted = Promise.withResolvers<void>()
     server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
       fetch(request) {
-        const path = new URL(request.url).pathname
+        const url = new URL(request.url)
+        const path = url.pathname
         requests.push(`${request.method} ${path}`)
+        const routed = route(url)
+        if (routed) return routed
         if (path === "/api/session") return Response.json({ data: { id: "planner" } })
         if (path === "/session") return Response.json({ id: "planner" })
         if (path === "/api/session/planner/prompt") {
@@ -224,6 +230,48 @@ describe("swarm lifecycle", () => {
     expect(getParallelWorkspace(stopped.tasks[0]!.workspaceId!)?.status).toBe("stopped")
     expect(requests).toContain("POST /api/session/planner/interrupt")
     expect(stopped.tasks.some((task) => task.status === "complete")).toBe(false)
+  })
+
+  test("stopping while a worker's changes merge into staging keeps the task complete", async () => {
+    const run = await seed("interrupted", [inspectTask])
+    // The worker's engine session edits its isolated copy, reports busy once and then goes idle with no error.
+    let worker = ""
+    let busy = true
+    route = async (url) => {
+      if (url.pathname === "/session") {
+        worker = url.searchParams.get("directory") ?? ""
+        return Response.json({ id: "worker" })
+      }
+      if (url.pathname === "/api/session/worker/prompt") {
+        await writeFile(join(worker, "result.txt"), "inspected\n")
+        return Response.json({ data: {} })
+      }
+      if (url.pathname === "/api/session/active") {
+        const active = busy ? { worker: { type: "busy" } } : {}
+        busy = false
+        return Response.json({ data: active })
+      }
+      if (url.pathname === "/api/session/worker/message") return Response.json({ data: [] })
+      if (url.pathname === "/api/session/worker/context") return Response.json({ data: [] })
+      return undefined
+    }
+    // Stop lands while the merge into staging is under way, after the worker validated and finished.
+    let stopping: Promise<SwarmRunRecord> | undefined
+    onWrite = (name) => {
+      if (name !== "swarm-orchestrator-state" || stopping) return
+      if (getSwarmRun(run.id)?.tasks[0]?.status === "merging") stopping = stopSwarmRun(run.id)
+    }
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    const deadline = Date.now() + 30_000
+    while (!stopping && Date.now() < deadline) await Bun.sleep(50)
+    if (!stopping) throw new Error("The worker never reached the staging merge.")
+    const stopped = await stopping
+
+    expect(stopped.status).toBe("canceled")
+    expect(stopped.tasks[0]?.status).toBe("complete")
+    expect(stopped.tasks[0]?.lastAction).toBe("Validated changes integrated into staging")
+    expect(await Bun.file(join(directory, "staging", "repo", "result.txt")).text()).toBe("inspected\n")
+    expect(getParallelWorkspace(stopped.tasks[0]!.workspaceId!)?.mergeState).toBe("merged")
   })
 
   test.each(["complete", "needs review", "merged", "discarded"] as const)(

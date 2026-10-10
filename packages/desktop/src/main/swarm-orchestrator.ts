@@ -652,7 +652,9 @@ async function executeSwarmTask(id: string, taskID: string, engine: ParallelWork
   } else if (settled.mergeState === "none") {
     await discardParallelWorkspace(settled.id).catch(() => undefined)
   }
-  signal.throwIfAborted()
+  // No Stop checkpoint here: the worker's changes are already in staging, so a Stop that arrived during the merge
+  // must still record the task complete. Recorded as canceled, Resume would run it again on a baseline that already
+  // holds its edits.
 
   updateTask(id, taskID, (current) => ({
     ...current,
