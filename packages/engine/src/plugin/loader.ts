@@ -96,6 +96,7 @@ export namespace PluginLoader {
   export async function resolve(
     plan: Plan,
     kind: PluginKind,
+    scope: ConfigPlugin.Scope,
   ): Promise<
     | { ok: true; value: Resolved }
     | { ok: false; stage: "missing"; value: Missing }
@@ -104,7 +105,7 @@ export namespace PluginLoader {
     // First make sure the plugin exists locally, installing npm plugins on demand.
     let target = ""
     try {
-      target = await resolvePluginTarget(plan.spec)
+      target = await resolvePluginTarget(plan.spec, { unpinned: scope === "global" })
     } catch (error) {
       return { ok: false, stage: "install", error }
     }
@@ -191,7 +192,7 @@ export namespace PluginLoader {
 
     report?.start?.(candidate, retry)
 
-    const resolved = await resolve(plan, kind)
+    const resolved = await resolve(plan, kind, candidate.origin.scope)
     if (!resolved.ok) {
       if (resolved.stage === "missing") {
         // Missing entrypoints are handled separately so callers can still inspect package metadata,

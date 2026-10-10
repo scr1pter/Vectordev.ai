@@ -47,7 +47,7 @@ export const Plugin = define({
     const location = yield* Location.Service
     const npm = yield* Npm.Service
     yield* Effect.gen(function* () {
-      const configured: { package: string; options?: Record<string, any> }[] = []
+      const configured: { package: string; options?: Record<string, any>; project: boolean }[] = []
 
       for (const entry of yield* config.entries()) {
         if (config.executable?.(entry) === false) continue
@@ -65,6 +65,7 @@ export const Plugin = define({
             configured.push({
               package: config.executablePath?.(entry, packageName) ?? packageName,
               options: ref.options,
+              project: config.scope?.(entry) === "project",
             })
           }
         }
@@ -80,14 +81,16 @@ export const Plugin = define({
             })
             .pipe(Effect.orElseSucceed(() => []))
           files.sort()
-          for (const file of files) configured.push({ package: config.executablePath?.(entry, file) ?? file })
+          for (const file of files)
+            configured.push({ package: config.executablePath?.(entry, file) ?? file, project: false })
         }
       }
 
       for (const ref of configured) {
         yield* Effect.gen(function* () {
           if (borrowedOAuthPlugin(ref.package)) return
-          if (!path.isAbsolute(ref.package) && !pinned(ref.package)) {
+          // The user's own config may follow a range or the latest release; a project must name an exact version.
+          if (ref.project && !path.isAbsolute(ref.package) && !pinned(ref.package)) {
             yield* Effect.logWarning(`Skipped mutable plugin package ${ref.package}; use an exact version`)
             return
           }

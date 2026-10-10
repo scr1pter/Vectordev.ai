@@ -210,11 +210,14 @@ export async function checkPluginCompatibility(target: string, vectorVersion: st
   }
 }
 
-export async function resolvePluginTarget(spec: string) {
+// A plugin in the user's own global config may follow a range or the latest release, as it always could. One a
+// project declares, or one being installed, must name an exact version, so what runs is the release that was chosen.
+export async function resolvePluginTarget(spec: string, options?: { unpinned?: boolean }) {
   if (isPathPluginSpec(spec)) return resolvePathPluginTarget(spec)
-  if (!isPinnedPluginSpecifier(spec)) throw new Error(`Plugin package ${spec} must use an exact version`)
   const hit = parse(spec)
-  const result = await Npm.add(hit?.raw ?? spec)
+  if (!options?.unpinned && !isPinnedPluginSpecifier(spec))
+    throw new Error(`Plugin package ${spec} must use an exact version, such as ${hit?.name ?? spec}@1.2.3`)
+  const result = await Npm.add(hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : spec)
   return result.directory
 }
 

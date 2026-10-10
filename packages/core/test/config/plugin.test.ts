@@ -373,6 +373,8 @@ describe("ConfigExternalPlugin", () => {
                   }),
                 }),
               ]),
+            // A project must pin its plugins; the mutable one is skipped.
+            scope: () => "project",
           }),
         ),
       )
@@ -381,6 +383,56 @@ describe("ConfigExternalPlugin", () => {
         description: "Installed from npm",
       })
       expect(installed).toEqual(["example-plugin@1.0.0"])
+    }),
+  )
+
+  it.live("loads an unpinned plugin from the user's global config", () =>
+    Effect.gen(function* () {
+      const plugins = yield* PluginV2.Service
+      const agents = yield* AgentV2.Service
+      const fs = yield* FSUtil.Service
+      const location = yield* Location.Service
+      const host = yield* PluginHost.make(plugins)
+      const installed: string[] = []
+      const npm = Npm.Service.of({
+        add: (spec) =>
+          Effect.sync(() => {
+            installed.push(spec)
+            return {
+              directory: import.meta.dir,
+              entrypoint: path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts"),
+            }
+          }),
+        install: () => Effect.void,
+        which: () => Effect.succeed(undefined),
+      })
+
+      yield* ConfigExternalPlugin.Plugin.effect(host).pipe(
+        Effect.provideService(PluginV2.Service, plugins),
+        Effect.provideService(FSUtil.Service, fs),
+        Effect.provideService(Location.Service, location),
+        Effect.provideService(Npm.Service, npm),
+        Effect.provideService(
+          Config.Service,
+          Config.Service.of({
+            entries: () =>
+              Effect.succeed([
+                new Config.Document({
+                  type: "document",
+                  info: decode({
+                    plugins: [{ package: "mutable-plugin", options: { description: "Latest from npm" } }],
+                  }),
+                }),
+              ]),
+            scope: () => "global",
+          }),
+        ),
+      )
+
+      expect(yield* waitForAgent(agents, "configured")).toMatchObject({
+        description: "Latest from npm",
+      })
+      expect(installed).toEqual(["mutable-plugin"])
     }),
   )
 
