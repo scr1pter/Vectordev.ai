@@ -54,7 +54,9 @@ describe("Codium pricing page", () => {
     for (const plan of live.plans) {
       expect(html).toContain(`<h3>${plan.name}</h3>`)
       expect(html).toContain(`<strong>$${plan.price}</strong>`)
-      expect(html).toContain(`${new Intl.NumberFormat("en-US").format(plan.credits * 100)} Codium credits every month`)
+      expect(html).toContain(
+        `<p>${new Intl.NumberFormat("en-US").format(plan.credits * 100)} Codium credits every month</p>`,
+      )
     }
     for (const model of live.models ?? []) expect(html).toContain(model.name)
     expect(html.match(/<article class="codium-card"/g)).toHaveLength(live.plans.length + 1)
@@ -63,10 +65,10 @@ describe("Codium pricing page", () => {
     // $8 of model credit at 0.8 × $0.10 + 0.2 × $0.60 = $0.20 per million tokens.
     expect(sample).toContain("<td>≈ 40M</td>")
     expect(sample).toContain("<td>≈ 80M</td>")
-    expect(sample).toContain("Est. 8M–40M tokens per month")
+    expect(sample).toContain("<p>Est. 8M–40M tokens per month</p>")
     expect(sample).toContain("Every Codium model: Everyday Coder and Hard Coder")
-    expect(sample).toContain("Everything in Codium 10, and:")
-    expect(sample).toContain("2× the credits of Codium 10")
+    expect(sample).toContain('<p class="codium-everything">Everything in Codium 10, with:</p>')
+    expect(sample).toContain("2× the credits</li>")
     expect(sample).toContain("Billed by your provider")
     expect(sample).toContain("assuming 80% input and 20% output")
     expect(sample).toContain('href="/legal/terms#codium"')
@@ -80,7 +82,7 @@ describe("Codium pricing page", () => {
     expect(monthly).toContain("<span>/ month</span>")
     expect(monthly).toContain("Get Codium 20")
     expect(monthly).toContain("Unused monthly credits reset when the period ends")
-    expect(monthly).toContain("Cancel any time")
+    expect(monthly).toContain("Renews monthly until you cancel; access lasts the paid period")
     expect(monthly).not.toContain("Codium 10 top-up")
 
     const topups = render(config, "topup")
@@ -88,8 +90,8 @@ describe("Codium pricing page", () => {
     expect(topups).toContain("<h3>Codium 10 top-up</h3>")
     expect(topups).toContain("<span>one-time</span>")
     expect(topups).toContain("Buy $20 top-up")
-    expect(topups).toContain("1,600 Codium credits</li>")
-    expect(topups).toContain("Credits carry forward with no expiry date")
+    expect(topups).toContain("<p>1,600 Codium credits</p>")
+    expect(topups).toContain("Unused credits carry forward separately from any plan")
     expect(topups).toContain("No subscription needed")
     expect(topups).toContain("Estimated tokens from each top-up")
     expect(topups).not.toContain("every month")
@@ -97,6 +99,63 @@ describe("Codium pricing page", () => {
 
     const noTopups = render({ ...config, topups: undefined })
     expect(noTopups).not.toContain("aria-pressed")
+  })
+
+  test("a later tier carries over features only, so its credits never read as adding to the tier before it", () => {
+    for (const mode of ["monthly", "topup"] as const) {
+      const html = render(readModelPlanConfig(publicModelPlans()), mode)
+      const text = html.replace(/<[^>]+>/g, "\n")
+      // Whatever follows "Everything in <tier>" up to the end of that card never names an amount of credits or tokens.
+      const carried = [...html.matchAll(/<p class="codium-everything">(.*?)<\/article>/g)].map((match) => match[1]!)
+      expect(carried).toHaveLength(4)
+      for (const part of carried) {
+        expect(part).not.toMatch(/\d[\d,]* Codium credits/)
+        expect(part).not.toMatch(/tokens/)
+      }
+      expect(text).not.toMatch(/Everything in [^\n]*, (and|plus):/)
+      // Each card states its own amount once, in its allowance, and later tiers say how many times the first they are.
+      expect(html).toContain(`<p>16,000 Codium credits${mode === "monthly" ? " every month" : ""}</p>`)
+      expect(html).toContain("20× the credits</li>")
+      expect(html.match(/Codium credits( every month)?<\/p>/g)).toHaveLength(5)
+    }
+  })
+
+  test("renewal, carry-forward and balance copy matches the Codium terms and what Vector shows today", async () => {
+    const monthly = render(config)
+    // Automatic renewal is stated above the plan buttons, not only inside a collapsed answer.
+    expect(monthly.indexOf("Plans renew automatically every month at the listed price until you cancel.")).toBeLessThan(
+      monthly.indexOf('class="codium-button"'),
+    )
+    const terms = await Bun.file(new URL("../../../pages/legal/terms.astro", import.meta.url)).text()
+    expect(terms).toContain("renew automatically at the")
+    expect(terms).toContain("carry forward separately from your subscription")
+    for (const html of [monthly, render(config, "topup")]) {
+      // The terms promise carry-forward, not credits that never expire.
+      expect(html).not.toMatch(/expiry|never expire|no expiration/i)
+      // Balances are on the account page; the page doesn't promise an in-app balance view.
+      expect(html).not.toContain("In the Vector app")
+      expect(html).toContain('On your <a href="/account">account page</a>')
+    }
+    expect(render(config, "topup")).toContain("unused credits carry forward separately from your subscription")
+  })
+
+  test("says where Codium sends code and links the privacy policy within the page itself", () => {
+    const html = render(config)
+    // The site footer isn't part of this island, so this link is the page's own.
+    expect(html).toContain('<a href="/legal/privacy">privacy policy</a>')
+    expect(html).toContain("go through Vector and OpenRouter to a provider serving the model you picked")
+    expect(html).toContain("zero-data-retention endpoints")
+  })
+
+  test("headings step down one level at a time below the page title", () => {
+    for (const mode of ["monthly", "topup"] as const) {
+      const levels = [...render(config, mode).matchAll(/<h([1-6])[\s>]/g)].map((match) => Number(match[1]))
+      // The page's own h1 sits above this island, so the island starts at h2.
+      expect(levels[0]).toBe(2)
+      for (const [index, level] of levels.entries())
+        if (index > 0) expect(level - levels[index - 1]!).toBeLessThanOrEqual(1)
+      expect(render(config, mode)).toContain('<h2 class="codium-visually-hidden">Plans</h2>')
+    }
   })
 
   test("with sales switched off every Codium button says Coming soon and is disabled", () => {

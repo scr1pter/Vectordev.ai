@@ -5,6 +5,15 @@
   font-family: var(--font-landing);
 }
 
+.codium-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .codium-toggle {
   width: fit-content;
   margin: 0 auto;
@@ -72,18 +81,18 @@
   text-align: center;
 }
 
-/* One row of equal cards whose name, price, button and list line up across the row. */
+/* One row of equal cards whose name, price, button, allowance and list line up across the row. */
 .codium-cards {
   margin-top: 40px;
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
-  grid-template-rows: repeat(4, auto);
+  grid-template-rows: repeat(5, auto);
   gap: 12px 10px;
 }
 
 .codium-card {
-  grid-row: span 4;
+  grid-row: span 5;
   display: grid;
   grid-template-rows: subgrid;
   row-gap: 0;
@@ -185,6 +194,32 @@
   color: #ffb4c2;
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+/* Each card's own credits and estimate, kept apart from the features a later card carries over. */
+.codium-allowance {
+  margin-top: 18px;
+  padding: 11px 13px;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  background: rgba(170, 140, 255, 0.07);
+  border: 1px solid rgba(170, 140, 255, 0.16);
+  border-radius: 12px;
+}
+
+.codium-allowance p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.codium-allowance p:first-child {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 560;
 }
 
 .codium-features {

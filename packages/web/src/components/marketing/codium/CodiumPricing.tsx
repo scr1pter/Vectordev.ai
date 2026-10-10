@@ -1,7 +1,7 @@
 /** @jsxImportSource react */
 import { Check, ChevronRight, Coins, Minus, Plus, Repeat } from "lucide-react"
 import React from "react"
-import type { CodiumOffer, CodiumPricing as Pricing } from "../../../lib/codium-pricing"
+import type { CodiumOffer, CodiumPricingView } from "../../../lib/codium-pricing"
 import { modelPlanRedirect } from "../../../lib/model-plans"
 import "./codium-pricing.css"
 
@@ -28,9 +28,9 @@ const FREE = [
 ]
 
 /** The Codium plan cards, usage estimates and questions on /codium. Purchases go through the account's checkout. */
-export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
+export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: CodiumMode }) {
   const [mode, setMode] = React.useState(props.mode ?? "monthly")
-  const [pending, setPending] = React.useState("")
+  const [pending, setPending] = React.useState<{ id: string; signIn?: boolean }>()
   const [failure, setFailure] = React.useState<{ id: string; message: string }>()
   const [open, setOpen] = React.useState(["credits"])
   const offers = mode === "monthly" ? props.pricing.monthly : props.pricing.topups
@@ -38,14 +38,16 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
 
   const buy = (offer: CodiumOffer, kind: CodiumMode, resumed = false) => {
     if (!offer.available || pending) return
-    setPending(offer.id)
+    setPending({ id: offer.id })
     setFailure(undefined)
-    void openCheckout(offer.id, kind, resumed)
-      .then((leaving) => {
-        if (!leaving) setPending("")
+    void checkoutDestination(offer.id, kind, resumed)
+      .then((destination) => {
+        if (!destination) return setPending(undefined)
+        setPending({ id: offer.id, signIn: destination.startsWith("/login") })
+        location.assign(destination)
       })
       .catch((cause) => {
-        setPending("")
+        setPending(undefined)
         setFailure({
           id: offer.id,
           message: cause instanceof Error ? cause.message : "Vector could not open checkout. Try again.",
@@ -64,10 +66,14 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
     buy(offer, intent.mode, true)
   }, [])
 
-  // Returning from checkout with the back button restores this page from the cache, still marked as opening.
+  // Returning with the back button restores this page from the cache, still marked as opening. The mount effect above
+  // doesn't run again, so a purchase saved before an abandoned sign-in is dropped here; otherwise a later visit to
+  // this page would open its checkout without a new click.
   React.useEffect(() => {
     const restore = (event: PageTransitionEvent) => {
-      if (event.persisted) setPending("")
+      if (!event.persisted) return
+      setPending(undefined)
+      takeIntent()
     }
     addEventListener("pageshow", restore)
     return () => removeEventListener("pageshow", restore)
@@ -104,9 +110,10 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
       answer: (
         <p>
           A monthly plan includes a fresh allowance each billing period. Unused monthly credits expire when the period
-          ends and don't roll over. A top-up is a one-time purchase: its credits carry forward with no expiry date, with
-          or without a plan. When you have both, monthly credits are used first, and purchased credits cover a request
-          the monthly remainder can't. Credits from a refunded or disputed payment are removed.
+          ends and don't roll over. A top-up is a one-time purchase that doesn't renew: its unused credits carry forward
+          separately from your subscription, and you can buy one with or without a plan. When you have both, monthly
+          credits are used first, and purchased credits cover a request the monthly remainder can't. Credits from a
+          refunded or disputed payment are removed.
         </p>
       ),
     },
@@ -137,6 +144,12 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
             ))}
           </ul>
           <p>Vector never switches models for you. The catalog can change as providers and their prices change.</p>
+          <p>
+            Codium requests, including the code and tool output a task sends, go through Vector and OpenRouter to a
+            provider serving the model you picked. Vector asks OpenRouter to route them only to zero-data-retention
+            endpoints that don't collect data for training. Review the <a href="/legal/privacy">privacy policy</a>{" "}
+            before sending code.
+          </p>
         </React.Fragment>
       ),
     },
@@ -157,9 +170,8 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
       question: "Where can I see my balance?",
       answer: (
         <p>
-          In the Vector app while you're signed in with your Vector account, and on your{" "}
-          <a href="/account">account page</a>, which lists monthly and purchased credits separately. A balance can lag
-          behind requests that are still finishing.
+          On your <a href="/account">account page</a> while you're signed in, which lists monthly and purchased credits
+          separately. A balance can lag behind requests that are still finishing.
         </p>
       ),
     },
@@ -167,6 +179,7 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
 
   return (
     <div className="codium-pricing">
+      <h2 className="codium-visually-hidden">Plans</h2>
       {props.pricing.topups.length > 0 && (
         <div className="codium-toggle" role="group" aria-label="Purchase type">
           <button type="button" aria-pressed={mode === "monthly"} onClick={() => setMode("monthly")}>
@@ -181,8 +194,8 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
       )}
       <p className="codium-mode-note">
         {mode === "monthly"
-          ? "A fresh credit allowance every billing period. Unused monthly credits reset when the period ends."
-          : "Buy credits once. They carry forward with no expiry date, with or without a monthly plan."}
+          ? "Plans renew automatically every month at the listed price until you cancel. Unused monthly credits reset when the period ends."
+          : "Buy credits once. Top-ups don't renew, and unused credits carry forward separately from any monthly plan."}
       </p>
       {!props.pricing.enabled && (
         <p className="codium-soon">Codium purchases open soon. Prices shown are planned launch pricing.</p>
@@ -204,6 +217,10 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
               <ChevronRight size={14} aria-hidden="true" />
             </a>
           </div>
+          <div className="codium-allowance">
+            <p>No Codium credits included</p>
+            <p>Use your own keys or free models</p>
+          </div>
           <div className="codium-features">
             <ul>
               {FREE.map((feature) => (
@@ -218,35 +235,30 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
 
         {offers.map((offer, index) => {
           const first = offers[0]
-          const previous = offers[index - 1]
-          const features = [
-            offer.credits > 0
-              ? `${count.format(offer.credits)} Codium credits${mode === "monthly" ? " every month" : ""}`
-              : "Credit allowance to be announced",
-            offer.tokens &&
-              `Est. ${compact.format(offer.tokens.min)}–${compact.format(offer.tokens.max)} tokens${mode === "monthly" ? " per month" : ""}`,
-            ...(previous
+          // Later tiers differ only in how many credits they include. Their amounts sit in each card's own allowance,
+          // so "Everything in" carries over features, never a credit count that could read as adding up.
+          const multiple =
+            index > 0 && first.credits > 0 && offer.credits > first.credits ? offer.credits / first.credits : undefined
+          const features =
+            index === 0
               ? [
-                  first && first.credits > 0 && offer.credits > first.credits
-                    ? `${count.format(offer.credits / first.credits)}× the credits of ${first.name}`
-                    : undefined,
-                ]
-              : [
                   models && `Every Codium model: ${models}`,
                   "Works in the Vector desktop app and CLI",
                   ...(mode === "monthly"
                     ? [
                         "Fresh credits each billing period",
                         "No overage charges or automatic top-ups",
-                        "Cancel any time; access lasts the paid period",
+                        "Renews monthly until you cancel; access lasts the paid period",
                       ]
                     : [
-                        "Credits carry forward with no expiry date",
+                        "Unused credits carry forward separately from any plan",
                         "No subscription needed",
                         "No automatic top-ups or overage charges",
                       ]),
-                ]),
-          ].filter((feature): feature is string => Boolean(feature))
+                ].filter((feature): feature is string => Boolean(feature))
+              : multiple
+                ? [`${count.format(multiple)}× the credits`]
+                : []
           return (
             <article className="codium-card" key={offer.id}>
               <header>
@@ -261,13 +273,17 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
                 <button
                   className="codium-button"
                   type="button"
-                  disabled={!offer.available || Boolean(pending)}
+                  disabled={!offer.available || pending !== undefined}
                   onClick={() => buy(offer, mode)}
                 >
                   {!offer.available ? (
                     "Coming soon"
-                  ) : pending === offer.id ? (
-                    "Opening checkout…"
+                  ) : pending?.id === offer.id ? (
+                    pending.signIn ? (
+                      "Signing in…"
+                    ) : (
+                      "Opening checkout…"
+                    )
                   ) : (
                     <React.Fragment>
                       {mode === "monthly" ? `Get ${offer.name}` : `Buy ${usd.format(offer.price)} top-up`}
@@ -281,16 +297,30 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
                   </p>
                 )}
               </div>
+              <div className="codium-allowance">
+                <p>
+                  {offer.credits > 0
+                    ? `${count.format(offer.credits)} Codium credits${mode === "monthly" ? " every month" : ""}`
+                    : "Credit allowance to be announced"}
+                </p>
+                {offer.tokens && (
+                  <p>{`Est. ${compact.format(offer.tokens.min)}–${compact.format(offer.tokens.max)} tokens${mode === "monthly" ? " per month" : ""}`}</p>
+                )}
+              </div>
               <div className="codium-features">
-                {previous && <p className="codium-everything">Everything in {previous.name}, and:</p>}
-                <ul>
-                  {features.map((feature) => (
-                    <li key={feature}>
-                      <Check size={15} aria-hidden="true" />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
+                {index > 0 && (
+                  <p className="codium-everything">{`Everything in ${first.name}${multiple ? ", with:" : ""}`}</p>
+                )}
+                {features.length > 0 && (
+                  <ul>
+                    {features.map((feature) => (
+                      <li key={feature}>
+                        <Check size={15} aria-hidden="true" />
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {index === offers.length - 1 && (
                   <p className="codium-fine">
                     Credits are metered by actual model usage, and estimates are a guide rather than a guarantee.{" "}
@@ -383,17 +413,21 @@ export function CodiumPricing(props: { pricing: Pricing; mode?: CodiumMode }) {
   )
 }
 
-async function openCheckout(id: string, mode: CodiumMode, resumed: boolean) {
+/** Where a purchase continues: the sign-in page for a signed-out visitor, or the plan's checkout session. */
+async function checkoutDestination(id: string, mode: CodiumMode, resumed: boolean) {
   const { readAccountApiResponse, vectorAccountClient } = await import("../../../lib/account-client")
   const client = await vectorAccountClient()
   const session = await client.auth.getSession()
   if (session.error) throw session.error
   if (!session.data.session) {
     // Coming back from an abandoned sign-in must not send the buyer straight back to it.
-    if (resumed) return false
-    rememberIntent(mode, id)
-    location.assign("/login?returnTo=%2Fcodium")
-    return true
+    if (resumed) return
+    try {
+      sessionStorage.setItem(INTENT_KEY, `${mode} ${id} ${Date.now()}`)
+    } catch {
+      // Without storage, the buyer chooses the plan again after signing in.
+    }
+    return "/login?returnTo=%2Fcodium"
   }
   const kind = mode === "monthly" ? "checkout" : "topup"
   const response = await fetch(`/api/model-plans/${kind}`, {
@@ -405,18 +439,7 @@ async function openCheckout(id: string, mode: CodiumMode, resumed: boolean) {
     },
     body: JSON.stringify(kind === "checkout" ? { plan: id } : { pack: id }),
   })
-  location.assign(
-    modelPlanRedirect(await readAccountApiResponse(response, "Vector could not open checkout. Try again."), kind),
-  )
-  return true
-}
-
-function rememberIntent(mode: CodiumMode, id: string) {
-  try {
-    sessionStorage.setItem(INTENT_KEY, `${mode} ${id} ${Date.now()}`)
-  } catch {
-    // Without storage, the buyer chooses the plan again after signing in.
-  }
+  return modelPlanRedirect(await readAccountApiResponse(response, "Vector could not open checkout. Try again."), kind)
 }
 
 /** Read once. Only a click in this tab can leave an intent, so a link can never start a checkout. */
