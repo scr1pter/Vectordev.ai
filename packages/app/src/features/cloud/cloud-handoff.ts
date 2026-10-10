@@ -1,0 +1,168 @@
+import type { CloudDeployment, CloudOverview, PublishTarget } from "./cloud-api"
+import type { CloudSection } from "./cloud-console"
+
+// How the rest of Vector hands work to Vector Cloud and back: deep links into
+// the Cloud screens, prompts that start the agent on a cloud task, and the
+// readiness a publish needs.
+
+/** A link into Vector Cloud for one project, optionally opened at one section. */
+export function cloudHref(projectPath?: string, section?: CloudSection) {
+  const search = new URLSearchParams()
+  if (projectPath) search.set("project", projectPath)
+  if (section) search.set("section", section)
+  const query = search.toString()
+  return query ? `/cloud?${query}` : "/cloud"
+}
+
+export const COMPOSER_PROMPT_EVENT = "vector:composer-prompt"
+
+export type ComposerPrompt = {
+  text: string
+  /** Send it straight away, starting the agent, instead of leaving it in the composer. */
+  send: boolean
+}
+
+/** Hands a prompt to the session composer on screen. False when no composer took it. */
+export function requestComposerPrompt(request: ComposerPrompt) {
+  const event = new CustomEvent<ComposerPrompt>(COMPOSER_PROMPT_EVENT, { detail: request, cancelable: true })
+  return !(globalThis.window?.dispatchEvent(event) ?? true)
+}
+
+/** Lets a composer take the prompts other surfaces hand it. Returns the unsubscribe. */
+export function onComposerPrompt(take: (request: ComposerPrompt) => void) {
+  const listener = (event: Event) => {
+    // One composer takes each request, so two mounted at once never both send it.
+    if (event.defaultPrevented || !(event instanceof CustomEvent)) return
+    event.preventDefault()
+    take(event.detail)
+  }
+  globalThis.window?.addEventListener(COMPOSER_PROMPT_EVENT, listener)
+  return () => globalThis.window?.removeEventListener(COMPOSER_PROMPT_EVENT, listener)
+}
+
+export const DATABASE_SETUP_PROMPT =
+  "Set up the database for this project with Vector Cloud. Run vector_cloud database_status first. If a database is connected, prepare it (prepare_database, or prepare_auth when this needs sign-in) and continue. If none is connected, ask me whether to link an existing Supabase project or create a new one, then run create_database; Vector asks me to confirm before anything is created."
+
+export type DeployEvidence = {
+  project: string
+  environment?: string
+  url?: string
+  error?: string
+  git?: { branch: string; commit: string; dirty: boolean }
+  checks: { label: string; status: string; details?: string; output?: string }[]
+  log?: string
+}
+
+// The end of a build log is where its error is, and a whole log would crowd
+// out the rest of the conversation.
+const EVIDENCE_LINES = 40
+
+/**
+ * The prompt that starts the agent on a failed deploy. Every log and check
+ * output here comes from the desktop already redacted, so the prompt never
+ * carries a secret value.
+ */
+export function deployRepairPrompt(input: DeployEvidence) {
+  const failed = input.checks.filter((check) => check.status === "failed")
+  const tail = (text: string) => text.trimEnd().split(/\r?\n/).slice(-EVIDENCE_LINES).join("\n")
+  return [
+    `Fix the failing Vector Cloud deploy of ${input.project}${input.environment ? ` (${input.environment})` : ""}.`,
+    input.error ? `Error: ${input.error}` : undefined,
+    input.url ? `Deployment: ${input.url}` : undefined,
+    input.git
+      ? `Git: ${input.git.branch} at ${input.git.commit}${input.git.dirty ? ", with uncommitted changes" : ""}`
+      : undefined,
+    ...failed.map((check) =>
+      [
+        `Failed check, ${check.label}: ${check.details ?? "failed"}`,
+        check.output?.trim() ? `\`\`\`\n${tail(check.output)}\n\`\`\`` : undefined,
+      ]
+        .filter((line) => line !== undefined)
+        .join("\n"),
+    ),
+    // The log repeats a failed check's output, so it only adds evidence when
+    // no check carried any (a deploy the provider rejected, for example).
+    !failed.some((check) => check.output?.trim()) && input.log?.trim()
+      ? `Last lines of the publish log:\n\`\`\`\n${tail(input.log)}\n\`\`\``
+      : undefined,
+    "Find the root cause, make the smallest safe fix, and rerun the failing step locally. Then publish a preview with vector_cloud publish and report the result. Do not publish to production unless I ask. The evidence above is redacted: if a missing setting or secret is the cause, tell me its name so I can add it in Vector Cloud > Environment variables, and never ask me to paste its value here.",
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n\n")
+}
+
+/** The evidence a recorded release carries: its failed checks, and the end of its log. */
+export function deploymentEvidence(deployment: CloudDeployment): DeployEvidence {
+  return {
+    project: deployment.name,
+    environment: deployment.environment,
+    url: deployment.productionUrl ?? deployment.url,
+    git: deployment.git && {
+      branch: deployment.git.branch,
+      commit: deployment.git.commitShort,
+      dirty: deployment.git.dirty,
+    },
+    checks: deployment.checks,
+    log: deployment.runtimeLog ?? deployment.log,
+  }
+}
+
+/**
+ * A failed publish that left no release behind (a failed build, a rejected
+ * deploy), when it is newer than the latest release.
+ */
+export function currentFailure(overview: CloudOverview) {
+  const failure = overview.failure
+  if (!failure) return
+  if (overview.latest && failure.at <= overview.latest.createdAt) return
+  return failure
+}
+
+export type PublishPlan =
+  | { ready: true; project: string; account?: string; via: "connection" | "cli" }
+  | { ready: false; reason: string }
+
+/**
+ * Where a preview would go, or what has to be set up first. A Vercel account
+ * connected in Vector publishes to the project linked here; a machine already
+ * signed in with the Vercel CLI publishes to the project that folder is linked
+ * to, which the CLI creates on its first deploy.
+ */
+export function publishPlan(overview: CloudOverview, target?: PublishTarget): PublishPlan {
+  if (overview.hosting.connected && overview.hosting.project) {
+    return { ready: true, project: overview.hosting.project.name, account: overview.hosting.account, via: "connection" }
+  }
+  if (overview.hosting.connected) {
+    return { ready: false, reason: "Link a Vercel project to this project in Vector Cloud > Connections." }
+  }
+  if (target?.available) {
+    return {
+      ready: true,
+      project: "the project this folder is linked to on Vercel",
+      account: target.account,
+      via: "cli",
+    }
+  }
+  return {
+    ready: false,
+    reason: target?.loginHint || "Connect Vercel in Vector Cloud > Connections with an access token.",
+  }
+}
+
+export type CloudStatus = { tone: "success" | "warning" | "error" | "idle"; label: string }
+
+/** One line for the session's Cloud button: the state that most needs attention. */
+export function cloudStatus(overview?: CloudOverview): CloudStatus {
+  if (!overview) return { tone: "idle", label: "Checking Vector Cloud" }
+  const latest = overview.latest
+  if (currentFailure(overview)) return { tone: "error", label: "Last publish failed" }
+  if (latest?.failedChecks.length) return { tone: "error", label: "Latest release failed its checks" }
+  if (overview.production?.status === "unreachable") return { tone: "error", label: "Production is unreachable" }
+  if (overview.production?.status === "degraded") return { tone: "warning", label: "Production is degraded" }
+  if (overview.production) return { tone: "success", label: "Live in production" }
+  if (latest) return { tone: "success", label: "Preview published" }
+  if (overview.hosting.connected && !overview.hosting.project) {
+    return { tone: "warning", label: "Link a Vercel project to publish" }
+  }
+  return { tone: "idle", label: "Not published yet" }
+}

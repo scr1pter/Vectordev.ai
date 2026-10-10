@@ -181,7 +181,44 @@ export type CloudSupabaseServices = {
   functions: { available: boolean; functions: CloudSupabaseFunction[]; detail?: string }
 }
 
+// The live summary behind the session's Cloud card. Names and states only:
+// never a token, key or environment value.
+export type CloudReleaseSummary = {
+  id: string
+  url: string
+  environment: "preview" | "production"
+  releaseStatus: CloudDeployment["releaseStatus"]
+  status: CloudDeployment["status"]
+  createdAt: string
+  workspaceName?: string
+  failedChecks: { label: string; details?: string }[]
+}
+
+export type CloudPublishFailure = {
+  at: string
+  environment: "preview" | "production"
+  error: string
+  checks: { label: string; status: string; required: boolean; details?: string; output?: string }[]
+  log?: string
+}
+
+export type CloudOverview = {
+  /** The main project every cloud record belongs to. */
+  projectPath: string
+  /** Where files are built and published from: an agent's worktree, or the project itself. */
+  directory: string
+  workspace?: { id: string; name: string }
+  hosting: { provider: "Vercel"; connected: boolean; account?: string; project?: { id: string; name: string } }
+  database: { provider: "Supabase"; accountConnected: boolean; account?: string; connected: boolean; name?: string }
+  latest?: CloudReleaseSummary
+  production?: CloudReleaseSummary
+  failure?: CloudPublishFailure
+  git?: { branch: string; commit: string; dirty: boolean }
+}
+
 export type CloudApi = {
+  overview: (directory: string) => Promise<CloudOverview>
+  onChange: (callback: () => void) => () => void
   connections: {
     list: () => Promise<CloudProviderConnection[]>
     connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>

@@ -100,6 +100,7 @@ import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/sessio
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { enqueueSessionFollowup, SESSION_FOLLOWUP_LIMIT } from "./session/followup-queue"
+import { onComposerPrompt } from "@/features/cloud/cloud-handoff"
 
 type FollowupItem = FollowupDraft & { id: string }
 const emptyFollowups: FollowupItem[] = []
@@ -423,6 +424,18 @@ export default function Page() {
       setSearchParams({ ...searchParams, prompt: undefined })
     })
   })
+
+  // Surfaces around the session (the Cloud card, the preview's publish sheet,
+  // the database banner) hand their prompts to this composer. One sent with
+  // `send` goes through the composer's own submission, and queues behind a
+  // running turn the way a typed follow-up does.
+  const [autoSubmit, setAutoSubmit] = createSignal(false)
+  onCleanup(
+    onComposerPrompt((request) => {
+      prompt.set([{ type: "text", content: request.text, start: 0, end: request.text.length }], request.text.length)
+      if (request.send) setAutoSubmit(true)
+    }),
+  )
 
   const [ui, setUi] = createStore({
     pendingMessage: undefined as string | undefined,
@@ -2112,6 +2125,8 @@ export default function Page() {
             }}
             shouldQueue={queueEnabled}
             onQueue={queueFollowup}
+            autoSubmit={autoSubmit()}
+            onAutoSubmit={() => setAutoSubmit(false)}
             onAbort={() => {
               const id = params.id
               if (!id) return
