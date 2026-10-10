@@ -24,7 +24,7 @@ export function CodiumError(props: { text: string; action: ModelPlanStatus.Actio
 }
 
 /** The buttons a failed Codium turn or session notice offers. Choosing another model needs no button. */
-export function codiumActions(action: ModelPlanStatus.Action, platform: Platform) {
+export function codiumActions(action: ModelPlanStatus.Action, platform: Pick<Platform, "openLink" | "vectorAccount">) {
   if (action === "credits")
     return [{ label: "Buy credits", onClick: () => platform.openLink(ModelPlanStatus.PURCHASE_URL) }]
   const account = platform.vectorAccount
