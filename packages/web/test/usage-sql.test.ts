@@ -200,6 +200,8 @@ test("the database refuses what the API would never send", async () => {
     { client: "server", version: "1.99.105", platform: "linux", arch: "x64", accountId: state.account },
     desktop(install, { usage: { ...report(), prompt: "fix the bug" } }),
     desktop(install, { usage: report({ lifetimeTokens: -1 }) }),
+    desktop(install, { usage: report({ lifetimeTokens: 1e12 + 1 }) }),
+    desktop(install, { usage: report({ days: [{ date: "2026-10-01", tokens: 1e10 + 1, tasks: 1, cost: 0 }] }) }),
     desktop(install, { usage: report({ days: [{ date: "2026-02-30", tokens: 1, tasks: 1, cost: 0 }] }) }),
     desktop(install, {
       usage: report({
@@ -214,7 +216,7 @@ test("the database refuses what the API would never send", async () => {
     }),
   ])
     await recordUsage(request as Parameters<typeof recordUsage>[0])
-  expect(statuses()).toEqual([...Array(9).fill("invalid"), "skipped", ...Array(6).fill("invalid")])
+  expect(statuses()).toEqual([...Array(9).fill("invalid"), "skipped", ...Array(8).fill("invalid")])
   expect((await database`select count(*)::int as count from public.vector_usage_daily`)[0].count).toBe(0)
 })
 
@@ -505,6 +507,19 @@ test("the summary adds up model use from each install's latest report", async ()
   expect(summary.streaks).toEqual({ one: 0, twoToSix: 1, sevenPlus: 1 })
   const text = JSON.stringify(summary)
   for (const identity of [state.account, signedIn, anonymous]) expect(text).not.toContain(identity)
+})
+
+test("totals that add up past 2^53 still reach the dashboard", async () => {
+  // Ten thousand reports at the 1e12 lifetime-token bound: the sum no longer fits a safe integer.
+  await database`
+    insert into public.vector_usage_daily (key, client, day, version, platform, arch, usage)
+    select 'install:' || gen_random_uuid(), 'desktop', (now() at time zone 'utc')::date, '1.99.106', 'linux', 'x64',
+      ${report({ lifetimeTokens: 1e12, inputTokens: 1e12 })}::jsonb
+    from generate_series(1, 10000)`
+  const summary = await usageSummary()
+  expect(summary.usage.reporting).toBe(10_000)
+  expect(summary.usage.lifetimeTokens).toBeGreaterThan(Number.MAX_SAFE_INTEGER)
+  expect(summary.usage.inputTokens).toBe(1e16)
 })
 
 test("retention fills in a finished week", async () => {

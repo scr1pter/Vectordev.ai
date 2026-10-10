@@ -6,9 +6,14 @@ import { Option, Schema } from "effect"
 // streaks, never prompts, code, file names, model output or keys. The server validates exactly this shape, and the SQL in
 // docs/vector/owner-actions/sql/usage.sql repeats the same bounds.
 
-const MAX_TOKENS = 1e15
+// Far above what one computer uses, and low enough that a forged report cannot swamp everyone's totals. Many reports
+// still add up past 2^53, so the summary reads its sums as plain numbers (usage-summary.ts).
+const MAX_TOKENS = 1e12
 const MAX_COST = 1e9
 const MAX_COUNT = 1e9
+const MAX_DAY_TOKENS = 1e10
+const MAX_DAY_TASKS = 1e6
+const MAX_DAY_COST = 1e6
 const MAX_DAYS = 100_000
 const MAX_DURATION = 1e12
 const Tokens = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_TOKENS }))
@@ -28,9 +33,12 @@ export const CalendarDay = Schema.String.check(
   Schema.makeFilter((value: string) => isCalendarDay(value)),
 )
 
-export const Day = Schema.Struct({ date: CalendarDay, tokens: Tokens, tasks: Count, cost: Cost }).annotate({
-  identifier: "UsageReport.Day",
-})
+export const Day = Schema.Struct({
+  date: CalendarDay,
+  tokens: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_DAY_TOKENS })),
+  tasks: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_DAY_TASKS })),
+  cost: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: MAX_DAY_COST })),
+}).annotate({ identifier: "UsageReport.Day" })
 export type Day = typeof Day.Type
 
 export const Model = Schema.Struct({
@@ -135,7 +143,7 @@ export function fromSummary(input: unknown) {
   return Option.getOrUndefined(
     decode({
       lifetimeTokens: whole(summary.lifetimeTokens, MAX_TOKENS),
-      lifetimeCost: money(summary.lifetimeCost),
+      lifetimeCost: money(summary.lifetimeCost, MAX_COST),
       inputTokens: whole(summary.inputTokens, MAX_TOKENS),
       outputTokens: whole(summary.outputTokens, MAX_TOKENS),
       reasoningTokens: whole(summary.reasoningTokens, MAX_TOKENS),
@@ -153,9 +161,9 @@ export function fromSummary(input: unknown) {
         .slice(-7)
         .map((day) => ({
           date: day.date,
-          tokens: whole(day.tokens, MAX_TOKENS),
-          tasks: whole(day.tasks, MAX_COUNT),
-          cost: money(day.cost),
+          tokens: whole(day.tokens, MAX_DAY_TOKENS),
+          tasks: whole(day.tasks, MAX_DAY_TASKS),
+          cost: money(day.cost, MAX_DAY_COST),
         })),
       favoriteModels: summary.favoriteModels
         .filter((model) => MODEL_ID.test(model.providerID) && MODEL_ID.test(model.modelID))
@@ -194,8 +202,8 @@ function whole(value: number, maximum: number) {
   return Number.isFinite(value) ? Math.min(maximum, Math.max(0, Math.round(value))) : 0
 }
 
-function money(value: number) {
-  return Number.isFinite(value) ? Math.min(MAX_COST, Math.max(0, Math.round(value * 1e6) / 1e6)) : 0
+function money(value: number, maximum: number) {
+  return Number.isFinite(value) ? Math.min(maximum, Math.max(0, Math.round(value * 1e6) / 1e6)) : 0
 }
 
 function percentage(value: number) {

@@ -35,9 +35,9 @@ create table if not exists public.vector_usage_tokens (
   client text not null check (client in ('desktop', 'cli')),
   day date not null,
   account_id uuid references auth.users(id) on delete cascade,
-  tokens bigint not null default 0 check (tokens between 0 and 1000000000000000),
-  cost numeric not null default 0 check (cost between 0 and 1000000000),
-  tasks integer not null default 0 check (tasks between 0 and 1000000000),
+  tokens bigint not null default 0 check (tokens between 0 and 10000000000),
+  cost numeric not null default 0 check (cost between 0 and 1000000),
+  tasks integer not null default 0 check (tasks between 0 and 1000000),
   updated_at timestamptz not null default now(),
   primary key (key, client, day),
   check ((client = 'desktop' and key like 'install:%') or (client = 'cli' and key like 'account:%'))
@@ -89,8 +89,9 @@ revoke all on function public.vector_usage_number(jsonb, numeric, boolean) from 
 grant execute on function public.vector_usage_number(jsonb, numeric, boolean) to service_role;
 
 -- The usage report a check-in may carry, exactly as packages/schema/src/usage-report.ts defines it: these
--- keys and no others, bounded non-negative numbers, real calendar days, at most 8 days, 10 models and
--- 10 effort levels, each listed once. Each step only runs once the steps before it hold, so a malformed
+-- keys and no others, bounded non-negative numbers (at most 1e12 tokens in a total and 1e10 tokens, a
+-- million tasks and a million dollars in a day, far above one computer's use), real calendar days, at most
+-- 8 days, 10 models and 10 effort levels, each listed once. Each step only runs once the steps before it hold, so a malformed
 -- report is refused instead of raising an error.
 create or replace function public.vector_usage_report_valid(report jsonb)
 returns boolean language plpgsql stable security definer set search_path = public, pg_temp as $$
@@ -108,8 +109,8 @@ begin
   if exists (
     select 1
     from (values
-      ('lifetimeTokens', 1e15, true), ('lifetimeCost', 1e9, false), ('inputTokens', 1e15, true),
-      ('outputTokens', 1e15, true), ('reasoningTokens', 1e15, true), ('cachedTokens', 1e15, true),
+      ('lifetimeTokens', 1e12, true), ('lifetimeCost', 1e9, false), ('inputTokens', 1e12, true),
+      ('outputTokens', 1e12, true), ('reasoningTokens', 1e12, true), ('cachedTokens', 1e12, true),
       ('completedChats', 1e9, true), ('conversations', 1e9, true), ('activeDays', 1e5, true),
       ('currentStreak', 1e5, true), ('longestStreak', 1e5, true), ('averageTaskMs', 1e12, true),
       ('longestTaskMs', 1e12, true), ('modelResponses', 1e9, true)
@@ -139,9 +140,9 @@ begin
        or exists (select 1 from jsonb_object_keys(entry) as field where field <> all (array['date', 'tokens', 'tasks', 'cost']))
        or jsonb_typeof(entry->'date') is distinct from 'string'
        or entry->>'date' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-       or not public.vector_usage_number(entry->'tokens', 1e15, true)
-       or not public.vector_usage_number(entry->'tasks', 1e9, true)
-       or not public.vector_usage_number(entry->'cost', 1e9, false)
+       or not public.vector_usage_number(entry->'tokens', 1e10, true)
+       or not public.vector_usage_number(entry->'tasks', 1e6, true)
+       or not public.vector_usage_number(entry->'cost', 1e6, false)
   ) then
     return false;
   end if;
@@ -165,7 +166,7 @@ begin
        or entry->>'providerID' !~ '^[A-Za-z0-9._:/@+-]{1,120}$'
        or jsonb_typeof(entry->'modelID') is distinct from 'string'
        or entry->>'modelID' !~ '^[A-Za-z0-9._:/@+-]{1,120}$'
-       or not public.vector_usage_number(entry->'tokens', 1e15, true)
+       or not public.vector_usage_number(entry->'tokens', 1e12, true)
        or not public.vector_usage_number(entry->'percentage', 100, false)
   ) then
     return false;
@@ -179,7 +180,7 @@ begin
        or entry->>'id' !~ '^[A-Za-z0-9._:/@+-]{1,40}$'
        or jsonb_typeof(entry->'label') is distinct from 'string'
        or entry->>'label' !~ '^[A-Za-z0-9._:/@+ -]{1,40}$'
-       or not public.vector_usage_number(entry->'tokens', 1e15, true)
+       or not public.vector_usage_number(entry->'tokens', 1e12, true)
        or not public.vector_usage_number(entry->'responses', 1e9, true)
        or not public.vector_usage_number(entry->'percentage', 100, false)
   ) then

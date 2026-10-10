@@ -4,6 +4,9 @@ import { Schema } from "effect"
 
 // The owner's usage dashboard: aggregate counts only, never an account, install or content.
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+// Sums of everyone's usage reports. Enough of them add up past 2^53, where a safe integer no longer holds, so these are
+// read as plain numbers.
+const Total = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 const Day = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/))
 const Share = Schema.NullOr(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })))
 const Client = Schema.Literals(["desktop", "cli"])
@@ -34,9 +37,9 @@ export const Daily = Schema.Struct({
   sessions: Count,
   subagentSessions: Count,
   // Model use on that calendar day as each install or CLI account reported it (local days).
-  tokens: Count,
+  tokens: Total,
   cost: Money,
-  tasks: Count,
+  tasks: Total,
 }).annotate({ identifier: "UsageSummary.Daily" })
 export type Daily = typeof Daily.Type
 
@@ -77,21 +80,21 @@ export const Platform = Schema.Struct({ client: Client, platform: Label, arch: L
 export const Usage = Schema.Struct({
   // Installs and CLI accounts that have sent a usage report.
   reporting: Count,
-  lifetimeTokens: Count,
+  lifetimeTokens: Total,
   lifetimeCost: Money,
-  inputTokens: Count,
-  outputTokens: Count,
-  reasoningTokens: Count,
-  cachedTokens: Count,
-  completedChats: Count,
-  conversations: Count,
-  modelResponses: Count,
-  tokens7: Count,
-  previousTokens7: Count,
+  inputTokens: Total,
+  outputTokens: Total,
+  reasoningTokens: Total,
+  cachedTokens: Total,
+  completedChats: Total,
+  conversations: Total,
+  modelResponses: Total,
+  tokens7: Total,
+  previousTokens7: Total,
   cost7: Money,
   previousCost7: Money,
   // Tokens in the last 7 days per weekly active person; null while nobody was active.
-  tokensPerActive7: Schema.NullOr(Count),
+  tokensPerActive7: Schema.NullOr(Total),
 }).annotate({ identifier: "UsageSummary.Usage" })
 export type Usage = typeof Usage.Type
 
@@ -99,7 +102,7 @@ export type Usage = typeof Usage.Type
 export const Model = Schema.Struct({
   providerID: Identifier,
   modelID: Identifier,
-  tokens: Count,
+  tokens: Total,
   people: Count,
   // Share of the tokens of every listed model across everyone.
   share: Fraction,
@@ -109,8 +112,8 @@ export type Model = typeof Model.Type
 export const Effort = Schema.Struct({
   id: Identifier,
   label: Identifier,
-  tokens: Count,
-  responses: Count,
+  tokens: Total,
+  responses: Total,
   people: Count,
   share: Fraction,
 }).annotate({ identifier: "UsageSummary.Effort" })

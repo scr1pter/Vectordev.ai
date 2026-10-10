@@ -232,7 +232,12 @@ describe("desktop check-in", () => {
       [checkin],
       { ...checkin, usage: { ...report, prompt: "fix the bug" } },
       { ...checkin, usage: { ...report, lifetimeTokens: -1 } },
+      { ...checkin, usage: { ...report, lifetimeTokens: 1e12 + 1 } },
       { ...checkin, usage: { ...report, lifetimeCost: 2e9 } },
+      { ...checkin, usage: { ...report, days: [{ ...report.days[0], tokens: 1e10 + 1 }] } },
+      { ...checkin, usage: { ...report, days: [{ ...report.days[0], tasks: 1e6 + 1 }] } },
+      { ...checkin, usage: { ...report, days: [{ ...report.days[0], cost: 1e6 + 0.01 }] } },
+      { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], tokens: 1e12 + 1 }] } },
       { ...checkin, usage: { ...report, completedChats: 1.5 } },
       { ...checkin, usage: { ...report, days: [{ ...report.days[0], date: "2026-02-30" }] } },
       { ...checkin, usage: { ...report, days: [report.days[0], report.days[0]] } },
@@ -273,26 +278,26 @@ describe("desktop check-in", () => {
     const storage = supabase()
     const usage = {
       ...report,
-      lifetimeTokens: 1e15,
+      lifetimeTokens: 1e12,
       lifetimeCost: 1e9,
       currentStreak: 100_000,
       longestTaskMs: 1e12,
       days: Array.from({ length: 8 }, (_, index) => ({
         date: `2026-10-0${index + 1}`,
-        tokens: 1e15,
-        tasks: 1e9,
-        cost: 1e9,
+        tokens: 1e10,
+        tasks: 1e6,
+        cost: 1e6,
       })),
       favoriteModels: Array.from({ length: 10 }, (_, index) => ({
         providerID: "p".repeat(120),
         modelID: `vendor/model-${index}:free@v1+x`,
-        tokens: 1e15,
+        tokens: 1e12,
         percentage: 100,
       })),
       effortLevels: Array.from({ length: 10 }, (_, index) => ({
         id: `level-${index}`,
         label: `Level ${index}`,
-        tokens: 1e15,
+        tokens: 1e12,
         responses: 1e9,
         percentage: 100,
       })),
@@ -420,9 +425,17 @@ describe("usage report from the local summary", () => {
       ...summary,
       lifetimeTokens: -5,
       lifetimeCost: Number.NaN,
+      inputTokens: 5e15,
       currentStreak: 1e9,
+      days: [{ date: "2026-09-29", tokens: 5e15, tasks: 5e9, cost: 5e9 }],
     })
-    expect(built).toMatchObject({ lifetimeTokens: 0, lifetimeCost: 0, currentStreak: 100_000 })
+    expect(built).toMatchObject({
+      lifetimeTokens: 0,
+      lifetimeCost: 0,
+      inputTokens: 1e12,
+      currentStreak: 100_000,
+      days: [{ date: "2026-09-29", tokens: 1e10, tasks: 1e6, cost: 1e6 }],
+    })
     expect(UsageReport.fromSummary({ lifetimeTokens: 1 })).toBeUndefined()
     expect(UsageReport.fromSummary("usage")).toBeUndefined()
   })
@@ -670,6 +683,32 @@ describe("usage summary", () => {
         })
       ).status,
     ).toBe(403)
+  })
+
+  test("reads totals that many reports add up past 2^53", async () => {
+    // A report may carry up to 1e12 lifetime tokens; ten thousand of them already pass Number.MAX_SAFE_INTEGER.
+    const huge = 1e16 + 2
+    const storage = backend(person(OWNER), {
+      ...summary,
+      daily: summary.daily.map((day) => ({ ...day, tokens: huge, tasks: huge })),
+      usage: {
+        ...summary.usage,
+        lifetimeTokens: huge,
+        inputTokens: huge,
+        completedChats: huge,
+        modelResponses: huge,
+        tokens7: huge,
+        tokensPerActive7: huge,
+      },
+      models: summary.models.map((model) => ({ ...model, tokens: huge })),
+      efforts: summary.efforts.map((effort) => ({ ...effort, tokens: huge, responses: huge })),
+    })
+    const result = await invoke((request, response) => handleUsageSummary(request, response, storage.fetcher), {
+      method: "GET",
+      headers: session(),
+    })
+    expect(result.status).toBe(200)
+    expect(result.body).toMatchObject({ usage: { lifetimeTokens: huge }, daily: [{ tokens: huge }] })
   })
 
   test("reports unavailable storage instead of a malformed summary", async () => {
