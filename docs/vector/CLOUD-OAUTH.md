@@ -70,7 +70,7 @@ the desktop's required relay capability are present, not that registration,
 permissions or live consent have been verified. Supabase readiness is unchanged:
 desktop 1.99.8 already supports its S256 PKCE flow.
 
-Desktop **Cloud Services → Connections** offers hosted sign-in when configured.
+Desktop **Vector Cloud → Connections** offers hosted sign-in when configured.
 If hosted OAuth is unavailable and this desktop supports manual tokens, it
 instead offers the provider's personal-access-token flow with local encrypted
 storage. Older unsupported desktops show an unavailable state. The Database
