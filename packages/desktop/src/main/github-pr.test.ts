@@ -542,7 +542,7 @@ describe("automatic reviews", () => {
     expect(file?.body?.branch).toBe(setup.branch)
     expect(Buffer.from(String(file?.body?.content), "base64").toString()).toBe(workflow.content)
     expect(pull).toMatchObject({ path: "/repos/acme/app/pulls", body: { head: setup.branch, base: "main" } })
-    expect(String(pull?.body?.body)).toContain("- `ANTHROPIC_API_KEY`: Your anthropic API key.")
+    expect(String(pull?.body?.body)).toContain("- `ANTHROPIC_API_KEY`: Your model provider's API key.")
     expect(rest).toEqual([])
     // No secret is ever sent: the user adds them in GitHub.
     expect(calls.some((call) => call.path.includes("/secrets"))).toBe(false)
