@@ -737,6 +737,18 @@ it.instance("keeps project MCP and provider secret references opaque before trus
   ),
 )
 
+it.instance("keeps the safe settings of a project vector.json that is a symlink", () =>
+  Effect.gen(function* () {
+    if (process.platform === "win32") return
+    const test = yield* TestInstance
+    const shared = path.join(test.directory, "config", "vector.shared.json")
+    yield* FSUtil.use.writeWithDirs(shared, JSON.stringify({ permission: { bash: "deny" }, username: "shared" }))
+    yield* Effect.promise(() => fs.symlink(shared, path.join(test.directory, "vector.json")))
+
+    expect(yield* Config.use.get()).toMatchObject({ permission: { bash: "deny" }, username: "shared" })
+  }),
+)
+
 it.instance("allows untrusted project provider settings to narrow but not replace global authority", () =>
   withGlobalConfig(
     {

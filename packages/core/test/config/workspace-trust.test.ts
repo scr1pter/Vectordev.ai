@@ -354,6 +354,43 @@ await WorkspaceTrust.materialize(${JSON.stringify(state.path)}, snapshot)
     expect((await WorkspaceTrust.snapshot(workspace.path, [config])).fingerprint).toBe(initial.fingerprint)
   })
 
+  test("reads a vector.json symlinked inside the workspace or to the user's dotfiles", async () => {
+    if (process.platform === "win32") return
+    await using workspace = await tmpdir()
+    await using dotfiles = await tmpdir()
+    const shared = path.join(workspace.path, "config", "shared.json")
+    const config = path.join(workspace.path, "vector.json")
+    const tui = path.join(workspace.path, "tui.json")
+    await fs.mkdir(path.dirname(shared), { recursive: true })
+    await fs.writeFile(shared, '{"theme":"shared"}')
+    await fs.writeFile(path.join(dotfiles.path, "tui.json"), '{"theme":"dotfiles"}')
+    await fs.symlink(shared, config)
+    await fs.symlink(path.join(dotfiles.path, "tui.json"), tui)
+
+    const initial = await WorkspaceTrust.snapshot(workspace.path, [config, tui])
+    expect(WorkspaceTrust.readFileString(initial, config)).toBe('{"theme":"shared"}')
+    expect(WorkspaceTrust.readFileString(initial, tui)).toBe('{"theme":"dotfiles"}')
+
+    // The approval covers the bytes read through the link, so a change to the target needs approval again.
+    await fs.writeFile(shared, '{"theme":"changed"}')
+    expect((await WorkspaceTrust.snapshot(workspace.path, [config, tui])).fingerprint).not.toBe(initial.fingerprint)
+  })
+
+  test("walks a .vector directory symlinked inside the workspace and stops at link cycles", async () => {
+    if (process.platform === "win32") return
+    await using workspace = await tmpdir()
+    const real = path.join(workspace.path, "shared-vector")
+    await fs.mkdir(path.join(real, "agent"), { recursive: true })
+    await fs.writeFile(path.join(real, "agent", "review.md"), "Review carefully\n")
+    await fs.symlink(real, path.join(real, "agent", "loop"), "dir")
+    await fs.symlink(real, path.join(workspace.path, ".vector"), "dir")
+
+    const snapshot = await WorkspaceTrust.snapshot(workspace.path, [])
+    expect(WorkspaceTrust.readFileString(snapshot, path.join(workspace.path, ".vector", "agent", "review.md"))).toBe(
+      "Review carefully\n",
+    )
+  })
+
   test("bounds recursive trust traversal", async () => {
     await using workspace = await tmpdir()
     const root = path.join(workspace.path, ".vector")

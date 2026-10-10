@@ -97,7 +97,7 @@ export async function snapshot(workspace: string, inputs: readonly string[]): Pr
   ]
 
   for (const input of new Set(expanded.map((item) => path.resolve(item)))) {
-    await collect(input, files, directories, budget)
+    await collect(input, files, directories, budget, canonical)
   }
   const configs = Array.from(files).filter(([file]) => configNames.has(path.basename(file)))
   for (const [file, value] of configs) {
@@ -106,7 +106,7 @@ export async function snapshot(workspace: string, inputs: readonly string[]): Pr
       ...executableInputs(config, { source: file, workspace: canonical }),
       ...fileInputs(config, file),
     ]) {
-      await collect(normalize(input), files, directories, budget)
+      await collect(normalize(input), files, directories, budget, canonical)
     }
     for (const directory of executableDirectories(config, canonical)) {
       await collectExecutionDirectory(normalize(directory), cwdDirectories)
@@ -367,21 +367,28 @@ async function collect(
   files: Map<string, CapturedFile>,
   directories: Set<string>,
   budget: { files: number; bytes: number },
+  workspace: string,
+  source = input,
   seen = new Set<string>(),
+  ancestors: ReadonlySet<string> = new Set<string>(),
   depth = 0,
 ): Promise<void> {
   if (depth > maxDepth) throw new Error(`Workspace trust traversal exceeded ${maxDepth} levels at ${input}`)
-  const stat = await fs.lstat(input).catch(() => undefined)
-  if (!stat || ignoredFiles.has(path.basename(input)) || stat.isSymbolicLink()) return
+  const link = await fs.lstat(source).catch(() => undefined)
+  if (!link || ignoredFiles.has(path.basename(input))) return
   if (vectorManagedData(input)) return
+  const target = link.isSymbolicLink() ? await followedLink(source, input, workspace) : path.resolve(source)
+  if (!target) return
+  // Every part of the path read from is real: a link is followed only through followedLink, never by a parent.
+  const real = await fs.realpath(target).catch(() => undefined)
+  if (!real || normalizePath(real) !== normalizePath(target)) return
+  const stat = link.isSymbolicLink() ? await fs.stat(real).catch(() => undefined) : link
   const resolved = path.resolve(input)
-  const real = await fs.realpath(input).catch(() => undefined)
-  if (!real || normalizePath(real) !== normalizePath(resolved)) return
-  if (seen.has(resolved)) return
+  if (!stat || seen.has(resolved)) return
   seen.add(resolved)
   if (stat.isFile()) {
     if (files.has(resolved)) return
-    const value = await captureFile(resolved)
+    const value = await captureFile(real)
     budget.files++
     budget.bytes += value.content.byteLength
     if (budget.files > maxFiles) throw new Error(`Workspace trust traversal exceeded ${maxFiles} files`)
@@ -389,22 +396,46 @@ async function collect(
     files.set(resolved, value)
     return
   }
-  if (!stat.isDirectory() || ignoredDirectories.has(path.basename(input))) return
+  if (!stat.isDirectory() || ignoredDirectories.has(path.basename(input)) || ancestors.has(real)) return
   directories.add(resolved)
   if (directories.size > maxDirectories) {
     throw new Error(`Workspace trust traversal exceeded ${maxDirectories} directories`)
   }
 
-  const directory = await fs.opendir(input)
+  const chain = new Set([...ancestors, real])
+  const directory = await fs.opendir(real)
   let count = 0
   for await (const entry of directory) {
     count++
     if (count > maxDirectoryEntries) {
       throw new Error(`Workspace trust traversal exceeded ${maxDirectoryEntries} entries in ${input}`)
     }
-    if (ignoredDirectories.has(entry.name) || ignoredFiles.has(entry.name) || entry.isSymbolicLink()) continue
-    await collect(path.join(input, entry.name), files, directories, budget, seen, depth + 1)
+    if (ignoredDirectories.has(entry.name) || ignoredFiles.has(entry.name)) continue
+    await collect(
+      path.join(input, entry.name),
+      files,
+      directories,
+      budget,
+      workspace,
+      path.join(real, entry.name),
+      seen,
+      chain,
+      depth + 1,
+    )
   }
+}
+
+// A link is followed when its target stays in the workspace (a config shared inside a monorepo), or when it is a
+// config file whose target is a regular file elsewhere (a vector.json kept with the user's dotfiles). Its bytes are
+// captured under the link's own path, so an approval covers exactly what was read and a change to the target
+// changes the fingerprint. A linked directory outside the workspace is never walked.
+async function followedLink(source: string, input: string, workspace: string) {
+  const real = await fs.realpath(source).catch(() => undefined)
+  if (!real) return
+  if (contains(workspace, normalizePath(real))) return real
+  if (!configNames.has(path.basename(input))) return
+  const stat = await fs.stat(real).catch(() => undefined)
+  return stat?.isFile() ? real : undefined
 }
 
 function vectorManagedData(input: string) {
