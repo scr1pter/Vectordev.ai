@@ -391,10 +391,38 @@ test("guest session lists and replay routes stay within canonical claims", async
 }, 30_000)
 
 test("guests cannot run host commands or answer permission requests", async () => {
-  await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
   await using outside = await tmpdir()
   const secret = path.join(outside.path, "host-secret.bin")
   await fs.writeFile(secret, "HOST-ONLY-SECRET-VALUE")
+  // A skill's @file reference is not the owner's own attachment, so running it from the owner's session parks
+  // that session on an external_directory request.
+  await using tmp = await tmpdir({
+    config: {
+      formatter: false,
+      lsp: false,
+      // A model that resolves without a network call; the command never gets as far as asking it anything.
+      provider: {
+        lmstudio: {
+          name: "Test",
+          npm: "@ai-sdk/openai-compatible",
+          models: {
+            "test-model": {
+              id: "test-model",
+              name: "Test Model",
+              tool_call: true,
+              limit: { context: 1000, output: 100 },
+            },
+          },
+          options: { apiKey: "test-key", baseURL: "http://localhost:1/v1" },
+        },
+      },
+    },
+    init: (dir) =>
+      Bun.write(
+        path.join(dir, ".vector", "skills", "probe", "SKILL.md"),
+        `---\nname: probe\ndescription: Reads a file outside the project\n---\nRead @${secret}\n`,
+      ),
+  })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
   const keys = [
     "VECTOR_SERVER_USERNAME",
@@ -462,7 +490,13 @@ test("guests cannot run host commands or answer permission requests", async () =
     })
     expect(command.status).toBe(403)
 
+    // The owner's own attachment is theirs to share from anywhere: it asks nothing.
     expect((await askOutside(ownerSession.id, owner)).status).toBe(204)
+    const ownerCommand = call(at(`/session/${ownerSession.id}/command`), {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ command: "probe", arguments: "", model: "lmstudio/test-model" }),
+    }).catch(() => undefined)
     expect((await askOutside(guestSession.id, guest)).status).toBe(204)
     const deadline = Date.now() + 15_000
     while ((await pending(owner)).length < 2 && Date.now() < deadline) await Bun.sleep(50)
@@ -500,6 +534,7 @@ test("guests cannot run host commands or answer permission requests", async () =
 
     const messages = await (await call(at(`/session/${guestSession.id}/message`), { headers: guest })).text()
     expect(messages).not.toContain(Buffer.from("HOST-ONLY-SECRET-VALUE").toString("base64"))
+    void ownerCommand
   } finally {
     Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
     await listener.stop(true)
