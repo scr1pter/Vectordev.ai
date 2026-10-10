@@ -569,6 +569,8 @@ export type ParallelWorkspaceRecord = {
   diff: string
   checkpointPath?: string
   pullRequestUrl?: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
   baselineHashes?: Record<string, string>
   contextFiles?: string[]
   contextIndexedFiles?: number

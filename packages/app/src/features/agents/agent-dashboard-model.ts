@@ -36,6 +36,7 @@ export type DashboardAgentInput = {
   swarmRole?: "coordinator" | "worker"
   teamId?: string
   pullRequestUrl?: string
+  previewUrl?: string
   mergeState: "none" | "merged" | "discarded"
   error?: string
 }

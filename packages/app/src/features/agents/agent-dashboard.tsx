@@ -237,6 +237,14 @@ function BoardCard(props: {
           Pull request ready
         </div>
       </Show>
+      <Show when={props.agent.previewUrl}>
+        {(url) => (
+          <div class="mt-2 flex min-w-0 items-center gap-1.5 text-[10.5px] text-[color:var(--vx-text-muted)]">
+            <span class="size-1.5 shrink-0 rounded-full bg-[color:var(--vx-purple)]" aria-hidden="true" />
+            <span class="truncate">Preview: {url().replace(/^https:\/\//, "")}</span>
+          </div>
+        )}
+      </Show>
     </button>
   )
 }

@@ -34,16 +34,6 @@ function fixture() {
         return { written: ".env" }
       },
     },
-    providers: {
-      syncEnvironment: async (projectPath: string, _taskId: string | undefined, provider: "vercel") => ({
-        provider,
-        projectId: projectPath,
-        projectName: projectPath,
-        changed: projects.get(projectPath)?.length ?? 0,
-        syncedAt: "2026-10-02T00:00:00Z",
-        detail: `Synced ${projectPath}`,
-      }),
-    },
   }
   return createRoot((dispose) => ({
     api,
@@ -216,29 +206,23 @@ describe("Cloud environment scope", () => {
     expect(f.editor.state.busy).toBe("")
   })
 
-  test("prevents overlapping mutations and ignores an old provider-sync success", async () => {
+  test("prevents overlapping mutations and ignores an old write's success", async () => {
     using f = fixture()
-    const pending = Promise.withResolvers<Awaited<ReturnType<typeof f.api.providers.syncEnvironment>>>()
+    const pending = Promise.withResolvers<{ written: string }>()
     const calls: string[] = []
-    f.api.providers.syncEnvironment = (projectPath) => {
+    f.api.env.apply = (projectPath) => {
       calls.push(projectPath)
       return pending.promise
     }
     f.editor.changeScope("/project-a")
     await f.editor.refresh()
-    const syncing = f.editor.sync("vercel")
-    await f.editor.apply()
-    expect(f.writes).toEqual([])
+    const writing = f.editor.apply()
+    f.editor.setKey("SECOND")
+    await f.editor.save()
+    expect(f.projects.get("/project-a")).toBeUndefined()
     f.editor.changeScope("/project-b")
-    pending.resolve({
-      provider: "vercel",
-      projectId: "a",
-      projectName: "a",
-      changed: 1,
-      syncedAt: "",
-      detail: "Old sync",
-    })
-    await syncing
+    pending.resolve({ written: ".env" })
+    await writing
     expect(calls).toEqual(["/project-a"])
     expect(f.notices).toEqual([])
   })
