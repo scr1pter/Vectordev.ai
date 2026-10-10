@@ -52,6 +52,16 @@ Purchased-credit reconciliation reads current payment and dispute state, with St
 
 Account deletion closes new purchases and model access durably, expires pending checkout, cancels recurring subscriptions and disables model keys before identity deletion. Cleanup failures remain retryable. Stripe notifications verify signatures and reconcile current payment state; duplicate or reordered notifications must not mint credits.
 
+## Using credits in Vector
+
+The desktop app and the CLI list **Vector Codium** (`vector-plan`) as a provider whenever the signed-in account's `/api/model-plans/models` answers `enabled: true`, which needs `MODEL_PLANS_ENABLED=true` and a complete server configuration. Every signed-in account then sees the catalog, with or without credits; the endpoint reads no billing state, so frequent catalog polls never reach Stripe or OpenRouter. The desktop app passes the account token from its main process to the local engine, and the CLI uses the `vct_` token from `vector login` or `VECTOR_CLI_TOKEN`. Neither the token nor project configuration can change the provider's destination, prices or models: requests go only to `/api/model-plans/chat`, with the token added at that final boundary.
+
+Both runtimes (the engine's AI SDK path and the Core V2 runner) stream text and tool calls through the gateway. Each step records the provider-billed cost that the gateway passes through in the usage chunk, which is what the credit pools are debited; the catalog prices are only a fallback ceiling. Codium is never the automatic default while another provider can run, so credits are spent only on a model the person chose.
+
+Settings → Providers and Settings → Usage show the plan, monthly credits left, purchased credits left and the renewal date from `/api/model-plans/status`, which accepts the same account token as chat requests (and the website's browser session). **Buy credits** opens `/codium`; **Manage plan** opens `/account`. A balance under a tenth of the granted credits, or under 50, is flagged as running low.
+
+When the gateway answers that the account has no plan or not enough credits (402), the turn fails at once with the gateway's explanation and a **Buy credits** action. A revoked or expired sign-in asks the person to sign in again, and a disabled or misconfigured service asks them to choose another model. None of these answers is retried or sent to another provider. `vector codium` (alias `vector credits`) prints the plan, balances and purchase link; `vector models vector-plan` lists the models.
+
 ## Configuration and deferred activation
 
 Server secrets belong in the hosting environment, never in client builds or the repository. See `.env.example` for the complete list:
