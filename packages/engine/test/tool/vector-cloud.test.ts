@@ -348,27 +348,50 @@ describe("vector_cloud bridge", () => {
 
   it.instance("writes a new migration only after the edit permission, which plan mode refuses", () =>
     Effect.gen(function* () {
-      const files = ["supabase/migrations/20261010120000_add_profiles.sql"]
+      const files = [
+        "supabase/migrations/20261010120000_add_profiles.sql",
+        "supabase/migrations/down/20261010120000_add_profiles.down.sql",
+      ]
+      const statements = [
+        {
+          label: `Migration ${files[0]}`,
+          sql: "create table profiles (id uuid primary key);",
+          length: 44,
+          truncated: false,
+        },
+        { label: `Down migration ${files[1]}`, sql: "drop table profiles;", length: 20, truncated: false },
+      ]
       const params = {
         action: "create_migration",
         migrationName: "add profiles",
         sql: "create table profiles (id uuid primary key);",
+        downSql: "drop table profiles;",
       } as const
-      const requests = yield* bridge({ ok: true, file: files[0] }, 200, { report: { ok: true, files } })
+      const requests = yield* bridge({ ok: true, file: files[0] }, 200, {
+        report: { ok: true, files, statements, approved: { version: "20261010120000" } },
+      })
       const asks = recordAsks()
       const result = yield* execute(params, asks.ask)
+      // Both files are in the prompt: the down SQL is what rollback_migration
+      // later runs against the live database.
       expect(asks.permissions).toEqual([
         expect.objectContaining({
           permission: "edit",
-          patterns: [expect.stringMatching(/supabase\/migrations\/20261010120000_add_profiles\.sql$/)],
+          patterns: [
+            expect.stringMatching(/supabase\/migrations\/20261010120000_add_profiles\.sql$/),
+            expect.stringMatching(/supabase\/migrations\/down\/20261010120000_add_profiles\.down\.sql$/),
+          ],
           metadata: expect.objectContaining({
             filepath: expect.stringContaining(files[0]),
             diff: expect.stringContaining("+create table profiles (id uuid primary key);"),
+            statements,
           }),
         }),
       ])
+      expect(String(asks.permissions[0].metadata.diff)).toContain("+drop table profiles;")
       expect(requests.map((item) => item.command)).toEqual(["describe", "create_migration"])
-      expect(requests[1]).toMatchObject({ name: "add profiles", sql: params.sql })
+      // The file written is the one the prompt named.
+      expect(requests[1]).toMatchObject({ name: "add profiles", sql: params.sql, version: "20261010120000" })
       expect(result.output).toContain(files[0])
 
       const refused = yield* bridge({ ok: true }, 200, { report: { ok: true, files } })
@@ -377,6 +400,44 @@ describe("vector_cloud bridge", () => {
       )
       expect(Exit.isFailure(denied)).toBe(true)
       expect(refused.map((item) => item.command)).toEqual(["describe"])
+    }),
+  )
+
+  it.instance("shows the SQL a database change runs, and runs only what was shown", () =>
+    Effect.gen(function* () {
+      const statements = [
+        {
+          label: "Down migration supabase/migrations/down/20261010120000_add_profiles.down.sql",
+          sql: "drop table profiles;",
+          length: 20,
+          truncated: false,
+        },
+      ]
+      const requests = yield* bridge({ ok: true, rolledBack: "20261010120000_add_profiles.sql" }, 200, {
+        report: {
+          ok: true,
+          repeatable: false,
+          scope: {
+            provider: "Supabase",
+            project: "shop-db",
+            environment: "production",
+            summary: "Roll back 20261010120000_add_profiles.sql.",
+          },
+          statements,
+          approved: { name: "20261010120000_add_profiles.sql", downChecksum: "abc123" },
+        },
+      })
+      const asks = recordAsks()
+      yield* execute({ action: "rollback_migration" }, asks.ask)
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "vector_cloud_database",
+          always: [],
+          metadata: expect.objectContaining({ summary: "Roll back 20261010120000_add_profiles.sql.", statements }),
+        }),
+      ])
+      expect(requests.map((item) => item.command)).toEqual(["describe", "rollback_migration"])
+      expect(requests[1]).toMatchObject({ name: "20261010120000_add_profiles.sql", downChecksum: "abc123" })
     }),
   )
 
@@ -439,6 +500,25 @@ describe("vector_cloud bridge", () => {
       const result = yield* execute({ action: "run_sql", sql: "select id, email from profiles" })
       expect(result.output).toContain("Read-only query on Supabase project shop-db: 2 of 2 row(s).")
       expect(result.output).toContain("id | email\n1 | a@example.com\n2 | null")
+
+      yield* bridge(
+        {
+          ok: true,
+          project: { ref: "shopref", name: "shop-db" },
+          result: {
+            columns: ["id", "encrypted_password"],
+            rows: [[1, "[hidden]"]],
+            rowCount: 1,
+            truncated: false,
+            readOnly: true,
+            hiddenColumns: ["encrypted_password"],
+          },
+        },
+        200,
+        described,
+      )
+      const hidden = yield* execute({ action: "run_sql", sql: "select id, encrypted_password from auth.users" })
+      expect(hidden.output).toContain("Hidden because they hold sign-in credentials: encrypted_password.")
 
       yield* bridge(
         {
