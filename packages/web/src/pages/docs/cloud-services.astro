@@ -23,7 +23,9 @@ export const prerender = true
     account before showing it as connected.
   </p>
   <p>
-    Link the existing Vercel project that this repository should use, or choose its Supabase project in Database.
+    For Vercel, pick the personal account or team the project lives in, then link one of its projects or create a new
+    one with a framework and root directory. A repository already deployed with the Vercel CLI is linked from its
+    .vercel/project.json automatically. Choose the Supabase project in Database.
     From 1.99.99, the desktop uses an encrypted temporary callback relay for Vercel, and PKCE for Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
   </p>
 
@@ -42,21 +44,40 @@ export const prerender = true
     Other frameworks retain their existing serialization.
   </p>
   <p>
-    Sync to Vercel sends the configured values to the linked project. Local .env changes and remote provider
-    values are separate: removing a local entry does not confirm remote deletion. Supabase setup adds public client
-    values, including the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY aliases used by the generated client. Secret,
-    service-role, management and user-session keys are rejected for that browser configuration.
+    The linked Vercel project's variables are listed by name, environment (production, preview, development) and
+    type; their values are never shown. Add, change or remove a variable per environment, optionally for one preview
+    branch. Compare with local compares values by hash. A sync first shows its plan: it creates what is missing and
+    updates or deletes only variables an earlier Vector sync wrote, and nothing is written until you apply that plan.
+    Pull development values copies readable development values into this project's .env after you review them.
+    Supabase setup adds public client values, including the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY aliases used
+    by the generated client. Secret, service-role, management and user-session keys are rejected for that browser
+    configuration.
+  </p>
+
+  <h2 id="vercel-deployments">Deploy to Vercel</h2>
+  <p>
+    Publish makes a preview unless you choose production and confirm it. A production build is made without moving
+    your domains, checked, and promoted only when the required checks pass. Deployments lists everything Vercel has
+    for the project, including git pushes, with Vector's checks attached to the releases it made. From there you can
+    read build or runtime logs, cancel a build, redeploy, promote a later production build, or roll production back.
+    An agent working in a parallel workspace can publish a preview of its worktree; it gets a stable address for its
+    branch, shown on the workspace and reported in the task.
   </p>
   <p>
-    A Vercel integration can manage the variables it owns. Pre-existing variables created outside that integration
-    may need to be managed directly in Vercel. You can still list projects and manage or apply local variables in Vector.
+    If Deployment Protection asks visitors to sign in, Vector's checks cannot open a preview. Project settings can
+    create a Protection Bypass for Automation secret, kept in Vector's vault, so they can; without it production is
+    checked after promotion. Project settings also edit Vercel's framework, root directory, build, output and install
+    commands and Node.js version. Domains attaches a domain you own and shows the exact records Vercel asks for, an A
+    record for an apex domain or a CNAME for a subdomain, plus any verification record, then verifies them and reports
+    the certificate.
   </p>
 
   <h2 id="cloud-actions">Run cloud work from a task</h2>
   <p>
     The agent's cloud tool can inspect connections, detect build settings, prepare a linked database or authentication,
-    sync variables, publish and inspect recent deployments. It asks before it publishes, changes a database or writes a
-    host's environment, and the prompt names the provider, project and environment. A wildcard allow does not skip
+    and run the same Vercel controls: projects and their settings, deployments, logs, promotion and rollback,
+    variables and domains. It asks before it publishes, moves production, changes a database, writes a host's
+    environment or changes a Vercel project or domain, and the prompt names the provider, project and environment. A wildcard allow does not skip
     these prompts; only a permission rule that names the cloud action does.
     Publishing goes to the Vercel project linked to the repository; without one, the tool returns setup guidance. A
     failed Vercel deployment never triggers a deployment somewhere else.
