@@ -15,10 +15,10 @@ This supersedes the record that disabled the sign-in pending provider authorizat
 
 ## What ships
 
-- `packages/core/src/provider-policy.ts` sets `CHATGPT_SIGN_IN = true` and holds `CHATGPT_CLIENT_ID`. It is the only source file that carries the client ID.
+- `packages/core/src/provider-policy.ts` sets `CHATGPT_SIGN_IN = true` and holds `CODEX_CLI_CLIENT_ID`, which `CHATGPT_CLIENT_ID` uses. It is the only source file that carries the client ID.
 - The Engine (`packages/engine/src/plugin/openai/codex.ts`) and V2 Core (`packages/core/src/plugin/provider/openai.ts`) offer "ChatGPT Pro/Plus (browser)" and "ChatGPT Pro/Plus (headless)" next to the OpenAI API key, in the desktop app, the TUI and `vector providers login`.
 - Requests identify as Vector: `originator: vector` and `User-Agent: vector/<version>`. Nothing claims to be Codex except the client ID itself. The browser sign-in also sends OpenAI's `codex_cli_simplified_flow` sign-in parameter, as it did before 1.99.104.
-- New sign-ins and every refresh record the client ID and issuer with the saved credential. Sign-ins saved before 1.99.104 have no such record; they all came from this client, so Vector uses and refreshes them again while this client is configured, without a new sign-in.
+- New sign-ins and every refresh record the client ID and issuer with the saved credential. Sign-ins saved before 1.99.104 have no such record; they all came from the Codex CLI client, so Vector uses and refreshes them again while that client is configured, without a new sign-in.
 - A ChatGPT sign-in shows OpenAI's GPT-5 generation onward and the `codex-*` models, listed with no per-token cost because the plan covers them, and GPT-5.5 onward with the Codex backend's 272K-token input window.
 - Release guards: `script/artifact-audit.ts` (used by the CLI publisher, the desktop package checks and the cloud CLI package) allows this one client ID and still rejects every other borrowed registration, including the GitHub one. `packages/engine/test/compliance/upstream-free.test.ts` allows the ID only in `provider-policy.ts`.
 - The separately installed Codex runtime (`packages/desktop/src/main/external-agents.ts`) is unchanged.
@@ -52,8 +52,8 @@ Keep `policy` in the keep list of `script/prune-vector-site.mjs`; the deploy del
 
 1. Ask OpenAI for a registration issued to Vector, covering the browser redirect `http://localhost:1455/auth/callback`, the device flow and access to the Codex backend for ChatGPT plans.
 2. Test it without a release by setting `VECTOR_OPENAI_OAUTH_CLIENT_ID=<client id>`. It replaces the built-in client; the remote switch still applies.
-3. Once approved, set `CHATGPT_CLIENT_ID` to the new ID, add the Codex CLI client back to the rejected registrations in `script/artifact-audit.ts` and its tests, and allow the new ID in the source-independence test.
-4. People signed in with the Codex CLI client then sign in again: their saved sign-ins name the old client and no longer match.
+3. Once approved, set `CHATGPT_CLIENT_ID` to the new ID, add the Codex CLI client back to the rejected registrations in `script/artifact-audit.ts` and its tests, and allow the new ID in the source-independence test. Then delete `CODEX_CLI_CLIENT_ID` and have `chatgptCredentialMatches` return `false` for unstamped sign-ins, so the release no longer carries the old client.
+4. People signed in with the Codex CLI client then sign in again: their saved sign-ins name the old client, or carry no stamp and are matched only against `CODEX_CLI_CLIENT_ID`, so they no longer match. This holds whether the new ID arrives through `VECTOR_OPENAI_OAUTH_CLIENT_ID` or through `CHATGPT_CLIENT_ID`.
 
 ## Release note
 

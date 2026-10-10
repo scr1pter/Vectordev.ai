@@ -17,6 +17,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
 import {
   CHATGPT_CLIENT_ID,
+  CODEX_CLI_CLIENT_ID,
   CHATGPT_SIGN_IN,
   applyRemoteProviderPolicy,
   chatgptCredentialMatches,
@@ -352,6 +353,10 @@ test("Sign in with ChatGPT uses the Codex CLI client unless an approved registra
   // Once an approved registration replaces it, an unstamped sign-in has to be redone.
   const owned = chatgptOAuthConfiguration({ VECTOR_OPENAI_OAUTH_CLIENT_ID: "vector-owned-test-registration" })
   expect(chatgptCredentialMatches({}, owned)).toBe(false)
+  // That holds when the built-in ID itself changes too: unstamped sign-ins match the Codex CLI client only.
+  expect(CODEX_CLI_CLIENT_ID).toBe("app_EMoamEEZ73f0CkXaXp7hrann")
+  expect(chatgptCredentialMatches({}, { clientId: CODEX_CLI_CLIENT_ID, origin: issuer })).toBe(true)
+  expect(chatgptCredentialMatches({}, chatgptOAuthConfiguration({}))).toBe(CHATGPT_CLIENT_ID === CODEX_CLI_CLIENT_ID)
   expect(chatgptCredentialMatches({ clientId: CHATGPT_CLIENT_ID, enterpriseUrl: issuer }, owned)).toBe(false)
   expect(chatgptCredentialMatches({ clientId: "vector-owned-test-registration", enterpriseUrl: issuer }, owned)).toBe(
     true,

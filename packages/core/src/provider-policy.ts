@@ -22,9 +22,11 @@ export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false
 export const GITLAB_SIGN_IN = false
 
-// The Codex CLI's public client registration, the only one Vector has used for ChatGPT sign-in.
-// VECTOR_OPENAI_OAUTH_CLIENT_ID swaps in a registration OpenAI approves for Vector.
-export const CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+// The Codex CLI's public client registration. Every ChatGPT sign-in saved before 1.99.104 came from it.
+export const CODEX_CLI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+// The registration new sign-ins use. VECTOR_OPENAI_OAUTH_CLIENT_ID swaps in a registration OpenAI approves for
+// Vector; an approved one can replace this value while CODEX_CLI_CLIENT_ID keeps naming the old client.
+export const CHATGPT_CLIENT_ID = CODEX_CLI_CLIENT_ID
 export const CHATGPT_SIGN_IN_UNAVAILABLE = "ChatGPT sign-in is temporarily unavailable; connect OpenAI with an API key."
 
 // The owner's remote off-switch, as last read from vectordev.ai (see provider-remote-policy.ts).
@@ -44,8 +46,9 @@ export function chatgptOAuthConfiguration(
   return { clientId, origin: "https://auth.openai.com" }
 }
 
-// Sign-ins saved before 1.99.104 carry no registration stamp. They all came from the built-in client,
-// so they stay usable with it, and need a new sign-in once another registration is configured.
+// Sign-ins saved before 1.99.104 carry no registration stamp. They all came from the Codex CLI client, so
+// they stay usable only while that client is configured, and need a new sign-in once another one is,
+// whether it arrives through VECTOR_OPENAI_OAUTH_CLIENT_ID or a new CHATGPT_CLIENT_ID.
 export function chatgptCredentialMatches(
   credential: { clientId?: string; enterpriseUrl?: string; metadata?: Readonly<Record<string, unknown>> },
   configuration = chatgptOAuthConfiguration(),
@@ -56,7 +59,7 @@ export function chatgptCredentialMatches(
     credential.metadata?.oauth_client_id,
     credential.metadata?.oauth_instance_url,
   ].some((value) => value !== undefined)
-  if (!stamped) return configuration?.clientId === CHATGPT_CLIENT_ID
+  if (!stamped) return configuration?.clientId === CODEX_CLI_CLIENT_ID
   return ownedOAuthMatches(credential, configuration)
 }
 
