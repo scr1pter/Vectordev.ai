@@ -13,58 +13,62 @@ import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 describe("Snapshot", () => {
-  testEffect(Layer.empty).live("captures and restores Location-scoped changes", () =>
-    Effect.acquireUseRelease(
-      Effect.promise(() => tmpdir()),
-      (tmp) =>
-        Effect.gen(function* () {
-          const project = path.join(tmp.path, "project")
-          const location = path.join(project, "scope")
-          yield* Effect.promise(async () => {
-            await fs.mkdir(location, { recursive: true })
-            await fs.writeFile(path.join(location, "tracked.txt"), "one\n")
-            await fs.writeFile(path.join(project, "outside.txt"), "outside\n")
-            await $`git init`.cwd(project).quiet()
-            await $`git config core.fsmonitor false`.cwd(project).quiet()
-            await $`git config commit.gpgsign false`.cwd(project).quiet()
-            await $`git config user.email test@vector.test`.cwd(project).quiet()
-            await $`git config user.name Test`.cwd(project).quiet()
-            await $`git add .`.cwd(project).quiet()
-            await $`git commit -m initial`.cwd(project).quiet()
-          })
-
-          const layer = snapshotLayer(tmp.path, location)
-          yield* Effect.gen(function* () {
-            const snapshot = yield* Snapshot.Service
-            const before = yield* snapshot.capture()
-            expect(before).toBeDefined()
-            if (!before) return
-
+  testEffect(Layer.empty).live(
+    "captures and restores Location-scoped changes",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) =>
+          Effect.gen(function* () {
+            const project = path.join(tmp.path, "project")
+            const location = path.join(project, "scope")
             yield* Effect.promise(async () => {
-              await fs.writeFile(path.join(location, "tracked.txt"), "two\n")
-              await fs.writeFile(path.join(location, "added.txt"), "added\n")
-              await fs.writeFile(path.join(project, "outside.txt"), "changed outside\n")
+              await fs.mkdir(location, { recursive: true })
+              await fs.writeFile(path.join(location, "tracked.txt"), "one\n")
+              await fs.writeFile(path.join(project, "outside.txt"), "outside\n")
+              await $`git init`.cwd(project).quiet()
+              await $`git config core.fsmonitor false`.cwd(project).quiet()
+              await $`git config commit.gpgsign false`.cwd(project).quiet()
+              await $`git config user.email test@vector.test`.cwd(project).quiet()
+              await $`git config user.name Test`.cwd(project).quiet()
+              await $`git add .`.cwd(project).quiet()
+              await $`git commit -m initial`.cwd(project).quiet()
             })
-            const after = yield* snapshot.capture()
-            expect(after).toBeDefined()
-            if (!after) return
 
-            expect(yield* snapshot.files({ from: before, to: after })).toEqual([
-              RelativePath.make("scope/added.txt"),
-              RelativePath.make("scope/tracked.txt"),
-            ])
-            const plan = new Map([[RelativePath.make("scope/tracked.txt"), before]])
-            const preview = yield* snapshot.preview({ files: plan, context: 1 })
-            expect(preview).toHaveLength(1)
-            expect(preview[0]?.path).toBe(RelativePath.make("scope/tracked.txt"))
-            yield* snapshot.restore({ files: plan })
-            expect(yield* read(path.join(location, "tracked.txt"))).toBe("one\n")
-            expect(yield* read(path.join(location, "added.txt"))).toBe("added\n")
-            expect(yield* read(path.join(project, "outside.txt"))).toBe("changed outside\n")
-          }).pipe(Effect.provide(layer))
-        }),
-      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
-    ),
+            const layer = snapshotLayer(tmp.path, location)
+            yield* Effect.gen(function* () {
+              const snapshot = yield* Snapshot.Service
+              const before = yield* snapshot.capture()
+              expect(before).toBeDefined()
+              if (!before) return
+
+              yield* Effect.promise(async () => {
+                await fs.writeFile(path.join(location, "tracked.txt"), "two\n")
+                await fs.writeFile(path.join(location, "added.txt"), "added\n")
+                await fs.writeFile(path.join(project, "outside.txt"), "changed outside\n")
+              })
+              const after = yield* snapshot.capture()
+              expect(after).toBeDefined()
+              if (!after) return
+
+              expect(yield* snapshot.files({ from: before, to: after })).toEqual([
+                RelativePath.make("scope/added.txt"),
+                RelativePath.make("scope/tracked.txt"),
+              ])
+              const plan = new Map([[RelativePath.make("scope/tracked.txt"), before]])
+              const preview = yield* snapshot.preview({ files: plan, context: 1 })
+              expect(preview).toHaveLength(1)
+              expect(preview[0]?.path).toBe(RelativePath.make("scope/tracked.txt"))
+              yield* snapshot.restore({ files: plan })
+              expect(yield* read(path.join(location, "tracked.txt"))).toBe("one\n")
+              expect(yield* read(path.join(location, "added.txt"))).toBe("added\n")
+              expect(yield* read(path.join(project, "outside.txt"))).toBe("changed outside\n")
+            }).pipe(Effect.provide(layer))
+          }),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    // About a dozen git processes; on a busy Windows runner they take longer than the default 5 seconds.
+    30_000,
   )
 
   testEffect(Layer.empty).live("treats capture outside Git as unavailable", () =>

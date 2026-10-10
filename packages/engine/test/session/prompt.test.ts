@@ -413,6 +413,9 @@ console.log("shell-released")
       if (fiber.pollUnsafe()) return yield* Effect.fail(new Error("shell completed before publishing child readiness"))
     }),
     `shell child did not publish readiness (${shell})`,
+    // On Windows the shell is PowerShell or cmd starting a Bun process, which can take longer than the default
+    // 5 seconds on a busy runner before the child writes .shell-ready.
+    "20 seconds",
   ).pipe(
     Effect.catchCause((cause) =>
       Effect.gen(function* () {
@@ -2244,7 +2247,7 @@ it.instance(
       yield* sh.phase("loop-completed")
     }),
   { git: true },
-  10_000,
+  30_000,
 )
 
 it.instance(
@@ -2288,7 +2291,7 @@ it.instance(
       yield* sh.phase("loops-completed")
     }),
   { git: true },
-  10_000,
+  30_000,
 )
 
 unix(
