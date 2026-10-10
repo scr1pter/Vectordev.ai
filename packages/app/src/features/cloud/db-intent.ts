@@ -17,9 +17,13 @@ const AUTH_PATTERN =
 const DB_PATTERN =
   /\b(database|supabase|postgres(?:ql)?|\bsql\b|persist(?:ence)?|store (?:the )?(?:users?|data|records|profiles?)|users? table|save (?:the )?(?:users?|data|records)|\bcrud\b|db schema|prisma|drizzle)\b/i
 
+// A prompt that already directs the agent to Vector Cloud (the database setup
+// and Fix this deploy prompts) needs no proposal on top of it.
+const VECTOR_CLOUD_PROMPT = /\bvector_cloud\b/
+
 export function detectDatabaseIntent(text: string): DatabaseIntent {
   const value = (text ?? "").trim()
-  if (value.length < 4) return { matched: false }
+  if (value.length < 4 || VECTOR_CLOUD_PROMPT.test(value)) return { matched: false }
   if (AUTH_PATTERN.test(value)) return { matched: true, reason: "auth" }
   if (DB_PATTERN.test(value)) return { matched: true, reason: "database" }
   return { matched: false }
