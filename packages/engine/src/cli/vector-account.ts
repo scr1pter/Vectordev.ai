@@ -2,6 +2,8 @@ import fs from "fs/promises"
 import path from "path"
 import open from "open"
 import { Global } from "@vectordevai/core/global"
+import { truthy } from "@vectordevai/core/flag/flag"
+import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { UI } from "./ui"
 import { VectorAccount } from "@vectordevai/core/vector-account"
 
@@ -63,10 +65,18 @@ type VerifyResult = { status: "ok"; user: CliUser } | { status: "invalid"; messa
 // portals, proxies, rate limits, and outages must never sign a user out.
 const REJECTION_CODES = new Set(["CLI_TOKEN_INVALID", "CLI_TOKEN_EXPIRED"])
 
+// The daily verification doubles as the CLI's usage count: the server records one row per account per UTC day from
+// these headers unless VECTOR_DISABLE_USAGE turns that off. Nothing else about the session is sent.
 async function verifyToken(token: string): Promise<VerifyResult> {
   const response = await fetch(`${SITE}/api/account/cli-verify`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "x-vector-version": InstallationVersion,
+      "x-vector-platform": `${process.platform}-${process.arch}`,
+      ...(truthy("VECTOR_DISABLE_USAGE") ? { "x-vector-usage": "off" } : {}),
+    },
     body: JSON.stringify({ token }),
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined)
