@@ -1351,6 +1351,91 @@ describe("tool.task", () => {
     }),
   )
 
+  background.instance("a resume refused by the locked cycle check keeps the child's finished record", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      const sessions = yield* Session.Service
+      const seeded = yield* seed()
+      const def = yield* singleTaskDefinition(yield* TaskTool)
+      // Children finish their first runs, then the resumed one keeps running.
+      let hold = false
+      const context = taskContext({
+        sessionID: seeded.chat.id,
+        messageID: seeded.assistant.id,
+        promptOps: {
+          ...stubOps(),
+          prompt: (input) =>
+            input.sessionID === seeded.chat.id
+              ? Effect.succeed(reply(input, "noted"))
+              : hold
+                ? Effect.never
+                : Effect.succeed(reply(input, "done")),
+        },
+      })
+      const record = (sessionID: string) =>
+        sessions.get(SessionID.make(sessionID)).pipe(Effect.map((info) => info.metadata?.subagent))
+      const finished = (sessionID: string) =>
+        pollWithTimeout(
+          record(sessionID).pipe(
+            Effect.map((value) =>
+              value && typeof value === "object" && "status" in value && value.status === "completed"
+                ? value
+                : undefined,
+            ),
+          ),
+          "the first run never settled",
+        )
+      const auth = (yield* def.execute(
+        { description: "Inspect auth", prompt: "Inspect auth", background: true },
+        context,
+      )).metadata.sessionId
+      const routes = (yield* def.execute(
+        { description: "Inspect routes", prompt: "Inspect routes", background: true },
+        context,
+      )).metadata.sessionId
+      const settled = yield* finished(routes)
+      yield* finished(auth)
+      hold = true
+
+      // The routes resume passes the unlocked check while nothing is running, then waits at its permission prompt.
+      const asked = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      const refused = yield* def
+        .execute(
+          {
+            description: "Use the auth report",
+            prompt: "Use the auth report.",
+            task_id: routes,
+            depends_on: [auth],
+            background: true,
+          },
+          { ...context, ask: () => Deferred.succeed(asked, undefined).pipe(Effect.andThen(Deferred.await(gate))) },
+        )
+        .pipe(Effect.exit, Effect.forkChild)
+      yield* awaitWithTimeout(Deferred.await(asked), "the routes resume never asked for permission")
+      // Meanwhile the auth resume starts a run that depends on routes.
+      yield* def.execute(
+        {
+          description: "Use the routes report",
+          prompt: "Use the routes report.",
+          task_id: auth,
+          depends_on: [routes],
+          background: true,
+        },
+        context,
+      )
+      expect((yield* jobs.get(auth))?.status).toBe("running")
+      yield* Deferred.succeed(gate, undefined)
+
+      const exit = yield* awaitWithTimeout(Fiber.join(refused), "the routes resume never settled")
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit))
+        expect(Cause.pretty(exit.cause)).toContain(`Dependency ${auth} would create a task cycle`)
+      expect(yield* record(routes)).toEqual(settled)
+      expect((yield* jobs.get(routes))?.status).toBe("completed")
+    }),
+  )
+
   background.instance("rejects overlapping ownership across active sibling subagents", () =>
     Effect.gen(function* () {
       const { chat, assistant } = yield* seed()

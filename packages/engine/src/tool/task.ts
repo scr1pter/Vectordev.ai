@@ -1135,43 +1135,43 @@ export const TaskTool = Tool.define(
         const added = yield* extendRun()
         if (added) return yield* joined(added)
 
-        // A resumed child starts a new run: point its record at this call.
-        if (session) {
-          yield* SubagentLifecycle.update(sessions, nextSession.id, {
-            ...record,
-            batchIndex: batch?.index,
-            completedAt: undefined,
-            usage: undefined,
-            error: undefined,
-          })
-        }
-
+        // The cycle check and the start hold the claim lock follow-ups take, so two calls cannot each pass the check and
+        // then close a cycle together. A resumed child's record moves to this call only after its check passed, so a
+        // call refused here leaves the record describing the run it already had.
         const info = yield* claimLock.withPermits(1)(
-          assertDependencies(nextSession.id, dependencies).pipe(
-            Effect.andThen(
-              background.start({
-                id: nextSession.id,
-                type: id,
-                title,
-                metadata,
-                promotable: !batch?.multiple,
-                onPromote: batch?.multiple
-                  ? undefined
-                  : Effect.all([
-                      Effect.sync(() => {
-                        detached = true
-                      }),
-                      ctx.metadata({
-                        title,
-                        metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
-                      }),
-                      SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
-                      notify(nextSession.id),
-                    ]),
-                run: guardedRun(),
-              }),
-            ),
-          ),
+          Effect.gen(function* () {
+            yield* assertDependencies(nextSession.id, dependencies)
+            // A resumed child starts a new run: point its record at this call.
+            if (session)
+              yield* SubagentLifecycle.update(sessions, nextSession.id, {
+                ...record,
+                batchIndex: batch?.index,
+                completedAt: undefined,
+                usage: undefined,
+                error: undefined,
+              })
+            return yield* background.start({
+              id: nextSession.id,
+              type: id,
+              title,
+              metadata,
+              promotable: !batch?.multiple,
+              onPromote: batch?.multiple
+                ? undefined
+                : Effect.all([
+                    Effect.sync(() => {
+                      detached = true
+                    }),
+                    ctx.metadata({
+                      title,
+                      metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
+                    }),
+                    SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
+                    notify(nextSession.id),
+                  ]),
+              run: guardedRun(),
+            })
+          }),
         )
         // start hands back the running job when a concurrent call resuming the same task_id got there first. Join that
         // run instead of dropping this call's prompt, so only the call that started it reports its result.
