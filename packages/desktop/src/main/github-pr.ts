@@ -600,7 +600,8 @@ export async function fetchAutoReviewStatus(access: GithubAccess, repo: GithubRe
     return {
       ...status,
       state:
-        installed.encoding === "base64" && reviewsOnlyOnRequest(Buffer.from(installed.content ?? "", "base64").toString())
+        installed.encoding === "base64" &&
+        reviewsOnlyOnRequest(Buffer.from(installed.content ?? "", "base64").toString())
           ? "on-request"
           : "installed",
       url: installed.html_url ?? `${info.html_url}/blob/${info.default_branch}/${WORKFLOW_FILE}`,
