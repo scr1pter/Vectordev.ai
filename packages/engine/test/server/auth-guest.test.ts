@@ -511,6 +511,94 @@ test("guests cannot run host commands or answer permission requests", async () =
   }
 }, 30_000)
 
+test("guests load the app's bootstrap routes, narrowed to their workspace", async () => {
+  await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+  await using other = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  // Server.listen prefers port 4096, so a pooled keep-alive socket from an earlier test would swallow a request.
+  const call = (route: string, init: RequestInit = {}) =>
+    fetch(new URL(route, listener.url), { ...init, keepalive: false })
+  const abort = new AbortController()
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    // The owner's other project, which a guest must not learn about.
+    const elsewhere = await call(`/session?directory=${encodeURIComponent(other.path)}`, {
+      method: "POST",
+      headers: owner,
+      body: "{}",
+    })
+    expect(elsewhere.status).toBe(200)
+
+    const stream = await call("/global/event", { headers: guest, signal: abort.signal })
+    expect(stream.status).toBe(200)
+    const events = vectorEvents(stream.body!)
+    expect((await events.next()).value).toMatchObject({ payload: { type: "server.connected" } })
+
+    expect((await call("/global/health", { headers: guest })).status).toBe(200)
+    const config = await call("/global/config", { headers: guest })
+    expect(config.status).toBe(200)
+    expect((await call("/global/config", { method: "PATCH", headers: guest, body: "{}" })).status).toBe(403)
+    expect((await call("/global/dispose", { method: "POST", headers: guest })).status).toBe(403)
+
+    const current = await call("/project/current", { headers: guest })
+    expect(current.status).toBe(200)
+    const project = (await current.json()) as { id: string; worktree: string }
+    expect(project.worktree).toBe(tmp.path)
+    const list = await call("/project", { headers: guest })
+    expect(list.status).toBe(200)
+    expect(((await list.json()) as Array<{ worktree: string }>).map((item) => item.worktree)).toEqual([tmp.path])
+    const ownerList = (await (await call("/project", { headers: owner })).json()) as Array<{ worktree: string }>
+    expect(ownerList.map((item) => item.worktree)).toContain(other.path)
+    expect((await call(`/project/${project.id}/directories`, { headers: guest })).status).toBe(403)
+
+    // The live stream carries the guest's workspace and nothing from the owner's other project.
+    await call(`/session?directory=${encodeURIComponent(other.path)}`, { method: "POST", headers: owner, body: "{}" })
+    const mine = (await (await call("/session", { method: "POST", headers: guest, body: "{}" })).json()) as {
+      id: string
+    }
+    const seen: Array<{ directory?: string; payload: { type: string; properties?: { info?: { id?: string } } } }> = []
+    while (true) {
+      const next = await events.next()
+      if (next.done) break
+      const event = next.value as (typeof seen)[number]
+      seen.push(event)
+      if (event.payload.type === "session.created" && event.payload.properties?.info?.id === mine.id) break
+    }
+    expect(seen.every((event) => event.directory === undefined || event.directory === tmp.path)).toBe(true)
+  } finally {
+    abort.abort()
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
 // Presence on the directory event stream. This test server has no password,
 // so every connection has the default owner principal regardless of headers.
 const EventData = Schema.Struct({

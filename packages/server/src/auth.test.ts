@@ -39,6 +39,13 @@ describe("server authentication", () => {
     // Trusting a project lets its config run code, so it is the owner's call too.
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/config/trust")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRequest("GET", "/config/trust")).toBe(false)
+    // The app bootstraps from these, so a guest reads them, narrowed to its workspace by their handlers.
+    for (const route of ["/global/health", "/global/event", "/global/config", "/project", "/project/current"])
+      expect(ServerAuth.isOwnerOnlyRequest("GET", route)).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRequest("PATCH", "/global/config")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/global/dispose")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/project/prj_1/directories")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("PATCH", "/project/prj_1")).toBe(true)
     // A guest still prompts, reads its own pending requests and answers its own questions.
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/message")).toBe(false)
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/prompt_async")).toBe(false)

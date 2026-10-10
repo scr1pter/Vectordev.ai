@@ -147,6 +147,14 @@ export function ownerPrincipal(config: Info): Principal {
   return { kind: "owner", username: config.username }
 }
 
+const guestBootstrapRoutes = new Set([
+  "/global/health",
+  "/global/event",
+  "/global/config",
+  "/project",
+  "/project/current",
+])
+
 export function isOwnerOnlyRequest(method: string, pathname: string) {
   const canonical = canonicalAuthorizationPath(pathname)
   if (!canonical) return true
@@ -174,7 +182,8 @@ export function isOwnerOnlyRequest(method: string, pathname: string) {
     canonical.startsWith("/sync") ||
     canonical.startsWith("/tui")
   )
-    return canonical !== "/global/health"
+    // The app loads from these, so a guest may read them; their handlers narrow what a guest sees to its workspace.
+    return !((method === "GET" || method === "HEAD") && guestBootstrapRoutes.has(canonical))
   if (method === "GET" || method === "HEAD") return false
   return (
     canonical.startsWith("/api/integration") ||
