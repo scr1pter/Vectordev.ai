@@ -746,6 +746,188 @@ it.instance(
   },
 )
 
+const smallModelModes = {
+  "test-nano": { family: "gpt-nano", release_date: "2026-01-01" },
+  "test-nano-flex": {
+    id: "test-nano",
+    family: "gpt-nano",
+    release_date: "2026-01-01",
+    options: { serviceTier: "flex" },
+  },
+}
+
+const oauthSmallModelConfig = {
+  provider: {
+    openai: {
+      models: { ...smallModelModes, "test-primary": { family: "gpt", release_date: "2026-01-01" } },
+      whitelist: [...Object.keys(smallModelModes), "test-primary"],
+    },
+  },
+}
+
+for (const entry of [
+  { auth: "oauth", primary: "test-primary", expected: "test-primary" },
+  { auth: "oauth", primary: undefined, expected: undefined },
+  { auth: "api", primary: "test-primary", expected: "test-nano" },
+] as const) {
+  it.instance(
+    `getSmallModel infers safely for OpenAI ${entry.auth} with primary ${entry.primary ?? "absent"}`,
+    Effect.gen(function* () {
+      yield* set(
+        "VECTOR_AUTH_CONTENT",
+        JSON.stringify({
+          openai:
+            entry.auth === "oauth"
+              ? { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 }
+              : { type: "api", key: "placeholder" },
+        }),
+      )
+      const model = yield* Provider.use.getSmallModel(
+        ProviderV2.ID.openai,
+        entry.primary ? ModelV2.ID.make(entry.primary) : undefined,
+      )
+      expect(model?.id).toBe(entry.expected ? ModelV2.ID.make(entry.expected) : undefined)
+    }),
+    { config: oauthSmallModelConfig },
+  )
+}
+
+it.instance(
+  "getSmallModel preserves an explicit small_model with OpenAI OAuth",
+  Effect.gen(function* () {
+    yield* set(
+      "VECTOR_AUTH_CONTENT",
+      JSON.stringify({
+        openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
+      }),
+    )
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.openai, ModelV2.ID.make("test-primary"))
+    expect(model?.id).toBe(ModelV2.ID.make("test-nano-flex"))
+    expect(model?.options.serviceTier).toBe("flex")
+  }),
+  { config: { ...oauthSmallModelConfig, small_model: "openai/test-nano-flex" } },
+)
+
+it.instance(
+  "getSmallModel preserves a plugin override with OpenAI OAuth",
+  Effect.gen(function* () {
+    const instance = yield* TestInstance
+    const configDir = path.join(instance.directory, ".vector")
+    yield* Effect.promise(() => mkdir(path.join(configDir, "plugin"), { recursive: true }))
+    yield* Effect.promise(() => markPluginDependenciesReady(configDir))
+    yield* Effect.promise(() =>
+      Bun.write(
+        path.join(configDir, "plugin", "small-model.ts"),
+        `
+      export default {
+        id: "fixture.small-model",
+        server: async () => ({
+          "experimental.provider.small_model": async (input, output) => {
+            output.model = input.provider.models["test-nano-flex"]
+          },
+        }),
+      }
+    `,
+      ),
+    )
+    yield* set(
+      "VECTOR_AUTH_CONTENT",
+      JSON.stringify({
+        openai: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: Date.now() + 60_000 },
+      }),
+    )
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.openai, ModelV2.ID.make("test-primary"))
+    expect(model?.id).toBe(ModelV2.ID.make("test-nano-flex"))
+    expect(model?.options.serviceTier).toBe("flex")
+  }),
+  { config: oauthSmallModelConfig },
+)
+
+it.instance(
+  "getSmallModel prefers the canonical OpenAI model over an inferred service-tier alias",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.openai)
+    expect(model?.id).toBe(ModelV2.ID.make("test-nano"))
+    expect(model?.options.serviceTier).toBeUndefined()
+    const alias = yield* Provider.use.getModel(ProviderV2.ID.openai, ModelV2.ID.make("test-nano-flex"))
+    expect(alias.api.id).toBe("test-nano")
+    expect(alias.options.serviceTier).toBe("flex")
+  }),
+  {
+    config: {
+      provider: {
+        openai: {
+          models: smallModelModes,
+          whitelist: Object.keys(smallModelModes),
+          options: { apiKey: "test-key" },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "getSmallModel preserves an explicit OpenAI service-tier alias",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.openai)
+    expect(model?.id).toBe(ModelV2.ID.make("test-nano-flex"))
+    expect(model?.options.serviceTier).toBe("flex")
+  }),
+  {
+    config: {
+      small_model: "openai/test-nano-flex",
+      provider: {
+        openai: {
+          models: smallModelModes,
+          whitelist: Object.keys(smallModelModes),
+          options: { apiKey: "test-key" },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "getSmallModel retains an OpenAI alias when it is the only available small model",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.openai)
+    expect(model?.id).toBe(ModelV2.ID.make("test-nano-flex"))
+    expect(model?.options.serviceTier).toBe("flex")
+  }),
+  {
+    config: {
+      provider: {
+        openai: {
+          models: smallModelModes,
+          whitelist: ["test-nano-flex"],
+          options: { apiKey: "test-key" },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
+  "getSmallModel preserves service-tier alias ordering for other providers",
+  Effect.gen(function* () {
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("lmstudio"))
+    expect(model?.id).toBe(ModelV2.ID.make("test-nano-flex"))
+    expect(model?.options.serviceTier).toBe("flex")
+  }),
+  {
+    config: {
+      provider: {
+        lmstudio: {
+          npm: "@ai-sdk/openai-compatible",
+          models: smallModelModes,
+          whitelist: Object.keys(smallModelModes),
+          options: { apiKey: "test-key" },
+        },
+      },
+    },
+  },
+)
+
 it.instance(
   "getSmallModel matches exact model families",
   Effect.gen(function* () {

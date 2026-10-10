@@ -6,7 +6,7 @@ ${workdirSection}
 
 Use `${tmp}` for temporary work outside the workspace. This directory has already been created, already exists, and is pre-approved for external directory access.
 
-IMPORTANT: This tool is for terminal operations like git, npm, docker, etc. DO NOT use it for file operations (reading, writing, editing, searching, finding files) - use the specialized tools for this instead.
+Use this tool for terminal operations like git, npm, docker, and project scripts. Prefer the specialized tools for individual file reads, searches, and manual edits. For a bounded group of known files, a single command may read them together or apply the same mechanical transformation. Keep paths explicit and within the authorized scope. For scripted edits, validate every expected match before writing any file, stop on a mismatch, and review the resulting diff.
 
 ${commandSection}
 

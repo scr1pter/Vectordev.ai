@@ -43,7 +43,45 @@ test("shows the not found fallback when the viewed session is deleted", async ({
   await expect(page.locator("[data-vector-session-title]")).toHaveCount(0)
 })
 
-async function setup(page: Page, events?: () => EventPayload[]) {
+for (const status of ["completed", "error"] as const) {
+  test(`keeps indexed child outcomes and navigation when the batch is ${status}`, async ({ page }) => {
+    await setup(page, undefined, status)
+    await page.goto(sessionHref(parentID))
+    await expectSessionTitle(page, parentTitle)
+    const chip = page.getByRole("button", { name: /CSV parser, JSON parser, YAML parser.*Show in Background tasks/ })
+    await expect(chip).toHaveCount(1)
+    await expect(chip).toContainText("3 agents")
+    await chip.click()
+    const rows = page.locator("#vector-bg-tasks .vector-bg-tasks-row")
+    await expect(rows).toHaveCount(3)
+    await expect(rows.nth(0)).toBeVisible()
+    await expect(rows.nth(0)).toHaveAttribute("data-status", "done")
+    await expect(rows.nth(1)).toHaveAttribute("data-status", "failed")
+    await expect(rows.nth(2)).toHaveAttribute("data-status", status === "error" ? "failed" : "pending")
+    await expect(rows.nth(2).getByRole("button", { name: /Open YAML parser/ })).toBeDisabled()
+    await page.screenshot({
+      path: test.info().outputPath(`task-batch-${status}.png`),
+      fullPage: true,
+      animations: "disabled",
+    })
+    await rows
+      .nth(0)
+      .getByRole("button", { name: /Open CSV parser/ })
+      .click()
+    await expectSessionTitle(page, childTitle)
+    await expect(page).toHaveURL(new RegExp(`/server/.+/session/${childID}$`))
+    await page.goto(sessionHref(parentID))
+    await chip.click()
+    await rows
+      .nth(1)
+      .getByRole("button", { name: /Open JSON parser/ })
+      .click()
+    await expectSessionTitle(page, "JSON child session")
+    await expect(page).toHaveURL(new RegExp(`/server/.+/session/${childID}_json$`))
+  })
+}
+
+async function setup(page: Page, events?: () => EventPayload[], batch?: "completed" | "error") {
   await mockVectorServer(page, {
     directory,
     project: {
@@ -67,8 +105,12 @@ async function setup(page: Page, events?: () => EventPayload[]) {
       connected: ["anthropic"],
       default: { providerID: "anthropic", modelID: "claude-opus-4-6" },
     },
-    sessions: [session(parentID, parentTitle, 1700000000000), childSession()],
-    pageMessages: (sessionID) => ({ items: sessionID === parentID ? parentMessages() : [] }),
+    sessions: [
+      session(parentID, parentTitle, 1700000000000),
+      childSession(),
+      ...(batch ? [session(`${childID}_json`, "JSON child session", 1700000001000, { parentID })] : []),
+    ],
+    pageMessages: (sessionID) => ({ items: sessionID === parentID ? parentMessages(batch) : [] }),
     events,
     eventRetry: events ? 16 : undefined,
   })
@@ -116,7 +158,7 @@ function childSession() {
   return session(childID, childTitle, 1700000001000, { parentID })
 }
 
-function parentMessages() {
+function parentMessages(batch?: "completed" | "error") {
   const userID = "msg_user_0001"
   const assistantID = "msg_assistant_0001"
   return [
@@ -163,14 +205,37 @@ function parentMessages() {
           type: "tool",
           callID: "call_task_0001",
           tool: "task",
-          state: {
-            status: "completed",
-            input: { description: taskDescription, subagent_type: "explore" },
-            output: "Subagent finished",
-            title: taskDescription,
-            metadata: { sessionId: childID },
-            time: { start: 1700000001000, end: 1700000002000 },
-          },
+          state: batch
+            ? {
+                status: batch,
+                input: {
+                  tasks: [
+                    { description: "CSV parser", subagent_type: "general" },
+                    { description: "JSON parser", subagent_type: "general" },
+                    { description: "YAML parser", subagent_type: "general" },
+                  ],
+                },
+                ...(batch === "error"
+                  ? { error: "Parent interrupted after child launch" }
+                  : { output: "Mixed child outcomes", title: "Parser batch" }),
+                metadata: {
+                  taskBatch: 1,
+                  status: batch,
+                  tasks: [
+                    { index: 1, sessionId: `${childID}_json`, status: "error", error: "JSON validation failed" },
+                    { index: 0, sessionId: childID, status: "completed" },
+                  ],
+                },
+                time: { start: 1700000001000, end: 1700000002000 },
+              }
+            : {
+                status: "completed",
+                input: { description: taskDescription, subagent_type: "explore" },
+                output: "Subagent finished",
+                title: taskDescription,
+                metadata: { sessionId: childID },
+                time: { start: 1700000001000, end: 1700000002000 },
+              },
         },
       ],
     },

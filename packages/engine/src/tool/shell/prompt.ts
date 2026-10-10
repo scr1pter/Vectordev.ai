@@ -64,23 +64,16 @@ function powershellNotes(name: string) {
 
 function chainGuidance(name: string) {
   if (name === "powershell") {
-    return "If the commands depend on each other and must run sequentially, avoid '&&' in this shell because Windows PowerShell (5.1) does not support it. Use PowerShell conditionals such as `cmd1; if ($?) { cmd2 }` when later commands must depend on earlier success."
+    return "Combine known dependent operations in one call, such as a validated edit followed by tests and diff review. Windows PowerShell (5.1) does not support `&&`; use nested success conditionals such as `edit; if ($?) { tests; if ($?) { git diff --check } }`. Stop on failure."
   }
-  if (PS.has(name)) {
-    return "If the commands depend on each other and must run sequentially, use a single bash tool call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like New-Item before Copy-Item, Write before bash for git operations, or git add before git commit), run these operations sequentially instead."
-  }
-  if (CMD.has(name)) {
-    return "If the commands depend on each other and must run sequentially, use a single bash tool call with `&&` to chain them together (e.g., `mkdir out && dir out`). For instance, if one operation must complete before another starts, run these operations sequentially instead."
-  }
-  return "If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead."
+  return "Combine known dependent operations in one call, such as a validated edit followed by tests and diff review. Use `&&` so later operations run only after success; stop on failure. Wait for a result before constructing commands whose arguments depend on that result."
 }
 
 function bashCommandSection(chain: string, limits: Limits, defaultTimeoutMs: number) {
   return `Before executing the command, please follow these steps:
 
 1. Directory Verification:
-   - If the command will create new directories or files, first use \`ls\` to verify the parent directory exists and is the correct location
-   - For example, before running "mkdir foo/bar", first use \`ls foo\` to check that "foo" exists and is the intended parent directory
+   - Before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`test -d\` in the same command if it is unknown.
 
 2. Command Execution:
    - Always quote file paths that contain spaces with double quotes (e.g., rm "path with spaces/file.txt")
@@ -97,18 +90,12 @@ Usage notes:
   - You can specify an optional timeout in milliseconds. If not specified, commands will time out after ${defaultTimeoutMs}ms.
   - If the output exceeds ${limits.maxLines} lines or ${limits.maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Do NOT use \`head\`, \`tail\`, or other truncation commands to limit output; the full output will already be captured to a file for more precise searching.
 
-  - Avoid using Bash with the \`find\`, \`grep\`, \`cat\`, \`head\`, \`tail\`, \`sed\`, \`awk\`, or \`echo\` commands, unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
-    - File search: Use Glob (NOT find or ls)
-    - Content search: Use Grep (NOT grep or rg)
-    - Read files: Use Read (NOT cat/head/tail)
-    - Edit files: Use Edit (NOT sed/awk)
-    - Write files: Use Write (NOT echo >/cat <<EOF)
-    - Communication: Output text directly (NOT echo/printf)
+  - Prefer Glob, Grep, and Read for individual searches and reads, and Edit or Write for manual changes. A bounded search or batch read of related files may use one shell command. Use a project runtime for repetitive edits, validating all matches before any writes. Communicate directly instead of printing progress with echo/printf.
   - When issuing multiple commands:
     - If the commands are independent and can run in parallel, make multiple bash tool calls in a single message. For example, if you need to run "git status" and "git diff", send a single message with two bash tool calls in parallel.
     - ${chain}
     - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
-    - DO NOT use newlines to separate commands (newlines are ok in quoted strings)
+    - Multiline scripts are allowed; explicitly propagate failures before dependent operations.
   - AVOID using \`cd <directory> && <command>\`. Use the \`workdir\` parameter to change directories instead.
     <good-example>
     Use workdir="/foo/bar" with command: pytest tests
@@ -130,8 +117,7 @@ function powershellCommandSection(
 Before executing the command, please follow these steps:
 
 1. Directory Verification:
-   - If the command will create new directories or files, first use \`Test-Path -LiteralPath <parent>\` to verify the parent directory exists and is the correct location
-   - For example, before creating \`foo${pathSep}bar\`, first use \`Test-Path -LiteralPath "foo"\` to check that \`foo\` exists and is the intended parent directory
+   - Before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`Test-Path -LiteralPath <parent>\` in the same command if it is unknown.
 
 2. Command Execution:
    - Always quote file paths that contain spaces with double quotes (e.g., Remove-Item -LiteralPath "path with spaces${pathSep}file.txt")
@@ -148,18 +134,12 @@ Usage notes:
   - You can specify an optional timeout in milliseconds. If not specified, commands will time out after ${defaultTimeoutMs}ms.
   - If the output exceeds ${limits.maxLines} lines or ${limits.maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Do NOT use \`Select-Object -First\`, \`Select-Object -Last\`, or other truncation commands to limit output; the full output will already be captured to a file for more precise searching.
 
-  - Avoid using Shell with PowerShell file/content cmdlets unless explicitly instructed or when these cmdlets are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
-    - File search: Use Glob (NOT Get-ChildItem)
-    - Content search: Use Grep (NOT Select-String)
-    - Read files: Use Read (NOT Get-Content)
-    - Edit files: Use Edit (NOT Set-Content)
-    - Write files: Use Write (NOT Set-Content/Out-File or here-strings)
-    - Communication: Output text directly (NOT Write-Output/Write-Host)
+  - Prefer Glob, Grep, and Read for individual searches and reads, and Edit or Write for manual changes. A bounded search or batch read of related files may use one shell command. Use a project runtime for repetitive edits, validating all matches before any writes. Communicate directly instead of printing progress with Write-Output/Write-Host.
   - When issuing multiple commands:
     - If the commands are independent and can run in parallel, make multiple bash tool calls in a single message. For example, if you need to run "git status" and "git diff", send a single message with two bash tool calls in parallel.
     - ${chain}
     - Use \`;\` only when you need to run commands sequentially but don't care if earlier commands fail
-    - DO NOT use newlines to separate commands (newlines are ok in quoted strings)
+    - Multiline scripts are allowed; explicitly propagate failures before dependent operations.
   - AVOID changing directories inside the command. Use the \`workdir\` parameter to change directories instead.
     <good-example>
     Use workdir="project${pathSep}subdir" with command: pytest tests
@@ -179,8 +159,7 @@ function cmdCommandSection(chain: string, limits: Limits, defaultTimeoutMs: numb
 Before executing the command, please follow these steps:
 
 1. Directory Verification:
-   - If the command will create new directories or files, first use \`if exist\` to verify the parent directory exists and is the correct location
-   - For example, before creating \`foo\\bar\`, first use \`if exist "foo\\" dir "foo"\` to check that \`foo\` exists and is the intended parent directory
+   - Before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`if exist\` in the same command if it is unknown.
 
 2. Command Execution:
    - Always quote file paths that contain spaces with double quotes (e.g., del "path with spaces\\file.txt")
@@ -197,13 +176,7 @@ Usage notes:
   - You can specify an optional timeout in milliseconds. If not specified, commands will time out after ${defaultTimeoutMs}ms.
   - If the output exceeds ${limits.maxLines} lines or ${limits.maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Do NOT use \`more\` or other pagination commands to limit output; the full output will already be captured to a file for more precise searching.
 
-  - Avoid using Shell with cmd.exe file/content commands unless explicitly instructed or when these commands are truly necessary for the task. Instead, always prefer using the dedicated tools for these commands:
-    - File search: Use Glob (NOT dir /s)
-    - Content search: Use Grep (NOT findstr)
-    - Read files: Use Read (NOT type)
-    - Edit files: Use Edit (NOT copy)
-    - Write files: Use Write (NOT echo > file)
-    - Communication: Output text directly (NOT echo)
+  - Prefer Glob, Grep, and Read for individual searches and reads, and Edit or Write for manual changes. A bounded search or batch read of related files may use one shell command. Use a project runtime for repetitive edits, validating all matches before any writes. Communicate directly instead of printing progress with echo.
   - When issuing multiple commands:
     - If the commands are independent and can run in parallel, make multiple bash tool calls in a single message. For example, if you need to run "dir" and "where cmd", send a single message with two bash tool calls in parallel.
     - ${chain}

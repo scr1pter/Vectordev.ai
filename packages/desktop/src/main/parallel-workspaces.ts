@@ -113,6 +113,8 @@ export type ParallelWorkspaceRuntime = "vector" | CodingAgentRuntime
 
 export type ParallelWorkspaceRecord = {
   id: string
+  // Orders durable snapshots even when writes share a timestamp or the clock moves backward.
+  revision?: number
   name: string
   taskPrompt: string
   runtime: ParallelWorkspaceRuntime
@@ -276,6 +278,7 @@ function readRecords(): ParallelWorkspaceRecord[] {
     .map(
       (item): ParallelWorkspaceRecord => ({
         ...item,
+        revision: item.revision ?? 0,
         runtime:
           item.runtime === "claude-code" || item.runtime === "codex" || item.runtime === "cursor"
             ? item.runtime
@@ -319,7 +322,10 @@ function updateRecord(id: string, update: (record: ParallelWorkspaceRecord) => P
   const records = readRecords()
   const index = records.findIndex((record) => record.id === id)
   if (index === -1) throw new Error("Parallel workspace was not found.")
-  records[index] = compactClosedParallelWorkspace(update(records[index]!))
+  records[index] = compactClosedParallelWorkspace({
+    ...update(records[index]!),
+    revision: (records[index]!.revision ?? 0) + 1,
+  })
   writeRecords(records)
   return records[index]!
 }
@@ -1306,6 +1312,7 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
     changed = true
     const interrupted: ParallelWorkspaceRecord = {
       ...record,
+      revision: (record.revision ?? 0) + 1,
       status: "failed",
       progress: 0,
       lastAction: "Interrupted by app restart",
@@ -1491,6 +1498,7 @@ export async function createParallelWorkspace(input: CreateParallelWorkspaceInpu
 
   const record: ParallelWorkspaceRecord = {
     id,
+    revision: 0,
     name,
     taskPrompt: input.taskPrompt.trim(),
     runtime,

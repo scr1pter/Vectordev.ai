@@ -535,6 +535,7 @@ export type ParallelWorkspaceTurn = {
 
 export type ParallelWorkspaceRecord = {
   id: string
+  revision?: number
   name: string
   taskPrompt: string
   runtime: "vector" | "claude-code" | "codex" | "cursor"

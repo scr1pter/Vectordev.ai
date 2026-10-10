@@ -71,12 +71,24 @@ export function webSearchEnabled(flags = { exa: false, parallel: false }) {
 
 type TaskDef = Tool.InferDef<typeof TaskTool>
 type ReadDef = Tool.InferDef<typeof ReadTool>
+const builtinPatches = new WeakSet<Tool.Def>()
+const builtinTasks = new WeakSet<Tool.Def>()
+
+export function isBuiltinTask(tool: Tool.Def) {
+  return builtinTasks.has(tool)
+}
+
+export function isBuiltinPatch(tool: Tool.Def) {
+  return builtinPatches.has(tool)
+}
 
 type State = {
   custom: Tool.Def[]
   builtin: Tool.Def[]
   task: TaskDef
+  taskSchema: string
   read: ReadDef
+  patch: Tool.Def
 }
 
 export interface Interface {
@@ -275,7 +287,9 @@ const layer = Layer.effect(
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,
+          taskSchema: JSON.stringify(tool.task.jsonSchema),
           read: tool.read,
+          patch: tool.patch,
         }
       }),
     )
@@ -305,6 +319,7 @@ const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      const builtin = yield* InstanceState.get(state)
       const exa = yield* auth.get("exa").pipe(Effect.orDie)
       const parallel = yield* auth.get("parallel").pipe(Effect.orDie)
       const filtered = (yield* all()).filter((tool) => {
@@ -327,17 +342,18 @@ const layer = Layer.effect(
       return yield* Effect.forEach(
         filtered,
         Effect.fnUntraced(function* (tool: Tool.Def) {
+          // Task's compatibility validator must distinguish untouched definitions
+          // from in-place plugin edits without mutating the cached builtin schema.
+          const initialSchema = tool === builtin.task ? structuredClone(tool.jsonSchema) : tool.jsonSchema
           const output = {
             description: tool.description,
             parameters: tool.parameters,
-            jsonSchema: tool.jsonSchema,
+            jsonSchema: initialSchema,
           }
           yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
           const jsonSchema =
-            output.parameters === tool.parameters || output.jsonSchema !== tool.jsonSchema
-              ? output.jsonSchema
-              : undefined
-          return {
+            output.parameters === tool.parameters || output.jsonSchema !== initialSchema ? output.jsonSchema : undefined
+          const result = {
             id: tool.id,
             description: [output.description, tool.id === TaskTool.id ? yield* describeTask(input.agent) : undefined]
               .filter(Boolean)
@@ -347,6 +363,16 @@ const layer = Layer.effect(
             execute: tool.execute,
             formatValidationError: tool.formatValidationError,
           }
+          if (tool === builtin.patch && output.parameters === tool.parameters && output.jsonSchema === tool.jsonSchema)
+            builtinPatches.add(result)
+          if (
+            tool === builtin.task &&
+            output.parameters === tool.parameters &&
+            output.jsonSchema === initialSchema &&
+            JSON.stringify(jsonSchema) === builtin.taskSchema
+          )
+            builtinTasks.add(result)
+          return result
         }),
         { concurrency: "unbounded" },
       )

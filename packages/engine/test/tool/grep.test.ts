@@ -4,7 +4,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer, PlatformError } from "effect"
 import { GrepTool } from "../../src/tool/grep"
 import { provideInstance, testInstanceStoreLayer, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
@@ -77,6 +77,153 @@ const git = Effect.fn("GrepToolTest.git")(function* (cwd: string, args: string[]
 })
 
 describe("tool.grep", () => {
+  for (const target of ["missing.txt", "missing{a,b}", "packages/{a,b}/src"]) {
+    it.instance(`rejects missing literal target ${target}`, () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* Effect.promise(() => Bun.write(path.join(test.directory, "sibling.txt"), "needle sibling"))
+        const info = yield* GrepTool
+        const grep = yield* info.init()
+        const result = yield* grep.execute({ pattern: "needle", path: target }, ctx).pipe(Effect.exit)
+        expect(Exit.isFailure(result)).toBe(true)
+        if (Exit.isFailure(result))
+          expect(Cause.squash(result.cause)).toMatchObject({
+            message: `Search path does not exist: ${target}. 'path' is a literal file or directory; use 'include' for file globs.`,
+          })
+      }),
+    )
+  }
+
+  it.instance("searches real brace-named files and directories literally", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() => fs.mkdir(path.join(test.directory, "dir{a,b}")))
+      yield* Effect.promise(() =>
+        Bun.write(path.join(test.directory, "dir{a,b}", "literal{a,b}.txt"), "needle literal"),
+      )
+      yield* Effect.promise(() => Bun.write(path.join(test.directory, "dir{a,b}", "sibling.txt"), "needle sibling"))
+      yield* Effect.promise(() => fs.mkdir(path.join(test.directory, "dira")))
+      yield* Effect.promise(() => Bun.write(path.join(test.directory, "dira", "expanded.txt"), "needle expanded"))
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const file = yield* grep.execute({ pattern: "needle", path: "dir{a,b}/literal{a,b}.txt" }, ctx)
+      expect(file.metadata.matches).toBe(1)
+      expect(file.output).toContain("needle literal")
+      expect(file.output).not.toContain("needle sibling")
+      const directory = yield* grep.execute({ pattern: "needle", path: "dir{a,b}", include: "*.txt" }, ctx)
+      expect(directory.metadata.matches).toBe(2)
+      expect(directory.output).toContain("needle sibling")
+      expect(directory.output).not.toContain("needle expanded")
+    }),
+  )
+
+  it.instance("grep permission denial precedes target inspection", () =>
+    Effect.gen(function* () {
+      const filesystem = yield* FSUtil.Service
+      const info = yield* GrepTool.pipe(
+        Effect.provideService(FSUtil.Service, {
+          ...filesystem,
+          stat: () => Effect.die("stat must not precede grep permission"),
+        }),
+      )
+      const grep = yield* info.init()
+      const denied = new Error("grep denied")
+      const result = yield* grep
+        .execute(
+          { pattern: "needle", path: "missing.txt" },
+          {
+            ...ctx,
+            ask: (request) => {
+              expect(request.permission).toBe("grep")
+              return Effect.die(denied)
+            },
+          },
+        )
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result)) expect(Cause.squash(result.cause)).toBe(denied)
+    }),
+  )
+
+  it.instance("searches a file named dash instead of treating it as stdin", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() => Bun.write(path.join(test.directory, "-"), "needle literal dash"))
+      yield* Effect.promise(() => Bun.write(path.join(test.directory, "sibling.txt"), "needle sibling"))
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const result = yield* grep.execute({ pattern: "needle", path: "-" }, ctx)
+      expect(result.metadata.matches).toBe(1)
+      expect(result.output).toContain("needle literal dash")
+      expect(result.output).not.toContain("needle sibling")
+    }),
+  )
+
+  it.instance("a missing target through an external alias is authorized before its diagnostic", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+      const test = yield* TestInstance
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "vector-grep-missing-alias-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+      )
+      const alias = path.join(test.directory, "escape")
+      yield* Effect.promise(() => fs.symlink(outside, alias, "dir"))
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const requests: string[] = []
+      const denied = new Error("external directory denied")
+      const result = yield* grep
+        .execute(
+          { pattern: "needle", path: "escape/missing.txt" },
+          {
+            ...ctx,
+            ask: (request) => {
+              requests.push(request.permission)
+              if (request.permission !== "external_directory") return Effect.void
+              expect(request.patterns).toEqual([path.join(alias, "*")])
+              return Effect.die(denied)
+            },
+          },
+        )
+        .pipe(Effect.exit)
+      expect(requests).toEqual(["grep", "external_directory"])
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result)) expect(Cause.squash(result.cause)).toBe(denied)
+      const permitted = yield* grep.execute({ pattern: "needle", path: "escape/missing.txt" }, ctx).pipe(Effect.exit)
+      expect(Exit.isFailure(permitted)).toBe(true)
+      if (Exit.isFailure(permitted))
+        expect(Cause.squash(permitted.cause)).toMatchObject({
+          message:
+            "Search path does not exist: escape/missing.txt. 'path' is a literal file or directory; use 'include' for file globs.",
+        })
+    }),
+  )
+
+  it.instance("preserves a non-NotFound stat failure without invoking ripgrep", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const target = path.join(test.directory, "inaccessible.txt")
+      yield* Effect.promise(() => Bun.write(target, "needle"))
+      const filesystem = yield* FSUtil.Service
+      const ripgrep = yield* Ripgrep.Service
+      const failure = PlatformError.systemError({
+        _tag: "PermissionDenied",
+        module: "FileSystem",
+        method: "stat",
+        pathOrDescriptor: target,
+      })
+      const info = yield* GrepTool.pipe(
+        Effect.provideService(FSUtil.Service, { ...filesystem, stat: () => Effect.fail(failure) }),
+        Effect.provideService(Ripgrep.Service, { ...ripgrep, grep: () => Effect.die("unexpected search") }),
+      )
+      const grep = yield* info.init()
+      const result = yield* grep.execute({ pattern: "needle", path: target }, ctx).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result)) expect(Cause.squash(result.cause)).toBe(failure)
+    }),
+  )
+
   rooted.live("basic search", () =>
     Effect.gen(function* () {
       const info = yield* GrepTool

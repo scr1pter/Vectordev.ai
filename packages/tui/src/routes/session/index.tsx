@@ -1,3 +1,4 @@
+import { taskBatchEntries, taskItemState, taskItemLabel } from "@vectordevai/ui/task-batch"
 import { freeModelsLimitNotice, freeModelsLimitTitle } from "@vectordevai/core/free-model-choice"
 import { DialogFreeModelsLimit } from "../../component/dialog-free-models-limit"
 import {
@@ -188,15 +189,7 @@ export function Session() {
   // A subagent's own tasks cannot move to the background, so its view offers no way to try.
   const foregroundTasks = createMemo(() =>
     sync.data.capabilities.experimentalBackgroundSubagents && !session()?.parentID
-      ? messages().flatMap((message) =>
-          (sync.data.part[message.id] ?? []).filter(
-            (part): part is ToolPart =>
-              part.type === "tool" &&
-              part.tool === "task" &&
-              part.state.status === "running" &&
-              part.state.metadata?.background !== true,
-          ),
-        )
+      ? messages().flatMap((message) => (sync.data.part[message.id] ?? []).filter(canBackgroundTask))
       : [],
   )
   // Stop on the main turn leaves background subagents running, so they have a command of their own to stop them. A
@@ -1456,13 +1449,8 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
             <Show
               when={
                 sync.data.capabilities.experimentalBackgroundSubagents &&
-                props.parts.some(
-                  (x) =>
-                    x.type === "tool" &&
-                    x.tool === "task" &&
-                    x.state.status === "running" &&
-                    x.state.metadata?.background !== true,
-                )
+                !sync.session.get(ctx.sessionID)?.parentID &&
+                props.parts.some(canBackgroundTask)
               }
             >
               <span style={{ fg: theme.textMuted }}> · </span>
@@ -1677,6 +1665,11 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
   const shouldHide = createMemo(() => {
     if (ctx.showDetails()) return false
     if (props.part.state.status !== "completed") return false
+    if (props.part.tool === "task") {
+      const entries = taskBatchEntries(props.part.state.input, props.part.state.metadata)
+      if (entries?.some((item) => taskItemState(item.metadata.status, props.part.state.status) !== "completed"))
+        return false
+    }
     return true
   })
 
@@ -1802,6 +1795,7 @@ function InlineTool(props: {
   failure?: string
   spinner?: boolean
   separate?: boolean
+  error?: string | null
   children: JSX.Element
   part: ToolPart
   onClick?: () => void
@@ -1819,7 +1813,14 @@ function InlineTool(props: {
     return callID === props.part.callID
   })
 
-  const error = createMemo(() => (props.part.state.status === "error" ? props.part.state.error : undefined))
+  // Indexed children keep their own outcome and link even if the enclosing call failed.
+  const error = createMemo(() =>
+    props.error !== undefined
+      ? (props.error ?? undefined)
+      : props.part.state.status === "error"
+        ? props.part.state.error
+        : undefined,
+  )
 
   const denied = createMemo(
     () =>
@@ -2177,16 +2178,51 @@ function WebSearch(props: ToolProps) {
   )
 }
 
+export function canBackgroundTask(part: Part): part is ToolPart {
+  if (part.type !== "tool" || part.tool !== "task" || part.state.status !== "running") return false
+  const entries = taskBatchEntries(part.state.input, part.state.metadata)
+  if (!entries) return part.state.metadata?.background !== true
+  if (entries.length !== 1 || entries[0].index !== 0) return false
+  return entries[0].metadata.background !== true && entries[0].metadata.status === "running"
+}
+
 function Task(props: ToolProps) {
+  const entries = createMemo(() => taskBatchEntries(props.input, props.metadata))
+  return (
+    <Show when={entries()} fallback={<TaskItem {...props} />}>
+      {(items) => (
+        <>
+          <For each={items().map((item) => item.index)}>
+            {(index) => {
+              const item = createMemo(() => items().find((item) => item.index === index))
+              return <TaskItem {...props} input={item()?.input ?? {}} metadata={item()?.metadata ?? {}} index={index} />
+            }}
+          </For>
+          <Show when={props.part.state.status === "error"}>
+            <InlineTool icon="✗" complete={true} pending="" separate={true} part={props.part}>
+              Task batch interrupted
+            </InlineTool>
+          </Show>
+        </>
+      )}
+    </Show>
+  )
+}
+
+function TaskItem(props: ToolProps & { index?: number }) {
   const { theme } = useTheme()
   const { navigate } = useRoute()
   const sync = useSync()
   const dialog = useDialog()
 
-  onMount(() => {
-    const sessionID = stringValue(props.metadata.sessionId)
-    if (sessionID && !sync.data.message[sessionID]?.length) void sync.session.sync(sessionID)
-  })
+  createEffect(
+    on(
+      () => stringValue(props.metadata.sessionId),
+      (sessionID) => {
+        if (sessionID && !sync.data.message[sessionID]?.length) void sync.session.sync(sessionID)
+      },
+    ),
+  )
 
   const sessionID = createMemo(() => stringValue(props.metadata.sessionId))
   const messages = createMemo(() => sync.data.message[sessionID() ?? ""] ?? [])
@@ -2210,6 +2246,10 @@ function Task(props: ToolProps) {
   const [now, setNow] = createSignal(Date.now())
   // The subagent's own outcome. The tool call completes even when the subagent failed or was stopped, so the part's
   // status alone would show those as done.
+  const lifecycle = createMemo(() => stringValue(props.metadata.status))
+  const itemState = createMemo(() =>
+    props.index === undefined ? props.part.state.status : taskItemState(lifecycle(), props.part.state.status),
+  )
   const row = createMemo(() =>
     subagentRowState({
       part: props.part.state.status,
@@ -2227,8 +2267,13 @@ function Task(props: ToolProps) {
     const timer = setTimeout(() => setNow(Date.now()), Math.max(0, at - Date.now()))
     onCleanup(() => clearTimeout(timer))
   })
-  const isRunning = createMemo(() => row().running)
-  const outcome = createMemo(() => row().outcome)
+  const isRunning = createMemo(() => (props.index === undefined ? row().running : itemState() === "running"))
+  const outcome = createMemo(() => {
+    if (props.index === undefined) return row().outcome
+    if (isRunning()) return
+    const value = lifecycle()
+    if (value === "error" || value === "cancelled") return value
+  })
   const retry = createMemo(() => {
     const value = status()
     if (value?.type !== "retry") return
@@ -2243,11 +2288,13 @@ function Task(props: ToolProps) {
   })
 
   const content = createMemo(() => {
-    const description = stringValue(props.input.description)
+    const description =
+      stringValue(props.input.description) ??
+      (props.index !== undefined ? (stringValue(props.metadata.title) ?? `Task ${props.index + 1}`) : undefined)
     if (!description) return ""
     let content = [
       formatSubagentTitle(
-        Locale.titlecase(stringValue(props.input.subagent_type) ?? "General"),
+        Locale.titlecase(stringValue(props.input.subagent_type) ?? (props.index === undefined ? "General" : "Agent")),
         description,
         props.metadata.background === true,
       ),
@@ -2264,7 +2311,14 @@ function Task(props: ToolProps) {
       } else content.push(`↳ ${formatSubagentToolcalls(tools().length)}`)
     }
 
-    if (!isRunning() && props.part.state.status === "completed") {
+    if (props.index !== undefined) {
+      const error = stringValue(props.metadata.error)
+      content.push(
+        `↳ ${taskItemLabel(lifecycle(), props.part.state.status)}${error ? ` · ${Locale.truncate(error, 80)}` : ""}`,
+      )
+      if (itemState() === "completed" && messages().length > 0 && duration() > 0)
+        content.push(`↳ ${formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`)
+    } else if (!isRunning() && props.part.state.status === "completed") {
       const error = stringValue(props.metadata.error)
       content.push(
         `↳ ${formatSubagentOutcome(outcome(), error && Locale.truncate(error, 80)) ?? formatCompletedSubagentDetail(tools().length, Locale.duration(duration()))}`,
@@ -2277,27 +2331,36 @@ function Task(props: ToolProps) {
   return (
     <InlineTool
       icon={
-        outcome() === "error"
-          ? "✗"
-          : outcome() === "cancelled" || outcome() === "interrupted"
-            ? "■"
-            : props.part.state.status === "completed"
+        outcome() === "cancelled" || outcome() === "interrupted"
+          ? "■"
+          : outcome() === "error" || (props.index !== undefined && itemState() === "error")
+            ? "✗"
+            : itemState() === "completed"
               ? "✓"
               : "│"
       }
       separate={true}
-      color={retry() || outcome() === "error" ? theme.error : undefined}
+      color={
+        retry() || outcome() === "error" || (props.index !== undefined && itemState() === "error")
+          ? theme.error
+          : undefined
+      }
       spinner={isRunning()}
-      complete={stringValue(props.input.description)}
+      complete={props.index !== undefined || stringValue(props.input.description)}
       pending="Delegating..."
+      error={props.index !== undefined ? null : undefined}
       part={props.part}
-      onClick={() => {
-        if (sessionID()) {
-          navigate({ type: "session", sessionID: sessionID()! })
-        }
-        const status = retry()
-        if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
-      }}
+      onClick={
+        sessionID() || retry()
+          ? () => {
+              if (sessionID()) {
+                navigate({ type: "session", sessionID: sessionID()! })
+              }
+              const status = retry()
+              if (status) void DialogAlert.show(dialog, "Retry Error", status.message)
+            }
+          : undefined
+      }
     >
       {content()}
     </InlineTool>
@@ -2378,11 +2441,13 @@ export function liveBackgroundTasks(
     ...new Set(
       parts.flatMap((part) => {
         if (part.type !== "tool" || part.tool !== "task" || part.state.status === "pending") return []
-        const metadata = part.state.metadata
-        if (metadata?.background !== true || typeof metadata.sessionId !== "string") return []
-        if (metadata.status !== "running" && metadata.status !== "queued") return []
-        const startedAt = typeof metadata.startedAt === "number" ? metadata.startedAt : undefined
-        return live({ sessionID: metadata.sessionId, status: metadata.status, startedAt }) ? [metadata.sessionId] : []
+        const entries = taskBatchEntries(part.state.input, part.state.metadata)
+        return (entries ? entries.map((item) => item.metadata) : [part.state.metadata]).flatMap((metadata) => {
+          if (metadata?.background !== true || typeof metadata.sessionId !== "string") return []
+          if (metadata.status !== "running" && metadata.status !== "queued") return []
+          const startedAt = typeof metadata.startedAt === "number" ? metadata.startedAt : undefined
+          return live({ sessionID: metadata.sessionId, status: metadata.status, startedAt }) ? [metadata.sessionId] : []
+        })
       }),
     ),
   ]

@@ -1,44 +1,13 @@
-Create and maintain a structured task list for the current coding session. Tracks progress, organizes multi-step work, and surfaces status to the user.
+Maintain a structured list of substantial milestones when the user requests a todo list/tracked plan, work has several substantial independent objectives, or extended work needs checkpoints to prevent omissions and retain progress.
 
-## When to use
-Use proactively when:
-- The task requires 3+ distinct steps or actions (not just 3 tool calls for a single conceptual step)
-- The work is non-trivial and benefits from planning
-- The user provides multiple tasks (numbered or comma-separated) or explicitly asks for a todo list
-- New instructions arrive - capture them as todos
-- You start a task - mark it `in_progress` (only one at a time) before working
-- You finish a task - mark it `completed` and add any follow-ups discovered during the work
+Unless explicitly requested, skip tracking for a single bounded objective (including multi-file mechanical changes), routine investigation/editing/verification, informational requests, or work where tracking adds no value. Multiple files or tool calls alone do not justify a list.
 
-## When NOT to use
-Skip when:
-- The work is a single, straightforward task (or <3 trivial steps)
-- The request is purely informational or conversational
-- Tracking adds no organizational value
+States: pending = not started; in_progress = actively working; completed = finished successfully; cancelled = no longer needed. Keep exactly one in_progress while work remains.
 
-## States
-- `pending` - not started
-- `in_progress` - actively working (exactly ONE at a time)
-- `completed` - finished successfully
-- `cancelled` - no longer needed
+Rules:
+- Use specific, actionable milestones, splitting large work into substantial outcomes rather than individual searches, reads, edits or test commands.
+- Persist observed progress, new blockers and changed requirements before reporting final status; prose alone does not update the list. Combine known status changes and, when possible, independent productive calls in the same response.
+- Mark completed only after work and required verification finish, never on intent. Keep the original blocked/partial milestone in_progress, including failed verification; add a pending follow-up describing the blocker rather than moving that milestone to pending.
+- Preserve user commands verbatim, including flags, arguments and order.
 
-## Rules
-- Update status in real time; don't batch completions
-- Mark `completed` only after the required work is actually done, including any required verification. Never based on intent.
-- Keep exactly one `in_progress` while work remains
-- If blocked or partial, keep it `in_progress` and add a follow-up todo describing the blocker
-- Preserve user-provided commands verbatim (flags, args, order)
-- Items should be specific and actionable; break large work into smaller steps
-
-## Examples
-
-Use it:
-- "Add a dark mode toggle and run the tests" -> multi-step feature + explicit verification
-- "Rename getCwd -> getCurrentWorkingDirectory across the repo" -> grep reveals 15 occurrences in 8 files
-- "Implement registration, catalog, cart, checkout" -> multiple complex features
-
-Skip it:
-- "How do I print Hello World in Python?" -> informational
-- "Add a comment to calculateTotal" -> single edit
-- "Run npm install and tell me what happened" -> one command
-
-When in doubt, use it.
+Examples: track several complex features, a storage/API/import migration, or an explicitly requested bug-fix plan. Otherwise skip a request to fix one failing test without changing tests, a feature with verification, rename, comment edit, command or informational question.

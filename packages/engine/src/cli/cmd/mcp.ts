@@ -1,19 +1,11 @@
-import { ConfigSchema } from "@/config/schema"
 import { cmd } from "./cmd"
-import { ConfigV1 } from "@vectordevai/core/v1/config/config"
+import type { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { effectCmd } from "../effect-cmd"
 import { Cause } from "effect"
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
-import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js"
 import * as prompts from "@clack/prompts"
 import { UI } from "../ui"
-import { MCP } from "../../mcp"
-import { McpAuth } from "../../mcp/auth"
-import { McpOAuthProvider } from "../../mcp/oauth-provider"
-import { Config } from "@/config/config"
-import { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
+import type { MCP } from "../../mcp"
+import type { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
 import { InstanceRef } from "@/effect/instance-ref"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import path from "path"
@@ -68,6 +60,8 @@ function oauthServers(config: ConfigV1.Info) {
 
 function listState() {
   return Effect.gen(function* () {
+    const { Config } = yield* Effect.promise(() => import("@/config/config"))
+    const { MCP } = yield* Effect.promise(() => import("../../mcp"))
     const cfg = yield* Config.Service
     const mcp = yield* MCP.Service
     const config = yield* cfg.get()
@@ -82,6 +76,8 @@ function listState() {
 
 function authState() {
   return Effect.gen(function* () {
+    const { Config } = yield* Effect.promise(() => import("@/config/config"))
+    const { MCP } = yield* Effect.promise(() => import("../../mcp"))
     const cfg = yield* Config.Service
     const mcp = yield* MCP.Service
     const config = yield* cfg.get()
@@ -179,6 +175,7 @@ export const McpAuthCommand = effectCmd({
       })
       .command(McpAuthListCommand),
   handler: Effect.fn("Cli.mcp.auth")(function* (args) {
+    const { MCP } = yield* Effect.promise(() => import("../../mcp"))
     UI.empty()
     prompts.intro("MCP OAuth Authentication")
 
@@ -343,6 +340,8 @@ export const McpLogoutCommand = effectCmd({
       type: "string",
     }),
   handler: Effect.fn("Cli.mcp.logout")(function* (args) {
+    const { MCP } = yield* Effect.promise(() => import("../../mcp"))
+    const { McpAuth } = yield* Effect.promise(() => import("../../mcp/auth"))
     UI.empty()
     prompts.intro("MCP OAuth Logout")
 
@@ -408,6 +407,7 @@ async function resolveConfigPath(baseDir: string, global = false) {
 }
 
 async function addMcpToConfig(name: string, mcpConfig: ConfigMCPV1.Info, configPath: string) {
+  const { ConfigSchema } = await import("@/config/schema")
   let text = "{}"
   if (await Filesystem.exists(configPath)) {
     text = await Filesystem.readText(configPath)
@@ -664,6 +664,9 @@ export const McpDebugCommand = effectCmd({
       demandOption: true,
     }),
   handler: Effect.fn("Cli.mcp.debug")(function* (args) {
+    const { Config } = yield* Effect.promise(() => import("@/config/config"))
+    const { MCP } = yield* Effect.promise(() => import("../../mcp"))
+    const { McpAuth } = yield* Effect.promise(() => import("../../mcp/auth"))
     const config = yield* Config.Service.use((cfg) => cfg.get())
     const mcp = yield* MCP.Service
     const auth = yield* McpAuth.Service
@@ -699,6 +702,7 @@ export const McpDebugCommand = effectCmd({
         return
       }
 
+      const { LATEST_PROTOCOL_VERSION } = await import("@modelcontextprotocol/sdk/types.js")
       prompts.log.info(`Server: ${serverName}`)
       prompts.log.info(`URL: ${serverConfig.url}`)
 
@@ -759,6 +763,10 @@ export const McpDebugCommand = effectCmd({
         }
 
         if (response.status === 401) {
+          const { Client } = await import("@modelcontextprotocol/sdk/client/index.js")
+          const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+          const { UnauthorizedError } = await import("@modelcontextprotocol/sdk/client/auth.js")
+          const { McpOAuthProvider } = await import("../../mcp/oauth-provider")
           prompts.log.info("Initial unauthenticated check returned 401, so this server requires OAuth")
 
           // Try to discover OAuth metadata

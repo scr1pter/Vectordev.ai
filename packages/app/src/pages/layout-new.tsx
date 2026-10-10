@@ -70,10 +70,21 @@ import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
 import { OnboardingProgress } from "@/features/onboarding/onboarding"
 import { SpotlightTour } from "@/features/onboarding/spotlight-tour"
 import { createSpotlightSteps } from "@/features/onboarding/spotlight-steps"
-import { outcomesFromWorkspaceRecord, recordOutcome } from "@/features/economics/economics-repository"
+import {
+  isTerminalWorkspace,
+  outcomesFromWorkspaceRecord,
+  recordWorkspaceOutcome,
+  recordSessionOutcome,
+} from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 import { measureUsage } from "@/features/economics/token-usage"
-import { outcomeFromSession } from "@/features/economics/session-outcomes"
+import {
+  createSessionOutcomeRecorder,
+  measureSessionEconomics,
+  outcomeFromSession,
+} from "@/features/economics/session-outcomes"
+import { createSessionFamilyRefresher, sessionFamilyEventID } from "@/features/economics/session-family"
+import { createWorkspaceOutcomeRecorder, type WorkspaceOutcomeRecord } from "@/features/economics/workspace-outcomes"
 import {
   ONBOARDING_UPDATED_EVENT,
   readOnboardingFlags,
@@ -187,6 +198,7 @@ type WorkspaceValidationReport = {
 
 type ParallelWorkspaceRecord = {
   id: string
+  revision?: number
   name: string
   taskPrompt: string
   runtime: ParallelAgentRuntime
@@ -1622,46 +1634,52 @@ export default function NewLayout(props: ParentProps) {
     return records
   }
 
-  // Feed the Model Economics Engine with verified outcomes: any terminal
-  // workspace record that ran validation becomes a ModelOutcome. recordOutcome
-  // dedups on the record id, so re-running over the full list is idempotent.
-  const TERMINAL_WORKSPACE_STATUSES: ParallelWorkspaceStatus[] = [
-    "complete",
-    "failed",
-    "needs review",
-    "stopped",
-    "merged",
-    "discarded",
-  ]
-  // Callers re-run over the full workspace list every poll, so remember which
-  // records were already measured. Without this the engine would refetch every
-  // finished agent's whole message history every 1.5 seconds.
-  const measuredEconomicsIds = new Set<string>()
-
   // Real spend comes from the provider's own reported usage on the agent
   // session's assistant messages. A workspace with no reachable session simply
   // records no usage rather than a fabricated zero.
-  const measureWorkspaceUsage = async (record: ParallelWorkspaceRecord) => {
+  const measureWorkspaceUsage = async (record: WorkspaceOutcomeRecord) => {
     if (!record.agentSessionId) return undefined
-    const history = await serverSDK()
-      .createClient({ directory: record.isolatedPath })
-      .session.messages({ sessionID: record.agentSessionId })
-      .catch(() => undefined)
-    if (!Array.isArray(history?.data)) return undefined
-    return measureUsage(history.data.map((entry) => entry.info))
+    const client = serverSDK().createClient({ directory: record.isolatedPath })
+    const sessionID = record.agentSessionId
+    return measureSessionEconomics({
+      session: async () => (await client.session.get({ sessionID })).data,
+      messages: async () => {
+        const history = await client.session.messages({ sessionID })
+        return Array.isArray(history.data) ? history.data.map((entry) => entry.info) : undefined
+      },
+    })
   }
 
-  const recordEconomicsOutcomes = (records: ParallelWorkspaceRecord[]) => {
-    for (const record of records) {
-      if (!record.validationReport && record.validationPassed === undefined) continue
-      if (!TERMINAL_WORKSPACE_STATUSES.includes(record.status)) continue
-      if (measuredEconomicsIds.has(record.id)) continue
-      measuredEconomicsIds.add(record.id)
-      void measureWorkspaceUsage(record).then((measured) =>
-        recordOutcome(outcomesFromWorkspaceRecord(record, categorizeTask(record.taskPrompt), measured)),
-      )
-    }
-  }
+  // Failed and stopped attempts can spend tokens before validation ever runs.
+  // Keep every terminal workspace in the evidence; the mapper records checks separately.
+  const workspaceOutcomes = createWorkspaceOutcomeRecorder(async (record, current) => {
+    const evidence = await measureWorkspaceUsage(record)
+    if (!current()) return
+    const outcome = outcomesFromWorkspaceRecord(
+      record,
+      categorizeTask(record.taskPrompt),
+      evidence?.measured,
+      evidence?.spend,
+      evidence?.timing,
+    )
+    if (!outcome) return
+    const result = await recordWorkspaceOutcome(
+      outcome,
+      {
+        workspaceRevision: record.revision ?? 0,
+        sessionID: record.agentSessionId,
+        sessionUpdatedAt: evidence?.updatedAt,
+      },
+      current,
+    )
+    if (result === "stale") throw new Error("Workspace economics snapshot was superseded")
+  })
+  const recordEconomicsOutcomes = (records: ParallelWorkspaceRecord[]) =>
+    Promise.all(records.map((record) => workspaceOutcomes.observe(record)))
+  createEffect(() => {
+    void recordEconomicsOutcomes(parallelRecords())
+  })
+  onCleanup(() => workspaceOutcomes.dispose())
 
   const loadParallelWorkspaces = async (scope = activeWorkspaceScope()) => {
     const api = parallelApi()
@@ -1694,7 +1712,6 @@ export default function NewLayout(props: ParentProps) {
     setParallelRecords(allRecords)
     for (const record of allRecords) server.projects.close(record.isolatedPath)
     if (isInternalProjectPath(lastProjectPath()) && scope.sourcePath) rememberProjectPath(scope.sourcePath)
-    recordEconomicsOutcomes(allRecords)
     reconcileAgentTabOrder(allRecords)
     if (!swarmSelectedID() && !allRecords.some((record) => record.id === parallelSelectedID())) {
       setParallelSelectedID(allRecords[0]?.id)
@@ -1775,7 +1792,6 @@ export default function NewLayout(props: ParentProps) {
         ? records.map((item) => (item.id === id ? record : item))
         : [record, ...records],
     )
-    recordEconomicsOutcomes([record])
   }
 
   onMount(() => {
@@ -1795,14 +1811,11 @@ export default function NewLayout(props: ParentProps) {
   })
 
   // Only agents that are working or about to start count. A result waiting for
-  // review is in TERMINAL_WORKSPACE_STATUSES with the other finished states: it
+  // review is terminal with the other finished states: it
   // uses no CPU, so it neither counts toward the core warning nor reads as running.
   const liveWorkspaceCount = () =>
     parallelRecords().filter(
-      (record) =>
-        record.swarmRole !== "coordinator" &&
-        record.mergeState === "none" &&
-        !TERMINAL_WORKSPACE_STATUSES.includes(record.status),
+      (record) => record.swarmRole !== "coordinator" && record.mergeState === "none" && !isTerminalWorkspace(record),
     ).length
   // Vector sets no cap. Past one live agent per core, the builds, tests and type
   // checks they run queue for CPU, so the launcher warns and never refuses.
@@ -2806,56 +2819,106 @@ export default function NewLayout(props: ParentProps) {
   // Ordinary sessions feed the economics engine too. Learning only from
   // validated parallel runs left it with too few samples to ever recommend
   // anything, which is why the feature looked dead.
-  const recordedSessionOutcomes = new Set<string>()
-  // Sessions whose idle had no usage to record yet. A provider that never reports usage would otherwise have the
-  // whole history fetched again on every turn, so each session gets a few tries.
-  const outcomeAttempts = new Map<string, number>()
-  const stopSessionOutcomes = serverSDK().event.listen((event) => {
-    if (event.details.type !== "session.idle") return
-    const sessionID = sessionIDFromEvent(event.details)
-    const directory = (event as { name?: string }).name
-    if (!sessionID || !directory) return
-    const outcomeRecorded = recordedSessionOutcomes.has(sessionID)
-    if (outcomeRecorded && readOnboardingFlags().taskCompleted) return
-    if (!outcomeRecorded) recordedSessionOutcomes.add(sessionID)
-    void (async () => {
-      const client = serverSDK().createClient({ directory })
-      const history = await client.session.messages({ sessionID }).catch(() => undefined)
-      if (!Array.isArray(history?.data)) {
-        if (!outcomeRecorded) recordedSessionOutcomes.delete(sessionID)
-        return
-      }
-      if (successfulActivationFromSession(history.data)) {
-        setOnboardingFlag("providerVerified")
-        setOnboardingFlag("taskCompleted")
-      }
-      if (outcomeRecorded) return
-      // A subagent's session is part of its parent's task, not a task of its own whose model choice to learn from.
-      const session = await client.session.get({ sessionID }).catch(() => undefined)
-      if (session?.data?.parentID) return
-      const parts: Record<string, unknown[]> = {}
-      for (const entry of history.data) {
-        const id = (entry.info as { id?: string } | undefined)?.id
-        if (id) parts[id] = (entry as { parts?: unknown[] }).parts ?? []
-      }
-      const outcome = outcomeFromSession({
-        sessionID,
-        projectId: directory,
-        messages: history.data as never,
-        parts: parts as never,
-        subagents: session?.data,
-      })
-      // A first turn that failed or was stopped before any usage has nothing to record yet, so a later idle tries again.
-      if (!outcome) {
-        const attempts = (outcomeAttempts.get(sessionID) ?? 0) + 1
-        outcomeAttempts.set(sessionID, attempts)
-        if (attempts < 3) recordedSessionOutcomes.delete(sessionID)
-        return
-      }
-      await recordOutcome(outcome)
-    })()
+  const sessionOutcomes = createSessionOutcomeRecorder(async (sessionID, directory, current) => {
+    const client = serverSDK().createClient({ directory })
+    const before = await client.session.get({ sessionID }).catch(() => undefined)
+    if (!current()) return
+    if (!before?.data) throw new Error("Session metadata is unavailable")
+    // Child spend is recorded through the root's family refresh; its full history is not a separate sample.
+    if (before.data.parentID) return
+    const history = await client.session.messages({ sessionID })
+    if (!Array.isArray(history.data)) throw new Error("Session history is unavailable")
+    if (!current()) return
+    if (successfulActivationFromSession(history.data)) {
+      setOnboardingFlag("providerVerified")
+      setOnboardingFlag("taskCompleted")
+    }
+    // Missing usage is not evidence to remove a previous sample. Measured mixed-model usage is.
+    if (!measureUsage(history.data.map((entry) => entry.info))) return
+    const session = await client.session.get({ sessionID })
+    if (!session.data) throw new Error("Session metadata is unavailable")
+    if (!current()) return
+    // Do not assign a newer metadata revision to history fetched before that revision existed.
+    if (
+      session.data.time.updated !== before.data.time.updated ||
+      session.data.cost !== before.data.cost ||
+      session.data.unpricedSteps !== before.data.unpricedSteps ||
+      session.data.subagentCost !== before.data.subagentCost ||
+      session.data.subagentUnpricedSteps !== before.data.subagentUnpricedSteps
+    )
+      throw new Error("Session changed while collecting usage")
+    const parts = Object.fromEntries(history.data.map((entry) => [entry.info.id, entry.parts]))
+    const outcome = outcomeFromSession({
+      sessionID,
+      projectId: directory,
+      messages: history.data,
+      parts,
+      spend: session.data,
+    })
+    if (!outcome) {
+      const models = new Set(
+        history.data.flatMap((entry) => {
+          const usage = measureUsage([entry.info])
+          return usage?.provider && usage.model ? [JSON.stringify([usage.provider, usage.model])] : []
+        }),
+      )
+      if (models.size < 2) return
+    }
+    await recordSessionOutcome({
+      sessionID,
+      projectId: directory,
+      updatedAt: history.data.reduce(
+        (latest, entry) =>
+          Math.max(
+            latest,
+            entry.info.role === "assistant"
+              ? (entry.info.time.completed ?? entry.info.time.created)
+              : entry.info.time.created,
+          ),
+        session.data.time.updated,
+      ),
+      outcome,
+    })
   })
-  onCleanup(stopSessionOutcomes)
+  const sessionFamily = createSessionFamilyRefresher(
+    async (sessionID, directory) => {
+      const result = await serverSDK().createClient({ directory }).session.get({ sessionID })
+      return result.data
+    },
+    async (sessionID, directory, revision) => {
+      if (!(await sessionOutcomes.refresh(sessionID, directory, revision))) return false
+      const workspaces = parallelRecords().filter(
+        (record) => record.agentSessionId === sessionID && record.isolatedPath === directory,
+      )
+      const recorded = await Promise.all(workspaces.map((record) => workspaceOutcomes.observe(record, true)))
+      return recorded.every(Boolean)
+    },
+  )
+  const stopSessionOutcomes = serverSDK().event.listen((event) => {
+    const directory = (event as { name?: string }).name
+    if (!directory) return
+    const familyID = sessionFamilyEventID(event.details)
+    if (familyID) void sessionFamily.refresh(familyID, directory).catch(() => undefined)
+    if (event.details.type === "session.updated") {
+      const session = event.details.properties.info
+      sessionOutcomes.changed(session.id, directory, session.time.updated)
+      return
+    }
+    const sessionID = sessionIDFromEvent(event.details)
+    if (!sessionID) return
+    if (event.details.type === "message.updated") {
+      const message = event.details.properties.info
+      if (message.role === "assistant" && message.time.completed)
+        sessionOutcomes.changed(sessionID, directory, message.time.completed)
+      return
+    }
+    if (event.details.type === "session.idle") void sessionOutcomes.idle(sessionID, directory)
+  })
+  onCleanup(() => {
+    stopSessionOutcomes()
+    sessionFamily.dispose()
+    sessionOutcomes.dispose()
+  })
 
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
   const taskDraftRoute = () => location.pathname === "/new-session" && Boolean(activeDraftID())

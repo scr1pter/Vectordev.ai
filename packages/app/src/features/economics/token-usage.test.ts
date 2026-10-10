@@ -3,6 +3,82 @@ import { measureUsage } from "./token-usage"
 import { addUsage, emptyUsage, totalTokens } from "./economics-types"
 
 describe("measureUsage", () => {
+  test("only homogeneous observed preset names qualify; mixed and unknown keep their totals", () => {
+    const message = {
+      role: "assistant",
+      providerID: "p",
+      modelID: "m",
+      cost: 0.1,
+      tokens: { input: 10 },
+      variant: "low",
+    }
+    expect(measureUsage([message, message])?.variant).toEqual({ kind: "named", name: "low" })
+    const mixed = measureUsage([message, { ...message, variant: "max" }])
+    expect(mixed?.variant).toEqual({ kind: "mixed" })
+    expect(mixed?.costUsd).toBeCloseTo(0.2)
+    expect(mixed?.usage.input).toBe(20)
+    expect(measureUsage([message, { ...message, variant: undefined }])?.variant).toBeUndefined()
+    expect(measureUsage([{ ...message, variant: undefined }])?.variant).toBeUndefined()
+    expect(measureUsage([message, { ...message, variant: "max", forked: true }])?.variant).toEqual({
+      kind: "named",
+      name: "low",
+    })
+  })
+
+  test("an unmetered later attempt cannot qualify another preset's paid history", () => {
+    const message = {
+      role: "assistant",
+      providerID: "p",
+      modelID: "m",
+      variant: "low",
+      cost: 0.1,
+      tokens: { input: 10 },
+    }
+    expect(measureUsage([message, { ...message, variant: "max", tokens: undefined }])?.variant).toEqual({
+      kind: "mixed",
+    })
+    expect(measureUsage([message, { ...message, variant: undefined, tokens: undefined }])?.variant).toBeUndefined()
+    expect(
+      measureUsage([
+        { ...message, variant: "xhigh" },
+        { ...message, variant: "max" },
+      ])?.variant,
+    ).toEqual({ kind: "mixed" })
+  })
+
+  test("unmetered cross-model attempts invalidate identity in either order without assuming they were free", () => {
+    const paid = {
+      role: "assistant",
+      providerID: "p",
+      modelID: "paid",
+      variant: "low",
+      cost: 0.1,
+      tokens: { input: 10 },
+    }
+    const unmetered = { role: "assistant", providerID: "p", modelID: "unmetered", variant: "max", cost: 0 }
+    for (const messages of [
+      [paid, unmetered],
+      [unmetered, paid],
+    ]) {
+      const result = measureUsage(messages)
+      expect(result).toMatchObject({ mixedModels: true, usage: { input: 10 }, messageCount: 1 })
+      expect(result?.provider).toBeUndefined()
+      expect(result?.model).toBeUndefined()
+      expect(result?.variant).toBeUndefined()
+      expect(result?.costUsd).toBeUndefined()
+    }
+    const unknown = measureUsage([paid, { ...unmetered, providerID: undefined, modelID: undefined }])
+    expect(unknown?.model).toBeUndefined()
+    expect(unknown?.mixedModels).toBeUndefined()
+    expect(unknown?.costUsd).toBeUndefined()
+    expect(measureUsage([paid, { ...unmetered, forked: true }])).toMatchObject({
+      provider: "p",
+      model: "paid",
+      variant: { kind: "named", name: "low" },
+      costUsd: 0.1,
+    })
+  })
+
   test("a run with an unpriced response has no cost, since the rest of it is not what the run cost", () => {
     const measured = measureUsage([
       {
@@ -156,6 +232,56 @@ describe("measureUsage", () => {
     ])
     expect(measured?.costUsd).toBeCloseTo(0.05, 10)
     expect(measured?.model).toBeUndefined()
+  })
+
+
+  test("keeps mixed-model totals without attributing the entire run to its last model", () => {
+    const measured = measureUsage([
+      { role: "assistant", providerID: "openai", modelID: "gpt-4o-mini", cost: 0.01, tokens: { input: 10, output: 5 } },
+      {
+        role: "assistant",
+        providerID: "anthropic",
+        modelID: "claude-opus-5",
+        cost: 0.02,
+        tokens: { input: 20, output: 5 },
+      },
+    ])
+    expect(measured?.model).toBeUndefined()
+    expect(measured?.provider).toBeUndefined()
+    expect(measured?.usage.input).toBe(30)
+    expect(measured?.costUsd).toBeCloseTo(0.03)
+  })
+
+  test("does not merge identical model names from different providers into one model's evidence", () => {
+    const measured = measureUsage([
+      { role: "assistant", providerID: "a", modelID: "model", cost: 0.01, tokens: { input: 10 } },
+      { role: "assistant", providerID: "b", modelID: "model", cost: 0.02, tokens: { input: 20 } },
+    ])
+    expect(measured?.model).toBeUndefined()
+    expect(measured?.provider).toBeUndefined()
+    expect(measured?.messageCount).toBe(2)
+  })
+
+  test("a missing price on one measured message leaves the total cost unknown", () => {
+    const measured = measureUsage([
+      { role: "assistant", cost: 0.01, tokens: { input: 10 } },
+      { role: "assistant", tokens: { input: 20 } },
+    ])
+    expect(measured?.usage.input).toBe(30)
+    expect(measured?.costUsd).toBeUndefined()
+  })
+
+  test("preserves an explicitly reported zero cost", () => {
+    expect(measureUsage([{ role: "assistant", cost: 0, tokens: { input: 10 } }])?.costUsd).toBe(0)
+  })
+
+  test("counts cache-write-only responses as measured usage", () => {
+    const measured = measureUsage([
+      { role: "assistant", providerID: "anthropic", modelID: "model", cost: 0.01, tokens: { cache: { write: 100 } } },
+    ])
+    expect(measured?.usage.cacheWrite).toBe(100)
+    expect(measured?.costUsd).toBe(0.01)
+    expect(measured?.messageCount).toBe(1)
   })
 })
 
