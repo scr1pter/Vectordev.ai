@@ -161,13 +161,12 @@ export async function rollbackMigration(context: SupabaseContext, input: { direc
       ? `if to_regclass('supabase_migrations.schema_migrations') is not null then delete from supabase_migrations.schema_migrations where version = ${quoted(version)}; end if;`
       : "",
   ].join("\n")
-  try {
-    await runner(`${down.sql}\n;\ndo $$\nbegin\n${history}\nend\n$$;`)
-  } catch (error) {
-    return {
-      ok: false,
-      error: `Rolling back ${last.name} failed and nothing changed: ${scrub(context, errorMessage(error))}`,
-    }
+  const failure = await runner(`${down.sql}\n;\ndo $$\nbegin\n${history}\nend\n$$;`).then(
+    () => undefined,
+    (error: unknown) => scrub(context, errorMessage(error)),
+  )
+  if (failure !== undefined) {
+    return { ok: false, error: `Rolling back ${last.name} failed and nothing changed: ${failure}` }
   }
   return {
     ok: true,

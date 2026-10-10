@@ -423,6 +423,16 @@ describe("migrations", () => {
       ok: false,
       error: expect.stringContaining("that is 20260102000000_more.sql"),
     })
+    // A down migration Postgres rejects leaves the history alone.
+    const tracking = fake.state.sql
+    fake.state.sql = (sql, readOnly) =>
+      sql.startsWith("drop table b;") ? { error: 'table "b" is referenced', status: 400 } : tracking(sql, readOnly)
+    expect(await run("rollback_migration")).toEqual({
+      ok: false,
+      error: 'Rolling back 20260102000000_more.sql failed and nothing changed: table "b" is referenced',
+    })
+    expect(database.versions).toEqual(["20260102000000"])
+    fake.state.sql = tracking
     // The -- down section is the rollback, and the CLI's history row goes too.
     expect(await run("rollback_migration")).toMatchObject({ ok: true, rolledBack: "20260102000000_more.sql" })
     expect(database.statements.at(-1)?.sql).toStartWith("drop table b;")
