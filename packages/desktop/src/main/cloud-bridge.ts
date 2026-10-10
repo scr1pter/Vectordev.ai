@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { createServer, type Server } from "node:http"
 
-import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments } from "./cloud-console"
+import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeployments, listEnv } from "./cloud-console"
 import {
   cachedCloudProviderConnection,
   getCloudProviderProjectLink,
@@ -17,23 +17,41 @@ import { publishProject } from "./publish"
 
 const MAX_BODY_BYTES = 64 * 1024
 
-type CloudCommand =
-  | "status"
-  | "detect_build"
-  | "database_status"
-  | "create_database"
-  | "prepare_database"
-  | "prepare_auth"
-  | "cloud_connections"
-  | "supabase_services"
-  | "sync_environment"
-  | "publish"
-  | "list_deployments"
-  | "logs"
-  | "apply_migrations"
+const COMMANDS = [
+  "status",
+  "detect_build",
+  "database_status",
+  "create_database",
+  "prepare_database",
+  "prepare_auth",
+  "cloud_connections",
+  "supabase_services",
+  "sync_environment",
+  "publish",
+  "list_deployments",
+  "logs",
+  "apply_migrations",
+  "describe",
+] as const
+
+// The actions that change something in the user's cloud accounts or project.
+// The agent tool asks permission for each, after `describe` names the provider,
+// project and environment it would touch.
+const DESCRIBABLE = [
+  "publish",
+  "sync_environment",
+  "create_database",
+  "prepare_database",
+  "prepare_auth",
+  "apply_migrations",
+] as const
+
+type CloudCommand = (typeof COMMANDS)[number]
+type CloudAction = (typeof DESCRIBABLE)[number]
 
 type CloudCommandInput = {
   command: CloudCommand
+  action?: CloudAction
   projectPath: string
   taskId?: string
   production?: boolean
@@ -118,6 +136,7 @@ export async function stopCloudBridge() {
 function parseCloudCommandInput(value: unknown): CloudCommandInput {
   if (!value || typeof value !== "object") throw new Error("Cloud command must be an object.")
   const command = Reflect.get(value, "command")
+  const action = Reflect.get(value, "action")
   const projectPath = Reflect.get(value, "projectPath")
   const taskId = Reflect.get(value, "taskId")
   const production = Reflect.get(value, "production")
@@ -128,23 +147,10 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   const organizationId = Reflect.get(value, "organizationId")
   const region = Reflect.get(value, "region")
   const force = Reflect.get(value, "force")
-  if (
-    command !== "status" &&
-    command !== "detect_build" &&
-    command !== "database_status" &&
-    command !== "create_database" &&
-    command !== "prepare_database" &&
-    command !== "prepare_auth" &&
-    command !== "cloud_connections" &&
-    command !== "supabase_services" &&
-    command !== "sync_environment" &&
-    command !== "publish" &&
-    command !== "list_deployments" &&
-    command !== "logs" &&
-    command !== "apply_migrations"
-  ) {
-    throw new Error("Unsupported Vector Cloud command.")
-  }
+  const known = COMMANDS.find((item) => item === command)
+  if (!known) throw new Error("Unsupported Vector Cloud command.")
+  const describable = DESCRIBABLE.find((item) => item === action)
+  if (known === "describe" && !describable) throw new Error("Choose a Vector Cloud action to describe.")
   if (typeof projectPath !== "string" || !projectPath.trim())
     throw new Error("Open a project before using Vector Cloud.")
   if (taskId !== undefined && typeof taskId !== "string") throw new Error("Invalid project session.")
@@ -165,7 +171,8 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   }
   if (force !== undefined && typeof force !== "boolean") throw new Error("Invalid database creation mode.")
   return {
-    command,
+    command: known,
+    action: describable,
     projectPath,
     taskId,
     production,
@@ -187,7 +194,105 @@ function configuredPublishTargets(input: CloudCommandInput) {
   return [{ id: "vercel" as const, label: "Vercel", projectName: link.projectName }]
 }
 
+// What a changing action would touch, worded for the permission prompt: the
+// provider, the provider-side project and the environment. A report that is not
+// ok means the action cannot run yet, so the tool relays it without asking.
+function describeCloudAction(input: CloudCommandInput) {
+  const scope = (provider: "Vercel" | "Supabase", project: string, environment: string, summary: string) => ({
+    ok: true,
+    scope: { provider, project, environment, summary },
+  })
+  if (input.action === "publish") {
+    const target = configuredPublishTargets(input)[0]
+    if (!target) return publishSetup()
+    const environment = input.production === false ? "preview" : "production"
+    return scope(
+      "Vercel",
+      target.projectName,
+      environment,
+      `Publish this project to the Vercel project ${target.projectName} as a ${environment} release.`,
+    )
+  }
+  if (input.action === "sync_environment") {
+    const link = getCloudProviderProjectLink(input.projectPath, input.taskId, "vercel")
+    if (!link) {
+      return {
+        ok: false,
+        needsSetup: true,
+        error: "No Vercel project is linked to this project.",
+        nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
+      }
+    }
+    const count = listEnv(input.projectPath, input.taskId).length
+    return scope(
+      "Vercel",
+      link.projectName,
+      "production, preview and development",
+      `Write ${count} environment ${count === 1 ? "variable" : "variables"} to the Vercel project ${link.projectName} for production, preview and development.`,
+    )
+  }
+  const database = getDatabase(input.projectPath, input.taskId)
+  const name = database ? (database.projectName ?? database.projectRef ?? new URL(database.url).hostname) : ""
+  if (input.action === "create_database") {
+    if (database && input.force !== true) {
+      return scope(
+        "Supabase",
+        name,
+        "production",
+        `Keep the Supabase project ${name} that is already connected; nothing new is created.`,
+      )
+    }
+    return scope(
+      "Supabase",
+      "a new project",
+      "production",
+      `Create a new Supabase project${input.organizationId ? ` in organization ${input.organizationId}` : ""} in ${input.region ?? "us-east-1"}. Supabase bills it to that organization.`,
+    )
+  }
+  if (!database) {
+    return {
+      ok: false,
+      needsSetup: true,
+      error: "No Vector Cloud database is connected.",
+      nextStep:
+        "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Cloud Services > Database.",
+    }
+  }
+  if (input.action === "apply_migrations") {
+    return input.dryRun
+      ? scope(
+          "Supabase",
+          name,
+          "production",
+          `Read which migrations the Supabase project ${name} has applied. Nothing changes.`,
+        )
+      : scope(
+          "Supabase",
+          name,
+          "production",
+          `Apply this project's pending migrations to the Supabase project ${name}. This changes its live database.`,
+        )
+  }
+  return scope(
+    "Supabase",
+    name,
+    "local .env",
+    `Write the Supabase project ${name}'s public client settings to this project's .env.`,
+  )
+}
+
+function publishSetup() {
+  return {
+    ok: false,
+    needsSetup: true,
+    targets: [],
+    error: "Connect and link a Vercel project in Vector Cloud before publishing.",
+    nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
+  }
+}
+
 async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOptions) {
+  if (input.command === "describe") return describeCloudAction(input)
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
     const connections = (["vercel", "supabase"] as const).map(cachedCloudProviderConnection)
@@ -278,15 +383,7 @@ async function runCloudCommand(input: CloudCommandInput, options: CloudBridgeOpt
       dryRun: input.dryRun === true,
     })
   }
-  if (!configuredPublishTargets(input).length) {
-    return {
-      ok: false,
-      needsSetup: true,
-      targets: [],
-      error: "Connect and link a Vercel project in Vector Cloud before publishing.",
-      nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
-    }
-  }
+  if (!configuredPublishTargets(input).length) return publishSetup()
   return (options.publish ?? publishProject)({
     projectPath: input.projectPath,
     taskId: input.taskId,

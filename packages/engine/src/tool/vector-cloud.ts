@@ -52,6 +52,7 @@ export const Parameters = Schema.Struct({
 
 type CloudReport = {
   ok: boolean
+  scope?: { provider: string; project: string; environment: string; summary: string }
   error?: string
   needsSetup?: boolean
   needsChoice?: boolean
@@ -275,78 +276,69 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
     execute: (params, ctx) =>
       Effect.gen(function* () {
         const instance = yield* InstanceState.context
-        if (params.action === "publish") {
+        const request = {
+          projectPath: instance.directory,
+          taskId: ctx.sessionID,
+          production: params.production,
+          provider: params.provider,
+          deploymentId: params.deploymentId,
+          limit: params.limit,
+          dryRun: params.dryRun,
+          organizationId: params.organizationId,
+          region: params.region,
+          force: params.force,
+        }
+        // Publishing, database changes and host environment writes act on the
+        // user's own accounts, so each asks first. The bridge describes the
+        // provider, project and environment the action would touch, and the
+        // prompt shows them. A migration dry run only reads, so it uses a
+        // separate permission that is allowed by default.
+        const permission =
+          params.action === "publish"
+            ? "vector_cloud_publish"
+            : params.action === "sync_environment"
+              ? "vector_cloud_environment"
+              : params.action === "apply_migrations" && params.dryRun === true
+                ? "vector_cloud_inspect"
+                : params.action === "apply_migrations" ||
+                    params.action === "create_database" ||
+                    params.action === "prepare_database" ||
+                    params.action === "prepare_auth"
+                  ? "vector_cloud_database"
+                  : undefined
+        if (permission) {
+          const described = yield* Effect.promise(() =>
+            bridgeRequest({ ...request, command: "describe", action: params.action }, ctx.abort),
+          )
+          // Nothing to approve yet: the action cannot run until setup is done.
+          if (!described.ok || !described.scope) {
+            return {
+              title: toolTitle(params.action),
+              metadata: { action: params.action, projectPath: instance.directory },
+              output: formatReport(params.action, described),
+            }
+          }
+          const pattern = [
+            described.scope.provider.toLowerCase(),
+            described.scope.project,
+            described.scope.environment,
+          ].join("/")
           yield* ctx.ask({
-            permission: "vector_cloud_publish",
-            patterns: [instance.directory],
-            always: [instance.directory],
+            permission,
+            patterns: [pattern],
+            always: [pattern],
             metadata: {
               projectPath: instance.directory,
-              production: params.production !== false,
-            },
-          })
-        }
-        if (params.action === "prepare_database" || params.action === "prepare_auth") {
-          yield* ctx.ask({
-            permission: "vector_cloud_database",
-            patterns: [instance.directory],
-            always: [instance.directory],
-            metadata: { projectPath: instance.directory },
-          })
-        }
-        // Creating a database is a real resource on the user's own Supabase
-        // account, billed to one of their organizations, so it asks first under
-        // the same permission the rest of the database actions use.
-        if (params.action === "create_database") {
-          yield* ctx.ask({
-            permission: "vector_cloud_database",
-            patterns: [instance.directory],
-            always: [instance.directory],
-            metadata: {
-              projectPath: instance.directory,
+              ...described.scope,
+              production: params.action === "publish" ? params.production !== false : undefined,
+              dryRun: params.action === "apply_migrations" ? params.dryRun === true : undefined,
               organizationId: params.organizationId,
               region: params.region,
-              force: params.force === true,
+              force: params.action === "create_database" ? params.force === true : undefined,
             },
           })
         }
-        // Writing schema to the user's real database is destructive, so it asks
-        // under the same permission the other database actions use — including
-        // the dry run, which still reaches that database to read what applied.
-        if (params.action === "apply_migrations") {
-          yield* ctx.ask({
-            permission: "vector_cloud_database",
-            patterns: [instance.directory],
-            always: [instance.directory],
-            metadata: { projectPath: instance.directory, dryRun: params.dryRun === true },
-          })
-        }
-        if (params.action === "sync_environment") {
-          yield* ctx.ask({
-            permission: "vector_cloud_environment",
-            patterns: [instance.directory],
-            always: [instance.directory],
-            metadata: { projectPath: instance.directory, provider: params.provider },
-          })
-        }
-        const report = yield* Effect.promise(() =>
-          bridgeRequest(
-            {
-              command: params.action,
-              projectPath: instance.directory,
-              taskId: ctx.sessionID,
-              production: params.production,
-              provider: params.provider,
-              deploymentId: params.deploymentId,
-              limit: params.limit,
-              dryRun: params.dryRun,
-              organizationId: params.organizationId,
-              region: params.region,
-              force: params.force,
-            },
-            ctx.abort,
-          ),
-        )
+        const report = yield* Effect.promise(() => bridgeRequest({ ...request, command: params.action }, ctx.abort))
         return {
           title: toolTitle(params.action),
           metadata: {

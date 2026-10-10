@@ -4,6 +4,7 @@ import { Button } from "@vectordevai/ui/button"
 import { DockPrompt } from "@vectordevai/session-ui/dock-prompt"
 import { Icon } from "@vectordevai/ui/icon"
 import { useLanguage } from "@/context/language"
+import { cloudPermissionScope } from "./cloud-permission-scope"
 
 export function SessionPermissionDock(props: {
   request: PermissionRequest
@@ -18,6 +19,7 @@ export function SessionPermissionDock(props: {
     if (value === key) return ""
     return value
   }
+  const cloudScope = () => cloudPermissionScope(props.request)
 
   return (
     <DockPrompt
@@ -59,7 +61,34 @@ export function SessionPermissionDock(props: {
         </div>
       </Show>
 
-      <Show when={props.request.patterns.length > 0}>
+      <Show when={cloudScope()}>
+        {(scope) => (
+          <>
+            <Show when={scope().summary}>
+              <div data-slot="permission-row">
+                <span data-slot="permission-spacer" aria-hidden="true" />
+                <div data-slot="permission-hint">{scope().summary}</div>
+              </div>
+            </Show>
+            <Show when={scope().rows.length > 0}>
+              <div data-slot="permission-row">
+                <span data-slot="permission-spacer" aria-hidden="true" />
+                <div data-slot="permission-patterns">
+                  <For each={scope().rows}>
+                    {(row) => (
+                      <code class="text-12-regular text-text-base break-all">
+                        {row.label}: {row.value}
+                      </code>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+          </>
+        )}
+      </Show>
+
+      <Show when={!cloudScope() && props.request.patterns.length > 0}>
         <div data-slot="permission-row">
           <span data-slot="permission-spacer" aria-hidden="true" />
           <div data-slot="permission-patterns">

@@ -296,6 +296,60 @@ describe("cloud bridge publish destination", () => {
     expect(published).toEqual([])
   })
 
+  test("describes what each changing action would touch for the permission prompt", async () => {
+    seedHost("vercel")
+    setEnv(project, undefined, "API_URL", "https://api.fixture.invalid")
+    const bridge = await startCloudBridge()
+    const describe = async (input: Record<string, unknown>) =>
+      (await bridgeCommand(bridge, { command: "describe", ...input })).json()
+    expect(await describe({ action: "publish" })).toEqual({
+      ok: true,
+      scope: {
+        provider: "Vercel",
+        project: "vercel app",
+        environment: "production",
+        summary: "Publish this project to the Vercel project vercel app as a production release.",
+      },
+    })
+    expect((await describe({ action: "publish", production: false })).scope.environment).toBe("preview")
+    expect(await describe({ action: "sync_environment" })).toMatchObject({
+      ok: true,
+      scope: { provider: "Vercel", project: "vercel app", environment: "production, preview and development" },
+    })
+    expect(JSON.stringify(await describe({ action: "sync_environment" }))).not.toContain("api.fixture.invalid")
+    for (const action of ["prepare_database", "prepare_auth", "apply_migrations"]) {
+      expect(await describe({ action })).toMatchObject({ ok: false, needsSetup: true })
+    }
+    expect(await describe({ action: "create_database", organizationId: "org_1", region: "eu-west-2" })).toMatchObject({
+      ok: true,
+      scope: {
+        provider: "Supabase",
+        project: "a new project",
+        summary:
+          "Create a new Supabase project in organization org_1 in eu-west-2. Supabase bills it to that organization.",
+      },
+    })
+    await connectDatabase(project, undefined, {
+      provider: "supabase",
+      url: "https://fixtureref.supabase.co",
+      anonKey: "sb_publishable_fixture_key",
+      projectRef: "fixtureref",
+      projectName: "shop-db",
+    })
+    expect(await describe({ action: "apply_migrations" })).toMatchObject({
+      ok: true,
+      scope: { provider: "Supabase", project: "shop-db", environment: "production" },
+    })
+    expect((await describe({ action: "apply_migrations", dryRun: true })).scope.summary).toContain("Nothing changes")
+    expect((await describe({ action: "create_database" })).scope.summary).toContain("nothing new is created")
+    const missing = await bridgeCommand(bridge, { command: "describe" })
+    expect(missing.status).toBe(400)
+    expect(await (await bridgeCommand(bridge, { command: "describe", action: "status" })).json()).toEqual({
+      ok: false,
+      error: "Choose a Vector Cloud action to describe.",
+    })
+  })
+
   test("rejects the removed AWS inventory commands", async () => {
     const bridge = await startCloudBridge()
     for (const command of ["aws_status", "aws_resources"]) {

@@ -1080,6 +1080,17 @@ export const dict = {
   "settings.permissions.tool.external_directory.description": "Access files outside the project directory",
   "settings.permissions.tool.doom_loop.title": "Doom Loop",
   "settings.permissions.tool.doom_loop.description": "Detect repeated tool calls with identical input",
+  "settings.permissions.tool.vector_cloud_publish.title": "Publish",
+  "settings.permissions.tool.vector_cloud_publish.description": "Deploy this project to your Vercel account",
+  "settings.permissions.tool.vector_cloud_database.title": "Database",
+  "settings.permissions.tool.vector_cloud_database.description":
+    "Create, configure or change the schema of your Supabase database",
+  "settings.permissions.tool.vector_cloud_environment.title": "Host environment",
+  "settings.permissions.tool.vector_cloud_environment.description":
+    "Write this project's environment variables to your Vercel project",
+  "settings.permissions.tool.vector_cloud_inspect.title": "Inspect database",
+  "settings.permissions.tool.vector_cloud_inspect.description":
+    "Read which migrations your Supabase database has applied",
 
   "session.delete.failed.title": "Failed to delete session",
   "session.delete.title": "Delete session",

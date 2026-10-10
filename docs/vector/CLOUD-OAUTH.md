@@ -140,6 +140,16 @@ integration. Existing variables created outside that integration may require
 direct management in Vercel; local variable listing, `.env` application and
 project listing remain available. See [Vercel's integration scopes](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations#project-environmental-variables).
 
+## Agent permissions
+
+The agent's `vector_cloud` tool asks before it publishes (`vector_cloud_publish`),
+creates, prepares or migrates a database (`vector_cloud_database`) or writes a
+host's environment variables (`vector_cloud_environment`). Each prompt names the
+provider, the provider-side project and the environment the action touches. All
+three default to ask for every agent; a wildcard `"*": "allow"` does not approve
+them, only a rule that names them. A migration dry run only reads, so it uses
+`vector_cloud_inspect`, which is allowed by default.
+
 ## Publishing and release checks
 
 Vector publishes to the Vercel project linked to the repository. Without a

@@ -54,7 +54,9 @@ export const prerender = true
   <h2 id="cloud-actions">Run cloud work from a task</h2>
   <p>
     The agent's cloud tool can inspect connections, detect build settings, prepare a linked database or authentication,
-    sync variables, publish and inspect recent deployments. Mutating actions pass through Vector's permission system.
+    sync variables, publish and inspect recent deployments. It asks before it publishes, changes a database or writes a
+    host's environment, and the prompt names the provider, project and environment. A wildcard allow does not skip
+    these prompts; only a permission rule that names the cloud action does.
     Publishing goes to the Vercel project linked to the repository; without one, the tool returns setup guidance. A
     failed Vercel deployment never triggers a deployment somewhere else.
   </p>

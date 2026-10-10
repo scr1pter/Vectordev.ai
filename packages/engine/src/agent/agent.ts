@@ -64,6 +64,10 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
+// Permissions whose Vector Cloud actions publish, change a database or write a
+// host's environment. Only a rule that names one of them can allow it.
+const CLOUD_MUTATIONS = ["vector_cloud_publish", "vector_cloud_database", "vector_cloud_environment"]
+
 const GeneratedAgent = Schema.Struct({
   identifier: Schema.String,
   whenToUse: Schema.String,
@@ -150,6 +154,11 @@ const layer = Layer.effect(
           browser_sensitive: "ask",
           webfetch: "ask",
           websearch: "ask",
+          // Vector Cloud actions that publish, change a database or write a
+          // host's environment act on the user's own accounts and may bill them.
+          vector_cloud_publish: "ask",
+          vector_cloud_database: "ask",
+          vector_cloud_environment: "ask",
           external_directory: {
             "*": "ask",
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
@@ -503,6 +512,21 @@ const layer = Layer.effect(
             ...user,
             ...Permission.fromConfig(cfg.agent?.[name]?.permission ?? {}),
           ])
+        }
+
+        // A wildcard allow (an agent's or the user's "*": "allow") must not silently
+        // approve cloud actions: they still ask unless a rule names them.
+        for (const name in agents) {
+          const permission = agents[name].permission
+          const unnamed = CLOUD_MUTATIONS.filter((key) => {
+            const rule = Permission.evaluate(key, "*", permission)
+            return rule.action === "allow" && !rule.permission.startsWith("vector_cloud")
+          })
+          if (!unnamed.length) continue
+          agents[name].permission = Permission.merge(
+            permission,
+            Permission.fromConfig(Object.fromEntries(unnamed.map((key) => [key, "ask" as const]))),
+          )
         }
 
         // Ensure Truncate.GLOB is allowed unless explicitly configured
