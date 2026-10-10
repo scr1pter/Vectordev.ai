@@ -1082,9 +1082,9 @@ export const dict = {
   "settings.permissions.tool.doom_loop.description": "Detect repeated tool calls with identical input",
   "settings.permissions.tool.vector_cloud_publish.title": "Publish",
   "settings.permissions.tool.vector_cloud_publish.description": "Deploy this project to your Vercel account",
-  "settings.permissions.tool.vector_cloud_database.title": "Database",
+  "settings.permissions.tool.vector_cloud_database.title": "Supabase",
   "settings.permissions.tool.vector_cloud_database.description":
-    "Create, configure or change the schema of your Supabase database",
+    "Create, link or change your Supabase project: schema, SQL, auth, storage, Edge Functions and secrets",
   "settings.permissions.tool.vector_cloud_environment.title": "Host environment",
   "settings.permissions.tool.vector_cloud_environment.description":
     "Write this project's environment variables to your Vercel project",
