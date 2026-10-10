@@ -587,7 +587,7 @@ const unsafeEnvironmentKeys = new Set([
   "ZDOTDIR",
 ])
 
-function unsafeProjectEnvironment(environment: Readonly<Record<string, string>> | undefined) {
+export function unsafeProjectEnvironment(environment: Readonly<Record<string, string>> | undefined) {
   if (!environment) return false
   return Object.keys(environment).some((key) => {
     const normalized = key.toUpperCase()

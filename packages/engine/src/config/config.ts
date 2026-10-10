@@ -156,16 +156,25 @@ function bindTrustedProjectExecutables(
 function rewriteCommandEntries(value: Record<string, unknown>, base: string, trusted: WorkspaceTrust.TrustedSnapshot) {
   return Object.fromEntries(
     Object.entries(value).flatMap(([name, entry]) => {
-      if (!isRecord(entry) || !Array.isArray(entry.command)) {
-        if (!isRecord(entry) || typeof entry.cwd !== "string") return [[name, entry]]
+      if (!isRecord(entry)) return [[name, entry]]
+      // An entry without a command overrides a built-in formatter, which still launches with this environment, so a
+      // PATH or preload variable would run live, unapproved programs just as a project command would.
+      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
+      const projectEnvironment = stringEnvironment(environment)
+      if (
+        environment !== undefined &&
+        (!projectEnvironment || WorkspaceTrust.unsafeProjectEnvironment(projectEnvironment))
+      )
+        return []
+      if (!Array.isArray(entry.command)) {
+        if (typeof entry.cwd !== "string") return [[name, entry]]
         const cwd = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, entry.cwd))
         if (!cwd) return []
         return [[name, { ...entry, cwd }]]
       }
       if (!entry.command.every((item): item is string => typeof item === "string")) return []
       const cwd = typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
-      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
-      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, stringEnvironment(environment))
+      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, projectEnvironment)
       if (!command) return []
       return [[name, { ...entry, command: command.command, cwd: command.cwd }]]
     }),

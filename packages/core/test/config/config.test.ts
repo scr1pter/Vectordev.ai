@@ -1088,6 +1088,9 @@ describe("Config", () => {
                       command: ["node", "server.js"],
                       environment: { NODE_OPTIONS: `--require=${server}` },
                     },
+                    // A built-in formatter overridden without a command still launches with this environment.
+                    prettier: { environment: { PATH: path.join(tmp.path, "tools") } },
+                    biome: { environment: { BIOME_CONFIG_PATH: "biome.json" } },
                   },
                   lsp: {
                     approved: { command: ["node", "server.js"] },
@@ -1133,6 +1136,10 @@ describe("Config", () => {
             expect(builtin?.cwd).not.toBe(path.join(tmp.path, "tools"))
             expect(path.basename(builtin?.cwd ?? "")).toBe("tools")
             expect(formatter && typeof formatter === "object" ? formatter.preload : undefined).toBeUndefined()
+            expect(formatter && typeof formatter === "object" ? formatter.prettier : undefined).toBeUndefined()
+            expect(formatter && typeof formatter === "object" ? formatter.biome?.environment : undefined).toEqual({
+              BIOME_CONFIG_PATH: "biome.json",
+            })
             const lsp = project.info.lsp
             const approvedLsp = lsp && typeof lsp === "object" ? lsp.approved : undefined
             expect(approvedLsp && "command" in approvedLsp ? approvedLsp.command[1] : undefined).toBe(local.command[1])

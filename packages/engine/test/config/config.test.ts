@@ -841,6 +841,9 @@ it.instance("runs trusted bare MCP scripts from materialized bytes and rejects a
           command: ["node", "server.js"],
           environment: { NODE_OPTIONS: `--require=${server}` },
         },
+        // A built-in formatter overridden without a command still launches with this environment.
+        prettier: { environment: { PATH: path.join(test.directory, "tools") } },
+        biome: { environment: { BIOME_CONFIG_PATH: "biome.json" } },
       },
       lsp: {
         approved: { command: ["node", "server.js"], extensions: [".js"] },
@@ -884,6 +887,9 @@ it.instance("runs trusted bare MCP scripts from materialized bytes and rejects a
     expect(lsp && "command" in lsp ? lsp.command[1] : undefined).toBe(approved.command[1])
     expect(lsp && "command" in lsp ? lsp.cwd : undefined).toBe(approved.cwd)
     expect(config.lsp && typeof config.lsp === "object" ? config.lsp.preload : undefined).toBeUndefined()
+    const formatters = config.formatter && typeof config.formatter === "object" ? config.formatter : {}
+    expect(formatters.prettier).toBeUndefined()
+    expect(formatters.biome?.environment).toEqual({ BIOME_CONFIG_PATH: "biome.json" })
 
     yield* FSUtil.use.writeFileString(server, "console.log('changed')\n")
     const output = yield* Effect.promise(async () => {

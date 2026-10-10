@@ -416,18 +416,25 @@ function rewriteCommandEntries<T extends Record<string, object>>(
 ): T {
   return Object.fromEntries(
     Object.entries(value).flatMap(([name, entry]) => {
-      if (!entry || typeof entry !== "object" || !("command" in entry) || !Array.isArray(entry.command)) {
-        if (!entry || typeof entry !== "object" || !("cwd" in entry) || typeof entry.cwd !== "string") {
-          return [[name, entry]]
-        }
+      if (!entry || typeof entry !== "object") return [[name, entry]]
+      // An entry without a command overrides a built-in formatter, which still launches with this environment, so a
+      // PATH or preload variable would run live, unapproved programs just as a project command would.
+      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
+      const projectEnvironment = stringEnvironment(environment)
+      if (
+        environment !== undefined &&
+        (!projectEnvironment || WorkspaceTrust.unsafeProjectEnvironment(projectEnvironment))
+      )
+        return []
+      if (!("command" in entry) || !Array.isArray(entry.command)) {
+        if (!("cwd" in entry) || typeof entry.cwd !== "string") return [[name, entry]]
         const cwd = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, entry.cwd))
         if (!cwd) return []
         return [[name, bind({ ...entry, cwd })]]
       }
       if (!entry.command.every((item): item is string => typeof item === "string")) return []
       const cwd = "cwd" in entry && typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
-      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
-      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, stringEnvironment(environment))
+      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, projectEnvironment)
       if (!command) return []
       return [[name, bind(entry as Record<string, unknown>, command)]]
     }),
