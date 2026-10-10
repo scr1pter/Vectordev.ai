@@ -603,9 +603,9 @@ describe("automatic reviews", () => {
       `DELETE /repos/acme/denied/git/refs/heads/${AUTO_REVIEW_BRANCH}`,
     ])
     expect(refs.has(`denied:refs/heads/${AUTO_REVIEW_BRANCH}`)).toBe(false)
-    await expect(
-      openAutoReviewPullRequest({ ...owner, source: "gh" }, repository("denied"), workflow),
-    ).rejects.toThrow("gh auth refresh -s workflow")
+    await expect(openAutoReviewPullRequest({ ...owner, source: "gh" }, repository("denied"), workflow)).rejects.toThrow(
+      "gh auth refresh -s workflow",
+    )
   })
 
   test("deletes its branch when GitHub refuses the pull request, and keeps it when the answer is unknown", async () => {

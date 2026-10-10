@@ -166,7 +166,9 @@ describe("BackgroundJob", () => {
       const queued = yield* jobs.start({
         type: "test",
         run: Deferred.await(failing).pipe(
-          Effect.andThen(Effect.fail(new BackgroundJob.RunFailed({ message: "rate limited", output: "partial notes" }))),
+          Effect.andThen(
+            Effect.fail(new BackgroundJob.RunFailed({ message: "rate limited", output: "partial notes" })),
+          ),
         ),
       })
       yield* jobs.extend({ id: queued.id, run: Effect.succeed("follow-up report") })
