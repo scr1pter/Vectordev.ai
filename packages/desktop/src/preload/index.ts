@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 import type { ElectronAPI, WslServersEvent } from "./types"
+import { vercelPreloadApi } from "./cloud-vercel"
 import type { UpdaterState } from "@vectordevai/app/updater"
 
 const updaterCallbacks = new Set<(state: UpdaterState) => void>()
@@ -241,19 +242,8 @@ const api: ElectronAPI = {
     providers: {
       resources: (provider) => ipcRenderer.invoke("cloud-provider-resources-list", provider),
       links: (projectPath, taskId) => ipcRenderer.invoke("cloud-provider-links-list", projectPath, taskId),
-      link: (projectPath, taskId, provider, projectId) =>
-        ipcRenderer.invoke("cloud-provider-links-set", projectPath, taskId, provider, projectId),
-      unlink: (projectPath, taskId, provider) =>
-        ipcRenderer.invoke("cloud-provider-links-remove", projectPath, taskId, provider),
-      syncEnvironment: (projectPath, taskId, provider) =>
-        ipcRenderer.invoke("cloud-provider-env-sync", projectPath, taskId, provider),
-      addDomain: (projectPath, taskId, provider, domain) =>
-        ipcRenderer.invoke("cloud-provider-domains-add", projectPath, taskId, provider, domain),
-      verifyDomain: (projectPath, taskId, id) =>
-        ipcRenderer.invoke("cloud-provider-domains-verify", projectPath, taskId, id),
-      removeDomain: (projectPath, taskId, id) =>
-        ipcRenderer.invoke("cloud-provider-domains-remove", projectPath, taskId, id),
     },
+    vercel: vercelPreloadApi(ipcRenderer),
     deployments: {
       list: (projectPath, taskId) => ipcRenderer.invoke("cloud-deployments-list", projectPath, taskId),
       remove: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-remove", projectPath, taskId, id),
@@ -271,9 +261,6 @@ const api: ElectronAPI = {
         ipcRenderer.invoke("cloud-env-set", projectPath, taskId, key, value, visibility),
       remove: (projectPath, taskId, key) => ipcRenderer.invoke("cloud-env-remove", projectPath, taskId, key),
       apply: (projectPath, taskId) => ipcRenderer.invoke("cloud-env-apply", projectPath, taskId),
-    },
-    domains: {
-      list: (projectPath, taskId) => ipcRenderer.invoke("cloud-domains-list", projectPath, taskId),
     },
     database: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-db-get", projectPath, taskId),

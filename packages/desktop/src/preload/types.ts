@@ -13,7 +13,6 @@ import type {
   CloudBuildSettings,
   CloudDatabaseConnection,
   CloudDeployment,
-  CloudDomain,
   CloudEnvVar,
   CloudEnvVisibility,
 } from "../main/cloud-console"
@@ -22,9 +21,9 @@ import type {
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudProviderSyncResult,
   CloudSupabaseServices,
 } from "../main/cloud-connections"
+import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
   GithubAuthStatus,
@@ -129,12 +128,12 @@ export type {
   CloudGitMetadata,
   CloudRequiredChecks,
 } from "../main/cloud-console"
+export type { VercelCloudApi } from "../main/cloud-vercel-ipc"
 export type {
   CloudProviderConnection,
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudProviderSyncResult,
   CloudSupabaseBucket,
   CloudSupabaseFunction,
   CloudSupabaseServices,
@@ -874,31 +873,8 @@ export type ElectronAPI = {
     providers: {
       resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>
       links: (projectPath: string, taskId?: string) => Promise<CloudProviderProjectLink[]>
-      link: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-        projectId: string,
-      ) => Promise<CloudProviderProjectLink>
-      unlink: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-      ) => Promise<CloudProviderProjectLink[]>
-      syncEnvironment: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-      ) => Promise<CloudProviderSyncResult>
-      addDomain: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel",
-        domain: string,
-      ) => Promise<CloudDomain>
-      verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-      removeDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
     }
+    vercel: VercelCloudApi
     deployments: {
       list: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
       remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment[]>
@@ -920,9 +896,6 @@ export type ElectronAPI = {
       ) => Promise<CloudEnvVar[]>
       remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
       apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
-    }
-    domains: {
-      list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
     }
     database: {
       get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>

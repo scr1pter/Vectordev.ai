@@ -8,21 +8,8 @@ import {
   readCloudOAuthCallback,
 } from "./cloud-oauth-relay"
 
-import {
-  addDomain,
-  cloudProjectScopeKey,
-  connectDatabase,
-  getDatabase,
-  listDomains,
-  listEnv,
-  normalizeCloudDomain,
-  removeDomain,
-  updateDomainRecord,
-  type CloudDatabaseConnection,
-  type CloudDomain,
-} from "./cloud-console"
+import { cloudProjectScopeKey, connectDatabase, getDatabase, type CloudDatabaseConnection } from "./cloud-console"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
-import { vercelEnvironmentPayload } from "./cloud-provider-payloads"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { validateCloudProviderToken, type CloudProviderId } from "./cloud-provider-token"
 
@@ -60,17 +47,12 @@ export type CloudProviderProjectLink = {
   projectName: string
   accountId?: string
   accountName?: string
+  /** The Vercel team the project belongs to; absent for a personal account. */
+  teamId?: string
   url?: string
+  /** Set when Vector linked the project from the repository's .vercel/project.json. */
+  linkedFrom?: string
   linkedAt: string
-}
-
-export type CloudProviderSyncResult = {
-  provider: Exclude<CloudProviderId, "supabase">
-  projectId: string
-  projectName: string
-  changed: number
-  syncedAt: string
-  detail: string
 }
 
 export type CloudSupabaseBucket = {
@@ -394,12 +376,6 @@ async function providerJson(
   return body
 }
 
-function vercelApiUrl(pathname: string, record: StoredConnection): URL {
-  const url = new URL(pathname, "https://api.vercel.com")
-  if (record.teamId) url.searchParams.set("teamId", record.teamId)
-  return url
-}
-
 async function finishOAuthDeepLink(url: URL): Promise<void> {
   const providerValue = url.searchParams.get("provider")
   if (!isProvider(providerValue)) return
@@ -563,33 +539,27 @@ export async function getCloudProviderRuntimeAuth(
   }
 }
 
+// The team a Vercel token lists projects in until a project link names its own.
+// Undefined selects the personal account.
+export function setCloudProviderDefaultTeam(provider: Exclude<CloudProviderId, "supabase">, teamId?: string): void {
+  const record = storedConnection(provider)
+  if (!record) throw new Error(`Connect ${connectionLabel(provider)} in Vector Cloud first.`)
+  saveConnection({ ...record, teamId })
+}
+
 export async function listCloudProviderResources(provider: CloudProviderId): Promise<CloudProviderResource[]> {
-  const auth = await accessToken(provider)
   if (provider === "vercel") {
-    const url = new URL("https://api.vercel.com/v9/projects")
-    url.searchParams.set("limit", "100")
-    if (auth.record.teamId) url.searchParams.set("teamId", auth.record.teamId)
-    const body = await providerJson(auth.token, url.toString())
-    const projects = body && typeof body === "object" ? Reflect.get(body, "projects") : undefined
-    if (!Array.isArray(projects)) return []
-    return projects
-      .map((project): CloudProviderResource | undefined => {
-        const id = stringField(project, "id")
-        const name = stringField(project, "name")
-        if (!id || !name) return
-        const targets = Reflect.get(project, "targets")
-        const production = targets && typeof targets === "object" ? Reflect.get(targets, "production") : undefined
-        return {
-          provider,
-          id,
-          name,
-          accountId: auth.record.teamId ?? stringField(project, "accountId"),
-          accountName: auth.record.account,
-          url: stringField(production, "alias") ? `https://${stringField(production, "alias")}` : undefined,
-        }
-      })
-      .filter((project): project is CloudProviderResource => Boolean(project))
+    // Every page, in the connection's default team scope.
+    const { listVercelProjects } = await import("./cloud-vercel-projects")
+    return (await listVercelProjects()).map((project) => ({
+      provider,
+      id: project.id,
+      name: project.name,
+      accountId: project.accountId,
+      url: project.productionUrl,
+    }))
   }
+  const auth = await accessToken(provider)
   const body = await providerJson(auth.token, "https://api.supabase.com/v1/projects")
   if (!Array.isArray(body)) return []
   return body
@@ -646,25 +616,14 @@ export function getCloudProviderProjectLink(
   return readLinks(projectPath).find((item) => item.provider === provider)
 }
 
-export async function linkCloudProviderProject(
+// Vercel links are made by cloud-vercel-projects, which reads the project and
+// its team from Vercel before saving it here.
+export function saveCloudProviderProjectLink(
   projectPath: string,
-  taskId: string | undefined,
-  provider: Exclude<CloudProviderId, "supabase">,
-  projectId: string,
-): Promise<CloudProviderProjectLink> {
+  link: CloudProviderProjectLink,
+): CloudProviderProjectLink {
   if (!projectPath.trim()) throw new Error("Open a project before linking a cloud project.")
-  const resource = (await listCloudProviderResources(provider)).find((item) => item.id === projectId)
-  if (!resource) throw new Error(`That ${connectionLabel(provider)} project is no longer available.`)
-  const link: CloudProviderProjectLink = {
-    provider,
-    projectId: resource.id,
-    projectName: resource.name,
-    accountId: resource.accountId,
-    accountName: resource.accountName,
-    url: resource.url,
-    linkedAt: now(),
-  }
-  const next = [link, ...readLinks(projectPath).filter((item) => item.provider !== provider)]
+  const next = [link, ...readLinks(projectPath).filter((item) => item.provider !== link.provider)]
   getStore(LINKS_STORE).set(cloudProjectScopeKey(projectPath), next)
   return link
 }
@@ -680,189 +639,6 @@ export async function unlinkCloudProviderProject(
   else store.delete(cloudProjectScopeKey(projectPath))
   await removeStoreFileIfEmpty(LINKS_STORE)
   return next
-}
-
-function requireProjectLink(
-  projectPath: string,
-  taskId: string | undefined,
-  provider: Exclude<CloudProviderId, "supabase">,
-): CloudProviderProjectLink {
-  const link = getCloudProviderProjectLink(projectPath, taskId, provider)
-  if (!link) {
-    throw new Error(`Link a ${connectionLabel(provider)} project in Connections first.`)
-  }
-  return link
-}
-
-export async function syncCloudProviderEnvironment(
-  projectPath: string,
-  taskId: string | undefined,
-  provider: Exclude<CloudProviderId, "supabase">,
-  request: CloudFetch = fetch,
-): Promise<CloudProviderSyncResult> {
-  const link = requireProjectLink(projectPath, taskId, provider)
-  const variables = listEnv(projectPath, taskId)
-  if (!variables.length) throw new Error("Add at least one environment variable before syncing.")
-  const auth = await accessToken(provider, request)
-
-  const url = vercelApiUrl(`/v10/projects/${encodeURIComponent(link.projectId)}/env`, auth.record)
-  url.searchParams.set("upsert", "true")
-  const result = await providerJson(
-    auth.token,
-    url.toString(),
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(vercelEnvironmentPayload(variables)),
-    },
-    request,
-  )
-  const failed = result && typeof result === "object" ? Reflect.get(result, "failed") : undefined
-  if (Array.isArray(failed) && failed.length) {
-    // Bulk upserts may return HTTP 201 with rejected entries. Provider error
-    // payloads can contain submitted values, so report no raw entry details.
-    throw new Error(
-      `Vercel rejected ${failed.length} environment-variable ${failed.length === 1 ? "operation" : "operations"}. Some variables may already be updated. Check project access and manage variables owned outside this integration in Vercel before syncing again.`,
-    )
-  }
-
-  return {
-    provider,
-    projectId: link.projectId,
-    projectName: link.projectName,
-    changed: variables.length,
-    syncedAt: now(),
-    detail: `${variables.length} ${variables.length === 1 ? "variable" : "variables"} synced to ${link.projectName}. Redeploy for the new values to take effect.`,
-  }
-}
-
-function verificationDetail(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") return
-  const records = Reflect.get(value, "verification")
-  if (!Array.isArray(records)) return
-  const instructions = records
-    .map((record) => {
-      const type = stringField(record, "type")
-      const domain = stringField(record, "domain")
-      const target = stringField(record, "value")
-      if (!type || !domain || !target) return
-      return `${type} ${domain} → ${target}`
-    })
-    .filter((item): item is string => Boolean(item))
-  return instructions.length ? `Complete domain verification: ${instructions.join("; ")}` : undefined
-}
-
-function recommendedCname(value: unknown): string | undefined {
-  if (!value || typeof value !== "object") return
-  const recommendation = Reflect.get(value, "recommendedCNAME")
-  if (typeof recommendation === "string") return recommendation
-  if (Array.isArray(recommendation)) {
-    for (const item of recommendation) {
-      if (typeof item === "string") return item
-      const target = stringField(item, "value") ?? stringField(item, "target")
-      if (target) return target
-    }
-  }
-  if (recommendation && typeof recommendation === "object") {
-    return stringField(recommendation, "value") ?? stringField(recommendation, "target")
-  }
-}
-
-export async function addCloudProviderDomain(
-  projectPath: string,
-  taskId: string | undefined,
-  provider: Exclude<CloudProviderId, "supabase">,
-  rawDomain: string,
-): Promise<CloudDomain> {
-  const link = requireProjectLink(projectPath, taskId, provider)
-  const domain = normalizeCloudDomain(rawDomain)
-  if (listDomains(projectPath, taskId).some((item) => item.domain === domain)) {
-    throw new Error(`${domain} is already connected to this project.`)
-  }
-  const auth = await accessToken(provider)
-  const url = vercelApiUrl(`/v10/projects/${encodeURIComponent(link.projectId)}/domains`, auth.record)
-  const response = await providerJson(auth.token, url.toString(), {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: domain }),
-  })
-  const configUrl = vercelApiUrl(`/v6/domains/${encodeURIComponent(domain)}/config`, auth.record)
-  const config = await providerJson(auth.token, configUrl.toString()).catch(() => undefined)
-  const verified = booleanField(response, "verified") === true
-  const misconfigured = booleanField(config, "misconfigured")
-  return addDomain(projectPath, taskId, {
-    domain,
-    provider,
-    providerProjectId: link.projectId,
-    providerProjectName: link.projectName,
-    cnameTarget: recommendedCname(config) ?? "cname.vercel-dns.com",
-    status: verified && misconfigured === false ? "verified" : "pending",
-    detail:
-      verificationDetail(response) ??
-      (misconfigured === true
-        ? "The domain is attached in Vercel. Update its DNS records, then verify again."
-        : undefined),
-  })
-}
-
-export async function verifyCloudProviderDomain(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-): Promise<CloudDomain> {
-  const domain = listDomains(projectPath, taskId).find((item) => item.id === id)
-  if (!domain) throw new Error("That domain is no longer connected to this project.")
-  const link = requireProjectLink(projectPath, taskId, domain.provider)
-  const auth = await accessToken(domain.provider)
-  const getUrl = vercelApiUrl(
-    `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}`,
-    auth.record,
-  )
-  const current = await providerJson(auth.token, getUrl.toString())
-  const response =
-    booleanField(current, "verified") === true
-      ? current
-      : await providerJson(
-          auth.token,
-          vercelApiUrl(
-            `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}/verify`,
-            auth.record,
-          ).toString(),
-          { method: "POST" },
-        ).catch(() => current)
-  const configUrl = vercelApiUrl(`/v6/domains/${encodeURIComponent(domain.domain)}/config`, auth.record)
-  const config = await providerJson(auth.token, configUrl.toString()).catch(() => undefined)
-  const verified = booleanField(response, "verified") === true
-  const misconfigured = booleanField(config, "misconfigured")
-  return updateDomainRecord(projectPath, taskId, id, {
-    cnameTarget: recommendedCname(config) ?? domain.cnameTarget,
-    status: verified && misconfigured === false ? "verified" : "pending",
-    detail:
-      verificationDetail(response) ??
-      (misconfigured === true
-        ? "Vercel has the domain, but its DNS records are not configured yet."
-        : verified
-          ? "Vercel is still checking the domain's DNS configuration."
-          : "Vercel still requires domain ownership verification."),
-    lastCheckedAt: now(),
-  })
-}
-
-export async function removeCloudProviderDomain(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-): Promise<CloudDomain[]> {
-  const domain = listDomains(projectPath, taskId).find((item) => item.id === id)
-  if (!domain) return listDomains(projectPath, taskId)
-  const link = requireProjectLink(projectPath, taskId, domain.provider)
-  const auth = await accessToken(domain.provider)
-  const url = vercelApiUrl(
-    `/v9/projects/${encodeURIComponent(link.projectId)}/domains/${encodeURIComponent(domain.domain)}`,
-    auth.record,
-  )
-  await providerJson(auth.token, url.toString(), { method: "DELETE" })
-  return removeDomain(projectPath, taskId, id)
 }
 
 export async function connectSupabaseProject(

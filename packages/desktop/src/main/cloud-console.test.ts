@@ -47,8 +47,6 @@ const {
   setEnv,
 } = await import("./cloud-console")
 const { startCloudBridge, stopCloudBridge } = await import("./cloud-bridge")
-const { syncCloudProviderEnvironment } = await import("./cloud-connections")
-const { encryptCloudCredential } = await import("./cloud-credential-vault")
 
 let project = ""
 
@@ -347,21 +345,21 @@ describe("cloud bridge publish destination", () => {
     const bridge = await startCloudBridge()
     const describe = async (input: Record<string, unknown>) =>
       (await bridgeCommand(bridge, { command: "describe", ...input })).json()
+    // A publish is a preview unless production is asked for by name.
     expect(await describe({ action: "publish" })).toEqual({
       ok: true,
       scope: {
         provider: "Vercel",
         project: "vercel app",
-        environment: "production",
-        summary: "Publish this project to the Vercel project vercel app as a production release.",
+        environment: "preview",
+        summary: "Publish this project to the Vercel project vercel app as a preview. Production does not change.",
       },
     })
     expect((await describe({ action: "publish", production: false })).scope.environment).toBe("preview")
-    expect(await describe({ action: "sync_environment" })).toMatchObject({
-      ok: true,
-      scope: { provider: "Vercel", project: "vercel app", environment: "production, preview and development" },
+    expect((await describe({ action: "publish", production: true })).scope).toMatchObject({
+      environment: "production",
+      summary: expect.stringContaining("run the release checks, then point production traffic at it"),
     })
-    expect(JSON.stringify(await describe({ action: "sync_environment" }))).not.toContain("api.fixture.invalid")
     for (const action of ["prepare_database", "prepare_auth", "apply_migrations"]) {
       expect(await describe({ action })).toMatchObject({ ok: false, needsSetup: true })
     }
@@ -422,7 +420,7 @@ describe("cloud bridge publish destination", () => {
       })
       expect(await command({ command: "publish" })).toMatchObject({
         ok: true,
-        nextStep: expect.stringContaining("Merge it into the main project"),
+        nextStep: expect.stringContaining("Merge the workspace into the main project"),
       })
       expect(published).toEqual([
         expect.objectContaining({
@@ -487,78 +485,4 @@ describe("cloud bridge publish destination", () => {
     expect(stores.get("cloud-provider-connections")?.get("records")).toEqual([])
     expect(forgetRetiredCloudProviders()).toBe(0)
   })
-})
-
-describe("Vercel environment sync", () => {
-  test.each([0, 1, 2])(
-    "handles HTTP 201 with %i rejected variables without leaking values or retrying",
-    async (rejected) => {
-      process.env.VECTOR_CREDENTIAL_KEY = Buffer.alloc(32, 7).toString("base64")
-      seedHost("vercel")
-      stores.get("cloud-provider-connections")!.set("records", [
-        {
-          provider: "vercel",
-          accessToken: encryptCloudCredential("fixture-vercel-token"),
-          connectedAt: "2026-01-01",
-        },
-      ])
-      const variables = [
-        { key: "NEW_KEY", value: "private-fixture-value-one" },
-        { key: "EXISTING_KEY", value: "private-fixture-value-two" },
-      ]
-      for (const variable of variables) setEnv(project, undefined, variable.key, variable.value)
-      const requests: string[] = []
-      const server = Bun.serve({
-        hostname: "127.0.0.1",
-        port: 0,
-        async fetch(request) {
-          requests.push(request.url)
-          expect(request.method).toBe("POST")
-          expect(request.headers.get("authorization")).toBe("Bearer fixture-vercel-token")
-          expect(await request.json()).toEqual(
-            variables.map((variable) => ({
-              ...variable,
-              type: "encrypted",
-              target: ["production", "preview", "development"],
-              comment: "Synced by Vector",
-            })),
-          )
-          return Response.json(
-            {
-              created: variables.slice(0, 2 - rejected),
-              failed: variables
-                .slice(0, rejected)
-                .map((variable) => ({ error: { message: variable.value, key: variable.key } })),
-            },
-            { status: 201 },
-          )
-        },
-      })
-      try {
-        const result = await syncCloudProviderEnvironment(project, undefined, "vercel", (input, init) => {
-          expect(String(input)).toBe("https://api.vercel.com/v10/projects/vercel-project/env?upsert=true")
-          return fetch(server.url, init)
-        }).then(
-          (report) => ({ report, error: "" }),
-          (error: Error) => ({ report: undefined, error: error.message }),
-        )
-        expect(requests).toHaveLength(1)
-        if (rejected) {
-          expect(result.report).toBeUndefined()
-          expect(result.error).toContain(`Vercel rejected ${rejected}`)
-          expect(result.error).toContain("Some variables may already be updated")
-          expect(result.error).toContain("owned outside this integration")
-        } else {
-          expect(result.report).toMatchObject({ provider: "vercel", projectId: "vercel-project", changed: 2 })
-          expect(result.error).toBe("")
-        }
-        expect(JSON.stringify(result)).not.toContain("private-fixture-value")
-        expect(JSON.stringify(result)).not.toContain("fixture-vercel-token")
-        expect(listEnv(project)).toEqual(variables.map((variable) => ({ ...variable, visibility: "server" })))
-      } finally {
-        await server.stop(true)
-        delete process.env.VECTOR_CREDENTIAL_KEY
-      }
-    },
-  )
 })

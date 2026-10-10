@@ -60,6 +60,10 @@ export type CloudDeployment = {
   healthError?: string
   checks: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  /** Vercel's own id (dpl_...) for this release. */
+  providerDeploymentId?: string
+  /** The stable per-branch preview address of an agent workspace's release. */
+  alias?: string
 }
 
 // "public" values may reach browser code; "server" values must not, so they can
@@ -196,6 +200,8 @@ function readDeployments(): CloudDeployment[] {
       healthError: typeof item.healthError === "string" ? item.healthError : undefined,
       checks: Array.isArray(item.checks) ? item.checks.filter(isCloudDeploymentCheck) : [],
       git: isCloudGitMetadata(item.git) ? item.git : undefined,
+      providerDeploymentId: typeof item.providerDeploymentId === "string" ? item.providerDeploymentId : undefined,
+      alias: typeof item.alias === "string" ? cleanDeploymentUrl(item.alias) : undefined,
     }))
 }
 
@@ -244,6 +250,7 @@ export function recordDeployment(input: {
   durationMs?: number
   checks?: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  providerDeploymentId?: string
 }): CloudDeployment {
   const records = readDeployments()
   const environment = input.environment ?? "production"
@@ -272,6 +279,7 @@ export function recordDeployment(input: {
       output: check.output ? redactCloudLog(input.projectPath, input.taskId, check.output).slice(-20_000) : undefined,
     })),
     git: input.git,
+    providerDeploymentId: input.providerDeploymentId,
   }
   const rest =
     environment === "production"

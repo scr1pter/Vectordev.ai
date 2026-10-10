@@ -4,6 +4,8 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { fakeVercel } from "../../test/fake-vercel"
+
 // publish reaches electron-store through cloud-console and electron's shell
 // through cloud-connections, so both are mocked before it is imported.
 const userDataPath = join(tmpdir(), "vector-publish-test")
@@ -36,8 +38,9 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { publishProject, runVercel } = await import("./publish")
-const { listDeployments, setBuildSettings } = await import("./cloud-console")
+const { publishProject, runVercel, VERCEL_CLI_VERSION } = await import("./publish")
+const { cloudProjectScopeKey, listDeployments, setBuildSettings } = await import("./cloud-console")
+const { encryptCloudCredential } = await import("./cloud-credential-vault")
 
 let directory = ""
 
@@ -53,7 +56,7 @@ afterEach(async () => {
 
 // A stand-in for the Vercel CLI that echoes its token back in two separate
 // writes, so the token arrives split across output chunks.
-async function fakeVercel() {
+async function tokenEchoCli() {
   const path = join(directory, "vercel")
   await writeFile(
     path,
@@ -76,7 +79,7 @@ describe.skipIf(process.platform === "win32")("Vercel CLI runs", () => {
     const token = "fixtureVercelToken0123456789"
     const chunks: string[] = []
     const result = await runVercel({
-      command: [await fakeVercel()],
+      command: [await tokenEchoCli()],
       args: ["--yes", "--project", "prj_fixture"],
       cwd: directory,
       token,
@@ -94,45 +97,331 @@ describe.skipIf(process.platform === "win32")("Vercel CLI runs", () => {
   })
 
   test("set no token when the user signed in with the CLI instead", async () => {
-    const result = await runVercel({ command: [await fakeVercel()], args: [], cwd: directory })
+    const result = await runVercel({ command: [await tokenEchoCli()], args: [], cwd: directory })
     expect(result.log).toContain("token-set=\n")
   })
 })
 
+// The fake CLI prints its arguments and the two variables that pick the
+// project, then a deployment URL the fake Vercel API knows, as `vercel deploy`
+// prints the deployment URL on stdout (https://vercel.com/docs/cli/deploy).
+async function fakeDeployCli(url: string) {
+  const path = join(directory, "vercel-deploy")
+  await writeFile(
+    path,
+    [
+      "#!/bin/sh",
+      'printf "args %s\\n" "$*"',
+      'printf "org=%s project=%s\\n" "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID"',
+      `printf "${url}\\n"`,
+    ].join("\n"),
+  )
+  await chmod(path, 0o755)
+  return path
+}
+
 describe.skipIf(process.platform === "win32")("publishing a project", () => {
-  test("deploys with the Vercel CLI and never rewrites the project's source", async () => {
-    const project = await mkdtemp(join(tmpdir(), "vector-publish-project-"))
-    try {
-      const page = "<!doctype html>\n<html>\n  <body>\n    <h1>Shop</h1>\n  </body>\n</html>\n"
-      await writeFile(join(project, "index.html"), page)
-      await mkdir(join(project, "public"))
-      await writeFile(join(project, "public", "index.html"), page)
-      setBuildSettings(project, undefined, {
-        framework: "Static",
-        packageManager: "static",
-        installCommand: "",
-        testCommand: "",
-        buildCommand: "",
-        outputDirectory: ".",
-        nodeVersion: "",
-        healthPath: "/",
-        requiredChecks: { test: false, secrets: true, health: false, browser: false },
-      })
-      const cli = await fakeVercel()
-      const result = await publishProject(
-        { projectPath: project, target: "vercel", production: false },
-        undefined,
-        async () => [{ id: "vercel", label: "Vercel", command: [cli], loginHint: "", available: true }],
-      )
-      expect(result).toMatchObject({ ok: true, target: "vercel", url: "https://fixture-app-abc123.vercel.app/" })
-      expect(await readFile(join(project, "index.html"), "utf8")).toBe(page)
-      expect(await readFile(join(project, "public", "index.html"), "utf8")).toBe(page)
-      expect((await readdir(project)).sort()).toEqual(["index.html", "public"])
-      expect(listDeployments(project)).toEqual([
-        expect.objectContaining({ target: "vercel", environment: "preview", releaseStatus: "preview" }),
-      ])
-    } finally {
-      await rm(project, { recursive: true, force: true })
+  let api: ReturnType<typeof fakeVercel>
+  let project = ""
+
+  beforeEach(async () => {
+    api = fakeVercel()
+    process.env.VECTOR_VERCEL_API_URL = api.url
+    project = await mkdtemp(join(tmpdir(), "vector-publish-project-"))
+    await writeFile(join(project, "index.html"), "<!doctype html><h1>Shop</h1>\n")
+    stores.set(
+      "cloud-provider-connections",
+      new Map([
+        [
+          "records",
+          [{ provider: "vercel", accessToken: encryptCloudCredential(api.token), connectedAt: "2026-10-01" }],
+        ],
+      ]),
+    )
+  })
+
+  afterEach(async () => {
+    await api.stop()
+    delete process.env.VECTOR_VERCEL_API_URL
+    await rm(project, { recursive: true, force: true })
+  })
+
+  function linkProject(teamId?: string, overrides: Parameters<typeof api.addProject>[0] = { name: "shop" }) {
+    const remote = api.addProject({ ...overrides, teamId })
+    stores.set(
+      "cloud-provider-links",
+      new Map([
+        [
+          cloudProjectScopeKey(project),
+          [
+            {
+              provider: "vercel",
+              projectId: remote.id,
+              projectName: remote.name,
+              accountId: teamId ?? "user_1",
+              teamId,
+              linkedAt: "2026-10-01",
+            },
+          ],
+        ],
+      ]),
+    )
+    return remote
+  }
+
+  function checks(input: { health: boolean; browser: boolean }) {
+    setBuildSettings(project, undefined, {
+      framework: "Static",
+      packageManager: "static",
+      installCommand: "",
+      testCommand: "",
+      buildCommand: "",
+      outputDirectory: ".",
+      nodeVersion: "",
+      healthPath: "/",
+      requiredChecks: { test: false, secrets: true, ...input },
+    })
+  }
+
+  // Vercel API calls go to the fake API; anything on *.vercel.app is the
+  // deployed site, answered by `site`.
+  function routed(site: (url: URL, headers: Headers) => Response) {
+    return async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (url.hostname.endsWith(".vercel.app") || url.hostname.endsWith(".example")) {
+        return site(url, new Headers(init?.headers))
+      }
+      return fetch(input, init)
     }
+  }
+
+  test("publishes a preview with the pinned CLI, the linked project and no production flags", async () => {
+    const remote = linkProject("team_1")
+    api.addDeployment({ projectId: remote.id, url: "shop-abc123.vercel.app", target: "production", uid: "dpl_first" })
+    remote.productionId = "dpl_first"
+    const preview = api.addDeployment({ projectId: remote.id, url: "shop-preview1.vercel.app", uid: "dpl_preview" })
+    checks({ health: true, browser: true })
+    const page = "<!doctype html>\n<html><body><h1>Shop</h1></body></html>\n"
+    await writeFile(join(project, "index.html"), page)
+    const cli = await fakeDeployCli(`https://${preview.url}`)
+    const browsed: string[] = []
+    const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+      command: [cli],
+      request: routed(() => new Response("ok")),
+      browserCheck: async (url) => {
+        browsed.push(url)
+        return { ok: true, details: "Rendered.", output: "", durationMs: 1 }
+      },
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      environment: "preview",
+      url: "https://shop-preview1.vercel.app/",
+      providerDeploymentId: "dpl_preview",
+    })
+    expect(result.log).toContain("args deploy --yes\n")
+    expect(result.log).toContain(`org=team_1 project=${remote.id}`)
+    expect(result.log).not.toContain(api.token)
+    expect(browsed).toEqual(["https://shop-preview1.vercel.app"])
+    expect(api.requests("POST").some((item) => item.path.includes("/promote/"))).toBe(false)
+    expect(remote.productionId).toBe("dpl_first")
+    expect(await readFile(join(project, "index.html"), "utf8")).toBe(page)
+    expect((await readdir(project)).sort()).toEqual(["index.html"])
+    expect(listDeployments(project)).toEqual([
+      expect.objectContaining({
+        environment: "preview",
+        releaseStatus: "preview",
+        providerDeploymentId: "dpl_preview",
+      }),
+    ])
+    expect(VERCEL_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
+  })
+
+  test("builds production without moving domains, checks it, then promotes it", async () => {
+    const remote = linkProject()
+    api.addDeployment({ projectId: remote.id, uid: "dpl_old", target: "production" })
+    remote.productionId = "dpl_old"
+    const staged = api.addDeployment({
+      projectId: remote.id,
+      uid: "dpl_new",
+      url: "shop-new.vercel.app",
+      target: "production",
+    })
+    checks({ health: true, browser: false })
+    const order: string[] = []
+    const result = await publishProject({ projectPath: project, target: "vercel", production: true }, undefined, {
+      command: [await fakeDeployCli(`https://${staged.url}`)],
+      sleep: async () => {},
+      request: routed((url) => {
+        order.push(`check ${url.host}`)
+        return new Response("ok")
+      }),
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      environment: "production",
+      productionUrl: "https://shop.vercel.app",
+      url: "https://shop.vercel.app",
+    })
+    expect(result.log).toContain("args deploy --yes --prod --skip-domain")
+    expect(order).toEqual(["check shop-new.vercel.app"])
+    expect(remote.productionId).toBe("dpl_new")
+    expect(listDeployments(project)[0]).toMatchObject({
+      releaseStatus: "current",
+      productionUrl: "https://shop.vercel.app/",
+    })
+  })
+
+  test("a protected preview is reported as protected, not as a failed release", async () => {
+    const remote = linkProject(undefined, { name: "shop", ssoProtection: { deploymentType: "preview" } })
+    api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
+    remote.productionId = "dpl_first"
+    const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
+    checks({ health: true, browser: true })
+    const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+      command: [await fakeDeployCli(`https://${preview.url}`)],
+      request: routed(
+        () =>
+          new Response("Authentication Required", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } }),
+      ),
+      browserCheck: async () => {
+        throw new Error("a protected deployment is not rendered")
+      },
+    })
+    expect(result).toMatchObject({ ok: true, protectedChecks: "skipped", environment: "preview" })
+    expect(result.checks?.filter((check) => check.type === "health" || check.type === "browser")).toEqual([
+      expect.objectContaining({
+        type: "health",
+        status: "skipped",
+        details: expect.stringContaining("Protection Bypass"),
+      }),
+      expect.objectContaining({ type: "browser", status: "skipped" }),
+    ])
+  })
+
+  test("checks a protected production build on the production domain after promotion", async () => {
+    const remote = linkProject(undefined, {
+      name: "shop",
+      ssoProtection: { deploymentType: "all_except_custom_domains" },
+    })
+    api.addDeployment({ projectId: remote.id, uid: "dpl_old", target: "production" })
+    remote.productionId = "dpl_old"
+    const staged = api.addDeployment({
+      projectId: remote.id,
+      uid: "dpl_new",
+      url: "shop-new.vercel.app",
+      target: "production",
+    })
+    checks({ health: true, browser: true })
+    const browsed: string[] = []
+    const result = await publishProject({ projectPath: project, target: "vercel", production: true }, undefined, {
+      command: [await fakeDeployCli(`https://${staged.url}`)],
+      sleep: async () => {},
+      request: routed((url) =>
+        url.host === "shop.vercel.app"
+          ? new Response("ok")
+          : new Response("", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } }),
+      ),
+      browserCheck: async (url) => {
+        browsed.push(url)
+        return { ok: true, details: "Rendered.", output: "", durationMs: 1 }
+      },
+    })
+    expect(result).toMatchObject({
+      ok: true,
+      protectedChecks: "checked-after-promotion",
+      productionUrl: "https://shop.vercel.app",
+    })
+    expect(browsed).toEqual(["https://shop.vercel.app"])
+    expect(result.checks?.find((check) => check.type === "health")).toMatchObject({
+      status: "passed",
+      details: expect.stringContaining("after promotion"),
+    })
+  })
+
+  test("uses the project's bypass secret to check a protected preview", async () => {
+    const remote = linkProject(undefined, {
+      name: "shop",
+      ssoProtection: { deploymentType: "preview" },
+      protectionBypass: {
+        bypassfixture0000000000000000000000: { createdAt: 1, createdBy: "user_1", scope: "automation-bypass" },
+      },
+    })
+    api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
+    remote.productionId = "dpl_first"
+    const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
+    checks({ health: true, browser: true })
+    const headers: Record<string, string>[] = []
+    const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+      command: [await fakeDeployCli(`https://${preview.url}`)],
+      request: routed((_url, sent) =>
+        sent.get("x-vercel-protection-bypass") === "bypassfixture0000000000000000000000"
+          ? new Response("ok")
+          : new Response("", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } }),
+      ),
+      browserCheck: async (_url, _id, sent) => {
+        headers.push(sent)
+        return { ok: true, details: "Rendered.", output: "", durationMs: 1 }
+      },
+    })
+    expect(result).toMatchObject({ ok: true, protectedChecks: undefined })
+    expect(headers).toEqual([
+      { "x-vercel-protection-bypass": "bypassfixture0000000000000000000000", "x-vercel-set-bypass-cookie": "true" },
+    ])
+  })
+
+  test("names the cause when the token is rejected, nothing is linked, or Vercel's build fails", async () => {
+    checks({ health: false, browser: false })
+    const cli = await fakeDeployCli("https://shop-x.vercel.app")
+    expect(
+      await publishProject({ projectPath: project, target: "vercel" }, undefined, { command: [cli] }),
+    ).toMatchObject({
+      ok: false,
+      errorCode: "not_linked",
+    })
+    const remote = linkProject()
+    api.state.rejectToken = true
+    const rejected = await publishProject({ projectPath: project, target: "vercel" }, undefined, { command: [cli] })
+    expect(rejected).toMatchObject({ ok: false, errorCode: "token_rejected" })
+    expect(rejected.error).toContain("Reconnect Vercel")
+    expect(listDeployments(project)).toEqual([])
+    api.state.rejectToken = false
+    api.addDeployment({
+      projectId: remote.id,
+      url: "shop-x.vercel.app",
+      readyState: "ERROR",
+      errorMessage: 'Command "npm run build" exited with 1',
+      events: [{ type: "stderr", created: 1, payload: { text: "src/app.ts(3,1): error TS2304" } }],
+    })
+    const failed = await publishProject({ projectPath: project, target: "vercel" }, undefined, { command: [cli] })
+    expect(failed).toMatchObject({ ok: false, errorCode: "build_failed" })
+    expect(failed.error).toContain("exited with 1")
+    expect(failed.log).toContain("error TS2304")
+  })
+
+  test("an agent workspace preview gets its branch's stable address", async () => {
+    const remote = linkProject("team_1")
+    api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
+    remote.productionId = "dpl_first"
+    const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_ws", url: "shop-ws.vercel.app" })
+    checks({ health: false, browser: false })
+    await Bun.$`git init -q -b agent/fix-cart && git -c user.email=a@b.invalid -c user.name=A commit -q --allow-empty -m init`
+      .cwd(project)
+      .quiet()
+    const result = await publishProject(
+      { projectPath: project, target: "vercel", workspaceId: "ws-unknown", workspaceName: "Agent 1" },
+      undefined,
+      { command: [await fakeDeployCli(`https://${preview.url}`)] },
+    )
+    expect(result).toMatchObject({
+      ok: true,
+      alias: "https://shop-git-agent-fix-cart-acme.vercel.app",
+      url: "https://shop-git-agent-fix-cart-acme.vercel.app",
+    })
+    expect(preview.alias).toEqual(["shop-git-agent-fix-cart-acme.vercel.app"])
+    expect(listDeployments(project)[0]).toMatchObject({
+      workspaceId: "ws-unknown",
+      alias: "https://shop-git-agent-fix-cart-acme.vercel.app/",
+    })
   })
 })
