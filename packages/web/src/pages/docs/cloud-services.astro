@@ -43,21 +43,40 @@ export const prerender = true
   </p>
   <p>
     Sync to Vercel sends the configured values to the linked project. Local .env changes and remote provider
-    values are separate: removing a local entry does not confirm remote deletion. Supabase setup adds public client
-    values, including the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY aliases used by the generated client. Secret,
-    service-role, management and user-session keys are rejected for that browser configuration.
+    values are separate: removing a local entry does not confirm remote deletion. Supabase setup adds the project's
+    public URL and key under the names your framework exposes to the browser: NEXT_PUBLIC_ for Next.js, VITE_ for
+    Vite, and plain SUPABASE_URL and SUPABASE_ANON_KEY otherwise. It writes a TypeScript client when the project has a
+    tsconfig.json, and adds .env to .gitignore when git does not already ignore it. Secret, service-role, management
+    and user-session keys are rejected for that browser configuration.
   </p>
   <p>
     A Vercel integration can manage the variables it owns. Pre-existing variables created outside that integration
     may need to be managed directly in Vercel. You can still list projects and manage or apply local variables in Vector.
   </p>
 
+  <h2 id="supabase">Run Supabase from Vector</h2>
+  <p>
+    The Database, Authentication, Storage, Edge functions, Database logs and Security screens act on the Supabase
+    project linked to the repository. The agent can do the same through its cloud tool.
+  </p>
+  <ul class="feature-list">
+    <li><strong>Projects</strong><span>Link an existing project or create one in the organization you choose, with progress shown while Supabase brings it up. An interrupted creation is finished rather than duplicated. Pause, restore or unlink the linked project.</span></li>
+    <li><strong>Server credentials</strong><span>Write a server-only DATABASE_URL through the transaction pooler after you confirm, and rotate the database password, which can update DATABASE_URL and push the environment to Vercel. The password is encrypted on this device and never shown.</span></li>
+    <li><strong>Migrations and SQL</strong><span>See which migrations are applied, pending or changed (including those the Supabase CLI applied), apply them, and roll back the latest one with its paired .down.sql file or a "-- down" section. Without a down migration Vector refuses. The SQL console runs queries read-only and asks before a query that changes data.</span></li>
+    <li><strong>Authentication</strong><span>Edit the site URL and redirect URLs, including your linked Vercel production and preview addresses. Turn email, Google, GitHub and Apple sign-in on or off; client secrets go to Supabase and are not shown again. List, invite and delete users.</span></li>
+    <li><strong>Storage and Edge Functions</strong><span>Create, update and delete buckets. Deploy functions from supabase/functions, delete them, and manage their secrets by name.</span></li>
+    <li><strong>Logs and security</strong><span>Read recent API, Postgres, Auth, Storage and Edge Function logs. The security check runs Supabase's security advisors and scans public environment variables and the built app for server keys; promoting a release to production requires it to pass.</span></li>
+  </ul>
+
   <h2 id="cloud-actions">Run cloud work from a task</h2>
   <p>
     The agent's cloud tool can inspect connections, detect build settings, prepare a linked database or authentication,
     sync variables, publish and inspect recent deployments. It asks before it publishes, changes a database or writes a
     host's environment, and the prompt names the provider, project and environment. A wildcard allow does not skip
-    these prompts; only a permission rule that names the cloud action does.
+    these prompts; only a permission rule that names the cloud action does. Each Supabase change is approved on its
+    own, and deleting users, buckets or functions, rolling back, pausing, rotating the password, writing DATABASE_URL
+    and SQL that changes data ask every time. The agent never handles secret values: OAuth client secrets and function
+    secrets are entered in Cloud Services, and the agent can only refer to variables already stored there.
     Publishing goes to the Vercel project linked to the repository; without one, the tool returns setup guidance. A
     failed Vercel deployment never triggers a deployment somewhere else.
   </p>

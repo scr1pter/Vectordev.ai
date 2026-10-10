@@ -128,14 +128,26 @@ literally are rejected before replacing `.env`; use the hosting provider's
 environment settings for such values. Other project types retain their existing
 serialization, so this is not a guarantee about every framework's parser.
 
-Supabase connection writes `SUPABASE_URL` and `SUPABASE_ANON_KEY`, plus the
-`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` aliases consumed by the generated
-browser client. Only a publishable key or legacy anonymous key is accepted for
-this client configuration. Management, secret, service-role and user-session
-keys must not be placed in these browser-visible variables. The provider's key
-listing may contain privileged keys, but Vector does not select them for the
-client, return them as its database connection, or write them to the scaffold.
-Public client keys still require appropriate database access policies.
+Supabase connection writes the project URL and publishable (or legacy
+anonymous) key under the names the framework exposes to browser code:
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for Next.js,
+`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for Vite, and `SUPABASE_URL`
+and `SUPABASE_ANON_KEY` otherwise. It scaffolds `src/lib/supabase.ts` (or `.js`
+without a `tsconfig.json`; `lib/` for a Next.js app without `src/`) unless a
+client already exists, and adds `.env` to `.gitignore` when git does not
+already ignore it. Management, secret, service-role and user-session keys are
+never placed in these browser-visible variables.
+
+The service-role or secret key is read from the Management API only inside the
+desktop main process, for the project's Auth admin and Storage APIs (users and
+buckets). It is kept in memory for that one operation, never written to the
+environment, `.env` or the scaffold, and scrubbed from every error and result,
+as are the management token, database passwords and stored environment values.
+`DATABASE_URL` (Supavisor transaction pooler) is written only with explicit
+consent, as a server-only variable, from a password Vector generated when it
+created the project or set when it rotated it; the password is stored with the
+same vault encryption as provider tokens. Public client keys still require
+appropriate database access policies.
 
 Vercel synchronization sends the configured variables to the linked
 provider project. It is separate from writing local `.env`. Removing a local
