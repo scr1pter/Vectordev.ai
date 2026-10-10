@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import path from "path"
+import { codeToHtml } from "shiki"
 import { sanitizeMarkdown } from "@vectordevai/session-ui/markdown-cache"
+
+// Chat renders math with the session UI's own KaTeX, which the app does not depend on directly.
+const katex = (await import(Bun.resolveSync("katex", path.join(import.meta.dir, "../../session-ui")))).default
 
 describe("untrusted Markdown network isolation", () => {
   test("removes elements and attributes that can initiate requests", () => {
@@ -18,6 +23,32 @@ describe("untrusted Markdown network isolation", () => {
       expect(html).not.toContain(value)
     }
     expect(html).toContain("safe text")
+  })
+
+  test("keeps the inline styles KaTeX math and Shiki code need", async () => {
+    const math = katex.renderToString("\\frac{a}{b}^2")
+    const code = await codeToHtml("const answer = 42", { lang: "ts", theme: "github-light" })
+
+    for (const html of [math, code]) {
+      const styles = html.match(/style="[^"]*"/g) ?? []
+      expect(styles.length).toBeGreaterThan(0)
+      expect(sanitizeMarkdown(html).match(/style="[^"]*"/g) ?? []).toEqual(styles)
+    }
+  })
+
+  test("removes a style that loads a resource however it is spelled", () => {
+    const html = sanitizeMarkdown(`
+      <span style="color:#d73a49">kept</span>
+      <span style="background-image: image-set('https://attacker.test/a.png' 1x)">set</span>
+      <span style="background:u\\72l(https://attacker.test/escaped)">escaped</span>
+      <span style="background:&#117;rl(https://attacker.test/entity)">entity</span>
+      <span style="cursor:URL (https://attacker.test/cursor), auto">cursor</span>
+    `)
+
+    expect(html).toContain('style="color:#d73a49"')
+    expect(html).not.toContain("attacker.test")
+    expect(html.match(/style=/g)).toHaveLength(1)
+    for (const text of ["kept", "set", "escaped", "entity", "cursor"]) expect(html).toContain(text)
   })
 
   test("keeps only navigable web links and isolates their opener", () => {

@@ -37,9 +37,11 @@ const networkAttributes = new Set([
   "src",
   "srcdoc",
   "srcset",
-  "style",
   "xlink:href",
 ])
+// KaTeX lays out math and Shiki colours code with inline styles, so styles stay. A style that could load anything
+// (url(), image-set(), src(), @import, legacy expression()) or hide such a call behind a CSS escape is removed.
+const networkStyle = /url\s*\(|image-set|image\s*\(|src\s*\(|@import|expression\s*\(|\\/i
 const networkTagPattern = new RegExp(`<\\s*\\/?\\s*(?:${networkTags.join("|")})\\b(?:[^>"']|"[^"]*"|'[^']*')*>`, "gi")
 const openingTagPattern = /<\s*([a-z][\w:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi
 const networkAttributePattern = new RegExp(
@@ -47,6 +49,7 @@ const networkAttributePattern = new RegExp(
   "gi",
 )
 const hrefAttributePattern = /\s+(?:href|xlink\s*:\s*href)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi
+const styleAttributePattern = /\s+style\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi
 const config = {
   USE_PROFILES: { html: true, mathMl: true },
   SANITIZE_NAMED_PROPS: true,
@@ -61,7 +64,11 @@ if (typeof window !== "undefined" && DOMPurify.isSupported) {
   DOMPurify.addHook("afterSanitizeAttributes", (node: Element) => {
     for (const attribute of Array.from(node.attributes)) {
       const name = attribute.name.toLowerCase()
-      if (networkAttributes.has(name) || (name === "href" && !(node instanceof HTMLAnchorElement))) {
+      if (
+        networkAttributes.has(name) ||
+        (name === "href" && !(node instanceof HTMLAnchorElement)) ||
+        (name === "style" && networkStyle.test(attribute.value))
+      ) {
         node.removeAttribute(attribute.name)
       }
     }
@@ -101,7 +108,9 @@ export function sanitizeMarkdown(html: string) {
 
 export function neutralizeNetworkMarkup(html: string) {
   return html.replace(networkTagPattern, "").replace(openingTagPattern, (tag, name: string) => {
-    const withoutNetworkAttributes = tag.replace(networkAttributePattern, "")
+    const withoutNetworkAttributes = tag
+      .replace(networkAttributePattern, "")
+      .replace(styleAttributePattern, (attribute, value: string) => (networkStyle.test(value) ? "" : attribute))
     return name.toLowerCase() === "a"
       ? withoutNetworkAttributes
       : withoutNetworkAttributes.replace(hrefAttributePattern, "")
