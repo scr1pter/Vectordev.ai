@@ -4,7 +4,7 @@ import { InstanceRef } from "@/effect/instance-ref"
 import type { InstanceContext } from "@/project/instance-context"
 import { InstanceStore } from "@/project/instance-store"
 import { SessionStatus } from "@/session/status"
-import { Effect, Option, RcMap } from "effect"
+import { Clock, Effect, Option, RcMap } from "effect"
 import { LocationServiceMap } from "@vectordevai/core/location-service-map"
 import { Event } from "./event"
 
@@ -45,8 +45,14 @@ const disposeIdleInstances = Effect.fnUntraced(function* (store: InstanceStore.I
   if (Option.isNone(background) || Option.isNone(statuses)) return yield* store.disposeAll()
   const busy = (ctx: InstanceContext) =>
     Effect.gen(function* () {
-      if ((yield* background.value.list()).some((job) => job.status === "running")) return true
-      return (yield* statuses.value.list()).size > 0
+      const now = yield* Clock.currentTimeMillis
+      // A background subagent that finished moments ago is still sending its report, which starts its parent's turn.
+      const working = (job: BackgroundJob.Info) =>
+        job.status === "running" ||
+        (job.metadata?.background === true && (job.completed_at ?? 0) > now - REPORT_IN_FLIGHT_MS)
+      if ((yield* background.value.list()).some(working)) return true
+      // A session waiting to retry a failed provider call is waiting on settings like the ones this reload brings.
+      return [...(yield* statuses.value.list()).values()].some((status) => status.type !== "retry")
     }).pipe(Effect.provideService(InstanceRef, ctx))
   yield* Effect.forEach(
     yield* store.loaded(),
@@ -57,6 +63,10 @@ const disposeIdleInstances = Effect.fnUntraced(function* (store: InstanceStore.I
     { discard: true },
   )
 })
+
+// How long a finished background subagent's report takes to reach its parent session: the batching window for reports
+// that finish together, then admitting the report as a prompt, which marks the session busy.
+const REPORT_IN_FLIGHT_MS = 3_000
 
 // Directories whose reload waits on their running work, so a second reload does not wait twice.
 const deferred = new Set<string>()
