@@ -25,6 +25,7 @@ import { getAdapter, registeredAdapters } from "./adapters"
 import { type Target, type WorkspaceInfo, WorkspaceInfo as WorkspaceInfoSchema } from "./types"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { Session } from "@/session/session"
+import { BackgroundJob } from "@/background/job"
 import { SessionPrompt } from "@/session/prompt"
 import { SessionTable } from "@vectordevai/core/session/sql"
 import { SessionID } from "@/session/schema"
@@ -162,6 +163,7 @@ const layer = Layer.effect(
     const session = yield* Session.Service
     const sharing = yield* ShareNext.Service
     const prompt = yield* SessionPrompt.Service
+    const background = yield* BackgroundJob.Service
     const http = yield* HttpClient.HttpClient
     const events = yield* EventV2Bridge.Service
     const vcs = yield* Vcs.Service
@@ -589,6 +591,7 @@ const layer = Layer.effect(
               )
             } else {
               yield* prompt.cancel(input.sessionID)
+              yield* stopBackgroundSubagents(background, input.sessionID)
             }
 
             // "claim" this session so any future events coming from
@@ -954,6 +957,30 @@ function route(url: string | URL, path: string) {
   return next
 }
 
+// Stopping a session's turn spares its background subagents. A warped session's would go on changing the checkout it
+// left, after its changes were copied, and report into a session that has moved, so they stop with everything they
+// started.
+const stopBackgroundSubagents = Effect.fnUntraced(function* (
+  background: BackgroundJob.Interface,
+  sessionID: SessionID,
+) {
+  const jobs = yield* background.list()
+  const family = new Set<string>([sessionID])
+  const grow = (): void => {
+    const before = family.size
+    jobs
+      .filter((job) => typeof job.metadata?.parentSessionId === "string" && family.has(job.metadata.parentSessionId))
+      .forEach((job) => family.add(job.id))
+    if (family.size > before) grow()
+  }
+  grow()
+  yield* Effect.forEach(
+    jobs.filter((job) => job.status === "running" && job.id !== sessionID && family.has(job.id)),
+    (job) => background.cancel(job.id),
+    { concurrency: "unbounded", discard: true },
+  )
+})
+
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
@@ -962,6 +989,7 @@ export const node = LayerNode.make({
     Auth.node,
     Session.node,
     SessionPrompt.node,
+    BackgroundJob.node,
     httpClient,
     EventV2Bridge.node,
     Vcs.node,
