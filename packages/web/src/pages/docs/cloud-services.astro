@@ -74,9 +74,10 @@ export const prerender = true
     sync variables, publish and inspect recent deployments. It asks before it publishes, changes a database or writes a
     host's environment, and the prompt names the provider, project and environment. A wildcard allow does not skip
     these prompts; only a permission rule that names the cloud action does. Each Supabase change is approved on its
-    own, and deleting users, buckets or functions, rolling back, pausing, rotating the password, writing DATABASE_URL
-    and SQL that changes data ask every time. The agent never handles secret values: OAuth client secrets and function
-    secrets are entered in Cloud Services, and the agent can only refer to variables already stored there.
+    own, and deleting users, buckets or functions, rolling back, pausing, rotating the password, writing DATABASE_URL,
+    SQL that changes data and turning a sign-in method or redirect address off ask every time. A new migration file
+    asks like any other edit. The agent never handles secret values: OAuth client secrets and function secrets are
+    entered in Cloud Services, and the agent can only refer to variables already stored there.
     Publishing goes to the Vercel project linked to the repository; without one, the tool returns setup guidance. A
     failed Vercel deployment never triggers a deployment somewhere else.
   </p>

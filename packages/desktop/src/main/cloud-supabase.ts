@@ -370,7 +370,12 @@ function list(input: Input, key: string) {
 // provider, project, environment and a one-line summary. `repeatable` is false
 // for anything destructive, billed or credential-bearing, so "always allow"
 // never covers it and each run asks again.
-export async function describeSupabaseCommand(command: SupabaseCommand, raw: unknown, workspaces: CloudWorkspace[]) {
+export async function describeSupabaseCommand(
+  command: SupabaseCommand,
+  raw: unknown,
+  workspaces: CloudWorkspace[],
+  options: SupabaseOptions = {},
+) {
   const input: Input = raw && typeof raw === "object" ? (raw as Input) : {}
   const scope = await resolveCloudScope(text(input, "projectPath") ?? "", workspaces)
   const database = getDatabase(scope.projectPath, text(input, "taskId"))
@@ -458,25 +463,40 @@ export async function describeSupabaseCommand(command: SupabaseCommand, raw: unk
         : describe(`Run a read-only SQL query against ${name}; the rows come back to the agent.`, true)
     }
     if (command === "update_auth") {
+      // The exact addresses are named, since each one becomes a place sign-in
+      // may send a user's session.
+      const vercel = bool(input, "addVercelUrls")
+        ? (await vercelRedirectSuggestions(scope.projectPath, options.request)).redirectUrls
+        : []
+      const providers = AUTH_PROVIDERS.flatMap((provider) => {
+        const change =
+          input.providers && typeof input.providers === "object" ? (input.providers as Input)[provider] : undefined
+        if (!change || typeof change !== "object") return []
+        return [{ provider, enabled: bool(change as Input, "enabled") }]
+      })
+      const redirects = [...(list(input, "redirectUrls") ?? []), ...vercel]
       const parts = [
         text(input, "siteUrl") ? `set the site URL to ${text(input, "siteUrl")}` : "",
-        list(input, "redirectUrls")?.length ? `allow redirects to ${list(input, "redirectUrls")?.join(", ")}` : "",
+        redirects.length ? `allow redirects to ${redirects.join(", ")}` : "",
+        bool(input, "addVercelUrls") && !vercel.length ? "allow the linked Vercel addresses (none found yet)" : "",
         list(input, "removeRedirectUrls")?.length
           ? `stop allowing ${list(input, "removeRedirectUrls")?.join(", ")}`
           : "",
-        bool(input, "addVercelUrls") ? "allow the linked Vercel production and preview addresses" : "",
         bool(input, "emailEnabled") !== undefined
           ? `turn email sign-in ${bool(input, "emailEnabled") ? "on" : "off"}`
           : "",
-        ...AUTH_PROVIDERS.map((provider) => {
-          const change =
-            input.providers && typeof input.providers === "object" ? (input.providers as Input)[provider] : undefined
-          if (!change || typeof change !== "object") return ""
-          const enabled = bool(change as Input, "enabled")
-          return `${enabled === undefined ? "update" : enabled ? "turn on" : "turn off"} ${provider} sign-in`
-        }),
+        ...providers.map(
+          (item) =>
+            `${item.enabled === undefined ? "update" : item.enabled ? "turn on" : "turn off"} ${item.provider} sign-in`,
+        ),
       ].filter(Boolean)
-      return describe(`Change Supabase Auth on ${name}: ${parts.join("; ") || "no changes"}.`, true)
+      // Turning a sign-in method off or removing an address can lock users
+      // out, so it asks every time.
+      const narrows =
+        bool(input, "emailEnabled") === false ||
+        Boolean(list(input, "removeRedirectUrls")?.length) ||
+        providers.some((item) => item.enabled === false)
+      return describe(`Change Supabase Auth on ${name}: ${parts.join("; ") || "no changes"}.`, !narrows)
     }
     if (command === "invite_user") {
       return describe(`Send a sign-up invitation email to ${required(input, "email")} from ${name}.`, false)

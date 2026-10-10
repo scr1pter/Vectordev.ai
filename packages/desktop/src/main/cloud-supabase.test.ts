@@ -599,6 +599,27 @@ describe("authentication", () => {
       siteUrl: "https://shop.vercel.app",
       redirectUrls: ["https://shop.vercel.app/**", "https://*-krishnas-projects.vercel.app/**"],
     })
+    // The agent's prompt names each address it would allow.
+    const described = await describeSupabaseCommand("update_auth", { projectPath: project, addVercelUrls: true }, [], {
+      request: fake.request,
+    })
+    expect(described).toMatchObject({
+      repeatable: true,
+      scope: {
+        summary:
+          "Change Supabase Auth on shop-db: allow redirects to https://shop.vercel.app/**, https://*-krishnas-projects.vercel.app/**.",
+      },
+    })
+    // Turning a method off or removing an address can lock users out.
+    for (const narrowing of [
+      { emailEnabled: false },
+      { removeRedirectUrls: ["http://localhost:3000/**"] },
+      { providers: { github: { enabled: false } } },
+    ]) {
+      expect(await describeSupabaseCommand("update_auth", { projectPath: project, ...narrowing }, [])).toMatchObject({
+        repeatable: false,
+      })
+    }
     expect(await run("update_auth", { addVercelUrls: true })).toMatchObject({
       ok: true,
       auth: {

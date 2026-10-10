@@ -144,7 +144,7 @@ async function routeCloudCommand(body: unknown, options: CloudBridgeOptions) {
   const action = body && typeof body === "object" ? Reflect.get(body, "action") : undefined
   const original = (value: unknown) => COMMANDS.some((item) => item === value)
   if (command === "describe" && isSupabaseCommand(action) && !original(action)) {
-    return describeSupabaseCommand(action, body, (await options.workspaces?.()) ?? [])
+    return describeSupabaseCommand(action, body, (await options.workspaces?.()) ?? [], { request: options.request })
   }
   if (isSupabaseCommand(command) && !original(command)) {
     return runSupabaseCommand(command, body, {
