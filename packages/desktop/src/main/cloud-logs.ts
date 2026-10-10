@@ -192,8 +192,12 @@ function deploymentHost(deployment: CloudDeployment): string {
   return URL.canParse(deployment.url) ? new URL(deployment.url).host : deployment.url
 }
 
-async function vercelEntries(deployment: CloudDeployment, lines: number, request: CloudFetch) {
-  const auth = await getCloudProviderRuntimeAuth("vercel")
+async function vercelEntries(
+  deployment: CloudDeployment,
+  lines: number,
+  request: CloudFetch,
+  auth: { token?: string; teamId?: string },
+) {
   if (!auth.token) throw new Error("Connect Vercel in Vector Cloud > Connections to read its deployment logs.")
   const url = new URL(
     `/v3/deployments/${encodeURIComponent(deploymentHost(deployment))}/events`,
@@ -231,20 +235,18 @@ export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch 
   let source: "provider" | "build" = "provider"
   let detail: string | undefined
   let entries: CloudLogEntry[] = []
-  if (deployment.target === "vercel") {
-    try {
-      entries = await vercelEntries(deployment, lines, request)
-    } catch (error) {
-      detail = error instanceof Error ? error.message : String(error)
-    }
+  // Every listed deployment is a Vercel one (see listDeployments).
+  const auth = await getCloudProviderRuntimeAuth("vercel")
+  try {
+    entries = await vercelEntries(deployment, lines, request, auth)
+  } catch (error) {
+    detail = error instanceof Error ? error.message : String(error)
   }
   if (!entries.length) {
     source = "build"
-    if (deployment.target === "vercel") {
-      detail = detail
-        ? `${detail} Falling back to the build output Vector recorded.`
-        : "The provider returned no log events; showing the build output Vector recorded."
-    }
+    detail = detail
+      ? `${detail} Falling back to the build output Vector recorded.`
+      : "The provider returned no log events; showing the build output Vector recorded."
     entries = recordedLogEntries(deployment)
   }
 
@@ -266,7 +268,7 @@ export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch 
       truncated: tail.truncated,
       // Provider output routinely echoes the env vars a build was given, so the
       // tail leaves here through the same redaction the publish log uses.
-      tail: redactCloudLog(input.projectPath, deployment.taskId, tail.log),
+      tail: redactCloudLog(input.projectPath, deployment.taskId, tail.log, [auth.token]),
     },
   }
 }

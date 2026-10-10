@@ -89,7 +89,7 @@ export type CloudRuntimeLogResult = {
   source: "provider" | "build"
 }
 
-const activePublishes = new Map<string, ReturnType<typeof spawn>>()
+const activePublishes = new Set<string>()
 
 function scopeFor(input: PublishProjectInput) {
   return {
@@ -166,6 +166,43 @@ function runProcess(input: {
       resolve({ ok: false, code: null, signal: null, log: `${output}\n${error.message}` })
     })
   })
+}
+
+// Runs the Vercel CLI with the user's token as VERCEL_TOKEN. A Vercel token is a
+// plain string with no prefix a pattern could recognise, so every chunk the CLI
+// prints is scrubbed of that exact string before it is streamed, logged or
+// returned. The tail of each chunk is held back until the next one, so a token
+// split across two chunks is still caught.
+export async function runVercel(input: {
+  command: string[]
+  args: string[]
+  cwd: string
+  token?: string
+  timeoutMs?: number
+  onOutput?: (output: string) => void
+}) {
+  const token = input.token ?? ""
+  const scrub = (text: string) => (token ? text.split(token).join("[redacted]") : text)
+  let pending = ""
+  const flush = (text: string, final: boolean) => {
+    const combined = scrub(pending + text)
+    const held = final || !token ? 0 : Math.min(combined.length, token.length - 1)
+    pending = combined.slice(combined.length - held)
+    const ready = combined.slice(0, combined.length - held)
+    if (ready) input.onOutput?.(ready)
+  }
+  const launch = shimmedCommand(input.command[0], [...input.command.slice(1), ...input.args])
+  const result = await runProcess({
+    command: launch.command,
+    args: launch.args,
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
+    cwd: input.cwd,
+    timeoutMs: input.timeoutMs,
+    env: token ? { VERCEL_TOKEN: token } : undefined,
+    onOutput: (text) => flush(text, false),
+  })
+  flush("", true)
+  return { ...result, log: scrub(result.log) }
 }
 
 export async function detectPublishTargets(): Promise<PublishTarget[]> {
@@ -532,7 +569,6 @@ export async function publishProject(
       error: `Choose a ${target.label.replace(" (via npx)", "")} project in Vector Cloud before publishing.`,
     }
   }
-  const providerEnv: NodeJS.ProcessEnv = providerAuth.token ? { VERCEL_TOKEN: providerAuth.token } : {}
 
   const startedAt = Date.now()
   const settings = getBuildSettings(scope.projectPath, scope.taskId)
@@ -560,40 +596,19 @@ export async function publishProject(
   const destinationArgs = providerLink
     ? ["--project", providerLink.projectId, ...(providerLink.accountId ? ["--scope", providerLink.accountId] : [])]
     : []
-  const args = [...target.command.slice(1), "--yes", ...destinationArgs]
   emitProgress(input, emit, "uploading", "info", `Creating an immutable ${target.label} preview.`)
 
-  const launch = shimmedCommand(target.command[0], args)
-  const command = await new Promise<{ ok: boolean; code: number | null; signal: NodeJS.Signals | null; log: string }>(
-    (resolve) => {
-      const child = spawn(launch.command, launch.args, {
-        cwd: directory,
-        env: untrustedChildEnvironment(process.env, providerEnv, { CI: "1", FORCE_COLOR: "0" }),
-        windowsVerbatimArguments: launch.windowsVerbatimArguments,
-      })
-      activePublishes.set(publishKey, child)
-      let output = ""
-      const capture = (chunk: Buffer) => {
-        const text = chunk.toString()
-        output = (output + text).slice(-40_000)
-        const redacted = redactCloudLog(scope.projectPath, scope.taskId, text).trim()
-        if (redacted) emitProgress(input, emit, "uploading", "info", redacted.slice(-800))
-      }
-      child.stdout?.on("data", capture)
-      child.stderr?.on("data", capture)
-      const timeout = setTimeout(() => child.kill("SIGTERM"), 10 * 60_000)
-      child.on("close", (code, signal) => {
-        clearTimeout(timeout)
-        activePublishes.delete(publishKey)
-        resolve({ ok: code === 0 && !signal, code, signal, log: output })
-      })
-      child.on("error", (error) => {
-        clearTimeout(timeout)
-        activePublishes.delete(publishKey)
-        resolve({ ok: false, code: null, signal: null, log: `${output}\n${error.message}` })
-      })
+  activePublishes.add(publishKey)
+  const command = await runVercel({
+    command: target.command,
+    args: ["--yes", ...destinationArgs],
+    cwd: directory,
+    token: providerAuth.token,
+    onOutput: (text) => {
+      const redacted = redactCloudLog(scope.projectPath, scope.taskId, text).trim()
+      if (redacted) emitProgress(input, emit, "uploading", "info", redacted.slice(-800))
     },
-  )
+  }).finally(() => activePublishes.delete(publishKey))
 
   const commandLog = redactCloudLog(scope.projectPath, scope.taskId, command.log).slice(-40_000)
   const log = [preflightLog.trim(), commandLog.trim()].filter(Boolean).join("\n")
@@ -681,11 +696,11 @@ async function vercelDeploymentCommand(deployment: CloudDeployment, action: "pro
   const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
   if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
   const auth = await getCloudProviderRuntimeAuth("vercel")
-  const launch = shimmedCommand(target.command[0], [...target.command.slice(1), action, deployment.url, "--yes"])
-  const result = await runProcess({
-    ...launch,
+  const result = await runVercel({
+    command: target.command,
+    args: [action, deployment.url, "--yes"],
     cwd: deployment.deploymentPath ?? deployment.projectPath,
-    env: auth.token ? { VERCEL_TOKEN: auth.token } : undefined,
+    token: auth.token,
   })
   if (!result.ok) throw new Error(redactCloudLog(deployment.projectPath, deployment.taskId, result.log).slice(-4_000))
   return extractDeployUrl(result.log) ?? deployment.url
@@ -748,22 +763,12 @@ export async function fetchDeploymentRuntimeLogs(input: DeploymentActionInput): 
   const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
   if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
   const auth = await getCloudProviderRuntimeAuth("vercel")
-  const launch = shimmedCommand(target.command[0], [
-    ...target.command.slice(1),
-    "logs",
-    "--deployment",
-    deployment.url,
-    "--json",
-    "--limit",
-    "100",
-    "--since",
-    "1h",
-  ])
-  const result = await runProcess({
-    ...launch,
+  const result = await runVercel({
+    command: target.command,
+    args: ["logs", "--deployment", deployment.url, "--json", "--limit", "100", "--since", "1h"],
     cwd: deployment.deploymentPath ?? deployment.projectPath,
     timeoutMs: 30_000,
-    env: auth.token ? { VERCEL_TOKEN: auth.token } : undefined,
+    token: auth.token,
   })
   const log = redactCloudLog(deployment.projectPath, deployment.taskId, result.log).slice(-40_000)
   if (!result.ok) throw new Error(log || "Vercel logs could not be read.")

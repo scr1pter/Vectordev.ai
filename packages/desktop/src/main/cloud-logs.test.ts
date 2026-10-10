@@ -172,6 +172,7 @@ describe("fetchCloudLogs", () => {
         { type: "stdout", created: 2, payload: { text: "API_KEY=s3cr3t-value" } },
         { type: "stderr", created: 3, payload: { text: "TypeError: undefined is not a function" } },
         { type: "stdout", created: 1, payload: { text: "Build started" } },
+        { type: "stdout", created: 4, payload: { text: "auth vercel-token" } },
       ])
     })
 
@@ -183,8 +184,12 @@ describe("fetchCloudLogs", () => {
     expect(report.deploymentId).toBe("dep_1")
     expect(report.url).toBe("https://demo-abc.vercel.app/")
     expect(report.logs?.source).toBe("provider")
-    expect(report.logs?.tail).toBe("Build started\nAPI_KEY=[REDACTED]\n[stderr] TypeError: undefined is not a function")
+    expect(report.logs?.tail).toBe(
+      "Build started\nAPI_KEY=[REDACTED]\n[stderr] TypeError: undefined is not a function\nauth [redacted]",
+    )
     expect(JSON.stringify(report)).not.toContain("s3cr3t-value")
+    // The connection's own token has no recognisable prefix; it is removed as an exact string.
+    expect(JSON.stringify(report)).not.toContain("vercel-token")
   })
 
   test("falls back to the recorded build output when the provider call fails", async () => {

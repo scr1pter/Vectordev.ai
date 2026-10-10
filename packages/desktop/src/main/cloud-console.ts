@@ -531,14 +531,21 @@ function writeProject(projectPath: string, data: ProjectData) {
   chmodSync(store.path, 0o600)
 }
 
-export function redactCloudLog(projectPath: string, taskId: string | undefined, value: string): string {
-  // Two layers, and both are needed: the stored env values catch the user's own
-  // secrets verbatim, and redactText catches everything a build or provider CLI
-  // prints that Vector never stored, such as bearer headers and token-shaped
-  // strings.
+// `secrets` are values known only to the caller, such as the provider token it
+// put in a child's environment: a Vercel token has no prefix redactText knows.
+export function redactCloudLog(
+  projectPath: string,
+  taskId: string | undefined,
+  value: string,
+  secrets: (string | undefined)[] = [],
+): string {
+  // Two layers, and both are needed: the stored env values and the caller's
+  // secrets catch exact strings, and redactText catches everything a build or
+  // provider prints that Vector never held, such as bearer headers and
+  // token-shaped strings.
   return redactText(
-    listEnv(projectPath).reduce(
-      (output, item) => (item.value.length >= 4 ? output.split(item.value).join("[redacted]") : output),
+    [...listEnv(projectPath).map((item) => item.value), ...secrets].reduce<string>(
+      (output, secret) => (secret && secret.length >= 4 ? output.split(secret).join("[redacted]") : output),
       value,
     ),
   )
