@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { fallbackSwarmPlan, parseSwarmPlan, routeSwarmModels } from "./swarm-plan"
+import { fallbackSwarmPlan, parseSwarmPlan, routeSwarmModels, selectSwarmPlannerModel } from "./swarm-plan"
 
 describe("swarm plan", () => {
   test("parses a fenced dependency graph", () => {
@@ -132,5 +132,21 @@ describe("swarm plan", () => {
       "economy",
     )
     expect(routed.every((task) => task.model === "gpt-5-mini")).toBe(true)
+  })
+
+  test("routes Gemini Pro as a strong model, not as a mini model", () => {
+    const tasks = fallbackSwarmPlan("Build the feature").tasks
+    const pool = [
+      { provider: "google", model: "gemini-2.5-pro" },
+      { provider: "google", model: "gemini-2.5-flash" },
+      { provider: "openai", model: "gpt-4.1" },
+    ]
+
+    expect(selectSwarmPlannerModel(pool, "quality").model).toBe("gemini-2.5-pro")
+    expect(routeSwarmModels(tasks, pool, "quality").every((task) => task.model === "gemini-2.5-pro")).toBe(true)
+    expect(routeSwarmModels(tasks, pool, "economy").every((task) => task.model === "gemini-2.5-flash")).toBe(true)
+    expect(
+      routeSwarmModels(tasks, [{ provider: "openai", model: "o4-mini" }, ...pool], "economy").map((task) => task.model),
+    ).not.toContain("gemini-2.5-pro")
   })
 })

@@ -252,7 +252,8 @@ function modelKey(candidate: SwarmModelCandidate) {
 
 function modelStrength(candidate: SwarmModelCandidate) {
   const name = `${candidate.label ?? ""} ${candidate.model}`.toLowerCase()
-  if (/(haiku|flash|mini|lite|small|fast|free|instant|groq)/.test(name)) return 1
+  // "mini" counts only as its own word: "gemini" contains it, and Gemini Pro is not a fast model.
+  if (/(haiku|flash|(^|[^a-z])mini($|[^a-z])|lite|small|fast|free|instant|groq)/.test(name)) return 1
   if (/(opus|gpt-5|o3|o4|pro|max|reasoning|large|ultra)/.test(name)) return 3
   return 2
 }
