@@ -54,7 +54,7 @@ export async function managementToken(options: SupabaseOptions = {}) {
   if (!token) {
     throw new SupabaseSetupError(
       "Supabase is not connected on this machine.",
-      "Connect Supabase in Cloud Services > Integrations (browser sign-in or a personal access token), then try again.",
+      "Connect Supabase in Vector Cloud > Connections (browser sign-in or a personal access token), then try again.",
     )
   }
   return token
@@ -68,7 +68,7 @@ export async function supabaseContext(
   if (!database?.projectRef) {
     throw new SupabaseSetupError(
       "No Supabase project is linked to this project.",
-      "Create one with create_database or link an existing project in Cloud Services > Database.",
+      "Create one with create_database or link an existing project in Vector Cloud > Database.",
     )
   }
   const token = await managementToken(options)

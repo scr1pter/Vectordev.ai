@@ -251,7 +251,7 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
         problem === "no_node"
           ? NO_NODE
           : problem === "not_connected"
-            ? "Connect Vercel in Cloud Services > Integrations to publish."
+            ? "Connect Vercel in Vector Cloud > Connections to publish."
             : `Connected${connection.account ? ` as ${connection.account}` : ""}.`,
     },
   ]
@@ -285,7 +285,7 @@ function runBuild(command: string, projectPath: string, onOutput?: (output: stri
   return runProcess({ command, cwd: projectPath, shell: true, onOutput })
 }
 
-async function readGitMetadata(projectPath: string): Promise<CloudGitMetadata | undefined> {
+export async function readGitMetadata(projectPath: string): Promise<CloudGitMetadata | undefined> {
   const read = (args: string[]) =>
     runProcess({ command: "git", args, cwd: projectPath, timeoutMs: 10_000 }).then((result) =>
       result.ok ? result.log.trim() : "",
@@ -372,7 +372,15 @@ async function runPreflightChecks(
       const text = redactCloudLog(scope.projectPath, scope.taskId, output).trim()
       if (text) emitProgress(input, emit, stage, "info", text.slice(-800))
     })
-    const check = commandCheck(type, label, required, result, Date.now() - startedAt)
+    // A failed preflight returns its checks straight to the agent and the
+    // preview panel, before any deployment record would redact them.
+    const check = commandCheck(
+      type,
+      label,
+      required,
+      { ok: result.ok, log: redactCloudLog(scope.projectPath, scope.taskId, result.log) },
+      Date.now() - startedAt,
+    )
     checks.push(check)
     if (result.log.trim()) logs.push(result.log.trim())
     emitProgress(input, emit, stage, result.ok ? "success" : "error", check.details ?? label)
@@ -492,7 +500,7 @@ type CheckAccess = {
 }
 
 const PROTECTED_DETAIL =
-  "Protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Cloud Services > Project settings so Vector can check protected deployments."
+  "Protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Vector Cloud > Project settings so Vector can check protected deployments."
 
 // One probe of the release's health path, as the release check and
 // Observability both run it.
@@ -863,7 +871,7 @@ async function deployAndCheck(
       ...failure(
         input,
         emit,
-        `Vercel Deployment Protection kept Vector's release checks out of this production build, so production was not moved to it. Turn on Protection Bypass for Automation in Cloud Services > Project settings, then publish to production again.`,
+        `Vercel Deployment Protection kept Vector's release checks out of this production build, so production was not moved to it. Turn on Protection Bypass for Automation in Vector Cloud > Project settings, then publish to production again.`,
         "checks_blocked",
       ),
       url: deployment.url,
@@ -996,13 +1004,13 @@ function classifyCliFailure(
   ) {
     return {
       error:
-        "Vercel rejected Vector's saved token: it expired, was revoked or lost access. Reconnect Vercel in Cloud Services > Integrations.",
+        "Vercel rejected Vector's saved token: it expired, was revoked or lost access. Reconnect Vercel in Vector Cloud > Connections.",
       code: "token_rejected",
     }
   }
   if (/project not found|could not find (?:the )?project|project .* (?:was )?not found/i.test(log)) {
     return {
-      error: `The Vercel CLI could not find the linked project ${projectName}. Link the project again in Cloud Services > Integrations.`,
+      error: `The Vercel CLI could not find the linked project ${projectName}. Link the project again in Vector Cloud > Connections.`,
       code: "not_linked",
     }
   }

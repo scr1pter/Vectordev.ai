@@ -10,7 +10,7 @@ import {
 import { suggestedProjectName, vercelFramework } from "./vercel-model"
 import { createConfirm, type VercelNotice } from "./vercel-ui"
 
-// The Vercel half of the Integrations card once Vercel is connected: which
+// The Vercel half of the Connections card once Vercel is connected: which
 // team the project lives in, and which Vercel project this repository deploys
 // to, picked from every page of the team's projects or created here.
 export function VercelLink(props: {

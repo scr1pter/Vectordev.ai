@@ -10,6 +10,7 @@ import {
 } from "./cloud-connections"
 import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
+import { recordPublishAttempt } from "./cloud-overview"
 import { createCloudDatabase } from "./cloud-provision"
 import { resolveCloudScope, type CloudScope, type CloudWorkspace } from "./cloud-scope"
 import { describeSupabaseCommand, isSupabaseCommand, runSupabaseCommand } from "./cloud-supabase"
@@ -330,7 +331,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       needsSetup: true,
       error: "No Vector Cloud database is connected.",
       nextStep:
-        "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Cloud Services > Database.",
+        "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Vector Cloud > Database.",
     }
   }
   if (input.action === "apply_migrations") {
@@ -362,7 +363,7 @@ function publishSetup() {
     needsSetup: true,
     targets: [],
     error: "Connect and link a Vercel project in Vector Cloud before publishing.",
-    nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
+    nextStep: "Ask the user to connect Vercel and link a project in Vector Cloud > Connections.",
   }
 }
 
@@ -372,10 +373,11 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   const scope = await resolveCloudScope(request.projectPath, (await options.workspaces?.()) ?? [])
   const input = { ...request, projectPath: scope.projectPath }
   if (input.command === "describe") {
-    if (input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)) {
-      return describeVercelAction(input, scope, options.vercel)
-    }
-    return describeCloudAction(input, scope, options.vercel?.request)
+    const described =
+      input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)
+        ? await describeVercelAction(input, scope, options.vercel)
+        : await describeCloudAction(input, scope, options.vercel?.request)
+    return askEveryTime(input, described)
   }
   if (
     VERCEL_COMMANDS.some((item) => item === input.command) ||
@@ -489,6 +491,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   // stable address. Production only moves once the work is merged and the
   // user asked for production.
   const isolated = scope.directory !== scope.projectPath
+  const production = !isolated && input.production === true
   const result = await (options.publish ?? publishProject)({
     projectPath: scope.directory,
     taskId: input.taskId,
@@ -497,17 +500,47 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     workspaceId: scope.workspace?.id,
     workspaceName: scope.workspace?.name,
     target: "vercel",
-    production: !isolated && input.production === true,
+    production,
     runId: randomUUID(),
   })
+  // Vercel makes a project's first deployment production whatever was asked,
+  // so a failure is remembered under the environment it actually reached.
+  recordPublishAttempt(scope.projectPath, production || result.environment === "production", result)
   return {
     ...result,
+    environment: result.environment ?? (production ? "production" : "preview"),
     needsSetup: result.errorCode ? SETUP_CODES.includes(result.errorCode) : undefined,
     nextStep: publishNextStep(result, isolated),
   }
 }
 
 const SETUP_CODES = ["not_connected", "not_linked", "no_node", "token_rejected"]
+
+// Moving production or what it serves, creating something the user is billed
+// for, changing the production database's schema, and handing over a
+// credential or variable values ask every time, as Supabase's own risky
+// commands do: an earlier "always" for the same kind of action never covers
+// them. (The app's auto-accept answers no Vector Cloud prompt at all.)
+const EACH_TIME = [
+  "create_database",
+  "promote",
+  "rollback",
+  "add_domain",
+  "remove_domain",
+  "enable_protection_bypass",
+  "set_env",
+  "pull_env",
+  "sync_environment",
+]
+
+function askEveryTime<T extends object>(input: CloudCommandInput, described: T) {
+  const scope = Reflect.get(described, "scope")
+  if (Reflect.get(described, "ok") !== true || !scope || typeof scope !== "object") return described
+  const production = input.action === "publish" && Reflect.get(scope, "environment") === "production"
+  const migration = input.action === "apply_migrations" && input.dryRun !== true
+  if (!production && !migration && !EACH_TIME.includes(input.action ?? "")) return described
+  return { ...described, repeatable: false }
+}
 
 function publishNextStep(result: PublishResult, isolated: boolean) {
   if (result.ok) {
@@ -523,9 +556,9 @@ function publishNextStep(result: PublishResult, isolated: boolean) {
   if (result.errorCode === "no_node")
     return "Ask the user to install Node.js 18 or later (nodejs.org), then publish again."
   if (result.errorCode === "token_rejected")
-    return "Ask the user to reconnect Vercel with a new token in Cloud Services > Integrations."
+    return "Ask the user to reconnect Vercel with a new token in Vector Cloud > Connections."
   if (result.errorCode === "not_linked" || result.errorCode === "not_connected") {
-    return "Link a project with link_project (see vercel_projects) or create_project, or ask the user to connect Vercel in Cloud Services > Integrations."
+    return "Link a project with link_project (see vercel_projects) or create_project, or ask the user to connect Vercel in Vector Cloud > Connections."
   }
   if (result.errorCode === "build_failed") return "Read the build output above, fix the cause, and publish again."
   if (result.errorCode === "checks_blocked") {

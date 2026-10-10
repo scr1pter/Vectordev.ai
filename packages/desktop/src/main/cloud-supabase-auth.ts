@@ -98,7 +98,7 @@ export async function updateAuthConfig(context: SupabaseContext, input: AuthUpda
       }
       if (SECRET_REQUIRED[name] && !(secret || current.providers[name].secretSet)) {
         throw new Error(
-          `Enter the ${LABEL[name]} client secret in Cloud Services > Authentication before turning ${LABEL[name]} sign-in on. Vector never takes it from chat.`,
+          `Enter the ${LABEL[name]} client secret in Vector Cloud > Authentication before turning ${LABEL[name]} sign-in on. Vector never takes it from chat.`,
         )
       }
     }
@@ -142,7 +142,7 @@ function requireRedirect(value: string) {
 // team slug comes from.
 export async function vercelRedirectSuggestions(projectPath: string, request: CloudFetch = fetch) {
   const link = getCloudProviderProjectLink(projectPath, undefined, "vercel")
-  if (!link) return { redirectUrls: [], detail: "Link a Vercel project in Cloud Services > Integrations first." }
+  if (!link) return { redirectUrls: [], detail: "Link a Vercel project in Vector Cloud > Connections first." }
   // Without a working Vercel connection the linked address and Vector's own
   // previews still give an answer.
   const context = await vercelLinkContext(projectPath).catch(() => undefined)

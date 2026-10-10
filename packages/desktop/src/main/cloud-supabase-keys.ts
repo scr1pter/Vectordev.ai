@@ -98,7 +98,7 @@ export async function writeDatabaseUrl(
   if (!password) {
     throw new SupabaseSetupError(
       `Vector does not know the database password of ${context.projectName}, because the project was not created or rotated here.`,
-      "Ask the user to enter the current database password in Cloud Services > Database, where Vector keeps it encrypted. Rotating it instead (rotate_database_password) breaks anything still using the old one.",
+      "Ask the user to enter the current database password in Vector Cloud > Database, where Vector keeps it encrypted. Rotating it instead (rotate_database_password) breaks anything still using the old one.",
     )
   }
   if (await envTracked(input.directory)) {

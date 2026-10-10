@@ -208,7 +208,7 @@ export async function unlinkVercelProject(projectPath: string) {
 export type VercelProjectCandidate = { projectId: string; teamId?: string }
 
 // A repository the user already deployed with the Vercel CLI carries
-// .vercel/project.json ({ projectId, orgId }). Cloud Services links that
+// .vercel/project.json ({ projectId, orgId }). Vector Cloud links that
 // project rather than asking the user to find it again. A worktree has its own
 // copy. Anything an agent can write is only a candidate there: the agent links
 // with link_project, which asks the user.
@@ -263,7 +263,7 @@ function saveLink(projectPath: string, project: unknown, auth: VercelAuth, linke
   })
 }
 
-// `autoLink` is for Cloud Services, where the user is looking; the agent's
+// `autoLink` is for Vector Cloud, where the user is looking; the agent's
 // status reports the candidate instead.
 export async function vercelProjectStatus(
   projectPath: string,

@@ -167,7 +167,7 @@ export function settingsPatch(settings: VercelProjectSettings, draft: VercelSett
   ) as Partial<VercelSettingsDraft>
 }
 
-// What Cloud Services says after a publish: where it went, whether production
+// What Vector Cloud says after a publish: where it went, whether production
 // moved, and why Vector's checks could not open a protected deployment.
 export function publishOutcome(result: PublishResult, workspaceName?: string) {
   if (!result.ok || !result.url) {

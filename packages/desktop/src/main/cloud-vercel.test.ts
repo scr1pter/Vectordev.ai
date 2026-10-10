@@ -936,8 +936,10 @@ describe("vector_cloud Vercel actions over the bridge", () => {
   test("describes production moves with provider, project and environment before asking", async () => {
     seed()
     const command = await bridge()
+    // Moving production, or what it serves, asks every time.
     expect(await command({ command: "describe", action: "promote", deploymentId: "dpl_old" })).toMatchObject({
       ok: true,
+      repeatable: false,
       scope: {
         provider: "Vercel",
         project: "shop",
@@ -947,15 +949,33 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     })
     // The rollback target is resolved before asking, and the approved run uses it.
     expect(await command({ command: "describe", action: "rollback" })).toMatchObject({
+      repeatable: false,
       scope: { environment: "production", summary: expect.stringContaining("(dpl_old)") },
       carry: { deploymentId: "dpl_old" },
     })
-    expect(await command({ command: "describe", action: "redeploy", deploymentId: "dpl_live" })).toMatchObject({
+    // A production rebuild does not move production, so it may be remembered.
+    const redeploy = await command({ command: "describe", action: "redeploy", deploymentId: "dpl_live" })
+    expect(redeploy).toMatchObject({
       scope: { environment: "production", summary: expect.stringContaining("production does not move") },
     })
+    expect(redeploy).not.toHaveProperty("repeatable")
     expect(await command({ command: "describe", action: "add_domain", domain: "shop.example" })).toMatchObject({
+      repeatable: false,
       scope: { environment: "production" },
     })
+    // Handing over a credential or variable values asks every time too.
+    expect(await command({ command: "describe", action: "enable_protection_bypass" })).toMatchObject({
+      repeatable: false,
+    })
+    expect(
+      await command({
+        command: "describe",
+        action: "set_env",
+        key: "API_URL",
+        value: "https://api.example",
+        targets: ["preview"],
+      }),
+    ).toMatchObject({ ok: true, repeatable: false })
     expect(await command({ command: "describe", action: "promote" })).toMatchObject({ ok: false })
   })
 
@@ -1102,7 +1122,7 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     const command = await bridge()
     expect(
       await command({ command: "describe", action: "set_env", key: "STRIPE_SECRET", targets: ["production"] }),
-    ).toMatchObject({ ok: false, error: expect.stringContaining("Cloud Services > Environment variables") })
+    ).toMatchObject({ ok: false, error: expect.stringContaining("Vector Cloud > Environment variables") })
     expect(await command({ command: "set_env", key: "STRIPE_SECRET", targets: ["production"] })).toMatchObject({
       ok: false,
       error: expect.stringContaining("never in chat"),

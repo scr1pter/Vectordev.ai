@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { mkdirSync, writeFileSync } from "node:fs"
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -596,5 +596,42 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
       workspaceId: "ws-unknown",
       alias: "https://shop-git-agent-fix-cart-acme.vercel.app/",
     })
+  })
+
+  test("refuses a Vercel CLI login alone: publishing needs the account connected in Vector Cloud", async () => {
+    checks({ health: false, browser: false })
+    linkProject()
+    stores.delete("cloud-provider-connections")
+    const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+      command: [await fakeDeployCli("https://shop-x.vercel.app")],
+    })
+    expect(result).toMatchObject({ ok: false, errorCode: "not_connected", log: "" })
+    expect(result.error).toContain("Vercel is not connected")
+    expect(listDeployments(project)).toEqual([])
+  })
+
+  test("returns a failed build's evidence with the project's secrets redacted", async () => {
+    linkProject()
+    setEnv(project, undefined, "PAYMENTS_SECRET", "fixture-payments-value-123", "server")
+    setBuildSettings(project, undefined, {
+      framework: "Static",
+      packageManager: "static",
+      installCommand: "",
+      testCommand: "",
+      buildCommand: 'echo "connecting with fixture-payments-value-123" && exit 3',
+      outputDirectory: ".",
+      nodeVersion: "",
+      healthPath: "/",
+      requiredChecks: { test: false, secrets: true, health: false, browser: false },
+    })
+    const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+      command: ["never-run"],
+    })
+    expect(result).toMatchObject({ ok: false, errorCode: "checks_failed" })
+    const build = result.checks?.find((check) => check.id === "build")
+    expect(build).toMatchObject({ status: "failed", required: true, details: "Production build failed." })
+    expect(build?.output).toContain("connecting with [redacted]")
+    expect(JSON.stringify(result)).not.toContain("fixture-payments-value-123")
+    expect(listDeployments(project)).toEqual([])
   })
 })

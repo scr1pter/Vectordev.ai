@@ -6,6 +6,7 @@ import { MessageID, SessionID } from "../../src/session/schema"
 import { Tool } from "../../src/tool/tool"
 import { Truncate } from "../../src/tool/truncate"
 import { Parameters, VectorCloudTool } from "../../src/tool/vector-cloud"
+import { VECTOR_CLOUD_POLICY } from "../../src/session/system"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([Truncate.node, Agent.node])))
@@ -108,7 +109,7 @@ describe("vector_cloud bridge", () => {
           needsSetup: true,
           targets: [],
           error: "Connect and link a Vercel project in Vector Cloud before publishing.",
-          nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
+          nextStep: "Ask the user to connect Vercel and link a project in Vector Cloud > Connections.",
         },
       })
       const asks = recordAsks()
@@ -116,7 +117,7 @@ describe("vector_cloud bridge", () => {
       expect(asks.permissions).toEqual([])
       expect(requests).toEqual([expect.objectContaining({ command: "describe", action: "publish" })])
       expect(result.output).toContain("Connect and link a Vercel project")
-      expect(result.output).toContain("Cloud Services > Integrations")
+      expect(result.output).toContain("Vector Cloud > Connections")
       expect(result.output).not.toContain("publish completed")
     }),
   )
@@ -141,8 +142,9 @@ describe("vector_cloud bridge", () => {
       expect(asks.permissions).toEqual([
         expect.objectContaining({
           permission: "vector_cloud_publish",
-          patterns: ["vercel/website/preview"],
-          always: ["vercel/website/preview"],
+          // The approval names its action, so "always" here never covers another one.
+          patterns: ["vercel/website/preview/publish"],
+          always: ["vercel/website/preview/publish"],
           metadata: expect.objectContaining({
             provider: "Vercel",
             project: "website",
@@ -172,6 +174,131 @@ describe("vector_cloud bridge", () => {
       const result = yield* execute({ action: "publish" })
       expect(result.output).toContain("URL: https://agent-preview.vercel.app")
       expect(result.output).toContain("Merge it into the main project before promoting it to production.")
+    }),
+  )
+
+  it.instance("a publish without production asks for a preview and reports one", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge(
+        {
+          ok: true,
+          environment: "preview",
+          url: "https://shop-git-abc.vercel.app",
+          deploymentId: "dep_1",
+          checks: [
+            { label: "Production build", status: "passed", required: true },
+            { label: "Browser smoke test", status: "passed", required: true },
+          ],
+        },
+        200,
+        scope("Vercel", "shop", "preview", "Publish this project to the Vercel project shop as a preview release."),
+      )
+      const asks = recordAsks()
+      const result = yield* execute({ action: "publish" }, asks.ask)
+      expect(requests[1]).toMatchObject({ command: "publish" })
+      expect(requests[1]).not.toHaveProperty("production")
+      expect(asks.permissions[0]?.metadata).toMatchObject({ environment: "preview", production: false })
+      expect(result.output).toContain("published a preview release. Production is unchanged.")
+      expect(result.output).toContain("URL: https://shop-git-abc.vercel.app")
+      expect(result.output).toContain("Checks: Production build passed; Browser smoke test passed")
+      expect(result.output).toContain("publish again with production: true")
+    }),
+  )
+
+  it.instance("a failed build reaches the agent as evidence, not as a setup hint", () =>
+    Effect.gen(function* () {
+      const output = Array.from({ length: 60 }, (_, index) => `build line ${index + 1}`).join("\n")
+      yield* bridge(
+        {
+          ok: false,
+          target: "vercel",
+          error: "Required pre-deploy checks failed. Review the evidence, repair the project, and publish again.",
+          log: `install output\n${output}`,
+          checks: [
+            { label: "Install dependencies", status: "passed", required: true, output: "added 12 packages" },
+            {
+              label: "Production build",
+              status: "failed",
+              required: true,
+              details: "Production build failed.",
+              output: `${output}\nsrc/App.tsx(4,7): error TS2322: Type 'string' is not assignable to type 'number'.`,
+            },
+          ],
+        },
+        400,
+        scope("Vercel", "shop", "preview", "Publish this project to the Vercel project shop as a preview release."),
+      )
+      const result = yield* execute({ action: "publish" })
+      expect(result.output).toContain("Vector Cloud publish failed: Required pre-deploy checks failed.")
+      expect(result.output).toContain("- Production build: Production build failed.")
+      expect(result.output).toContain("error TS2322")
+      expect(result.output).toContain("build line 60")
+      // Only the end of a long build log reaches the model.
+      expect(result.output).not.toContain("build line 20\n")
+      // A passing check's output and the duplicated log stay out.
+      expect(result.output).not.toContain("added 12 packages")
+      expect(result.output).not.toContain("install output")
+      expect(result.output).not.toContain("Vector Cloud > Connections")
+      expect(result.output).not.toContain("publish completed")
+    }),
+  )
+
+  it.instance("a deploy that failed without a check shows the end of the publish log", () =>
+    Effect.gen(function* () {
+      yield* bridge(
+        {
+          ok: false,
+          target: "vercel",
+          error: "Vercel exited with code 1.",
+          log: "Vercel CLI 39.0.0\nError: Project not found in this scope.",
+          checks: [{ label: "Secret scan", status: "passed", required: true }],
+        },
+        400,
+        scope("Vercel", "shop", "preview", "Publish this project to the Vercel project shop as a preview release."),
+      )
+      const result = yield* execute({ action: "publish" })
+      expect(result.output).toContain("Vector Cloud publish failed: Vercel exited with code 1.")
+      expect(result.output).toContain("--- last lines of the publish log ---")
+      expect(result.output).toContain("Error: Project not found in this scope.")
+      expect(result.output).not.toContain("Failed checks:")
+    }),
+  )
+
+  it.instance("names the Connections screen only when setup is missing", () =>
+    Effect.gen(function* () {
+      yield* bridge({ ok: false, needsSetup: true, error: "Supabase rejected the saved access token." })
+      const setup = yield* execute({ action: "supabase_services" })
+      expect(setup.output).toContain("Supabase rejected the saved access token.")
+      expect(setup.output).toContain("Vector Cloud > Connections with an access token")
+    }),
+  )
+
+  it.instance("leaves the setup hint off a failure that is not about setup", () =>
+    Effect.gen(function* () {
+      yield* bridge({ ok: false, error: "Supabase is temporarily unavailable." })
+      const result = yield* execute({ action: "supabase_services" })
+      expect(result.output).toContain("Supabase is temporarily unavailable.")
+      expect(result.output).not.toContain("Vector Cloud > Connections")
+    }),
+  )
+
+  it.instance("its description agrees with the system prompt's cloud rules", () =>
+    Effect.gen(function* () {
+      const info = yield* VectorCloudTool
+      const tool = yield* info.init()
+      for (const text of [tool.description, VECTOR_CLOUD_POLICY]) {
+        expect(text).toContain("create_database")
+        expect(text).toContain("Vector Cloud > Database")
+        expect(text).toContain("production: true")
+        expect(text).toMatch(/offer (vector_cloud )?rollback/)
+        expect(text).toContain("link_database")
+        expect(text).toContain("Vector Cloud > Environment variables")
+        expect(text).toContain("Vector Cloud > Connections")
+        expect(text).toMatch(/Never ask (the user )?(to paste|for secret values)/)
+        expect(text).not.toMatch(/Netlify|AWS|Cloud Services|Integrations/)
+      }
+      expect(tool.description).toContain("publishes a preview by default")
+      expect(VECTOR_CLOUD_POLICY).toContain("Publish previews by default")
     }),
   )
 
@@ -697,11 +824,12 @@ describe("vector_cloud Vercel actions", () => {
       )
       const result = yield* execute({ action: "publish" })
       expect(result.output).toContain("Vector Cloud publish failed: Required pre-deploy checks failed.")
-      expect(result.output).toContain("FAILED Production build: Production build failed.")
+      expect(result.output).toContain("- Production build: Production build failed.")
       expect(result.output).toContain("error TS2304")
-      expect(result.output).toContain("npm ERR! build failed")
+      // The failed check's own output is the evidence; the log it came from is not repeated.
+      expect(result.output).not.toContain("npm ERR! build failed")
       expect(result.output).toContain("fix the cause")
-      expect(result.output).not.toContain("Connect an account")
+      expect(result.output).not.toContain("Vector Cloud > Connections")
     }),
   )
 

@@ -4,7 +4,7 @@ import "./vercel.css"
 export type VercelNotice = (notice: { tone: "info" | "success" | "error"; text: string }) => void
 
 // A destructive or production-moving button arms on the first click and acts
-// on a second click within three seconds, as the rest of Cloud Services does.
+// on a second click within three seconds, as the rest of Vector Cloud does.
 export function createConfirm() {
   const [armed, setArmed] = createSignal("")
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -34,7 +34,7 @@ export function VercelLinkRequired(props: { linked: boolean; onOpenConnections?:
           <Show when={props.onOpenConnections}>
             {(open) => (
               <button class="cloud-button" type="button" onClick={() => open()()}>
-                Open Integrations
+                Open Connections
               </button>
             )}
           </Show>

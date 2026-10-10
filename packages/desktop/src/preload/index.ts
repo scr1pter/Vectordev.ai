@@ -233,6 +233,12 @@ const api: ElectronAPI = {
     },
   },
   cloud: {
+    overview: (directory) => ipcRenderer.invoke("cloud-overview", directory),
+    onChange: (cb) => {
+      const handler = () => cb()
+      ipcRenderer.on("cloud-changed", handler)
+      return () => ipcRenderer.removeListener("cloud-changed", handler)
+    },
     connections: {
       list: () => ipcRenderer.invoke("cloud-connections-list"),
       connect: (provider) => ipcRenderer.invoke("cloud-connections-connect", provider),

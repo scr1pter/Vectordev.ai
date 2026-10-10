@@ -148,9 +148,9 @@ export async function runSupabaseCommand(command: unknown, raw: unknown, options
       error: message,
       nextStep:
         status === 401
-          ? "Supabase rejected Vector's saved credentials. Reconnect Supabase in Cloud Services > Integrations."
+          ? "Supabase rejected Vector's saved credentials. Reconnect Supabase in Vector Cloud > Connections."
           : status === 403
-            ? "Vector's Supabase connection is not allowed to do this. Reconnect Supabase in Cloud Services > Integrations and grant the access it asks for, or connect with a personal access token."
+            ? "Vector's Supabase connection is not allowed to do this. Reconnect Supabase in Vector Cloud > Connections and grant the access it asks for, or connect with a personal access token."
             : undefined,
     }
   }
@@ -201,7 +201,7 @@ async function run(
     // console sends it after its own confirmation, with the current password
     // when the user typed one.
     if (agent && input.password !== undefined) {
-      throw new Error("The database password is entered in Cloud Services > Database, never through chat.")
+      throw new Error("The database password is entered in Vector Cloud > Database, never through chat.")
     }
     return writeDatabaseUrl(context, {
       directory: project.directory,
@@ -283,7 +283,7 @@ async function run(
   if (command === "set_function_secrets") {
     if (agent && input.secrets !== undefined) {
       throw new Error(
-        "Secret values are entered in Cloud Services > Edge functions, never through chat. Pass names from this project's environment instead.",
+        "Secret values are entered in Vector Cloud > Edge functions, never through chat. Pass names from this project's environment instead.",
       )
     }
     return setFunctionSecrets(context, { secrets: secretPairs(input), fromEnv: list(input, "secretNames") })
@@ -315,7 +315,7 @@ function authUpdate(input: Input, agent: boolean): AuthUpdate {
     const change = value as Input
     if (agent && change.secret !== undefined) {
       throw new Error(
-        "OAuth client secrets are entered in Cloud Services > Authentication, never through chat, so they stay out of the conversation.",
+        "OAuth client secrets are entered in Vector Cloud > Authentication, never through chat, so they stay out of the conversation.",
       )
     }
     providers[name] = {
@@ -628,7 +628,7 @@ export async function describeSupabaseCommand(
           needsSetup: true,
           error: `${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} not in this project's environment.`,
           nextStep:
-            "Ask the user to add the value in Cloud Services > Environment variables or Edge functions; never ask for it in chat.",
+            "Ask the user to add the value in Vector Cloud > Environment variables or Edge functions; never ask for it in chat.",
         }
       }
       // A credential leaves Vector for Supabase, so each set asks.

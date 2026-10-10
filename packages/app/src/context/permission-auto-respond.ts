@@ -38,11 +38,23 @@ function sessionLineage(session: { id: string; parentID?: string }[], sessionID:
   return ids
 }
 
-// Vector Cloud marks a destructive, billed or credential-bearing action as
-// asking every time (no "always" patterns), and auto-accept must not answer
-// it either: the user decides each one.
-export function asksEveryTime(permission: { permission?: string; always?: string[] }) {
-  return Boolean(permission.permission?.startsWith("vector_cloud_") && permission.always?.length === 0)
+// Vector Cloud permissions that act on the user's provider accounts:
+// publishing and moving production, creating or changing a database and its
+// auth, storage and functions (which the provider may bill), hosting settings
+// and domains, and the host's environment variables. Auto-accept leaves every
+// one of them to the user, and any other cloud request that asks every time
+// (no "always" patterns) too. The read-only migration dry run
+// (vector_cloud_inspect) is the one cloud request it may answer.
+const ALWAYS_ASK = new Set([
+  "vector_cloud_publish",
+  "vector_cloud_database",
+  "vector_cloud_environment",
+  "vector_cloud_hosting",
+])
+
+export function alwaysAsks(permission: { permission?: string; always?: string[] }) {
+  if (!permission.permission?.startsWith("vector_cloud_")) return false
+  return ALWAYS_ASK.has(permission.permission) || permission.always?.length === 0
 }
 
 export function autoRespondsPermission(
@@ -51,7 +63,7 @@ export function autoRespondsPermission(
   permission: { sessionID: string; permission?: string; always?: string[] },
   directory?: string,
 ) {
-  if (asksEveryTime(permission)) return false
+  if (alwaysAsks(permission)) return false
   const value = sessionLineage(session, permission.sessionID)
     .map((id) => accepted(autoAccept, id, directory))
     .find((item): item is boolean => item !== undefined)

@@ -70,7 +70,7 @@ the desktop's required relay capability are present, not that registration,
 permissions or live consent have been verified. Supabase readiness is unchanged:
 desktop 1.99.8 already supports its S256 PKCE flow.
 
-Desktop **Cloud Services → Connections** offers hosted sign-in when configured.
+Desktop **Vector Cloud → Connections** offers hosted sign-in when configured.
 If hosted OAuth is unavailable and this desktop supports manual tokens, it
 instead offers the provider's personal-access-token flow with local encrypted
 storage. Older unsupported desktops show an unavailable state. The Database
@@ -90,7 +90,7 @@ Grant only the management access required for the selected operations:
 
 - Vercel: user identity (`/v2/user`, including User read), selected team/project
   listing, deployment, environment variables and project domains.
-- Supabase: the OAuth app's scopes must cover every control in Cloud Services
+- Supabase: the OAuth app's scopes must cover every control in Vector Cloud
   and the agent's tool
   ([scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes)):
   Organizations read; Projects read and write (create, pause, restore);

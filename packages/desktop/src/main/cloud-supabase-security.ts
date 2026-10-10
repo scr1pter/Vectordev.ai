@@ -113,7 +113,7 @@ export async function securityCheck(
       status === "skipped"
         ? forbidden
           ? `Supabase's security advisors did not run, because Vector's Supabase connection is not allowed to read them. The local scan found nothing.`
-          : `Connect Supabase in Cloud Services > Integrations to run the security advisors. The local scan found nothing.`
+          : `Connect Supabase in Vector Cloud > Connections to run the security advisors. The local scan found nothing.`
         : status === "failed"
           ? errors
             ? `${errors} security problem${errors === 1 ? "" : "s"} must be fixed before a production release.`
@@ -130,12 +130,12 @@ export async function securityCheck(
 function advisorsNextStep(status: number | undefined, failed: boolean) {
   if (!failed) return
   const optional =
-    "To release without it meanwhile, make Secret scan optional under Cloud Services > Build & runtime > Required release checks."
+    "To release without it meanwhile, make Secret scan optional under Vector Cloud > Build & runtime > Required release checks."
   if (status === 403) {
-    return "Reconnect Supabase in Cloud Services > Integrations and grant the access it asks for, or connect with a personal access token."
+    return "Reconnect Supabase in Vector Cloud > Connections and grant the access it asks for, or connect with a personal access token."
   }
   if (status === 401) {
-    return `Reconnect Supabase in Cloud Services > Integrations, or connect with a personal access token. ${optional}`
+    return `Reconnect Supabase in Vector Cloud > Connections, or connect with a personal access token. ${optional}`
   }
   return `Run the check again in a moment. ${optional}`
 }

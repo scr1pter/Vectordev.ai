@@ -2,6 +2,7 @@ import { createEffect, createMemo, For, on, Show } from "solid-js"
 import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { cloudApi, type CloudDeployment } from "../cloud-api"
+import { deployRepairPrompt } from "../cloud-handoff"
 import { vercelApi, vercelErrorText, type VercelDeployment, type VercelProjectStatus } from "./vercel-api"
 import { deploymentActions, deploymentTone, matchRelease, rollbackTarget, type DeploymentAction } from "./vercel-model"
 import { createConfirm, formatWhen, VercelLinkRequired, type VercelNotice } from "./vercel-ui"
@@ -14,7 +15,8 @@ export function VercelDeployments(props: {
   projectPath: string
   notice: VercelNotice
   refreshKey?: number
-  onRepair?: (context: string) => void
+  /** Starts the agent on a failed deployment, with `prompt` (redacted evidence) as its first message. */
+  onRepair: (prompt: string) => void
   onOpenConnections?: () => void
 }) {
   const api = vercelApi()
@@ -157,28 +159,23 @@ export function VercelDeployments(props: {
     }
   }
 
-  const repair = (deployment: VercelDeployment, release?: CloudDeployment) => {
-    const evidence = [
-      `Repair the Vercel deployment ${deployment.id} (${deployment.url}) of ${state.status?.link?.projectName ?? "this project"}.`,
-      deployment.errorMessage ? `Vercel reported: ${deployment.errorMessage}` : "",
-      deployment.branch
-        ? `Git: ${deployment.branch}${deployment.commitSha ? ` at ${deployment.commitSha.slice(0, 8)}` : ""}`
-        : "",
-      ...(release?.checks ?? [])
-        .filter((check) => check.status === "failed")
-        .map((check) => `${check.label}: ${check.details ?? "failed"}\n${check.output ?? ""}`),
-      state.logs?.id === deployment.id ? `${state.logs.source} logs:\n${state.logs.text}` : "",
-      "Read its logs with vector_cloud logs (source build or runtime), find the root cause, make the smallest safe fix, run the relevant checks, and explain what changed.",
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-    if (props.onRepair) {
-      props.onRepair(evidence)
-      return
-    }
-    void navigator.clipboard?.writeText(evidence).catch(() => undefined)
-    props.notice({ tone: "info", text: "Repair context copied. Paste it into the composer." })
-  }
+  // Check output and logs arrive from the desktop already redacted. The
+  // deployment id lets the agent read the logs this screen has not loaded.
+  const repair = (deployment: VercelDeployment, release?: CloudDeployment) =>
+    props.onRepair(
+      deployRepairPrompt({
+        project: state.status?.link?.projectName ?? "this project",
+        environment: deployment.target === "production" ? "production" : "preview",
+        url: deployment.url,
+        deploymentId: deployment.id,
+        error: deployment.errorMessage ? `Vercel reported: ${deployment.errorMessage}` : undefined,
+        git: deployment.branch
+          ? { branch: deployment.branch, commit: deployment.commitSha?.slice(0, 8) ?? "unknown", dirty: false }
+          : undefined,
+        checks: release?.checks ?? [],
+        log: state.logs?.id === deployment.id ? state.logs.text : undefined,
+      }),
+    )
 
   // A production rebuild does not take production's domains; the confirm says so.
   const actionLabel = (action: DeploymentAction, deployment: VercelDeployment) => {
@@ -413,7 +410,7 @@ export function VercelDeployments(props: {
                         type="button"
                         onClick={() => repair(deployment, release())}
                       >
-                        Repair with Vector
+                        Fix this deploy
                       </button>
                     </Show>
                   </div>

@@ -368,7 +368,7 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
     const status = await vercelProjectStatus(projectPath, scope.directory, request, { autoLink: false })
     if (!status.connected) {
       return vercelErrorReport(
-        new VercelError("not_connected", "Vercel is not connected. Connect it in Cloud Services > Integrations."),
+        new VercelError("not_connected", "Vercel is not connected. Connect it in Vector Cloud > Connections."),
       )
     }
     if (!status.link) {
@@ -708,12 +708,12 @@ export function vercelStatusSummary(projectPath: string) {
     : undefined
 }
 
-// set_env without a value copies the one the user stored in Cloud Services, so
+// set_env without a value copies the one the user stored in Vector Cloud, so
 // a secret reaches Vercel without passing through the model.
 function storedEnvValue(projectPath: string, key: string) {
   return listEnv(projectPath).find((item) => item.key === key)?.value
 }
 
 function missingStoredValue(key: string) {
-  return `${key} has no value in this project's Vector environment. Ask the user to add it in Cloud Services > Environment variables (never in chat), then call set_env again without a value.`
+  return `${key} has no value in this project's Vector environment. Ask the user to add it in Vector Cloud > Environment variables (never in chat), then call set_env again without a value.`
 }

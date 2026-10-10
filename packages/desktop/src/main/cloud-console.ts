@@ -355,7 +355,7 @@ export function releaseForProviderDeployment(projectPath: string, deployment: { 
   )
 }
 
-// Production moved on Vercel (a promote or rollback from Cloud Services or the
+// Production moved on Vercel (a promote or rollback from Vector Cloud or the
 // agent). Vector's release for that deployment becomes current; the release
 // that was current is superseded or rolled back, even when Vercel now serves a
 // deployment Vector did not make.
@@ -744,7 +744,7 @@ function decryptEnvValue(item: StoredEnvVar): string {
     return decryptCloudCredential(item.secret)
   } catch {
     throw new Error(
-      `The saved value of ${item.key} cannot be decrypted on this device. Remove it in Cloud Services > Environment variables and set it again.`,
+      `The saved value of ${item.key} cannot be decrypted on this device. Remove it in Vector Cloud > Environment variables and set it again.`,
     )
   }
 }

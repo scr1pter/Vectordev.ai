@@ -15,28 +15,6 @@ const permission = (sessionID: string) =>
   }) as Pick<PermissionRequest, "sessionID">
 
 describe("autoRespondsPermission", () => {
-  test("never answers a Vector Cloud action that asks every time", () => {
-    const sessions = [session({ id: "root" })]
-    const request = (always: string[]) => ({ sessionID: "root", permission: "vector_cloud_database", always })
-    expect(autoRespondsPermission({ root: true }, sessions, request([]), "/tmp/project")).toBe(false)
-    expect(
-      autoRespondsPermission(
-        { root: true },
-        sessions,
-        request(["supabase/shop-db/production/create_bucket"]),
-        "/tmp/project",
-      ),
-    ).toBe(true)
-    expect(
-      autoRespondsPermission(
-        { root: true },
-        sessions,
-        { sessionID: "root", permission: "bash", always: [] },
-        "/tmp/project",
-      ),
-    ).toBe(true)
-  })
-
   test("uses a parent session's directory-scoped auto-accept", () => {
     const directory = "/tmp/project"
     const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]
@@ -91,6 +69,52 @@ describe("autoRespondsPermission", () => {
     }
 
     expect(autoRespondsPermission(autoAccept, sessions, permission("root"), directory)).toBe(true)
+  })
+
+  test("leaves every Vector Cloud change to the user, and answers only the read-only dry run", () => {
+    const directory = "/tmp/project"
+    const sessions = [session({ id: "root" })]
+    const autoAccept = {
+      [`${base64Encode(directory)}/*`]: true,
+      [`${base64Encode(directory)}/root`]: true,
+    }
+    const asked = (name: string, always?: string[]) => ({ sessionID: "root", permission: name, always })
+
+    expect(autoRespondsPermission(autoAccept, sessions, asked("edit"), directory)).toBe(true)
+    expect(autoRespondsPermission(autoAccept, sessions, asked("bash", []), directory)).toBe(true)
+    // A migration dry run only reads.
+    expect(
+      autoRespondsPermission(
+        autoAccept,
+        sessions,
+        asked("vector_cloud_inspect", ["supabase/shop-db/production"]),
+        directory,
+      ),
+    ).toBe(true)
+    // Publishing and production moves, databases (billed), hosting settings and
+    // domains, and host variables, whether or not the request could be
+    // remembered, under directory, session and legacy auto-accept alike.
+    for (const name of [
+      "vector_cloud_publish",
+      "vector_cloud_database",
+      "vector_cloud_environment",
+      "vector_cloud_hosting",
+    ]) {
+      expect(autoRespondsPermission(autoAccept, sessions, asked(name), directory)).toBe(false)
+      expect(
+        autoRespondsPermission(autoAccept, sessions, asked(name, [`vercel/shop/production/${name}`]), directory),
+      ).toBe(false)
+      expect(
+        autoRespondsPermission(
+          { root: true },
+          sessions,
+          asked(name, ["supabase/shop-db/production/create_bucket"]),
+          directory,
+        ),
+      ).toBe(false)
+    }
+    // Any other cloud request that asks every time is left to the user too.
+    expect(autoRespondsPermission(autoAccept, sessions, asked("vector_cloud_inspect", []), directory)).toBe(false)
   })
 
   test("session-level override takes precedence over directory-level", () => {

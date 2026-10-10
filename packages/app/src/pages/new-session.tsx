@@ -1,4 +1,4 @@
-import { Show, createEffect, createMemo, createResource, untrack } from "solid-js"
+import { Show, createEffect, createMemo, createResource, createSignal, onCleanup, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useSearchParams } from "@solidjs/router"
 import { NewSessionDesignView } from "@/components/session"
@@ -19,6 +19,7 @@ import { useSessionKey } from "@/pages/session/session-layout"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { NEW_SESSION_CONTENT_WIDTH } from "@/pages/session/new-session-layout"
 import { PromptWorkspaceSelector } from "@/components/prompt-workspace-selector"
+import { composerTakes, onComposerPrompt } from "@/features/cloud/cloud-handoff"
 
 const showWorkspaceBar = import.meta.env.VITE_VECTOR_CHANNEL !== "prod"
 
@@ -35,7 +36,10 @@ export default function NewSessionPage() {
   const comments = useComments()
   const language = useLanguage()
   const route = useSessionKey()
-  const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string }>()
+  const [searchParams, setSearchParams] = useSearchParams<{ draftId?: string; prompt?: string; send?: string }>()
+  // The prompt to send once models load, when one arrives with send (a Fix
+  // this deploy handoff, for example).
+  const [autoSubmit, setAutoSubmit] = createSignal<string>()
 
   useComposerCommands()
 
@@ -68,15 +72,30 @@ export default function NewSessionPage() {
     return serverSync().child(worktree)[0].vcs?.branch ?? localBranch()
   })
 
+  const takePrompt = (text: string, send: boolean) => {
+    prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
+    if (send) setAutoSubmit(text)
+  }
+
   createEffect(() => {
     if (!prompt.ready()) return
     untrack(() => {
       const text = searchParams.prompt
       if (!text) return
-      prompt.set([{ type: "text", content: text, start: 0, end: text.length }], text.length)
-      setSearchParams({ ...searchParams, prompt: undefined })
+      takePrompt(text, searchParams.send === "1")
+      setSearchParams({ ...searchParams, prompt: undefined, send: undefined })
     })
   })
+
+  // An unsent draft, line comments included, is never replaced: the surface
+  // starts another session instead.
+  onCleanup(
+    onComposerPrompt((request) => {
+      if (!composerTakes({ dirty: prompt.dirty(), context: prompt.context.items(), open: true })) return false
+      takePrompt(request.text, request.send)
+      return true
+    }),
+  )
 
   createEffect(() => {
     if (!prompt.ready()) return
@@ -113,6 +132,8 @@ export default function NewSessionPage() {
                       newSessionWorktree={newSessionWorktree()}
                       onNewSessionWorktreeReset={() => setStore("worktree", undefined)}
                       onSubmit={() => comments.clear()}
+                      autoSubmit={autoSubmit()}
+                      onAutoSubmit={() => setAutoSubmit(undefined)}
                       toolbar={
                         <Show when={!projectController.selected()}>
                           <PromptProjectAddButton controller={projectController} />

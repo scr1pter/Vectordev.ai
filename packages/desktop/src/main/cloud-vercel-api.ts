@@ -46,7 +46,7 @@ export class VercelError extends Error {
 }
 
 export const VERCEL_TOKEN_REJECTED =
-  "Vercel rejected Vector's saved token: it expired, was revoked or lost access. Reconnect Vercel in Cloud Services > Integrations."
+  "Vercel rejected Vector's saved token: it expired, was revoked or lost access. Reconnect Vercel in Vector Cloud > Connections."
 
 const DEFAULT_TIMEOUT_MS = 20_000
 const MAX_PAGES = 50
@@ -213,7 +213,7 @@ export async function vercelPages(
 export async function vercelAuth(scope?: VercelScopeChoice): Promise<VercelAuth> {
   const runtime = await getCloudProviderRuntimeAuth("vercel")
   if (!runtime.token) {
-    throw new VercelError("not_connected", "Vercel is not connected. Connect it in Cloud Services > Integrations.")
+    throw new VercelError("not_connected", "Vercel is not connected. Connect it in Vector Cloud > Connections.")
   }
   return { token: runtime.token, teamId: scope === null ? undefined : (scope ?? runtime.teamId) }
 }
@@ -231,7 +231,7 @@ export async function vercelLinkContext(projectPath: string): Promise<VercelLink
   if (!link) {
     throw new VercelError(
       "not_linked",
-      "No Vercel project is linked to this project. Link or create one in Cloud Services > Integrations.",
+      "No Vercel project is linked to this project. Link or create one in Vector Cloud > Connections.",
     )
   }
   const auth = await vercelAuth(linkTeamId(link) ?? null)
@@ -254,10 +254,10 @@ export function vercelErrorReport(error: unknown) {
 function setupStep(code: VercelErrorCode) {
   if (code === "no_node") return "Ask the user to install Node.js 18 or later, then publish again."
   if (code === "token_rejected")
-    return "Ask the user to reconnect Vercel in Cloud Services > Integrations with a new token."
+    return "Ask the user to reconnect Vercel in Vector Cloud > Connections with a new token."
   if (code === "not_linked")
-    return "Link an existing Vercel project with link_project (see vercel_projects), create one with create_project, or ask the user to pick one in Cloud Services > Integrations."
-  return "Ask the user to connect Vercel in Cloud Services > Integrations (Use access token), then try again."
+    return "Link an existing Vercel project with link_project (see vercel_projects), create one with create_project, or ask the user to pick one in Vector Cloud > Connections."
+  return "Ask the user to connect Vercel in Vector Cloud > Connections (Use access token), then try again."
 }
 
 export function wait(ms: number) {

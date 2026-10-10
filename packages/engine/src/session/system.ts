@@ -203,6 +203,20 @@ export const LOCAL_MEMORY_POLICY = [
   "</vector_local_memory>",
 ].join("\n")
 
+// Agrees with the vector_cloud tool's description: the model reads both, and a
+// system prompt that contradicts a tool usually wins.
+export const VECTOR_CLOUD_POLICY = [
+  "<vector_cloud_policy>",
+  "Vector Cloud is this project's backend and hosting: Vercel hosts the app and Supabase stores its data. No other host or database exists in Vector Cloud. If the user asks for one, say so, and never switch providers on your own.",
+  "Before building authentication, accounts, persistence or other database-backed features, run vector_cloud database_status. If a database is connected, prepare it (prepare_database, or prepare_auth for sign-in) and build against it. If none is connected, offer create_database (a new Supabase project on the user's account, created only after they confirm) or linking their existing Supabase project with supabase_projects and link_database (or in Vector Cloud > Database). Never invent credentials.",
+  "Manage the linked Supabase project (migrations, SQL, auth settings and users, storage buckets, Edge Functions and their secrets, logs, security advisors) through vector_cloud instead of sending the user to the Supabase dashboard.",
+  "Publish previews by default: vector_cloud publish makes a preview release unless you pass production: true. Ask the user before any production release, naming the Vercel project. Report the URL and the check results.",
+  "When a publish fails, use the failed checks and log lines in the result to fix the project, then publish a preview again. When a live production release is broken, first offer vector_cloud rollback, which returns production to the last release that served it and passed Vector's checks, then investigate with the logs action.",
+  "After a user-facing feature is built and verified, offer a preview publish when Vercel is linked; when it is not, say what to connect in Vector Cloud > Connections.",
+  "Never ask for secret values (tokens, keys, passwords) in the chat. Name the variable or account that is needed and send the user to Vector Cloud > Environment variables or Vector Cloud > Connections to add it there; vector_cloud set_env without a value copies a stored value to Vercel. Never show or repeat environment variable values.",
+  "</vector_cloud_policy>",
+].join("\n")
+
 export type EnvironmentOptions = {
   /** What the current agent may launch through the task tool; selects the subagent policy. Defaults to everything. */
   subagents?: SubagentAvailability
@@ -302,18 +316,7 @@ const layer = Layer.effect(
               "External websites require approval. Never enter credentials, one-time codes, card data, make purchases, send messages, or perform destructive remote actions; pause for the user at those boundaries.",
               "</browser_engineering_policy>",
             ].join("\n"),
-          offered("vector_cloud") &&
-            [
-              "<vector_cloud_policy>",
-              "Vector Cloud is the default backend and publishing surface when the vector_cloud tool is available.",
-              "For authentication, user accounts, databases, persistence, environment-backed features, or backend setup, inspect Vector Cloud database readiness before implementation and prepare the connected project database when available.",
-              "If the project has no connected database, offer create_database or linking an existing Supabase project in Cloud Services > Database; never invent credentials.",
-              "Manage the linked Supabase project (migrations, SQL, auth settings and users, storage buckets, Edge Functions and their secrets, logs, security advisors) through vector_cloud instead of sending the user to the Supabase dashboard. Never ask the user to paste a secret into chat; secret values are entered in Cloud Services.",
-              "Vector Cloud hosts on Vercel and stores data in Supabase. When the user asks to publish or deploy, call vector_cloud publish, which deploys a preview to the Vercel project linked to this repository; pass production: true only when the user explicitly asks to ship to production. Report its validation checks and return the final URL.",
-              "When a production release misbehaves, read its logs, then offer vector_cloud rollback before attempting a fix. Never show or repeat environment variable values; refer to variables by name. Never ask for a secret value in chat: the user stores it in Cloud Services > Environment variables, and vector_cloud set_env without a value copies it to Vercel.",
-              "If the user asks for a different host, say Vector Cloud publishes to Vercel only, and never switch to another provider on your own.",
-              "</vector_cloud_policy>",
-            ].join("\n"),
+          offered("vector_cloud") && VECTOR_CLOUD_POLICY,
           changes &&
             [
               "<process_safety_policy>",

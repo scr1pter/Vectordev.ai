@@ -6,7 +6,7 @@ export const prerender = true
 
 <DocsPage id="cloud-services">
   <p>
-    Cloud Services connects the repositories you work on to your own Vercel and Supabase accounts. Resources remain
+    Vector Cloud connects the repositories you work on to your own Vercel and Supabase accounts. Resources remain
     in those accounts, with their own billing, quotas and terms. Free model inference does not make hosting or
     database operations free.
   </p>
@@ -17,15 +17,14 @@ export const prerender = true
 
   <h2 id="connect-accounts">Connect an account and select a project</h2>
   <p>
-    Open Cloud Services → Connections. When hosted sign-in is configured, finish approval in your browser. When it is
-    unavailable, supported desktop builds offer a personal access token from the provider's settings, validated and
-    encrypted on this device. Supabase setup from Database leads to the same connection flow. Vector verifies the
-    account before showing it as connected.
+    Open Vector Cloud from Home, or from the Cloud button in a session, then Connections. Choose Use access token: Vector
+    opens the provider's token page, and the token you paste is validated and encrypted on this device. Supabase setup
+    from Database leads to the same connection flow. Vector verifies the account before showing it as connected.
   </p>
   <p>
     For Vercel, pick the personal account or team the project lives in, then link one of its projects or create a new
     one with a framework and root directory. A repository already deployed with the Vercel CLI is linked from its
-    .vercel/project.json when you open Cloud Services; an agent asks before linking it. Choose the Supabase project in Database.
+    .vercel/project.json when you open Vector Cloud; an agent asks before linking it. Choose the Supabase project in Database.
     From 1.99.99, the desktop uses an encrypted temporary callback relay for Vercel, and PKCE for Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
   </p>
 
@@ -77,6 +76,15 @@ export const prerender = true
     the certificate.
   </p>
 
+  <h2 id="publishing">Publish a preview, then go to production</h2>
+  <p>
+    Publish in a session's preview, or in Vector Cloud → Deployments, makes a preview release by default. Before it
+    runs, Vector names the Vercel project and the environment, and warns when the folder has uncommitted changes.
+    Production changes only when you ask for it and the release checks pass. When a release fails, Fix this deploy
+    starts the agent on it, with the failed checks and the end of the log as its first message. The Cloud button in a
+    session shows the project's hosting, database and latest release, and updates as they change.
+  </p>
+
   <h2 id="supabase">Run Supabase from Vector</h2>
   <p>
     The Database, Authentication, Storage, Edge functions, Database logs and Security screens act on the Supabase
@@ -97,18 +105,23 @@ export const prerender = true
     and run the same Vercel and Supabase controls: Vercel projects and their settings, deployments, logs, promotion
     and rollback, variables and domains, and everything listed for Supabase above. It asks before it publishes, moves
     production, changes a database, writes a host's environment or changes a Vercel project or domain, and the prompt
-    names the provider, project and environment. A wildcard allow does not skip these prompts; only a permission rule
-    that names the cloud action does. Each Supabase change is approved on its own. Every SQL query, rolling back,
+    names the provider, project and environment. Neither a wildcard allow nor auto-accepting permissions in a session
+    skips these prompts; only a permission rule that names the cloud action does. Each cloud action is approved on
+    its own, so allowing one always never allows another. Moving production (a production publish, promote,
+    rollback, adding or removing a domain), creating a database, applying migrations, turning on Protection Bypass,
+    and setting, syncing or pulling Vercel variables ask every time. So do every SQL query, rolling back a migration,
     deleting users, buckets or functions, pausing, rotating the password, writing DATABASE_URL, setting function
     secrets, deploying a function anyone can call, a new site URL, a redirect address other than your linked Vercel
-    ones, and turning a sign-in method or redirect address off ask every time, and the prompt shows the SQL that would
-    run. Auto-accept never answers a Vector Cloud prompt. A new migration file asks like any other edit, showing both
-    the migration and its down file. OAuth client secrets, function secret values and the database password are
-    entered in Cloud Services, never in chat, and the agent can only refer to variables already stored there. Query
-    results reach the agent as the query returns them, except cells in columns named like passwords, tokens or
-    secrets, which are hidden.
-    Publishing goes to the Vercel project linked to the repository; without one, the tool returns setup guidance. A
-    failed Vercel deployment never triggers a deployment somewhere else.
+    ones, and turning a sign-in method or redirect address off, and the prompt shows the SQL that would run. A new migration file asks like any other edit, showing both the
+    migration and its down file. OAuth client secrets, function secret values and the database password are entered
+    in Vector Cloud, never in chat, and the agent can only refer to variables already stored there. Query results
+    reach the agent as the query returns them, except cells in columns named like passwords, tokens or secrets, which
+    are hidden.
+    Publishing goes to the Vercel project linked to the repository, as a preview unless you ask for production;
+    without a linked project, the tool returns setup guidance. A failed publish reaches the agent with its failed
+    checks and log lines, so it can fix the cause. A failed Vercel deployment never triggers a deployment somewhere
+    else. The agent is instructed not to ask for secret values in the chat, and to name the variable to add in
+    Environment variables instead.
   </p>
   <ul class="feature-list">
     <li><strong>Deployment checks and logs</strong><span>Publishing can run configured build, health and browser checks. Their results and provider logs show what was verified and what failed.</span></li>

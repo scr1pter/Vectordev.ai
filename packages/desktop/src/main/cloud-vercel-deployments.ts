@@ -406,7 +406,7 @@ export function requireVercelChecksPassed(projectPath: string, deployment: Verce
   if (!failed.length) return
   throw new VercelError(
     "invalid",
-    `Vector's required release checks failed for ${deployment.id} (${failed.map((check) => check.label).join(", ")}), so production was not moved to it. Fix the cause and publish again. If the failure came from outside the release, the user can run its checks again with Run checks in Cloud Services > Deployments.`,
+    `Vector's required release checks failed for ${deployment.id} (${failed.map((check) => check.label).join(", ")}), so production was not moved to it. Fix the cause and publish again. If the failure came from outside the release, the user can run its checks again with Run checks in Vector Cloud > Deployments.`,
   )
 }
 

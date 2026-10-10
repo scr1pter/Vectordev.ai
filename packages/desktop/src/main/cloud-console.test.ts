@@ -303,6 +303,26 @@ describe("cloud bridge publish destination", () => {
     expect(published).toEqual(["vercel"])
   })
 
+  test("publishes a preview unless production is asked for, and says which it made", async () => {
+    seedHost("vercel")
+    const published: (boolean | undefined)[] = []
+    const bridge = await startCloudBridge({
+      publish: async (input) => {
+        published.push(input.production)
+        return { ok: true, target: input.target, log: "", url: "https://fixture.vercel.app" }
+      },
+    })
+    expect(await (await bridgeCommand(bridge, { command: "publish" })).json()).toMatchObject({
+      ok: true,
+      environment: "preview",
+    })
+    expect(await (await bridgeCommand(bridge, { command: "publish", production: true })).json()).toMatchObject({
+      ok: true,
+      environment: "production",
+    })
+    expect(published).toEqual([false, true])
+  })
+
   test("reports a provider failure without falling back to another destination", async () => {
     seedHost("vercel")
     const published: string[] = []
@@ -358,15 +378,20 @@ describe("cloud bridge publish destination", () => {
       },
     })
     expect((await describe({ action: "publish", production: false })).scope.environment).toBe("preview")
-    expect((await describe({ action: "publish", production: true })).scope).toMatchObject({
+    const production = await describe({ action: "publish", production: true })
+    expect(production.scope).toMatchObject({
       environment: "production",
       summary: expect.stringContaining("Production traffic moves to it only if they pass"),
     })
+    // Moving production asks every time; a preview may be remembered.
+    expect(production.repeatable).toBe(false)
     for (const action of ["prepare_database", "prepare_auth", "apply_migrations"]) {
       expect(await describe({ action })).toMatchObject({ ok: false, needsSetup: true })
     }
+    // Creating something the user is billed for asks every time.
     expect(await describe({ action: "create_database", organizationId: "org_1", region: "eu-west-2" })).toMatchObject({
       ok: true,
+      repeatable: false,
       scope: {
         provider: "Supabase",
         project: "a new project",
@@ -381,11 +406,15 @@ describe("cloud bridge publish destination", () => {
       projectRef: "fixtureref",
       projectName: "shop-db",
     })
+    // A schema change on the production database asks every time; reading the plan does not.
     expect(await describe({ action: "apply_migrations" })).toMatchObject({
       ok: true,
+      repeatable: false,
       scope: { provider: "Supabase", project: "shop-db", environment: "production" },
     })
-    expect((await describe({ action: "apply_migrations", dryRun: true })).scope.summary).toContain("Nothing changes")
+    const dryRun = await describe({ action: "apply_migrations", dryRun: true })
+    expect(dryRun.scope.summary).toContain("Nothing changes")
+    expect(dryRun).not.toHaveProperty("repeatable")
     expect((await describe({ action: "create_database" })).scope.summary).toContain("nothing new is created")
     const missing = await bridgeCommand(bridge, { command: "describe" })
     expect(missing.status).toBe(400)

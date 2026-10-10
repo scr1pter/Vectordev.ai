@@ -14,6 +14,7 @@ import {
   SystemPrompt,
   subagentAvailability,
   subagentPolicy,
+  VECTOR_CLOUD_POLICY,
 } from "../../src/session/system"
 import { MCP } from "../../src/mcp"
 import { testEffect } from "../lib/effect"
@@ -311,6 +312,17 @@ describe("session.system", () => {
       expect(child).not.toContain("<vector_project_memory>")
       // An agent that cannot edit cannot keep project memory either.
       expect(readOnly).not.toContain("<vector_project_memory>")
+    }),
+  )
+
+  it.instance("sends the Vector Cloud rules only to an agent offered the cloud tool", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const model = { api: { id: "model" }, providerID: "provider" } as unknown as Provider.Model
+      const cloud = (yield* prompt.environment(model, { tools: ["edit", "vector_cloud"] })).stable.join("\n")
+      const plain = (yield* prompt.environment(model, { tools: ["edit"] })).stable.join("\n")
+      expect(cloud).toContain(VECTOR_CLOUD_POLICY)
+      expect(plain).not.toContain("<vector_cloud_policy>")
     }),
   )
 

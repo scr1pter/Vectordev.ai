@@ -147,7 +147,7 @@ describe("projects", () => {
     expect(await run("supabase_projects")).toMatchObject({
       ok: false,
       needsSetup: true,
-      nextStep: expect.stringContaining("Cloud Services > Integrations"),
+      nextStep: expect.stringContaining("Vector Cloud > Connections"),
     })
   })
 
@@ -270,7 +270,7 @@ describe("database credentials", () => {
     expect(await run("write_database_url", { consent: true })).toMatchObject({
       ok: false,
       needsSetup: true,
-      nextStep: expect.stringContaining("enter the current database password in Cloud Services > Database"),
+      nextStep: expect.stringContaining("enter the current database password in Vector Cloud > Database"),
     })
     expect(listEnv(project)).toEqual([])
   })
@@ -1088,7 +1088,7 @@ describe("security check", () => {
       call.path.endsWith("/advisors/security") ? Response.json({ message: "Unauthorized" }, { status: 401 }) : undefined
     expect((await run("security_check")).security).toMatchObject({
       status: "failed",
-      nextStep: expect.stringContaining("make Secret scan optional under Cloud Services > Build & runtime"),
+      nextStep: expect.stringContaining("make Secret scan optional under Vector Cloud > Build & runtime"),
     })
 
     // The release check carries the next step, which is what a refused
@@ -1102,7 +1102,7 @@ describe("security check", () => {
     ).toMatchObject({
       status: "failed",
       details:
-        "Supabase's security advisors could not run: upstream timeout Run the check again in a moment. To release without it meanwhile, make Secret scan optional under Cloud Services > Build & runtime > Required release checks.",
+        "Supabase's security advisors could not run: upstream timeout Run the check again in a moment. To release without it meanwhile, make Secret scan optional under Vector Cloud > Build & runtime > Required release checks.",
     })
   })
 })

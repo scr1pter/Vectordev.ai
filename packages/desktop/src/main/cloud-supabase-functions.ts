@@ -195,7 +195,7 @@ export async function setFunctionSecrets(
     const found = env.find((item) => item.key === name.trim())
     if (!found) {
       throw new Error(
-        `${name} is not one of this project's environment variables. Add it in Cloud Services > Environment variables first.`,
+        `${name} is not one of this project's environment variables. Add it in Vector Cloud > Environment variables first.`,
       )
     }
     return { name: secretName(found.key), value: found.value }
