@@ -27,6 +27,23 @@ describe("server authentication", () => {
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/experimental/console/switch")).toBe(true)
   })
 
+  test("host commands and permission answers require the server owner", () => {
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/shell")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/command")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/%73hell")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/permission/per_1/reply")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/permissions/per_1")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/api/session/ses_1/permission/per_1/reply")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/api/permission/request")).toBe(true)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/api/question/request")).toBe(true)
+    // A guest still prompts, reads its own pending requests and answers its own questions.
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/message")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/session/ses_1/prompt_async")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/permission")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRequest("GET", "/api/session/ses_1/permission")).toBe(false)
+    expect(ServerAuth.isOwnerOnlyRequest("POST", "/question/que_1/reply")).toBe(false)
+  })
+
   test("encoded owner-only routes remain owner-only", () => {
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/api/%70ty")).toBe(true)
     expect(ServerAuth.isOwnerOnlyRequest("POST", "/%63onfig")).toBe(true)

@@ -152,6 +152,16 @@ export function isOwnerOnlyRequest(method: string, pathname: string) {
   if (!canonical) return true
   if (canonical === "/api/session/import" || /\/session\/[^/]+\/share(?:\/|$)/.test(canonical)) return true
   if (canonical.startsWith("/api/pty") || canonical.startsWith("/pty")) return true
+  // The session shell route runs its command on the host with no permission prompt, and a slash
+  // command can run its template's shell snippets, so both are as powerful as a terminal.
+  if (/\/session\/[^/]+\/(?:shell|command)(?:\/|$)/.test(canonical)) return true
+  // Approving a permission request is how a session crosses the workspace boundary (an outside
+  // directory, a guarded file), so only the owner may answer one, even for a guest's own session.
+  if (/\/permission\/[^/]+\/reply(?:\/|$)/.test(canonical) || /\/session\/[^/]+\/permissions\//.test(canonical))
+    return true
+  // The v2 request lists span every session on the server. A guest reads its own through the
+  // session-scoped routes instead.
+  if (canonical.startsWith("/api/permission/request") || canonical.startsWith("/api/question/request")) return true
   if (canonical.startsWith("/api/credential") || canonical.startsWith("/api/permission/saved")) return true
   if (canonical.startsWith("/experimental/project/") && canonical.includes("/copy")) return true
   if (

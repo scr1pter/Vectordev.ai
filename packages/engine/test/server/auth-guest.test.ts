@@ -1,4 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node"
+import fs from "fs/promises"
+import path from "path"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer, Option, Queue, Redacted, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/unstable/http"
@@ -379,6 +381,127 @@ test("guest session lists and replay routes stay within canonical claims", async
   } finally {
     Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
     await events?.return(undefined)
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
+test("guests cannot run host commands or answer permission requests", async () => {
+  await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+  await using outside = await tmpdir()
+  const secret = path.join(outside.path, "host-secret.bin")
+  await fs.writeFile(secret, "HOST-ONLY-SECRET-VALUE")
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  // Server.listen prefers port 4096, so this listener reuses the earlier test's port. A pooled keep-alive
+  // socket left from that server would swallow the first request.
+  const call = (url: URL, init: RequestInit = {}) => fetch(url, { ...init, keepalive: false })
+  const at = (route: string) => new URL(`${route}?directory=${encodeURIComponent(tmp.path)}`, listener.url)
+  const model = { providerID: "probe", modelID: "probe" }
+  // A binary file part outside the workspace parks its session on an external_directory request.
+  const askOutside = (sessionID: string, headers: Record<string, string>) =>
+    call(at(`/session/${sessionID}/prompt_async`), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        noReply: true,
+        model,
+        parts: [{ type: "file", mime: "application/octet-stream", filename: "x.bin", url: `file://${secret}` }],
+      }),
+    })
+  const pending = async (headers: Record<string, string>) =>
+    (await (await call(at("/permission"), { headers })).json()) as Array<{ id: string; sessionID: string }>
+  try {
+    // The owner's own session in the same directory, outside the guest's workspace claim.
+    const ownerSession = (await (
+      await call(at("/session"), { method: "POST", headers: owner, body: "{}" })
+    ).json()) as {
+      id: string
+    }
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    const created = await call(at("/session"), { method: "POST", headers: guest, body: "{}" })
+    expect(created.status).toBe(200)
+    const guestSession = (await created.json()) as { id: string }
+
+    const shell = await call(at(`/session/${guestSession.id}/shell`), {
+      method: "POST",
+      headers: guest,
+      body: JSON.stringify({ agent: "build", model, command: `cat ${secret}; id -un` }),
+    })
+    expect(shell.status).toBe(403)
+    expect(await shell.text()).not.toContain("HOST-ONLY-SECRET-VALUE")
+    const command = await call(at(`/session/${guestSession.id}/command`), {
+      method: "POST",
+      headers: guest,
+      body: JSON.stringify({ command: "init", arguments: "" }),
+    })
+    expect(command.status).toBe(403)
+
+    expect((await askOutside(ownerSession.id, owner)).status).toBe(204)
+    expect((await askOutside(guestSession.id, guest)).status).toBe(204)
+    const deadline = Date.now() + 15_000
+    while ((await pending(owner)).length < 2 && Date.now() < deadline) await Bun.sleep(50)
+    const all = await pending(owner)
+    expect(all.map((item) => item.sessionID).sort()).toEqual([ownerSession.id, guestSession.id].sort())
+
+    // A guest sees what its own session waits on, never the owner's requests.
+    expect((await pending(guest)).map((item) => item.sessionID)).toEqual([guestSession.id])
+    expect((await call(new URL("/api/permission/request", listener.url), { headers: guest })).status).toBe(403)
+
+    // Approving crosses the workspace boundary, so it stays with the owner even for the guest's session.
+    for (const item of all) {
+      const reply = await call(at(`/permission/${item.id}/reply`), {
+        method: "POST",
+        headers: guest,
+        body: JSON.stringify({ reply: "always" }),
+      })
+      expect(reply.status).toBe(403)
+      const legacy = await call(at(`/session/${item.sessionID}/permissions/${item.id}`), {
+        method: "POST",
+        headers: guest,
+        body: JSON.stringify({ response: "always" }),
+      })
+      expect(legacy.status).toBe(403)
+    }
+    expect((await pending(owner)).length).toBe(2)
+    for (const item of all) {
+      const reply = await call(at(`/permission/${item.id}/reply`), {
+        method: "POST",
+        headers: owner,
+        body: JSON.stringify({ reply: "reject" }),
+      })
+      expect(reply.status).toBe(200)
+    }
+
+    const messages = await (await call(at(`/session/${guestSession.id}/message`), { headers: guest })).text()
+    expect(messages).not.toContain(Buffer.from("HOST-ONLY-SECRET-VALUE").toString("base64"))
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
     await listener.stop(true)
     for (const key of keys) {
       const value = previous[key]
