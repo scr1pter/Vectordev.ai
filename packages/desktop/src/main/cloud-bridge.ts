@@ -216,7 +216,8 @@ function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
         `Publish this agent workspace to the Vercel project ${target.projectName} as a preview release. Production changes only after it is merged into the main project.`,
       )
     }
-    const environment = input.production === false ? "preview" : "production"
+    // A preview unless production was asked for: production changes only on request.
+    const environment = input.production === true ? "production" : "preview"
     return scope(
       "Vercel",
       target.projectName,
@@ -231,7 +232,7 @@ function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
         ok: false,
         needsSetup: true,
         error: "No Vercel project is linked to this project.",
-        nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
+        nextStep: "Ask the user to connect Vercel and link a project in Vector Cloud > Connections.",
       }
     }
     const count = listEnv(input.projectPath, input.taskId).length
@@ -266,7 +267,7 @@ function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
       needsSetup: true,
       error: "No Vector Cloud database is connected.",
       nextStep:
-        "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Cloud Services > Database.",
+        "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Vector Cloud > Database.",
     }
   }
   if (input.action === "apply_migrations") {
@@ -298,7 +299,7 @@ function publishSetup() {
     needsSetup: true,
     targets: [],
     error: "Connect and link a Vercel project in Vector Cloud before publishing.",
-    nextStep: "Ask the user to connect Vercel and link a project in Cloud Services > Integrations.",
+    nextStep: "Ask the user to connect Vercel and link a project in Vector Cloud > Connections.",
   }
 }
 
@@ -404,6 +405,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   // An agent workspace publishes a preview from its worktree. Production only
   // moves once the work is merged into the main project.
   const isolated = scope.directory !== scope.projectPath
+  const production = !isolated && input.production === true
   const result = await (options.publish ?? publishProject)({
     projectPath: scope.directory,
     taskId: input.taskId,
@@ -412,12 +414,14 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     workspaceId: scope.workspace?.id,
     workspaceName: scope.workspace?.name,
     target: "vercel",
-    production: !isolated && input.production !== false,
+    production,
     runId: randomUUID(),
   })
-  if (!isolated) return result
+  const environment = production ? "production" : "preview"
+  if (!isolated) return { ...result, environment }
   return {
     ...result,
+    environment,
     nextStep:
       "This agent workspace was published as a preview. Merge it into the main project before promoting it to production.",
   }

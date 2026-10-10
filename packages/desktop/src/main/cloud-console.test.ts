@@ -303,6 +303,26 @@ describe("cloud bridge publish destination", () => {
     expect(published).toEqual(["vercel"])
   })
 
+  test("publishes a preview unless production is asked for, and says which it made", async () => {
+    seedHost("vercel")
+    const published: (boolean | undefined)[] = []
+    const bridge = await startCloudBridge({
+      publish: async (input) => {
+        published.push(input.production)
+        return { ok: true, target: input.target, log: "", url: "https://fixture.vercel.app" }
+      },
+    })
+    expect(await (await bridgeCommand(bridge, { command: "publish" })).json()).toMatchObject({
+      ok: true,
+      environment: "preview",
+    })
+    expect(await (await bridgeCommand(bridge, { command: "publish", production: true })).json()).toMatchObject({
+      ok: true,
+      environment: "production",
+    })
+    expect(published).toEqual([false, true])
+  })
+
   test("reports a provider failure without falling back to another destination", async () => {
     seedHost("vercel")
     const published: string[] = []
@@ -347,16 +367,20 @@ describe("cloud bridge publish destination", () => {
     const bridge = await startCloudBridge()
     const describe = async (input: Record<string, unknown>) =>
       (await bridgeCommand(bridge, { command: "describe", ...input })).json()
+    // A preview unless production is asked for.
     expect(await describe({ action: "publish" })).toEqual({
       ok: true,
       scope: {
         provider: "Vercel",
         project: "vercel app",
-        environment: "production",
-        summary: "Publish this project to the Vercel project vercel app as a production release.",
+        environment: "preview",
+        summary: "Publish this project to the Vercel project vercel app as a preview release.",
       },
     })
-    expect((await describe({ action: "publish", production: false })).scope.environment).toBe("preview")
+    expect((await describe({ action: "publish", production: true })).scope).toMatchObject({
+      environment: "production",
+      summary: "Publish this project to the Vercel project vercel app as a production release.",
+    })
     expect(await describe({ action: "sync_environment" })).toMatchObject({
       ok: true,
       scope: { provider: "Vercel", project: "vercel app", environment: "production, preview and development" },

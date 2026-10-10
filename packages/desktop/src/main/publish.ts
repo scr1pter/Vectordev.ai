@@ -225,9 +225,11 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
       id: "vercel",
       label: vercel ? "Vercel" : "Vercel (via npx)",
       command: vercel ? [vercel] : [npx ?? "npx", "--yes", "vercel"],
-      loginHint: vercelConnection.connected
-        ? "Connected through Vector Cloud."
-        : "Connect Vercel in Vector Cloud, or sign in with the Vercel CLI.",
+      loginHint: !(vercel || npx)
+        ? "Publishing runs the Vercel deploy through Node.js (npx), which is not installed on this machine. Install Node.js from nodejs.org, then publish again."
+        : vercelConnection.connected
+          ? "Connected through Vector Cloud."
+          : "Connect Vercel in Vector Cloud > Connections with an access token.",
       available: Boolean(vercel || npx) && Boolean(vercelConnection.connected || vercelAccount),
       account: vercelConnection.account ?? vercelAccount,
     },
@@ -342,7 +344,15 @@ async function runPreflightChecks(
       const text = redactCloudLog(scope.projectPath, scope.taskId, output).trim()
       if (text) emitProgress(input, emit, stage, "info", text.slice(-800))
     })
-    const check = commandCheck(type, label, required, result, Date.now() - startedAt)
+    // A failed preflight returns its checks straight to the agent and the
+    // preview panel, before any deployment record would redact them.
+    const check = commandCheck(
+      type,
+      label,
+      required,
+      { ok: result.ok, log: redactCloudLog(scope.projectPath, scope.taskId, result.log) },
+      Date.now() - startedAt,
+    )
     checks.push(check)
     if (result.log.trim()) logs.push(result.log.trim())
     emitProgress(input, emit, stage, result.ok ? "success" : "error", check.details ?? label)
@@ -524,7 +534,7 @@ export async function publishProject(
       ok: false,
       target: input.target,
       log: "",
-      error: `${input.target} is not available on this machine. ${target?.loginHint ?? ""}`.trim(),
+      error: target?.loginHint || "Connect Vercel in Vector Cloud > Connections with an access token.",
     }
   }
   if (target.id !== "vercel") {
@@ -537,7 +547,7 @@ export async function publishProject(
       ok: false,
       target: target.id,
       log: "",
-      error: `Choose a ${target.label.replace(" (via npx)", "")} project in Vector Cloud before publishing.`,
+      error: "Link a Vercel project in Vector Cloud > Connections before publishing.",
     }
   }
 
@@ -592,7 +602,9 @@ export async function publishProject(
       command.log,
     )
     const error = needsLogin
-      ? `You are not logged in to ${target.label}. ${target.loginHint} Then publish again.`
+      ? providerAuth.token
+        ? "Vercel rejected the saved access token. Reconnect Vercel in Vector Cloud > Connections, then publish again."
+        : "You are not signed in to Vercel. Connect Vercel in Vector Cloud > Connections with an access token, then publish again."
       : command.ok
         ? "The deploy finished but no URL was found in the output."
         : `${target.label} exited with code ${command.code}.`
@@ -632,7 +644,7 @@ export async function publishProject(
       error,
     }
   }
-  if (input.production !== false) {
+  if (input.production === true) {
     deployment = await promoteDeployment(
       { projectPath: scope.projectPath, taskId: scope.taskId, id: deployment.id, runId: input.runId },
       emit,
@@ -643,7 +655,7 @@ export async function publishProject(
     emit,
     "complete",
     "success",
-    input.production === false ? "Preview is ready." : "Production release is live.",
+    input.production === true ? "Production release is live." : "Preview is ready.",
   )
   return {
     ok: true,

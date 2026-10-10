@@ -37,7 +37,7 @@ mock.module("./store", () => ({
 }))
 
 const { publishProject, runVercel } = await import("./publish")
-const { listDeployments, setBuildSettings } = await import("./cloud-console")
+const { listDeployments, setBuildSettings, setEnv } = await import("./cloud-console")
 
 let directory = ""
 
@@ -135,4 +135,60 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
       await rm(project, { recursive: true, force: true })
     }
   })
+
+  test("publishes a preview when production is not asked for", async () => {
+    const project = await mkdtemp(join(tmpdir(), "vector-publish-project-"))
+    try {
+      await writeFile(join(project, "index.html"), "<h1>Shop</h1>\n")
+      setBuildSettings(project, undefined, staticSettings(""))
+      const cli = await fakeVercel()
+      const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, async () => [
+        { id: "vercel", label: "Vercel", command: [cli], loginHint: "", available: true },
+      ])
+      expect(result.ok).toBe(true)
+      expect(listDeployments(project)).toEqual([
+        expect.objectContaining({ environment: "preview", releaseStatus: "preview", promotedAt: undefined }),
+      ])
+    } finally {
+      await rm(project, { recursive: true, force: true })
+    }
+  })
+
+  test("returns a failed build's evidence with the project's secrets redacted", async () => {
+    const project = await mkdtemp(join(tmpdir(), "vector-publish-project-"))
+    try {
+      await writeFile(join(project, "index.html"), "<h1>Shop</h1>\n")
+      setEnv(project, undefined, "PAYMENTS_SECRET", "fixture-payments-value-123", "server")
+      setBuildSettings(
+        project,
+        undefined,
+        staticSettings('echo "connecting with fixture-payments-value-123" && exit 3'),
+      )
+      const result = await publishProject({ projectPath: project, target: "vercel" }, undefined, async () => [
+        { id: "vercel", label: "Vercel", command: ["never-run"], loginHint: "", available: true },
+      ])
+      expect(result.ok).toBe(false)
+      const build = result.checks?.find((check) => check.id === "build")
+      expect(build).toMatchObject({ status: "failed", required: true, details: "Production build failed." })
+      expect(build?.output).toContain("connecting with [redacted]")
+      expect(JSON.stringify(result)).not.toContain("fixture-payments-value-123")
+      expect(listDeployments(project)).toEqual([])
+    } finally {
+      await rm(project, { recursive: true, force: true })
+    }
+  })
 })
+
+function staticSettings(buildCommand: string) {
+  return {
+    framework: "Static",
+    packageManager: "static" as const,
+    installCommand: "",
+    testCommand: "",
+    buildCommand,
+    outputDirectory: ".",
+    nodeVersion: "",
+    healthPath: "/",
+    requiredChecks: { test: false, secrets: true, health: false, browser: false },
+  }
+}

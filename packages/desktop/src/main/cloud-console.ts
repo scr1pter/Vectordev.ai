@@ -770,7 +770,7 @@ function decryptEnvValue(item: StoredEnvVar): string {
     return decryptCloudCredential(item.secret)
   } catch {
     throw new Error(
-      `The saved value of ${item.key} cannot be decrypted on this device. Remove it in Cloud Services > Environment variables and set it again.`,
+      `The saved value of ${item.key} cannot be decrypted on this device. Remove it in Vector Cloud > Environment variables and set it again.`,
     )
   }
 }
