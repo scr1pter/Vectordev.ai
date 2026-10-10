@@ -506,13 +506,14 @@ const AUTO_REVIEW_MONTHLY_USD = 50
 const VECTOR_TOKEN_URL = "https://vectordev.ai/auth/cli"
 
 export type AutoReviewStatus = {
-  // installed: the default branch has the workflow. pending: a pull request that adds it is open. read-only: this
+  // installed: the default branch has the workflow. on-request: it has the workflow `vector github install` writes when
+  // asked to review only on a `/vector review` comment. pending: a pull request that adds it is open. read-only: this
   // account cannot push to the repository. needs-scope: this sign-in may not write workflow files.
-  state: "installed" | "pending" | "read-only" | "needs-scope" | "available"
+  state: "installed" | "on-request" | "pending" | "read-only" | "needs-scope" | "available"
   repo: string // owner/name
   defaultBranch: string
   secretsUrl: string // the repository's Actions secrets settings
-  url?: string // installed: the workflow file; pending: the pull request
+  url?: string // installed and on-request: the workflow file; pending: the pull request
   source: GithubAccess["source"]
 }
 
@@ -588,7 +589,7 @@ export async function fetchAutoReviewStatus(access: GithubAccess, repo: GithubRe
     secretsUrl: `${info.html_url}/settings/secrets/actions`,
     source: access.source,
   }
-  const installed = await githubJson<{ html_url?: string }>(
+  const installed = await githubJson<{ html_url?: string; content?: string; encoding?: string }>(
     access,
     `${repoPath(repo)}/contents/${WORKFLOW_FILE}?ref=${encodeURIComponent(info.default_branch)}`,
   ).catch((error: unknown) => {
@@ -598,23 +599,43 @@ export async function fetchAutoReviewStatus(access: GithubAccess, repo: GithubRe
   if (installed)
     return {
       ...status,
-      state: "installed",
+      state:
+        installed.encoding === "base64" && reviewsOnlyOnRequest(Buffer.from(installed.content ?? "", "base64").toString())
+          ? "on-request"
+          : "installed",
       url: installed.html_url ?? `${info.html_url}/blob/${info.default_branch}/${WORKFLOW_FILE}`,
     }
-  const open = await githubJson<{ html_url: string; head: { ref: string; repo?: { full_name?: string } | null } }[]>(
-    access,
-    `${repoPath(repo)}/pulls?state=open&per_page=100`,
-  )
-  const pending = open.find(
-    (pull) =>
-      pull.head.ref.startsWith(AUTO_REVIEW_BRANCH) &&
-      pull.head.repo?.full_name?.toLowerCase() === status.repo.toLowerCase(),
-  )
-  if (pending) return { ...status, state: "pending", url: pending.html_url }
+  const pending = await pendingAutoReviewPullRequest(access, repo, status.repo)
+  if (pending) return { ...status, state: "pending", url: pending }
   if (!info.permissions?.push) return { ...status, state: "read-only" }
   if (scopes !== null && !scopes.split(",").some((scope) => scope.trim() === "workflow"))
     return { ...status, state: "needs-scope" }
   return { ...status, state: "available" }
+}
+
+// `vector github install` leaves out the pull_request trigger when asked to review only on a `/vector review` comment.
+// A file that names no pull_request event in any form (`pull_request:`, `[push, pull_request]`, `- pull_request`) is
+// that workflow; anything else, including a file someone rewrote, counts as reviewing every pull request.
+function reviewsOnlyOnRequest(content: string) {
+  return content.includes("issue_comment") && !/(^|[\s[,])pull_request\s*(:|,|\]|$)/m.test(content)
+}
+
+// The open pull request an earlier set-up made, found by its branch rather than in a page of every open pull request,
+// so a busy repository never hides it. Branches of the same name in forks belong to someone else.
+async function pendingAutoReviewPullRequest(access: GithubAccess, repo: GithubRepoRef, fullName: string) {
+  const branches = await githubJson<{ ref: string }[]>(
+    access,
+    `${repoPath(repo)}/git/matching-refs/heads/${AUTO_REVIEW_BRANCH}`,
+  )
+  const owner = fullName.split("/")[0]
+  for (const branch of branches) {
+    const head = `${owner}:${branch.ref.replace(/^refs\/heads\//, "")}`
+    const [open] = await githubJson<{ html_url: string }[]>(
+      access,
+      `${repoPath(repo)}/pulls?state=open&per_page=1&head=${encodeURIComponent(head)}`,
+    )
+    if (open) return open.html_url
+  }
 }
 
 export async function setUpAutomaticReviews(input: { cwd: string; model: string; keys: string[] }, version: string) {
@@ -647,12 +668,14 @@ export async function openAutoReviewPullRequest(
     timeoutMs: 60_000,
   }).catch(async (error: unknown) => {
     // The branch exists only for this file, so it is not left behind.
-    await githubFetch(access, `${repoPath(repo)}/git/refs/heads/${refPath(branch)}`, { method: "DELETE" }).catch(
-      () => undefined,
-    )
+    await deleteBranch(access, repo, branch)
     if (error instanceof GithubRequestError && (error.status === 403 || error.status === 404))
       throw new Error(
-        `GitHub refused to add ${workflow.path} (${error.message}). Your GitHub sign-in may not be allowed to change workflows: sign out of GitHub in Vectorscope and sign in again.`,
+        `GitHub refused to add ${workflow.path} (${error.message}). ${
+          access.source === "gh"
+            ? "Your GitHub CLI login may not be allowed to change workflows: run `gh auth refresh -s workflow`, then try again."
+            : "Your GitHub sign-in may not be allowed to change workflows: sign out of GitHub in Vectorscope and sign in again."
+        } If it still fails, a rule in ${status.repo} may protect workflow files; ask a maintainer.`,
       )
     throw error
   })
@@ -665,8 +688,20 @@ export async function openAutoReviewPullRequest(
       body: autoReviewBody(workflow),
     },
     timeoutMs: 60_000,
+  }).catch(async (error: unknown) => {
+    // GitHub refused the pull request, so its branch goes too and a retry starts clean. After a timeout or a server
+    // error the pull request may exist, so the branch stays for the next status check to find.
+    if (error instanceof GithubRequestError && error.status >= 400 && error.status < 500)
+      await deleteBranch(access, repo, branch)
+    throw error
   })
   return { url: pull.html_url, number: pull.number, branch, secrets: workflow.secrets, secretsUrl: status.secretsUrl }
+}
+
+function deleteBranch(access: GithubAccess, repo: GithubRepoRef, branch: string) {
+  return githubFetch(access, `${repoPath(repo)}/git/refs/heads/${refPath(branch)}`, { method: "DELETE" }).catch(
+    () => undefined,
+  )
 }
 
 // A branch left from an earlier set-up whose pull request was closed is kept; the new one gets a suffix instead.
@@ -690,6 +725,8 @@ async function createAutoReviewBranch(access: GithubAccess, repo: GithubRepoRef,
 
 function autoReviewRefusal(status: AutoReviewStatus) {
   if (status.state === "installed") return `Automatic reviews are already set up in ${status.repo}.`
+  if (status.state === "on-request")
+    return `${status.repo} already has ${WORKFLOW_FILE}, set up to review when someone comments /vector review. Run \`vector github install\` and choose to review every pull request to change it.`
   if (status.state === "pending")
     return `A pull request that sets up automatic reviews is already open in ${status.repo}: ${status.url}`
   if (status.state === "read-only") return `You need write access to ${status.repo} to add a workflow.`
