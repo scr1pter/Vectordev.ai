@@ -201,7 +201,8 @@ describe("Discovery delegation", () => {
   delegated.effect("delegates remote skill discovery to the hardened Core implementation", () =>
     Effect.gen(function* () {
       requested.length = 0
-      const result = yield* (yield* Discovery.Service).pull("https://skills.example.test/catalog")
+      const discovery = yield* Discovery.Service
+      const result = yield* discovery.pull("https://skills.example.test/catalog")
 
       expect(requested).toEqual(["https://skills.example.test/catalog"])
       expect(result).toEqual([directory])

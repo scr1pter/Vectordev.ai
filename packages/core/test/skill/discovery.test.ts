@@ -35,7 +35,8 @@ describe("SkillDiscovery destinations", () => {
             [Global.node, Global.layerWith({ cache: tmp.path })],
           ])
           const directories = yield* Effect.gen(function* () {
-            return yield* (yield* SkillDiscovery.Service).pull(base)
+            const discovery = yield* SkillDiscovery.Service
+            return yield* discovery.pull(base)
           }).pipe(Effect.provide(layer))
           return { directories, requests }
         }),
@@ -71,7 +72,8 @@ describe("SkillDiscovery limits", () => {
     Effect.acquireRelease(Effect.promise(tmpdir), (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]())).pipe(
       Effect.flatMap((tmp) =>
         Effect.gen(function* () {
-          return yield* (yield* SkillDiscovery.Service).pull(base)
+          const discovery = yield* SkillDiscovery.Service
+          return yield* discovery.pull(base)
         }).pipe(
           Effect.provide(
             AppNodeBuilder.build(SkillDiscovery.node, [

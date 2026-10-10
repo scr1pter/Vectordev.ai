@@ -231,7 +231,8 @@ describe("Instruction.resolve", () => {
       ])
 
       return Effect.gen(function* () {
-        const system = yield* (yield* Instruction.Service).system()
+        const instruction = yield* Instruction.Service
+        const system = yield* instruction.system()
         expect(system).toContain("Instructions from: https://1.1.1.1/rules\nRemote rules")
         expect(system).toContain("Instructions from: http://127.0.0.1/private\nRemote rules")
         expect(requests.toSorted()).toEqual(["http://127.0.0.1/private", "https://1.1.1.1/rules"])

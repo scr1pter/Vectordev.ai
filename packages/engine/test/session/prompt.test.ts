@@ -2845,7 +2845,8 @@ noLLMServer.instance(
     Effect.gen(function* () {
       const external = yield* tmpdirScoped()
       const image = path.join(external, "outside.png")
-      yield* (yield* FSUtil.Service).writeWithDirs(
+      const fsys = yield* FSUtil.Service
+      yield* fsys.writeWithDirs(
         image,
         Buffer.from(
           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
@@ -2881,7 +2882,8 @@ noLLMServer.instance(
     Effect.gen(function* () {
       const external = yield* tmpdirScoped()
       const secret = path.join(external, "outside.bin")
-      yield* (yield* FSUtil.Service).writeWithDirs(secret, "outside-binary-secret")
+      const fsys = yield* FSUtil.Service
+      yield* fsys.writeWithDirs(secret, "outside-binary-secret")
       const prompt = yield* SessionPrompt.Service
       const permission = yield* Permission.Service
       const sessions = yield* Session.Service
@@ -2966,7 +2968,8 @@ noLLMServer.instance(
     Effect.gen(function* () {
       const { directory: dir } = yield* TestInstance
       const inside = path.join(dir, "inside.bin")
-      yield* (yield* FSUtil.Service).writeWithDirs(inside, "inside-binary")
+      const fsys = yield* FSUtil.Service
+      yield* fsys.writeWithDirs(inside, "inside-binary")
       const prompt = yield* SessionPrompt.Service
       const sessions = yield* Session.Service
       const session = yield* sessions.create({})
