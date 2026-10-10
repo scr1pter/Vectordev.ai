@@ -513,7 +513,7 @@ function buildAgent(source: TaskSource, seed: AgentSeed): TaskAgent {
   // A task_id resume rewrites the child's record for the new run, so its run
   // fields only describe this part when the call ids agree.
   const matched = stored && (!part || !stored.callID || stored.callID === part.callID) ? stored : undefined
-  const run: Lifecycle = { ...matched, ...definedFields(meta) }
+  const run: Lifecycle = { ...matched, ...definedFields(meta), ...finishedFields(matched, meta) }
   const facts = childFacts(source, sessionID)
   const agent = resolveAgent({
     metadata: meta.agent,
@@ -574,6 +574,25 @@ function buildAgent(source: TaskSource, seed: AgentSeed): TaskAgent {
 
 function definedFields<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined)) as Partial<T>
+}
+
+/**
+ * The engine settles the child's record first and mirrors it onto the task part afterwards. The mirror waits for the
+ * part to settle and gives up after ten minutes, and a client can miss its event, so a part can still say live long
+ * after the run ended. A finished record for the same call outranks it: a run never goes back to live under one call.
+ */
+function finishedFields(record: Lifecycle | undefined, meta: Lifecycle): Partial<Lifecycle> {
+  if (!record?.status || liveLifecycle(record.status) || !liveLifecycle(meta.status)) return {}
+  return definedFields({
+    status: record.status,
+    completedAt: record.completedAt,
+    usage: record.usage,
+    error: record.error,
+  })
+}
+
+function liveLifecycle(status: LifecycleStatus | undefined) {
+  return status === "queued" || status === "running"
 }
 
 function looksLikeSubagent(session: Session) {
@@ -804,6 +823,33 @@ function compareCards(a: TaskCard, b: TaskCard) {
 }
 
 export type TaskLocation = { card: TaskCard; phase: TaskPhase; agent: TaskAgent; first: boolean }
+
+/** The copy of a session the engine updated last, from the store, the children route or a reload; a tie keeps the first. */
+export function freshestSession(...copies: (Session | undefined)[]) {
+  return copies.reduce<Session | undefined>((best, copy) => {
+    if (!copy || !best) return best ?? copy
+    return (copy.time?.updated ?? 0) > (best.time?.updated ?? 0) ? copy : best
+  }, undefined)
+}
+
+/**
+ * Sessions of agents shown live whose child the engine reports neither busy nor retrying. Events lost while the
+ * stream was down leave cards like these behind, and only a fresh copy of the child and its messages settles them.
+ */
+export function idleLiveSessions(
+  agents: readonly Pick<TaskAgent, "sessionID" | "status">[],
+  status: (sessionID: string) => SessionStatus["type"] | undefined,
+) {
+  return [
+    ...new Set(
+      agents.flatMap((agent) => {
+        if (!agent.sessionID || !isLive(agent.status)) return []
+        const type = status(agent.sessionID)
+        return type === "busy" || type === "retry" ? [] : [agent.sessionID]
+      }),
+    ),
+  ]
+}
 
 /** Where a task part sits; `first` marks the part that carries its phase's inline chip. */
 export function locateTaskPart(cards: readonly TaskCard[], partID: string): TaskLocation | undefined {

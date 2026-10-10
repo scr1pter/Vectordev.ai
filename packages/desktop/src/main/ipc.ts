@@ -216,6 +216,8 @@ type Deps = {
   setBackgroundColor: (color: string) => void
   exportDebugLogs: () => Promise<string>
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
+  getUsageSharing: () => boolean
+  setUsageSharing: (enabled: boolean) => void
 }
 
 function assertTrustedRenderer(event: IpcMainEvent | IpcMainInvokeEvent) {
@@ -903,6 +905,8 @@ export function registerIpcHandlers(deps: Deps) {
     if (!win) return
     updateTitlebar(win)
   })
+  handle("get-usage-sharing", () => deps.getUsageSharing())
+  handle("set-usage-sharing", (_event: IpcMainInvokeEvent, enabled: boolean) => deps.setUsageSharing(enabled === true))
   handle("get-pinch-zoom-enabled", () => getPinchZoomEnabled())
   handle("set-pinch-zoom-enabled", (_event: IpcMainInvokeEvent, enabled: boolean) => {
     setPinchZoomEnabled(enabled)
