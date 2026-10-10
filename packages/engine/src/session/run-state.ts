@@ -3,6 +3,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Runner } from "@/effect/runner"
 import { BackgroundJob } from "@/background/job"
+import { SubagentLifecycle } from "@/tool/subagent-lifecycle"
 import { Effect, Latch, Layer, Scope, Context } from "effect"
 import { Session } from "./session"
 import { SessionID } from "./schema"
@@ -36,6 +37,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const background = yield* BackgroundJob.Service
     const status = yield* SessionStatus.Service
+    const sessions = yield* Session.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
@@ -88,8 +90,24 @@ const layer = Layer.effect(
       // signal a launch still in progress checks; the sweep then stops the session's own job and the foreground work
       // left under it.
       if (existing) yield* existing.cancel
-      else yield* status.set(sessionID, { type: "idle" })
+      else yield* settleIdle(sessionID)
       yield* cancelAttachedJobs(background, sessionID)
+    })
+
+    // With no runner nothing is running, yet a subagent's record can still say it is: the engine stopped mid-run (a
+    // crash, or an update restarting it), and no job in this process will ever settle the record, so its card stays
+    // live on every client. Stop settles it as cancelled. A job this process still knows owns the record and settles
+    // it itself, possibly a moment from now; writing here as well could put an older status back over the one it
+    // writes.
+    const settleIdle = Effect.fnUntraced(function* (sessionID: SessionID) {
+      yield* status.set(sessionID, { type: "idle" })
+      if (yield* background.get(sessionID)) return
+      const record = yield* sessions.get(sessionID).pipe(
+        Effect.map(SubagentLifecycle.read),
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
+      if (record?.status !== "queued" && record?.status !== "running") return
+      yield* SubagentLifecycle.settle(sessions, sessionID, { status: "cancelled" })
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
@@ -162,6 +180,10 @@ function busyError(sessionID: SessionID) {
   return new Session.BusyError({ sessionID })
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [BackgroundJob.node, SessionStatus.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [BackgroundJob.node, SessionStatus.node, Session.node],
+})
 
 export * as SessionRunState from "./run-state"

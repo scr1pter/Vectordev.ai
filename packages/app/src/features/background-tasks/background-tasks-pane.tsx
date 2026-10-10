@@ -29,7 +29,8 @@ import {
   type TaskStatus,
 } from "./subagent-model"
 import { TaskSquares } from "./task-squares"
-import { useBackgroundTasks, type BackgroundTasks } from "./use-background-tasks"
+import type { BackgroundTasks } from "./background-tasks"
+import { useBackgroundTasks } from "./use-background-tasks"
 
 const MAX_ROWS = 12
 
