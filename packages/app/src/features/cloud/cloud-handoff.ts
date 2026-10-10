@@ -171,6 +171,21 @@ export function publishPlan(hosting: CloudOverview["hosting"], target?: PublishT
   return { ready: true, project: hosting.project.name, account: hosting.account }
 }
 
+/**
+ * What a recorded release's row offers. Each acts on that release itself: a
+ * checked preview of the main project can be promoted, and an older production
+ * release that passed its checks can be rolled back to. A row never rebuilds:
+ * that would publish the files on disk now, not the release it sits on, and
+ * the Publish button already does that.
+ */
+export function releaseActions(deployment: Pick<CloudDeployment, "releaseStatus" | "workspaceId" | "checks">) {
+  const passed = !deployment.checks.some((check) => check.required && check.status === "failed")
+  return {
+    promote: passed && deployment.releaseStatus === "preview" && !deployment.workspaceId,
+    rollback: passed && (deployment.releaseStatus === "superseded" || deployment.releaseStatus === "rolled-back"),
+  }
+}
+
 export type CloudStatus = { tone: "success" | "warning" | "error" | "idle"; label: string }
 
 /** One line for the session's Cloud button: the state that most needs attention. */

@@ -8,6 +8,7 @@ import {
   holdsHandoff,
   onComposerPrompt,
   publishPlan,
+  releaseActions,
   requestComposerPrompt,
   type ComposerPrompt,
 } from "./cloud-handoff"
@@ -160,6 +161,34 @@ describe("publish plan", () => {
       reason: noNode,
       connect: false,
     })
+  })
+})
+
+describe("release actions", () => {
+  test("act on the release itself: promote a checked preview, roll back to an older production release", () => {
+    const failed = [
+      {
+        id: "build",
+        type: "build" as const,
+        label: "Production build",
+        status: "failed" as const,
+        required: true,
+        checkedAt: "2026-10-10T10:00:00.000Z",
+      },
+    ]
+    expect(releaseActions({ releaseStatus: "preview", checks: [] })).toEqual({ promote: true, rollback: false })
+    // A workspace preview is merged before it goes to production.
+    expect(releaseActions({ releaseStatus: "preview", workspaceId: "ws_1", checks: [] })).toEqual({
+      promote: false,
+      rollback: false,
+    })
+    expect(releaseActions({ releaseStatus: "preview", checks: failed })).toEqual({ promote: false, rollback: false })
+    expect(releaseActions({ releaseStatus: "current", checks: [] })).toEqual({ promote: false, rollback: false })
+    // An older production release goes back live as it was built, never by
+    // building whatever is on disk today.
+    expect(releaseActions({ releaseStatus: "superseded", checks: [] })).toEqual({ promote: false, rollback: true })
+    expect(releaseActions({ releaseStatus: "rolled-back", checks: [] })).toEqual({ promote: false, rollback: true })
+    expect(releaseActions({ releaseStatus: "superseded", checks: failed })).toEqual({ promote: false, rollback: false })
   })
 })
 

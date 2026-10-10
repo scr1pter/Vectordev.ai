@@ -23,7 +23,13 @@ import {
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
-import { deploymentEvidence, deployRepairPrompt, publishPlan, type DeployEvidence } from "./cloud-handoff"
+import {
+  deploymentEvidence,
+  deployRepairPrompt,
+  publishPlan,
+  releaseActions,
+  type DeployEvidence,
+} from "./cloud-handoff"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -457,9 +463,11 @@ export function CloudConsole(props: {
     }
   }
 
-  const runPublish = async (override?: { environment?: "preview" | "production"; workspace?: CloudAgentWorkspace }) => {
+  // Publishes the files on disk: the main project in the chosen environment, or
+  // an agent workspace as a preview.
+  const runPublish = async (workspace?: CloudAgentWorkspace) => {
     if (!publish || !props.projectPath) return
-    const environment = override?.environment ?? deploymentEnvironment()
+    const environment = workspace ? "preview" : deploymentEnvironment()
     const target = vercelTarget()
     if (target && !target.available) {
       setNotice({ tone: "error", text: target.loginHint || `${target.label} is not available on this machine.` })
@@ -472,26 +480,26 @@ export function CloudConsole(props: {
     setPublishing(true)
     setNotice({
       tone: "info",
-      text: override?.workspace
-        ? `Publishing ${override.workspace.name} as an isolated preview…`
+      text: workspace
+        ? `Publishing ${workspace.name} as an isolated preview…`
         : `Publishing a ${environment} release to Vercel… this can take a minute.`,
     })
     try {
       const result = await publish.run({
-        projectPath: override?.workspace?.isolatedPath ?? props.projectPath,
+        projectPath: workspace?.isolatedPath ?? props.projectPath,
         taskId: props.taskId,
-        scopeProjectPath: override?.workspace ? props.projectPath : undefined,
-        scopeTaskId: override?.workspace ? props.taskId : undefined,
-        workspaceId: override?.workspace?.id,
-        workspaceName: override?.workspace?.name,
+        scopeProjectPath: workspace ? props.projectPath : undefined,
+        scopeTaskId: workspace ? props.taskId : undefined,
+        workspaceId: workspace?.id,
+        workspaceName: workspace?.name,
         target: "vercel",
-        production: override?.workspace ? false : environment === "production",
+        production: environment === "production",
         runId,
       })
       if (result.ok && result.url) {
         setNotice({
           tone: "success",
-          text: `${override?.workspace ? "Workspace preview" : "Release"} live at ${result.url}`,
+          text: `${workspace ? "Workspace preview" : "Release"} live at ${result.url}`,
         })
       } else {
         setNotice({ tone: "error", text: result.error ?? "Publish failed." })
@@ -499,7 +507,7 @@ export function CloudConsole(props: {
       if (!result.ok && !result.deploymentId) {
         setFailedPublish({
           project: projectName(),
-          environment: override?.workspace ? "preview" : environment,
+          environment,
           url: result.url,
           error: result.error,
           checks: result.checks ?? [],
@@ -1561,7 +1569,7 @@ export function CloudConsole(props: {
                                 data-variant="primary"
                                 type="button"
                                 disabled={!publish || publishing()}
-                                onClick={() => void runPublish({ environment: "preview", workspace })}
+                                onClick={() => void runPublish(workspace)}
                               >
                                 {preview() ? "Redeploy preview" : "Publish preview"}
                               </button>
@@ -1591,11 +1599,7 @@ export function CloudConsole(props: {
                       const failedChecks = () =>
                         deployment.checks.filter((check) => check.required && check.status === "failed")
                       const passedChecks = () => deployment.checks.filter((check) => check.status === "passed")
-                      const canPromote = () =>
-                        deployment.releaseStatus === "preview" && !deployment.workspaceId && failedChecks().length === 0
-                      const canRollback = () =>
-                        (deployment.releaseStatus === "superseded" || deployment.releaseStatus === "rolled-back") &&
-                        failedChecks().length === 0
+                      const actions = () => releaseActions(deployment)
                       return (
                         <div class="cloud-row cloud-row-block">
                           <div class="min-w-0 flex-1">
@@ -1707,7 +1711,7 @@ export function CloudConsole(props: {
                             >
                               Runtime logs
                             </button>
-                            <Show when={canPromote()}>
+                            <Show when={actions().promote}>
                               <button
                                 class="cloud-button"
                                 data-variant="primary"
@@ -1720,7 +1724,7 @@ export function CloudConsole(props: {
                                 {confirmId() === `promote-${deployment.id}` ? "Confirm promote?" : "Promote"}
                               </button>
                             </Show>
-                            <Show when={canRollback()}>
+                            <Show when={actions().rollback}>
                               <button
                                 class="cloud-button"
                                 data-variant="warning"
@@ -1743,21 +1747,6 @@ export function CloudConsole(props: {
                                 Fix this deploy
                               </button>
                             </Show>
-                            <button
-                              class="cloud-button"
-                              type="button"
-                              disabled={!publish || publishing()}
-                              onClick={() =>
-                                deployment.environment === "production"
-                                  ? requestConfirm(
-                                      `redeploy-${deployment.id}`,
-                                      () => void runPublish({ environment: "production" }),
-                                    )
-                                  : void runPublish({ environment: "preview" })
-                              }
-                            >
-                              {confirmId() === `redeploy-${deployment.id}` ? "Confirm production release?" : "Redeploy"}
-                            </button>
                             <button
                               class="cloud-button"
                               type="button"

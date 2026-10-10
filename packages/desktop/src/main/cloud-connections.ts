@@ -732,7 +732,7 @@ export async function syncCloudProviderEnvironment(
     projectName: link.projectName,
     changed: variables.length,
     syncedAt: now(),
-    detail: `${variables.length} ${variables.length === 1 ? "variable" : "variables"} synced to ${link.projectName}. Redeploy for the new values to take effect.`,
+    detail: `${variables.length} ${variables.length === 1 ? "variable" : "variables"} synced to ${link.projectName}. Publish again for the new values to take effect.`,
   }
 }
 
