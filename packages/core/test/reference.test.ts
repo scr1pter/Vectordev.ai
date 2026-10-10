@@ -76,20 +76,20 @@ describe("Reference", () => {
     }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
   )
 
-  it.effect("rejects private and non-HTTP Git destinations before materialization", () =>
+  it.effect("keeps the intranet and SSH references the user configured", () =>
     Effect.gen(function* () {
       const references = yield* Reference.Service
-      for (const [name, repository] of [
-        ["loopback", "https://127.0.0.1/owner/repo.git"],
-        ["metadata", "http://169.254.169.254/repo.git"],
-        ["ssh", "ssh://git@1.1.1.1/owner/repo.git"],
-        ["git", "git://1.1.1.1/owner/repo.git"],
-        ["file", "file:///tmp/repo.git"],
-      ]) {
+      const configured = {
+        intranet: "https://git.corp.internal/owner/repo.git",
+        lan: "http://192.168.1.20/owner/repo.git",
+        ssh: "ssh://git@github.com/owner/private.git",
+        scp: "git@github.com:owner/other.git",
+      }
+      for (const [name, repository] of Object.entries(configured)) {
         yield* references.transform((editor) => editor.add(name, Reference.GitSource.make({ type: "git", repository })))
       }
 
-      expect(yield* references.list()).toEqual([])
+      expect((yield* references.list()).map((item) => item.name).toSorted()).toEqual(Object.keys(configured).toSorted())
     }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
   )
 })

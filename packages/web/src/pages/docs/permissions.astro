@@ -33,6 +33,17 @@ export const prerender = true
             settings.
           </p>
 
+          <h2 id="private-network">Your own network</h2>
+          <p>
+            From the next release, when an agent's web fetch would reach your own computer or network (a dev server on
+            <code>localhost</code>, an intranet page, a cloud metadata address), Vector asks for
+            <code>private_network</code> as well as <code>webfetch</code>, so a hostile page cannot steer the agent
+            into your network. Approve it once for that address, or allow it in your settings, for example
+            <code>"permission": {"{"} "private_network": {"{"} "http://localhost:3000": "allow" {"}"} {"}"}</code>.
+            Addresses you put in your own settings (remote instructions, skill catalogs, providers such as a LAN Ollama
+            host, MCP servers, references) are reached without asking.
+          </p>
+
           <h2 id="shell-sandbox">The shell sandbox</h2>
           <p>
             Commands an agent runs can be confined to their workspace by the operating system's own mechanism — a

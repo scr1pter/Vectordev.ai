@@ -149,6 +149,7 @@ const layer = Layer.effect(
           browser_interact: "ask",
           browser_sensitive: "ask",
           webfetch: "ask",
+          private_network: "ask",
           websearch: "ask",
           external_directory: {
             "*": "ask",

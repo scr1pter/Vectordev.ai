@@ -12,6 +12,8 @@ import { AbsolutePath } from "../schema"
 import { WebFetchRequest } from "../util/webfetch-request"
 
 const skillConcurrency = 4
+// Skill URLs come from the user's own config (or a project they trusted), so an internal catalog is fine.
+const configured = { authorize: () => Effect.void, authorizePrivate: () => Effect.void }
 const fileConcurrency = 8
 
 function isSafeSegment(value: string) {
@@ -87,7 +89,7 @@ const layer = Layer.effect(
     const download = Effect.fn("SkillDiscovery.download")(function* (url: string, destination: string) {
       if (yield* fs.exists(destination).pipe(Effect.orDie)) return true
       return yield* HttpClientRequest.get(url).pipe(
-        (request) => WebFetchRequest.execute(http, request, { authorize: () => Effect.void }),
+        (request) => WebFetchRequest.execute(http, request, configured),
         Effect.flatMap((response) => response.arrayBuffer),
         Effect.flatMap((body) => fs.writeWithDirs(destination, new Uint8Array(body))),
         Effect.as(true),
@@ -105,7 +107,7 @@ const layer = Layer.effect(
         const index = new URL("index.json", source).href
         const data = yield* HttpClientRequest.get(index).pipe(
           HttpClientRequest.acceptJson,
-          (request) => WebFetchRequest.execute(http, request, { authorize: () => Effect.void }),
+          (request) => WebFetchRequest.execute(http, request, configured),
           Effect.flatMap(HttpClientResponse.schemaBodyJson(Index)),
           Effect.scoped,
           Effect.catch((error) =>

@@ -398,6 +398,18 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("keeps an HTTP endpoint on the user's own network, such as a LAN Ollama host", () =>
+    Effect.gen(function* () {
+      for (const url of ["http://192.168.1.20:11434/v1", "http://100.101.102.103:1234/v1", "http://gpu-box:8080/v1"]) {
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(
+          model({ type: "aisdk", package: "@ai-sdk/openai", url }),
+          Credential.Key.make({ type: "key", key: "lan-key" }),
+        )
+        expect(resolved).toBeDefined()
+      }
+    }),
+  )
+
   it.effect("reports whether a catalog model has a supported native route", () =>
     Effect.sync(() => {
       expect(

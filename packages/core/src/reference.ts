@@ -9,7 +9,6 @@ import { Repository } from "./repository"
 import { RepositoryCache } from "./repository-cache"
 import { AbsolutePath } from "./schema"
 import { State } from "./state"
-import { WebFetchRequest } from "./util/webfetch-request"
 
 export const LocalSource = Reference.LocalSource
 export type LocalSource = Reference.LocalSource
@@ -76,10 +75,6 @@ const layer = Layer.effect(
             }
             const repository = Repository.parse(source.repository)
             if (!repository || !Repository.isRemote(repository)) continue
-            const publicDestination = yield* WebFetchRequest.assertPublicDestination(repository.remote).pipe(
-              Effect.match({ onFailure: () => false, onSuccess: () => true }),
-            )
-            if (!publicDestination) continue
             if (source.branch) {
               try {
                 Repository.validateBranch(source.branch)

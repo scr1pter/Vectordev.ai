@@ -117,6 +117,18 @@ const layer = Layer.effectDiscard(
                       agent: context.agent,
                       source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
                     }),
+                  // A dev server, an intranet page or a cloud metadata address is reached only with its own
+                  // approval, since a model reading a hostile page could otherwise be steered into the user's network.
+                  authorizePrivate: (url) =>
+                    permission.assert({
+                      action: "private_network",
+                      resources: [new URL(url).origin],
+                      save: [new URL(url).origin],
+                      metadata: { url },
+                      sessionID: context.sessionID,
+                      agent: context.agent,
+                      source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                    }),
                 })
                 const contentType = response.headers["content-type"] || ""
                 const mime = mimeFrom(contentType)

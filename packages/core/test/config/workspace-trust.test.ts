@@ -383,4 +383,25 @@ await WorkspaceTrust.materialize(${JSON.stringify(state.path)}, snapshot)
     expect(WorkspaceTrust.remoteUrlAllowed("http://example.com/api")).toBe(false)
     expect(WorkspaceTrust.remoteUrlAllowed("https://user:secret@example.com/api")).toBe(false)
   })
+
+  test("lets the user's own config use plain HTTP only on their machine or network", () => {
+    for (const url of [
+      "https://example.com/api",
+      "http://localhost:11434/v1",
+      "http://192.168.1.20:11434/v1",
+      "http://10.0.0.5:8080/mcp",
+      "http://100.101.102.103:1234/v1",
+      "http://[fd00::5]:8080/v1",
+      "http://gpu-box:8080/v1",
+      "http://nas.local/v1",
+    ])
+      expect(WorkspaceTrust.userRemoteUrlAllowed(url)).toBe(true)
+    for (const url of [
+      "http://example.com/api",
+      "http://8.8.8.8/v1",
+      "http://user:secret@192.168.1.20/v1",
+      "ftp://192.168.1.20/v1",
+    ])
+      expect(WorkspaceTrust.userRemoteUrlAllowed(url)).toBe(false)
+  })
 })

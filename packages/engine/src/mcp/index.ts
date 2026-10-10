@@ -233,7 +233,7 @@ function declaredMcp(mcp: ConfigMCPV1.Info, configured: unknown, onDisk: Record<
 }
 
 function remoteURL(value: string) {
-  if (!WorkspaceTrust.remoteUrlAllowed(value)) return
+  if (!WorkspaceTrust.userRemoteUrlAllowed(value)) return
   const url = new URL(value)
   return url
 }
@@ -864,7 +864,8 @@ const layer = Layer.effect(
         return {
           status: {
             status: "failed",
-            error: "MCP remote URLs must use HTTPS (or loopback HTTP) and cannot contain embedded credentials.",
+            error:
+              "MCP remote URLs must use HTTPS (HTTP only on your own machine or network) and cannot contain embedded credentials.",
           } satisfies Status,
         }
       }

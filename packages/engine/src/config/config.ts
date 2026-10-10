@@ -137,6 +137,10 @@ function bindTrustedProjectExecutables(
     next.mcp = Object.fromEntries(
       Object.entries(next.mcp)
         .map(([name, entry]) => {
+          // A project's remote server gets HTTPS or loopback HTTP only; plain HTTP to the user's network is for
+          // servers the user adds themselves.
+          if ("url" in entry && typeof entry.url === "string")
+            return [name, WorkspaceTrust.remoteUrlAllowed(entry.url) ? entry : undefined]
           if (!("command" in entry) || !Array.isArray(entry.command)) return [name, entry]
           const cwd = "cwd" in entry && typeof entry.cwd === "string" ? path.resolve(workspace, entry.cwd) : workspace
           const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, entry.environment)

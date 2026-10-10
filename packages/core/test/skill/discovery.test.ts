@@ -8,7 +8,7 @@ import { SkillDiscovery } from "@vectordevai/core/skill/discovery"
 import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
 
-describe("SkillDiscovery public destinations", () => {
+describe("SkillDiscovery destinations", () => {
   const run = (base: string, redirect?: string) => {
     const requests: string[] = []
     return Effect.acquireRelease(Effect.promise(tmpdir), (tmp) =>
@@ -45,19 +45,12 @@ describe("SkillDiscovery public destinations", () => {
 
   const it = testEffect(Layer.empty)
 
-  it.effect("blocks a direct private skill catalog before transport", () =>
+  // Skill URLs come from the user's own config or a project they trusted, so an internal catalog is reachable.
+  it.effect("loads a catalog the user configured on their own network", () =>
     Effect.gen(function* () {
       const result = yield* run("http://127.0.0.1/catalog/")
       expect(result.directories).toEqual([])
-      expect(result.requests).toEqual([])
-    }),
-  )
-
-  it.effect("blocks a public catalog redirect to a private destination", () =>
-    Effect.gen(function* () {
-      const result = yield* run("https://1.1.1.1/catalog/", "http://169.254.169.254/latest/meta-data")
-      expect(result.directories).toEqual([])
-      expect(result.requests).toEqual(["https://1.1.1.1/catalog/index.json"])
+      expect(result.requests).toEqual(["http://127.0.0.1/catalog/index.json"])
     }),
   )
 })

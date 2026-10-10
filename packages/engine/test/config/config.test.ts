@@ -807,6 +807,24 @@ it.instance("binds trusted project executable inputs to the approved private cop
   }),
 )
 
+it.instance("keeps plain-HTTP MCP servers on the user's network only from their own config", () =>
+  withGlobalConfig({ config: { mcp: { home: { type: "remote", url: "http://192.168.1.20:8080/mcp" } } } }, () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* writeTrustedConfigEffect(test.directory, {
+        mcp: {
+          lan: { type: "remote", url: "http://192.168.1.21:8080/mcp" },
+          hosted: { type: "remote", url: "https://mcp.example.test/mcp" },
+          local: { type: "remote", url: "http://127.0.0.1:8080/mcp" },
+        },
+      })
+
+      const config = yield* Config.use.get()
+      expect(Object.keys(config.mcp ?? {}).toSorted()).toEqual(["home", "hosted", "local"])
+    }),
+  ),
+)
+
 it.instance("runs trusted bare MCP scripts from materialized bytes and rejects ambiguous runners", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance

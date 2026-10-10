@@ -17,6 +17,7 @@ import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/to
 const sessionID = SessionV2.ID.make("ses_webfetch_test")
 const requests: Array<{ readonly url: string; readonly headers: Record<string, string> }> = []
 const assertions: PermissionV2.AssertInput[] = []
+const denied = new Set<string>()
 let respond = (_request: HttpClientRequest.HttpClientRequest) =>
   Effect.succeed(new Response("hello", { headers: { "content-type": "text/plain" } }))
 
@@ -30,7 +31,10 @@ const http = Layer.succeed(HttpClient.HttpClient, client)
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
-    assert: (input) => Effect.sync(() => assertions.push(input)),
+    assert: (input) =>
+      Effect.sync(() => assertions.push(input)).pipe(
+        Effect.andThen(denied.has(input.action) ? Effect.fail(new PermissionV2.RejectedError()) : Effect.void),
+      ),
     ask: () => Effect.die("unused"),
     reply: () => Effect.die("unused"),
     get: () => Effect.die("unused"),
@@ -49,6 +53,7 @@ const it = testEffect(toolLayer([[LayerNodePlatform.httpClient, http]]))
 const reset = () => {
   requests.length = 0
   assertions.length = 0
+  denied.clear()
   respond = () => Effect.succeed(new Response("hello", { headers: { "content-type": "text/plain" } }))
 }
 
@@ -108,7 +113,7 @@ describe("WebFetchTool registration", () => {
     }),
   )
 
-  it.effect("blocks private, link-local, reserved, and mapped destinations before permission or transport", () =>
+  it.effect("asks separately before reaching private, link-local, reserved and mapped destinations", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       for (const url of [
@@ -123,13 +128,32 @@ describe("WebFetchTool registration", () => {
         "http://[64:ff9b::7f00:1]/private",
       ]) {
         reset()
+        denied.add("private_network")
         expect(yield* executeTool(registry, call({ url, format: "text" }, `call-${url}`))).toEqual({
           type: "error",
           value: `Unable to fetch ${url}`,
         })
-        expect(assertions).toEqual([])
+        expect(assertions.map((assertion) => [assertion.action, assertion.resources])).toEqual([
+          ["webfetch", [url]],
+          ["private_network", [new URL(url).origin]],
+        ])
         expect(requests).toEqual([])
       }
+    }),
+  )
+
+  it.effect("fetches a private destination once the user approves it", () =>
+    Effect.gen(function* () {
+      reset()
+      const registry = yield* ToolRegistry.Service
+      const url = "http://localhost:3000/health"
+
+      expect(yield* executeTool(registry, call({ url, format: "text" }))).toEqual({ type: "text", value: "hello" })
+      expect(assertions).toMatchObject([
+        { action: "webfetch", resources: [url] },
+        { action: "private_network", resources: ["http://localhost:3000"], save: ["http://localhost:3000"] },
+      ])
+      expect(requests.map((request) => request.url)).toEqual([url])
     }),
   )
 
@@ -155,9 +179,10 @@ describe("WebFetchTool registration", () => {
     }),
   )
 
-  it.effect("blocks a redirect to a private destination before permission or transport", () =>
+  it.effect("asks again before following a redirect to a private destination", () =>
     Effect.gen(function* () {
       reset()
+      denied.add("private_network")
       const source = "https://1.1.1.1/redirect"
       const target = "http://169.254.169.254/latest/meta-data"
       respond = () => Effect.succeed(new Response("", { status: 302, headers: { location: target } }))
@@ -167,7 +192,11 @@ describe("WebFetchTool registration", () => {
         type: "error",
         value: `Unable to fetch ${source}`,
       })
-      expect(assertions.map((assertion) => assertion.resources)).toEqual([[source]])
+      expect(assertions.map((assertion) => [assertion.action, assertion.resources])).toEqual([
+        ["webfetch", [source]],
+        ["webfetch", [target]],
+        ["private_network", ["http://169.254.169.254"]],
+      ])
       expect(requests.map((request) => request.url)).toEqual([source])
     }),
   )

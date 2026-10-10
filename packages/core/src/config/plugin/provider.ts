@@ -54,8 +54,10 @@ export const Plugin = define({
         }
         for (const file of files) {
           for (const [id, item] of Object.entries(file.info.providers ?? {})) {
-            if (!ConfigProvider.endpointsAllowed(item)) continue
             const project = config.scope?.(file) === "project"
+            // A project may not point a provider, and the user's key for it, at plain HTTP off this machine. The
+            // user's own config may, for an Ollama or LM Studio host on their network.
+            if (project && !ConfigProvider.endpointsAllowed(item)) continue
             const providerID = id
             catalog.provider.update(providerID, (provider) => {
               if (item.name !== undefined) provider.name = item.name
@@ -65,7 +67,10 @@ export const Plugin = define({
                   provider.request.headers,
                   project ? ConfigProvider.projectHeaders(item.request.headers) : item.request.headers,
                 )
-                Object.assign(provider.request.body, project ? ConfigProvider.projectBody(item.request.body) : item.request.body)
+                Object.assign(
+                  provider.request.body,
+                  project ? ConfigProvider.projectBody(item.request.body) : item.request.body,
+                )
               }
             })
             for (const [id, config] of Object.entries(item.models ?? {})) {

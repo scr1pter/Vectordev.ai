@@ -76,7 +76,7 @@ export class UnsafeEndpointError extends Schema.TaggedErrorClass<UnsafeEndpointE
   },
 ) {
   override get message() {
-    return `Provider endpoint must use HTTPS or loopback HTTP: ${this.url}`
+    return `Provider endpoint must use HTTPS, or HTTP only on your own machine or network: ${this.url}`
   }
 }
 
@@ -206,7 +206,7 @@ export const fromCatalogModel = (
           Object.assign(draft.request.body, credential.metadata)
         })
   const key = apiKey(resolved, credential)
-  if (resolved.api.url && !WorkspaceTrust.remoteUrlAllowed(resolved.api.url)) {
+  if (resolved.api.url && !WorkspaceTrust.userRemoteUrlAllowed(resolved.api.url)) {
     return Effect.fail(
       new UnsafeEndpointError({ providerID: resolved.providerID, modelID: resolved.id, url: resolved.api.url }),
     )

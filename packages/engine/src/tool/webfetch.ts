@@ -82,6 +82,15 @@ export const WebFetchTool = Tool.define(
                     timeout: params.timeout,
                   },
                 }),
+              // A dev server, an intranet page or a cloud metadata address is reached only with its own approval,
+              // since a model reading a hostile page could otherwise be steered into the user's network.
+              authorizePrivate: (url) =>
+                ctx.ask({
+                  permission: "private_network",
+                  patterns: [new URL(url).origin],
+                  always: [new URL(url).origin],
+                  metadata: { url },
+                }),
             })
             const body = yield* collectBoundedResponseBody(
               response,

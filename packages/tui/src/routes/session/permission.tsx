@@ -315,6 +315,21 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               }
             }
 
+            if (permission === "private_network") {
+              const url = typeof data.url === "string" ? data.url : ""
+              return {
+                icon: "%",
+                title: `Reach your network: ${url}`,
+                body: (
+                  <Show when={url}>
+                    <box paddingLeft={1}>
+                      <text fg={theme.textMuted}>{"A local or private address: " + url}</text>
+                    </box>
+                  </Show>
+                ),
+              }
+            }
+
             if (permission === "websearch") {
               const query = typeof data.query === "string" ? data.query : ""
               return {

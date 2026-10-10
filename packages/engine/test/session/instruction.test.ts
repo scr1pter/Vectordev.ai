@@ -206,7 +206,7 @@ describe("Instruction.resolve", () => {
     ),
   )
 
-  it.live("fetches public remote instructions without dispatching private destinations", () =>
+  it.live("fetches the remote instructions the user configured, including an intranet page", () =>
     provideTmpdirInstance((dir) => {
       const requests: string[] = []
       const client = HttpClient.make((request) =>
@@ -231,10 +231,10 @@ describe("Instruction.resolve", () => {
       ])
 
       return Effect.gen(function* () {
-        expect(yield* (yield* Instruction.Service).system()).toContain(
-          "Instructions from: https://1.1.1.1/rules\nRemote rules",
-        )
-        expect(requests).toEqual(["https://1.1.1.1/rules"])
+        const system = yield* (yield* Instruction.Service).system()
+        expect(system).toContain("Instructions from: https://1.1.1.1/rules\nRemote rules")
+        expect(system).toContain("Instructions from: http://127.0.0.1/private\nRemote rules")
+        expect(requests.toSorted()).toEqual(["http://127.0.0.1/private", "https://1.1.1.1/rules"])
       }).pipe(Effect.provide(layer))
     }),
   )

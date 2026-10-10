@@ -2,9 +2,6 @@ export * as Git from "./git"
 
 import path from "path"
 import { randomUUID } from "crypto"
-import { createServer } from "node:http"
-import { isIP, connect, type Socket } from "node:net"
-import { devNull } from "node:os"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { AbsolutePath, RelativePath } from "./schema"
@@ -25,175 +22,6 @@ export type ChangeSet = typeof ChangeSet.Type
 
 export const TreeID = Schema.String.pipe(Schema.brand("Git.TreeID"))
 export type TreeID = typeof TreeID.Type
-
-export type HttpTransport = {
-  readonly hostname: string
-  readonly port: number
-  readonly addresses: readonly string[]
-}
-
-export function httpTransportArgs(transport: HttpTransport | undefined, proxy: string | undefined) {
-  if (!transport || !proxy) return []
-  return [
-    "-c",
-    "http.followRedirects=false",
-    "-c",
-    `http.proxy=${proxy}`,
-    "-c",
-    "http.sslVerify=true",
-    "-c",
-    "protocol.allow=never",
-    "-c",
-    "protocol.https.allow=always",
-    "-c",
-    "protocol.file.allow=never",
-    "-c",
-    `core.hooksPath=${devNull}`,
-    "-c",
-    "filter.lfs.required=false",
-    "-c",
-    "filter.lfs.smudge=",
-    "-c",
-    "filter.lfs.process=",
-    ...transport.addresses.flatMap((address) => [
-      "-c",
-      `http.curloptResolve=${transport.hostname}:${transport.port}:${isIP(address) === 6 ? `[${address}]` : address}`,
-    ]),
-  ]
-}
-
-export function httpTransportEnvironment(proxy: string) {
-  return {
-    ...Object.fromEntries(
-      ["PATH", "HOME", "SystemRoot", "WINDIR", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL"].flatMap((key) =>
-        process.env[key] === undefined ? [] : [[key, process.env[key]!]],
-      ),
-    ),
-    GIT_ALLOW_PROTOCOL: "https",
-    GIT_ASKPASS: "false",
-    GIT_CONFIG_COUNT: "0",
-    GIT_CONFIG_GLOBAL: devNull,
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_CONFIG_PARAMETERS: "",
-    GIT_LFS_SKIP_SMUDGE: "1",
-    GIT_PROTOCOL_FROM_USER: "0",
-    GIT_PROXY_COMMAND: "false",
-    GIT_SSH_COMMAND: "false",
-    GIT_TERMINAL_PROMPT: "0",
-    SSH_ASKPASS: "false",
-    ALL_PROXY: proxy,
-    HTTPS_PROXY: proxy,
-    HTTP_PROXY: proxy,
-    NO_PROXY: "",
-    all_proxy: proxy,
-    https_proxy: proxy,
-    http_proxy: proxy,
-    no_proxy: "",
-  }
-}
-
-type PinnedProxy = {
-  readonly url: string
-  readonly close: () => Promise<void>
-}
-
-function openPinnedProxy(transport: HttpTransport) {
-  return new Promise<PinnedProxy>((resolve, reject) => {
-    const sockets = new Set<Socket>()
-    const track = (socket: Socket) => {
-      sockets.add(socket)
-      socket.once("close", () => sockets.delete(socket))
-    }
-    const server = createServer((_request, response) => {
-      response.writeHead(405, { Connection: "close" })
-      response.end()
-    })
-    server.on("error", () => undefined)
-    server.on("connection", track)
-    server.on("connect", (request, client, head) => {
-      if (!allowsHttpTransportTarget(transport, request.url)) {
-        client.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
-        return
-      }
-      void connectPinned(transport.addresses, transport.port).then(
-        (upstream) => {
-          track(upstream)
-          upstream.on("error", () => client.destroy())
-          client.on("error", () => upstream.destroy())
-          client.write("HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n")
-          if (head.length) upstream.write(head)
-          upstream.pipe(client)
-          client.pipe(upstream)
-        },
-        () => client.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"),
-      )
-    })
-    const fail = (error: Error) => reject(error)
-    server.once("error", fail)
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", fail)
-      const address = server.address()
-      if (!address || typeof address === "string") {
-        server.close()
-        reject(new Error("Unable to bind the Git egress proxy"))
-        return
-      }
-      resolve({
-        url: `http://127.0.0.1:${address.port}`,
-        close: async () => {
-          for (const socket of sockets) socket.destroy()
-          await new Promise<void>((complete) => server.close(() => complete()))
-        },
-      })
-    })
-  })
-}
-
-export function allowsHttpTransportTarget(transport: HttpTransport, input: string | undefined) {
-  const target = connectTarget(input)
-  return (
-    target !== undefined && target.hostname === normalizedHostname(transport.hostname) && target.port === transport.port
-  )
-}
-
-function connectTarget(input: string | undefined) {
-  if (!input) return
-  try {
-    const url = new URL(`http://${input}`)
-    const port = Number(url.port)
-    if (url.username || url.password || url.pathname !== "/" || !Number.isInteger(port)) return
-    return { hostname: normalizedHostname(url.hostname), port }
-  } catch {
-    return
-  }
-}
-
-function normalizedHostname(hostname: string) {
-  return hostname
-    .replace(/^\[|\]$/g, "")
-    .replace(/\.$/, "")
-    .toLowerCase()
-}
-
-async function connectPinned(addresses: readonly string[], port: number) {
-  for (const address of addresses) {
-    const socket = await new Promise<Socket | undefined>((resolve) => {
-      const candidate = connect({ host: address, port, family: isIP(address) || undefined })
-      const failed = () => {
-        candidate.destroy()
-        resolve(undefined)
-      }
-      candidate.setTimeout(15_000, failed)
-      candidate.once("error", failed)
-      candidate.once("connect", () => {
-        candidate.setTimeout(0)
-        resolve(candidate)
-      })
-    })
-    if (socket) return socket
-  }
-  throw new Error("Unable to connect to the validated Git destination")
-}
 
 export class OperationError extends Schema.TaggedErrorClass<OperationError>()("Git.OperationError", {
   operation: Schema.Literals([
@@ -241,7 +69,6 @@ export interface Interface {
       directory: AbsolutePath
       branch?: string
       depth?: number
-      transport?: HttpTransport
     }) => Effect.Effect<Repository, OperationError>
     readonly create: (input: {
       worktree: AbsolutePath
@@ -261,21 +88,17 @@ export interface Interface {
   readonly sync: {
     readonly fetchRemotes: (
       repository: Repository,
-      input?: { prune?: boolean; remoteUrl?: string; transport?: HttpTransport },
+      input?: { prune?: boolean; remoteUrl?: string },
     ) => Effect.Effect<void, OperationError>
     readonly fetchBranch: (
       repository: Repository,
-      input: { remote?: string; remoteUrl?: string; branch: string; force?: boolean; transport?: HttpTransport },
+      input: { remote?: string; remoteUrl?: string; branch: string; force?: boolean },
     ) => Effect.Effect<void, OperationError>
     readonly checkoutRemoteBranch: (
       repository: Repository,
-      input: { remote?: string; branch: string; reset?: boolean; transport?: HttpTransport },
+      input: { remote?: string; branch: string; reset?: boolean },
     ) => Effect.Effect<void, OperationError>
-    readonly resetHard: (
-      repository: Repository,
-      revision: string,
-      transport?: HttpTransport,
-    ) => Effect.Effect<void, OperationError>
+    readonly resetHard: (repository: Repository, revision: string) => Effect.Effect<void, OperationError>
   }
   readonly change: {
     readonly capture: (input: { repository: Repository; path: AbsolutePath }) => Effect.Effect<ChangeSet, PatchError>
@@ -383,6 +206,7 @@ const layer = Layer.effect(
     })
 
     const remote = Effect.fn("Git.remote.get")(function* (repository: Repository, name = "origin") {
+      // The configured URL, not one rewritten by a url.insteadOf rule, so a cache is reused only for the exact remote.
       const result = yield* run(repository.worktree, proc)(["config", "--get", `remote.${name}.url`])
       if (result.exitCode !== 0) return undefined
       return result.text.trim() || undefined
@@ -423,9 +247,11 @@ const layer = Layer.effect(
       operation: OperationError["operation"],
       directory: AbsolutePath,
       args: string[],
-      env?: Record<string, string>,
     ) {
-      const result = yield* execute(directory, proc)(args, env).pipe(
+      const result = yield* execute(
+        directory,
+        proc,
+      )(args).pipe(
         Effect.mapError((cause) => new OperationError({ operation, directory, message: cause.message, cause })),
       )
       if (result.exitCode === 0) return
@@ -436,132 +262,67 @@ const layer = Layer.effect(
       })
     })
 
-    const transportContext = (
-      operation: OperationError["operation"],
-      directory: AbsolutePath,
-      transport: HttpTransport | undefined,
-    ) => {
-      if (!transport) return Effect.succeed({ args: [] as string[], env: undefined })
-      return Effect.acquireRelease(
-        Effect.tryPromise({
-          try: () => openPinnedProxy(transport),
-          catch: (cause) =>
-            new OperationError({ operation, directory, message: "Unable to start the Git egress proxy", cause }),
-        }),
-        (proxy) => Effect.promise(proxy.close).pipe(Effect.ignore),
-      ).pipe(
-        Effect.map((proxy) => ({
-          args: httpTransportArgs(transport, proxy.url),
-          env: httpTransportEnvironment(proxy.url),
-        })),
-      )
-    }
-
     const clone = Effect.fn("Git.repo.clone")(function* (input: {
       remote: string
       directory: AbsolutePath
       branch?: string
       depth?: number
-      transport?: HttpTransport
     }) {
-      return yield* Effect.gen(function* () {
-        const directory = AbsolutePath.make(path.dirname(input.directory))
-        const context = yield* transportContext("clone", directory, input.transport)
-        yield* operation(
-          "clone",
-          directory,
-          [
-            ...context.args,
-            "clone",
-            "--depth",
-            String(input.depth ?? 100),
-            ...(input.branch ? ["--branch", input.branch] : []),
-            ...(input.transport ? ["--no-checkout"] : []),
-            "--",
-            input.remote,
-            input.directory,
-          ],
-          context.env,
-        )
-        const repository = yield* discover(input.directory)
-        if (!repository)
-          return yield* new OperationError({
-            operation: "clone",
-            directory: input.directory,
-            message: "Cloned repository could not be opened",
-          })
-        if (input.transport)
-          yield* operation("checkout", input.directory, [...context.args, "checkout", "--force"], context.env)
-        return repository
-      }).pipe(Effect.scoped)
+      yield* operation("clone", AbsolutePath.make(path.dirname(input.directory)), [
+        "clone",
+        "--depth",
+        String(input.depth ?? 100),
+        ...(input.branch ? ["--branch", input.branch] : []),
+        "--",
+        input.remote,
+        input.directory,
+      ])
+      const repository = yield* discover(input.directory)
+      if (repository) return repository
+      return yield* new OperationError({
+        operation: "clone",
+        directory: input.directory,
+        message: "Cloned repository could not be opened",
+      })
     })
 
     const fetch = Effect.fn("Git.sync.fetchRemotes")(function* (
       repository: Repository,
-      input: { prune?: boolean; remoteUrl?: string; transport?: HttpTransport } = {},
+      input: { prune?: boolean; remoteUrl?: string } = {},
     ) {
-      yield* Effect.gen(function* () {
-        const context = yield* transportContext("fetch", repository.worktree, input.transport)
-        yield* operation(
-          "fetch",
-          repository.worktree,
-          [
-            ...context.args,
-            "fetch",
-            ...(input.prune === false ? [] : ["--prune"]),
-            ...(input.remoteUrl ? [input.remoteUrl, "+refs/heads/*:refs/remotes/origin/*"] : ["--all"]),
-          ],
-          context.env,
-        )
-      }).pipe(Effect.scoped)
+      yield* operation("fetch", repository.worktree, [
+        "fetch",
+        ...(input.prune === false ? [] : ["--prune"]),
+        ...(input.remoteUrl ? [input.remoteUrl, "+refs/heads/*:refs/remotes/origin/*"] : ["--all"]),
+      ])
     })
 
     const fetchBranch = Effect.fn("Git.sync.fetchBranch")(function* (
       repository: Repository,
-      input: { remote?: string; remoteUrl?: string; branch: string; force?: boolean; transport?: HttpTransport },
+      input: { remote?: string; remoteUrl?: string; branch: string; force?: boolean },
     ) {
       const remoteName = input.remote ?? "origin"
       const spec = `refs/heads/${input.branch}:refs/remotes/${remoteName}/${input.branch}`
-      yield* Effect.gen(function* () {
-        const context = yield* transportContext("fetch", repository.worktree, input.transport)
-        yield* operation(
-          "fetch",
-          repository.worktree,
-          [...context.args, "fetch", input.remoteUrl ?? remoteName, input.force === false ? spec : `+${spec}`],
-          context.env,
-        )
-      }).pipe(Effect.scoped)
+      yield* operation("fetch", repository.worktree, [
+        "fetch",
+        input.remoteUrl ?? remoteName,
+        input.force === false ? spec : `+${spec}`,
+      ])
     })
 
     const checkout = Effect.fn("Git.sync.checkoutRemoteBranch")(function* (
       repository: Repository,
-      input: { remote?: string; branch: string; reset?: boolean; transport?: HttpTransport },
+      input: { remote?: string; branch: string; reset?: boolean },
     ) {
       const remoteName = input.remote ?? "origin"
-      yield* Effect.gen(function* () {
-        const context = yield* transportContext("checkout", repository.worktree, input.transport)
-        yield* operation(
-          "checkout",
-          repository.worktree,
-          [
-            ...context.args,
-            "checkout",
-            ...(input.reset === false ? [input.branch] : ["-B", input.branch, `${remoteName}/${input.branch}`]),
-          ],
-          context.env,
-        )
-      }).pipe(Effect.scoped)
+      yield* operation("checkout", repository.worktree, [
+        "checkout",
+        ...(input.reset === false ? [input.branch] : ["-B", input.branch, `${remoteName}/${input.branch}`]),
+      ])
     })
 
-    const reset = Effect.fn("Git.sync.resetHard")(function* (
-      repository: Repository,
-      revision: string,
-      transport?: HttpTransport,
-    ) {
-      yield* Effect.gen(function* () {
-        const context = yield* transportContext("reset", repository.worktree, transport)
-        yield* operation("reset", repository.worktree, [...context.args, "reset", "--hard", revision], context.env)
-      }).pipe(Effect.scoped)
+    const reset = Effect.fn("Git.sync.resetHard")(function* (repository: Repository, revision: string) {
+      yield* operation("reset", repository.worktree, ["reset", "--hard", revision])
     })
 
     const repositoryArgs = (repository: Repository, args: string[]) => [
@@ -1208,13 +969,12 @@ function run(cwd: string, proc: AppProcess.Interface) {
 }
 
 function execute(cwd: string, proc: AppProcess.Interface) {
-  return (args: string[], env?: Record<string, string>) =>
+  return (args: string[]) =>
     proc
       .run(
         ChildProcess.make("git", args, {
           cwd,
-          env,
-          extendEnv: env === undefined,
+          extendEnv: true,
           stdin: "ignore",
         }),
       )

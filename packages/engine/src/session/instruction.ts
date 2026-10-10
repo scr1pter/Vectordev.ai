@@ -105,7 +105,11 @@ const layer: Layer.Layer<
     })
 
     const fetch = Effect.fnUntraced(function* (url: string) {
-      return yield* WebFetchRequest.execute(http, HttpClientRequest.get(url)).pipe(
+      // Instruction URLs come from the user's own config (or a project they trusted), so an intranet page is fine.
+      return yield* WebFetchRequest.execute(http, HttpClientRequest.get(url), {
+        authorize: () => Effect.void,
+        authorizePrivate: () => Effect.void,
+      }).pipe(
         Effect.flatMap((response) =>
           collectBoundedResponseBody(response, 1024 * 1024, () => new Error("Remote instructions exceed 1 MiB")),
         ),

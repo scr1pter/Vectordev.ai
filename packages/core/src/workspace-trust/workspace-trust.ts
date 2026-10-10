@@ -3,11 +3,13 @@ export * as WorkspaceTrust from "./workspace-trust"
 import { constants, realpathSync } from "node:fs"
 import { createHash } from "node:crypto"
 import fs from "node:fs/promises"
+import { isIP } from "node:net"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { parse } from "jsonc-parser"
 import whichPkg from "which"
 import { Flock } from "../util/flock"
+import { WebFetchRequest } from "../util/webfetch-request"
 
 const version = 1 as const
 const filename = "workspace-trust.json"
@@ -250,6 +252,24 @@ export function remoteUrlAllowed(value: string) {
   return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
 }
 
+/**
+ * An endpoint the user configured themselves: https anywhere, or plain http to their own machine or network
+ * (loopback, private, link-local and CGNAT addresses, or a local-only name such as `gpu-box` or `nas.local`). Plain
+ * http to any other host would send credentials in clear text, so it is refused.
+ */
+export function userRemoteUrlAllowed(value: string) {
+  if (remoteUrlAllowed(value)) return true
+  if (isWindowsPath(value) || !URL.canParse(value)) return false
+  const url = new URL(value)
+  if (url.protocol !== "http:" || url.username || url.password) return false
+  const hostname = url.hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase()
+  if (isIP(hostname)) return WebFetchRequest.isPrivateAddress(hostname)
+  return !hostname.includes(".") || /\.(?:local|lan|home|internal|localhost|home\.arpa)$/.test(hostname)
+}
+
 export function executableInputs(config: unknown, context: { source: string; workspace: string }) {
   if (!isRecord(config)) return []
   const source = path.dirname(context.source)
@@ -456,7 +476,10 @@ function executableDirectories(config: unknown, workspace: string) {
   const commands = (value: unknown, cwdWithoutCommand = false) => {
     if (!isRecord(value)) return []
     return Object.values(value).flatMap((entry) => {
-      if (!isRecord(entry) || (!Array.isArray(entry.command) && !(cwdWithoutCommand && typeof entry.cwd === "string"))) {
+      if (
+        !isRecord(entry) ||
+        (!Array.isArray(entry.command) && !(cwdWithoutCommand && typeof entry.cwd === "string"))
+      ) {
         return []
       }
       return [typeof entry.cwd === "string" ? path.resolve(workspace, entry.cwd) : workspace]

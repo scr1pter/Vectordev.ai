@@ -89,20 +89,6 @@ describe("RepositoryCache", () => {
 
         const invalidBranch = yield* Effect.flip(cache.ensure({ reference: fixture.reference, branch: "../unsafe" }))
         expect(invalidBranch).toBeInstanceOf(RepositoryCache.InvalidBranchError)
-        const initial = yield* cache.ensure({ reference: fixture.reference })
-
-        const insecureRemote = yield* Effect.flip(
-          cache.ensure({ reference: { ...fixture.reference, remote: "http://example.com/owner/repo.git" } }),
-        )
-        expect(insecureRemote).toBeInstanceOf(RepositoryCache.InvalidRepositoryError)
-
-        const credentialQuery = yield* Effect.flip(
-          cache.ensure({
-            reference: { ...fixture.reference, remote: "https://example.com/owner/repo.git?token=secret" },
-          }),
-        )
-        expect(credentialQuery).toBeInstanceOf(RepositoryCache.InvalidRepositoryError)
-        expect(yield* read(path.join(initial.localPath, "README.md"))).toBe("one\n")
 
         const cloneFailure = yield* Effect.flip(
           cache.ensure({

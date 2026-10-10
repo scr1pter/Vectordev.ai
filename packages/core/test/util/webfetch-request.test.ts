@@ -130,3 +130,34 @@ test("a stalled retry remains inside the caller's deadline", async () => {
   ).toBe(true)
   expect(sample.requests).toHaveLength(2)
 })
+
+test("a private destination is reached only through authorizePrivate", async () => {
+  const sample = fixture(() => new Response("local"))
+  const url = "http://127.0.0.1:3000/"
+  const refused = await Effect.runPromise(Effect.flip(execute(sample.client, url, { authorize: () => Effect.void })))
+  expect(refused).toBeInstanceOf(Error)
+  expect(refused instanceof Error ? refused.message : "").toBe("Private network destinations are not allowed")
+  expect(sample.requests).toHaveLength(0)
+
+  const approved: string[] = []
+  const body = await Effect.runPromise(
+    execute(sample.client, url, {
+      authorize: () => Effect.void,
+      authorizePrivate: (target) => Effect.sync(() => approved.push(target)),
+    }),
+  )
+  expect(body).toBe("local")
+  expect(approved).toEqual([url])
+  expect(sample.requests.map((request) => request.url)).toEqual([url])
+})
+
+test("a public destination never asks for private network approval", async () => {
+  const sample = fixture(() => new Response("public"))
+  const body = await Effect.runPromise(
+    execute(sample.client, sample.url, {
+      authorize: () => Effect.void,
+      authorizePrivate: () => Effect.fail(new Error("unexpected private approval")),
+    }),
+  )
+  expect(body).toBe("public")
+})
