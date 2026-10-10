@@ -73,9 +73,7 @@ import {
   applyEnv,
   checkAllDeployments,
   checkDeployment,
-  connectDatabase,
   detectBuildSettings,
-  disconnectDatabase,
   getBuildSettings,
   getDatabase,
   listDeployments,
@@ -90,9 +88,7 @@ import {
   addCloudProviderDomain,
   connectCloudProvider,
   connectCloudProviderWithToken,
-  connectSupabaseProject,
   disconnectCloudProvider,
-  getSupabaseServiceSnapshot,
   linkCloudProviderProject,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
@@ -586,14 +582,6 @@ export function registerIpcHandlers(deps: Deps) {
     (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
       removeCloudProviderDomain(projectPath, taskId, id),
   )
-  handle(
-    "cloud-supabase-project-connect",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, projectRef: string) =>
-      connectSupabaseProject(projectPath, taskId, projectRef),
-  )
-  handle("cloud-supabase-services", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    getSupabaseServiceSnapshot(projectPath, taskId),
-  )
   // Every Supabase control in the console, through the same commands the agent uses.
   handle("cloud-supabase", (event: IpcMainInvokeEvent, command: unknown, input: unknown) =>
     runSupabaseCommand(command, input, {
@@ -674,18 +662,6 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("cloud-db-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getDatabase(projectPath, taskId),
-  )
-  handle(
-    "cloud-db-connect",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      input: { provider: "supabase"; url: string; anonKey: string },
-    ) => connectDatabase(projectPath, taskId, input),
-  )
-  handle("cloud-db-disconnect", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    disconnectDatabase(projectPath, taskId),
   )
   handle("cloud-build-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getBuildSettings(projectPath, taskId),

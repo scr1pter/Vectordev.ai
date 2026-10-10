@@ -246,7 +246,6 @@ export async function startSupabaseFake(overrides: Partial<FakeState> = {}) {
     }
     // https://supabase.com/docs/reference/api/v1-get-security-advisors
     if (rest === "/advisors/security") return Response.json({ lints: state.lints })
-    if (rest === "/storage/buckets") return Response.json(state.buckets)
     return Response.json({ message: `unexpected ${call.method} ${call.path}` }, { status: 404 })
   }
 

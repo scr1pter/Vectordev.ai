@@ -5,7 +5,6 @@ import { applyEnv, detectBuildSettings, getBuildSettings, getDatabase, listDeplo
 import {
   cachedCloudProviderConnection,
   getCloudProviderProjectLink,
-  getSupabaseServiceSnapshot,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
   syncCloudProviderEnvironment,
@@ -28,7 +27,6 @@ const COMMANDS = [
   "prepare_database",
   "prepare_auth",
   "cloud_connections",
-  "supabase_services",
   "sync_environment",
   "publish",
   "list_deployments",
@@ -405,9 +403,6 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
       connections: await listCloudProviderConnections(),
       links: listCloudProviderProjectLinks(input.projectPath, input.taskId),
     }
-  }
-  if (input.command === "supabase_services") {
-    return { ok: true, services: await getSupabaseServiceSnapshot(input.projectPath, input.taskId) }
   }
   if (input.command === "sync_environment") {
     return {

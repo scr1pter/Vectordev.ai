@@ -277,13 +277,6 @@ const api: ElectronAPI = {
     },
     database: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-db-get", projectPath, taskId),
-      connect: (projectPath, taskId, input) => ipcRenderer.invoke("cloud-db-connect", projectPath, taskId, input),
-      connectProject: (projectPath, taskId, projectRef) =>
-        ipcRenderer.invoke("cloud-supabase-project-connect", projectPath, taskId, projectRef),
-      disconnect: (projectPath, taskId) => ipcRenderer.invoke("cloud-db-disconnect", projectPath, taskId),
-    },
-    services: {
-      supabase: (projectPath, taskId) => ipcRenderer.invoke("cloud-supabase-services", projectPath, taskId),
     },
     supabase: {
       run: (command, input) => ipcRenderer.invoke("cloud-supabase", command, input),

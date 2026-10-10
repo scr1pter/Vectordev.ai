@@ -876,4 +876,36 @@ describe("agent bridge", () => {
       nextStep: expect.stringContaining("Rotate"),
     })
   })
+
+  test("lists storage and Edge Functions for the agent through the shared commands", async () => {
+    connect()
+    linkDatabase()
+    fake.state.buckets = [{ id: "avatars", name: "avatars", public: false, file_size_limit: 1024 }]
+    fake.state.functions = [{ id: "fn-1", slug: "hello", name: "hello", status: "ACTIVE", version: 3 }]
+    await mkdir(join(project, "supabase", "functions", "digest"), { recursive: true })
+    await writeFile(join(project, "supabase", "functions", "digest", "index.ts"), "Deno.serve(() => new Response())")
+    const report = await bridgeCommand({ command: "supabase_services" })
+    expect(report).toMatchObject({
+      ok: true,
+      services: {
+        project: { ref: "fixtureref", name: "shop-db" },
+        storage: { available: true, buckets: [{ id: "avatars", public: false, fileSizeLimit: 1024 }] },
+        functions: { available: true, deployed: [{ slug: "hello", version: 3 }], local: ["digest"] },
+      },
+    })
+    expectNoSecrets(report)
+
+    // One half failing leaves the other.
+    fake.state.fail = (call) =>
+      call.path === "/storage/v1/bucket"
+        ? Response.json({ message: "storage unavailable" }, { status: 503 })
+        : undefined
+    expect(await bridgeCommand({ command: "supabase_services" })).toMatchObject({
+      ok: true,
+      services: {
+        storage: { available: false, error: "storage unavailable" },
+        functions: { available: true, deployed: [{ slug: "hello" }] },
+      },
+    })
+  })
 })

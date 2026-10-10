@@ -152,35 +152,6 @@ export type CloudProviderSyncResult = {
   detail: string
 }
 
-export type CloudSupabaseBucket = {
-  id: string
-  name: string
-  public: boolean
-  createdAt?: string
-  updatedAt?: string
-}
-
-export type CloudSupabaseFunction = {
-  id: string
-  name: string
-  slug: string
-  status?: string
-  version?: number
-  createdAt?: string
-  updatedAt?: string
-}
-
-export type CloudSupabaseServices = {
-  connected: boolean
-  projectRef?: string
-  projectName?: string
-  region?: string
-  dashboardUrl?: string
-  detail?: string
-  storage: { available: boolean; buckets: CloudSupabaseBucket[]; detail?: string }
-  functions: { available: boolean; functions: CloudSupabaseFunction[]; detail?: string }
-}
-
 export type CloudApi = {
   connections: {
     list: () => Promise<CloudProviderConnection[]>
@@ -243,27 +214,6 @@ export type CloudApi = {
   }
   database: {
     get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
-    connect: (
-      projectPath: string,
-      taskId: string | undefined,
-      input: {
-        provider: "supabase"
-        url: string
-        anonKey: string
-        projectRef?: string
-        projectName?: string
-        managedByOAuth?: boolean
-      },
-    ) => Promise<CloudDatabaseConnection>
-    connectProject: (
-      projectPath: string,
-      taskId: string | undefined,
-      projectRef: string,
-    ) => Promise<CloudDatabaseConnection>
-    disconnect: (projectPath: string, taskId?: string) => Promise<void>
-  }
-  services: {
-    supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
   }
   build: {
     get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>

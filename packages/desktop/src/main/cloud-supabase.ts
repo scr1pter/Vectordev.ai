@@ -66,6 +66,7 @@ const READS = [
   "vercel_redirect_urls",
   "buckets",
   "functions",
+  "supabase_services",
   "function_secrets",
   "supabase_logs",
   "security_check",
@@ -244,6 +245,20 @@ async function run(
     return deleteBucket(context, { name: required(input, "bucket"), empty: bool(input, "empty") })
   }
   if (command === "functions") return listFunctions(context, project.directory)
+  // The agent's overview of storage and Edge Functions. Either half can fail on
+  // its own (a token without storage access) without hiding the other.
+  if (command === "supabase_services") {
+    const part = <T>(work: Promise<T>) =>
+      work.then(
+        (value) => ({ available: true, ...value }),
+        (error: unknown) => ({ available: false, error: scrub(context, errorMessage(error)) }),
+      )
+    const [storage, functions] = await Promise.all([
+      part(listBuckets(context)),
+      part(listFunctions(context, project.directory)),
+    ])
+    return { services: { project: { ref: context.projectRef, name: context.projectName }, storage, functions } }
+  }
   if (command === "deploy_function") {
     return deployFunction(context, { directory: project.directory, name: required(input, "functionName") })
   }

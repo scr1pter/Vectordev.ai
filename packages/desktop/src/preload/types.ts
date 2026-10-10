@@ -23,7 +23,6 @@ import type {
   CloudProviderProjectLink,
   CloudProviderResource,
   CloudProviderSyncResult,
-  CloudSupabaseServices,
 } from "../main/cloud-connections"
 import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
@@ -136,9 +135,6 @@ export type {
   CloudProviderProjectLink,
   CloudProviderResource,
   CloudProviderSyncResult,
-  CloudSupabaseBucket,
-  CloudSupabaseFunction,
-  CloudSupabaseServices,
 } from "../main/cloud-connections"
 export type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 export type {
@@ -927,27 +923,6 @@ export type ElectronAPI = {
     }
     database: {
       get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
-      connect: (
-        projectPath: string,
-        taskId: string | undefined,
-        input: {
-          provider: "supabase"
-          url: string
-          anonKey: string
-          projectRef?: string
-          projectName?: string
-          managedByOAuth?: boolean
-        },
-      ) => Promise<CloudDatabaseConnection>
-      connectProject: (
-        projectPath: string,
-        taskId: string | undefined,
-        projectRef: string,
-      ) => Promise<CloudDatabaseConnection>
-      disconnect: (projectPath: string, taskId?: string) => Promise<void>
-    }
-    services: {
-      supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
     }
     supabase: {
       run: (
