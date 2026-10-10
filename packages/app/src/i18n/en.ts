@@ -574,6 +574,8 @@ export const dict = {
   "toast.context.noLineSelection.description": "Select a line range in a file tab first.",
 
   "toast.session.listFailed.title": "Failed to load sessions for {{project}}",
+  "toast.subagent.alreadyFinished.title": "Already finished",
+  "toast.subagent.alreadyFinished.description": "Nothing was still running, so there was nothing to stop.",
   "toast.project.reloadFailed.title": "Failed to reload {{project}}",
 
   "toast.update.title": "Update available",

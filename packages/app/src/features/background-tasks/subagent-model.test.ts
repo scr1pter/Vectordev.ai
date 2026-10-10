@@ -11,6 +11,8 @@ import {
   formatAgentCount,
   formatDuration,
   formatTokens,
+  freshestSession,
+  idleLiveSessions,
   isDismissed,
   kindLabel,
   liveAgentCount,
@@ -993,5 +995,105 @@ describe("chips, counts and dismissal", () => {
     expect(isDismissed({ live: false }, 600)).toBe(true)
     expect(isDismissed({ live: true, endedAt: 100 }, 600)).toBe(false)
     expect(isDismissed({ live: false, endedAt: 500 }, undefined)).toBe(false)
+  })
+})
+
+describe("cards the event stream left behind", () => {
+  const running = (sessionId: string, callID: string) =>
+    lifecycle({ sessionId, callID, status: "running", background: true, completedAt: undefined, usage: undefined })
+
+  test("a finished child record outranks a task part whose mirror of it never landed", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", callID: "call_1", metadata: running("ses_c1", "call_1") }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", {
+      metadata: {
+        subagent: {
+          agent: "explore",
+          callID: "call_1",
+          status: "completed",
+          startedAt: 1_000,
+          completedAt: 61_000,
+          usage: usage(12_000),
+        },
+      },
+    })
+    const card = buildTaskCards(source(data))[0]!
+    expect(card.live).toBe(false)
+    expect(card.agents[0]!.status).toBe("done")
+    expect(card.agents[0]!.endedAt).toBe(61_000)
+    expect(card.agents[0]!.tokens).toBe(12_000)
+  })
+
+  test("a failed or cancelled record settles the part the same way", () => {
+    for (const [status, expected] of [
+      ["error", "failed"],
+      ["cancelled", "stopped"],
+    ] as const) {
+      const data = fixture()
+      addUser(data, "msg_u1", "go")
+      addAssistant(data, "msg_a1", "msg_u1", [
+        taskPart({ id: "prt_1", callID: "call_1", metadata: running("ses_c1", "call_1") }),
+      ])
+      data.sessions.ses_c1 = child("ses_c1", {
+        metadata: { subagent: { callID: "call_1", status, startedAt: 1_000, completedAt: 5_000, error: "Rate limited" } },
+      })
+      const agent = buildTaskCards(source(data))[0]!.agents[0]!
+      expect(agent.status).toBe(expected)
+      expect(agent.error).toBe(status === "error" ? "Rate limited" : undefined)
+    }
+  })
+
+  test("a record from another call or a live record never overrides the part", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      // The record moved on to a later run, so it says nothing about this call.
+      taskPart({ id: "prt_1", callID: "call_1", metadata: running("ses_c1", "call_1") }),
+      // The part settled while the record still says running.
+      taskPart({
+        id: "prt_2",
+        callID: "call_2",
+        metadata: lifecycle({ sessionId: "ses_c2", callID: "call_2", status: "completed" }),
+      }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", {
+      metadata: { subagent: { callID: "call_9", status: "completed", startedAt: 90_000, completedAt: 95_000 } },
+    })
+    data.sessions.ses_c2 = child("ses_c2", {
+      metadata: { subagent: { callID: "call_2", status: "running", startedAt: 1_000 } },
+    })
+    const agents = buildTaskCards(source(data))[0]!.agents
+    expect(agents.map((agent) => agent.status)).toEqual(["running", "done"])
+  })
+
+  test("the freshest copy of a session wins, whichever source it came from", () => {
+    const stale = child("ses_c1", { time: { created: 50, updated: 60 } })
+    const fresh = child("ses_c1", { time: { created: 50, updated: 9_000 } })
+    expect(freshestSession(stale, fresh)).toBe(fresh)
+    expect(freshestSession(fresh, stale)).toBe(fresh)
+    expect(freshestSession(undefined, stale)).toBe(stale)
+    expect(freshestSession(stale, undefined)).toBe(stale)
+    expect(freshestSession(undefined, undefined)).toBeUndefined()
+    // A tie keeps the store's copy, which live events keep current.
+    const twin = child("ses_c1", { time: { created: 50, updated: 60 } })
+    expect(freshestSession(stale, twin)).toBe(stale)
+  })
+
+  test("live agents whose child is not busy or retrying need a fresh copy, cached messages or not", () => {
+    const agents = [
+      { sessionID: "ses_cached", status: "running" as const },
+      { sessionID: "ses_idle", status: "pending" as const },
+      { sessionID: "ses_busy", status: "running" as const },
+      { sessionID: "ses_retry", status: "waiting" as const },
+      { sessionID: "ses_done", status: "done" as const },
+      { sessionID: "ses_cached", status: "running" as const },
+      { sessionID: undefined, status: "pending" as const },
+    ]
+    const status: Record<string, SessionStatus["type"]> = { ses_busy: "busy", ses_retry: "retry", ses_cached: "idle" }
+    expect(idleLiveSessions(agents, (id) => status[id])).toEqual(["ses_cached", "ses_idle"])
+    expect(idleLiveSessions([], () => undefined)).toEqual([])
   })
 })

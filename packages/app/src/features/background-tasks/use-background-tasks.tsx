@@ -13,6 +13,7 @@ import {
 import { createStore, reconcile } from "solid-js/store"
 import { useNavigate, useParams } from "@solidjs/router"
 import type { Session } from "@vectordevai/sdk/v2"
+import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useSync } from "@/context/sync"
@@ -22,6 +23,8 @@ import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/sessio
 import { loadDismissed, saveDismissed } from "./background-tasks-state"
 import {
   buildTaskCards,
+  freshestSession,
+  idleLiveSessions,
   isDismissed,
   isLive,
   liveAgentCount,
@@ -71,7 +74,9 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
   const sync = useSync()
   const sdk = useSDK()
   const serverSync = useServerSync()
+  const language = useLanguage()
   const navigate = useNavigate()
+  const reconnects = () => serverSync().reconnects()
   const params = useParams<{ serverKey?: string }>()
 
   const rootID = createMemo(() => {
@@ -97,11 +102,13 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
   )
 
   // The children route covers subagents whose task parts sit in history pages
-  // that are not loaded. Live ones are in the store already and win.
+  // that are not loaded. A reconnected stream fetches it again, since the
+  // records it missed only arrive that way for children nothing else loads.
   const [fetched, setFetched] = createSignal<readonly Session[]>([])
   createEffect(
-    on(rootID, (root) => {
-      setFetched([])
+    on([rootID, reconnects], (input, previous) => {
+      const root = input[0]
+      if (root !== previous?.[0]) setFetched([])
       if (!root) return
       let alive = true
       onCleanup(() => {
@@ -122,14 +129,17 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     const found = new Map<string, Session>()
     for (const session of fetched()) if (session.parentID === root) found.set(session.id, session)
     for (const session of sync().data.session) if (session.parentID === root) found.set(session.id, session)
-    return [...found.values()].map((session) => sync().session.get(session.id) ?? session)
+    // The store follows live events and the fetch is a snapshot: whichever the engine updated last is current.
+    return [...found.values()].map(
+      (session) => freshestSession(sync().session.get(session.id), fetchedByID().get(session.id)) ?? session,
+    )
   })
 
   const source = (root: string): TaskSource => ({
     rootID: root,
     messages: (id) => sync().data.message[id],
     parts: (id) => sync().data.part[id],
-    session: (id) => sync().session.get(id) ?? fetchedByID().get(id),
+    session: (id) => freshestSession(sync().session.get(id), fetchedByID().get(id)),
     children: children(),
     status: (id) => sync().data.session_status[id],
     waiting: (id) => (sync().data.permission[id]?.length ?? 0) > 0 || (sync().data.question[id]?.length ?? 0) > 0,
@@ -157,25 +167,45 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
     setState("cards", reconcile(next, { key: "key" }))
   })
 
-  // A record left saying queued or running by an engine restart only settles
-  // from the child's last reply. After a reload an idle child has no
-  // session_status entry and nothing else loads a live agent's messages, so
-  // load them once for each such agent, pane open or not.
+  // A card left live by an engine restart, or by events lost while the
+  // stream was down, only settles from a fresh copy of the child: its record
+  // and its last reply. After a reload an idle child has no session_status
+  // entry, and messages already cached can be the stale part, so reload each
+  // such agent once, pane open or not, and once more after each reconnect.
   const settling = new Set<string>()
+  let settlingRound = 0
   createEffect(() => {
-    for (const card of state.cards) {
-      for (const agent of card.agents) {
-        const id = agent.sessionID
-        if (!id || !isLive(agent.status) || settling.has(id)) continue
-        const status = sync().data.session_status[id]?.type
-        if (status === "busy" || status === "retry" || sync().data.message[id]) continue
-        settling.add(id)
-        void sync()
-          .session.sync(id)
-          .catch(() => undefined)
-      }
+    const round = reconnects()
+    if (round !== settlingRound) settling.clear()
+    settlingRound = round
+    const agents = state.cards.flatMap((card) => card.agents)
+    for (const id of idleLiveSessions(agents, (sessionID) => sync().data.session_status[sessionID]?.type)) {
+      if (settling.has(id)) continue
+      settling.add(id)
+      void sync()
+        .session.sync(id, { force: true })
+        .catch(() => undefined)
     }
   })
+
+  // The open session, its family's root (whose history holds the task parts)
+  // and the children whose messages are loaded all missed whatever happened
+  // while the stream was down.
+  createEffect(
+    on(
+      reconnects,
+      () => {
+        const loaded = children().flatMap((child) => (sync().data.message[child.id] ? [child.id] : []))
+        for (const id of new Set([props.sessionID(), rootID(), ...loaded])) {
+          if (!id) continue
+          void sync()
+            .session.sync(id, { force: true })
+            .catch(() => undefined)
+        }
+      },
+      { defer: true },
+    ),
+  )
 
   const index = createMemo(() => {
     const map = new Map<string, TaskLocation>()
@@ -236,6 +266,14 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
 
   const stopSessions = async (ids: readonly string[]) => {
     const client = sdk().client
+    // Agents shown running whose child the engine already reports idle: a
+    // card the event stream left behind, with nothing left to stop.
+    const stale = idleLiveSessions(
+      state.cards.flatMap((card) =>
+        card.agents.filter((agent) => agent.status !== "pending" && !!agent.sessionID && ids.includes(agent.sessionID)),
+      ),
+      (sessionID) => sync().data.session_status[sessionID]?.type,
+    )
     const results = await Promise.allSettled(
       ids.map((sessionID) =>
         Promise.resolve(client.session.abort({ sessionID })).then((result) => {
@@ -244,11 +282,25 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
         }),
       ),
     )
-    if (results.every((result) => result.status === "fulfilled")) return
+    // Reload what the cards are built from, so Stop always shows where each
+    // agent really is, even with the event stream down.
+    const root = rootID()
+    await Promise.allSettled(
+      [...ids, ...(root ? [root] : [])].map((sessionID) => sync().session.sync(sessionID, { force: true })),
+    )
+    if (results.some((result) => result.status === "rejected")) {
+      showToast({
+        variant: "error",
+        title: "Could not stop every subagent",
+        description: "Try again, or stop the whole session from the composer.",
+      })
+      return
+    }
+    const live = state.cards.flatMap((card) => card.agents.filter((agent) => isLive(agent.status)))
+    if (!stale.some((sessionID) => live.some((agent) => agent.sessionID === sessionID))) return
     showToast({
-      variant: "error",
-      title: "Could not stop every subagent",
-      description: "Try again, or stop the whole session from the composer.",
+      title: language.t("toast.subagent.alreadyFinished.title"),
+      description: language.t("toast.subagent.alreadyFinished.description"),
     })
   }
 
