@@ -4,12 +4,29 @@ import {
   getConfiguredAgentVariant,
   modelVariantDescription,
   modelVariantLabel,
+  modelSelectionState,
   normalizeModelVariant,
   resolveModelVariant,
   visibleModelVariants,
 } from "./model-variant"
 
 describe("model variant", () => {
+  test("one selection patch targets the new model and exact preset together", () => {
+    const before = { model: { providerID: "old", modelID: "old-model" }, variant: "low" }
+    const target = { providerID: "new", modelID: "new-model", variant: "xhigh" }
+    const next = modelSelectionState(target, ["low", "xhigh"])
+    expect({ ...before, ...next }).toEqual({ model: target, variant: "xhigh" })
+    expect(next?.model?.providerID).toBe("new")
+    expect(modelSelectionState(target, ["low", "max"])).toBeUndefined()
+    expect(modelSelectionState(target, [])).toBeUndefined()
+  })
+
+  test("ordinary model selection preserves the existing effort selection", () => {
+    const next = modelSelectionState({ providerID: "p", modelID: "m" }, ["low"])
+    expect({ variant: "low", ...next }).toEqual({ model: { providerID: "p", modelID: "m" }, variant: "low" })
+    expect(modelSelectionState(undefined, [])).toEqual({ model: undefined })
+  })
+
   test("resolves configured agent variant when model matches", () => {
     const value = getConfiguredAgentVariant({
       agent: {
@@ -107,12 +124,7 @@ describe("model variant", () => {
   })
 
   test("prefers a provider's native max tier", () => {
-    expect(visibleModelVariants(["low", "medium", "high", "xhigh", "max"])).toEqual([
-      "low",
-      "medium",
-      "high",
-      "max",
-    ])
+    expect(visibleModelVariants(["low", "medium", "high", "xhigh", "max"])).toEqual(["low", "medium", "high", "max"])
     expect(normalizeModelVariant("xhigh", ["low", "medium", "high", "max"])).toBe("max")
   })
 

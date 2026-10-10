@@ -944,6 +944,29 @@ export type SessionsHistoryOutput = {
     | {
         readonly id: string
         readonly metadata?: { readonly [x: string]: JsonValue }
+        readonly type: "session.next.ancillary.usage"
+        readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+        readonly location?: { readonly directory: string; readonly workspaceID?: string }
+        readonly data: {
+          readonly timestamp: number
+          readonly sessionID: string
+          readonly usageID: string
+          readonly purpose: "title"
+          readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+          readonly cost?: number
+          readonly unpriced?: boolean
+          readonly tokens?: {
+            readonly input: number
+            readonly output: number
+            readonly reasoning: number
+            readonly cache: { readonly read: number; readonly write: number }
+          }
+          readonly incomplete?: boolean
+        }
+      }
+    | {
+        readonly id: string
+        readonly metadata?: { readonly [x: string]: JsonValue }
         readonly type: "session.next.message.imported"
         readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
         readonly location?: { readonly directory: string; readonly workspaceID?: string }
@@ -1661,6 +1684,29 @@ export type SessionsEventsInput = {
 }
 
 export type SessionsEventsOutput =
+  | {
+      readonly id: string
+      readonly metadata?: { readonly [x: string]: unknown }
+      readonly type: "session.next.ancillary.usage"
+      readonly durable?: { readonly aggregateID: string; readonly seq: number; readonly version: number }
+      readonly location?: { readonly directory: string; readonly workspaceID?: string }
+      readonly data: {
+        readonly timestamp: number
+        readonly sessionID: string
+        readonly usageID: string
+        readonly purpose: "title"
+        readonly model: { readonly id: string; readonly providerID: string; readonly variant?: string }
+        readonly cost?: number
+        readonly unpriced?: boolean
+        readonly tokens?: {
+          readonly input: number
+          readonly output: number
+          readonly reasoning: number
+          readonly cache: { readonly read: number; readonly write: number }
+        }
+        readonly incomplete?: boolean
+      }
+    }
   | {
       readonly id: string
       readonly metadata?: { readonly [x: string]: unknown }

@@ -318,6 +318,7 @@ const live: Layer.Layer<
           // reports a response's input usage in message_start, which the SDK holds back until the response finishes.
           includeRawChunks:
             input.model.providerID.includes("github-copilot") ||
+            input.model.api.npm === "@ai-sdk/openai" ||
             input.model.api.npm === "@ai-sdk/anthropic" ||
             input.model.api.npm === "@ai-sdk/google-vertex/anthropic",
           async experimental_repairToolCall(failed) {

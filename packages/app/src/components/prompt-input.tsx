@@ -75,11 +75,11 @@ import { dictationAvailable, startDictation, type DictationHandle } from "@/serv
 import { DictationIndicator } from "@/components/dictation-indicator"
 import { ImagePreview } from "@vectordevai/ui/image-preview"
 import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
-import { modelVariantDescription, modelVariantLabel } from "@/context/model-variant"
+import { modelVariantDescription, modelVariantLabel, visibleModelVariants } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { detectParallelIntent } from "@/features/delegation/delegation"
 import { createOutcomes } from "@/features/economics/economics-repository"
-import { recommendModel } from "@/features/economics/economics-recommender"
+import { recommendationAvailable, recommendModel } from "@/features/economics/economics-recommender"
 import { categorizeTask } from "@/features/economics/task-categorizer"
 
 export type PromptInputState = ReturnType<typeof usePrompt>
@@ -554,32 +554,56 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     setDelegationDismissedFor(delegationPromptText())
   }
 
-  // Model Economics recommendation: mirrors the delegation chip. Suggests the
-  // model with the best verified track record for this task's category, learned
-  // from real parallel-workspace outcomes. Honest cold start — recommendModel
-  // returns undefined until there is enough evidence.
+  // Recommend only available models with enough completed or positively validated work.
+  // Execution failures remain in the ranking evidence; completion itself does not imply passing checks.
   const taskCategory = createMemo(() => categorizeTask(delegationPromptText()))
   const economicsOutcomes = createOutcomes(() => sdk().directory)
-  const modelRecommendation = createMemo(() => recommendModel(economicsOutcomes() ?? [], taskCategory()))
+  const recommendationModels = createMemo(() =>
+    props.controls.model.selection
+      .list()
+      .map((model) => ({
+        providerID: model.provider.id,
+        modelID: model.id,
+        variants: visibleModelVariants(Object.keys(model.variants ?? {})),
+      }))
+      .filter((model) => props.controls.model.selection.visible(model)),
+  )
+  const modelRecommendation = createMemo(() =>
+    recommendModel(economicsOutcomes() ?? [], taskCategory(), 3, recommendationModels()),
+  )
   const [recommendationDismissedFor, setRecommendationDismissedFor] = createSignal("")
   const recommendationDiffersFromCurrent = createMemo(() => {
     const rec = modelRecommendation()
     if (!rec) return false
     const current = props.controls.model.selection.current()
-    return current?.provider?.id !== rec.provider || current?.id !== rec.model
+    return (
+      current?.provider?.id !== rec.provider ||
+      current?.id !== rec.model ||
+      props.controls.model.selection.variant.current() !== rec.variant
+    )
   })
+  const recommendationKey = createMemo(() =>
+    JSON.stringify([
+      taskCategory(),
+      modelRecommendation()?.provider,
+      modelRecommendation()?.model,
+      modelRecommendation()?.variant,
+    ]),
+  )
   const showRecommendationChip = createMemo(() => {
     if (!props.controls.newLayoutDesigns) return false
     if (!modelRecommendation()) return false
     if (!recommendationDiffersFromCurrent()) return false
-    return recommendationDismissedFor() !== `${taskCategory()}:${modelRecommendation()?.model ?? ""}`
+    return recommendationDismissedFor() !== recommendationKey()
   })
-  const dismissRecommendation = () =>
-    setRecommendationDismissedFor(`${taskCategory()}:${modelRecommendation()?.model ?? ""}`)
+  const dismissRecommendation = () => setRecommendationDismissedFor(recommendationKey())
   const useRecommendedModel = () => {
     const rec = modelRecommendation()
-    if (!rec) return
-    props.controls.model.selection.set({ providerID: rec.provider, modelID: rec.model }, { recent: true })
+    if (!rec || !recommendationAvailable(rec, recommendationModels())) return
+    props.controls.model.selection.set(
+      { providerID: rec.provider, modelID: rec.model, variant: rec.variant },
+      { recent: true },
+    )
     dismissRecommendation()
   }
 
@@ -1803,7 +1827,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
             ✦
           </span>
           <span class="min-w-0 flex-1 truncate">
-            Best for this {taskCategory()}: {modelRecommendation()?.model} — {modelRecommendation()?.evidence[0]}
+            Suggested for this {taskCategory()}: {modelRecommendation()?.model} · {modelRecommendation()?.variant}{" "}
+            effort — {modelRecommendation()?.evidence[0]} · {modelRecommendation()?.pricedSamples}/
+            {modelRecommendation()?.sampleSize} priced
           </span>
           <button
             type="button"

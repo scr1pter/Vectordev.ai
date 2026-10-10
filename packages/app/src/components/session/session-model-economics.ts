@@ -1,15 +1,15 @@
-import { checkPassScore, knownCostUsd, type ModelOutcome } from "@/features/economics/economics-types"
+import {
+  completedOutcome,
+  outcomeCostCoverage,
+  outcomeLatencyCoverage,
+  outcomeModelKey,
+  outcomeQualityScore,
+  type ModelOutcome,
+} from "@/features/economics/economics-types"
 import { projectCost, ratesFor, type ModelCostSource } from "@/features/economics/model-pricing"
 
-function medianOf(values: number[]): number {
-  if (values.length === 0) return 0
-  const sorted = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
-}
-
-// Ranks recorded outcomes for one task category exactly like the recommender:
-// check-pass rate first, then measured cost, then median latency.
+// Orders recorded history for one task category using the recommender's quality score:
+// checks adjusted for execution reliability first; compare cost only within fully priced quality ties.
 //
 // Two different cost numbers matter here and they are not interchangeable.
 // `medianCostUsd` is what runs on this model HAVE cost — the provider's own
@@ -27,37 +27,53 @@ export function rankModelsForCategory(
   const matching = outcomes.filter((outcome) => outcome.category === category)
   const groups = new Map<string, ModelOutcome[]>()
   for (const outcome of matching) {
-    const key = `${outcome.provider}::${outcome.model}`
+    const key = outcomeModelKey(outcome)
     const list = groups.get(key) ?? []
     list.push(outcome)
     groups.set(key, list)
   }
-  return [...groups.values()]
-    .map((list) => {
-      const checked = list.filter((outcome) => outcome.hadChecks && outcome.checksPassed !== undefined)
-      const checkPassRate = checked.length
-        ? checked.filter((outcome) => outcome.checksPassed === true).length / checked.length
-        : undefined
-      // Absent rather than zero: a run with no listed price must not read as free next to one that reported real
-      // spend, so only fully priced runs count, free ones included.
-      const measured = list.map(knownCostUsd).filter((cost): cost is number => cost !== undefined)
-      return {
-        provider: list[0].provider,
-        model: list[0].model,
-        sampleSize: list.length,
-        checkPassRate,
-        checkPassScore: checkPassScore(list),
-        medianLatencyMs: medianOf(list.map((outcome) => outcome.latencyMs)),
-        medianCostUsd: measured.length ? medianOf(measured) : undefined,
-        projectedCostUsd: projectCost(ratesFor(providers, list[0].provider, list[0].model), promptTokens)?.totalCost,
-      }
-    })
-    .sort((a, b) => {
-      const passDiff = b.checkPassScore - a.checkPassScore
-      if (passDiff !== 0) return passDiff
-      const aCost = a.medianCostUsd ?? Infinity
-      const bCost = b.medianCostUsd ?? Infinity
-      if (aCost !== bCost) return aCost - bCost
-      return a.medianLatencyMs - b.medianLatencyMs
-    })
+  const ranked = [...groups.values()].map((list) => {
+    const checked = list.filter((outcome) => outcome.hadChecks && outcome.checksPassed !== undefined)
+    const checkPassRate = checked.length
+      ? checked.filter((outcome) => outcome.checksPassed === true).length / checked.length
+      : undefined
+    return {
+      key: outcomeModelKey(list[0]),
+      provider: list[0].provider,
+      model: list[0].model,
+      mixedModels: list[0].mixedModels,
+      variant: list[0].variant,
+      sampleSize: list.length,
+      completedSamples: list.filter(completedOutcome).length,
+      unsuccessfulSamples: list.filter(
+        (outcome) => outcome.execution !== undefined && outcome.execution !== "completed",
+      ).length,
+      checkPassRate,
+      qualityScore: outcomeQualityScore(list),
+      ...outcomeLatencyCoverage(list),
+      ...outcomeCostCoverage(list),
+      projectedCostUsd:
+        list[0].provider && list[0].model && !list[0].mixedModels
+          ? projectCost(ratesFor(providers, list[0].provider, list[0].model), promptTokens)?.totalCost
+          : undefined,
+    }
+  })
+  const uncertain = new Set(
+    ranked.filter((row) => row.unknownCostSamples > 0 || row.pricedSamples < 3).map((row) => row.qualityScore),
+  )
+  // One policy for an entire quality/price tie keeps sorting transitive with mixed timing coverage.
+  const uncertainTiming = new Set(
+    ranked
+      .filter((row) => row.unknownLatencySamples > 0 || row.timedSamples < 3)
+      .map((row) => JSON.stringify([row.qualityScore, row.medianCostUsd])),
+  )
+  return ranked.sort((a, b) => {
+    const passDiff = b.qualityScore - a.qualityScore
+    if (passDiff !== 0) return passDiff
+    if (uncertain.has(a.qualityScore)) return a.key.localeCompare(b.key)
+    const costDiff = a.medianCostUsd! - b.medianCostUsd!
+    if (costDiff !== 0) return costDiff
+    if (uncertainTiming.has(JSON.stringify([a.qualityScore, a.medianCostUsd]))) return a.key.localeCompare(b.key)
+    return a.medianLatencyMs! - b.medianLatencyMs! || a.key.localeCompare(b.key)
+  })
 }

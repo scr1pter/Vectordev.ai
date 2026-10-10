@@ -7,6 +7,8 @@ import { PublicSession } from "@vectordevai/schema/public-session"
 import { Database } from "../database/database"
 import { makeGlobalNode } from "../effect/app-node"
 import { EventV2 } from "../event"
+import { EventTable } from "../event/sql"
+import { optional } from "@vectordevai/schema/schema"
 import { SessionV1 } from "../v1/session"
 import { SessionSchema } from "../session/schema"
 import { SessionMessage } from "../session/message"
@@ -22,7 +24,12 @@ import { InstallationVersion } from "../installation/version"
 import { ModelV2 } from "../model"
 import { encodedBody } from "./transport"
 
-export const Legacy = Schema.Struct({ info: SessionV1.SessionInfo, messages: Schema.Array(SessionV1.WithParts) })
+const AncillaryUsage = Schema.Array(SessionEvent.AncillaryUsage.data).pipe(optional)
+export const Legacy = Schema.Struct({
+  info: SessionV1.SessionInfo,
+  messages: Schema.Array(SessionV1.WithParts),
+  ancillaryUsage: AncillaryUsage,
+})
 export type Legacy = typeof Legacy.Type
 export const Native = Schema.Struct({
   format: Schema.Literal("vector-session"),
@@ -30,6 +37,7 @@ export const Native = Schema.Struct({
   engine: Schema.Literal("v2"),
   info: SessionSchema.Info,
   messages: Schema.Array(SessionMessage.Message),
+  ancillaryUsage: AncillaryUsage,
 })
 export type Native = typeof Native.Type
 export type Local = Legacy | Native
@@ -179,6 +187,21 @@ const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       if (!row) return yield* new PublicSession.Error({ code: "NOT_FOUND", message: "Session not found." })
+      const usage = yield* db
+        .select({ data: EventTable.data })
+        .from(EventTable)
+        .where(
+          and(
+            eq(EventTable.aggregate_id, input.sessionID),
+            eq(EventTable.type, EventV2.versionedType(SessionEvent.AncillaryUsage.type, 1)),
+          ),
+        )
+        .orderBy(asc(EventTable.seq))
+        .all()
+        .pipe(Effect.orDie)
+      const ancillaryUsage = usage.length
+        ? usage.map((event) => Schema.decodeUnknownSync(SessionEvent.AncillaryUsage.data)(event.data))
+        : undefined
       const native = yield* db
         .select()
         .from(SessionMessageTable)
@@ -195,6 +218,7 @@ const layer = Layer.effect(
           messages: native.map((message) =>
             Schema.decodeUnknownSync(SessionMessage.Message)({ ...message.data, id: message.id, type: message.type }),
           ),
+          ancillaryUsage,
         })
       const messages = yield* db
         .select()
@@ -212,6 +236,7 @@ const layer = Layer.effect(
         .pipe(Effect.orDie)
       return Schema.decodeUnknownSync(Schema.fromJsonString(Legacy))(
         JSON.stringify({
+          ancillaryUsage: ancillaryUsage?.map((usage) => Schema.encodeSync(SessionEvent.AncillaryUsage.data)(usage)),
           info: {
             id: row.id,
             slug: row.slug,
@@ -274,6 +299,11 @@ const layer = Layer.effect(
       )
       const local = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.Union([Native, Legacy]))(input.archive))
       if (!archive && !local) return yield* invalid()
+      if (
+        local?.ancillaryUsage &&
+        new Set(local.ancillaryUsage.map((usage) => usage.usageID)).size !== local.ancillaryUsage.length
+      )
+        return yield* invalid()
       if (input.targetEngine && !archive)
         return yield* new PublicSession.Error({
           code: "INVALID",
@@ -508,6 +538,8 @@ const layer = Layer.effect(
             })
         }
       }
+      // Local archives preserve historical spend; public transcripts and forks carry no ancillary billing records.
+      for (const usage of local?.ancillaryUsage ?? []) append(SessionEvent.AncillaryUsage, { ...usage, sessionID })
       yield* events.importAll(sequence)
       return { sessionID, engine: source.engine }
     })

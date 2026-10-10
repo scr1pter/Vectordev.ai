@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { Option, Schema } from "effect"
+import { DateTime, Option, Schema } from "effect"
 import { SessionV1 } from "@vectordevai/core/v1/session"
+import { EventV2 } from "@vectordevai/core/event"
+import { ModelV2 } from "@vectordevai/core/model"
+import { SessionEvent } from "@vectordevai/schema/session-event"
 import { summarizeUsage } from "@/session/session"
+import { SessionID } from "@/session/schema"
 
 describe("session usage", () => {
   test("aggregates real assistant usage into daily activity and streaks", () => {
@@ -72,6 +76,77 @@ describe("session usage", () => {
     expect(result.unpricedResponses).toBe(1)
   })
 
+  test("adds title spend without changing transcript activity, model attribution, or streaks", () => {
+    const today = new Date()
+    today.setHours(12, 0, 0, 0)
+    const day = (offset: number) => {
+      const date = new Date(today)
+      date.setDate(date.getDate() + offset)
+      return date.getTime()
+    }
+    const messages = [assistant(day(-1), 100, 0.2, 1_000), assistant(day(-3), 50, 0.1, 2_000)]
+    const before = summarizeUsage(messages)
+    const after = summarizeUsage(messages, [ancillary(day(0)), ancillary(day(-2)), ancillary(day(-1))])
+
+    expect(after.lifetimeCost).toBeCloseTo(before.lifetimeCost + 0.375)
+    expect(after.days.reduce((sum, value) => sum + value.cost, 0)).toBe(after.lifetimeCost)
+    expect(after.days.filter((value) => value.tasks === 0)).toHaveLength(2)
+    expect(after.days.filter((value) => value.tasks === 0).every((value) => value.tokens === 0)).toBe(true)
+    expect({ ...after, lifetimeCost: before.lifetimeCost, days: before.days }).toEqual(before)
+    expect(after.currentStreak).toBe(1)
+    expect(after.longestStreak).toBe(1)
+  })
+
+  test("title-only spend does not create assistant responses or activity", () => {
+    const result = summarizeUsage([], [ancillary(Date.now())])
+    expect(result.lifetimeCost).toBe(0.125)
+    expect(result.days).toHaveLength(1)
+    expect(result.days[0]).toMatchObject({ cost: 0.125, tasks: 0, tokens: 0 })
+    expect(summarizeUsage([])).toEqual({ ...result, lifetimeCost: 0, days: [] })
+  })
+
+  test("deduplicates paid attempt identity across sessions while retaining distinct attempts", () => {
+    const first = ancillary(Date.now())
+    const copy = SessionEvent.AncillaryUsage.data.make({ ...first, sessionID: SessionID.make("ses_copy") })
+    const second = { ...first, usageID: EventV2.ID.create() }
+    expect(summarizeUsage([], [first, copy, copy, second]).lifetimeCost).toBe(0.25)
+    expect(summarizeUsage([], [copy, first])).toEqual(summarizeUsage([], [first]))
+  })
+
+  test("conflicting copies count as one unknown attempt without an arbitrary amount or date", () => {
+    const first = ancillary(Date.now())
+    const conflicts = [
+      { ...first, cost: 0.5 },
+      { ...first, timestamp: DateTime.makeUnsafe(DateTime.toEpochMillis(first.timestamp) - 86_400_000) },
+      { ...first, model: { ...first.model, id: ModelV2.ID.make("other") } },
+      { ...first, tokens: { ...first.tokens!, output: 3 } },
+      { ...first, incomplete: true },
+    ]
+    conflicts.forEach((copy) => {
+      const expected = { ...summarizeUsage([]), unpricedResponses: 1 }
+      expect(summarizeUsage([], [first, copy, first])).toEqual(expected)
+      expect(summarizeUsage([], [copy, first, copy])).toEqual(expected)
+    })
+  })
+
+  test("keeps partial title cost as a subtotal and marks missing usage separately from reported zero", () => {
+    const first = ancillary(Date.now())
+    const result = summarizeUsage(
+      [],
+      [
+        { ...first, incomplete: true },
+        { ...first, usageID: EventV2.ID.create(), cost: 0, unpriced: true },
+        { ...first, usageID: EventV2.ID.create(), cost: undefined },
+        { ...first, usageID: EventV2.ID.create(), tokens: undefined },
+        { ...first, usageID: EventV2.ID.create(), cost: 0 },
+      ],
+    )
+    expect(result.lifetimeCost).toBe(0.25)
+    expect(result.unpricedResponses).toBe(4)
+    expect(result.modelResponses).toBe(0)
+    expect(summarizeUsage([], [{ ...first, cost: 0 }]).unpricedResponses).toBeUndefined()
+  })
+
   test("ranks model and effort preferences by token share", () => {
     const now = Date.now()
     const result = summarizeUsage([
@@ -127,6 +202,18 @@ describe("session usage", () => {
     })
   })
 })
+
+function ancillary(timestamp: number) {
+  return Schema.decodeUnknownSync(SessionEvent.AncillaryUsage.data)({
+    sessionID: "ses_title",
+    timestamp,
+    usageID: EventV2.ID.create(),
+    purpose: "title",
+    model: { providerID: "title-provider", id: "title-model" },
+    cost: 0.125,
+    tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+  })
+}
 
 function assistant(
   created: number,

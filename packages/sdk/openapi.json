@@ -17172,6 +17172,9 @@
             "$ref": "#/components/schemas/EventMessagePartRemoved"
           },
           {
+            "$ref": "#/components/schemas/EventSessionNextAncillaryUsage"
+          },
+          {
             "$ref": "#/components/schemas/EventSessionNextMessageImported"
           },
           {
@@ -19755,6 +19758,84 @@
                       }
                     },
                     "required": ["sessionID", "messageID", "partID"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["id", "type", "properties"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["session.next.ancillary.usage"]
+                  },
+                  "properties": {
+                    "type": "object",
+                    "properties": {
+                      "timestamp": {
+                        "type": "number"
+                      },
+                      "sessionID": {
+                        "type": "string",
+                        "pattern": "^ses"
+                      },
+                      "usageID": {
+                        "type": "string",
+                        "pattern": "^evt_"
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "enum": ["title"]
+                      },
+                      "model": {
+                        "$ref": "#/components/schemas/ModelRef"
+                      },
+                      "cost": {
+                        "type": "number"
+                      },
+                      "unpriced": {
+                        "type": "boolean"
+                      },
+                      "tokens": {
+                        "type": "object",
+                        "properties": {
+                          "input": {
+                            "type": "number"
+                          },
+                          "output": {
+                            "type": "number"
+                          },
+                          "reasoning": {
+                            "type": "number"
+                          },
+                          "cache": {
+                            "type": "object",
+                            "properties": {
+                              "read": {
+                                "type": "number"
+                              },
+                              "write": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["read", "write"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["input", "output", "reasoning", "cache"],
+                        "additionalProperties": false
+                      },
+                      "incomplete": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["timestamp", "sessionID", "usageID", "purpose", "model"],
                     "additionalProperties": false
                   }
                 },
@@ -22710,6 +22791,9 @@
               },
               {
                 "$ref": "#/components/schemas/SyncEventMessagePartRemoved"
+              },
+              {
+                "$ref": "#/components/schemas/SyncEventSessionNextAncillaryUsage"
               },
               {
                 "$ref": "#/components/schemas/SyncEventSessionNextMessageImported"
@@ -27937,6 +28021,9 @@
       "SessionDurableEvent": {
         "oneOf": [
           {
+            "$ref": "#/components/schemas/SessionNextAncillaryUsage"
+          },
+          {
             "$ref": "#/components/schemas/SessionNextMessageImported"
           },
           {
@@ -28330,6 +28417,9 @@
           },
           {
             "$ref": "#/components/schemas/MessagePartRemoved"
+          },
+          {
+            "$ref": "#/components/schemas/SessionNextAncillaryUsage"
           },
           {
             "$ref": "#/components/schemas/SessionNextMessageImported"
@@ -28867,6 +28957,22 @@
         "required": ["id", "url", "expiresAt", "updatedAt", "revision", "updates"],
         "additionalProperties": false
       },
+      "ModelRef": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "providerID": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "providerID"],
+        "additionalProperties": false
+      },
       "SessionMessageAgentSwitched": {
         "type": "object",
         "properties": {
@@ -28896,22 +29002,6 @@
           }
         },
         "required": ["id", "time", "type", "agent"],
-        "additionalProperties": false
-      },
-      "ModelRef": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "providerID": {
-            "type": "string"
-          },
-          "variant": {
-            "type": "string"
-          }
-        },
-        "required": ["id", "providerID"],
         "additionalProperties": false
       },
       "SessionMessageModelSwitched": {
@@ -30250,6 +30340,105 @@
                   }
                 },
                 "required": ["sessionID", "messageID", "partID"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["type", "id", "seq", "aggregateID", "data"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["type", "id", "syncEvent"],
+        "additionalProperties": false
+      },
+      "SyncEventSessionNextAncillaryUsage": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["sync"]
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "syncEvent": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["session.next.ancillary.usage.1"]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^evt_"
+              },
+              "seq": {
+                "type": "number"
+              },
+              "aggregateID": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object",
+                "properties": {
+                  "timestamp": {
+                    "type": "number"
+                  },
+                  "sessionID": {
+                    "type": "string",
+                    "pattern": "^ses"
+                  },
+                  "usageID": {
+                    "type": "string",
+                    "pattern": "^evt_"
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "enum": ["title"]
+                  },
+                  "model": {
+                    "$ref": "#/components/schemas/ModelRef"
+                  },
+                  "cost": {
+                    "type": "number"
+                  },
+                  "unpriced": {
+                    "type": "boolean"
+                  },
+                  "tokens": {
+                    "type": "object",
+                    "properties": {
+                      "input": {
+                        "type": "number"
+                      },
+                      "output": {
+                        "type": "number"
+                      },
+                      "reasoning": {
+                        "type": "number"
+                      },
+                      "cache": {
+                        "type": "object",
+                        "properties": {
+                          "read": {
+                            "type": "number"
+                          },
+                          "write": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["read", "write"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["input", "output", "reasoning", "cache"],
+                    "additionalProperties": false
+                  },
+                  "incomplete": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["timestamp", "sessionID", "usageID", "purpose", "model"],
                 "additionalProperties": false
               }
             },
@@ -32842,6 +33031,106 @@
           }
         },
         "required": ["admittedSeq", "id", "sessionID", "prompt", "delivery", "timeCreated"],
+        "additionalProperties": false
+      },
+      "SessionNextAncillaryUsage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "metadata": {
+            "type": "object"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.ancillary.usage"]
+          },
+          "durable": {
+            "type": "object",
+            "properties": {
+              "aggregateID": {
+                "type": "string"
+              },
+              "seq": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": ["aggregateID", "seq", "version"],
+            "additionalProperties": false
+          },
+          "location": {
+            "$ref": "#/components/schemas/LocationRef"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "usageID": {
+                "type": "string",
+                "pattern": "^evt_"
+              },
+              "purpose": {
+                "type": "string",
+                "enum": ["title"]
+              },
+              "model": {
+                "$ref": "#/components/schemas/ModelRef"
+              },
+              "cost": {
+                "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
+              },
+              "tokens": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "reasoning": {
+                    "type": "number"
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "number"
+                      },
+                      "write": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["read", "write"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["input", "output", "reasoning", "cache"],
+                "additionalProperties": false
+              },
+              "incomplete": {
+                "type": "boolean"
+              }
+            },
+            "required": ["timestamp", "sessionID", "usageID", "purpose", "model"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "data"],
         "additionalProperties": false
       },
       "SessionNextMessageImported": {
@@ -39385,6 +39674,84 @@
               }
             },
             "required": ["sessionID", "messageID", "partID"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["id", "type", "properties"],
+        "additionalProperties": false
+      },
+      "EventSessionNextAncillaryUsage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^evt_"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["session.next.ancillary.usage"]
+          },
+          "properties": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "number"
+              },
+              "sessionID": {
+                "type": "string",
+                "pattern": "^ses"
+              },
+              "usageID": {
+                "type": "string",
+                "pattern": "^evt_"
+              },
+              "purpose": {
+                "type": "string",
+                "enum": ["title"]
+              },
+              "model": {
+                "$ref": "#/components/schemas/ModelRef"
+              },
+              "cost": {
+                "type": "number"
+              },
+              "unpriced": {
+                "type": "boolean"
+              },
+              "tokens": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "reasoning": {
+                    "type": "number"
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "number"
+                      },
+                      "write": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["read", "write"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["input", "output", "reasoning", "cache"],
+                "additionalProperties": false
+              },
+              "incomplete": {
+                "type": "boolean"
+              }
+            },
+            "required": ["timestamp", "sessionID", "usageID", "purpose", "model"],
             "additionalProperties": false
           }
         },

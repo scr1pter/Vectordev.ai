@@ -16,6 +16,7 @@ import { Persist, persisted } from "@/utils/persist"
 import {
   cycleModelVariant,
   getConfiguredAgentVariant,
+  modelSelectionState,
   normalizeModelVariant,
   resolveModelVariant,
   visibleModelVariants,
@@ -371,14 +372,20 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       set(item: ModelKey | undefined, options?: { recent?: boolean }) {
         startTransition(() =>
           batch(() => {
+            const next = modelSelectionState(
+              item,
+              visibleModelVariants(Object.keys(item ? (models.find(item)?.variants ?? {}) : {})),
+            )
+            if (!next) return
             setStore("last", {
               type: "model",
               agent: agent.current()?.name,
               model: item ?? null,
-              variant: selected(),
+              variant: next.variant ?? selected(),
             })
-            write({ model: item })
+            write(next)
             if (!item) return
+            if (next.variant !== undefined) models.variant.set(item, next.variant)
             models.setVisibility(item, true)
             if (!options?.recent) return
             models.recent.push(item)

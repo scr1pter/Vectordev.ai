@@ -3,7 +3,8 @@ import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import path from "path"
-import { tool, type ModelMessage } from "ai"
+import { streamText, tool, type ModelMessage } from "ai"
+import { createOpenAI } from "@ai-sdk/openai"
 import { Cause, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
@@ -183,6 +184,186 @@ describe("session.llm.ai-sdk adapter", () => {
   }
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- tests defensive adapter branches outside AI SDK's current typed surface
   const uncheckedAdapterEvent = (input: unknown) => input as AISDKAdapterEvent
+
+  test.each([false, true])(
+    "fails HTTP 200 SSE provider errors with sequence_number=%s without a false finish",
+    async (sequence) => {
+      const failure = {
+        type: "error",
+        ...(sequence ? { sequence_number: 1 } : {}),
+        error: {
+          type: "invalid_request_error",
+          code: "unsupported_value",
+          message: "Unsupported reasoning effort",
+          param: "reasoning.effort",
+        },
+      }
+      let requests = 0
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch() {
+          requests++
+          return new Response(`event: error\ndata: ${JSON.stringify(failure)}\n\n`, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          })
+        },
+      })
+      try {
+        const sdk = createOpenAI({ apiKey: "test-key", baseURL: `${server.url.origin}/v1` })
+        const stream = streamText({
+          model: sdk.responses("gpt-6.1-sol"),
+          prompt: "Generate a title",
+          includeRawChunks: true,
+          maxRetries: 0,
+        })
+        const parts: AISDKAdapterEvent[] = []
+        for await (const part of stream.fullStream) parts.push(part)
+        // Exercise the real SDK's permissive unknown-chunk fallback, as well as its normal error shape.
+        expect(parts.filter((part) => part.type === "error")).toHaveLength(sequence ? 1 : 0)
+        expect(parts.some((part) => part.type === "finish")).toBe(true)
+        const state = LLMAISDK.adapterState()
+        const visible: string[] = []
+        const result = await Effect.runPromise(
+          Stream.fromIterable(parts).pipe(
+            Stream.mapEffect((part) => LLMAISDK.toLLMEvents(state, part)),
+            Stream.flatMap((events) => Stream.fromIterable(events)),
+            Stream.tap((event) =>
+              Effect.sync(() => {
+                visible.push(event.type)
+              }),
+            ),
+            Stream.runDrain,
+            Effect.match({ onFailure: (error) => ({ error }), onSuccess: () => ({ error: undefined }) }),
+          ),
+        )
+        expect(result.error).toEqual(failure)
+        expect(visible).toEqual(["step-start"])
+        expect(requests).toBe(1)
+      } finally {
+        await server.stop(true)
+      }
+    },
+  )
+
+  test.each(["response.completed", "response.incomplete", "response.done"])(
+    "retains OpenAI cache writes from raw %s without adding duplicate terminal usage",
+    async (type) => {
+      const raw = {
+        type: "raw",
+        rawValue: { type, response: { usage: { input_tokens_details: { cache_write_tokens: 3000 } } } },
+      }
+      const events = await adapt([
+        uncheckedAdapterEvent(raw),
+        uncheckedAdapterEvent(raw),
+        uncheckedAdapterEvent({
+          type: "finish-step",
+          finishReason: "stop",
+          usage: { inputTokens: 12000, outputTokens: 200 },
+        }),
+        uncheckedAdapterEvent({
+          type: "finish",
+          finishReason: "stop",
+          totalUsage: { inputTokens: 12000, outputTokens: 200 },
+        }),
+      ])
+      expect(events.map((event) => "usage" in event && event.usage?.cacheWriteInputTokens)).toEqual([3000, 3000])
+    },
+  )
+
+  test.each([undefined, null, -1, 1.5, "3", Infinity, NaN, 0])(
+    "preserves absent or invalid OpenAI cache-write counts as unknown and reported zero as zero: %p",
+    async (value) => {
+      const events = await adapt([
+        uncheckedAdapterEvent({
+          type: "raw",
+          rawValue: {
+            type: "response.completed",
+            response: { usage: { input_tokens_details: { cache_write_tokens: value } } },
+          },
+        }),
+        uncheckedAdapterEvent({ type: "finish-step", finishReason: "stop", usage: { inputTokens: 12 } }),
+        uncheckedAdapterEvent({ type: "finish", finishReason: "stop", totalUsage: { inputTokens: 12 } }),
+      ])
+      expect(events.map((event) => "usage" in event && event.usage?.cacheWriteInputTokens)).toEqual(
+        value === 0 ? [0, 0] : [undefined, undefined],
+      )
+    },
+  )
+
+  test("uses SDK cache-write counts when present and resets raw usage across steps and streams", async () => {
+    const events = await adapt([
+      uncheckedAdapterEvent({
+        type: "raw",
+        rawValue: {
+          type: "response.completed",
+          response: { usage: { input_tokens_details: { cache_write_tokens: 3 } } },
+        },
+      }),
+      uncheckedAdapterEvent({
+        type: "finish-step",
+        finishReason: "tool-calls",
+        usage: { inputTokens: 12, inputTokenDetails: { cacheWriteTokens: 4 } },
+      }),
+      uncheckedAdapterEvent({ type: "finish-step", finishReason: "stop", usage: { inputTokens: 12 } }),
+      uncheckedAdapterEvent({
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: { inputTokens: 24, inputTokenDetails: { cacheWriteTokens: 4 } },
+      }),
+      uncheckedAdapterEvent({ type: "finish-step", finishReason: "stop", usage: { inputTokens: 12 } }),
+      uncheckedAdapterEvent({ type: "finish", finishReason: "stop", totalUsage: { inputTokens: 12 } }),
+    ])
+    expect(events.map((event) => "usage" in event && event.usage?.cacheWriteInputTokens)).toEqual([
+      4,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ])
+  })
+
+  test("aggregates reported cache writes once per step for the stream total", async () => {
+    const events = await adapt([
+      ...[3, 0, 7].flatMap((count) => [
+        uncheckedAdapterEvent({
+          type: "raw",
+          rawValue: {
+            type: "response.completed",
+            response: { usage: { input_tokens_details: { cache_write_tokens: count } } },
+          },
+        }),
+        uncheckedAdapterEvent({ type: "finish-step", finishReason: "tool-calls", usage: { inputTokens: 12 } }),
+      ]),
+      uncheckedAdapterEvent({ type: "finish", finishReason: "stop", totalUsage: { inputTokens: 36 } }),
+    ])
+    expect(events.map((event) => "usage" in event && event.usage?.cacheWriteInputTokens)).toEqual([3, 0, 7, 10])
+  })
+
+  test("includes raw-only steps when the SDK total contains a partial cache-write sum", async () => {
+    const events = await adapt([
+      uncheckedAdapterEvent({
+        type: "finish-step",
+        finishReason: "tool-calls",
+        usage: { inputTokens: 12, inputTokenDetails: { cacheWriteTokens: 4 } },
+      }),
+      uncheckedAdapterEvent({
+        type: "raw",
+        rawValue: {
+          type: "response.completed",
+          response: { usage: { input_tokens_details: { cache_write_tokens: 3 } } },
+        },
+      }),
+      uncheckedAdapterEvent({ type: "finish-step", finishReason: "stop", usage: { inputTokens: 12 } }),
+      uncheckedAdapterEvent({
+        type: "finish",
+        finishReason: "stop",
+        totalUsage: { inputTokens: 24, inputTokenDetails: { cacheWriteTokens: 4 } },
+      }),
+    ])
+    expect(events.map((event) => "usage" in event && event.usage?.cacheWriteInputTokens)).toEqual([4, 3, 7])
+  })
 
   test("maps AI SDK stream chunks without losing session-visible fields", async () => {
     const metadata = { openai: { itemID: "item-1" } }
@@ -781,6 +962,99 @@ function createEventResponse(chunks: unknown[], includeDone = false) {
 }
 
 describe("session.llm.stream", () => {
+  for (const verbosity of [undefined, "high"] as const) {
+    it.instance(
+      `preserves and prices OpenAI cache writes through the real SDK with verbosity ${verbosity ?? "default"}`,
+      () =>
+        Effect.gen(function* () {
+          const request = waitRequest(
+            "/responses",
+            createEventResponse([
+              {
+                type: "response.created",
+                response: { id: "resp-cache-write", created_at: 1, model: "gpt-6.1-sol", service_tier: null },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  incomplete_details: null,
+                  service_tier: null,
+                  usage: {
+                    input_tokens: 12000,
+                    input_tokens_details: { cached_tokens: 8000, cache_write_tokens: 3000 },
+                    output_tokens: 200,
+                    output_tokens_details: { reasoning_tokens: 50 },
+                  },
+                },
+              },
+            ]),
+          )
+          const resolved = yield* Provider.use.getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-6.1-sol"))
+          const sessionID = SessionID.make("session-cache-write")
+          const agent = {
+            name: "test",
+            mode: "primary",
+            options: verbosity ? { textVerbosity: verbosity } : {},
+            permission: [],
+          } satisfies Agent.Info
+          const events = yield* LLM.Service.use((svc) =>
+            svc
+              .stream({
+                user: {
+                  id: MessageID.make("msg_cache-write"),
+                  sessionID,
+                  role: "user",
+                  time: { created: 1 },
+                  agent: agent.name,
+                  model: { providerID: ProviderV2.ID.openai, modelID: resolved.id },
+                },
+                sessionID,
+                model: resolved,
+                agent,
+                system: ["Test"],
+                messages: [{ role: "user", content: "Hello" }],
+                tools: {},
+              })
+              .pipe(Stream.runCollect),
+          )
+          const steps = events.filter((event) => event.type === "step-finish")
+          expect(steps).toHaveLength(1)
+          expect(steps[0].usage).toMatchObject({
+            inputTokens: 12000,
+            cacheReadInputTokens: 8000,
+            cacheWriteInputTokens: 3000,
+            outputTokens: 200,
+            reasoningTokens: 50,
+            totalTokens: 12200,
+          })
+          expect(events.find((event) => event.type === "finish")?.usage?.cacheWriteInputTokens).toBe(3000)
+          const billed = SessionNs.getUsage({
+            model: { ...resolved, cost: { input: 2, output: 10, cache: { read: 0.1, write: 2.5 } } },
+            usage: steps[0].usage!,
+          })
+          expect(billed.tokens).toEqual({
+            total: 12200,
+            input: 1000,
+            output: 150,
+            reasoning: 50,
+            cache: { read: 8000, write: 3000 },
+          })
+          expect(billed.cost).toBeCloseTo(0.0123, 10)
+          const capture = yield* Effect.promise(() => request)
+          expect(capture.body.text).toEqual(verbosity ? { verbosity } : undefined)
+          expect(capture.body.prompt_cache_key).toBe(sessionID)
+          expect(capture.body.reasoning).toMatchObject({ effort: "medium" })
+        }),
+      {
+        config: () =>
+          openAIConfig(
+            { ...loadFixture("openai", "gpt-5.2").model, id: "gpt-6.1-sol" },
+            `${state.server!.url.origin}/v1`,
+          ),
+      },
+    )
+  }
+
   const vivgridFixture = { providerID: "vivgrid", modelID: "gemini-3.1-pro-preview" }
   it.instance(
     "sends temperature, tokens, and reasoning options for openai-compatible models",

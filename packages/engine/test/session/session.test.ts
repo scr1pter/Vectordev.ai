@@ -1,8 +1,13 @@
 import { describe, expect } from "bun:test"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { EventV2 } from "@vectordevai/core/event"
+import { SessionEvent } from "@vectordevai/schema/session-event"
+import { ModelV2 } from "@vectordevai/core/model"
+import { ProviderV2 } from "@vectordevai/core/provider"
 import { SessionProjector } from "@vectordevai/core/session/projector"
-import { Deferred, Effect, Exit, Layer } from "effect"
+import { SessionArchive } from "@vectordevai/core/share/archive"
+import { AbsolutePath } from "@vectordevai/core/schema"
+import { DateTime, Deferred, Effect, Exit, Layer, Schema } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
@@ -21,6 +26,8 @@ const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([
       SessionNs.node,
+      EventV2.node,
+      SessionArchive.node,
       EventV2Bridge.node,
       SessionProjector.node,
       CrossSpawnSpawner.node,
@@ -349,11 +356,66 @@ describe("unpriced steps", () => {
 })
 
 describe("subagent spend", () => {
+  it.instance("late descendant spend refreshes the root without inflating assistant activity or duration", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionNs.Service
+      const events = yield* EventV2.Service
+      const root = yield* sessions.create({ title: "root" })
+      const child = yield* sessions.create({ parentID: root.id, title: "child" })
+      const grandchild = yield* sessions.create({ parentID: child.id, title: "grandchild" })
+      const messageID = MessageID.ascending()
+      const started = Date.now() - 1000
+      yield* sessions.updateMessage({
+        id: messageID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        sessionID: root.id,
+        mode: "build",
+        agent: "build",
+        cost: 0.1,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ModelV2.ID.make("main-model"),
+        providerID: ProviderV2.ID.make("openai"),
+        finish: "stop",
+        time: { created: started, completed: started + 500 },
+      })
+      const before = yield* sessions.usage()
+      const beforeRoot = yield* sessions.get(root.id)
+      const late = Date.now() + 7 * 86_400_000
+      yield* events.publish(SessionEvent.AncillaryUsage, {
+        sessionID: grandchild.id,
+        timestamp: DateTime.makeUnsafe(late),
+        usageID: EventV2.ID.create(),
+        purpose: "title",
+        model: { id: ModelV2.ID.make("title-model"), providerID: ProviderV2.ID.make("openai") },
+        cost: 0.05,
+        tokens: { input: 3, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+      const after = yield* sessions.usage()
+      const afterRoot = yield* sessions.get(root.id)
+      expect(afterRoot.time.updated).toBe(late)
+      expect(afterRoot.time.created).toBe(beforeRoot.time.created)
+      expect(afterRoot.subagentCost).toBeCloseTo(0.05)
+      for (const key of ["longestTaskMs", "averageTaskMs", "currentStreak", "longestStreak", "lifetimeTokens"] as const)
+        expect(after[key]).toBe(before[key])
+      expect(after.favoriteModels).toEqual(before.favoriteModels)
+      expect(after.days.filter((day) => day.tasks > 0)).toEqual(before.days.filter((day) => day.tasks > 0))
+      expect(after.lifetimeCost).toBeCloseTo(before.lifetimeCost + 0.05)
+      expect((yield* sessions.messages({ sessionID: root.id }))[0]?.info.time).toEqual({
+        created: started,
+        completed: started + 500,
+      })
+      yield* sessions.remove(root.id)
+    }),
+  )
+
   it.instance("a parent session carries what its subagents spent, apart from its own cost", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const parent = yield* session.create({ title: "parent" })
       const child = yield* session.create({ parentID: parent.id, title: "child" })
+      const grandchild = yield* session.create({ parentID: child.id, title: "grandchild" })
       const spend = (sessionID: SessionID, cost: number) =>
         Effect.gen(function* () {
           const messageID = MessageID.ascending()
@@ -381,7 +443,7 @@ describe("subagent spend", () => {
             tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
           }
           yield* session.updatePart(part)
-          return { messageID, partID: part.id }
+          return { messageID, partID: part.id, part }
         })
       yield* spend(parent.id, 0.6)
       const delegated = yield* spend(child.id, 2.4)
@@ -389,9 +451,25 @@ describe("subagent spend", () => {
       expect(yield* session.get(parent.id)).toMatchObject({ cost: 0.6, subagentCost: 2.4 })
       expect((yield* session.get(child.id)).subagentCost).toBeUndefined()
 
+      const firstRevision = (yield* session.get(parent.id)).time.updated
+      yield* session.updatePart(delegated.part)
+      expect((yield* session.get(parent.id)).time.updated).toBe(firstRevision)
+      const childRevision = (yield* session.get(child.id)).time.updated
+      yield* session.updatePart({ ...delegated.part, tokens: { ...delegated.part.tokens, input: 101 } })
+      expect((yield* session.get(child.id)).time.updated).toBeGreaterThan(childRevision)
+      expect((yield* session.get(parent.id)).time.updated).toBe(firstRevision)
+      const nested = yield* spend(grandchild.id, 0.25)
+      const nestedRevision = (yield* session.get(parent.id)).time.updated
+      expect(nestedRevision).toBeGreaterThan(firstRevision)
+      expect((yield* session.get(parent.id)).subagentCost).toBeCloseTo(2.65)
+      expect((yield* session.get(child.id)).subagentCost).toBeCloseTo(0.25)
+      yield* session.removePart({ sessionID: grandchild.id, messageID: nested.messageID, partID: nested.partID })
+      expect((yield* session.get(parent.id)).time.updated).toBeGreaterThan(nestedRevision)
+
       // Removing the child's step takes it back out of the parent's rollup too.
       yield* session.removePart({ sessionID: child.id, messageID: delegated.messageID, partID: delegated.partID })
       expect((yield* session.get(parent.id)).subagentCost).toBeUndefined()
+      yield* session.remove(grandchild.id)
       yield* session.remove(child.id)
       yield* session.remove(parent.id)
     }),
@@ -444,3 +522,100 @@ describe("Session", () => {
     }),
   )
 })
+
+it.instance("forked history leaves ancillary title spend on the original session", () =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionNs.Service
+    const events = yield* EventV2Bridge.Service
+    const original = yield* sessions.create({ title: "Original" })
+    yield* events.publish(SessionEvent.AncillaryUsage, {
+      sessionID: original.id,
+      timestamp: DateTime.nowUnsafe(),
+      usageID: EventV2.ID.create(),
+      purpose: "title",
+      model: { id: ModelV2.ID.make("title"), providerID: ProviderV2.ID.make("test") },
+      cost: 0.25,
+      tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    const forked = yield* sessions.fork({ sessionID: original.id })
+    expect((yield* sessions.get(original.id)).cost).toBe(0.25)
+    expect((yield* sessions.get(forked.id)).cost).toBe(0)
+    expect(yield* sessions.messages({ sessionID: forked.id })).toHaveLength(0)
+  }),
+)
+
+it.instance("global spend counts title attempts once through replay, archive imports, forks, and deletion", () =>
+  Effect.gen(function* () {
+    const sessions = yield* SessionNs.Service
+    const events = yield* EventV2.Service
+    const archives = yield* SessionArchive.Service
+    const before = yield* sessions.usage()
+    const original = yield* sessions.create({ title: "Usage provenance" })
+    const first = yield* events.publish(SessionEvent.AncillaryUsage, {
+      sessionID: original.id,
+      timestamp: DateTime.nowUnsafe(),
+      usageID: EventV2.ID.create(),
+      purpose: "title",
+      model: { id: ModelV2.ID.make("title"), providerID: ProviderV2.ID.make("test") },
+      cost: 0.25,
+      tokens: { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    yield* events.publish(SessionEvent.AncillaryUsage, {
+      ...first.data,
+      usageID: EventV2.ID.create(),
+      cost: undefined,
+      tokens: undefined,
+      incomplete: true,
+    })
+    if (!first.durable) return yield* Effect.die("Ancillary usage was not durable")
+    yield* events.replay({
+      id: first.id,
+      aggregateID: original.id,
+      seq: first.durable.seq,
+      type: EventV2.versionedType(first.type, first.durable.version),
+      data: Schema.encodeSync(SessionEvent.AncillaryUsage.data)(first.data),
+    })
+    const recorded = yield* sessions.usage()
+    expect(recorded.lifetimeCost).toBeCloseTo(before.lifetimeCost + 0.25)
+    expect(recorded.unpricedResponses).toBe((before.unpricedResponses ?? 0) + 1)
+    expect({
+      ...recorded,
+      lifetimeCost: before.lifetimeCost,
+      unpricedResponses: before.unpricedResponses,
+      days: before.days,
+    }).toEqual({ ...before, unpricedResponses: before.unpricedResponses })
+
+    const forked = yield* sessions.fork({ sessionID: original.id })
+    const exported = yield* archives.export({ sessionID: original.id })
+    const encoded =
+      "engine" in exported
+        ? Schema.encodeSync(SessionArchive.Native)(exported)
+        : Schema.encodeSync(SessionArchive.Legacy)(exported)
+    const location = { directory: AbsolutePath.make(original.directory) }
+    const imported = yield* archives.import({ archive: encoded, location })
+    const duplicate = yield* archives.import({ archive: encoded, location })
+    expect(yield* sessions.usage()).toEqual(recorded)
+
+    const conflicting = yield* archives.import({
+      archive: {
+        ...encoded,
+        ancillaryUsage: encoded.ancillaryUsage?.map((usage) =>
+          usage.usageID === first.data.usageID ? { ...usage, cost: 0.75 } : usage,
+        ),
+      },
+      location,
+    })
+    const ambiguous = yield* sessions.usage()
+    expect(ambiguous.lifetimeCost).toBe(before.lifetimeCost)
+    expect(ambiguous.unpricedResponses).toBe((before.unpricedResponses ?? 0) + 2)
+    yield* sessions.remove(conflicting.sessionID)
+    expect(yield* sessions.usage()).toEqual(recorded)
+
+    yield* sessions.remove(original.id)
+    yield* sessions.remove(forked.id)
+    yield* sessions.remove(imported.sessionID)
+    expect(yield* sessions.usage()).toEqual(recorded)
+    yield* sessions.remove(duplicate.sessionID)
+    expect(yield* sessions.usage()).toEqual(before)
+  }),
+)

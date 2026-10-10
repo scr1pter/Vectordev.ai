@@ -71,7 +71,8 @@ export function SessionContextTab() {
     rankModelsForCategory(economicsOutcomes() ?? [], taskCategory(), ctx()?.tokens ?? 0, providers.all()),
   )
   const formatPercent = (value: number | undefined) => (value === undefined ? "-" : `${Math.round(value * 100)}%`)
-  const formatLatency = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`)
+  const formatLatency = (ms: number | undefined) =>
+    ms === undefined ? "unknown" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
 
   const ledger = createMemo(() => [
     {
@@ -300,8 +301,8 @@ export function SessionContextTab() {
             when={modelEconomics().length > 0}
             fallback={
               <div class="mt-3 text-xs leading-5 text-white/38">
-                No verified runs yet for this task type. As you run agents and their checks pass or fail, Vector learns
-                which model performs best here.
+                No recorded runs yet for this task type. Completion and validation checks provide separate evidence
+                about how each model performs here.
               </div>
             }
           >
@@ -310,18 +311,33 @@ export function SessionContextTab() {
                 {(row) => (
                   <div class="rounded-md border border-[color:var(--vx-line)] bg-white/[0.025] px-4 py-3">
                     <div class="flex items-center justify-between gap-3">
-                      <div class="min-w-0 truncate text-sm font-semibold text-white">{row.model}</div>
+                      <div class="min-w-0 truncate text-sm font-semibold text-white">
+                        {row.mixedModels ? "Mixed models" : (row.model ?? "Model unknown")} ·{" "}
+                        {row.variant?.kind === "named"
+                          ? `${row.variant.name} effort`
+                          : row.variant?.kind === "mixed"
+                            ? "mixed effort"
+                            : "effort unknown"}
+                      </div>
                       <div class="shrink-0 text-xs text-white/42">{row.provider}</div>
                     </div>
                     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/55">
                       <span>
                         {row.sampleSize} run{row.sampleSize === 1 ? "" : "s"}
                       </span>
+                      <span>{row.completedSamples} completed or positively validated</span>
+                      <span>{row.unsuccessfulSamples} failed, aborted or incomplete</span>
                       <span>checks {formatPercent(row.checkPassRate)}</span>
-                      <span>median {formatLatency(row.medianLatencyMs)}</span>
+                      <span title="Sum of recorded assistant wall-clock intervals, including tools and waits within them; excludes gaps and startup. Not total task wall time or provider-only latency.">
+                        median summed reply time {formatLatency(row.medianLatencyMs)} · {row.timedSamples}/
+                        {row.sampleSize} timed
+                      </span>
                       <Show when={row.medianCostUsd !== undefined}>
-                        <span>median {price(row.medianCostUsd ?? 0)}/run</span>
+                        <span>median {price(row.medianCostUsd ?? 0)}/priced run</span>
                       </Show>
+                      <span>
+                        {row.pricedSamples}/{row.sampleSize} priced
+                      </span>
                       <span>
                         {row.projectedCostUsd !== undefined
                           ? `~${price(row.projectedCostUsd)} next turn`

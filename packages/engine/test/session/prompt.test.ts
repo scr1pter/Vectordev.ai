@@ -1,6 +1,8 @@
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Database } from "@vectordevai/core/database/database"
+import { EventTable } from "@vectordevai/core/event/sql"
+import { SessionEvent } from "@vectordevai/schema/session-event"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
@@ -707,6 +709,16 @@ it.instance("title generation sends only what the user typed", () =>
     )
     expect(title).toContain("Fix the login redirect")
     expect(title).not.toContain("ATTACHED FILE CONTENTS")
+    yield* prompt.awaitTitles()
+    const database = yield* Database.Service
+    const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    expect(usage).toHaveLength(1)
+    // The server's automatic title reply reports no usage; keep its spend unknown rather than inventing tokens.
+    expect(usage[0]?.data).toMatchObject({ incomplete: true, unpriced: true })
+    expect(usage[0]?.data.tokens).toBeUndefined()
+    const history = yield* sessions.messages({ sessionID: chat.id })
+    expect(history.filter((message) => message.info.role === "assistant")).toHaveLength(1)
   }),
 )
 

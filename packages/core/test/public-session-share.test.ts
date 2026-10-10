@@ -16,6 +16,8 @@ import { PublicSessionShareTable } from "../src/share/public.sql"
 import { makeShareTransport, shareID } from "../src/share/transport"
 import { SessionV1 } from "../src/v1/session"
 import { SessionEvent } from "../src/session/event"
+import { ModelV2 } from "../src/model"
+import { ProviderV2 } from "../src/provider"
 import { SessionMessage } from "../src/session/message"
 import { SessionSchema } from "../src/session/schema"
 import { SessionTable, SessionInputTable, SessionMessageTable, MessageTable } from "../src/session/sql"
@@ -657,3 +659,60 @@ test("failed and DELETE requests cancel response bodies and reject redirects", a
   await client.remove("a".repeat(32), "b".repeat(64))
   expect(canceled).toEqual(["GET", "DELETE"])
 })
+
+for (const engine of ["v1", "v2"] as const) {
+  it.effect(`${engine} local archives preserve ancillary attempt identity and spend, public transcripts omit it`, () =>
+    Effect.gen(function* () {
+      const archives = yield* SessionArchive.Service
+      const events = yield* EventV2.Service
+      const database = yield* Database.Service
+      const original = yield* archives.import({
+        archive: source,
+        targetEngine: engine,
+        location: { directory: AbsolutePath.make("/tmp") },
+      })
+      const usageID = EventV2.ID.create()
+      yield* events.publish(
+        SessionEvent.AncillaryUsage,
+        {
+          sessionID: original.sessionID,
+          timestamp: DateTime.makeUnsafe(3),
+          usageID,
+          purpose: "title",
+          model: { id: ModelV2.ID.make("title-model"), providerID: ProviderV2.ID.make("title-provider") },
+          cost: 0.125,
+          incomplete: true,
+          tokens: { input: 25, output: 0, reasoning: 0, cache: { read: 5, write: 0 } },
+        },
+        { id: usageID },
+      )
+      const exported = yield* archives.export(original)
+      expect(exported.ancillaryUsage).toHaveLength(1)
+      expect(exported.ancillaryUsage?.[0]?.usageID).toBe(usageID)
+      expect(JSON.stringify(SessionArchive.publicArchive(exported))).not.toContain("ancillaryUsage")
+      const encoded =
+        "engine" in exported
+          ? Schema.encodeSync(SessionArchive.Native)(exported)
+          : Schema.encodeSync(SessionArchive.Legacy)(exported)
+      const imported = yield* archives.import({ archive: encoded, location: { directory: AbsolutePath.make("/tmp") } })
+      const roundtrip = yield* archives.export(imported)
+      expect(roundtrip.ancillaryUsage?.[0]).toMatchObject({
+        usageID,
+        sessionID: imported.sessionID,
+        cost: 0.125,
+        incomplete: true,
+      })
+      const row = yield* database.db.select().from(SessionTable).where(eq(SessionTable.id, imported.sessionID)).get()
+      expect(row?.cost).toBe(0.125)
+      expect(row?.unpriced_steps).toBe(1)
+      expect(row?.tokens_input).toBe(25)
+      const duplicate = yield* archives
+        .import({
+          archive: { ...encoded, ancillaryUsage: [encoded.ancillaryUsage![0], encoded.ancillaryUsage![0]] },
+          location: { directory: AbsolutePath.make("/tmp") },
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(duplicate)).toBe(true)
+    }),
+  )
+}

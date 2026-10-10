@@ -2,6 +2,7 @@ import { FinishReason, LLMEvent, ProviderMetadata, ToolResultValue } from "@vect
 import { Effect, Schema } from "effect"
 import { type streamText } from "ai"
 import { errorMessage } from "@/util/error"
+import { isRecord } from "@/util/record"
 
 type Result = Awaited<ReturnType<typeof streamText>>
 type AISDKEvent = Result["fullStream"] extends AsyncIterable<infer T> ? T : never
@@ -15,6 +16,8 @@ export function adapterState() {
     currentReasoningID: undefined as string | undefined,
     toolNames: {} as Record<string, string>,
     copilotTotalNanoAiu: undefined as number | undefined,
+    openAICacheWriteTokens: undefined as number | undefined,
+    cacheWriteTokensTotal: 0 as number | undefined,
   }
 }
 
@@ -41,6 +44,19 @@ function copilotTotalNanoAiu(value: unknown) {
   return total
 }
 
+// The pinned OpenAI SDK omits cache_write_tokens from its parsed usage schema.
+// Read only the terminal raw usage; an absent field remains unknown, not zero.
+function openAICacheWriteTokens(value: unknown) {
+  if (!isRecord(value)) return
+  if (value.type !== "response.completed" && value.type !== "response.incomplete" && value.type !== "response.done")
+    return
+  if (!isRecord(value.response) || !isRecord(value.response.usage)) return
+  const details = value.response.usage.input_tokens_details
+  if (!isRecord(details)) return
+  const count = details.cache_write_tokens
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : undefined
+}
+
 // The usage Anthropic's message_start reports: the prompt and its cache read and write, which the provider bills once
 // it starts the response. A step that is stopped or fails mid-stream never gets its finish-step, so this is all the
 // usage it will report.
@@ -64,7 +80,7 @@ export function startedUsage(value: unknown) {
   }
 }
 
-function usage(value: unknown) {
+function usage(value: unknown, cacheWriteTokens?: number) {
   if (!value || typeof value !== "object") return undefined
   const item = value as {
     inputTokens?: number
@@ -81,7 +97,7 @@ function usage(value: unknown) {
     totalTokens: item.totalTokens,
     reasoningTokens: item.outputTokenDetails?.reasoningTokens ?? item.reasoningTokens,
     cacheReadInputTokens: item.inputTokenDetails?.cacheReadTokens ?? item.cachedInputTokens,
-    cacheWriteInputTokens: item.inputTokenDetails?.cacheWriteTokens,
+    cacheWriteInputTokens: item.inputTokenDetails?.cacheWriteTokens ?? cacheWriteTokens,
   }).filter((entry) => entry[1] !== undefined)
   return entries.length === 0 ? undefined : Object.fromEntries(entries)
 }
@@ -109,6 +125,12 @@ export function toLLMEvents(
 
     case "finish-step":
       return Effect.sync(() => {
+        const reported = usage(event.usage, state.openAICacheWriteTokens)
+        state.cacheWriteTokensTotal =
+          state.cacheWriteTokensTotal === undefined || reported?.cacheWriteInputTokens === undefined
+            ? undefined
+            : state.cacheWriteTokensTotal + reported.cacheWriteInputTokens
+        state.openAICacheWriteTokens = undefined
         const original = providerMetadata(event.providerMetadata)
         const metadata =
           state.copilotTotalNanoAiu === undefined
@@ -125,7 +147,7 @@ export function toLLMEvents(
           LLMEvent.stepFinish({
             index: state.step++,
             reason: finishReason(event.finishReason),
-            usage: usage(event.usage),
+            usage: reported,
             providerMetadata: metadata,
           }),
         ]
@@ -133,10 +155,17 @@ export function toLLMEvents(
 
     case "finish":
       return Effect.sync(() => {
+        const reported = usage(event.totalUsage, state.openAICacheWriteTokens)
+        if (reported && state.step > 0) {
+          // The SDK total can omit writes recovered from raw frames, or sum only known steps.
+          // Use the normalized sum only when every step reported its write count.
+          if (state.cacheWriteTokensTotal === undefined) delete reported.cacheWriteInputTokens
+          if (state.cacheWriteTokensTotal !== undefined) reported.cacheWriteInputTokens = state.cacheWriteTokensTotal
+        }
         const events = [
           LLMEvent.finish({
             reason: finishReason(event.finishReason),
-            usage: usage(event.totalUsage),
+            usage: reported,
             providerMetadata: "providerMetadata" in event ? providerMetadata(event.providerMetadata) : undefined,
           }),
         ]
@@ -295,8 +324,12 @@ export function toLLMEvents(
       return Effect.succeed([])
 
     case "raw":
+      // Some Responses endpoints omit sequence_number on SSE errors. The SDK treats those as
+      // unknown chunks and finishes successfully, so preserve the error before consuming its finish.
+      if (isRecord(event.rawValue) && event.rawValue.type === "error") return Effect.fail(event.rawValue)
       return Effect.sync(() => {
         state.copilotTotalNanoAiu = copilotTotalNanoAiu(event.rawValue) ?? state.copilotTotalNanoAiu
+        state.openAICacheWriteTokens = openAICacheWriteTokens(event.rawValue) ?? state.openAICacheWriteTokens
         return []
       })
 

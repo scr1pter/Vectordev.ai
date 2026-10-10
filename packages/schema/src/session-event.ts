@@ -204,6 +204,25 @@ export namespace Step {
   export type Resumed = typeof Resumed.Type
 }
 
+// Shared by both session engines. Provider work outside the transcript still belongs to the session's spend.
+export const AncillaryUsage = Event.define({
+  type: "session.next.ancillary.usage",
+  ...options,
+  schema: {
+    ...Base,
+    // Stable across archive remapping; separate billed attempts never share this identity.
+    usageID: Event.ID,
+    purpose: Schema.Literal("title"),
+    model: Model.Ref,
+    cost: Step.Ended.data.fields.cost.pipe(optional),
+    unpriced: Step.Ended.data.fields.unpriced,
+    tokens: Step.Ended.data.fields.tokens.pipe(optional),
+    // Only partial provider usage was available; normalized totals are a lower bound, not a fully priced request.
+    incomplete: Schema.Boolean.pipe(optional),
+  },
+})
+export type AncillaryUsage = typeof AncillaryUsage.Type
+
 export namespace Text {
   export const Started = Event.define({
     type: "session.next.text.started",
@@ -487,6 +506,7 @@ export const ShareChanged = Event.define({
 })
 
 export const DurableDefinitions = Event.inventory(
+  AncillaryUsage,
   MessageImported,
   ShareChanged,
   AgentSwitched,
@@ -522,6 +542,7 @@ export const DurableDefinitions = Event.inventory(
 )
 
 export const Definitions = Event.inventory(
+  AncillaryUsage,
   MessageImported,
   ShareChanged,
   AgentSwitched,

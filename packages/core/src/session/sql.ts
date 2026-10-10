@@ -43,7 +43,7 @@ export const SessionTable = sqliteTable(
     summary_diffs: text({ mode: "json" }).$type<Snapshot.LegacyFileDiff[]>(),
     metadata: text({ mode: "json" }).$type<Record<string, unknown>>(),
     cost: real().notNull().default(0),
-    // Steps on a model with no listed price, which cost leaves out. Kept by the same step accounting as cost.
+    // Requests with unknown pricing or incomplete usage. Kept by the same accounting as cost.
     unpriced_steps: integer().notNull().default(0),
     // What the subagent sessions below this one spent, kept by the same step accounting, so a session's total covers
     // the work it delegated.

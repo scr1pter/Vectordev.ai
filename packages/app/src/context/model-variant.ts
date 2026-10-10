@@ -18,6 +18,13 @@ type VariantInput = {
   configured: string | undefined
 }
 
+// Produce one state update for the target model and its exact preset. Resolving a second selection from
+// the current model during a transition can otherwise save the preset against the previous model.
+export function modelSelectionState(model: (AgentModel & { variant?: string }) | undefined, variants: string[]) {
+  if (model?.variant !== undefined && !variants.includes(model.variant)) return undefined
+  return { model, ...(model?.variant !== undefined ? { variant: model.variant } : {}) }
+}
+
 const VARIANT_COPY: Record<string, { label: string; description: string }> = {
   default: {
     label: "Default",
@@ -57,19 +64,12 @@ const VARIANT_COPY: Record<string, { label: string; description: string }> = {
   },
 }
 
-const EFFORT_GROUPS = [
-  ["low", "minimal"],
-  ["medium"],
-  ["high"],
-  ["max", "xhigh", "ultra"],
-] as const
+const EFFORT_GROUPS = [["low", "minimal"], ["medium"], ["high"], ["max", "xhigh", "ultra"]] as const
 
 const EFFORT_VALUES = new Set(["default", "none", ...EFFORT_GROUPS.flat()])
 
 function humanizeVariant(value: string) {
-  return value
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 export function modelVariantLabel(value: string | null | undefined) {

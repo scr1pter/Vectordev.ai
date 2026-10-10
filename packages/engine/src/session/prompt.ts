@@ -60,6 +60,7 @@ import { eq } from "drizzle-orm"
 import { SessionTable } from "@vectordevai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
+import { TitleUsage } from "./title-usage"
 import { LLMEvent } from "@vectordevai/llm"
 
 // @ts-ignore
@@ -302,6 +303,7 @@ const layer = Layer.effect(
         : ag.model
           ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
           : ((yield* provider.getSmallModel(input.providerID, input.modelID)) ?? primary)
+      const usage = TitleUsage.create({ sessionID: input.session.id, model: mdl, publish: events.publish })
       const text = yield* llm
         .stream({
           agent: ag,
@@ -312,15 +314,18 @@ const layer = Layer.effect(
           model: mdl,
           sessionID: input.session.id,
           retries: 2,
+          started: usage.started,
           messages: [
             { role: "user", content: "Generate a title for this conversation:\n" },
             { role: "user", content: request },
           ],
         })
         .pipe(
+          Stream.tap(usage.record),
           Stream.filter(LLMEvent.is.textDelta),
           Stream.map((e) => e.text),
           Stream.mkString,
+          Effect.ensuring(usage.finish()),
           Effect.orDie,
         )
       const cleaned = text

@@ -691,6 +691,44 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  for (const terminal of ["response.completed", "response.incomplete"]) {
+    for (const written of [undefined, 0, 3000]) {
+      it.effect(`preserves cache-write usage in ${terminal}: ${written ?? "unknown"}`, () =>
+        Effect.gen(function* () {
+          const response = yield* LLMClient.generate(request).pipe(
+            Effect.provide(
+              fixedResponse(
+                sseEvents({
+                  type: terminal,
+                  response: {
+                    usage: {
+                      input_tokens: 12000,
+                      input_tokens_details: { cached_tokens: 8000, cache_write_tokens: written },
+                      output_tokens: 200,
+                      output_tokens_details: { reasoning_tokens: 50 },
+                      total_tokens: 12200,
+                    },
+                  },
+                }),
+              ),
+            ),
+          )
+          expect(response.usage).toMatchObject({
+            inputTokens: 12000,
+            cacheReadInputTokens: 8000,
+            nonCachedInputTokens: 4000 - (written ?? 0),
+            outputTokens: 200,
+            reasoningTokens: 50,
+            totalTokens: 12200,
+          })
+          expect(response.usage?.cacheWriteInputTokens).toBe(written)
+          expect(response.events.filter((event) => event.type === "step-finish")).toHaveLength(1)
+          expect(response.events.filter((event) => event.type === "finish")).toHaveLength(1)
+        }),
+      )
+    }
+  }
+
   it.effect("parses text and usage stream fixtures", () =>
     Effect.gen(function* () {
       const body = sseEvents(

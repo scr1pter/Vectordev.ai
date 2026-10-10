@@ -594,3 +594,20 @@ describe("applyDirectoryEvent", () => {
     expect(lspLoads).toBe(1)
   })
 })
+
+test("ancillary usage refreshes session metadata without inserting a transcript message", () => {
+  const [store, setStore] = createStore(baseState())
+  const refreshed: string[] = []
+  applyDirectoryEvent({
+    event: { type: "session.next.ancillary.usage" },
+    store,
+    setStore,
+    push: (directory) => {
+      refreshed.push(directory)
+    },
+    directory: "/repo",
+    loadLsp: () => {},
+  })
+  expect(refreshed).toEqual(["/repo"])
+  expect(store.message).toEqual({})
+})

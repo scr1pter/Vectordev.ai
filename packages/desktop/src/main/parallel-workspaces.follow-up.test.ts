@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from "bun:test"
 import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -67,6 +67,7 @@ const dependencies = {
 const {
   createParallelWorkspace,
   followUpParallelWorkspace,
+  getParallelWorkspace,
   listParallelWorkspaces,
   refreshParallelWorkspace,
   runParallelWorkspace,
@@ -87,6 +88,7 @@ describe("sending a follow-up to an external workspace", () => {
   })
 
   afterEach(async () => {
+    setSystemTime()
     // A queued turn outlives the test that started it, and would then call
     // updateRecord against a store this teardown has already emptied.
     for (const id of started) await stopParallelWorkspace(id).catch(() => undefined)
@@ -186,8 +188,47 @@ describe("sending a follow-up to an external workspace", () => {
     await expect(followUpParallelWorkspace(seeded.id, engine, "hi")).rejects.toThrow("cannot be continued")
   })
 
+  test("legacy workspace snapshots start at revision zero", async () => {
+    const seeded = await seed()
+
+    expect(getParallelWorkspace(seeded.id)?.revision).toBe(0)
+    expect(listParallelWorkspaces().find((record) => record.id === seeded.id)?.revision).toBe(0)
+    expect((await refreshParallelWorkspace(seeded.id)).revision).toBe(1)
+  })
+
+  test("same-millisecond updates advance the persisted revision and continue after reload", async () => {
+    const seeded = await seed({ revision: 4 })
+    setSystemTime(new Date("2026-10-10T00:00:00.000Z"))
+
+    const first = await refreshParallelWorkspace(seeded.id)
+    const second = await refreshParallelWorkspace(seeded.id)
+    expect(first.lastActivityAt).toBe(second.lastActivityAt)
+    expect(first.revision).toBe(5)
+    expect(second.revision).toBe(6)
+
+    const persisted = join(userDataPath, "workspace-snapshots.json")
+    await Bun.write(persisted, JSON.stringify(store.get("parallel-workspaces-state")?.get("records")))
+    store.clear()
+    store.set("parallel-workspaces-state", new Map([["records", await Bun.file(persisted).json()]]))
+
+    expect(getParallelWorkspace(seeded.id)?.revision).toBe(6)
+    expect((await refreshParallelWorkspace(seeded.id)).revision).toBe(7)
+  })
+
+  test.each([undefined, 7])("interrupted repair advances revision %s once and persists it", async (revision) => {
+    const seeded = await seed({ revision, status: "testing" })
+
+    const repaired = listParallelWorkspaces().find((record) => record.id === seeded.id)!
+    expect(repaired.status).toBe("failed")
+    expect(repaired.revision).toBe((revision ?? 0) + 1)
+    const persisted = store.get("parallel-workspaces-state")?.get("records") as (typeof repaired)[]
+    expect(persisted[0]?.revision).toBe(repaired.revision)
+    expect(listParallelWorkspaces().find((record) => record.id === seeded.id)?.revision).toBe(repaired.revision)
+  })
+
   test("closed workspace history drops review-only payloads before the next store write", async () => {
     const seeded = await seed({
+      revision: 8,
       status: "discarded",
       mergeState: "discarded",
       changedFilesCount: 2,
@@ -201,10 +242,12 @@ describe("sending a follow-up to an external workspace", () => {
     expect(listed.changedFiles).toEqual([])
     expect(listed.diff).toBe("")
     expect(listed.baselineHashes).toBeUndefined()
+    expect(listed.revision).toBe(8)
 
     const persisted = store.get("parallel-workspaces-state")?.get("records") as (typeof listed)[]
     expect(persisted[0]?.diff).toBe("")
     expect(persisted[0]?.baselineHashes).toBeUndefined()
+    expect(persisted[0]?.revision).toBe(8)
   })
 
   test("an open review keeps the payload required for selective merge", async () => {
@@ -233,11 +276,13 @@ describe("sending a follow-up to an external workspace", () => {
     })
 
     expect(created.isolation).toBe("copy")
+    expect(created.revision).toBe(0)
     expect(Object.keys(created.baselineHashes ?? {})).toContain("README.md")
     const refreshed = await refreshParallelWorkspace(created.id)
     expect(refreshed.changedFiles).toEqual([])
     expect(refreshed.diff).toBe("")
     expect(refreshed.riskLevel).toBe("low")
+    expect(refreshed.revision).toBe(1)
   })
 
   test("a task can hold more than sixteen active agents", async () => {

@@ -17,6 +17,7 @@ export type Event =
   | EventMessageRemoved
   | EventMessagePartUpdated
   | EventMessagePartRemoved
+  | EventSessionNextAncillaryUsage
   | EventSessionNextMessageImported
   | EventSessionNextShareChanged
   | EventSessionNextAgentSwitched
@@ -877,6 +878,29 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "session.next.ancillary.usage"
+        properties: {
+          timestamp: number
+          sessionID: string
+          usageID: string
+          purpose: "title"
+          model: ModelRef
+          cost?: number
+          unpriced?: boolean
+          tokens?: {
+            input: number
+            output: number
+            reasoning: number
+            cache: {
+              read: number
+              write: number
+            }
+          }
+          incomplete?: boolean
+        }
+      }
+    | {
+        id: string
         type: "session.next.message.imported"
         properties: {
           timestamp: number
@@ -1728,6 +1752,7 @@ export type GlobalEvent = {
     | SyncEventMessageRemoved
     | SyncEventMessagePartUpdated
     | SyncEventMessagePartRemoved
+    | SyncEventSessionNextAncillaryUsage
     | SyncEventSessionNextMessageImported
     | SyncEventSessionNextShareChanged
     | SyncEventSessionNextAgentSwitched
@@ -3484,6 +3509,7 @@ export type MessageNotFoundError = {
 }
 
 export type SessionDurableEvent =
+  | SessionNextAncillaryUsage
   | SessionNextMessageImported
   | SessionNextShareChanged
   | SessionNextAgentSwitched
@@ -3616,6 +3642,7 @@ export type V2Event =
   | MessageRemoved
   | MessagePartUpdated
   | MessagePartRemoved
+  | SessionNextAncillaryUsage
   | SessionNextMessageImported
   | SessionNextShareChanged
   | SessionNextAgentSwitched
@@ -3801,6 +3828,12 @@ export type PublicSessionInfo = {
   updates: boolean
 }
 
+export type ModelRef = {
+  id: string
+  providerID: string
+  variant?: string
+}
+
 export type SessionMessageAgentSwitched = {
   id: string
   metadata?: {
@@ -3811,12 +3844,6 @@ export type SessionMessageAgentSwitched = {
   }
   type: "agent-switched"
   agent: string
-}
-
-export type ModelRef = {
-  id: string
-  providerID: string
-  variant?: string
 }
 
 export type SessionMessageModelSwitched = {
@@ -4290,6 +4317,36 @@ export type SyncEventMessagePartRemoved = {
       sessionID: string
       messageID: string
       partID: string
+    }
+  }
+}
+
+export type SyncEventSessionNextAncillaryUsage = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.next.ancillary.usage.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      timestamp: number
+      sessionID: string
+      usageID: string
+      purpose: "title"
+      model: ModelRef
+      cost?: number
+      unpriced?: boolean
+      tokens?: {
+        input: number
+        output: number
+        reasoning: number
+        cache: {
+          read: number
+          write: number
+        }
+      }
+      incomplete?: boolean
     }
   }
 }
@@ -5084,6 +5141,39 @@ export type SessionInputAdmitted = {
   delivery: "steer" | "queue"
   timeCreated: number
   promotedSeq?: number
+}
+
+export type SessionNextAncillaryUsage = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.next.ancillary.usage"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    timestamp: number
+    sessionID: string
+    usageID: string
+    purpose: "title"
+    model: ModelRef
+    cost?: number
+    unpriced?: boolean
+    tokens?: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+    incomplete?: boolean
+  }
 }
 
 export type SessionNextMessageImported = {
@@ -7304,6 +7394,30 @@ export type EventMessagePartRemoved = {
     sessionID: string
     messageID: string
     partID: string
+  }
+}
+
+export type EventSessionNextAncillaryUsage = {
+  id: string
+  type: "session.next.ancillary.usage"
+  properties: {
+    timestamp: number
+    sessionID: string
+    usageID: string
+    purpose: "title"
+    model: ModelRef
+    cost?: number
+    unpriced?: boolean
+    tokens?: {
+      input: number
+      output: number
+      reasoning: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
+    incomplete?: boolean
   }
 }
 
