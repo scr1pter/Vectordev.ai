@@ -37,10 +37,10 @@ export async function openEditor(input: { value: string; renderer: CliRenderer; 
   try {
     await new Promise<void>((resolve, reject) => {
       const parts = editor.split(" ")
-      const child = spawn(parts[0]!, [...parts.slice(1), temporary.file], {
+      const child = spawn(parts[0]!, [...parts.slice(1), editorFileArgument(temporary.file)], {
         cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
         stdio: [input.stdin ?? "inherit", "inherit", "inherit"],
-        shell: false,
+        shell: process.platform === "win32",
       })
       child.on("error", reject)
       child.on("exit", (code, signal) => {
@@ -55,6 +55,13 @@ export async function openEditor(input: { value: string; renderer: CliRenderer; 
     input.renderer.resume()
     input.renderer.requestRender()
   }
+}
+
+// Windows editors are usually .cmd shims (code.cmd, cursor.cmd), which only cmd.exe can start, so the editor runs
+// through the shell there. The temporary path Vector made is quoted, so a space in the user's profile path cannot
+// split it; Windows paths cannot contain a double quote.
+export function editorFileArgument(file: string, platform: NodeJS.Platform = process.platform) {
+  return platform === "win32" ? `"${file}"` : file
 }
 
 export function discoverEditorConnection(directory: string) {

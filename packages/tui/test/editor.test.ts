@@ -2,7 +2,13 @@ import { afterEach, expect, spyOn, test } from "bun:test"
 import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { createEditorTempFile, discoverEditorConnection, normalizePromptContent, openEditor } from "../src/editor"
+import {
+  createEditorTempFile,
+  discoverEditorConnection,
+  editorFileArgument,
+  normalizePromptContent,
+  openEditor,
+} from "../src/editor"
 import { resolveEditorConnection } from "../src/context/editor"
 
 const editor = process.env.EDITOR
@@ -24,6 +30,13 @@ test("rejects when the external editor cannot start", async () => {
   }
 
   await expect(openEditor({ value: "original", renderer: renderer as never })).rejects.toThrow()
+})
+
+test("quotes the prompt file for cmd.exe so Windows .cmd editors start", () => {
+  expect(editorFileArgument("C:\\Users\\Jane Doe\\AppData\\Local\\Temp\\prompt.md", "win32")).toBe(
+    '"C:\\Users\\Jane Doe\\AppData\\Local\\Temp\\prompt.md"',
+  )
+  expect(editorFileArgument("/tmp/vector-editor-x/prompt.md", "darwin")).toBe("/tmp/vector-editor-x/prompt.md")
 })
 
 test("normalizes a single trailing editor newline for one-line prompts", () => {
