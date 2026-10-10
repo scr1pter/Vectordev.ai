@@ -28,8 +28,10 @@ import {
   deployRepairPrompt,
   publishPlan,
   releaseActions,
+  uncommittedNote,
   type DeployEvidence,
 } from "./cloud-handoff"
+import { createCloudOverview } from "./cloud-overview"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -304,6 +306,8 @@ export function CloudConsole(props: {
   const [publishTargets, setPublishTargets] = createSignal<PublishTarget[]>([])
   const vercelTarget = () => publishTargets().find((item) => item.id === "vercel")
   const [deploymentEnvironment, setDeploymentEnvironment] = createSignal<"preview" | "production">("preview")
+  // The project's git state, kept live, for the warning before a publish.
+  const overview = api && createCloudOverview({ api, directory: () => props.projectPath || undefined })
   const [publishing, setPublishing] = createSignal(false)
   const [activeRunId, setActiveRunId] = createSignal("")
   const [publishEvents, setPublishEvents] = createSignal<PublishProgressEvent[]>([])
@@ -1434,6 +1438,13 @@ export function CloudConsole(props: {
                       Production
                     </button>
                   </div>
+                  <Show when={publish && uncommittedNote(overview?.overview()?.git)}>
+                    {(note) => (
+                      <p class="cloud-notice" data-tone="warning" style={{ margin: "12px 0 0" }}>
+                        {note()}
+                      </p>
+                    )}
+                  </Show>
                   <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       class="cloud-button ml-auto"

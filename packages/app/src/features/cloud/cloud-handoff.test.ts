@@ -12,6 +12,7 @@ import {
   publishPlan,
   releaseActions,
   requestComposerPrompt,
+  uncommittedNote,
   type ComposerPrompt,
 } from "./cloud-handoff"
 
@@ -172,6 +173,16 @@ describe("publish plan", () => {
       reason: noNode,
       connect: false,
     })
+  })
+})
+
+describe("uncommitted changes", () => {
+  test("are named before a publish, with the commit the files differ from", () => {
+    expect(uncommittedNote()).toBeUndefined()
+    expect(uncommittedNote({ branch: "main", commit: "abc1234", dirty: false })).toBeUndefined()
+    expect(uncommittedNote({ branch: "main", commit: "abc1234", dirty: true })).toBe(
+      "This folder has uncommitted changes. It is built from the files as they are on disk, not from main at abc1234.",
+    )
   })
 })
 

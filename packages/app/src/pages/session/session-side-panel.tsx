@@ -151,6 +151,7 @@ import {
   promoteFailed,
   publishPlan,
   requestComposerPrompt,
+  uncommittedNote,
   type DeployEvidence,
 } from "@/features/cloud/cloud-handoff"
 
@@ -4438,11 +4439,12 @@ export function PreviewPanel(props: {
                         )}
                       </Show>
                     </dl>
-                    <Show when={place().overview.git?.dirty}>
-                      <p class="mt-2.5 rounded-[10px] border border-amber-300/25 bg-amber-300/[0.07] px-3 py-2 text-[12px] leading-5 text-amber-100/85">
-                        This folder has uncommitted changes. The preview is built from the files as they are on disk,
-                        not from {place().overview.git?.branch} at {place().overview.git?.commit}.
-                      </p>
+                    <Show when={uncommittedNote(place().overview.git)}>
+                      {(note) => (
+                        <p class="mt-2.5 rounded-[10px] border border-amber-300/25 bg-amber-300/[0.07] px-3 py-2 text-[12px] leading-5 text-amber-100/85">
+                          {note()}
+                        </p>
+                      )}
                     </Show>
                     <div class="mt-3 flex items-center justify-end gap-2">
                       <button

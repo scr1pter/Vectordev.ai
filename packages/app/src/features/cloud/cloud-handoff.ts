@@ -143,6 +143,15 @@ export function currentFailure(overview: CloudOverview) {
 }
 
 /**
+ * The warning shown before a publish from a folder with uncommitted changes:
+ * a release is built from the files on disk, so it includes them.
+ */
+export function uncommittedNote(git?: { branch: string; commit: string; dirty: boolean }) {
+  if (!git?.dirty) return
+  return `This folder has uncommitted changes. It is built from the files as they are on disk, not from ${git.branch} at ${git.commit}.`
+}
+
+/**
  * The preview's publish sheet after a failed Promote. The preview did publish
  * and is still live, so the sheet keeps its link and Promote can be tried
  * again. The note carries the last line of what Vercel said: the whole log

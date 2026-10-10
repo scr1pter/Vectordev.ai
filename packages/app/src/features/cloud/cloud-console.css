@@ -724,6 +724,11 @@
   background: rgba(230, 120, 125, 0.08);
   color: #f0b3b6;
 }
+.cloud-notice[data-tone="warning"] {
+  border-color: rgba(214, 169, 92, 0.3);
+  background: rgba(214, 169, 92, 0.08);
+  color: #ecd3a6;
+}
 .cloud-notice[data-tone="info"] {
   border-color: rgba(147, 116, 236, 0.3);
   background: rgba(147, 116, 236, 0.08);
