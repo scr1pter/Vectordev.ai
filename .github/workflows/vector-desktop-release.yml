@@ -488,7 +488,7 @@ jobs:
             {
               echo "## Unsigned installer notice"
               echo
-              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. It is download-only and is not offered through automatic or in-app updates. A new install may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
+              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. Installed copies receive it through Check for Updates; a new install may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
               echo
               cat release-notes.md
             } > "$unsigned_notes"
@@ -1590,8 +1590,9 @@ jobs:
           }
           channel=latest
           if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
+          # Owner decision (2 October 2026): unsigned releases also update the in-app update feed, so every
+          # installed copy is offered them through Check for Updates. Signed releases do the same.
           scope=full
-          if [ "$RELEASE_UNSIGNED" = "true" ]; then scope=downloads; fi
           VECTOR_RELEASE_VERSION="${TAG#v}" \
           VECTOR_RELEASE_CHANNEL="$channel" \
           VECTOR_RELEASE_PHASE=commit \
@@ -1604,7 +1605,6 @@ jobs:
           PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
           RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
           API_ORIGIN: https://vectordev.ai
-          RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
         run: |
           set -euo pipefail
 
@@ -1667,38 +1667,26 @@ jobs:
               "stable desktop manifest"
           fi
 
-          if [ "$RELEASE_UNSIGNED" = "true" ]; then
-            for feed in "${feeds[@]}"; do
-              committed="$audit_dir/committed-$feed"
-              curl "${curl_args[@]}" "$origin/$committed_prefix/$feed?$cache_buster" --output "$committed"
-              test "$(updater_version "$committed")" != "$version" || {
-                echo "Unsigned release $version entered automatic update feed $feed"
-                exit 1
-              }
-            done
-            echo "Verified unsigned $version is absent from automatic update feeds."
-          else
-            for feed in "${feeds[@]}"; do
-              staged="$audit_dir/staged-$feed"
-              committed="$audit_dir/committed-$feed"
-              curl "${curl_args[@]}" \
-                "$origin/releases/vector-v$version/updater/$feed?$cache_buster" \
-                --output "$staged"
-              test "$(updater_version "$staged")" = "$version" || {
-                echo "Staged $feed does not advertise $version"
-                exit 1
-              }
-              fetch_exact_copy \
-                "$staged" \
-                "$origin/$committed_prefix/$feed" \
-                "$committed" \
-                "$committed_prefix/$feed"
-              test "$(updater_version "$committed")" = "$version" || {
-                echo "Committed $feed does not advertise $version"
-                exit 1
-              }
-            done
-          fi
+          for feed in "${feeds[@]}"; do
+            staged="$audit_dir/staged-$feed"
+            committed="$audit_dir/committed-$feed"
+            curl "${curl_args[@]}" \
+              "$origin/releases/vector-v$version/updater/$feed?$cache_buster" \
+              --output "$staged"
+            test "$(updater_version "$staged")" = "$version" || {
+              echo "Staged $feed does not advertise $version"
+              exit 1
+            }
+            fetch_exact_copy \
+              "$staged" \
+              "$origin/$committed_prefix/$feed" \
+              "$committed" \
+              "$committed_prefix/$feed"
+            test "$(updater_version "$committed")" = "$version" || {
+              echo "Committed $feed does not advertise $version"
+              exit 1
+            }
+          done
 
           if [ "$PRERELEASE" = "true" ]; then
             echo "Verified beta updater pointers without replacing stable download pointers."
@@ -1816,14 +1804,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
           PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
-          RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
         run: |
           set -euo pipefail
-          if [ "$RELEASE_UNSIGNED" = "true" ]; then
-            gh release edit "$TAG" --draft=false --prerelease=false --latest=false
-          else
-            gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
-          fi
-          if [ "$RELEASE_UNSIGNED" != "true" ] && [ "$PRERELEASE" != "true" ]; then
-            gh release edit "$TAG" --latest
-          fi
+          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
+          if [ "$PRERELEASE" != "true" ]; then gh release edit "$TAG" --latest; fi

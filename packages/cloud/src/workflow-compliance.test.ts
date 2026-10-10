@@ -19,10 +19,9 @@ describe("release workflow supply-chain policy", () => {
     expect(workflow).not.toContain("gh release download")
     expect(workflow.match(/id: platform-artifact/g)).toHaveLength(3)
     expect(workflow.match(/artifact_digest:/g)).toHaveLength(3)
-    expect(workflow.match(/actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093/g)?.length).toBeGreaterThanOrEqual(4)
-    expect(workflow).toContain('if [ "$RELEASE_UNSIGNED" = "true" ]; then scope=downloads; fi')
-    expect(workflow).toContain("Unsigned release $version entered automatic update feed $feed")
-    expect(workflow).toContain('gh release edit "$TAG" --draft=false --prerelease=false --latest=false')
+    expect(
+      workflow.match(/actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093/g)?.length,
+    ).toBeGreaterThanOrEqual(4)
   })
 
   test("release actions and runner images are commit/version pinned", async () => {
