@@ -1,10 +1,10 @@
 import { management, refPath, scrub, stringField, numberField, type SupabaseContext } from "./cloud-supabase-api"
 
 // Recent logs of one Supabase service, read from the Management API's logs
-// endpoint. It takes ClickHouse SQL against a single `logs` table filtered by
-// source, and a window of at most 24 hours:
+// endpoint. It takes ClickHouse SQL against a single `logs` table whose
+// `source` column names the service, and a window of at most 24 hours:
 // https://supabase.com/docs/reference/api/v1-get-project-logs
-// https://supabase.com/changelog/48235-migration-of-supabase-management-api-logs-all-analytics-endpoint-to-logs-endpoint
+// https://supabase.com/docs/guides/observability/advanced-log-filtering
 
 export const LOG_SERVICES = {
   api: { label: "API gateway", sources: ["edge_logs"] },
@@ -37,7 +37,7 @@ export async function readSupabaseLogs(
   const search = input.search?.trim().slice(0, 200)
   const sql = [
     "select timestamp, event_message from logs",
-    `where source_name in (${service.sources.map(literal).join(", ")})`,
+    `where source in (${service.sources.map(literal).join(", ")})`,
     search ? `and event_message ilike ${literal(`%${search}%`)}` : "",
     "order by timestamp desc",
     `limit ${limit}`,

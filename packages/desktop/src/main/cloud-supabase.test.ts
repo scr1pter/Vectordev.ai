@@ -101,7 +101,11 @@ function linkVercel() {
 type Report = { ok: boolean; error?: string; needsSetup?: boolean; nextStep?: string } & Record<string, any>
 
 function run(command: string, input: Record<string, unknown> = {}, caller: "console" | "agent" = "console") {
-  return runSupabaseCommand(command, { projectPath: project, ...input }, { caller, request: fake.request }) as Promise<Report>
+  return runSupabaseCommand(
+    command,
+    { projectPath: project, ...input },
+    { caller, request: fake.request },
+  ) as Promise<Report>
 }
 
 // Nothing secret may appear in a result the console or the model receives.
@@ -194,7 +198,11 @@ describe("projects", () => {
       { projectPath: project },
       { caller: "console", request: fake.request, progress },
     )) as Report
-    expect(choose).toMatchObject({ ok: false, needsChoice: true, organizations: [{ id: "org-solo" }, { id: "org-team" }] })
+    expect(choose).toMatchObject({
+      ok: false,
+      needsChoice: true,
+      organizations: [{ id: "org-solo" }, { id: "org-team" }],
+    })
     expect(fake.calls.filter((call) => call.method === "POST")).toEqual([])
 
     const created = (await runSupabaseCommand(
@@ -228,7 +236,11 @@ describe("database credentials", () => {
   test("DATABASE_URL needs consent and a password Vector knows", async () => {
     connect()
     linkDatabase()
-    expect(await run("write_database_url")).toMatchObject({ ok: false, needsSetup: true, error: expect.stringContaining("consent") })
+    expect(await run("write_database_url")).toMatchObject({
+      ok: false,
+      needsSetup: true,
+      error: expect.stringContaining("consent"),
+    })
     expect(await run("write_database_url", { consent: true })).toMatchObject({
       ok: false,
       needsSetup: true,
@@ -263,14 +275,18 @@ describe("database credentials", () => {
     // A second rotation follows the DATABASE_URL that points at this project.
     const again = await run("rotate_database_password")
     expect(again).toMatchObject({ ok: true, databaseUrl: "updated", vercel: { synced: false } })
-    expect(listEnv(project).find((item) => item.key === "DATABASE_URL")?.value).toContain(fake.state.password ?? "missing")
+    expect(listEnv(project).find((item) => item.key === "DATABASE_URL")?.value).toContain(
+      fake.state.password ?? "missing",
+    )
   })
 
   test("a rotation whose later steps fail still says the password changed", async () => {
     connect()
     linkDatabase()
     fake.state.fail = (call) =>
-      call.path.endsWith("/config/database/pooler") ? Response.json({ message: "pooler unavailable" }, { status: 503 }) : undefined
+      call.path.endsWith("/config/database/pooler")
+        ? Response.json({ message: "pooler unavailable" }, { status: 503 })
+        : undefined
     const report = await run("rotate_database_password", { writeDatabaseUrl: true })
     expect(report).toMatchObject({
       ok: true,
@@ -289,7 +305,9 @@ describe("database credentials", () => {
     expect(created.ok).toBe(true)
     const report = await run("write_database_url", { consent: true })
     expect(report).toMatchObject({ ok: true, variable: { key: "DATABASE_URL", visibility: "server", port: 6543 } })
-    expect(listEnv(project).find((item) => item.key === "DATABASE_URL")?.value).toContain(fake.state.password ?? "missing")
+    expect(listEnv(project).find((item) => item.key === "DATABASE_URL")?.value).toContain(
+      fake.state.password ?? "missing",
+    )
     expectNoSecrets(report, fake.state.password ?? "")
   })
 })
@@ -297,7 +315,11 @@ describe("database credentials", () => {
 // The fake database behind the query endpoint keeps Vector's history table and
 // the Supabase CLI's, and records every statement.
 function trackingDatabase(initial: { tracked?: { name: string; checksum: string }[]; versions?: string[] } = {}) {
-  const state = { tracked: initial.tracked, versions: initial.versions, statements: [] as { sql: string; readOnly: boolean }[] }
+  const state = {
+    tracked: initial.tracked,
+    versions: initial.versions,
+    statements: [] as { sql: string; readOnly: boolean }[],
+  }
   fake.state.sql = (sql, readOnly) => {
     state.statements.push({ sql, readOnly })
     if (sql.startsWith("create schema if not exists vector;")) {
@@ -386,10 +408,16 @@ describe("migrations", () => {
     connect()
     linkDatabase()
     await mkdir(join(project, "supabase", "migrations"), { recursive: true })
-    await writeFile(join(project, "supabase", "migrations", "1_a.sql"), "create table a ();\n-- migrate:down\ndrop table a;")
+    await writeFile(
+      join(project, "supabase", "migrations", "1_a.sql"),
+      "create table a ();\n-- migrate:down\ndrop table a;",
+    )
     await writeFile(join(project, "supabase", "migrations", "1_a.down.sql"), "drop table a;")
     const database = trackingDatabase()
-    expect(await run("apply_migrations")).toMatchObject({ ok: true, migrations: { discovered: ["1_a.sql"], applied: ["1_a.sql"] } })
+    expect(await run("apply_migrations")).toMatchObject({
+      ok: true,
+      migrations: { discovered: ["1_a.sql"], applied: ["1_a.sql"] },
+    })
     const applied = database.statements.find((item) => item.sql.includes("values ('1_a.sql'"))
     expect(applied?.sql).toStartWith("create table a ();")
     expect(applied?.sql).not.toContain("drop table a")
@@ -484,7 +512,9 @@ describe("authentication", () => {
         email: { enabled: false },
       },
     })
-    expect(await run("update_auth", { providers: { google: { enabled: true, clientId: "google-client" } } })).toMatchObject({
+    expect(
+      await run("update_auth", { providers: { google: { enabled: true, clientId: "google-client" } } }),
+    ).toMatchObject({
       ok: false,
       error: expect.stringContaining("client secret"),
     })
@@ -533,7 +563,11 @@ describe("authentication", () => {
     expect(await run("update_auth", { addVercelUrls: true })).toMatchObject({
       ok: true,
       auth: {
-        redirectUrls: ["http://localhost:3000/**", "https://shop.vercel.app/**", "https://*-krishnas-projects.vercel.app/**"],
+        redirectUrls: [
+          "http://localhost:3000/**",
+          "https://shop.vercel.app/**",
+          "https://*-krishnas-projects.vercel.app/**",
+        ],
       },
     })
   })
@@ -567,7 +601,9 @@ describe("storage", () => {
   test("creates, updates and deletes buckets, emptying only when asked", async () => {
     connect()
     linkDatabase()
-    expect(await run("create_bucket", { bucket: "avatars", public: false, allowedMimeTypes: ["image/*"] })).toMatchObject({
+    expect(
+      await run("create_bucket", { bucket: "avatars", public: false, allowedMimeTypes: ["image/*"] }),
+    ).toMatchObject({
       ok: true,
       bucket: "avatars",
     })
@@ -637,11 +673,15 @@ describe("edge functions", () => {
     })
     expectNoSecrets(listed, "fixture-existing-value", "digest")
 
-    expect(await run("set_function_secrets", { secrets: [{ name: "RESEND_KEY", value: "fixture-resend" }] })).toMatchObject({
+    expect(
+      await run("set_function_secrets", { secrets: [{ name: "RESEND_KEY", value: "fixture-resend" }] }),
+    ).toMatchObject({
       ok: true,
       set: ["RESEND_KEY"],
     })
-    expect(await run("set_function_secrets", { secrets: [{ name: "SUPABASE_X", value: "x" }] })).toMatchObject({ ok: false })
+    expect(await run("set_function_secrets", { secrets: [{ name: "SUPABASE_X", value: "x" }] })).toMatchObject({
+      ok: false,
+    })
     expect(
       await run("set_function_secrets", { secrets: [{ name: "FROM_CHAT", value: "fixture-chat-value" }] }, "agent"),
     ).toMatchObject({ ok: false, error: expect.stringContaining("never through chat") })
@@ -664,8 +704,9 @@ describe("logs", () => {
     connect()
     linkDatabase()
     fake.state.logs = [
-      { timestamp: 1_760_000_060_000_000, event_message: "POST /rest/v1/orders 500" },
-      { timestamp: 1_760_000_000_000_000, event_message: `GET /auth Bearer ${SERVICE_KEY}` },
+      { timestamp: 1_760_000_060_000_000, event_message: "POST /rest/v1/orders 500", source: "edge_logs" },
+      { timestamp: 1_760_000_000_000_000, event_message: `GET /auth Bearer ${SERVICE_KEY}`, source: "edge_logs" },
+      { timestamp: 1_760_000_030_000_000, event_message: "statement timeout", source: "postgres_logs" },
     ]
     const report = await run("supabase_logs", { service: "api", minutes: 5000, search: "it's" })
     expect(report).toMatchObject({
@@ -678,7 +719,7 @@ describe("logs", () => {
     })
     const call = fake.calls.find((item) => item.path === "/v1/projects/fixtureref/analytics/endpoints/logs")
     expect(call?.query.sql).toBe(
-      "select timestamp, event_message from logs where source_name in ('edge_logs') and event_message ilike '%it\\'s%' order by timestamp desc limit 100",
+      "select timestamp, event_message from logs where source in ('edge_logs') and event_message ilike '%it\\'s%' order by timestamp desc limit 100",
     )
     // The window is capped at the endpoint's 24 hours.
     expect(Date.parse(call?.query.iso_timestamp_end ?? "") - Date.parse(call?.query.iso_timestamp_start ?? "")).toBe(
@@ -686,7 +727,7 @@ describe("logs", () => {
     )
     expectNoSecrets(report)
     expect(await run("supabase_logs", { service: "functions" })).toMatchObject({ ok: true })
-    expect(fake.calls.at(-1)?.query.sql).toContain("source_name in ('function_edge_logs', 'function_logs')")
+    expect(fake.calls.at(-1)?.query.sql).toContain("where source in ('function_edge_logs', 'function_logs')")
     expect(await run("supabase_logs", { service: "realtime" })).toMatchObject({ ok: false })
   })
 })
@@ -717,7 +758,9 @@ describe("security check", () => {
         { name: "rls_disabled_in_public", level: "ERROR", entity: "public.orders" },
         { name: "function_search_path_mutable", level: "WARN" },
       ],
-      environment: [{ where: "VITE_SUPABASE_SERVICE", reason: "is public but holds this project's service key", level: "ERROR" }],
+      environment: [
+        { where: "VITE_SUPABASE_SERVICE", reason: "is public but holds this project's service key", level: "ERROR" },
+      ],
       bundle: [{ where: "assets/index.js", reason: "ships this project's service key", level: "ERROR" }],
     })
     expectNoSecrets(report)
@@ -787,9 +830,14 @@ describe("agent bridge", () => {
       ["write_database_url", {}],
       ["rollback_migration", {}],
     ] as const) {
-      expect(await bridgeCommand({ command: "describe", action, ...extra })).toMatchObject({ ok: true, repeatable: false })
+      expect(await bridgeCommand({ command: "describe", action, ...extra })).toMatchObject({
+        ok: true,
+        repeatable: false,
+      })
     }
-    expect(await bridgeCommand({ command: "describe", action: "set_function_secrets", secretNames: ["NOPE"] })).toMatchObject({
+    expect(
+      await bridgeCommand({ command: "describe", action: "set_function_secrets", secretNames: ["NOPE"] }),
+    ).toMatchObject({
       ok: false,
       needsSetup: true,
       error: "NOPE is not in this project's environment.",
@@ -800,7 +848,7 @@ describe("agent bridge", () => {
   test("runs Supabase commands as the agent, with the agent's limits", async () => {
     connect()
     linkDatabase()
-    fake.state.logs = [{ timestamp: 1_760_000_000_000_000, event_message: "auth ok" }]
+    fake.state.logs = [{ timestamp: 1_760_000_000_000_000, event_message: "auth ok", source: "auth_logs" }]
     expect(await bridgeCommand({ command: "supabase_logs", service: "auth" })).toMatchObject({
       ok: true,
       entries: [{ message: "auth ok" }],

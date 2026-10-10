@@ -35,7 +35,7 @@ export type FakeState = {
   functions: Record<string, unknown>[]
   secrets: { name: string; value: string; updated_at?: string }[]
   password?: string
-  logs: { timestamp: number; event_message: string }[]
+  logs: { timestamp: number; event_message: string; source: string }[]
   lints: Record<string, unknown>[]
   pooler: Record<string, unknown>[]
   vercelDeployments: { url: string }[]
@@ -49,7 +49,13 @@ export async function startSupabaseFake(overrides: Partial<FakeState> = {}) {
   const state: FakeState = {
     organizations: [{ id: "org-solo", name: "Solo", plan: "free" }],
     projects: [
-      { ref: "fixtureref", name: "shop-db", organization_id: "org-solo", region: "us-east-1", status: "ACTIVE_HEALTHY" },
+      {
+        ref: "fixtureref",
+        name: "shop-db",
+        organization_id: "org-solo",
+        region: "us-east-1",
+        status: "ACTIVE_HEALTHY",
+      },
     ],
     auth: {
       site_url: "http://localhost:3000",
@@ -224,8 +230,20 @@ export async function startSupabaseFake(overrides: Partial<FakeState> = {}) {
       state.secrets = state.secrets.filter((item) => !names.includes(item.name))
       return Response.json({})
     }
-    // https://supabase.com/docs/reference/api/v1-get-project-logs
-    if (rest === "/analytics/endpoints/logs") return Response.json({ result: state.logs })
+    // https://supabase.com/docs/reference/api/v1-get-project-logs: ClickHouse SQL
+    // over one `logs` table whose `source` column names the service
+    // (https://supabase.com/docs/guides/observability/advanced-log-filtering).
+    // A query error comes back as `error` beside an empty result.
+    if (rest === "/analytics/endpoints/logs") {
+      const sources = call.query.sql?.match(/\bwhere source in \(([^)]*)\)/)?.[1]
+      if (!sources) return Response.json({ result: [], error: { message: "Unknown identifier in the logs query." } })
+      const wanted = sources.split(",").map((item) => item.trim().replace(/^'|'$/g, ""))
+      return Response.json({
+        result: state.logs
+          .filter((item) => wanted.includes(item.source))
+          .map((item) => ({ timestamp: item.timestamp, event_message: item.event_message })),
+      })
+    }
     // https://supabase.com/docs/reference/api/v1-get-security-advisors
     if (rest === "/advisors/security") return Response.json({ lints: state.lints })
     if (rest === "/storage/buckets") return Response.json(state.buckets)
@@ -258,14 +276,21 @@ export async function startSupabaseFake(overrides: Partial<FakeState> = {}) {
     if (call.path === "/storage/v1/bucket" && call.method === "GET") return Response.json(state.buckets)
     if (call.path === "/storage/v1/bucket" && call.method === "POST") {
       if (state.buckets.some((item) => item.id === body?.id)) {
-        return Response.json({ statusCode: "409", error: "Duplicate", message: "The resource already exists" }, { status: 409 })
+        return Response.json(
+          { statusCode: "409", error: "Duplicate", message: "The resource already exists" },
+          { status: 409 },
+        )
       }
       state.buckets.push({ ...body, created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z" })
       return Response.json({ name: body?.name })
     }
     const bucket = call.path.match(/^\/storage\/v1\/bucket\/([^/]+)(\/empty)?$/)
     const found = state.buckets.find((item) => item.id === bucket?.[1])
-    if (bucket && !found) return Response.json({ statusCode: "404", error: "Bucket not found", message: "Bucket not found" }, { status: 404 })
+    if (bucket && !found)
+      return Response.json(
+        { statusCode: "404", error: "Bucket not found", message: "Bucket not found" },
+        { status: 404 },
+      )
     if (bucket && found && bucket[2] && call.method === "POST") {
       state.bucketFiles[String(found.id)] = 0
       return Response.json({ message: "Successfully emptied" })
@@ -277,7 +302,10 @@ export async function startSupabaseFake(overrides: Partial<FakeState> = {}) {
     }
     if (bucket && found && call.method === "DELETE") {
       if (state.bucketFiles[String(found.id)]) {
-        return Response.json({ statusCode: "409", error: "Bucket not empty", message: "The bucket you tried to delete is not empty" }, { status: 409 })
+        return Response.json(
+          { statusCode: "409", error: "Bucket not empty", message: "The bucket you tried to delete is not empty" },
+          { status: 409 },
+        )
       }
       state.buckets = state.buckets.filter((item) => item !== found)
       return Response.json({ message: "Successfully deleted" })
