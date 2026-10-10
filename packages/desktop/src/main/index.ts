@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { getCACertificates, setDefaultCACertificates } from "node:tls"
 import type { Event } from "electron"
-import { app, BrowserWindow, dialog } from "electron"
+import { app, BrowserWindow, dialog, powerSaveBlocker } from "electron"
 
 import { Deferred, Effect, Fiber } from "effect"
 import contextMenu from "electron-context-menu"
@@ -56,6 +56,7 @@ import {
   setAllScheduledAgentsPaused,
 } from "./scheduled-agents"
 import { createTray, destroyTray, notifyScheduledRunFinished, updateTray } from "./tray"
+import { engineEventSource, startKeepAwake } from "./keep-awake"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Vector Dev",
@@ -72,6 +73,7 @@ const jsCallStackFeature = "DocumentPolicyIncludeJSCallStacksInCrashReports"
 
 let logger: ReturnType<typeof initLogging>
 let server: SidecarListener | null = null
+let keepAwake: ReturnType<typeof startKeepAwake> | undefined
 let trayReady = false
 
 const pendingDeepLinks: string[] = []
@@ -195,6 +197,7 @@ const main = Effect.gen(function* () {
   )
   const stopSidecars = async () => {
     unregisterManagedAccount()
+    keepAwake?.stop()
     await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudBridge(), wslServers.stopAll()])
   }
   const relaunch = () => {
@@ -465,6 +468,16 @@ const main = Effect.gen(function* () {
         }),
       ),
     )
+
+    // Idle sleep freezes agents mid-run, so the machine stays awake while the engine has work running.
+    keepAwake = startKeepAwake({
+      source: engineEventSource({ url, username: "vector", password }),
+      blocker: {
+        start: () => powerSaveBlocker.start("prevent-app-suspension"),
+        stop: (id) => powerSaveBlocker.stop(id),
+      },
+      log: (message, meta) => logger.log(message, meta),
+    })
 
     yield* Effect.promise(() => vectorAccount.restore())
     if (process.platform === "win32") {
