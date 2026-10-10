@@ -61,11 +61,11 @@ export const prerender = true
   </p>
   <ul class="feature-list">
     <li><strong>Projects</strong><span>Link an existing project or create one in the organization you choose, with progress shown while Supabase brings it up. An interrupted creation is finished rather than duplicated. Pause, restore or unlink the linked project.</span></li>
-    <li><strong>Server credentials</strong><span>Write a server-only DATABASE_URL through the transaction pooler after you confirm, and rotate the database password, which can update DATABASE_URL and push the environment to Vercel. The password is encrypted on this device and never shown.</span></li>
-    <li><strong>Migrations and SQL</strong><span>See which migrations are applied, pending or changed (including those the Supabase CLI applied), apply them, and roll back the latest one with its paired .down.sql file or a "-- down" section. Without a down migration Vector refuses. The SQL console runs queries read-only and asks before a query that changes data.</span></li>
+    <li><strong>Server credentials</strong><span>Write a server-only DATABASE_URL through the transaction pooler after you confirm. For a project Vector did not create, enter its current database password once instead of resetting it. Rotating the password can update DATABASE_URL and push the environment to Vercel. The password is encrypted on this device and never shown. Vector does not write DATABASE_URL into a .env that git already tracks.</span></li>
+    <li><strong>Migrations and SQL</strong><span>See which migrations are applied, pending or changed (including those the Supabase CLI applied), apply them, and roll back the latest one with its down migration in supabase/migrations/down/&lt;name&gt;.down.sql. Without a down migration Vector refuses. The Supabase CLI reads neither a "-- down" section nor a .down.sql file next to the migrations: supabase db push runs both as forward SQL. Migration status warns when it finds them. The SQL console runs queries read-only and asks before a query that changes data.</span></li>
     <li><strong>Authentication</strong><span>Edit the site URL and redirect URLs, including your linked Vercel production and preview addresses. Turn email, Google, GitHub and Apple sign-in on or off; client secrets go to Supabase and are not shown again. List, invite and delete users.</span></li>
     <li><strong>Storage and Edge Functions</strong><span>Create, update and delete buckets. Deploy functions from supabase/functions, delete them, and manage their secrets by name.</span></li>
-    <li><strong>Logs and security</strong><span>Read recent API, Postgres, Auth, Storage and Edge Function logs. The security check runs Supabase's security advisors and scans public environment variables and the built app for server keys; promoting a release to production requires it to pass.</span></li>
+    <li><strong>Logs and security</strong><span>Read recent API, Postgres, Auth, Storage and Edge Function logs. The security check runs Supabase's security advisors and scans public environment variables and the built app for server keys. While Secret scan is a required release check (the default, under Build &amp; runtime), promoting a release to production requires it to pass. If your Supabase connection is not allowed to read the advisors, they are skipped with a warning to reconnect.</span></li>
   </ul>
 
   <h2 id="cloud-actions">Run cloud work from a task</h2>
@@ -74,10 +74,14 @@ export const prerender = true
     sync variables, publish and inspect recent deployments. It asks before it publishes, changes a database or writes a
     host's environment, and the prompt names the provider, project and environment. A wildcard allow does not skip
     these prompts; only a permission rule that names the cloud action does. Each Supabase change is approved on its
-    own, and deleting users, buckets or functions, rolling back, pausing, rotating the password, writing DATABASE_URL,
-    SQL that changes data and turning a sign-in method or redirect address off ask every time. A new migration file
-    asks like any other edit. The agent never handles secret values: OAuth client secrets and function secrets are
-    entered in Cloud Services, and the agent can only refer to variables already stored there.
+    own. Every SQL query, rolling back, deleting users, buckets or functions, pausing, rotating the password, writing
+    DATABASE_URL, setting function secrets, deploying a function anyone can call, a new site URL, a redirect address
+    other than your linked Vercel ones, and turning a sign-in method or redirect address off ask every time, and the
+    prompt shows the SQL that would run. Auto-accept answers the other prompts but never these. A new migration file
+    asks like any other edit, showing both the migration and its down file. OAuth client secrets, function secret
+    values and the database password are entered in Cloud Services, never in chat, and the agent can only refer to
+    variables already stored there. Query results reach the agent as the query returns them, except cells in columns
+    named like passwords, tokens or secrets, which are hidden.
     Publishing goes to the Vercel project linked to the repository; without one, the tool returns setup guidance. A
     failed Vercel deployment never triggers a deployment somewhere else.
   </p>
