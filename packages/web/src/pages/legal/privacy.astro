@@ -6,8 +6,8 @@ export const prerender = true
 <LegalPage
   eyebrow="Privacy"
   title="Privacy Policy"
-  description="How Vector handles account information, local work, AI requests, connected services, and diagnostics."
-  updated="October 7, 2026"
+  description="How Vector handles account information, local work, AI requests, connected services, diagnostics, and usage counts."
+  updated="October 9, 2026"
 >
   <section>
     <h2>1. Scope and contact</h2>
@@ -210,7 +210,7 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>9. Diagnostics and service logs</h2>
+    <h2>9. Diagnostics, usage counts, and service logs</h2>
     <p>
       Remote crash diagnostics are off by default. If you enable them and reporting is configured, Sentry
       receives application version, platform, stack traces, and technical error information. Vector disables
@@ -232,13 +232,32 @@ export const prerender = true
       The help counter expires after ten minutes; bug-report network counters expire after one hour and
       email counters after 24 hours. Expiration of those counters does not delete separate provider logs.
     </p>
+    <p>
+      Usage counts are on by default. The desktop application reports how many sessions and subagent sessions
+      were active on the current day (in UTC), with a random install ID created on your computer, the
+      application version, operating system, and CPU architecture. It reports shortly after it opens each day
+      and again, checked about once an hour, whenever a count has gone up. When you are signed in, the report is
+      linked to your Vector account. The command-line tool checks your account at the first command of each UTC
+      day; that check also carries the tool's version, operating system, and CPU architecture, and we record one
+      usage row for your account for each day it runs. Usage records never include prompts, code, file names or
+      paths, model output, or provider names or keys, and we do not store IP addresses or user agents with them,
+      although the requests themselves pass through the operational records described above.
+    </p>
+    <p>
+      We use these counts to understand how many people use Vector and how features such as subagents are used,
+      so we can plan and improve the service. We keep usage records only while they are useful for that purpose,
+      and you can ask us to delete the records linked to your account at any time using the contact details
+      above. To stop usage counts, turn off <strong>Share usage counts</strong> in the desktop application's
+      Settings under General, or set <code>VECTOR_DISABLE_USAGE=1</code> for the command-line tool. The
+      command-line account check continues without recording a usage row.
+    </p>
   </section>
 
   <section>
     <h2>10. Why information is used and who receives it</h2>
     <p>
-      We use information to provide requested features, authenticate accounts, deliver communications, answer support requests, troubleshoot failures, prevent fraud and
-      abuse, secure the service, and meet legal obligations. Recipients include the account, email,
+      We use information to provide requested features, authenticate accounts, deliver communications, answer support requests, troubleshoot failures, measure
+      how Vector is used, prevent fraud and abuse, secure the service, and meet legal obligations. Recipients include the account, email,
       hosting, security, and diagnostic providers described above and the model and integration providers
       involved in your selected workflow.
     </p>
@@ -250,8 +269,9 @@ export const prerender = true
     </p>
     <p>
       Where a law requires a legal basis for processing, the applicable basis depends on the purpose: providing
-      a service you request; legitimate interests in security, abuse prevention,
-      and service support balanced against your rights; compliance with legal obligations; or consent for
+      a service you request; legitimate interests in security, abuse prevention, service support, and
+      understanding how Vector is used (the default usage counts in section 9, which you can turn off at any
+      time), balanced against your rights; compliance with legal obligations; or consent for
       optional processing such as public session sharing and remote crash diagnostics. You can withdraw consent
       for optional processing without affecting processing that was lawful before withdrawal. Required account information
       is necessary to provide those features; optional diagnostics are not a condition of using Vector.
@@ -289,7 +309,9 @@ export const prerender = true
     <h2>12. Your choices and privacy rights</h2>
     <p>
       You can choose models and integrations, limit permissions, stop background work or computer use,
-      disconnect providers, turn off diagnostics and automatic sharing, unshare public sessions, edit or erase
+      disconnect providers, turn off diagnostics, usage counts (<strong>Share usage counts</strong> in the desktop
+      application, or <code>VECTOR_DISABLE_USAGE=1</code> for the command-line tool), and automatic sharing,
+      unshare public sessions, edit or erase
       local memory, and remove local sessions and other data. Removing a local session alone does not remove
       its public copy. Use the relevant provider's controls to revoke its credentials or manage records it holds.
       Deleting an account, deleting local data, and deleting provider-held content are
