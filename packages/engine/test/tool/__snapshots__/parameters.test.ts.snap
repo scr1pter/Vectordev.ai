@@ -102,7 +102,7 @@ exports[`tool parameters JSON Schema (wire shape) grep 1`] = `
       "type": "string",
     },
     "path": {
-      "description": "The directory to search in. Defaults to the current working directory.",
+      "description": "Existing literal file or directory to search. Relative paths use the current working directory, which is also the default. No glob expansion; use include for file globs.",
       "type": "string",
     },
     "pattern": {
@@ -258,7 +258,7 @@ exports[`tool parameters JSON Schema (wire shape) read 1`] = `
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "filePath": {
-      "description": "The absolute path to the file or directory to read",
+      "description": "The path to the file or directory to read, relative to the workspace or absolute",
       "type": "string",
     },
     "limit": {
@@ -301,55 +301,65 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
-    "background": {
-      "description": "Run the agent in the background. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress",
-      "type": "boolean",
-    },
-    "command": {
-      "description": "The command that triggered this task",
-      "type": "string",
-    },
-    "depends_on": {
-      "description": "Task IDs that must complete successfully before this subagent starts. Use this to express dependencies between delegated work without polling",
+    "tasks": {
+      "description": "One to eight complete, independent subagent briefs. All entries are checked before any starts; accepted entries run together.",
       "items": {
-        "type": "string",
+        "properties": {
+          "command": {
+            "description": "The command that triggered this task",
+            "type": "string",
+          },
+          "depends_on": {
+            "description": "Task IDs that must complete successfully before this subagent starts. Use this to express dependencies between delegated work without polling",
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "description": {
+            "description": "A short (3-5 words) title for this subagent, shown to the user on its card, e.g. "Map auth middleware". Make it specific and distinct from sibling subagents",
+            "type": "string",
+          },
+          "owned_paths": {
+            "description": "Repository-relative files or directory prefixes this subagent owns. Vector rejects overlapping ownership among active sibling subagents",
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "prompt": {
+            "description": "The task for the subagent: a complete brief that stands on its own, because the subagent sees none of your conversation",
+            "type": "string",
+          },
+          "subagent_type": {
+            "description": "Agent to use. Name a Subagent specialist from the available agent types when the work matches its description. Omit it for the general-purpose Subagent only when general is in that list",
+            "type": "string",
+          },
+          "success_criteria": {
+            "description": "Observable conditions the subagent must verify before reporting completion",
+            "items": {
+              "type": "string",
+            },
+            "type": "array",
+          },
+          "task_id": {
+            "description": "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
+            "type": "string",
+          },
+        },
+        "required": [
+          "description",
+          "prompt",
+        ],
+        "type": "object",
       },
+      "maxItems": 8,
+      "minItems": 1,
       "type": "array",
-    },
-    "description": {
-      "description": "A short (3-5 words) title for this subagent, shown to the user on its card, e.g. "Map auth middleware". Make it specific and distinct from sibling subagents",
-      "type": "string",
-    },
-    "owned_paths": {
-      "description": "Repository-relative files or directory prefixes this subagent owns. Vector rejects overlapping ownership among active sibling subagents",
-      "items": {
-        "type": "string",
-      },
-      "type": "array",
-    },
-    "prompt": {
-      "description": "The task for the subagent: a complete brief that stands on its own, because the subagent sees none of your conversation",
-      "type": "string",
-    },
-    "subagent_type": {
-      "description": "Agent to use. Name a Subagent specialist from the available agent types when the work matches its description. Omit it for the general-purpose Subagent only when general is in that list",
-      "type": "string",
-    },
-    "success_criteria": {
-      "description": "Observable conditions the subagent must verify before reporting completion",
-      "items": {
-        "type": "string",
-      },
-      "type": "array",
-    },
-    "task_id": {
-      "description": "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
-      "type": "string",
     },
   },
   "required": [
-    "description",
-    "prompt",
+    "tasks",
   ],
   "type": "object",
 }
@@ -359,6 +369,10 @@ exports[`tool parameters JSON Schema (wire shape) todo 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "reset": {
+      "description": "Set true only when the user explicitly requests restarting or reprioritizing already-started work.",
+      "type": "boolean",
+    },
     "todos": {
       "description": "The updated todo list",
       "items": {

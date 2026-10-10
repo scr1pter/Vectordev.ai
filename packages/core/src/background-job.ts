@@ -43,6 +43,7 @@ type Active = {
   tail: Deferred.Deferred<void>
   promoted: Deferred.Deferred<Info>
   onPromote?: Effect.Effect<void>
+  promotable: boolean
 }
 
 type State = {
@@ -81,6 +82,7 @@ export type StartInput = {
   title?: string
   metadata?: Record<string, unknown>
   onPromote?: Effect.Effect<void>
+  promotable?: boolean
   run: Effect.Effect<string, unknown>
 }
 
@@ -260,6 +262,7 @@ export const make = Effect.gen(function* () {
               tail,
               promoted,
               onPromote: input.onPromote,
+              promotable: input.promotable !== false,
             }
             return [{ info: snapshot(job), scope, token }, new Map(jobs).set(id, job)] as readonly [
               StartResult,
@@ -342,7 +345,8 @@ export const make = Effect.gen(function* () {
       state.jobs,
       Effect.fnUntraced(function* (jobs) {
         const job = jobs.get(id)
-        if (!job || job.info.status !== "running") return [{}, jobs] as readonly [PromoteResult, Map<string, Active>]
+        if (!job || job.info.status !== "running" || !job.promotable)
+          return [{}, jobs] as readonly [PromoteResult, Map<string, Active>]
         if (job.info.metadata?.background === true)
           return [{ info: snapshot(job) }, jobs] as readonly [PromoteResult, Map<string, Active>]
         const next = {

@@ -565,8 +565,8 @@ async function monthlyStatus(id: string, fetcher: typeof fetch = fetch, now = Da
   const eligible = all
     .map((subscription) => paidModelPlan(subscription, id, now))
     .filter((value) => value !== undefined)
-  if (eligible.length !== 1) return { active: false as const, customer: true }
-  const paid = eligible[0]
+  const paid = eligible.length === 1 ? eligible[0] : undefined
+  if (!paid) return { active: false as const, customer: true }
   const current = account.key?.subscription === paid.id && account.key.start === paid.start ? account.key : undefined
   const data = current
     ? (await openRouterManagement(`/${encodeURIComponent(current.hash)}`, undefined, fetcher)).data
@@ -650,7 +650,8 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
       const eligible = (await subscriptions(account.customer, fetcher))
         .map((subscription) => paidModelPlan(subscription, id, now))
         .filter((value) => value !== undefined)
-      if (eligible.length !== 1) {
+      const paid = eligible.length === 1 ? eligible[0] : undefined
+      if (!paid) {
         if (account.key)
           await openRouterManagement(`/${encodeURIComponent(account.key.hash)}`, { disabled: true }, fetcher, "PATCH")
         throw new ApiError(
@@ -659,7 +660,6 @@ async function monthlyCredential(id: string, fetcher: typeof fetch, now: number,
           "Your model subscription needs an active paid billing period.",
         )
       }
-      const paid = eligible[0]
       if (paid.plan.credits < requiredCredits)
         throw new ApiError(
           402,
@@ -759,6 +759,7 @@ export async function modelPlanCheckout(
   const plan = modelPlans().find((plan) => plan.id === planID)
   if (!plan?.priceID || !plan.credits)
     throw new ApiError(400, "MODEL_PLAN_INVALID", "Choose an available Codium subscription.")
+  const priceID = plan.priceID
   return withBillingMutation(
     `model-plan:${user.id}`,
     async (verify) => {
@@ -805,7 +806,7 @@ export async function modelPlanCheckout(
           account.checkout.plan === plan.id &&
           stripeRecord(pending.metadata) &&
           pending.metadata.vector_model_credits_usd === String(plan.credits) &&
-          pending.metadata.vector_price_id === plan.priceID
+          pending.metadata.vector_price_id === priceID
         )
           return { url: account.checkout.url }
         if (pending.status === "open") {
@@ -817,7 +818,7 @@ export async function modelPlanCheckout(
           )
         }
       }
-      const price = await modelPlanStripe(`prices/${plan.priceID}`, {}, fetcher)
+      const price = await modelPlanStripe(`prices/${priceID}`, {}, fetcher)
       const recurring = stripeRecord(price.recurring) ? price.recurring : undefined
       if (
         price.active !== true ||
@@ -832,16 +833,16 @@ export async function modelPlanCheckout(
         "checkout/sessions",
         {
           method: "POST",
-          idempotency: `vector-model-checkout-${user.id}-${plan.id}-${createHash("sha256").update(`${plan.priceID}:${plan.credits}`).digest("hex").slice(0, 12)}-${account.checkout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
+          idempotency: `vector-model-checkout-${user.id}-${plan.id}-${createHash("sha256").update(`${priceID}:${plan.credits}`).digest("hex").slice(0, 12)}-${account.checkout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
           body: new URLSearchParams({
             mode: "subscription",
             "payment_method_types[0]": "card",
             customer,
             client_reference_id: user.id,
-            "line_items[0][price]": plan.priceID,
+            "line_items[0][price]": priceID,
             "line_items[0][quantity]": "1",
             "metadata[vector_model_credits_usd]": String(plan.credits),
-            "metadata[vector_price_id]": plan.priceID,
+            "metadata[vector_price_id]": priceID,
             "subscription_data[metadata][vector_account_id]": user.id,
             "subscription_data[metadata][vector_plan]": plan.id,
             "subscription_data[metadata][vector_model_credits_usd]": String(plan.credits),
@@ -905,6 +906,7 @@ export async function modelTopupCheckout(
   const pack = modelTopups().find((value) => value.id === packID)
   if (!pack?.priceID || !pack.credits)
     throw new ApiError(400, "MODEL_TOPUP_INVALID", "Choose an available Codium credit pack.")
+  const priceID = pack.priceID
   await settlePendingTopup(user.id, fetcher)
   return withBillingMutation(
     `model-plan:${user.id}`,
@@ -949,7 +951,7 @@ export async function modelTopupCheckout(
           account.topupCheckout.plan === pack.id &&
           stripeRecord(pending.metadata) &&
           pending.metadata.vector_credits_usd === String(pack.credits) &&
-          pending.metadata.vector_price_id === pack.priceID
+          pending.metadata.vector_price_id === priceID
         )
           return { url: account.topupCheckout.url }
         if (pending.status === "open") {
@@ -961,7 +963,7 @@ export async function modelTopupCheckout(
           )
         }
       }
-      const price = await modelPlanStripe(`prices/${pack.priceID}`, {}, fetcher)
+      const price = await modelPlanStripe(`prices/${priceID}`, {}, fetcher)
       if (
         price.active !== true ||
         price.currency !== "usd" ||
@@ -974,7 +976,7 @@ export async function modelTopupCheckout(
         "payment_method_types[0]": "card",
         customer,
         client_reference_id: user.id,
-        "line_items[0][price]": pack.priceID,
+        "line_items[0][price]": priceID,
         "line_items[0][quantity]": "1",
         success_url: `${modelPlanOrigin()}/account?model_topup=success`,
         cancel_url: `${modelPlanOrigin()}/account?model_topup=cancelled`,
@@ -985,7 +987,7 @@ export async function modelTopupCheckout(
         vector_product: "codium-topup",
         vector_pack: pack.id,
         vector_credits_usd: String(pack.credits),
-        vector_price_id: pack.priceID,
+        vector_price_id: priceID,
       }).forEach(([key, value]) => {
         body.set(`metadata[${key}]`, value)
         body.set(`payment_intent_data[metadata][${key}]`, value)
@@ -995,7 +997,7 @@ export async function modelTopupCheckout(
         "checkout/sessions",
         {
           method: "POST",
-          idempotency: `vector-topup-checkout-${user.id}-${pack.id}-${createHash("sha256").update(`${pack.priceID}:${pack.credits}`).digest("hex").slice(0, 12)}-${account.topupCheckout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
+          idempotency: `vector-topup-checkout-${user.id}-${pack.id}-${createHash("sha256").update(`${priceID}:${pack.credits}`).digest("hex").slice(0, 12)}-${account.topupCheckout?.id ?? "new"}-${Math.floor(now / 1_800_000)}`,
           body,
         },
         fetcher,

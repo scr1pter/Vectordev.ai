@@ -1,10 +1,11 @@
 // Review.run (section 3.8): one read-only session per specialist, with Vector's own step, dollar and time limits, a
 // finalize prompt for a session stopped early, a verify pass, then selection and cost. The engine's agent `steps`
-// limit is deliberately not used: at that limit prompt.ts forbids tools while JSON-schema output keeps
-// toolChoice "required", so the last step could only fail.
+// limit only adds text-only prompt guidance, which conflicts with this runner's required StructuredOutput tool.
+// Review admits each provider attempt, including retries, and one separate finalizer. Dollar reservations are
+// estimates; reported usage can exceed them, so they are not a hard billing cap.
 
 import path from "path"
-import { Cause, Duration, Effect, Exit, Fiber, Option, Scope } from "effect"
+import { Cause, Duration, Effect, Exit, Option, Scope } from "effect"
 import type { EventV2 } from "@vectordevai/core/event"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import type { PermissionV1 } from "@vectordevai/core/v1/permission"
@@ -61,6 +62,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Permission } from "@/permission"
 import type { Provider } from "@/provider/provider"
 import { SessionPrompt } from "@/session/prompt"
+import { SessionAdmission } from "@/session/admission"
 import type { SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { Truncate } from "@/tool/truncate"
@@ -100,6 +102,7 @@ type Stop = "budget" | "steps" | "timeout"
 type Progress = Parameters<NonNullable<RunInput["onProgress"]>>[0]
 
 interface Track {
+  name: Name
   sessionID: SessionID
   cap: number
   steps: number
@@ -107,9 +110,10 @@ interface Track {
   context: number // tokens the last step sent, cached ones included
   cached: number // of which the provider reported as cache reads
   stop?: Stop
-  answered: boolean // the current step called StructuredOutput
+  attempts: number // invocation admission counts retries and missing-usage failures, independently of steps
+  finalizeAttempts: number
   finalizing: boolean
-  cancel?: Fiber.Fiber<void>
+  denied: boolean
 }
 
 interface Spec<T> {
@@ -125,7 +129,7 @@ interface Asked<T> {
   sessionID?: SessionID
   value?: T
   status: ReviewOutcome["specialists"][number]["status"]
-  stop?: Stop // set only when the value came from a finalize after a stop
+  stop?: Stop // includes a request refused before admission
   steps: number
   detail?: string
 }
@@ -162,49 +166,39 @@ export const run: (
     truncateGlob: input.trust === "untrusted" ? undefined : Truncate.GLOB,
   })
   const tracks = new Map<string, Track>()
+  const reservations = new Map<Name, { turn: number; finalize: number }>()
   const sessionIDs: SessionID[] = []
-  const state = { spent: 0 }
+  const state = { spent: 0, reported: 0, uncertain: 0, incomplete: false }
   const scope = yield* Scope.make()
 
   const progress = (event: Progress) =>
     Effect.sync(() => input.onProgress?.(event)).pipe(Effect.catchCause(() => Effect.void))
 
-  // Steps, then dollars (the next step and a finalize must both fit under the cap), then time.
-  const stopReason = (track: Track): Stop | undefined => {
-    if (track.steps >= track.cap) return "steps"
-    if (price) {
-      const next = nextStepCostUsd(track.context + NEXT_STEP_SLACK, price, track.cached)
-      if (state.spent + next + next > config.maxCostUsd) return "budget"
-    }
-    if (Date.now() >= deadline) return "timeout"
-    return undefined
+  // Reservations are estimates, not billed spend. Replace this specialist's old reservation in one synchronous
+  // operation: parallel specialists must not each spend the same remainder, including a pending finalization.
+  const reserve = (name: Name, turn: number, finalize: number) => {
+    if (!price) return true
+    const others = [...reservations].reduce(
+      (total, [owner, amount]) => total + (owner === name ? 0 : amount.turn + amount.finalize),
+      0,
+    )
+    if (state.spent + state.uncertain + others + turn + finalize > config.maxCostUsd) return false
+    reservations.set(name, { turn, finalize })
+    return true
   }
-
-  // Listeners run inside the publishing session's own fiber, so a stop is forked rather than awaited here.
+  const nextCost = (track: Pick<Track, "context" | "cached">) =>
+    price ? nextStepCostUsd(track.context + NEXT_STEP_SLACK, price, track.cached) : 0
+  // Usage is settled by the processor lease before retry/continuation admission. Events only report progress.
   const unsubscribe = yield* events.listen((event) => {
     if (event.type === SessionV1.Event.PartUpdated.type) {
       const part = (event.data as EventV2.Data<typeof SessionV1.Event.PartUpdated>).part
       const track = tracks.get(part.sessionID)
       if (!track) return Effect.void
-      if (part.type === "tool" && part.tool === "StructuredOutput") track.answered = true
       if (part.type !== "step-finish" || track.seen.has(part.id)) return Effect.void
       track.seen.add(part.id)
       track.steps++
-      state.spent += part.cost
-      track.context = part.tokens.input + part.tokens.cache.read + part.tokens.cache.write
-      track.cached = part.tokens.cache.read
-      // Only a step that ended in tool calls leads to another. A step that answered, or ended the turn, is the
-      // session's last, and a stop landing then could only interrupt saving the report.
-      const continues = (part.reason === "tool-calls" || part.reason === "unknown") && !track.answered
-      const stop = track.finalizing || track.stop || !continues ? undefined : stopReason(track)
-      if (!stop) return progress({ type: "cost", costUsd: state.spent })
-      track.stop = stop
-      return progress({ type: "cost", costUsd: state.spent }).pipe(
-        Effect.andThen(prompts.cancel(track.sessionID).pipe(Effect.forkIn(scope))),
-        Effect.map((fiber) => {
-          track.cancel = fiber
-        }),
-      )
+      state.reported += part.cost
+      return progress({ type: "cost", costUsd: state.reported })
     }
     if (event.type === Permission.Event.Asked.type) {
       // Nothing is set to ask, so nothing should; if something does, it is refused rather than left waiting.
@@ -229,6 +223,11 @@ export const run: (
       .flatMap((entry) => entry.messages)
       .filter((message) => message.info.role !== "assistant" || !message.info.forked)
     const measured = measureCost(recorded)
+    // Admission can refuse the first request after an empty assistant marker is stored. No admitted attempt
+    // means no provider spend; an attempted request without usage must still remain unknown.
+    const unused =
+      children.length === 0 &&
+      [...tracks.values()].every((track) => track.attempts === 0 && track.finalizeAttempts === 0)
     const assistant = recorded.flatMap((message) => (message.info.role === "assistant" ? [message.info] : []))
     const incomplete =
       messages.some((entry) => !entry.complete) ||
@@ -243,13 +242,13 @@ export const run: (
       reasoning: measured?.reasoning ?? 0,
       cacheRead: measured?.cacheRead ?? 0,
       cacheWrite: measured?.cacheWrite ?? 0,
-      ...(!measured ? { usageMissing: true } : {}),
+      ...(!measured && !unused ? { usageMissing: true } : {}),
       kind:
-        !measured || incomplete || !Number.isFinite(measured.costUsd)
+        (!measured && !unused) || incomplete || (measured !== undefined && !Number.isFinite(measured.costUsd))
           ? "unknown"
           : sameModel
             ? input.model.costKind
-            : measured.costUsd > 0
+            : (measured?.costUsd ?? 0) > 0
               ? "priced"
               : "unknown",
       model: sameModel ? `${input.model.providerID}/${input.model.modelID}` : "Multiple models",
@@ -267,45 +266,109 @@ export const run: (
   // session with every tool but StructuredOutput denied.
   function ask<T>(spec: Spec<T>): Effect.Effect<Asked<T>> {
     return Effect.gen(function* () {
+      // Include the structured-output schema and a fixed context allowance. The first turn has no reported usage
+      // yet, so this is only an admission estimate; provider usage replaces it as soon as it arrives.
+      const context = Math.ceil((spec.text.length + JSON.stringify(spec.schema).length) / 3.5)
+      const firstCost = nextCost({ context, cached: 0 })
+      if (!reserve(spec.name, firstCost, firstCost))
+        return { name: spec.name, status: "stopped", stop: "budget", detail: "budget", steps: 0 } satisfies Asked<T>
       const session = yield* sessions.create({
         title: `Vectorscope review · ${input.head.slice(0, 7)} · ${spec.name}`,
         permission: rules,
       })
       const track: Track = {
+        name: spec.name,
         sessionID: session.id,
         cap: spec.cap,
         steps: 0,
         seen: new Set(),
-        context: 0,
+        context,
         cached: 0,
-        answered: false,
+        attempts: 0,
+        finalizeAttempts: 0,
         finalizing: false,
+        denied: false,
       }
       tracks.set(session.id, track)
       sessionIDs.push(session.id)
       yield* progress({ type: "specialist", name: spec.name, status: "running" })
 
+      // One policy survives every processor instance, retry and prompt for this fresh owned session. It is never
+      // rebuilt at a continuation boundary, and the finalizer gets exactly one separately reserved invocation.
+      const policy: SessionAdmission.Policy = {
+        sessionID: session.id,
+        admit: (request) => {
+          const stop = track.finalizing
+            ? track.finalizeAttempts >= 1 || !request.tools.includes("StructuredOutput")
+              ? "steps"
+              : undefined
+            : track.attempts >= track.cap
+              ? "steps"
+              : Date.now() >= deadline
+                ? "timeout"
+                : undefined
+          if (stop) {
+            track.stop ??= stop
+            track.denied = true
+            return
+          }
+          const estimate = nextCost(track)
+          if (!reserve(track.name, estimate, track.finalizing ? 0 : estimate)) {
+            track.stop = "budget"
+            track.denied = true
+            return
+          }
+          if (track.finalizing) track.finalizeAttempts++
+          else track.attempts++
+          return {
+            ...(track.finalizing ? { tools: ["StructuredOutput"] } : {}),
+            observe: (cost) => {
+              const reservation = reservations.get(track.name)
+              if (reservation) reservation.turn = Math.max(reservation.turn, cost)
+            },
+            settle: (result) => {
+              state.spent += result.cost
+              if (price && !result.complete) {
+                // No usage, partial usage, and unpriced usage cannot turn an accepted attempt into free capacity.
+                state.uncertain += Math.max(
+                  0,
+                  Math.max(estimate, reservations.get(track.name)?.turn ?? 0) - result.cost,
+                )
+                state.incomplete = true
+              }
+              track.context = result.complete ? result.context : Math.max(track.context, result.context)
+              track.cached = result.complete ? result.cached : 0
+              if (price) reservations.set(track.name, { turn: 0, finalize: track.finalizing ? 0 : nextCost(track) })
+            },
+          }
+        },
+      }
+
       const send = (text: string, ms: number): Effect.Effect<Sent> =>
-        prompts
-          .prompt({
-            sessionID: session.id,
-            agent: spec.name === "security" ? "security" : "review",
-            model: { providerID: input.model.providerID, modelID: input.model.modelID },
-            ...(input.model.variant ? { variant: input.model.variant } : {}),
-            // A class instance: the stored user message only accepts the schema class, not a plain object.
-            format: new SessionV1.OutputFormatJsonSchema({ type: "json_schema", schema: spec.schema, retryCount: 0 }),
-            parts: [{ type: "text", text }],
-          })
-          .pipe(
-            Effect.timeoutOption(Duration.millis(Math.max(0, ms))),
-            Effect.exit,
-            Effect.flatMap((exit): Effect.Effect<Sent> => {
-              if (Exit.isFailure(exit)) return Effect.succeed({ timedOut: false })
-              if (Option.isNone(exit.value))
-                return prompts.cancel(session.id).pipe(Effect.as({ timedOut: true as const }))
-              return Effect.succeed({ timedOut: false, message: exit.value.value })
-            }),
-          )
+        Effect.suspend(() => {
+          if (ms <= 0) return Effect.succeed<Sent>({ timedOut: true })
+          return prompts
+            .prompt({
+              sessionID: session.id,
+              agent: spec.name === "security" ? "security" : "review",
+              model: { providerID: input.model.providerID, modelID: input.model.modelID },
+              ...(input.model.variant ? { variant: input.model.variant } : {}),
+              // A class instance: the stored user message only accepts the schema class, not a plain object.
+              format: new SessionV1.OutputFormatJsonSchema({ type: "json_schema", schema: spec.schema, retryCount: 0 }),
+              parts: [{ type: "text", text }],
+            })
+            .pipe(
+              Effect.provideService(SessionAdmission.Current, policy),
+              Effect.timeoutOption(Duration.millis(ms)),
+              Effect.exit,
+              Effect.flatMap((exit): Effect.Effect<Sent> => {
+                if (Exit.isFailure(exit)) return Effect.succeed({ timedOut: false })
+                if (Option.isNone(exit.value))
+                  return prompts.cancel(session.id).pipe(Effect.as({ timedOut: true as const }))
+                return Effect.succeed({ timedOut: false, message: exit.value.value })
+              }),
+            )
+        }).pipe(Effect.ensuring(prompts.cancel(session.id)))
       const done = (value: T | undefined, status: Asked<T>["status"], stop?: Stop, detail?: string): Asked<T> => ({
         name: spec.name,
         sessionID: session.id,
@@ -318,8 +381,6 @@ export const run: (
 
       const first = yield* send(spec.text, deadline - Date.now())
       if (first.timedOut) track.stop ??= "timeout"
-      // A stop the listener forked may still be landing; the session must be idle before it is prompted again.
-      if (track.cancel) yield* Fiber.join(track.cancel)
       const message = first.timedOut ? undefined : first.message
       const structured = message?.info.role === "assistant" ? message.info.structured : undefined
       // The report came back whole; a stop that landed after its last step changes nothing.
@@ -327,17 +388,23 @@ export const run: (
         structured !== undefined ? spec.decode(structured) : !track.stop ? spec.decode(lastText(message)) : undefined
       if (value !== undefined) return done(value, "ok")
 
+      // The first prompt is now idle. Unknown exposure stays in the review's ledger; only unused future work is
+      // released. The finalizer must still fit beside every other specialist's admitted work.
+      if (!reserve(track.name, nextCost(track), 0)) return done(undefined, "stopped", "budget", "budget")
       track.finalizing = true
+      track.denied = false
       yield* sessions.setPermission({ sessionID: session.id, permission: [...rules, DENY_ALL, ALLOW_OUTPUT] })
       const last = yield* send(buildFinalizePrompt(), FINALIZE_MS)
       const final = last.timedOut ? undefined : last.message
       const finalStructured = final?.info.role === "assistant" ? final.info.structured : undefined
       const finalValue = spec.decode(finalStructured !== undefined ? finalStructured : lastText(final))
+      if (finalValue === undefined && track.denied) return done(undefined, "stopped", track.stop, track.stop)
       if (finalValue === undefined)
         return done(undefined, "failed", track.stop, errorOf(final) ?? errorOf(message) ?? "no report")
       const status = track.stop === "timeout" ? "timeout" : track.stop ? "stopped" : "ok"
       return done(finalValue, status, track.stop, track.stop)
     }).pipe(
+      Effect.ensuring(Effect.sync(() => reservations.delete(spec.name))),
       Effect.catchCauseIf(
         (cause) => !Cause.hasInterrupts(cause),
         (cause) =>
@@ -431,7 +498,7 @@ export const run: (
     const estimate = price
       ? estimateCostUsd({ promptTokens: Math.ceil(verifyText.length / 3.5), maxSteps: VERIFY_STEPS, price }).low
       : 0
-    const unaffordable = price !== undefined && state.spent + estimate > config.maxCostUsd
+    const unaffordable = price !== undefined && state.spent + state.uncertain + estimate > config.maxCostUsd
     const late = deadline - Date.now() < VERIFY_MIN_MS
     const verify: Asked<ReturnType<typeof decodeVerify>> | undefined = !candidates.length
       ? undefined
@@ -484,13 +551,14 @@ export const run: (
     // A partial run records the files no finished specialist saw, so the next run reviews them. A run where no
     // specialist finished leaves every file unreviewed.
     const partial =
-      asked.find((entry) => entry.value && entry.stop)?.stop ??
+      asked.find((entry) => entry.stop)?.stop ??
       (asked.some((entry) => !entry.value) ? ("model-error" as const) : undefined)
-    const unreviewed = !reports.length
-      ? input.files.map((file) => file.path)
-      : partial && partial !== "model-error"
-        ? yield* uncovered(asked.flatMap((entry) => (entry.value && entry.sessionID ? [entry.sessionID] : [])))
-        : []
+    const unreviewed =
+      !reports.length || asked.some((entry) => entry.stop && !entry.value)
+        ? input.files.map((file) => file.path)
+        : partial && partial !== "model-error"
+          ? yield* uncovered(asked.flatMap((entry) => (entry.value && entry.sessionID ? [entry.sessionID] : [])))
+          : []
 
     function uncovered(ids: SessionID[]) {
       return Effect.gen(function* () {
@@ -535,7 +603,14 @@ export const run: (
         additions: input.files.reduce((sum, file) => sum + file.additions, 0),
         deletions: input.files.reduce((sum, file) => sum + file.deletions, 0),
       },
-      notes: verify?.status === "skipped" ? [noteVerifySkipped()] : [],
+      notes: [
+        ...(verify?.status === "skipped" ? [noteVerifySkipped()] : []),
+        ...(state.incomplete
+          ? [
+              "Reported cost may be incomplete; work with uncertain usage retained its estimated budget exposure for this review.",
+            ]
+          : []),
+      ],
     } satisfies ReviewOutcome
   })
 

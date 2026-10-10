@@ -66,6 +66,12 @@ cliIt.live(
         ["anthropic", "disabled"],
       ])
       expect(JSON.stringify(providers.unavailable)).not.toContain("fixture-access")
+      const configured = yield* Effect.promise(async () => {
+        const response = await fetch(`${server.url}/config/providers`)
+        expect(response.status).toBe(200)
+        return response.json() as Promise<{ unavailable: typeof providers.unavailable }>
+      })
+      expect(configured.unavailable).toEqual(providers.unavailable)
       server.kill()
       const run = yield* vector.run("hello", { model: "github-copilot/gpt-4.1", format: "json", env })
       const errors = run.stdout

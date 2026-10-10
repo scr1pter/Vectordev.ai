@@ -7,6 +7,34 @@ import { it } from "./lib/effect"
 const jobsLayer = LayerNode.compile(BackgroundJob.node)
 
 describe("BackgroundJob", () => {
+  it.live("refuses promotion without changing a foreground-only job and preserves default promotion", () =>
+    Effect.gen(function* () {
+      const jobs = yield* BackgroundJob.Service
+      let promoted = 0
+      const fixed = yield* jobs.start({
+        type: "test",
+        promotable: false,
+        run: Effect.never,
+        onPromote: Effect.sync(() => {
+          promoted += 1
+        }),
+      })
+      expect(yield* jobs.promote(fixed.id)).toBeUndefined()
+      expect(yield* jobs.get(fixed.id)).toEqual(fixed)
+      expect(promoted).toBe(0)
+      const ordinary = yield* jobs.start({
+        type: "test",
+        run: Effect.never,
+        onPromote: Effect.sync(() => {
+          promoted += 1
+        }),
+      })
+      expect(yield* jobs.promote(ordinary.id)).toMatchObject({ metadata: { background: true } })
+      expect(promoted).toBe(1)
+      yield* jobs.promote(ordinary.id)
+      expect(promoted).toBe(1)
+    }).pipe(Effect.provide(jobsLayer)),
+  )
   it.live("tracks process-local work through explicit observation", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service

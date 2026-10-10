@@ -15,6 +15,7 @@ import {
   liveAgentCount,
   liveBackgroundSessions,
   runningAgentCount,
+  taskPartLocations,
   type TaskAgent,
   type TaskCard,
   type TaskLocation,
@@ -196,20 +197,7 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     ),
   )
 
-  const index = createMemo(() => {
-    const map = new Map<string, TaskLocation>()
-    for (const card of state.cards) {
-      for (const phase of card.phases) {
-        const first = phase.agents.findIndex((agent) => agent.partID !== undefined)
-        phase.agents.forEach((agent, position) => {
-          if (agent.partID) map.set(agent.partID, { card, phase, agent, first: position === first })
-          // A part that only extended this agent's run renders nothing of its own.
-          for (const partID of agent.extendPartIDs ?? []) map.set(partID, { card, phase, agent, first: false })
-        })
-      }
-    }
-    return map
-  })
+  const index = createMemo(() => taskPartLocations(state.cards))
 
   const liveCount = createMemo(() => liveAgentCount(state.cards))
   const runningCount = createMemo(() => runningAgentCount(state.cards))

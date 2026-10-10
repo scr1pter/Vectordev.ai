@@ -1097,6 +1097,26 @@
                       "additionalProperties": {
                         "type": "string"
                       }
+                    },
+                    "unavailable": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": ["sign-in-paused", "provider-not-configured", "disabled", "no-models"]
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "reason", "message"],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": ["providers", "default"],

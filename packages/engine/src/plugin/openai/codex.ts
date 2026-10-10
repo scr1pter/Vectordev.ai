@@ -11,6 +11,7 @@ import os from "os"
 import { setTimeout as sleep } from "node:timers/promises"
 import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
+import { OpenAITransport } from "./transport"
 import { OauthCallbackPage } from "@vectordevai/core/oauth/page"
 
 const ISSUER = "https://auth.openai.com"
@@ -119,6 +120,7 @@ interface CodexAuthPluginOptions {
   issuer?: string
   codexApiEndpoint?: string
   experimentalWebSockets?: boolean
+  onTransportDiagnostic?: (event: OpenAITransport.Diagnostic) => void
   /** How long a browser sign-in waits for its callback before failing and closing the server. */
   callbackTimeout?: number
 }
@@ -510,13 +512,31 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         const auth = await getAuth()
         if (auth.type === "oauth" && !chatgptCredentialMatches(auth)) return {}
         const websocketFetch = options.experimentalWebSockets
-          ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch })
+          ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch, onDiagnostic: options.onTransportDiagnostic })
           : undefined
         if (websocketFetch) {
           websocketFetches.push(websocketFetch)
           websocketFetchInstalled = true
         }
-        if (auth.type !== "oauth") return websocketFetch ? { fetch: websocketFetch } : {}
+        const httpFetch = (request: RequestInfo | URL, init?: RequestInit) => {
+          const url = request instanceof URL ? request : new URL(typeof request === "string" ? request : request.url)
+          const headers = new Headers(init?.headers ?? (request instanceof Request ? request.headers : undefined))
+          const requestInit = OpenAIWebSocketPool.withoutInternalHeaders(init, request)
+          if (!url.pathname.endsWith("/responses")) return fetch(request, requestInit)
+          return OpenAITransport.fetchHttp({
+            fetch,
+            request,
+            init: requestInit,
+            reason: "disabled",
+            trace: OpenAITransport.createTrace({
+              transport: "http",
+              headers: Object.fromEntries(headers.entries()),
+              report: options.onTransportDiagnostic,
+              body: init?.body,
+            }),
+          })
+        }
+        if (auth.type !== "oauth") return { fetch: websocketFetch ?? httpFetch }
 
         let refreshPromise:
           | Promise<{
@@ -542,7 +562,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
 
             const currentAuth = await getAuth()
             if (currentAuth.type !== "oauth")
-              return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
+              return websocketFetch ? websocketFetch(requestInput, init) : httpFetch(requestInput, init)
             const app = chatgptOAuthConfiguration()
             if (!app || !chatgptCredentialMatches(currentAuth, app)) throw new Error(CHATGPT_SIGN_IN_UNAVAILABLE)
 
@@ -613,7 +633,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
               headers,
             }
             if (websocketFetch && parsed.pathname.endsWith("/responses")) return websocketFetch(url, requestInit)
-            return fetch(url, OpenAIWebSocketPool.withoutInternalHeaders(requestInit))
+            return httpFetch(url, requestInit)
           },
         }
       },

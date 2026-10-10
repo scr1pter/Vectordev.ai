@@ -1,8 +1,5 @@
 import { Effect } from "effect"
 import { effectCmd } from "../effect-cmd"
-import { AgentSideConnection, ndJsonStream } from "@agentclientprotocol/sdk"
-import { ServerAuth } from "@/server/auth"
-import { createVectorClient } from "@vectordevai/sdk/v2"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
 import { ACPProfile } from "@/acp/profile"
 
@@ -17,6 +14,9 @@ export const AcpCommand = effectCmd({
     })
   },
   handler: Effect.fn("Cli.acp")(function* (args) {
+    const { AgentSideConnection, ndJsonStream } = yield* Effect.promise(() => import("@agentclientprotocol/sdk"))
+    const { ServerAuth } = yield* Effect.promise(() => import("@/server/auth"))
+    const { createVectorClient } = yield* Effect.promise(() => import("@vectordevai/sdk/v2"))
     const { Server } = yield* Effect.promise(() => import("@/server/server"))
     const { ACP } = yield* Effect.promise(() => import("@/acp/agent"))
     ACPProfile.mark("cli.acp.handler")

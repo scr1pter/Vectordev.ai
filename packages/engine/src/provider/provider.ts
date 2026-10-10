@@ -998,6 +998,7 @@ export type ListResult = Types.DeepMutable<Schema.Schema.Type<typeof ListResult>
 export const ConfigProvidersResult = Schema.Struct({
   providers: Schema.Array(Info),
   default: DefaultModelIDs,
+  unavailable: Schema.optional(Schema.Array(ProviderUnavailable)),
 })
 export type ConfigProvidersResult = Types.DeepMutable<Schema.Schema.Type<typeof ConfigProvidersResult>>
 
@@ -2126,6 +2127,12 @@ const layer = Layer.effect(
         }
       }
 
+      // ChatGPT sign-in does not establish access to every small model in the API catalog.
+      // Reuse the selected route instead of inferring a sibling; explicit choices above still win.
+      if (providerID === ProviderV2.ID.openai && (yield* auth.get(providerID).pipe(Effect.orDie))?.type === "oauth") {
+        return primary
+      }
+
       // TODO: Remove these provider-specific assumptions once model syncing reliably reports available deployments.
       if (providerID === ProviderV2.ID.azure || providerID === ProviderV2.ID.make("azure-cognitive-services")) {
         return undefined
@@ -2137,6 +2144,16 @@ const layer = Layer.effect(
       const models = sortBy(
         Object.values(provider.models),
         [(model) => model.release_date, "desc"],
+        // OpenAI delivery modes share the base release date; a background call must not opt into a tier by ID order.
+        [
+          (model) =>
+            Number(
+              providerID === ProviderV2.ID.openai &&
+                model.id !== model.api.id &&
+                model.options.serviceTier !== undefined,
+            ),
+          "asc",
+        ],
         [(model) => model.id, "desc"],
       )
       for (const family of priority) {

@@ -363,7 +363,44 @@ function runWebSearch(p: ToolProps<typeof WebSearchTool>): ToolInline {
   }
 }
 
+function taskBatchRows(p: ToolProps<typeof TaskTool>) {
+  const records = list<ToolDict>(p.frame.meta.tasks)
+  if (!p.input.tasks && p.frame.meta.taskBatch !== 1) return undefined
+  const indexes = p.input.tasks
+    ? p.input.tasks.map((_, index) => index)
+    : [
+        ...new Set(
+          records.flatMap((record) =>
+            typeof record.index === "number" && Number.isSafeInteger(record.index) && record.index >= 0
+              ? [record.index]
+              : [],
+          ),
+        ),
+      ].sort((a, b) => a - b)
+  return indexes.map((index) => {
+    const matches = records.filter((record) => record.index === index)
+    const item = matches.length === 1 ? matches[0] : undefined
+    const status =
+      matches.length > 1 ? "unknown" : text(item?.status) || (p.frame.status === "error" ? "not started" : "pending")
+    const error = text(item?.error)
+    return `${text(item?.title) || p.input.tasks?.[index]?.description || `Task ${index + 1}`} · ${status}${error ? `: ${error}` : ""}`
+  })
+}
+
 function runTask(p: ToolProps<typeof TaskTool>): ToolInline {
+  const rows = taskBatchRows(p)
+  if (rows)
+    return {
+      icon:
+        p.frame.status === "error" || p.frame.meta.status === "error"
+          ? "✗"
+          : p.frame.meta.status === "completed"
+            ? "✓"
+            : "•",
+      title: `${rows.length} Subagent tasks`,
+      mode: "block",
+      body: rows.join("\n"),
+    }
   const kind = Locale.titlecase(p.input.subagent_type || "unknown")
   const desc = p.input.description
   const icon = p.frame.status === "error" ? "✗" : p.frame.status === "running" ? "•" : "✓"
@@ -569,6 +606,8 @@ function snapPatch(p: ToolProps<typeof ApplyPatchTool>): ToolSnapshot | undefine
 }
 
 function snapTask(p: ToolProps<typeof TaskTool>): ToolSnapshot {
+  const batch = taskBatchRows(p)
+  if (batch) return { kind: "task", title: `# ${batch.length} Subagent tasks`, rows: batch, tail: "" }
   const kind = Locale.titlecase(p.input.subagent_type || "general")
   const desc = p.input.description
   const title = text(p.frame.state.title)
@@ -775,6 +814,11 @@ function taskResult(output: string): string | undefined {
 }
 
 function scrollTaskFinal(p: ToolProps<typeof TaskTool>): string {
+  const rows = taskBatchRows(p)
+  if (rows)
+    return [`# ${rows.length} Subagent tasks`, ...rows, p.frame.status === "error" ? fail(p.frame) : ""]
+      .filter(Boolean)
+      .join("\n")
   if (p.frame.status === "error") {
     return fail(p.frame)
   }
@@ -1438,7 +1482,7 @@ export function toolEntryBody(commit: StreamCommit, raw: string): RunEntryBody |
       return undefined
     }
 
-    if (commit.phase === "final" && ctx.status === "completed") {
+    if (commit.phase === "final" && ctx.status === "completed" && !taskBatchRows(props(ctx))) {
       const result = taskResult(text(ctx.state.output))
       if (result) {
         return markdownBody(result)

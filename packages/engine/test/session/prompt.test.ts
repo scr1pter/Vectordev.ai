@@ -13,7 +13,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { expect } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
-import { fileURLToPath } from "url"
+import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@vectordevai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
@@ -1311,6 +1311,77 @@ it.instance("loop continues when finish is tool-calls", () =>
       expect(result.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
       expect(result.info.finish).toBe("stop")
     }
+  }),
+)
+
+it.instance("loop continues after a missing-file read with a valid read and final response", () =>
+  Effect.gen(function* () {
+    const setup = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({
+      title: "Read recovery",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    const missing = path.join(setup.dir, "does-not-exist.txt")
+    const valid = path.join(setup.dir, "available.txt")
+    yield* writeText(valid, "native read recovery content\n")
+    expect(yield* Effect.promise(() => Bun.file(missing).exists())).toBe(false)
+
+    yield* setup.llm.tool("read", { filePath: missing })
+    yield* setup.llm.tool("read", { filePath: valid })
+    yield* setup.llm.text("Recovered from the missing file.")
+    const result = yield* prompt.prompt({
+      sessionID: session.id,
+      model: ref,
+      agent: "build",
+      parts: [{ type: "text", text: "Read the requested file and recover if it is missing." }],
+    })
+
+    const reads = (yield* MessageV2.filterCompactedEffect(session.id))
+      .flatMap((message) => message.parts)
+      .filter((part): part is SessionV1.ToolPart => part.type === "tool" && part.tool === "read")
+    expect(reads).toHaveLength(2)
+    expect(reads[0]).toMatchObject({
+      state: {
+        status: "error",
+        input: { filePath: missing },
+        error: expect.stringContaining(`File not found: ${missing}`),
+      },
+    })
+    expect(reads[1]).toMatchObject({
+      state: {
+        status: "completed",
+        input: { filePath: valid },
+        output: expect.stringContaining("native read recovery content"),
+      },
+    })
+    const inputs = yield* setup.llm.inputs
+    expect(inputs).toHaveLength(3)
+    expect(inputs[1].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "tool",
+          tool_call_id: reads[0].callID,
+          content: expect.stringContaining(`File not found: ${missing}`),
+        }),
+      ]),
+    )
+    expect(inputs[2].messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "tool",
+          tool_call_id: reads[1].callID,
+          content: expect.stringContaining("native read recovery content"),
+        }),
+      ]),
+    )
+    expect(result.info).toMatchObject({ role: "assistant", finish: "stop" })
+    expect(result.parts).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "text", text: "Recovered from the missing file." })]),
+    )
+    expect(yield* setup.llm.pending).toBe(0)
+    expect(yield* setup.llm.misses).toEqual([])
   }),
 )
 
@@ -3136,3 +3207,363 @@ noLLMServer.instance(
     }),
   30_000,
 )
+
+it.instance(
+  "one SDK task call launches both batch children before either returns",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const gate = yield* Deferred.make<void>()
+      yield* llm.tool("task", {
+        tasks: [
+          {
+            description: "Inspect alpha",
+            prompt: "Inspect alpha independently.",
+            subagent_type: "general",
+            owned_paths: ["alpha"],
+            success_criteria: ["Report alpha evidence"],
+          },
+          {
+            description: "Inspect beta",
+            prompt: "Inspect beta independently.",
+            subagent_type: "general",
+            owned_paths: ["beta"],
+            success_criteria: ["Report beta evidence"],
+          },
+        ],
+      })
+      yield* llm.hold("alpha verified", deferredAsPromise(gate))
+      yield* llm.hold("beta verified", deferredAsPromise(gate))
+      yield* llm.text("Both reports reviewed")
+      yield* user(chat.id, "Inspect the two independent areas")
+      const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+      yield* awaitWithTimeout(llm.wait(3), "second child was serialized behind first completion", "8 seconds")
+      expect(yield* sessions.children(chat.id)).toHaveLength(2)
+      const during = (yield* sessions.messages({ sessionID: chat.id }))
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "tool" && part.tool === "task")
+      expect(during).toHaveLength(1)
+      yield* Deferred.succeed(gate, undefined)
+      yield* awaitWithTimeout(Fiber.join(fiber), "batch and parent did not finish")
+      const tasks = (yield* sessions.messages({ sessionID: chat.id }))
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "tool" && part.tool === "task")
+      expect(tasks).toHaveLength(1)
+      expect(tasks[0]).toMatchObject({
+        state: {
+          status: "completed",
+          metadata: {
+            taskBatch: 1,
+            status: "completed",
+            tasks: [
+              { index: 0, status: "completed" },
+              { index: 1, status: "completed" },
+            ],
+          },
+        },
+      })
+      expect(yield* llm.calls).toBe(4)
+      expect(yield* llm.pending).toBe(0)
+    }),
+  15_000,
+)
+
+for (const mode of ["legacy", "hybrid", "plugin-schema", "plugin-inplace", "legacy-extra"] as const) {
+  it.instance(
+    `SDK task compatibility validates ${mode} before execution hooks`,
+    () =>
+      Effect.gen(function* () {
+        const fixture = yield* TestInstance
+        const log = path.join(fixture.directory, "task-hooks.txt")
+        const plugin = path.join(fixture.directory, "task-schema-plugin.ts")
+        yield* writeText(
+          plugin,
+          `export default async () => ({
+      "tool.execute.before": async (input, output) => { if (input.tool === "task") await Bun.write(${JSON.stringify(log)}, JSON.stringify(output.args)); },
+      ${
+        mode === "plugin-schema"
+          ? `"tool.definition": async (input, output) => {
+        if (input.toolID === "task") output.jsonSchema = {
+          type: "object", properties: { permit: { type: "string" } }, required: ["permit"]
+        };
+      },`
+          : mode === "plugin-inplace"
+            ? `"tool.definition": async (input, output) => { if (input.toolID === "task") output.jsonSchema.properties.route = { type: "string" }; },`
+            : ""
+      }
+    })`,
+        )
+        const { llm } = yield* useServerConfig((url) => ({ ...providerCfg(url), plugin: [pathToFileURL(plugin).href] }))
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({
+          title: "Pinned",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const brief = {
+          description: "Inspect legacy",
+          prompt: "Inspect this independent area.",
+          subagent_type: "general",
+        }
+        const valid = mode === "legacy" || mode === "legacy-extra"
+        yield* llm.tool(
+          "task",
+          valid
+            ? { ...brief, route: "preserved-plugin-context" }
+            : { ...brief, tasks: [brief], route: "preserved-plugin-context" },
+        )
+        if (valid) yield* llm.text("child verified")
+        yield* llm.text("parent verified tool outcome")
+        yield* user(chat.id, "Inspect the assigned area")
+        yield* prompt.loop({ sessionID: chat.id })
+        expect(yield* Effect.promise(() => Bun.file(log).exists())).toBe(mode !== "hybrid")
+        expect(yield* sessions.children(chat.id)).toHaveLength(valid ? 1 : 0)
+        expect(yield* llm.calls).toBe(valid ? 3 : 2)
+        if (mode !== "hybrid")
+          expect(yield* Effect.promise(() => Bun.file(log).json())).toMatchObject({ route: "preserved-plugin-context" })
+        if (valid) {
+          const messages = yield* sessions.messages({ sessionID: chat.id })
+          const part = messages
+            .flatMap((message) => message.parts)
+            .find((part) => part.type === "tool" && part.tool === "task")
+          expect(part).toMatchObject({ state: { status: "completed", metadata: { sessionId: expect.any(String) } } })
+          const bodies = yield* llm.inputs
+          expect(bodies[0].tools).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                function: expect.objectContaining({
+                  name: "task",
+                  parameters: expect.objectContaining({ required: ["tasks"] }),
+                }),
+              }),
+            ]),
+          )
+        }
+      }),
+    15_000,
+  )
+}
+
+for (const mode of ["allow", "reject", "cancel", "definition", "override"] as const) {
+  noLLMServer.instance(
+    `native patch preserves SessionTools hooks, durable input and ${mode} behavior`,
+    () =>
+      Effect.gen(function* () {
+        const fixture = yield* TestInstance
+        const patchText = "*** Begin Patch\n*** Add File: native-patch.txt\n+hello from patch\n*** End Patch"
+        const log = path.join(fixture.directory, "hook-log.jsonl")
+        const plugin = path.join(fixture.directory, "native-patch-plugin.ts")
+        yield* writeText(
+          plugin,
+          `
+          const log = ${JSON.stringify(log)};
+          async function record(stage, args) {
+            const file = Bun.file(log);
+            const previous = await file.exists() ? await file.text() : "";
+            await Bun.write(log, previous + JSON.stringify({ stage, args }) + "\\n");
+          }
+          export default async () => ({
+            "tool.execute.before": async (input, output) => {
+              if (input.tool === "apply_patch") await record("before", output.args);
+            },
+            "tool.execute.after": async (input) => {
+              if (input.tool === "apply_patch") await record("after", input.args);
+            },
+            ${
+              mode === "definition"
+                ? `"tool.definition": async (input, output) => {
+              if (input.toolID === "apply_patch") output.jsonSchema = {
+                type: "object", properties: { patchText: { type: "string" }, extra: { type: "string" } },
+                required: ["patchText", "extra"], additionalProperties: false
+              };
+            },`
+                : ""
+            }
+            ${
+              mode === "override"
+                ? `tool: { apply_patch: {
+              description: "Custom replacement", args: { patchText: { type: "string" } },
+              execute: async () => "plugin replacement ran"
+            } },`
+                : ""
+            }
+          });
+        `,
+        )
+        const state = { sent: false, bodies: [] as Record<string, unknown>[] }
+        const server = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            Bun.serve({
+              hostname: "127.0.0.1",
+              port: 0,
+              async fetch(request) {
+                const body = (await request.json()) as Record<string, unknown>
+                state.bodies.push(body)
+                const custom =
+                  Array.isArray(body.tools) &&
+                  body.tools.some((tool) => tool.name === "apply_patch" && tool.type === "custom")
+                const args = { patchText, ...(mode === "definition" ? { extra: "required by plugin" } : {}) }
+                const item = custom
+                  ? {
+                      type: "custom_tool_call",
+                      id: "ctc_patch",
+                      call_id: "patch_call",
+                      name: "apply_patch",
+                      input: patchText,
+                    }
+                  : {
+                      type: "function_call",
+                      id: "fc_patch",
+                      call_id: "patch_call",
+                      name: "apply_patch",
+                      arguments: JSON.stringify(args),
+                    }
+                const first = !state.sent
+                state.sent = true
+                const frames = [
+                  { type: "response.created", response: { id: "resp_patch", created_at: 1, model: "gpt-6.1-sol" } },
+                  ...(first
+                    ? [
+                        { type: "response.output_item.added", output_index: 0, item },
+                        custom
+                          ? {
+                              type: "response.custom_tool_call_input.delta",
+                              output_index: 0,
+                              item_id: item.id,
+                              delta: patchText,
+                            }
+                          : {
+                              type: "response.function_call_arguments.delta",
+                              output_index: 0,
+                              item_id: item.id,
+                              delta: JSON.stringify(args),
+                            },
+                        { type: "response.output_item.done", output_index: 0, item: { ...item, status: "completed" } },
+                      ]
+                    : [
+                        {
+                          type: "response.output_item.added",
+                          output_index: 0,
+                          item: { type: "message", id: "msg_final" },
+                        },
+                        {
+                          type: "response.output_text.delta",
+                          item_id: "msg_final",
+                          output_index: 0,
+                          content_index: 0,
+                          delta: "Done",
+                        },
+                        {
+                          type: "response.output_item.done",
+                          output_index: 0,
+                          item: { type: "message", id: "msg_final" },
+                        },
+                      ]),
+                  { type: "response.completed", response: { usage: { input_tokens: 100, output_tokens: 20 } } },
+                ]
+                return new Response(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(""), {
+                  headers: { "content-type": "text/event-stream" },
+                })
+              },
+            }),
+          ),
+          (server) => Effect.sync(() => server.stop(true)),
+        )
+        yield* writeConfig(fixture.directory, {
+          enabled_providers: ["openai"],
+          plugin: [pathToFileURL(plugin).href],
+          model: "openai/gpt-6.1-sol",
+          provider: {
+            openai: {
+              npm: "@ai-sdk/openai",
+              options: { apiKey: "synthetic-local-only", baseURL: `${server.url.origin}/v1` },
+              models: {
+                "gpt-6.1-sol": {
+                  ...cfg.provider.lmstudio.models["test-model"],
+                  id: "gpt-6.1-sol",
+                  options: { nativePatch: true },
+                },
+              },
+            },
+          },
+        })
+        const sessions = yield* Session.Service
+        const prompt = yield* SessionPrompt.Service
+        const permission = yield* Permission.Service
+        const chat = yield* sessions.create({
+          title: "Pinned",
+          permission: [
+            { permission: "*", pattern: "*", action: "allow" },
+            ...(mode === "reject" || mode === "cancel"
+              ? [{ permission: "edit", pattern: "*", action: "ask" as const }]
+              : []),
+          ],
+        })
+        const running = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            model: { providerID: ProviderV2.ID.openai, modelID: ModelV2.ID.make("gpt-6.1-sol") },
+            parts: [{ type: "text", text: "Create native-patch.txt" }],
+          })
+          .pipe(Effect.forkChild)
+        if (mode === "reject" || mode === "cancel") {
+          const request = yield* pollWithTimeout(
+            permission
+              .list()
+              .pipe(
+                Effect.map((items) => items.find((item) => item.sessionID === chat.id && item.permission === "edit")),
+              ),
+            "native patch did not request edit permission",
+            "10 seconds",
+          )
+          expect(request.metadata).toMatchObject({
+            files: [{ filePath: path.join(fixture.directory, "native-patch.txt"), type: "add" }],
+          })
+          if (mode === "reject") yield* permission.reply({ requestID: request.id, reply: "reject" })
+          if (mode === "cancel") yield* prompt.cancel(chat.id)
+        }
+        yield* Fiber.join(running)
+        const parts = (yield* sessions.messages({ sessionID: chat.id })).flatMap((message) => message.parts)
+        const edited = parts.find((part) => part.type === "tool" && part.tool === "apply_patch")
+        expect(edited).toMatchObject({
+          type: "tool",
+          callID: "patch_call",
+          state: {
+            status: mode === "reject" || mode === "cancel" ? "error" : "completed",
+            input: { patchText },
+          },
+        })
+        const hooks = (yield* Effect.promise(() => Bun.file(log).text()))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+        expect(hooks[0]).toMatchObject({ stage: "before", args: { patchText } })
+        expect(hooks.map((hook) => hook.stage)).toEqual(
+          mode === "reject" || mode === "cancel" ? ["before"] : ["before", "after"],
+        )
+        expect(state.bodies[0]).toMatchObject({
+          tools: expect.arrayContaining([
+            expect.objectContaining({
+              name: "apply_patch",
+              type: mode === "definition" || mode === "override" ? "function" : "custom",
+            }),
+          ]),
+        })
+        const file = Bun.file(path.join(fixture.directory, "native-patch.txt"))
+        if (mode === "reject" || mode === "cancel" || mode === "override")
+          expect(yield* Effect.promise(() => file.exists())).toBe(false)
+        if (mode === "allow" || mode === "definition")
+          expect(yield* Effect.promise(() => file.text())).toBe("hello from patch\n")
+        if (mode === "definition") expect(hooks[0].args.extra).toBe("required by plugin")
+        if (mode === "override") expect(edited).toMatchObject({ state: { output: "plugin replacement ran" } })
+        expect(yield* permission.list()).toEqual([])
+      }),
+    30_000,
+  )
+}

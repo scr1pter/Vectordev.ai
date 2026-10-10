@@ -1041,8 +1041,8 @@ describe("session.llm.stream", () => {
           })
           expect(billed.cost).toBeCloseTo(0.0123, 10)
           const capture = yield* Effect.promise(() => request)
-          expect(capture.body.text).toEqual(verbosity ? { verbosity } : undefined)
-          expect(capture.body.prompt_cache_key).toBe(sessionID)
+          expect(capture.body.text).toMatchObject({ verbosity: verbosity ?? "low" })
+          expect(capture.body.prompt_cache_key).toBeUndefined()
           expect(capture.body.reasoning).toMatchObject({ effort: "medium" })
         }),
       {

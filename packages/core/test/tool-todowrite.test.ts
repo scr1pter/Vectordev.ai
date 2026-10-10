@@ -75,10 +75,10 @@ const setup = Effect.gen(function* () {
     .pipe(Effect.orDie)
 })
 
-const call = (todos: ReadonlyArray<SessionTodo.Info>, id = "call-todowrite") => ({
+const call = (todos: ReadonlyArray<SessionTodo.Info>, id = "call-todowrite", reset = false) => ({
   sessionID,
   ...toolIdentity,
-  call: { type: "tool-call" as const, id, name: TodoWriteTool.name, input: { todos } },
+  call: { type: "tool-call" as const, id, name: TodoWriteTool.name, input: { todos, reset } },
 })
 
 describe("TodoWriteTool", () => {
@@ -106,22 +106,56 @@ describe("TodoWriteTool", () => {
     }),
   )
 
-  it.effect("does not update persisted todos when permission is denied", () =>
+  it.effect("returns an actionable regression error and accepts an explicit reset", () =>
     Effect.gen(function* () {
       yield* setup
       const registry = yield* ToolRegistry.Service
       const service = yield* SessionTodo.Service
-      yield* service.update({ sessionID, todos: [{ content: "keep", status: "pending", priority: "low" }] })
+      const active = [{ content: "Verify change", status: "in_progress", priority: "high" }]
+      const pending = [{ content: "Verify change", status: "pending", priority: "high" }]
+      yield* service.update({ sessionID, todos: active })
+
+      const result = yield* executeTool(registry, call(pending))
+      expect(result).toMatchObject({ type: "error" })
+      expect(result.value).toContain("Verify change")
+      expect(result.value).toContain("in_progress")
+      expect(result.value).toContain("pending")
+      expect(result.value).toContain("reset")
+      expect(yield* service.get(sessionID)).toEqual(active)
+      expect(assertions).toHaveLength(1)
+
+      expect(yield* executeTool(registry, call(pending, "call-todowrite-reset", true))).toEqual({
+        type: "text",
+        value: "Todo list updated: 1 open, 0 completed.",
+      })
+      expect(yield* service.get(sessionID)).toEqual(pending)
+      expect(assertions).toHaveLength(2)
+    }),
+  )
+
+  it.effect("checks permission before transition validation and does not allow reset to bypass denial", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const registry = yield* ToolRegistry.Service
+      const service = yield* SessionTodo.Service
+      const active = [{ content: "Verify change", status: "in_progress", priority: "high" }]
+      const pending = [{ content: "Verify change", status: "pending", priority: "high" }]
+      yield* service.update({ sessionID, todos: active })
       deny = true
 
-      expect(
-        yield* executeTool(registry, call([{ content: "blocked", status: "completed", priority: "high" }])),
-      ).toEqual({
+      expect(yield* executeTool(registry, call(pending))).toEqual({
         type: "error",
         value: "Unable to update todos",
       })
-      expect(yield* service.get(sessionID)).toEqual([{ content: "keep", status: "pending", priority: "low" }])
-      expect(assertions).toMatchObject([{ sessionID, action: "todowrite", resources: ["*"], save: ["*"] }])
+      expect(yield* executeTool(registry, call(pending, "call-todowrite-denied-reset", true))).toEqual({
+        type: "error",
+        value: "Unable to update todos",
+      })
+      expect(yield* service.get(sessionID)).toEqual(active)
+      expect(assertions).toMatchObject([
+        { sessionID, action: "todowrite", resources: ["*"], save: ["*"] },
+        { sessionID, action: "todowrite", resources: ["*"], save: ["*"] },
+      ])
     }),
   )
 })

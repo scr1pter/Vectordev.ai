@@ -8864,6 +8864,11 @@ export type ConfigProvidersResponses = {
     default: {
       [key: string]: string
     }
+    unavailable?: Array<{
+      id: string
+      reason: "sign-in-paused" | "provider-not-configured" | "disabled" | "no-models"
+      message: string
+    }>
   }
 }
 

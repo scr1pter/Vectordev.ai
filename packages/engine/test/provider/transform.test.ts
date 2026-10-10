@@ -73,7 +73,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBeUndefined()
   })
 
-  test("should set promptCacheKey for openai provider regardless of setCacheKey", () => {
+  test("keeps the default promptCacheKey for older OpenAI models", () => {
     const openaiModel = {
       ...mockModel,
       providerID: "openai",
@@ -275,7 +275,7 @@ describe("ProviderTransform.options - google thinkingConfig gating", () => {
   })
 })
 
-describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
+describe("ProviderTransform.options - GPT textVerbosity", () => {
   const sessionID = "test-session-123"
 
   const createGpt5Model = (apiId: string) =>
@@ -310,6 +310,57 @@ describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
     expect(result.textVerbosity).toBe("low")
     expect(result.include).toEqual(["reasoning.encrypted_content"])
   })
+
+  test.each(["gpt-5.6", "gpt-5.6-sol", "gpt-5.10", "gpt-6-astra", "gpt-6.1-sol", "openai/gpt-6-luna"])(
+    "%s does not partition automatic cache accounting by session unless requested",
+    (id) => {
+      const model = createGpt5Model(id)
+      expect(ProviderTransform.options({ model, sessionID }).promptCacheKey).toBeUndefined()
+      expect(
+        ProviderTransform.options({ model, sessionID, providerOptions: { setCacheKey: true } }).promptCacheKey,
+      ).toBe(sessionID)
+    },
+  )
+
+  test.each(["gpt-4", "gpt-5", "gpt-5.5", "gpt-54-pro", "custom-gpt-6"])(
+    "%s preserves legacy routing and honors an explicit cache-key opt-out",
+    (id) => {
+      const model = createGpt5Model(id)
+      expect(ProviderTransform.options({ model, sessionID }).promptCacheKey).toBe(sessionID)
+      expect(
+        ProviderTransform.options({ model, sessionID, providerOptions: { setCacheKey: false } }).promptCacheKey,
+      ).toBeUndefined()
+    },
+  )
+
+  test.each(["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"])(
+    "%s retains concise output without reducing reasoning effort",
+    (id) => {
+      const result = ProviderTransform.options({ model: createGpt5Model(id), sessionID })
+      expect(result.textVerbosity).toBe("low")
+      expect(result.reasoningEffort).toBe("medium")
+      expect(result.promptCacheKey).toBeUndefined()
+      expect(result.include).toEqual(["reasoning.encrypted_content"])
+    },
+  )
+
+  test.each(["gpt-6-luna", "openai/gpt-6-luna"])(
+    "%s keeps provider-selected detail and automatic cache routing without changing reasoning",
+    (id) => {
+      const result = ProviderTransform.options({ model: createGpt5Model(id), sessionID })
+      expect(result.textVerbosity).toBeUndefined()
+      expect(result.reasoningEffort).toBe("medium")
+      expect(result.promptCacheKey).toBeUndefined()
+      expect(result.include).toEqual(["reasoning.encrypted_content"])
+    },
+  )
+
+  test.each(["gpt-6.1-sol-chat", "gpt-6.1-sol-codex", "gpt-7-future"])(
+    "%s does not acquire an unsupported verbosity default",
+    (id) => {
+      expect(ProviderTransform.options({ model: createGpt5Model(id), sessionID }).textVerbosity).toBeUndefined()
+    },
+  )
 
   test("Bedrock Mantle gpt-5.5 uses OpenAI Responses defaults", () => {
     const model = {
@@ -4809,6 +4860,120 @@ describe("ProviderTransform.options - GPT-6 reasoning defaults", () => {
       options: {},
       headers: {},
     }) as any
+
+  for (const id of ["gpt-6.1-sol", "gpt-6-astra", "openai/gpt-6.1-sol", "openai/gpt-6-astra"]) {
+    test(`${id} infers only supported Responses efforts and low background reasoning`, () => {
+      const value = { ...model(id), release_date: "2026-10-01" }
+      const variants = ProviderTransform.variants(value)
+      expect(Object.keys(variants)).toEqual(["low", "medium", "high", "xhigh", "max"])
+      expect(ProviderTransform.smallOptions({ ...value, variants })).toMatchObject({ reasoningEffort: "low" })
+      expect(ProviderTransform.options({ model: value, sessionID: "s", providerOptions: {} }).reasoningEffort).toBe(
+        "medium",
+      )
+    })
+  }
+
+  for (const id of ["gpt-6.1-sol", "gpt-6-astra"]) {
+    for (const provider of [
+      { id: "openrouter", npm: "@openrouter/ai-sdk-provider" },
+      { id: "cloudflare-ai-gateway", npm: "ai-gateway-provider" },
+    ]) {
+      test(`${provider.id} ${id} avoids unsupported background effort without expanding compatible max`, () => {
+        const value = {
+          ...model(id),
+          providerID: provider.id,
+          release_date: "2026-10-01",
+          api: { ...model(id).api, id: `openai/${id}`, npm: provider.npm },
+        }
+        const variants = ProviderTransform.variants(value)
+        expect(Object.keys(variants)).toEqual(["low", "medium", "high", "xhigh"])
+        const small = ProviderTransform.smallOptions({ ...value, variants })
+        expect(provider.id === "openrouter" ? small.reasoning.effort : small.reasoningEffort).toBe("low")
+      })
+    }
+  }
+
+  for (const id of ["gpt-6-sol", "gpt-6-luna", "openai/gpt-6-luna"]) {
+    test(`${id} exposes max in Responses while preserving none`, () => {
+      const value = { ...model(id), release_date: "2026-10-01" }
+      expect(Object.keys(ProviderTransform.variants(value))).toEqual(["none", "low", "medium", "high", "xhigh", "max"])
+      expect(
+        Object.keys(ProviderTransform.variants({ ...value, api: { ...value.api, npm: "@ai-sdk/azure" } })),
+      ).not.toContain("max")
+    })
+  }
+
+  for (const id of ["gpt-6.2-sol", "gpt-6-astra-pro"]) {
+    test(`${id} is outside the exact reasoning-only model rule`, () => {
+      const variants = ProviderTransform.variants({ ...model(id), release_date: "2026-10-01" })
+      expect(Object.keys(variants)).toContain("none")
+      expect(Object.keys(variants)).not.toContain("max")
+    })
+  }
+
+  for (const entry of [
+    { name: "background", small: true, modelOptions: {}, agentOptions: {}, variant: "high", expected: "low" },
+    { name: "primary", small: false, modelOptions: {}, agentOptions: {}, variant: undefined, expected: "medium" },
+    {
+      name: "explicit model",
+      small: true,
+      modelOptions: { reasoningEffort: "high" },
+      agentOptions: {},
+      variant: undefined,
+      expected: "high",
+    },
+    {
+      name: "explicit agent",
+      small: true,
+      modelOptions: {},
+      agentOptions: { reasoningEffort: "xhigh" },
+      variant: undefined,
+      expected: "xhigh",
+    },
+    {
+      name: "explicit primary variant",
+      small: false,
+      modelOptions: {},
+      agentOptions: {},
+      variant: "max",
+      expected: "max",
+    },
+  ]) {
+    test(`GPT-6.1 Sol request preparation preserves ${entry.name} effort`, async () => {
+      const value = { ...model("gpt-6.1-sol"), release_date: "2026-10-01", options: entry.modelOptions }
+      const input: Parameters<typeof LLMRequestPrep.prepare>[0] = {
+        user: {
+          id: "msg_test",
+          sessionID: "ses_test",
+          role: "user",
+          time: { created: 1 },
+          agent: "test",
+          model: { providerID: ProviderV2.ID.openai, modelID: ModelV2.ID.make("gpt-6.1-sol"), variant: entry.variant },
+        } as Parameters<typeof LLMRequestPrep.prepare>[0]["user"],
+        sessionID: "ses_test",
+        model: { ...value, variants: ProviderTransform.variants(value) },
+        agent: { name: "test", mode: "primary", options: entry.agentOptions, permission: [] },
+        system: [],
+        messages: [{ role: "user", content: "Title this" }],
+        tools: {},
+        small: entry.small,
+        provider: { id: ProviderV2.ID.openai, name: "OpenAI", source: "config", env: [], options: {}, models: {} },
+        auth: { type: "oauth", access: "placeholder", refresh: "placeholder", expires: 0 },
+        plugin: {
+          trigger: (_name, _input, output) => Effect.succeed(output),
+          list: () => Effect.succeed([]),
+          init: () => Effect.void,
+        },
+        flags: { outputTokenMax: 32000, client: "test" } as Parameters<typeof LLMRequestPrep.prepare>[0]["flags"],
+        isWorkflow: false,
+      }
+      const prepared = await Effect.runPromise(LLMRequestPrep.prepare(input))
+      expect(prepared.params.options.reasoningEffort).toBe(entry.expected)
+      expect(ProviderTransform.providerOptions(input.model, prepared.params.options).openai.reasoningEffort).toBe(
+        entry.expected,
+      )
+    })
+  }
 
   for (const id of ["gpt-5.5", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"])
     test(`${id} keeps its reasoning summary and encrypted reasoning`, () => {

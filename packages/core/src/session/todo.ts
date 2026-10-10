@@ -8,6 +8,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
 import { TodoTable } from "./sql"
+import { TodoTransition } from "./todo-transition"
 
 export const Info = SessionTodo.Info
 export type Info = typeof Info.Type
@@ -18,6 +19,11 @@ export interface Interface {
     readonly sessionID: SessionSchema.ID
     readonly todos: ReadonlyArray<Info>
   }) => Effect.Effect<void>
+  readonly updateFromModel: (input: {
+    readonly sessionID: SessionSchema.ID
+    readonly todos: ReadonlyArray<Info>
+    readonly reset?: boolean
+  }) => Effect.Effect<void, TodoTransition.Rejected>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<Info>>
 }
 
@@ -29,13 +35,18 @@ const layer = Layer.effect(
     const { db } = yield* Database.Service
     const events = yield* EventV2.Service
 
-    const update = Effect.fn("SessionTodo.update")(function* (input: {
-      readonly sessionID: SessionSchema.ID
-      readonly todos: ReadonlyArray<Info>
-    }) {
-      yield* db
+    const replace = Effect.fn("SessionTodo.replace")(function* (
+      input: { readonly sessionID: SessionSchema.ID; readonly todos: ReadonlyArray<Info> },
+      preserveProgress: boolean,
+    ) {
+      const demoted = yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
+            if (preserveProgress) {
+              const previous = yield* tx.select().from(TodoTable).where(eq(TodoTable.session_id, input.sessionID)).all()
+              const demoted = TodoTransition.demoted(previous, input.todos)
+              if (demoted) return demoted
+            }
             yield* tx.delete(TodoTable).where(eq(TodoTable.session_id, input.sessionID)).run()
             if (input.todos.length === 0) return
             yield* tx
@@ -53,8 +64,12 @@ const layer = Layer.effect(
           }),
         )
         .pipe(Effect.orDie)
-      yield* events.publish(Event.Updated, input)
+      if (demoted) return yield* new TodoTransition.Rejected({ content: demoted.content })
+      yield* events.publish(Event.Updated, { sessionID: input.sessionID, todos: input.todos })
     })
+
+    const update: Interface["update"] = (input) => replace(input, false).pipe(Effect.orDie)
+    const updateFromModel: Interface["updateFromModel"] = (input) => replace(input, input.reset !== true)
 
     const get = Effect.fn("SessionTodo.get")(function* (sessionID: SessionSchema.ID) {
       const rows = yield* db
@@ -71,7 +86,7 @@ const layer = Layer.effect(
       }))
     })
 
-    return Service.of({ update, get })
+    return Service.of({ update, updateFromModel, get })
   }),
 )
 

@@ -977,9 +977,10 @@ export const RunCommand = effectCmd({
 
         const requested = pick(args.model)
         if (requested) {
-          const notice = (await client.provider.list()).data?.unavailable?.find(
-            (item) => item.id === requested.providerID,
-          )
+          // An attached session may resolve to a different directory than the initial SDK.
+          const configured = args.attach ? await client.config.providers({}, { throwOnError: true }) : available
+          const unavailable = configured.data.unavailable ?? (await client.provider.list()).data?.unavailable
+          const notice = unavailable?.find((item) => item.id === requested.providerID)
           if (notice) {
             const error = {
               name: "ProviderUnavailable",

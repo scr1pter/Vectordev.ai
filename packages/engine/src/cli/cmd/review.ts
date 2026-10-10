@@ -62,8 +62,8 @@ import type {
 } from "@vectordevai/core/review/types"
 import { Git } from "@/git"
 import { ReviewContext } from "@/review/context"
-import { ReviewModel, type ResolvedModel } from "@/review/model"
-import { Review } from "@/review/run"
+import type { ReviewModel, ResolvedModel } from "@/review/model"
+import type { Review } from "@/review/run"
 import { ReviewSource } from "@/review/source"
 import { Process } from "@/util/process"
 import { UI } from "../ui"
@@ -1204,6 +1204,8 @@ export const ReviewCommand = effectCmd({
       .option("full", { type: "boolean", describe: "review the whole change again, ignoring the last local review" }),
   directory: () => repositoryRoot(process.cwd()),
   handler: Effect.fn("Cli.review")(function* (args) {
+    const { ReviewModel } = yield* Effect.promise(() => import("@/review/model"))
+    const { Review } = yield* Effect.promise(() => import("@/review/run"))
     const result = yield* executeLocalReview(
       {
         directory: repositoryRoot(process.cwd()),

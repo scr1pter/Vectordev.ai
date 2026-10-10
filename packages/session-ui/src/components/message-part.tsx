@@ -44,6 +44,7 @@ import { Collapsible } from "@vectordevai/ui/collapsible"
 import { FileIcon } from "@vectordevai/ui/file-icon"
 import { Icon } from "@vectordevai/ui/icon"
 import { ToolErrorCard } from "./tool-error-card"
+import { taskBatchEntries, taskItemState, taskItemLabel } from "@vectordevai/ui/task-batch"
 import { Checkbox } from "@vectordevai/ui/checkbox"
 import { DiffChanges } from "@vectordevai/ui/diff-changes"
 import { Markdown } from "./markdown"
@@ -1457,7 +1458,13 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
   const input = () => part().state?.input ?? emptyInput
   // @ts-expect-error
   const partMetadata = () => part().state?.metadata ?? emptyMetadata
+  const taskBatch = createMemo(() => part().tool === "task" && taskBatchEntries(input(), partMetadata()))
+  const taskBatchError = createMemo(() => {
+    const state = part().state
+    return taskBatch() && state.status === "error" ? state.error : undefined
+  })
   const taskId = createMemo(() => {
+    if (taskBatch()) return
     if (part().tool !== "task") return
     const value = partMetadata().sessionId
     if (typeof value === "string" && value) return value
@@ -1481,7 +1488,7 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
     <Show when={!hideQuestion()}>
       <div data-component="tool-part-wrapper" data-timeline-part-id={part().id}>
         <Switch>
-          <Match when={part().state.status === "error" && (part().state as any).error}>
+          <Match when={!taskBatch() && part().state.status === "error" && (part().state as any).error}>
             {(error) => {
               const cleaned = error().replace("Error: ", "")
               if (part().tool === "question" && cleaned.includes("dismissed this question")) {
@@ -1525,6 +1532,17 @@ PART_MAPPING["tool"] = function ToolPartDisplay(props) {
               virtualizeDiff={props.virtualizeDiff}
               onContentRendered={props.onContentRendered}
             />
+            <Show when={taskBatchError()}>
+              {(error) => (
+                <ToolErrorCard
+                  tool="task"
+                  error={error()}
+                  defaultOpen={props.defaultOpen}
+                  open={controlledOpen()}
+                  onOpenChange={props.onToolOpenChange ? handleToolOpenChange : undefined}
+                />
+              )}
+            </Show>
           </Match>
         </Switch>
       </div>
@@ -1881,106 +1899,144 @@ ToolRegistry.register({
 ToolRegistry.register({
   name: "task",
   render(props) {
-    const data = useData()
-    const i18n = useI18n()
-    const location = useLocation()
-    const childSessionId = createMemo(() => {
-      const value = props.metadata.sessionId
-      if (typeof value === "string" && value) return value
-      return taskSession(props.input, location.pathname, data.store.session, data.store.agent)
-    })
-    const agent = createMemo(() => taskAgent(props.input.subagent_type, data.store.agent))
-    // A built-in subagent shows its own name and a short summary of what it
-    // does. A user-defined agent has no identity and renders exactly as before.
-    const identity = createMemo(() =>
-      typeof props.input.subagent_type === "string" ? subagentIdentity(props.input.subagent_type) : undefined,
-    )
-    const title = createMemo(() => agent().name ?? i18n.t("ui.tool.agent.default"))
-    const tone = createMemo(() => agent().color)
-    const subtitle = createMemo(() => {
-      const value =
-        typeof props.input.description === "string" && props.input.description
-          ? props.input.description
-          : childSessionId()
-      if (!value) return value
-      if (props.metadata.background === true) return `${value} (background)`
-      return value
-    })
-    const running = createMemo(() => props.status === "pending" || props.status === "running")
-
-    const href = createMemo(() => sessionLink(childSessionId(), location.pathname, data.sessionHref))
-    const clickable = createMemo(() => !!(childSessionId() && (data.navigateToSession || href())))
-
-    const open = () => {
-      const id = childSessionId()
-      if (!id) return
-      if (data.navigateToSession) {
-        data.navigateToSession(id)
-        return
-      }
-      const value = href()
-      if (value) window.location.assign(value)
-    }
-
-    const navigate = (event: MouseEvent) => {
-      if (!data.navigateToSession) return
-      if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-      event.preventDefault()
-      open()
-    }
-    const navigateKey = (event: KeyboardEvent) => {
-      if (!clickable() || href()) return
-      if (event.key !== "Enter" && event.key !== " ") return
-      event.preventDefault()
-      open()
-    }
-
-    const trigger = () => (
-      <div data-component="task-tool-card">
-        <div data-slot="basic-tool-tool-info-structured">
-          <div data-slot="basic-tool-tool-info-main">
-            <Show when={running()}>
-              <span data-component="task-tool-spinner" style={{ color: tone() ?? "var(--icon-interactive-base)" }}>
-                <Spinner />
-              </span>
-            </Show>
-            <Show when={identity()}>
-              <SubagentAvatar id={identity()!.id} size={15} />
-            </Show>
-            <span data-component="task-tool-title" style={{ color: tone() ?? "var(--text-strong)" }}>
-              {identity()?.name ?? title()}
-            </span>
-            <Show when={identity()}>
-              <span data-component="task-tool-agent">{identity()!.summary}</span>
-            </Show>
-            <Show when={subtitle()}>
-              <span data-slot="basic-tool-tool-subtitle">{subtitle()}</span>
-            </Show>
-          </div>
-        </div>
-        <Show when={clickable()}>
-          <div data-component="task-tool-action">
-            <Icon name="square-arrow-top-right" size="small" />
-          </div>
-        </Show>
-      </div>
-    )
-
+    const entries = createMemo(() => taskBatchEntries(props.input, props.metadata))
     return (
-      <BasicTool
-        icon="task"
-        status={props.status}
-        trigger={trigger()}
-        hideDetails
-        triggerAsLink
-        triggerHref={href()}
-        clickable={clickable()}
-        onTriggerClick={navigate}
-        onTriggerKeyDown={navigateKey}
-      />
+      <Show when={entries()} fallback={<TaskItem {...props} />}>
+        {(items) => (
+          <div data-component="task-batch">
+            <For each={items().map((item) => item.index)}>
+              {(index) => {
+                const item = createMemo(() => items().find((item) => item.index === index))
+                return (
+                  <TaskItem
+                    {...props}
+                    indexed
+                    input={item()?.input ?? {}}
+                    metadata={item()?.metadata ?? {}}
+                    status={taskItemState(item()?.metadata.status, props.status)}
+                  />
+                )
+              }}
+            </For>
+          </div>
+        )}
+      </Show>
     )
   },
 })
+
+function TaskItem(props: ToolProps & { indexed?: boolean }) {
+  const data = useData()
+  const i18n = useI18n()
+  const location = useLocation()
+  const childSessionId = createMemo(() => {
+    const value = props.metadata.sessionId
+    if (typeof value === "string" && value) return value
+    if (props.indexed) return
+    return taskSession(props.input, location.pathname, data.store.session, data.store.agent)
+  })
+  const agent = createMemo(() => taskAgent(props.input.subagent_type, data.store.agent))
+  // A built-in subagent shows its own name and a short summary of what it
+  // does. A user-defined agent has no identity and renders exactly as before.
+  const identity = createMemo(() =>
+    typeof props.input.subagent_type === "string" ? subagentIdentity(props.input.subagent_type) : undefined,
+  )
+  const title = createMemo(() => agent().name ?? i18n.t("ui.tool.agent.default"))
+  const tone = createMemo(() => agent().color)
+  const subtitle = createMemo(() => {
+    const value =
+      typeof props.input.description === "string" && props.input.description
+        ? props.input.description
+        : props.indexed && typeof props.metadata.title === "string"
+          ? props.metadata.title
+          : childSessionId()
+    if (!value) return value
+    if (props.metadata.background === true) return `${value} (background)`
+    return value
+  })
+  const running = createMemo(() =>
+    props.indexed ? props.status === "running" : props.status === "pending" || props.status === "running",
+  )
+  const stateLabel = createMemo(() => (props.indexed ? taskItemLabel(props.metadata.status, props.status) : undefined))
+
+  const href = createMemo(() => sessionLink(childSessionId(), location.pathname, data.sessionHref))
+  const clickable = createMemo(() => !!(childSessionId() && (data.navigateToSession || href())))
+
+  const open = () => {
+    const id = childSessionId()
+    if (!id) return
+    if (data.navigateToSession) {
+      data.navigateToSession(id)
+      return
+    }
+    const value = href()
+    if (value) window.location.assign(value)
+  }
+
+  const navigate = (event: MouseEvent) => {
+    if (!data.navigateToSession) return
+    if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    event.preventDefault()
+    open()
+  }
+  const navigateKey = (event: KeyboardEvent) => {
+    if (!clickable() || href()) return
+    if (event.key !== "Enter" && event.key !== " ") return
+    event.preventDefault()
+    open()
+  }
+
+  const trigger = () => (
+    <div data-component="task-tool-card">
+      <div data-slot="basic-tool-tool-info-structured">
+        <div data-slot="basic-tool-tool-info-main">
+          <Show when={running()}>
+            <span data-component="task-tool-spinner" style={{ color: tone() ?? "var(--icon-interactive-base)" }}>
+              <Spinner />
+            </span>
+          </Show>
+          <Show when={identity()}>
+            <SubagentAvatar id={identity()!.id} size={15} />
+          </Show>
+          <span data-component="task-tool-title" style={{ color: tone() ?? "var(--text-strong)" }}>
+            {identity()?.name ?? title()}
+          </span>
+          <Show when={identity()}>
+            <span data-component="task-tool-agent">{identity()!.summary}</span>
+          </Show>
+          <Show when={subtitle()}>
+            <span data-slot="basic-tool-tool-subtitle">{subtitle()}</span>
+          </Show>
+          <Show when={stateLabel()}>
+            <span data-slot="task-tool-state">{stateLabel()}</span>
+          </Show>
+          <Show when={props.indexed && typeof props.metadata.error === "string" && props.metadata.error}>
+            {(error) => <span data-slot="task-tool-error">{error()}</span>}
+          </Show>
+        </div>
+      </div>
+      <Show when={clickable()}>
+        <div data-component="task-tool-action">
+          <Icon name="square-arrow-top-right" size="small" />
+        </div>
+      </Show>
+    </div>
+  )
+
+  return (
+    <BasicTool
+      icon="task"
+      status={props.status}
+      trigger={trigger()}
+      hideDetails
+      triggerAsLink
+      triggerHref={href()}
+      clickable={clickable()}
+      onTriggerClick={navigate}
+      onTriggerKeyDown={navigateKey}
+    />
+  )
+}
 
 ToolRegistry.register({
   name: "bash",

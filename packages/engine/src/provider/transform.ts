@@ -591,11 +591,19 @@ function gpt5ChatReasoningEfforts(apiId: string) {
   return gpt5Version(apiId) === undefined ? [] : OPENAI_GPT5_CHAT_EFFORTS
 }
 
+function requiresGpt6Reasoning(apiId: string) {
+  // These exact models require at least `low`; release dates cannot imply support for `none`.
+  // https://developers.openai.com/api/docs/models/gpt-6.1-sol
+  // https://developers.openai.com/api/docs/models/gpt-6-astra
+  return /(?:^|\/)(?:gpt-6\.1-sol|gpt-6-astra)$/i.test(apiId)
+}
+
 // Computes the reasoning_effort tiers an OpenAI (or OpenAI-compatible upstream
 // routed through it, e.g. cf-ai-gateway) model exposes. Effort order: weakest
 // to strongest.
 function openaiReasoningEfforts(apiId: string, releaseDate: string) {
   const id = apiId.toLowerCase()
+  if (requiresGpt6Reasoning(id)) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
   if (id.includes("deep-research")) return ["medium"]
   const chatEfforts = gpt5ChatReasoningEfforts(id)
   if (chatEfforts) return chatEfforts
@@ -615,6 +623,7 @@ function openaiReasoningEfforts(apiId: string, releaseDate: string) {
 
 function openaiCompatibleReasoningEfforts(id: string) {
   const apiId = id.toLowerCase()
+  if (requiresGpt6Reasoning(apiId)) return [...WIDELY_SUPPORTED_EFFORTS, "xhigh"]
   const chatEfforts = gpt5ChatReasoningEfforts(apiId)
   if (chatEfforts) return chatEfforts
   if (GPT5_PRO_RE.test(apiId)) return OPENAI_GPT5_PRO_EFFORTS
@@ -909,7 +918,14 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
     case "@ai-sdk/amazon-bedrock/mantle":
     case "@ai-sdk/openai": {
       // https://v5.ai-sdk.dev/providers/ai-sdk-providers/openai
-      const efforts = openaiReasoningEfforts(model.api.id, model.release_date)
+      const efforts = [
+        ...openaiReasoningEfforts(model.api.id, model.release_date),
+        // The pinned Responses adapter accepts `max`; compatible Chat adapters do not all accept it.
+        ...(model.api.npm === "@ai-sdk/openai" &&
+        /(?:^|\/)(?:gpt-6\.1-sol|gpt-6-(?:astra|sol|luna))$/i.test(model.api.id)
+          ? ["max"]
+          : []),
+      ]
       return Object.fromEntries(
         efforts.map((effort) => [
           effort,
@@ -1147,7 +1163,16 @@ export function options(input: {
     }
   }
 
-  if (input.model.providerID === "openai" || input.providerOptions?.setCacheKey) {
+  // GPT-5.6+ routes cache reuse automatically. A fresh key per session creates a separate cache accounting
+  // group even for shared prefixes; retain session isolation only when explicitly requested.
+  const cacheVersion = /^(?:openai\/)?gpt-([5-9])(?:\.(\d+))?(?:-|$)/.exec(input.model.api.id)
+  const automaticCacheRouting =
+    cacheVersion !== null &&
+    (Number(cacheVersion[1]) > 5 || (Number(cacheVersion[1]) === 5 && Number(cacheVersion[2] ?? 0) >= 6))
+  if (
+    input.providerOptions?.setCacheKey === true ||
+    (input.model.providerID === "openai" && !automaticCacheRouting && input.providerOptions?.setCacheKey !== false)
+  ) {
     result["promptCacheKey"] = input.sessionID
   }
 
@@ -1215,10 +1240,11 @@ export function options(input: {
       }
     }
 
-    // Only set textVerbosity for non-chat gpt-5.x models
-    // Chat models (e.g. gpt-5.2-chat-latest) only support "medium" verbosity
+    // Keep Luna's provider-selected detail level: concise output is not a substitute for a complete deliverable.
+    // Explicit model, agent and variant options can still select verbosity during request preparation.
     if (
-      input.model.api.id.includes("gpt-5.") &&
+      (input.model.api.id.includes("gpt-5.") ||
+        /(?:^|[/.])gpt-6(?:\.\d+)?-(?:astra|sol)(?:-|$)/.test(input.model.api.id)) &&
       !input.model.api.id.includes("codex") &&
       !input.model.api.id.includes("-chat") &&
       input.model.providerID !== "azure"
@@ -1257,7 +1283,11 @@ export function smallOptions(model: Provider.Model) {
     return mergeDeep(base, small)
   }
   if (model.providerID === "openrouter" || model.providerID === "llmgateway") {
-    if (model.providerID === "openrouter" && small.reasoning?.effort === "low") {
+    if (
+      model.providerID === "openrouter" &&
+      small.reasoning?.effort === "low" &&
+      !requiresGpt6Reasoning(model.api.id)
+    ) {
       return { reasoning: { effort: "none" } }
     }
     if (Object.keys(small).length === 0 && model.api.id.includes("google")) {

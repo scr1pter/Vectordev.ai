@@ -1,5 +1,6 @@
 import type { Message, Part, Session, SessionStatus, ToolPart } from "@vectordevai/sdk/v2"
 import { GENERAL_SUBAGENT_ID, subagentIdentity } from "@vectordevai/session-ui/subagent-identity"
+import { taskBatchEntries, taskItemState } from "@vectordevai/ui/task-batch"
 
 /*
  * Pure derivation behind the Background tasks panel and the inline task chips.
@@ -7,7 +8,7 @@ import { GENERAL_SUBAGENT_ID, subagentIdentity } from "@vectordevai/session-ui/s
  * One card per user turn: every task tool part whose assistant message answers
  * the same user message. One phase per assistant message inside that turn: the
  * engine runs the task calls of one message together, and the next phase only
- * starts in a later message. One agent per task part.
+ * starts in a later message. A task part can contain several indexed agents.
  *
  * The engine now mirrors a lifecycle record onto the child session
  * (metadata.subagent) and onto the parent's task part metadata. Older sessions
@@ -47,6 +48,7 @@ export type TaskAgent = {
   partID?: string
   callID?: string
   messageID?: string
+  batchIndex?: number
   sessionID?: string
   agent: string
   kind: SubagentKind
@@ -249,6 +251,7 @@ type Lifecycle = {
   custom?: boolean
   title?: string
   callID?: string
+  batchIndex?: number
   parentMessageID?: string
   sessionID?: string
   background?: boolean
@@ -313,6 +316,10 @@ export function readLifecycle(value: unknown): Lifecycle {
     custom: typeof item.custom === "boolean" ? item.custom : undefined,
     title: text(item.title),
     callID: text(item.callID),
+    batchIndex:
+      typeof item.batchIndex === "number" && Number.isSafeInteger(item.batchIndex) && item.batchIndex >= 0
+        ? item.batchIndex
+        : undefined,
     parentMessageID: text(item.parentMessageID) ?? text(item.parentMessageId),
     sessionID: text(item.sessionId),
     background: typeof item.background === "boolean" ? item.background : undefined,
@@ -500,19 +507,29 @@ type AgentSeed = {
   part?: ToolPart
   messageID?: string
   child?: Session
+  item?: { index: number; input: Record<string, unknown>; metadata: Record<string, unknown> }
 }
 
 function buildAgent(source: TaskSource, seed: AgentSeed): TaskAgent {
   const part = seed.part
   const state = part?.state
-  const input = record(state?.input) ?? {}
-  const meta = readLifecycle("metadata" in (state ?? {}) ? (state as { metadata?: unknown }).metadata : undefined)
+  const input = seed.item?.input ?? record(state?.input) ?? {}
+  const meta = readLifecycle(
+    seed.item?.metadata ?? ("metadata" in (state ?? {}) ? (state as { metadata?: unknown }).metadata : undefined),
+  )
   const sessionID = meta.sessionID ?? seed.child?.id
   const child = sessionID ? (source.session(sessionID) ?? seed.child) : seed.child
   const stored = childRecord(child)
   // A task_id resume rewrites the child's record for the new run, so its run
   // fields only describe this part when the call ids agree.
-  const matched = stored && (!part || !stored.callID || stored.callID === part.callID) ? stored : undefined
+  const matched =
+    stored &&
+    (!part ||
+      ((!stored.callID || stored.callID === part.callID) &&
+        (!stored.parentMessageID || stored.parentMessageID === seed.messageID) &&
+        stored.batchIndex === seed.item?.index))
+      ? stored
+      : undefined
   const run: Lifecycle = { ...matched, ...definedFields(meta), ...finishedFields(matched, meta) }
   const facts = childFacts(source, sessionID)
   const agent = resolveAgent({
@@ -526,11 +543,17 @@ function buildAgent(source: TaskSource, seed: AgentSeed): TaskAgent {
   const background = run.background ?? false
   const startedAt =
     run.startedAt ??
-    (state && "time" in state ? finite((state as { time?: { start?: unknown } }).time?.start) : undefined) ??
-    finite(child?.time?.created)
-  const partError = state?.status === "error" ? text(state.error) : undefined
+    (seed.item
+      ? undefined
+      : ((state && "time" in state ? finite((state as { time?: { start?: unknown } }).time?.start) : undefined) ??
+        finite(child?.time?.created)))
+  const partError = seed.item
+    ? text(seed.item.metadata.error)
+    : state?.status === "error"
+      ? text(state.error)
+      : undefined
   const status = agentStatus({
-    part: state?.status,
+    part: seed.item ? taskItemState(seed.item.metadata.status, state?.status) : state?.status,
     partError,
     reported: run.status,
     background,
@@ -554,6 +577,7 @@ function buildAgent(source: TaskSource, seed: AgentSeed): TaskAgent {
     partID: part?.id,
     callID: part?.callID ?? stored?.callID,
     messageID: seed.messageID ?? stored?.parentMessageID,
+    batchIndex: seed.item?.index ?? stored?.batchIndex,
     sessionID,
     agent,
     kind,
@@ -730,8 +754,13 @@ function isTaskPart(part: Part): part is ToolPart {
  * rewrites the record to its own call, so it stays a run of its own.
  */
 function extendsRun(source: TaskSource, owner: TaskAgent, agent: TaskAgent, part: ToolPart) {
-  const recorded = childRecord(agent.sessionID ? source.session(agent.sessionID) : undefined)?.callID
-  if (recorded === part.callID) return false
+  const recorded = childRecord(agent.sessionID ? source.session(agent.sessionID) : undefined)
+  if (
+    recorded?.callID === part.callID &&
+    recorded.batchIndex === agent.batchIndex &&
+    (!recorded.parentMessageID || recorded.parentMessageID === agent.messageID)
+  )
+    return false
   if (isLive(owner.status)) return true
   // The run has settled since; the part still extended it if it started first.
   return agent.startedAt !== undefined && owner.endedAt !== undefined && agent.startedAt < owner.endedAt
@@ -746,8 +775,8 @@ export function buildTaskCards(source: TaskSource): TaskCard[] {
   const children = (source.children ?? []).filter((session) => session.parentID === source.rootID)
   const byCall = new Map<string, Session>()
   for (const session of children) {
-    const callID = childRecord(session)?.callID
-    if (callID) byCall.set(callID, session)
+    const record = childRecord(session)
+    if (record?.callID) byCall.set(JSON.stringify([record.parentMessageID, record.callID, record.batchIndex]), session)
   }
 
   const claimed = new Set<string>()
@@ -770,21 +799,34 @@ export function buildTaskCards(source: TaskSource): TaskCard[] {
     if (parts.length === 0) continue
     const agents: TaskAgent[] = []
     for (const part of parts) {
-      const meta = readLifecycle(part.state && "metadata" in part.state ? part.state.metadata : undefined)
-      // An errored call can lose its metadata until the lifecycle merges it
-      // back, so the child is also found through the call id.
-      const child = meta.sessionID ? undefined : byCall.get(part.callID)
-      const agent = buildAgent(source, { key: part.id, part, messageID: message.id, child })
-      const owner = agent.sessionID ? owners.get(agent.sessionID) : undefined
-      if (owner && extendsRun(source, owner, agent, part)) {
-        owner.extendPartIDs = [...(owner.extendPartIDs ?? []), part.id]
-        continue
+      const metadata = part.state && "metadata" in part.state ? part.state.metadata : undefined
+      const items = taskBatchEntries(part.state?.input, metadata)
+      for (const item of items?.length ? items : [undefined]) {
+        const meta = readLifecycle(item?.metadata ?? metadata)
+        // An errored call can lose its metadata until the lifecycle merges it
+        // back, so the child is also found through the call id.
+        const child = meta.sessionID
+          ? undefined
+          : (byCall.get(JSON.stringify([message.id, part.callID, item?.index])) ??
+            byCall.get(JSON.stringify([undefined, part.callID, item?.index])))
+        const agent = buildAgent(source, {
+          key: item ? `${part.id}:${item.index}` : part.id,
+          part,
+          messageID: message.id,
+          child,
+          item,
+        })
+        const owner = agent.sessionID ? owners.get(agent.sessionID) : undefined
+        if (owner && extendsRun(source, owner, agent, part)) {
+          owner.extendPartIDs = [...(owner.extendPartIDs ?? []), part.id]
+          continue
+        }
+        if (agent.sessionID) {
+          claimed.add(agent.sessionID)
+          owners.set(agent.sessionID, agent)
+        }
+        agents.push(agent)
       }
-      if (agent.sessionID) {
-        claimed.add(agent.sessionID)
-        owners.set(agent.sessionID, agent)
-      }
-      agents.push(agent)
     }
     // A message whose only task part extended an earlier run starts no phase.
     if (agents.length === 0) continue
@@ -852,21 +894,27 @@ export function idleLiveSessions(
 }
 
 /** Where a task part sits; `first` marks the part that carries its phase's inline chip. */
-export function locateTaskPart(cards: readonly TaskCard[], partID: string): TaskLocation | undefined {
+export function taskPartLocations(cards: readonly TaskCard[]) {
+  const map = new Map<string, TaskLocation>()
   for (const card of cards) {
     for (const phase of card.phases) {
-      const index = phase.agents.findIndex((agent) => agent.partID === partID)
-      if (index === -1) {
-        // A part that only extended a run belongs to that run's agent and draws nothing.
-        const owner = phase.agents.find((agent) => agent.extendPartIDs?.includes(partID))
-        if (owner) return { card, phase, agent: owner, first: false }
-        continue
-      }
       const first = phase.agents.findIndex((agent) => agent.partID !== undefined)
-      return { card, phase, agent: phase.agents[index]!, first: index === first }
+      phase.agents.forEach((agent, position) => {
+        // Several indexed children share one real part. Keep its first child
+        // so a later sibling cannot hide the phase's inline task chip.
+        if (agent.partID && !map.has(agent.partID))
+          map.set(agent.partID, { card, phase, agent, first: position === first })
+        for (const partID of agent.extendPartIDs ?? []) {
+          if (!map.has(partID)) map.set(partID, { card, phase, agent, first: false })
+        }
+      })
     }
   }
-  return undefined
+  return map
+}
+
+export function locateTaskPart(cards: readonly TaskCard[], partID: string): TaskLocation | undefined {
+  return taskPartLocations(cards).get(partID)
 }
 
 type CountedCard = { agents: readonly Pick<TaskAgent, "key" | "sessionID" | "status">[] }

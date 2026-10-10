@@ -41,7 +41,10 @@ export function verifyModelPlanWebhook(raw: Buffer, signature: string, now = Dat
     Math.abs(now / 1000 - Number(timestamp)) > 300 ||
     !parts.some(
       ([name, value]) =>
-        name === "v1" && /^[a-fA-F0-9]{64}$/.test(value ?? "") && timingSafeEqual(Buffer.from(value, "hex"), expected),
+        name === "v1" &&
+        typeof value === "string" &&
+        /^[a-fA-F0-9]{64}$/.test(value) &&
+        timingSafeEqual(Buffer.from(value, "hex"), expected),
     )
   )
     throw new ApiError(400, "WEBHOOK_SIGNATURE", "Invalid billing notification signature.")

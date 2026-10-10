@@ -1,10 +1,12 @@
 import { Effect, Schema } from "effect"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
+import { TodoTransition } from "@vectordevai/core/session/todo-transition"
 import DESCRIPTION_WRITE from "./todowrite.txt"
 import { Todo } from "../session/todo"
 
 export const Parameters = Schema.Struct({
   todos: Schema.mutable(Schema.Array(Todo.Info)).annotate({ description: "The updated todo list" }),
+  reset: TodoTransition.Reset,
 })
 
 type Metadata = {
@@ -28,10 +30,11 @@ export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Servi
             metadata: {},
           })
 
-          yield* todo.update({
+          yield* todo.updateFromModel({
             sessionID: ctx.sessionID,
             todos: params.todos,
-          })
+            reset: params.reset,
+          }).pipe(Effect.orDie)
 
           return {
             title: `${params.todos.filter((x) => x.status !== "completed").length} todos`,

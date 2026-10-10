@@ -5,7 +5,7 @@ import { Provider } from "@/provider/provider"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { providerCredentialAllowed, providerUsable } from "@vectordevai/core/provider-policy"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Exit, Layer } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
 import type { LLMEvent, UsageInput } from "@vectordevai/llm"
@@ -30,6 +30,9 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { LLMTiming } from "./llm/timing"
+import { NativePatch } from "./llm/native-patch"
+import { REQUEST_ID_HEADER } from "@/plugin/openai/transport"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -59,6 +62,7 @@ export type StreamInput = {
 
 export type StreamRequest = StreamInput & {
   abort: AbortSignal
+  requestID: string
 }
 
 export interface Interface {
@@ -97,6 +101,7 @@ const live: Layer.Layer<
         providerID: input.model.providerID,
         modelID: input.model.id,
         "session.id": input.sessionID,
+        "request.id": input.requestID,
         small: (input.small ?? false).toString(),
         agent: input.agent.name,
         mode: input.agent.mode,
@@ -134,6 +139,13 @@ const live: Layer.Layer<
         flags,
         isWorkflow,
       })
+      if (
+        input.model.providerID === "openai" &&
+        info &&
+        !flags.disableDefaultPlugins &&
+        typeof item.options.fetch === "function"
+      )
+        Object.assign(prepared.headers, { [REQUEST_ID_HEADER]: input.requestID })
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via vector's tool system
@@ -368,6 +380,11 @@ const live: Layer.Layer<
                   return args.params
                 },
               },
+              NativePatch.middleware({
+                model: input.model,
+                options: prepared.params.options,
+                tool: prepared.tools.apply_patch,
+              }),
             ],
           }),
           experimental_telemetry: {
@@ -387,14 +404,31 @@ const live: Layer.Layer<
       Stream.scoped(
         Stream.unwrap(
           Effect.gen(function* () {
+            const timing = LLMTiming.create()
+            const requestID = crypto.randomUUID()
             const ctrl = yield* Effect.acquireRelease(
               Effect.sync(() => new AbortController()),
               (ctrl) => Effect.sync(() => ctrl.abort()),
             )
+            yield* Effect.addFinalizer((exit) =>
+              Effect.logInfo("llm request timing", {
+                "session.id": input.sessionID,
+                "request.id": requestID,
+                providerID: input.model.providerID,
+                modelID: input.model.id,
+                agent: input.agent.name,
+                small: input.small ?? false,
+                ...timing.summary(
+                  Exit.hasInterrupts(exit) ? "interrupted" : Exit.isFailure(exit) ? "failure" : "success",
+                ),
+              }),
+            )
 
-            const result = yield* run({ ...input, abort: ctrl.signal })
+            const result = yield* run({ ...input, abort: ctrl.signal, requestID })
+            timing.ready()
 
-            if (result.type === "native") return result.stream
+            if (result.type === "native")
+              return result.stream.pipe(Stream.tap((event) => Effect.sync(() => timing.observe(event))))
 
             // Adapter seam: both runtimes expose the same LLMEvent stream. Native
             // already returns one; AI SDK streams are converted here.
@@ -410,6 +444,7 @@ const live: Layer.Layer<
               ),
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
+              Stream.tap((event) => Effect.sync(() => timing.observe(event))),
             )
           }),
         ),

@@ -76,6 +76,7 @@ import { MessageComment, SummaryDiff, TimelineRow, TimelineRowMap } from "./rows
 import { filterVirtualIndexes } from "./virtual-items"
 import { SubagentTaskChip } from "@/features/background-tasks/subagent-task-chip"
 import { useBackgroundTasks } from "@/features/background-tasks/use-background-tasks"
+import { taskBatchEntries } from "@vectordevai/ui/task-batch"
 
 const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
@@ -92,6 +93,11 @@ const timelineCache = new Map<string, { measurements: VirtualItem[]; toolOpen: R
 const taskDescription = (part: PartType, sessionID: string) => {
   if (part.type !== "tool" || part.tool !== "task") return
   const metadata = "metadata" in part.state ? part.state.metadata : undefined
+  const item = taskBatchEntries(part.state.input, metadata)?.find((item) => item.metadata.sessionId === sessionID)
+  if (item) {
+    const title = item.metadata.title ?? item.input.description
+    return typeof title === "string" && title ? title : undefined
+  }
   if (metadata?.sessionId !== sessionID) return
   // The engine's lifecycle title, which also covers calls that gave no description.
   if (typeof metadata?.title === "string" && metadata.title) return metadata.title
