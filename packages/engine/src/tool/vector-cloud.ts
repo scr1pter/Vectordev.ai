@@ -22,7 +22,8 @@ const Action = Schema.Literals([
 export const Parameters = Schema.Struct({
   action: Action.annotate({ description: "The Vector Cloud action to perform" }),
   production: Schema.optional(Schema.Boolean).annotate({
-    description: "For publish, promote the verified deployment to production. Defaults to true.",
+    description:
+      "For publish, release to production once the checks pass. Defaults to false, which publishes a preview and leaves production unchanged. Set it only when the user asked for a production release.",
   }),
   provider: Schema.optional(Schema.Literals(["vercel"])).annotate({
     description: "For sync_environment, the linked hosting provider to update. Vercel is the only hosting provider.",
@@ -50,6 +51,8 @@ export const Parameters = Schema.Struct({
   }),
 })
 
+type CloudCheck = { label?: string; status?: string; required?: boolean; details?: string; output?: string }
+
 type CloudReport = {
   ok: boolean
   scope?: { provider: string; project: string; environment: string; summary: string }
@@ -71,9 +74,10 @@ type CloudReport = {
   sync?: unknown
   url?: string
   target?: string
+  environment?: string
   targets?: { id: string; label: string; projectName?: string }[]
   deploymentId?: string
-  checks?: unknown[]
+  checks?: CloudCheck[]
   log?: string
   logs?: {
     provider?: string
@@ -149,8 +153,61 @@ function nameList(values?: string[]) {
 
 // What the user has to do before this action can work. Cloud actions depend on
 // an account Vector cannot connect on the user's behalf, so an unfinished setup
-// has to read as an instruction rather than as a failed run.
-const SETUP_HINT = "Connect an account in Vector Cloud > Connections (Vercel or Supabase), then try again."
+// has to read as an instruction rather than as a failed run. It is only added
+// when the report says setup is missing: a failed build is not a setup problem.
+const SETUP_HINT =
+  "Ask the user to connect Vercel or Supabase in Vector Cloud > Connections with an access token, then try again."
+
+// How much of a failed check's output, or of the publish log, reaches the
+// model: the end of a build log is where the error is.
+const TAIL_LINES = 40
+
+function tail(text: string | undefined) {
+  return (text ?? "").trimEnd().split(/\r?\n/).slice(-TAIL_LINES).join("\n")
+}
+
+function setupStep(report: CloudReport) {
+  return report.nextStep ?? (report.needsSetup ? SETUP_HINT : undefined)
+}
+
+// Handled before the generic failure branch: a failed publish carries the
+// evidence the agent needs to repair it (the failed checks with their output,
+// and the redacted log), which the generic branch would drop.
+function formatPublish(report: CloudReport) {
+  const checks = report.checks ?? []
+  if (report.ok) {
+    return lines(
+      report.environment === "production"
+        ? "Vector Cloud published a production release."
+        : report.environment === "preview"
+          ? "Vector Cloud published a preview release. Production is unchanged."
+          : "Vector Cloud publish completed.",
+      report.url ? `URL: ${report.url}` : undefined,
+      report.deploymentId ? `Deployment: ${report.deploymentId}` : undefined,
+      checks.length ? `Checks: ${checks.map((check) => `${check.label} ${check.status}`).join("; ")}` : undefined,
+      report.nextStep ??
+        (report.environment === "preview"
+          ? "Share the preview URL. Release to production only after the user asks: publish again with production: true."
+          : undefined),
+    )
+  }
+  const failed = checks.filter((check) => check.status === "failed")
+  const evidence = failed.some((check) => check.output?.trim())
+  return lines(
+    `Vector Cloud publish failed: ${report.error ?? "the publish did not complete."}`,
+    report.url ? `URL: ${report.url}` : undefined,
+    report.deploymentId ? `Deployment: ${report.deploymentId}` : undefined,
+    failed.length ? "Failed checks:" : undefined,
+    ...failed.map((check) =>
+      lines(
+        `- ${check.label}${check.required === false ? " (optional)" : ""}: ${check.details ?? "failed"}`,
+        check.output?.trim() ? `--- last lines of ${check.label} output ---\n${tail(check.output)}` : undefined,
+      ),
+    ),
+    !evidence && report.log?.trim() ? `--- last lines of the publish log ---\n${tail(report.log)}` : undefined,
+    setupStep(report),
+  )
+}
 
 function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudReport) {
   // Handled before the generic failure branch: a create_database that stopped to
@@ -171,7 +228,7 @@ function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudRe
     if (report.ok === false) {
       return lines(
         `Vector Cloud did not create a database: ${report.error ?? "the action did not complete."}`,
-        report.nextStep ?? SETUP_HINT,
+        setupStep(report),
       )
     }
     return lines(
@@ -183,10 +240,11 @@ function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudRe
       report.nextStep,
     )
   }
+  if (action === "publish") return formatPublish(report)
   if (report.ok === false) {
     return lines(
       `Vector Cloud could not run ${action}: ${report.error ?? "the action did not complete."}`,
-      report.nextStep ?? SETUP_HINT,
+      setupStep(report),
     )
   }
   if (action === "logs") {
@@ -224,15 +282,6 @@ function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudRe
         : undefined,
       migrations.failed ? `FAILED on ${migrations.failed.name}: ${migrations.failed.error}` : undefined,
       migrations.skipped?.length ? `Ignored (unsupported filename): ${nameList(migrations.skipped)}` : undefined,
-      report.nextStep,
-    )
-  }
-  if (action === "publish") {
-    return lines(
-      "Vector Cloud publish completed.",
-      report.url ? `URL: ${report.url}` : undefined,
-      report.deploymentId ? `Deployment: ${report.deploymentId}` : undefined,
-      report.checks ? `Checks: ${JSON.stringify(report.checks)}` : undefined,
       report.nextStep,
     )
   }
@@ -275,8 +324,13 @@ function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudRe
 export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
   "vector_cloud",
   Effect.succeed({
-    description:
-      "Controls Vector Cloud for the active project: Vercel for hosting and Supabase for data. Use it before building authentication, accounts, databases, persistence, environment-backed features, or publishing. Inspect cloud_connections before provider work; use database_status plus prepare_database or prepare_auth before implementing Supabase-backed code; and use supabase_services to inspect storage and Edge Functions. When a feature needs a database and database_status reports none, do not stop and send the user to a dashboard: offer create_database, which creates a real Supabase project on their connected Supabase account and wires it in so prepare_database, supabase_services and apply_migrations work straight afterwards. Prefer an existing database over creating one — if the user already has a Supabase project for this app, ask them to link it in Vector Cloud > Database, and never create a second project for a project that already has one unless the user asks. create_database creates something the user's account is billed for, so if it reports several organizations, ask the user which one and call it again with that organizationId rather than picking one, and if it reports a plan or quota limit, relay Supabase's own words instead of retrying. publish deploys to the Vercel project linked to this repository; if none is linked, relay the setup step instead of trying another host. Hosting and database operations follow the connected account's billing and do not guarantee zero cost. When a published app errors, 500s, renders blank, or otherwise misbehaves, read its logs with the logs action before guessing at a cause or asking the user to paste an error. After writing or changing a .sql migration file, apply it with apply_migrations so the connected database actually has the schema the code expects; call it with dryRun first when you want to see the pending files. Never claim a resource was created unless this tool reports it.",
+    description: [
+      "Controls Vector Cloud for the active project. Vector Cloud has exactly two providers: Vercel hosts the app and Supabase stores its data. There is no other host or database; never offer or switch to one.",
+      "Databases: before building authentication, accounts, persistence or other database-backed features, call database_status. When a database is connected, run prepare_database (or prepare_auth for sign-in) and build against it. When none is connected, do not stop and do not just send the user to a dashboard: offer create_database, which creates a new Supabase project on the user's connected Supabase account and wires it in, or linking an existing Supabase project in Vector Cloud > Database. Never create a second database for a project that already has one unless the user asks. create_database is billed to the user's Supabase organization: when it lists several organizations, ask which one and call it again with that organizationId; when it reports a plan or quota limit, relay Supabase's own words instead of retrying. After writing or changing a .sql migration file, run apply_migrations (call it with dryRun first to see what would run). Use supabase_services to inspect storage and Edge Functions.",
+      "Publishing: publish deploys this project to the Vercel project linked to it. It publishes a preview by default and leaves production unchanged; pass production: true only when the user asked for a production release, and say which Vercel project before calling. Report the URL and the check results. When a publish fails, the result lists the failed checks with the end of their output: fix the cause in the project and publish a preview again. Do not tell the user to reconnect an account unless the result says setup is needed. When a live production release is broken, first offer to restore the previous release (Vector Cloud > Deployments > Roll back), then read its logs with the logs action before guessing at a cause or asking the user to paste an error.",
+      "Secrets: results carry names, never values. Never ask the user to paste a token, key or password into the chat. Name what is needed and where to add it: Vector Cloud > Environment variables for the app's settings, Vector Cloud > Connections for the Vercel and Supabase accounts (connected with an access token).",
+      "Every action that publishes, changes a database or writes host settings asks the user first, naming the provider, project and environment. Hosting and database usage follow the connected accounts' billing. Never claim a resource was created unless this tool reports it.",
+    ].join(" "),
     parameters: Parameters,
     execute: (params, ctx) =>
       Effect.gen(function* () {
@@ -335,7 +389,7 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
             metadata: {
               projectPath: instance.directory,
               ...described.scope,
-              production: params.action === "publish" ? params.production !== false : undefined,
+              production: params.action === "publish" ? params.production === true : undefined,
               dryRun: params.action === "apply_migrations" ? params.dryRun === true : undefined,
               organizationId: params.organizationId,
               region: params.region,
