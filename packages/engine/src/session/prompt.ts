@@ -23,6 +23,8 @@ import { Instruction } from "./instruction"
 import { Plugin } from "../plugin"
 import { MAX_STEPS_PROMPT } from "@vectordevai/core/session/runner/max-steps"
 import { ToolRegistry } from "@/tool/registry"
+import { assertExternalDirectoryEffect } from "@/tool/external-directory"
+import type { Tool } from "@/tool/tool"
 import { MCP } from "../mcp"
 import { LSP } from "@/lsp/lsp"
 import { ulid } from "ulid"
@@ -904,27 +906,25 @@ const layer = Layer.effect(
               const mime = (yield* fsys.isDir(filepath)) ? "application/x-directory" : part.mime
 
               const { read } = yield* registry.named()
-              const execRead = (args: Parameters<typeof read.execute>[0]) => {
-                const controller = new AbortController()
-                return read
-                  .execute(args, {
-                    sessionID: input.sessionID,
-                    abort: controller.signal,
-                    agent: input.agent!,
-                    messageID: info.id,
-                    messages: [],
-                    metadata: () => Effect.void,
-                    ask: (request) =>
-                      permission
-                        .ask({
-                          ...request,
-                          sessionID: input.sessionID,
-                          ruleset: Permission.merge(ag.permission, current.permission ?? []),
-                        })
-                        .pipe(Effect.orDie),
-                  })
-                  .pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())))
+              const controller = new AbortController()
+              const readContext: Tool.Context = {
+                sessionID: input.sessionID,
+                abort: controller.signal,
+                agent: input.agent!,
+                messageID: info.id,
+                messages: [],
+                metadata: () => Effect.void,
+                ask: (request) =>
+                  permission
+                    .ask({
+                      ...request,
+                      sessionID: input.sessionID,
+                      ruleset: Permission.merge(ag.permission, current.permission ?? []),
+                    })
+                    .pipe(Effect.orDie),
               }
+              const execRead = (args: Parameters<typeof read.execute>[0]) =>
+                read.execute(args, readContext).pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())))
 
               if (mime === "text/plain") {
                 let offset: number | undefined
@@ -1056,6 +1056,40 @@ const layer = Layer.effect(
                 ]
               }
 
+              // Binary attachments skip the Read tool's text handling, never its boundary: the same
+              // outside-directory and read permission checks run before any byte leaves the disk.
+              const bytes = yield* Effect.gen(function* () {
+                const instance = yield* InstanceState.context
+                yield* assertExternalDirectoryEffect(readContext, filepath)
+                yield* readContext.ask({
+                  permission: "read",
+                  patterns: [path.relative(instance.worktree, filepath)],
+                  always: ["*"],
+                  metadata: {},
+                })
+                return yield* fsys.readFile(filepath)
+              }).pipe(Effect.exit)
+              if (Exit.isFailure(bytes)) {
+                const error = Cause.squash(bytes.cause)
+                yield* Effect.logError("failed to read file", { error, filepath })
+                const message = error instanceof Error ? error.message : String(error)
+                yield* events.publish(Session.Event.Error, {
+                  sessionID: input.sessionID,
+                  error: new NamedError.Unknown({ message }).toObject(),
+                })
+                // Carries the client part's id so a client showing the attachment while sending drops
+                // its copy, but never the file:// URL, which nothing downstream may read.
+                return [
+                  {
+                    id: part.id,
+                    messageID: info.id,
+                    sessionID: input.sessionID,
+                    type: "text",
+                    synthetic: true,
+                    text: `Read tool failed to read ${filepath} with the following error: ${message}`,
+                  },
+                ]
+              }
               return [
                 {
                   messageID: info.id,
@@ -1069,9 +1103,7 @@ const layer = Layer.effect(
                   messageID: info.id,
                   sessionID: input.sessionID,
                   type: "file",
-                  url:
-                    `data:${mime};base64,` +
-                    Buffer.from(yield* fsys.readFile(filepath).pipe(Effect.catch(Effect.die))).toString("base64"),
+                  url: `data:${mime};base64,` + Buffer.from(bytes.value).toString("base64"),
                   mime,
                   filename: part.filename!,
                   source: part.source,

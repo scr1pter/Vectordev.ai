@@ -2737,6 +2737,79 @@ noLLMServer.instance(
 )
 
 noLLMServer.instance(
+  "client binary file parts outside the project require external-directory approval",
+  () =>
+    Effect.gen(function* () {
+      const external = yield* tmpdirScoped()
+      const secret = path.join(external, "outside.bin")
+      yield* (yield* FSUtil.Service).writeWithDirs(secret, "outside-binary-secret")
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+      const id = PartID.ascending()
+
+      const fiber = yield* prompt
+        .prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [
+            { id, type: "file", mime: "application/octet-stream", filename: "outside.bin", url: `file://${secret}` },
+          ],
+        })
+        .pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        permission.list().pipe(Effect.map((items) => items.find((item) => item.permission === "external_directory"))),
+        "binary file part did not request external-directory permission",
+        "15 seconds",
+      )
+      expect(request.patterns.some((pattern) => pattern.includes(path.basename(external)))).toBe(true)
+      yield* permission.reply({ requestID: request.id, reply: "reject" })
+
+      const exit = yield* Fiber.await(fiber)
+      if (Exit.isFailure(exit)) throw new Error(Cause.pretty(exit.cause))
+      const stored = JSON.stringify(exit.value.parts)
+      expect(stored).not.toContain(Buffer.from("outside-binary-secret").toString("base64"))
+      expect(stored).not.toContain("file://")
+      expect(exit.value.parts).toEqual([
+        expect.objectContaining({ id, type: "text", text: expect.stringContaining("Read tool failed to read") }),
+      ])
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
+  "client binary file parts inside the project are still attached",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const inside = path.join(dir, "inside.bin")
+      yield* (yield* FSUtil.Service).writeWithDirs(inside, "inside-binary")
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+
+      const msg = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "file", mime: "application/octet-stream", filename: "inside.bin", url: `file://${inside}` }],
+      })
+
+      expect(msg.parts).toContainEqual(
+        expect.objectContaining({
+          type: "file",
+          url: `data:application/octet-stream;base64,${Buffer.from("inside-binary").toString("base64")}`,
+        }),
+      )
+    }),
+  { config: cfg },
+)
+
+noLLMServer.instance(
   "does not fail the prompt when a file part is missing",
   () =>
     Effect.gen(function* () {
