@@ -800,7 +800,9 @@ description: Permission skill.
       )
 
       const build = yield* load((svc) => svc.get("build"))
-      const target = path.join(skillDir, "reference", "notes.md")
+      // A trusted project's skills load from the approved snapshot, so that copy is the directory the agent reads.
+      const skill = yield* Skill.Service.use((svc) => svc.get("perm-skill"))
+      const target = path.join(path.dirname(skill!.location), "reference", "notes.md")
       expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
     }),
   { git: true },
