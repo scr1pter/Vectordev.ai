@@ -165,7 +165,8 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
 type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>, model?: Model) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
-type CustomLoader = (provider: Info) => Effect.Effect<{
+type CustomProvider = Pick<Info, "id" | "source" | "options"> & { hasModel: (id: string) => boolean }
+type CustomLoader = (provider: CustomProvider) => Effect.Effect<{
   autoload: boolean
   getModel?: CustomModelLoader
   vars?: CustomVarsLoader
@@ -236,7 +237,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
         options: {},
       }),
-    azure: Effect.fnUntraced(function* (provider: Info) {
+    azure: Effect.fnUntraced(function* (provider: CustomProvider) {
       const env = yield* dep.env()
       const auth = yield* dep.auth(provider.id)
       const resource = iife(() => {
@@ -492,7 +493,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           },
         },
       }),
-    "google-vertex": Effect.fnUntraced(function* (provider: Info) {
+    "google-vertex": Effect.fnUntraced(function* (provider: CustomProvider) {
       const env = yield* dep.env()
       // The catalog advertises GOOGLE_VERTEX_PROJECT for Vertex; keep the wider
       // Google Cloud project env names as fallbacks for existing ADC setups.
@@ -583,7 +584,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           },
         },
       }),
-    gitlab: Effect.fnUntraced(function* (input: Info) {
+    gitlab: Effect.fnUntraced(function* (input: CustomProvider) {
       const {
         VERSION: GITLAB_PROVIDER_VERSION,
         isWorkflowModel,
@@ -658,7 +659,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
 
             const models: Record<string, Model> = {}
             for (const m of result.models) {
-              if (!input.models[m.id]) {
+              if (!input.hasModel(m.id)) {
                 models[m.id] = {
                   id: ModelV2.ID.make(m.id),
                   providerID: ProviderV2.ID.make("gitlab"),
@@ -708,7 +709,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }
     }),
-    "cloudflare-workers-ai": Effect.fnUntraced(function* (input: Info) {
+    "cloudflare-workers-ai": Effect.fnUntraced(function* (input: CustomProvider) {
       // When baseURL is already configured (e.g. corporate config routing through a proxy/gateway),
       // skip the account ID check because the URL is already fully specified.
       if (input.options?.baseURL) return { autoload: false }
@@ -746,7 +747,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }
     }),
-    "cloudflare-ai-gateway": Effect.fnUntraced(function* (input: Info) {
+    "cloudflare-ai-gateway": Effect.fnUntraced(function* (input: CustomProvider) {
       const auth = yield* dep.auth(input.id)
       const env = yield* dep.env()
       const accountId =
@@ -784,7 +785,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           },
         },
       }),
-    "snowflake-cortex": Effect.fnUntraced(function* (input: Info) {
+    "snowflake-cortex": Effect.fnUntraced(function* (input: CustomProvider) {
       const env = yield* dep.env()
       const auth = yield* dep.auth(input.id)
 
@@ -1128,7 +1129,8 @@ interface State {
   unavailable: ProviderUnavailable[]
   // Every provider ID configuration or a plugin names, whether or not it loaded.
   declared: Set<string>
-  catalog: Record<ProviderV2.ID, Info>
+  catalogIDs: Record<string, true>
+  getCatalog: (providerID: string) => Info | undefined
   sdk: Map<string, BundledSDK>
   modelLoaders: Record<string, CustomModelLoader>
   varsLoaders: Record<string, CustomVarsLoader>
@@ -1368,11 +1370,35 @@ const layer = Layer.effect(
         const modelCatalog = Object.fromEntries(
           Object.entries(yield* modelCatalogSvc.get()).filter(([id]) => providerAllowed(id)),
         )
-        const catalog = mapValues(modelCatalog, fromModelCatalogProvider)
+        const catalogIDs = Object.fromEntries(Object.keys(modelCatalog).map((id) => [id, true as const]))
+        const catalog = new Map<string, Info>()
         const freeCatalog = yield* freeModels.catalog()
-        if (freeCatalog.enabled && freeCatalog.models.length)
-          catalog[ProviderV2.ID.vector] = fromFreeModels(freeCatalog.models)
-        const database = mapValues(catalog, toPublicInfo)
+        if (freeCatalog.enabled && freeCatalog.models.length) {
+          catalogIDs[ProviderV2.ID.vector] = true
+          catalog.set(ProviderV2.ID.vector, fromFreeModels(freeCatalog.models))
+        }
+        const database = new Map<string, Info>()
+
+        // Keep the catalog copy isolated from config/plugin mutations, but expand only providers that are used.
+        function getCatalog(providerID: string) {
+          const cached = catalog.get(providerID)
+          if (cached) return cached
+          if (!Object.hasOwn(modelCatalog, providerID)) return
+          const raw = modelCatalog[providerID]
+          const provider = fromModelCatalogProvider(raw)
+          catalog.set(providerID, provider)
+          return provider
+        }
+
+        function getDatabase(providerID: string) {
+          const cached = database.get(providerID)
+          if (cached) return cached
+          const source = getCatalog(providerID)
+          if (!source) return
+          const provider = toPublicInfo(source)
+          database.set(providerID, provider)
+          return provider
+        }
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
         const languages = new Map<string, LanguageModelV3>()
@@ -1401,16 +1427,14 @@ const layer = Layer.effect(
 
         function mergeProvider(providerID: ProviderV2.ID, provider: Partial<Info>) {
           if (!isProviderAllowed(providerID)) return
-          const value = providerAllowed(providerID)
-            ? provider
-            : { ...provider, source: database[providerID]?.source ?? "custom" }
+          const match = getDatabase(providerID)
+          const value = providerAllowed(providerID) ? provider : { ...provider, source: match?.source ?? "custom" }
           const existing = providers[providerID]
           if (existing) {
             // @ts-expect-error
             providers[providerID] = mergeDeep(existing, value)
             return
           }
-          const match = database[providerID]
           if (!match) return
           // @ts-expect-error
           providers[providerID] = mergeDeep(match, value)
@@ -1449,7 +1473,7 @@ const layer = Layer.effect(
           const providerID = ProviderV2.ID.make(p.id)
           if (!isProviderAllowed(providerID)) continue
 
-          const provider = database[providerID] ?? {
+          const provider = getDatabase(providerID) ?? {
             id: providerID,
             name: providerID,
             env: [],
@@ -1457,7 +1481,7 @@ const layer = Layer.effect(
             source: "custom" as const,
             models: {},
           }
-          database[providerID] = provider
+          database.set(providerID, provider)
           const storedPluginAuth = yield* auth.get(providerID).pipe(Effect.orDie)
           const pluginAuth =
             storedPluginAuth && providerCredentialAllowed(providerID, storedPluginAuth, userProviders.has(providerID))
@@ -1477,12 +1501,12 @@ const layer = Layer.effect(
               ]),
             )
           })
-          if (!catalog[providerID]) mergeProvider(providerID, { source: "custom" })
+          if (!Object.hasOwn(catalogIDs, providerID)) mergeProvider(providerID, { source: "custom" })
         }
 
         // extend database from config
         for (const [providerID, provider] of configProviders) {
-          const existing = database[providerID]
+          const existing = getDatabase(providerID)
           const parsed: Info = {
             id: ProviderV2.ID.make(providerID),
             name: provider.name ?? existing?.name ?? providerID,
@@ -1588,20 +1612,21 @@ const layer = Layer.effect(
             )
             parsed.models[modelID] = parsedModel
           }
-          database[providerID] = parsed
+          database.set(providerID, parsed)
         }
 
         // load env
         const envs = yield* env.all()
-        for (const [id, provider] of Object.entries(database)) {
+        for (const id of Object.keys({ ...catalogIDs, ...Object.fromEntries(database) })) {
           const providerID = ProviderV2.ID.make(id)
           if (!isProviderAllowed(providerID)) continue
           if (!providerEnvironmentAllowed(providerID)) continue
-          const apiKey = provider.env.map((item) => envs[item]).find(Boolean)
+          const names = database.get(id)?.env ?? catalog.get(id)?.env ?? modelCatalog[id]?.env ?? []
+          const apiKey = names.map((item) => envs[item]).find(Boolean)
           if (!apiKey) continue
           mergeProvider(providerID, {
             source: "env",
-            key: provider.env.length === 1 ? apiKey : undefined,
+            key: names.length === 1 ? apiKey : undefined,
           })
         }
 
@@ -1630,12 +1655,14 @@ const layer = Layer.effect(
           const stored = yield* auth.get(providerID).pipe(Effect.orDie)
           if (!stored) continue
           if (!providerCredentialAllowed(providerID, stored, userProviders.has(providerID))) continue
-          if (!plugin.auth.loader || !database[providerID]) continue
+          if (!plugin.auth.loader) continue
+          const provider = getDatabase(providerID)
+          if (!provider) continue
 
           const options = yield* Effect.promise(() =>
             plugin.auth!.loader!(
               () => bridge.promise(auth.get(providerID).pipe(Effect.orDie)) as any,
-              toPublicInfo(database[plugin.auth!.provider]),
+              toPublicInfo(provider),
             ),
           )
           const opts = options ?? {}
@@ -1646,11 +1673,14 @@ const layer = Layer.effect(
         for (const [id, fn] of Object.entries(custom(dep))) {
           const providerID = ProviderV2.ID.make(id)
           if (!isProviderAllowed(providerID)) continue
-          const data = database[providerID]
-          if (!data) {
-            continue
-          }
-          const result = yield* fn(data)
+          const data = database.get(providerID)
+          if (!data && !Object.hasOwn(catalogIDs, providerID)) continue
+          const result = yield* fn({
+            id: data?.id ?? ProviderV2.ID.make(modelCatalog[providerID]?.id ?? providerID),
+            source: data?.source ?? "custom",
+            options: data?.options ?? {},
+            hasModel: (id) => Boolean(getDatabase(providerID)?.models[id]),
+          })
           if (result && (result.autoload || providers[providerID])) {
             if (result.getModel) modelLoaders[providerID] = result.getModel
             if (result.vars) varsLoaders[providerID] = result.vars
@@ -1780,7 +1810,8 @@ const layer = Layer.effect(
             ...(cfg.enabled_providers ?? []),
             ...userProviders,
           ]),
-          catalog,
+          catalogIDs,
+          getCatalog,
           sdk,
           modelLoaders,
           varsLoaders,
@@ -1994,13 +2025,13 @@ const layer = Layer.effect(
 
     const getModel = Effect.fn("Provider.getModel")(function* (providerID: ProviderV2.ID, modelID: ModelV2.ID) {
       const s = yield* InstanceState.get(state)
-      const provider = s.providers[providerID]
+      const provider = Object.hasOwn(s.providers, providerID) ? s.providers[providerID] : undefined
       if (!provider) {
-        const catalogProvider = s.catalog[providerID]
+        const catalogProvider = s.getCatalog(providerID)
         const suggestions = catalogProvider
           ? modelSuggestions(catalogProvider, modelID)
           : fuzzysort
-              .go(providerID, Object.keys({ ...s.catalog, ...s.providers }), { limit: 3, threshold: -10000 })
+              .go(providerID, Object.keys({ ...s.catalogIDs, ...s.providers }), { limit: 3, threshold: -10000 })
               .map((m) => m.target)
         return yield* new ModelNotFoundError({
           providerID,
@@ -2013,7 +2044,7 @@ const layer = Layer.effect(
       const info = provider.models[modelID]
       if (!info) {
         const current = modelSuggestions(provider, modelID)
-        const suggestions = current.length ? current : modelSuggestions(s.catalog[providerID], modelID)
+        const suggestions = current.length ? current : modelSuggestions(s.getCatalog(providerID), modelID)
         return yield* new ModelNotFoundError({ providerID, modelID, suggestions })
       }
       return info

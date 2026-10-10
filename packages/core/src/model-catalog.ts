@@ -140,8 +140,10 @@ const layer = Layer.effect(
       }),
     )
 
-    const loadSnapshot =
-      typeof VECTOR_MODEL_CATALOG === "undefined" ? Effect.succeed(undefined) : decode(VECTOR_MODEL_CATALOG)
+    // The build substitutes an object literal; allocate it only when disk data is unavailable.
+    const loadSnapshot = Effect.suspend(() =>
+      typeof VECTOR_MODEL_CATALOG === "undefined" ? Effect.succeed(undefined) : decode(VECTOR_MODEL_CATALOG),
+    )
 
     const fetchAndWrite = Effect.fn("ModelCatalog.fetchAndWrite")(function* () {
       const response = yield* fetchApi()
