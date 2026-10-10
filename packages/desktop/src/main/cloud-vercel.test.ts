@@ -792,6 +792,33 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     })
   })
 
+  test("copies a value the user stored in Vector to Vercel without the model seeing it", async () => {
+    seed()
+    const command = await bridge()
+    expect(
+      await command({ command: "describe", action: "set_env", key: "STRIPE_SECRET", targets: ["production"] }),
+    ).toMatchObject({ ok: false, error: expect.stringContaining("Cloud Services > Environment variables") })
+    expect(await command({ command: "set_env", key: "STRIPE_SECRET", targets: ["production"] })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("never in chat"),
+    })
+    setEnv(project, undefined, "STRIPE_SECRET", "sk_live_stored_fixture")
+    const described = await command({
+      command: "describe",
+      action: "set_env",
+      key: "STRIPE_SECRET",
+      targets: ["production"],
+    })
+    expect(described).toMatchObject({
+      ok: true,
+      scope: { environment: "production", summary: expect.stringContaining("value stored for it in this project") },
+    })
+    const set = await command({ command: "set_env", key: "STRIPE_SECRET", targets: ["production"] })
+    expect(set).toMatchObject({ ok: true, text: "Created STRIPE_SECRET on shop for production." })
+    expect(api.state.env.find((item) => item.key === "STRIPE_SECRET")?.value).toBe("sk_live_stored_fixture")
+    expect(JSON.stringify([described, set])).not.toContain("sk_live_stored_fixture")
+  })
+
   test("sets a variable, manages domains and creates a project from the agent", async () => {
     seed()
     const command = await bridge()

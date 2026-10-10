@@ -271,13 +271,14 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
     const targets = input.targets?.length ? input.targets : action === "set_env" ? undefined : [...VERCEL_ENV_TARGETS]
     if (!targets)
       return { ok: false as const, error: "Choose targets for the variable: production, preview and/or development." }
-    if (action === "set_env" && input.value === undefined)
-      return { ok: false as const, error: "Give the variable a value." }
+    const stored = action === "set_env" && input.value === undefined
+    if (stored && storedEnvValue(scope.projectPath, input.key) === undefined)
+      return { ok: false as const, error: missingStoredValue(input.key) }
     return described(
       project,
       targets.join(", "),
       action === "set_env"
-        ? `Set ${input.key} on the Vercel project ${project} for ${targets.join(", ")}${input.gitBranch ? ` (branch ${input.gitBranch})` : ""}. Deployments pick it up when they are next built.`
+        ? `Set ${input.key}${stored ? " to the value stored for it in this project's Vector environment" : ""} on the Vercel project ${project} for ${targets.join(", ")}${input.gitBranch ? ` (branch ${input.gitBranch})` : ""}. Deployments pick it up when they are next built.`
         : `Remove ${input.key} from the Vercel project ${project} for ${targets.join(", ")}${input.gitBranch ? ` (branch ${input.gitBranch})` : ""}.`,
     )
   }
@@ -482,12 +483,12 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
     )
   }
   if (command === "set_env") {
-    if (!input.key || input.value === undefined || !input.targets?.length) {
-      return { ok: false, error: "set_env needs key, value and targets." }
-    }
+    if (!input.key || !input.targets?.length) return { ok: false, error: "set_env needs key and targets." }
+    const value = input.value ?? storedEnvValue(projectPath, input.key)
+    if (value === undefined) return { ok: false, error: missingStoredValue(input.key) }
     const set = await setVercelEnv(
       projectPath,
-      { key: input.key, value: input.value, targets: input.targets, gitBranch: input.gitBranch, type: input.envType },
+      { key: input.key, value, targets: input.targets, gitBranch: input.gitBranch, type: input.envType },
       { request },
     )
     return text(
@@ -700,4 +701,14 @@ export function vercelStatusSummary(projectPath: string) {
         localVariables: listEnv(projectPath).length,
       }
     : undefined
+}
+
+// set_env without a value copies the one the user stored in Cloud Services, so
+// a secret reaches Vercel without passing through the model.
+function storedEnvValue(projectPath: string, key: string) {
+  return listEnv(projectPath).find((item) => item.key === key)?.value
+}
+
+function missingStoredValue(key: string) {
+  return `${key} has no value in this project's Vector environment. Ask the user to add it in Cloud Services > Environment variables (never in chat), then call set_env again without a value.`
 }

@@ -78,7 +78,7 @@ export const VercelParameters = {
   key: Schema.optional(Schema.String).annotate({ description: "For set_env and remove_env: the variable name." }),
   value: Schema.optional(Schema.String).annotate({
     description:
-      "For set_env: the value. Only pass a value the user gave you or a non-secret one; never invent secrets. Tool output never repeats it.",
+      "For set_env: a non-secret value. Omit it to copy the value stored for this key in the project's Vector environment; that is how secrets reach Vercel. Never ask for a secret in chat: the user adds it in Cloud Services > Environment variables. Tool output never repeats a value.",
   }),
   targets: Schema.optional(Schema.Array(Target)).annotate({
     description:
@@ -111,4 +111,4 @@ export function vercelPermission(action: string) {
 }
 
 export const VERCEL_GUIDANCE =
-  "Vercel: publish makes a preview; pass production: true only when the user asked to ship to production, and Vector then builds production, runs the release checks and promotes it. list_deployments shows Vercel's own history including git pushes; inspect_deployment and logs (source build or runtime) explain a failure. When production breaks, offer rollback first (no deploymentId rolls back to the previous production deployment). Project setup: vercel_scopes, vercel_projects, link_project or create_project, vercel_project and update_project_settings. Variables: list_env shows names only; set_env and remove_env change one variable per environment; env_diff compares local values by hash; env_plan shows what sync_environment would write and the user approves that plan; pull_env writes development values into .env. Domains: list_domains, add_domain, verify_domain and remove_domain report the exact DNS records to set. If checks report Deployment Protection, offer enable_protection_bypass."
+  "Vercel: publish makes a preview; pass production: true only when the user asked to ship to production, and Vector then builds production, runs the release checks and promotes it. list_deployments shows Vercel's own history including git pushes; inspect_deployment and logs (source build or runtime) explain a failure. When production breaks, offer rollback first (no deploymentId rolls back to the previous production deployment). Project setup: vercel_scopes, vercel_projects, link_project or create_project, vercel_project and update_project_settings. Variables: list_env shows names only; set_env and remove_env change one variable per environment, and set_env without a value copies the one the user stored in Vector; env_diff compares local values by hash; env_plan shows what sync_environment would write and the user approves that plan; pull_env writes development values into .env. Domains: list_domains, add_domain, verify_domain and remove_domain report the exact DNS records to set. If checks report Deployment Protection, offer enable_protection_bypass."
