@@ -167,7 +167,11 @@ export function VercelLink(props: {
                 onChange={(event) => void chooseScope(event.currentTarget.value)}
               >
                 <For each={state.scopes}>
-                  {(item) => <option value={item.teamId ?? ""}>{item.kind === "team" ? item.name : `${item.name} (personal)`}</option>}
+                  {(item) => (
+                    <option value={item.teamId ?? ""}>
+                      {item.kind === "team" ? item.name : `${item.name} (personal)`}
+                    </option>
+                  )}
                 </For>
               </select>
             </label>
@@ -222,7 +226,11 @@ export function VercelLink(props: {
                 <div class="cloud-form-grid">
                   <label>
                     <span>Project name</span>
-                    <input class="cloud-input w-full font-mono" value={state.name} onInput={(event) => setState("name", event.currentTarget.value)} />
+                    <input
+                      class="cloud-input w-full font-mono"
+                      value={state.name}
+                      onInput={(event) => setState("name", event.currentTarget.value)}
+                    />
                   </label>
                   <label>
                     <span>Framework</span>
@@ -244,10 +252,16 @@ export function VercelLink(props: {
                   </label>
                 </div>
                 <p class="cloud-muted text-[11.5px]">
-                  Created in {scopeName(state.scope || undefined)}. Vercel makes a new project's first deployment production.
+                  Created in {scopeName(state.scope || undefined)}. Vercel makes a new project's first deployment
+                  production.
                 </p>
                 <div class="vercel-actions">
-                  <button class="cloud-button" data-variant="primary" type="submit" disabled={!state.name.trim() || Boolean(state.busy)}>
+                  <button
+                    class="cloud-button"
+                    data-variant="primary"
+                    type="submit"
+                    disabled={!state.name.trim() || Boolean(state.busy)}
+                  >
                     {state.busy === "create" ? "Creating…" : "Create and link"}
                   </button>
                   <button class="cloud-button" type="button" onClick={() => setState("creating", false)}>

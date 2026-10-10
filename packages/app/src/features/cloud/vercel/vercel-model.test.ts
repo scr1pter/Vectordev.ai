@@ -47,9 +47,9 @@ describe("Vercel deployment actions", () => {
   test("a preview, or a release whose required checks failed, never moves production", () => {
     expect(deploymentActions(deployment({ id: "p", target: "preview" }), current)).toEqual(["redeploy"])
     const failed = { checks: [{ required: true, status: "failed" }] } as Pick<CloudDeployment, "checks">
-    expect(deploymentActions(deployment({ id: "new", createdAt: "2026-10-06T00:00:00.000Z" }), current, failed)).toEqual([
-      "redeploy",
-    ])
+    expect(
+      deploymentActions(deployment({ id: "new", createdAt: "2026-10-06T00:00:00.000Z" }), current, failed),
+    ).toEqual(["redeploy"])
   })
 
   test("finds Vector's own evidence for a Vercel deployment by id or address", () => {
@@ -123,7 +123,13 @@ describe("Vercel project settings", () => {
 describe("publish outcome", () => {
   test("a preview says production did not change, production says it moved", () => {
     expect(
-      publishOutcome({ ok: true, target: "vercel", log: "", url: "https://shop-abc.vercel.app", environment: "preview" }),
+      publishOutcome({
+        ok: true,
+        target: "vercel",
+        log: "",
+        url: "https://shop-abc.vercel.app",
+        environment: "preview",
+      }),
     ).toEqual({ tone: "success", text: "Preview live at https://shop-abc.vercel.app. Production did not change." })
     expect(
       publishOutcome({ ok: true, target: "vercel", log: "", url: "https://shop.com", environment: "production" }).text,

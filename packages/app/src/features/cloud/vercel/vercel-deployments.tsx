@@ -54,7 +54,12 @@ export function VercelDeployments(props: {
     }
   }
 
-  createEffect(on(() => [props.projectPath, props.refreshKey], () => void load()))
+  createEffect(
+    on(
+      () => [props.projectPath, props.refreshKey],
+      () => void load(),
+    ),
+  )
 
   const act = async (deployment: VercelDeployment, action: DeploymentAction) => {
     if (!api) return
@@ -139,7 +144,9 @@ export function VercelDeployments(props: {
       const failed = updated.checks.filter((check) => check.required && check.status === "failed").length
       props.notice({
         tone: failed ? "error" : "success",
-        text: failed ? `${failed} required check${failed === 1 ? "" : "s"} failed.` : "All required release checks passed.",
+        text: failed
+          ? `${failed} required check${failed === 1 ? "" : "s"} failed.`
+          : "All required release checks passed.",
       })
     } catch (caught) {
       props.notice({ tone: "error", text: vercelErrorText(caught, "Could not run the release checks.") })
@@ -152,7 +159,9 @@ export function VercelDeployments(props: {
     const evidence = [
       `Repair the Vercel deployment ${deployment.id} (${deployment.url}) of ${state.status?.link?.projectName ?? "this project"}.`,
       deployment.errorMessage ? `Vercel reported: ${deployment.errorMessage}` : "",
-      deployment.branch ? `Git: ${deployment.branch}${deployment.commitSha ? ` at ${deployment.commitSha.slice(0, 8)}` : ""}` : "",
+      deployment.branch
+        ? `Git: ${deployment.branch}${deployment.commitSha ? ` at ${deployment.commitSha.slice(0, 8)}` : ""}`
+        : "",
       ...(release?.checks ?? [])
         .filter((check) => check.status === "failed")
         .map((check) => `${check.label}: ${check.details ?? "failed"}\n${check.output ?? ""}`),
@@ -187,7 +196,12 @@ export function VercelDeployments(props: {
           </p>
         </div>
         <div class="vercel-actions">
-          <Show when={current() && state.deployments.some((item) => item.target === "production" && !item.current && item.state === "READY")}>
+          <Show
+            when={
+              current() &&
+              state.deployments.some((item) => item.target === "production" && !item.current && item.state === "READY")
+            }
+          >
             <button
               class="cloud-button"
               data-variant="warning"
@@ -203,15 +217,23 @@ export function VercelDeployments(props: {
           </button>
         </div>
       </div>
-      <VercelLinkRequired linked={Boolean(state.status?.link) || !state.status} onOpenConnections={props.onOpenConnections}>
+      <VercelLinkRequired
+        linked={Boolean(state.status?.link) || !state.status}
+        onOpenConnections={props.onOpenConnections}
+      >
         <div class="cloud-list mt-3">
           <For
             each={state.deployments}
-            fallback={<p class="cloud-muted text-[12px]">{state.loading ? "Loading…" : "No deployments yet. Publish a preview to create one."}</p>}
+            fallback={
+              <p class="cloud-muted text-[12px]">
+                {state.loading ? "Loading…" : "No deployments yet. Publish a preview to create one."}
+              </p>
+            }
           >
             {(deployment) => {
               const release = () => matchRelease(deployment, state.releases)
-              const failedChecks = () => release()?.checks.filter((check) => check.required && check.status === "failed") ?? []
+              const failedChecks = () =>
+                release()?.checks.filter((check) => check.required && check.status === "failed") ?? []
               const actions = () => deploymentActions(deployment, current(), release())
               return (
                 <div class="cloud-row cloud-row-block">
@@ -228,7 +250,9 @@ export function VercelDeployments(props: {
                       </Show>
                       <Show when={release()}>
                         <span class="cloud-status" data-tone={failedChecks().length ? "error" : "success"}>
-                          {failedChecks().length ? `${failedChecks().length} Vector check(s) failed` : "Vector checks passed"}
+                          {failedChecks().length
+                            ? `${failedChecks().length} Vector check(s) failed`
+                            : "Vector checks passed"}
                         </span>
                       </Show>
                     </div>
@@ -260,7 +284,12 @@ export function VercelDeployments(props: {
                             Addresses:{" "}
                             <For each={deployment.aliases}>
                               {(alias) => (
-                                <a class="cloud-link" href={`https://${alias}`} target="_blank" rel="noopener noreferrer">
+                                <a
+                                  class="cloud-link"
+                                  href={`https://${alias}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
                                   {alias}{" "}
                                 </a>
                               )}
@@ -316,7 +345,9 @@ export function VercelDeployments(props: {
                             Runtime
                           </button>
                         </div>
-                        <pre class="cloud-log mt-2">{state.logs?.loading ? "Reading from Vercel…" : state.logs?.text}</pre>
+                        <pre class="cloud-log mt-2">
+                          {state.logs?.loading ? "Reading from Vercel…" : state.logs?.text}
+                        </pre>
                       </div>
                     </Show>
                   </div>
@@ -343,24 +374,44 @@ export function VercelDeployments(props: {
                       {(action) => (
                         <button
                           class="cloud-button"
-                          data-variant={action === "promote" ? "primary" : action === "rollback" || action === "cancel" ? "warning" : undefined}
+                          data-variant={
+                            action === "promote"
+                              ? "primary"
+                              : action === "rollback" || action === "cancel"
+                                ? "warning"
+                                : undefined
+                          }
                           type="button"
                           disabled={Boolean(state.busy)}
-                          onClick={() => confirm.request(`${action}-${deployment.id}`, () => void act(deployment, action))}
+                          onClick={() =>
+                            confirm.request(`${action}-${deployment.id}`, () => void act(deployment, action))
+                          }
                         >
-                          {state.busy === `${action}-${deployment.id}` ? "Working…" : actionLabel(action, deployment.id)}
+                          {state.busy === `${action}-${deployment.id}`
+                            ? "Working…"
+                            : actionLabel(action, deployment.id)}
                         </button>
                       )}
                     </For>
                     <Show when={release()}>
                       {(item) => (
-                        <button class="cloud-button" type="button" disabled={Boolean(state.busy)} onClick={() => void rerunChecks(item())}>
+                        <button
+                          class="cloud-button"
+                          type="button"
+                          disabled={Boolean(state.busy)}
+                          onClick={() => void rerunChecks(item())}
+                        >
                           {state.busy === `checks-${item().id}` ? "Checking…" : "Run checks"}
                         </button>
                       )}
                     </Show>
                     <Show when={deployment.state === "ERROR" || failedChecks().length}>
-                      <button class="cloud-button" data-variant="primary" type="button" onClick={() => repair(deployment, release())}>
+                      <button
+                        class="cloud-button"
+                        data-variant="primary"
+                        type="button"
+                        onClick={() => repair(deployment, release())}
+                      >
                         Repair with Vector
                       </button>
                     </Show>

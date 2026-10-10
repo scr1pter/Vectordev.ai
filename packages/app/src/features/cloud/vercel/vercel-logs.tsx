@@ -60,7 +60,11 @@ export function VercelLogs(props: { projectPath: string; notice: VercelNotice; o
     <VercelLinkRequired linked={state.linked} onOpenConnections={props.onOpenConnections}>
       <div class="cloud-panel vercel-section">
         <div class="vercel-log-controls">
-          <select class="cloud-input" value={state.selected} onChange={(event) => setState("selected", event.currentTarget.value)}>
+          <select
+            class="cloud-input"
+            value={state.selected}
+            onChange={(event) => setState("selected", event.currentTarget.value)}
+          >
             <For each={state.deployments} fallback={<option value="">No deployments yet</option>}>
               {(deployment) => (
                 <option value={deployment.id}>
@@ -72,21 +76,33 @@ export function VercelLogs(props: { projectPath: string; notice: VercelNotice; o
             </For>
           </select>
           <div class="cloud-segment" aria-label="Log source">
-            <button type="button" data-active={state.source === "runtime"} onClick={() => setState("source", "runtime")}>
+            <button
+              type="button"
+              data-active={state.source === "runtime"}
+              onClick={() => setState("source", "runtime")}
+            >
               Runtime
             </button>
             <button type="button" data-active={state.source === "build"} onClick={() => setState("source", "build")}>
               Build
             </button>
           </div>
-          <button class="cloud-button" data-variant="primary" type="button" disabled={!state.selected || state.loading} onClick={() => void read()}>
+          <button
+            class="cloud-button"
+            data-variant="primary"
+            type="button"
+            disabled={!state.selected || state.loading}
+            onClick={() => void read()}
+          >
             {state.loading ? "Reading…" : "Read logs"}
           </button>
         </div>
         <Show when={state.output}>
           <p class="cloud-muted mt-3 text-[11px]">
-            {state.source === "runtime" ? "Requests, errors and console output of the running app" : "What the build printed"} · read{" "}
-            {formatWhen(state.fetchedAt)}
+            {state.source === "runtime"
+              ? "Requests, errors and console output of the running app"
+              : "What the build printed"}{" "}
+            · read {formatWhen(state.fetchedAt)}
           </p>
           <pre class="cloud-log mt-2">{state.output}</pre>
         </Show>

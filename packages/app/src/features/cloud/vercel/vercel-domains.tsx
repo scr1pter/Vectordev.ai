@@ -38,7 +38,12 @@ export function VercelDomains(props: { projectPath: string; notice: VercelNotice
     }
   }
 
-  createEffect(on(() => props.projectPath, () => void load()))
+  createEffect(
+    on(
+      () => props.projectPath,
+      () => void load(),
+    ),
+  )
 
   const replace = (domain: VercelDomain) =>
     setState("domains", (items) =>
@@ -133,7 +138,12 @@ export function VercelDomains(props: { projectPath: string; notice: VercelNotice
             autocomplete="off"
             spellcheck={false}
           />
-          <button class="cloud-button" data-variant="primary" type="submit" disabled={!state.draft.trim() || Boolean(state.busy)}>
+          <button
+            class="cloud-button"
+            data-variant="primary"
+            type="submit"
+            disabled={!state.draft.trim() || Boolean(state.busy)}
+          >
             {state.busy === "add" ? "Adding…" : "Add domain"}
           </button>
         </form>
@@ -142,7 +152,9 @@ export function VercelDomains(props: { projectPath: string; notice: VercelNotice
         <For
           each={state.domains}
           fallback={
-            <p class="cloud-muted text-[12px]">{state.loading ? "Loading…" : "No custom domains on this project yet."}</p>
+            <p class="cloud-muted text-[12px]">
+              {state.loading ? "Loading…" : "No custom domains on this project yet."}
+            </p>
           }
         >
           {(domain) => (
@@ -197,7 +209,11 @@ export function VercelDomains(props: { projectPath: string; notice: VercelNotice
                   disabled={Boolean(state.busy)}
                   onClick={() => void verify(domain)}
                 >
-                  {state.busy === `verify-${domain.name}` ? "Checking…" : domain.status === "ready" ? "Recheck" : "Verify"}
+                  {state.busy === `verify-${domain.name}`
+                    ? "Checking…"
+                    : domain.status === "ready"
+                      ? "Recheck"
+                      : "Verify"}
                 </button>
                 <button
                   class="cloud-button"

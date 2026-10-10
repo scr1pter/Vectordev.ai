@@ -89,7 +89,9 @@ export function VercelEnvironment(props: {
   }
 
   const toggle = (list: VercelEnvTarget[], target: VercelEnvTarget) =>
-    list.includes(target) ? list.filter((item) => item !== target) : VERCEL_ENV_TARGETS.filter((item) => item === target || list.includes(item))
+    list.includes(target)
+      ? list.filter((item) => item !== target)
+      : VERCEL_ENV_TARGETS.filter((item) => item === target || list.includes(item))
 
   const save = () =>
     run("save", async () => {
@@ -141,7 +143,10 @@ export function VercelEnvironment(props: {
       if (!api || !current) return
       const applied = await api.envApply(props.projectPath, [...current.targets], current.id)
       setState("plan", undefined)
-      props.notice({ tone: "success", text: `Applied ${applied.applied} change(s) to ${applied.project}. ${applied.nextStep}` })
+      props.notice({
+        tone: "success",
+        text: `Applied ${applied.applied} change(s) to ${applied.project}. ${applied.nextStep}`,
+      })
       await load()
     })
 
@@ -262,7 +267,10 @@ export function VercelEnvironment(props: {
         </form>
 
         <div class="cloud-list mt-3">
-          <For each={groupRemoteEnv(state.variables)} fallback={<p class="cloud-muted text-[12px]">No variables on Vercel yet.</p>}>
+          <For
+            each={groupRemoteEnv(state.variables)}
+            fallback={<p class="cloud-muted text-[12px]">No variables on Vercel yet.</p>}
+          >
             {(group) => (
               <div class="cloud-row cloud-row-block">
                 <div class="min-w-0 flex-1">
@@ -386,7 +394,12 @@ export function VercelEnvironment(props: {
                 <For each={current().changes} fallback={<p>Nothing to change: Vercel already matches.</p>}>
                   {(change) => (
                     <p>
-                      <span class="cloud-status" data-tone={change.action === "delete" ? "error" : change.action === "update" ? "warning" : "success"}>
+                      <span
+                        class="cloud-status"
+                        data-tone={
+                          change.action === "delete" ? "error" : change.action === "update" ? "warning" : "success"
+                        }
+                      >
                         {change.action}
                       </span>{" "}
                       <code>{change.key}</code> · {change.targets.join(", ")}
@@ -428,7 +441,12 @@ export function VercelEnvironment(props: {
                 <For each={current().variables} fallback={<p>Vercel has no readable development values.</p>}>
                   {(item) => (
                     <p>
-                      <span class="cloud-status" data-tone={item.action === "overwrite" ? "warning" : item.action === "add" ? "success" : undefined}>
+                      <span
+                        class="cloud-status"
+                        data-tone={
+                          item.action === "overwrite" ? "warning" : item.action === "add" ? "success" : undefined
+                        }
+                      >
                         {item.action === "add" ? "add" : item.action === "overwrite" ? "replace local" : "same"}
                       </span>{" "}
                       <code>{item.key}</code>
@@ -450,7 +468,11 @@ export function VercelEnvironment(props: {
                     disabled={Boolean(state.busy)}
                     onClick={() => confirm.request("pull", () => void pull())}
                   >
-                    {state.busy === "pull" ? "Writing…" : confirm.armed("pull") ? "Confirm write to .env?" : "Write to .env"}
+                    {state.busy === "pull"
+                      ? "Writing…"
+                      : confirm.armed("pull")
+                        ? "Confirm write to .env?"
+                        : "Write to .env"}
                   </button>
                 </Show>
               </div>

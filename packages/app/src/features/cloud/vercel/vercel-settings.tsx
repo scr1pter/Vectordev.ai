@@ -42,7 +42,12 @@ export function VercelSettings(props: { projectPath: string; notice: VercelNotic
     }
   }
 
-  createEffect(on(() => props.projectPath, () => void load()))
+  createEffect(
+    on(
+      () => props.projectPath,
+      () => void load(),
+    ),
+  )
 
   const patch = () => {
     const current = state.project
@@ -104,7 +109,10 @@ export function VercelSettings(props: { projectPath: string; notice: VercelNotic
             {state.busy === "load" ? "Reading…" : "Refresh"}
           </button>
         </div>
-        <Show when={state.draft} fallback={<p class="cloud-muted mt-3 text-[12px]">{state.busy === "load" ? "Loading…" : ""}</p>}>
+        <Show
+          when={state.draft}
+          fallback={<p class="cloud-muted mt-3 text-[12px]">{state.busy === "load" ? "Loading…" : ""}</p>}
+        >
           {(values) => (
             <>
               <div class="cloud-form-grid mt-4">
