@@ -22,6 +22,7 @@ import { Global } from "../global"
 import { Integration } from "../integration"
 import { Location } from "../location"
 import { ModelCatalog } from "../model-catalog"
+import { ModelPlans } from "../model-plans"
 import { Npm } from "../npm"
 import { PluginV2 } from "../plugin"
 import { Reference } from "../reference"
@@ -32,6 +33,7 @@ import { AgentPlugin } from "./agent"
 import { CommandPlugin } from "./command"
 import { ModelCatalogPlugin } from "./model-catalog"
 import { ProviderPlugins } from "./provider"
+import { VectorPlanPlugin } from "./provider/vector-plan"
 import { SkillPlugin } from "./skill"
 import { VariantPlugin } from "./variant"
 
@@ -50,6 +52,7 @@ export type Requirements =
   | Integration.Service
   | Location.Service
   | ModelCatalog.Service
+  | ModelPlans.Service
   | Npm.Service
   | Reference.Service
   | SkillV2.Service
@@ -78,6 +81,7 @@ const layer = Layer.effectDiscard(
     const fs = yield* FSUtil.Service
     const filesystem = yield* FileSystem.Service
     const freeModels = yield* FreeModels.Service
+    const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
     const global = yield* Global.Service
     const http = yield* HttpClient.HttpClient
@@ -103,6 +107,7 @@ const layer = Layer.effectDiscard(
               Effect.provideService(FileSystem.Service, filesystem),
               Effect.provideService(Global.Service, global),
               Effect.provideService(FreeModels.Service, freeModels),
+              Effect.provideService(ModelPlans.Service, modelPlans),
               Effect.provideService(FreeModels.CredentialsService, freeCredentials),
               Effect.provideService(HttpClient.HttpClient, http),
               Effect.provideService(SkillV2.Service, skill),
@@ -125,6 +130,8 @@ const layer = Layer.effectDiscard(
         for (const item of ProviderPlugins) yield* add(item)
         yield* add(ConfigExternalPlugin.Plugin)
         yield* add(ConfigProviderPlugin.Plugin)
+        // Account entitlements, prices and transport metadata cannot be replaced by repository configuration.
+        yield* add(VectorPlanPlugin)
         yield* add(VariantPlugin.Plugin)
       }),
     ).pipe(Effect.withSpan("PluginInternal.boot"), Effect.forkScoped({ startImmediately: true }))
@@ -154,6 +161,7 @@ export const node = makeLocationNode({
     FileSystem.node,
     Global.node,
     FreeModels.node,
+    ModelPlans.node,
     FreeModels.credentialsNode,
     httpClient,
     SkillV2.node,

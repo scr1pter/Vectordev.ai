@@ -9,7 +9,9 @@ import { Auth, type AnyRoute } from "@vectordevai/llm/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
 import { FreeModels } from "../../free-models"
+import { ModelPlans } from "../../model-plans"
 import { freeModelRoute } from "./free-model-route"
+import { modelPlanRoute } from "./model-plan-route"
 import { Catalog } from "../../catalog"
 import { Credential } from "../../credential"
 import { Integration } from "../../integration"
@@ -110,6 +112,10 @@ export const calculateCost = (model: Model, tokens: Tokens, metadata?: ProviderM
   if (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0)
     // Copilot bills in nano AI units: 1 AI credit is 1e9 nano-AIU and costs $0.01, so USD = nano-AIU / 1e11.
     return totalNanoAiu / 100_000_000_000
+  // Vector Codium debits the cost the gateway reports it billed; the catalog prices are only ceilings.
+  const reported =
+    model.provider === ModelPlans.PROVIDER_ID ? ModelPlans.usageCost({ usage: metadata?.openai }) : undefined
+  if (reported !== undefined) return reported
 
   const costs = pricing.get(model)
   if (!costs?.length) return undefined
@@ -232,6 +238,7 @@ export const resolve = (session: SessionSchema.Info, model: ModelV2.Info, creden
   withVariant(model, session.model?.variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential)))
 
 export const supported = (model: ModelV2.Info) =>
+  model.providerID === ModelPlans.PROVIDER_ID ||
   requiresFreeRoute(model) ||
   (model.api.type === "aisdk" &&
     (model.api.package === "@ai-sdk/openai" ||
@@ -253,6 +260,7 @@ export const locationLayer = Layer.effect(
     const catalog = yield* Catalog.Service
     const integrations = yield* Integration.Service
     const freeModels = yield* FreeModels.Service
+    const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
     return Service.of({
       resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
@@ -279,13 +287,15 @@ export const locationLayer = Layer.effect(
             )
           : defaultModel && supported(defaultModel)
             ? defaultModel
-            : (yield* catalog.model.available()).find(supported)
+            : yield* catalog.model.available().pipe(Effect.map(automaticModel))
         if (!selected && session.model)
           return yield* new ModelUnavailableError({
             providerID: session.model.providerID,
             modelID: session.model.id,
           })
         if (!selected) return yield* new ModelNotSelectedError({ sessionID: session.id })
+        if (selected.providerID === ModelPlans.PROVIDER_ID)
+          return withPricing(modelPlanRoute(selected, modelPlans, freeCredentials), selected.cost)
         // Configuration can overwrite API metadata or add a free ID after catalog validation.
         // Free intent always crosses the final eligibility and zero-price request guard.
         if (requiresFreeRoute(selected))
@@ -309,5 +319,9 @@ export const locationLayer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer: locationLayer,
-  deps: [Catalog.node, Integration.node, FreeModels.node, FreeModels.credentialsNode],
+  deps: [Catalog.node, Integration.node, FreeModels.node, FreeModels.credentialsNode, ModelPlans.node],
 })
+
+// Codium spends the account's credits, so it is chosen automatically only when nothing else can run.
+const automaticModel = (models: readonly ModelV2.Info[]) =>
+  models.find((model) => supported(model) && model.providerID !== ModelPlans.PROVIDER_ID) ?? models.find(supported)

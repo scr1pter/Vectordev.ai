@@ -5,6 +5,7 @@ import { Catalog } from "@vectordevai/core/catalog"
 import { Config } from "@vectordevai/core/config"
 import { ConfigProviderPlugin } from "@vectordevai/core/config/plugin/provider"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 import { ModelV2 } from "@vectordevai/core/model"
 import { PluginV2 } from "@vectordevai/core/plugin"
 import { PluginHost } from "@vectordevai/core/plugin/host"
@@ -113,6 +114,13 @@ for (const scenario of [
         return yield* resolver.resolve(session)
       }).pipe(
         Effect.provide(SessionRunnerModel.locationLayer),
+        Effect.provideService(
+          ModelPlans.Service,
+          ModelPlans.Service.of({
+            catalog: () => Effect.succeed({ enabled: false, models: [] }),
+            request: () => Promise.reject(new Error("Codium is off in this test")),
+          }),
+        ),
         Effect.provideService(FreeModels.Service, freeModels),
         Effect.provideService(FreeModels.CredentialsService, credentials),
       )
