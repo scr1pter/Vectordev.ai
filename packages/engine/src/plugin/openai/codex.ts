@@ -86,7 +86,13 @@ async function signInConfiguration() {
   return app
 }
 
-function buildAuthorizeUrl(clientId: string, redirectUri: string, pkce: PkceCodes, state: string): string {
+function buildAuthorizeUrl(
+  issuer: string,
+  clientId: string,
+  redirectUri: string,
+  pkce: PkceCodes,
+  state: string,
+): string {
   const params = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
@@ -99,7 +105,7 @@ function buildAuthorizeUrl(clientId: string, redirectUri: string, pkce: PkceCode
     state,
     originator: "vector",
   })
-  return `${ISSUER}/oauth/authorize?${params.toString()}`
+  return `${issuer}/oauth/authorize?${params.toString()}`
 }
 
 interface TokenResponse {
@@ -118,14 +124,15 @@ interface CodexAuthPluginOptions {
 }
 
 async function exchangeCodeForTokens(
+  issuer: string,
   clientId: string,
   code: string,
   redirectUri: string,
   pkce: PkceCodes,
 ): Promise<TokenResponse> {
-  const response = await fetch(`${ISSUER}/oauth/token`, {
+  const response = await fetch(`${issuer}/oauth/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": `vector/${InstallationVersion}` },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
@@ -143,7 +150,7 @@ async function exchangeCodeForTokens(
 async function refreshAccessToken(clientId: string, refreshToken: string, issuer = ISSUER): Promise<TokenResponse> {
   const response = await fetch(`${issuer}/oauth/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": `vector/${InstallationVersion}` },
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
@@ -160,6 +167,7 @@ async function refreshAccessToken(clientId: string, refreshToken: string, issuer
 export const renderOAuthError = (error: string) => OauthCallbackPage.error(error, { provider: "ChatGPT" })
 
 interface PendingOAuth {
+  issuer: string
   clientId: string
   pkce: PkceCodes
   state: string
@@ -220,7 +228,13 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
     res.end(OauthCallbackPage.success({ provider: "ChatGPT" }))
     releaseOAuth(current)
-    exchangeCodeForTokens(current.clientId, code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
+    exchangeCodeForTokens(
+      current.issuer,
+      current.clientId,
+      code,
+      `http://localhost:${OAUTH_PORT}/auth/callback`,
+      current.pkce,
+    )
       .then((tokens) => current.resolve(tokens))
       .catch((err) => current.reject(err))
   })
@@ -254,9 +268,16 @@ function releaseOAuth(entry: PendingOAuth) {
   if (!pendingOAuth) stopOAuthServer()
 }
 
-function waitForOAuthCallback(clientId: string, pkce: PkceCodes, state: string, wait: number): Promise<TokenResponse> {
+function waitForOAuthCallback(
+  issuer: string,
+  clientId: string,
+  pkce: PkceCodes,
+  state: string,
+  wait: number,
+): Promise<TokenResponse> {
   return new Promise((resolve, reject) => {
     const entry: PendingOAuth = {
+      issuer,
       clientId,
       pkce,
       state,
@@ -309,9 +330,10 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         const { redirectUri } = await startOAuthServer()
         const pkce = await generatePKCE()
         const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
-        const authUrl = buildAuthorizeUrl(app.clientId, redirectUri, pkce, state)
+        const authUrl = buildAuthorizeUrl(issuer, app.clientId, redirectUri, pkce, state)
 
         const callbackPromise = waitForOAuthCallback(
+          issuer,
           app.clientId,
           pkce,
           state,
@@ -346,7 +368,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       type: "oauth",
       authorize: async () => {
         const app = await signInConfiguration()
-        const deviceResponse = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
+        const deviceResponse = await fetch(`${issuer}/api/accounts/deviceauth/usercode`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -365,12 +387,12 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         const interval = Math.max(parseInt(deviceData.interval) || 5, 1) * 1000
 
         return {
-          url: `${ISSUER}/codex/device`,
+          url: `${issuer}/codex/device`,
           instructions: `Enter code: ${deviceData.user_code}`,
           method: "auto" as const,
           async callback() {
             while (true) {
-              const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
+              const response = await fetch(`${issuer}/api/accounts/deviceauth/token`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -388,13 +410,16 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                   code_verifier: string
                 }
 
-                const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
+                const tokenResponse = await fetch(`${issuer}/oauth/token`, {
                   method: "POST",
-                  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                  headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": `vector/${InstallationVersion}`,
+                  },
                   body: new URLSearchParams({
                     grant_type: "authorization_code",
                     code: data.authorization_code,
-                    redirect_uri: `${ISSUER}/deviceauth/callback`,
+                    redirect_uri: `${issuer}/deviceauth/callback`,
                     client_id: app.clientId,
                     code_verifier: data.code_verifier,
                   }).toString(),

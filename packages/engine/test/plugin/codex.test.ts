@@ -212,12 +212,17 @@ describe("plugin.codex", () => {
   })
 
   test("refreshes a saved ChatGPT sign-in as Vector and stamps the registration it came from", async () => {
-    const requests: Array<{ path: string; body: string; authorization: string | null }> = []
+    const requests: Array<{ path: string; body: string; authorization: string | null; agent: string | null }> = []
     using server = Bun.serve({
       port: 0,
       async fetch(request) {
         const path = new URL(request.url).pathname
-        requests.push({ path, body: await request.text(), authorization: request.headers.get("authorization") })
+        requests.push({
+          path,
+          body: await request.text(),
+          authorization: request.headers.get("authorization"),
+          agent: request.headers.get("user-agent"),
+        })
         if (path === "/oauth/token")
           return Response.json({ access_token: "test-access", refresh_token: "test-refresh", expires_in: 3600 })
         return Response.json({ ok: true })
@@ -241,6 +246,7 @@ describe("plugin.codex", () => {
     expect(response.ok).toBe(true)
     expect(requests.map((request) => request.path)).toEqual(["/oauth/token", "/responses"])
     expect(new URLSearchParams(requests[0].body).get("client_id")).toBe(CHATGPT_CLIENT_ID)
+    expect(requests[0].agent).toStartWith("vector/")
     expect(requests[1].authorization).toBe("Bearer test-access")
     expect(saved).toEqual([
       {
@@ -258,6 +264,43 @@ describe("plugin.codex", () => {
     await hooks["chat.headers"]!({ model: { providerID: "openai" }, sessionID: "session" } as never, headers as never)
     expect(headers.headers.originator).toBe("vector")
     expect(headers.headers["User-Agent"]).toStartWith("vector/")
+  })
+
+  test("a headless ChatGPT sign-in identifies as Vector and stamps the registration it came from", async () => {
+    const requests: Array<{ path: string; body: string; agent: string | null }> = []
+    using server = Bun.serve({
+      port: 0,
+      async fetch(request) {
+        const path = new URL(request.url).pathname
+        requests.push({ path, body: await request.text(), agent: request.headers.get("user-agent") })
+        if (path === "/api/accounts/deviceauth/usercode")
+          return Response.json({ device_auth_id: "device-placeholder", user_code: "CODE-1234", interval: "1" })
+        if (path === "/api/accounts/deviceauth/token")
+          return Response.json({ authorization_code: "code-placeholder", code_verifier: "verifier-placeholder" })
+        return Response.json({ access_token: "test-access", refresh_token: "test-refresh", expires_in: 3600 })
+      },
+    })
+    const hooks = await CodexAuthPlugin({} as never, { issuer: server.url.origin })
+    const method = hooks.auth!.methods[1]
+    if (method.type !== "oauth") throw new Error("expected the headless OAuth method")
+    const authorization = await method.authorize()
+    if (authorization.method !== "auto") throw new Error("expected an automatic callback")
+    expect(authorization.url).toBe(`${server.url.origin}/codex/device`)
+    expect(authorization.instructions).toBe("Enter code: CODE-1234")
+    expect(await authorization.callback()).toMatchObject({
+      type: "success",
+      access: "test-access",
+      refresh: "test-refresh",
+      clientId: CHATGPT_CLIENT_ID,
+      enterpriseUrl: "https://auth.openai.com",
+    })
+    expect(requests.map((request) => request.path)).toEqual([
+      "/api/accounts/deviceauth/usercode",
+      "/api/accounts/deviceauth/token",
+      "/oauth/token",
+    ])
+    expect(new URLSearchParams(requests[2].body).get("client_id")).toBe(CHATGPT_CLIENT_ID)
+    expect(requests.every((request) => request.agent?.startsWith("vector/"))).toBe(true)
   })
 
   test("the owner's off-switch hides ChatGPT sign-in, refuses a new one and stops a saved one without shifting method indexes", async () => {
