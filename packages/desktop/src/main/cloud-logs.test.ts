@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 // cloud-logs reaches electron-store through ./store and cloud-connections
@@ -22,7 +23,12 @@ mock.module("./store", () => ({
     const bucket = store.get(name)!
     return {
       get: (key: string) => bucket.get(key),
-      set: (key: string, value: unknown) => bucket.set(key, value),
+      // electron-store writes its file on set; cloud-console tightens its mode after.
+      set: (key: string, value: unknown) => {
+        mkdirSync(userDataPath, { recursive: true })
+        writeFileSync(join(userDataPath, name), "", { flag: "a" })
+        bucket.set(key, value)
+      },
       delete: (key: string) => bucket.delete(key),
       path: join(userDataPath, name),
     }

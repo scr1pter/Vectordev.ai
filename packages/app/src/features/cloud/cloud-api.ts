@@ -33,7 +33,10 @@ export type CloudDeployment = {
   git?: CloudGitMetadata
 }
 
-export type CloudEnvVar = { key: string; value: string }
+// "public" values may reach browser code; "server" values never use a name a
+// bundler inlines into the client.
+export type CloudEnvVisibility = "public" | "server"
+export type CloudEnvVar = { key: string; value: string; visibility: CloudEnvVisibility }
 
 export type CloudDeploymentCheck = {
   id: string
@@ -225,7 +228,13 @@ export type CloudApi = {
   }
   env: {
     list: (projectPath: string, taskId?: string) => Promise<CloudEnvVar[]>
-    set: (projectPath: string, taskId: string | undefined, key: string, value: string) => Promise<CloudEnvVar[]>
+    set: (
+      projectPath: string,
+      taskId: string | undefined,
+      key: string,
+      value: string,
+      visibility?: CloudEnvVisibility,
+    ) => Promise<CloudEnvVar[]>
     remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
     apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
   }

@@ -42,6 +42,7 @@ const {
   detectBuildSettings,
   getDatabase,
   listEnv,
+  redactCloudLog,
   removeEnv,
   setEnv,
 } = await import("./cloud-console")
@@ -56,7 +57,8 @@ beforeEach(async () => {
   project = await mkdtemp(join(tmpdir(), "vector-cloud-workspace-"))
   delete process.env.VECTOR_CLOUD_URL
   delete process.env.VECTOR_CLOUD_TOKEN
-  delete process.env.VECTOR_CREDENTIAL_KEY
+  // Environment values are vault-encrypted at rest, as provider tokens are.
+  process.env.VECTOR_CREDENTIAL_KEY = Buffer.alloc(32, 4).toString("base64")
 })
 
 afterEach(async () => {
@@ -111,6 +113,48 @@ describe("managed cloud environment", () => {
     setEnv(project, undefined, "SECRET", "first\nINJECTED=second")
     await expect(applyEnv(project)).rejects.toThrow("contains a line break")
     expect(await readFile(join(project, ".env"), "utf8")).toBe("KEEP=yes\n")
+  })
+
+  test("encrypts values at rest and moves an older release's plaintext on first read", async () => {
+    stores.set(
+      "cloud-projects",
+      new Map([
+        [
+          cloudProjectScopeKey(project),
+          {
+            env: [{ key: "LEGACY_TOKEN", value: "plaintext-fixture-secret" }],
+            database: null,
+            domains: [],
+            build: null,
+          },
+        ],
+      ]),
+    )
+    expect(listEnv(project)).toEqual([{ key: "LEGACY_TOKEN", value: "plaintext-fixture-secret", visibility: "server" }])
+    setEnv(project, undefined, "NEW_SECRET", "new-fixture-secret")
+    const stored = JSON.stringify(stores.get("cloud-projects")?.get(cloudProjectScopeKey(project)))
+    expect(stored).not.toContain("plaintext-fixture-secret")
+    expect(stored).not.toContain("new-fixture-secret")
+    expect(stored).toContain('"secret":"v1.')
+    expect(listEnv(project).map((item) => item.value)).toEqual(["plaintext-fixture-secret", "new-fixture-secret"])
+    expect(redactCloudLog(project, undefined, "token new-fixture-secret leaked")).toBe("token [redacted] leaked")
+  })
+
+  test("never stores a server-only value under a browser-visible name", async () => {
+    for (const key of ["VITE_STRIPE_KEY", "NEXT_PUBLIC_SECRET", "PUBLIC_TOKEN", "REACT_APP_KEY", "EXPO_PUBLIC_KEY"]) {
+      expect(() => setEnv(project, undefined, key, "fixture-secret", "server")).toThrow(
+        "puts its value into browser code",
+      )
+    }
+    expect(listEnv(project)).toEqual([])
+    setEnv(project, undefined, "STRIPE_SECRET_KEY", "fixture-secret")
+    setEnv(project, undefined, "VITE_API_URL", "https://api.fixture.invalid")
+    setEnv(project, undefined, "SUPABASE_URL", "https://fixture.supabase.co", "public")
+    expect(listEnv(project).map((item) => [item.key, item.visibility])).toEqual([
+      ["STRIPE_SECRET_KEY", "server"],
+      ["VITE_API_URL", "public"],
+      ["SUPABASE_URL", "public"],
+    ])
   })
 
   test("wires public Supabase credentials into the generated Vite browser client", async () => {
@@ -188,7 +232,7 @@ describe("managed cloud environment", () => {
     }
     const anonKey = jwt({ iss: "supabase", ref: "fixture", role: "anon" })
     await connectDatabase(project, undefined, { provider: "supabase", url: "https://fixture.supabase.co", anonKey })
-    expect(listEnv(project)).toContainEqual({ key: "VITE_SUPABASE_ANON_KEY", value: anonKey })
+    expect(listEnv(project)).toContainEqual({ key: "VITE_SUPABASE_ANON_KEY", value: anonKey, visibility: "public" })
   })
 })
 
@@ -510,7 +554,7 @@ describe("Vercel environment sync", () => {
         }
         expect(JSON.stringify(result)).not.toContain("private-fixture-value")
         expect(JSON.stringify(result)).not.toContain("fixture-vercel-token")
-        expect(listEnv(project)).toEqual(variables)
+        expect(listEnv(project)).toEqual(variables.map((variable) => ({ ...variable, visibility: "server" })))
       } finally {
         await server.stop(true)
         delete process.env.VECTOR_CREDENTIAL_KEY

@@ -267,7 +267,8 @@ const api: ElectronAPI = {
     },
     env: {
       list: (projectPath, taskId) => ipcRenderer.invoke("cloud-env-list", projectPath, taskId),
-      set: (projectPath, taskId, key, value) => ipcRenderer.invoke("cloud-env-set", projectPath, taskId, key, value),
+      set: (projectPath, taskId, key, value, visibility) =>
+        ipcRenderer.invoke("cloud-env-set", projectPath, taskId, key, value, visibility),
       remove: (projectPath, taskId, key) => ipcRenderer.invoke("cloud-env-remove", projectPath, taskId, key),
       apply: (projectPath, taskId) => ipcRenderer.invoke("cloud-env-apply", projectPath, taskId),
     },

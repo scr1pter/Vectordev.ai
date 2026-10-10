@@ -10,8 +10,17 @@ function fixture() {
   const api = {
     env: {
       list: async (projectPath: string) => projects.get(projectPath) ?? [],
-      set: async (projectPath: string, _taskId: string | undefined, key: string, value: string) => {
-        const variables = [...(projects.get(projectPath) ?? []).filter((item) => item.key !== key), { key, value }]
+      set: async (
+        projectPath: string,
+        _taskId: string | undefined,
+        key: string,
+        value: string,
+        visibility?: "public" | "server",
+      ) => {
+        const variables = [
+          ...(projects.get(projectPath) ?? []).filter((item) => item.key !== key),
+          { key, value, visibility: visibility ?? ("server" as const) },
+        ]
         projects.set(projectPath, variables)
         return variables
       },
@@ -53,15 +62,38 @@ describe("Cloud environment scope", () => {
     f.editor.setKey("  mixed_Case  ")
     f.editor.setValue("fixture value # exact")
     await f.editor.save()
-    expect(f.projects.get("/project-a")).toEqual([{ key: "mixed_Case", value: "fixture value # exact" }])
+    expect(f.projects.get("/project-a")).toEqual([
+      { key: "mixed_Case", value: "fixture value # exact", visibility: "server" as const },
+    ])
     expect(f.editor.state.key).toBe("")
     expect(f.editor.state.value).toBe("")
     expect(f.editor.state.revealedKey).toBe("")
   })
 
+  test("sends the chosen visibility, or leaves it to the name, and resets it after saving", async () => {
+    using f = fixture()
+    const sent: (string | undefined)[] = []
+    const set = f.api.env.set
+    f.api.env.set = (projectPath, taskId, key, value, visibility) => {
+      sent.push(visibility)
+      return set(projectPath, taskId, key, value, visibility)
+    }
+    f.editor.changeScope("/project-a")
+    f.editor.setKey("SUPABASE_URL")
+    f.editor.setValue("https://fixture.supabase.co")
+    f.editor.setVisibility("public")
+    await f.editor.save()
+    expect(f.editor.state.visibility).toBe("")
+    f.editor.setKey("STRIPE_SECRET")
+    f.editor.setValue("fixture")
+    await f.editor.save()
+    expect(sent).toEqual(["public", undefined])
+    expect(f.projects.get("/project-a")?.map((item) => item.visibility)).toEqual(["public", "server"])
+  })
+
   test("allows applying the empty list after the final removal", async () => {
     using f = fixture()
-    f.projects.set("/project-a", [{ key: "REMOVE_ME", value: "fixture" }])
+    f.projects.set("/project-a", [{ key: "REMOVE_ME", value: "fixture", visibility: "server" as const }])
     f.editor.changeScope("/project-a", "task-a")
     await f.editor.refresh()
     f.editor.reveal("REMOVE_ME")
@@ -94,7 +126,7 @@ describe("Cloud environment scope", () => {
     using f = fixture()
     const pending = Promise.withResolvers<CloudEnvVar[]>()
     f.api.env.set = () => pending.promise
-    f.projects.set("/project-b", [{ key: "PUBLIC_LABEL", value: "project-b" }])
+    f.projects.set("/project-b", [{ key: "PUBLIC_LABEL", value: "project-b", visibility: "server" as const }])
     f.editor.changeScope("/project-a", "task-a")
     f.editor.setKey("API_KEY")
     f.editor.setValue("fixture-a-only")
@@ -105,9 +137,11 @@ describe("Cloud environment scope", () => {
     expect(f.editor.state.key).toBe("")
     expect(f.editor.state.revealedKey).toBe("")
     await f.editor.refresh()
-    pending.resolve([{ key: "API_KEY", value: "fixture-a-only" }])
+    pending.resolve([{ key: "API_KEY", value: "fixture-a-only", visibility: "server" as const }])
     await saving
-    expect(f.editor.state.variables).toEqual([{ key: "PUBLIC_LABEL", value: "project-b" }])
+    expect(f.editor.state.variables).toEqual([
+      { key: "PUBLIC_LABEL", value: "project-b", visibility: "server" as const },
+    ])
     expect(f.editor.state.busy).toBe("")
     expect(f.notices).toEqual([])
   })
@@ -121,7 +155,7 @@ describe("Cloud environment scope", () => {
     f.editor.reveal("API_KEY")
     const loading = f.editor.refresh()
     f.editor.changeScope("/project-a", "task-b")
-    pending.resolve([{ key: "API_KEY", value: "old-view" }])
+    pending.resolve([{ key: "API_KEY", value: "old-view", visibility: "server" as const }])
     await loading
     expect(f.editor.state.variables).toEqual([])
     expect(f.editor.state.value).toBe("")
@@ -141,13 +175,13 @@ describe("Cloud environment scope", () => {
     f.editor.setKey("NEW")
     f.editor.setValue("new-view")
     const saving = f.editor.save()
-    first.resolve([{ key: "STALE", value: "old-view" }])
+    first.resolve([{ key: "STALE", value: "old-view", visibility: "server" as const }])
     await removing
     expect(f.editor.state.variables).toEqual([])
     expect(f.editor.state.busy).toBe("save")
-    second.resolve([{ key: "NEW", value: "new-view" }])
+    second.resolve([{ key: "NEW", value: "new-view", visibility: "server" as const }])
     await saving
-    expect(f.editor.state.variables).toEqual([{ key: "NEW", value: "new-view" }])
+    expect(f.editor.state.variables).toEqual([{ key: "NEW", value: "new-view", visibility: "server" as const }])
   })
 
   test.each(["before", "during"])("a refresh started %s a mutation cannot overwrite its result", async (timing) => {
@@ -162,11 +196,11 @@ describe("Cloud environment scope", () => {
     const before = timing === "before" ? f.editor.refresh() : undefined
     const saving = f.editor.save()
     const loading = before ?? f.editor.refresh()
-    saved.resolve([{ key: "NEW", value: "current-view" }])
+    saved.resolve([{ key: "NEW", value: "current-view", visibility: "server" as const }])
     await saving
-    loaded.resolve([{ key: "OLD", value: "stale-view" }])
+    loaded.resolve([{ key: "OLD", value: "stale-view", visibility: "server" as const }])
     await loading
-    expect(f.editor.state.variables).toEqual([{ key: "NEW", value: "current-view" }])
+    expect(f.editor.state.variables).toEqual([{ key: "NEW", value: "current-view", visibility: "server" as const }])
   })
 
   test("a failed prior project operation cannot display an error in the new project", async () => {
@@ -217,7 +251,7 @@ describe("Cloud environment scope", () => {
     f.editor.setValue("fixture-unsaved")
     const loading = f.editor.refresh()
     f[Symbol.dispose]()
-    pending.resolve([{ key: "OLD", value: "stale-view" }])
+    pending.resolve([{ key: "OLD", value: "stale-view", visibility: "server" as const }])
     await loading
     expect(f.editor.state.variables).toEqual([])
     expect(f.editor.state.value).toBe("")

@@ -105,6 +105,13 @@ when the project or task changes and ignores delayed results from the previous
 view. Variable names retain their case. Values are hidden by default; use
 Reveal deliberately.
 
+Stored values are encrypted with the same local credential vault as provider
+tokens; values saved in plaintext by an older release are encrypted the first
+time they are read. Each variable is public or server-only. A name with a
+browser-visible prefix (`VITE_`, `NEXT_PUBLIC_`, `PUBLIC_`, `REACT_APP_`,
+`EXPO_PUBLIC_`, `NUXT_PUBLIC_`, `GATSBY_`, `VUE_APP_`, `STORYBOOK_`) is public;
+a server-only value can never be saved under such a name.
+
 Adding or removing a variable updates Vector's project configuration. **Write
 to .env** applies the current list, including an empty list after the final
 removal. It preserves content above Vector's managed marker. A successful load

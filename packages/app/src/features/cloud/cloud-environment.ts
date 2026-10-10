@@ -1,6 +1,6 @@
 import { onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
-import type { CloudApi, CloudEnvVar } from "./cloud-api"
+import type { CloudApi, CloudEnvVar, CloudEnvVisibility } from "./cloud-api"
 
 type Scope = { projectPath: string; taskId?: string }
 type EnvironmentApi = Pick<CloudApi, "env"> & {
@@ -16,6 +16,9 @@ export function createCloudEnvironment(input: {
     variables: [] as CloudEnvVar[],
     key: "",
     value: "",
+    // Empty lets the desktop decide from the name: a browser-visible prefix
+    // such as VITE_ means public, anything else is server-only.
+    visibility: "" as "" | CloudEnvVisibility,
     revealedKey: "",
     busy: "",
     loaded: false,
@@ -26,12 +29,12 @@ export function createCloudEnvironment(input: {
     if (lifecycle.scope.projectPath === projectPath && lifecycle.scope.taskId === taskId) return
     lifecycle.scope = { projectPath, taskId }
     lifecycle.revision++
-    setState({ variables: [], key: "", value: "", revealedKey: "", busy: "", loaded: false })
+    setState({ variables: [], key: "", value: "", visibility: "", revealedKey: "", busy: "", loaded: false })
   }
   onCleanup(() => {
     lifecycle.scope = { projectPath: "" }
     lifecycle.revision++
-    setState({ variables: [], key: "", value: "", revealedKey: "", busy: "", loaded: false })
+    setState({ variables: [], key: "", value: "", visibility: "", revealedKey: "", busy: "", loaded: false })
   })
 
   const refresh = async () => {
@@ -81,18 +84,20 @@ export function createCloudEnvironment(input: {
     refresh,
     setKey: (key: string) => setState("key", key),
     setValue: (value: string) => setState("value", value),
+    setVisibility: (visibility: "" | CloudEnvVisibility) => setState("visibility", visibility),
     reveal: (key: string) => setState("revealedKey", state.revealedKey === key ? "" : key),
     hide: () => setState("revealedKey", ""),
     save: async () => {
       const key = state.key.trim()
       const value = state.value
+      const visibility = state.visibility || undefined
       if (!key) return
       await perform(
         "save",
-        (api, scope) => api.env.set(scope.projectPath, scope.taskId, key, value),
+        (api, scope) => api.env.set(scope.projectPath, scope.taskId, key, value, visibility),
         (variables) => {
           setState({ variables, loaded: true })
-          if (state.key.trim() === key && state.value === value) setState({ key: "", value: "" })
+          if (state.key.trim() === key && state.value === value) setState({ key: "", value: "", visibility: "" })
         },
       )
     },

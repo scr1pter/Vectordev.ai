@@ -633,8 +633,21 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "cloud-env-set",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, key: string, value: string) =>
-      setEnv(projectPath, taskId, key, value),
+    (
+      _event: IpcMainInvokeEvent,
+      projectPath: string,
+      taskId: string | undefined,
+      key: string,
+      value: string,
+      visibility?: "public" | "server",
+    ) =>
+      setEnv(
+        projectPath,
+        taskId,
+        key,
+        value,
+        visibility === "public" || visibility === "server" ? visibility : undefined,
+      ),
   )
   handle(
     "cloud-env-remove",

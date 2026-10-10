@@ -8,6 +8,7 @@ import { getStore } from "./store"
 import { transitionReleaseRecords } from "./cloud-release-state"
 import { redactText } from "./security-redaction"
 import { isSupabasePublicKey } from "./cloud-public-key"
+import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 
 // The Vector Cloud console is the desktop-side brain behind the full-page
 // dashboard: it tracks real deployments, writes env vars into the project's
@@ -61,7 +62,13 @@ export type CloudDeployment = {
   git?: CloudGitMetadata
 }
 
-export type CloudEnvVar = { key: string; value: string }
+// "public" values may reach browser code; "server" values must not, so they can
+// never use a name that a bundler inlines into the client.
+export type CloudEnvVisibility = "public" | "server"
+export type CloudEnvVar = { key: string; value: string; visibility: CloudEnvVisibility }
+
+// At rest a value is encrypted with the same vault as provider tokens.
+type StoredEnvVar = { key: string; secret: string; visibility: CloudEnvVisibility }
 
 export type CloudDeploymentCheck = {
   id: string
@@ -420,7 +427,7 @@ export async function checkAllDeployments(projectPath: string, taskId?: string):
 // ---- Per-project data (env vars + database) -------------------------------
 
 type ProjectData = {
-  env: CloudEnvVar[]
+  env: StoredEnvVar[]
   database: CloudDatabaseConnection
   domains: CloudDomain[]
   build: CloudBuildSettings | null
@@ -444,9 +451,28 @@ function readProject(projectPath: string): ProjectData {
   const raw = getStore(PROJECTS_STORE).get(cloudProjectScopeKey(projectPath))
   if (!raw || typeof raw !== "object") return { env: [], database: null, domains: [], build: null }
   const data = raw as Partial<ProjectData>
-  const env = Array.isArray(data.env)
-    ? data.env.filter((item): item is CloudEnvVar => typeof item?.key === "string" && typeof item?.value === "string")
-    : []
+  const stored: unknown[] = Array.isArray(data.env) ? data.env : []
+  const env = stored
+    .map((item): StoredEnvVar | undefined => {
+      if (!item || typeof item !== "object") return
+      const key = Reflect.get(item, "key")
+      if (typeof key !== "string") return
+      const secret = Reflect.get(item, "secret")
+      const visibility = Reflect.get(item, "visibility")
+      if (typeof secret === "string") {
+        return {
+          key,
+          secret,
+          visibility: visibility === "public" || visibility === "server" ? visibility : envVisibility(key),
+        }
+      }
+      // Older releases stored the value in plaintext. It is encrypted here and
+      // written back below, so plaintext does not outlive the first read.
+      const value = Reflect.get(item, "value")
+      if (typeof value === "string")
+        return { key, secret: encryptCloudCredential(value), visibility: envVisibility(key) }
+    })
+    .filter((item): item is StoredEnvVar => Boolean(item))
   const database =
     data.database && typeof data.database === "object" && data.database.provider === "supabase" ? data.database : null
   // Only Vercel domains are shown. Domains attached through a retired host
@@ -473,7 +499,11 @@ function readProject(projectPath: string): ProjectData {
             : defaultRequiredChecks(),
         }
       : null
-  return { env, database, domains, build }
+  const project = { env, database, domains, build }
+  if (stored.some((item) => item && typeof item === "object" && typeof Reflect.get(item, "value") === "string")) {
+    writeProject(projectPath, project)
+  }
+  return project
 }
 
 function defaultRequiredChecks(): CloudRequiredChecks {
@@ -493,10 +523,11 @@ function isCloudRequiredChecks(value: unknown): value is CloudRequiredChecks {
 function writeProject(projectPath: string, data: ProjectData) {
   const store = getStore(PROJECTS_STORE)
   store.set(cloudProjectScopeKey(projectPath), data)
-  // This file holds DATABASE_URL and service-role keys in plaintext and
-  // electron-store creates it with the process umask (0644). It also rewrites
-  // the file atomically through a temp file plus rename, which drops the mode
-  // again, so the tightening has to be reapplied on every write.
+  // Environment values here are vault-encrypted, but names, database and domain
+  // details are not, and electron-store creates the file with the process umask
+  // (0644). It also rewrites the file atomically through a temp file plus
+  // rename, which drops the mode again, so the tightening is reapplied on every
+  // write.
   chmodSync(store.path, 0o600)
 }
 
@@ -506,7 +537,7 @@ export function redactCloudLog(projectPath: string, taskId: string | undefined, 
   // prints that Vector never stored, such as bearer headers and token-shaped
   // strings.
   return redactText(
-    readProject(projectPath).env.reduce(
+    listEnv(projectPath).reduce(
       (output, item) => (item.value.length >= 4 ? output.split(item.value).join("[redacted]") : output),
       value,
     ),
@@ -696,31 +727,83 @@ function normalizeHealthPath(value: string): string {
 
 // ---- Environment variables ------------------------------------------------
 
-export function listEnv(projectPath: string, taskId?: string): CloudEnvVar[] {
-  return readProject(projectPath).env
+// Bundlers inline variables with these prefixes into browser code (Vite,
+// Next.js, Astro and SvelteKit, Create React App, Expo, Nuxt, Gatsby, Vue CLI,
+// Storybook), so anything under them is public once the app is built.
+const CLIENT_ENV_PREFIXES = [
+  "VITE_",
+  "NEXT_PUBLIC_",
+  "PUBLIC_",
+  "REACT_APP_",
+  "EXPO_PUBLIC_",
+  "NUXT_PUBLIC_",
+  "GATSBY_",
+  "VUE_APP_",
+  "STORYBOOK_",
+]
+
+export function clientEnvPrefix(key: string): string | undefined {
+  return CLIENT_ENV_PREFIXES.find((prefix) => key.startsWith(prefix))
 }
 
-export function setEnv(projectPath: string, taskId: string | undefined, key: string, value: string): CloudEnvVar[] {
+function envVisibility(key: string): CloudEnvVisibility {
+  return clientEnvPrefix(key) ? "public" : "server"
+}
+
+export function listEnv(projectPath: string, taskId?: string): CloudEnvVar[] {
+  return readProject(projectPath).env.map((item) => ({
+    key: item.key,
+    value: decryptEnvValue(item),
+    visibility: item.visibility,
+  }))
+}
+
+function decryptEnvValue(item: StoredEnvVar): string {
+  try {
+    return decryptCloudCredential(item.secret)
+  } catch {
+    throw new Error(
+      `The saved value of ${item.key} cannot be decrypted on this device. Remove it in Cloud Services > Environment variables and set it again.`,
+    )
+  }
+}
+
+export function setEnv(
+  projectPath: string,
+  taskId: string | undefined,
+  key: string,
+  value: string,
+  visibility?: CloudEnvVisibility,
+): CloudEnvVar[] {
   const trimmedKey = (key ?? "").trim()
   if (!KEY_PATTERN.test(trimmedKey)) {
     throw new Error(
       `"${trimmedKey}" is not a valid environment variable name. Use letters, digits and underscores, starting with a letter or underscore.`,
     )
   }
+  const prefix = clientEnvPrefix(trimmedKey)
+  if (visibility === "server" && prefix) {
+    throw new Error(
+      `${trimmedKey} starts with ${prefix}, which puts its value into browser code. Give a server-only value a name without that prefix.`,
+    )
+  }
+  const entry = {
+    key: trimmedKey,
+    secret: encryptCloudCredential(value),
+    visibility: visibility ?? envVisibility(trimmedKey),
+  }
   const data = readProject(projectPath)
-  const existing = data.env.find((item) => item.key === trimmedKey)
-  const nextEnv = existing
-    ? data.env.map((item) => (item.key === trimmedKey ? { key: trimmedKey, value } : item))
-    : [...data.env, { key: trimmedKey, value }]
+  const nextEnv = data.env.some((item) => item.key === trimmedKey)
+    ? data.env.map((item) => (item.key === trimmedKey ? entry : item))
+    : [...data.env, entry]
   writeProject(projectPath, { ...data, env: nextEnv })
-  return nextEnv
+  return listEnv(projectPath)
 }
 
 export function removeEnv(projectPath: string, taskId: string | undefined, key: string): CloudEnvVar[] {
   const data = readProject(projectPath)
-  const nextEnv = data.env.filter((item) => item.key !== key)
-  writeProject(projectPath, { ...data, env: nextEnv })
-  return nextEnv
+  writeProject(projectPath, { ...data, env: data.env.filter((item) => item.key !== key) })
+  return listEnv(projectPath)
 }
 
 // The real payoff: flush the stored vars into the project's actual .env. Any
@@ -737,7 +820,7 @@ export async function applyEnv(
     throw new Error("Open a project folder before applying environment variables.")
   }
   const project = readProject(projectPath)
-  const vars = project.env
+  const vars = listEnv(projectPath)
   for (const item of vars) {
     if (/[\r\n]/.test(item.value)) {
       throw new Error(`The value for "${item.key}" contains a line break, which cannot be written to .env.`)
@@ -959,10 +1042,10 @@ export async function connectDatabase(
 
   // Merge the credentials into the project's managed env vars so a later
   // applyEnv writes them to .env alongside everything else.
-  setEnv(projectPath, taskId, "SUPABASE_URL", url)
-  setEnv(projectPath, taskId, "SUPABASE_ANON_KEY", anonKey)
-  setEnv(projectPath, taskId, "VITE_SUPABASE_URL", url)
-  setEnv(projectPath, taskId, "VITE_SUPABASE_ANON_KEY", anonKey)
+  setEnv(projectPath, taskId, "SUPABASE_URL", url, "public")
+  setEnv(projectPath, taskId, "SUPABASE_ANON_KEY", anonKey, "public")
+  setEnv(projectPath, taskId, "VITE_SUPABASE_URL", url, "public")
+  setEnv(projectPath, taskId, "VITE_SUPABASE_ANON_KEY", anonKey, "public")
 
   const data = readProject(projectPath)
   writeProject(projectPath, { ...data, database: connection })

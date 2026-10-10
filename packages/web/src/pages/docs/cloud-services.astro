@@ -29,8 +29,9 @@ export const prerender = true
 
   <h2 id="project-environment">Manage project variables</h2>
   <p>
-    Environment variable names keep the case you enter. Values are hidden by default, and drafts and revealed values
-    clear when you change project or task. Add or remove values in Vector, then choose Write to .env to update its
+    Environment variable names keep the case you enter. Values are encrypted on your device and hidden by default, and
+    drafts and revealed values clear when you change project or task. Each variable is public or server-only, and a
+    server-only value can never use a browser-visible name such as VITE_ or NEXT_PUBLIC_. Add or remove values in Vector, then choose Write to .env to update its
     managed block. Applying an empty list clears that block after the final removal; your lines above the marker remain.
     The file is replaced atomically, symbolic links are rejected, and POSIX systems use private file permissions.
   </p>

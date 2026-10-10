@@ -2031,6 +2031,10 @@ export function CloudConsole(props: {
               >
                 <div class="cloud-panel">
                   <div class="cloud-panel-title">Add a variable</div>
+                  <p class="cloud-muted mt-1 text-[12px]">
+                    Values are encrypted on this device. Server-only values can never use a browser-visible name such as
+                    VITE_ or NEXT_PUBLIC_.
+                  </p>
                   <form
                     class="mt-3 flex flex-wrap gap-2"
                     onSubmit={(event) => {
@@ -2059,6 +2063,20 @@ export function CloudConsole(props: {
                       spellcheck={false}
                       disabled={Boolean(environment.state.busy)}
                     />
+                    <select
+                      class="cloud-input"
+                      aria-label="Who can read this value"
+                      value={environment.state.visibility}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value
+                        environment.setVisibility(value === "public" || value === "server" ? value : "")
+                      }}
+                      disabled={Boolean(environment.state.busy)}
+                    >
+                      <option value="">From the name</option>
+                      <option value="server">Server only</option>
+                      <option value="public">Public (browser)</option>
+                    </select>
                     <button
                       class="cloud-button"
                       data-variant="primary"
@@ -2120,6 +2138,9 @@ export function CloudConsole(props: {
                             {environment.state.revealedKey === variable.key ? variable.value || '""' : "••••••••••••"}
                           </span>
                         </code>
+                        <span class="cloud-status" data-tone={variable.visibility === "public" ? "warning" : undefined}>
+                          {variable.visibility === "public" ? "public" : "server only"}
+                        </span>
                         <button class="cloud-button" type="button" onClick={() => environment.reveal(variable.key)}>
                           {environment.state.revealedKey === variable.key ? "Hide" : "Reveal"}
                         </button>

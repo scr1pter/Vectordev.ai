@@ -15,6 +15,7 @@ import type {
   CloudDeployment,
   CloudDomain,
   CloudEnvVar,
+  CloudEnvVisibility,
 } from "../main/cloud-console"
 import type {
   CloudProviderConnection,
@@ -124,6 +125,7 @@ export type {
   CloudDomainProvider,
   CloudDomainStatus,
   CloudEnvVar,
+  CloudEnvVisibility,
   CloudGitMetadata,
   CloudRequiredChecks,
 } from "../main/cloud-console"
@@ -909,7 +911,13 @@ export type ElectronAPI = {
     }
     env: {
       list: (projectPath: string, taskId?: string) => Promise<CloudEnvVar[]>
-      set: (projectPath: string, taskId: string | undefined, key: string, value: string) => Promise<CloudEnvVar[]>
+      set: (
+        projectPath: string,
+        taskId: string | undefined,
+        key: string,
+        value: string,
+        visibility?: CloudEnvVisibility,
+      ) => Promise<CloudEnvVar[]>
       remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
       apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
     }
