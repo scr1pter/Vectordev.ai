@@ -6,8 +6,8 @@ export const prerender = true
 <LegalPage
   eyebrow="Privacy"
   title="Privacy Policy"
-  description="How Vector handles account information, local work, AI requests, connected services, and diagnostics."
-  updated="October 7, 2026"
+  description="How Vector handles account information, local work, AI requests, connected services, diagnostics, and usage counts."
+  updated="October 9, 2026"
 >
   <section>
     <h2>1. Scope and contact</h2>
@@ -235,10 +235,55 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>10. Why information is used and who receives it</h2>
+    <h2>10. Usage counts and website analytics</h2>
+    <p>
+      <strong>What is counted.</strong> To learn how many people use Vector, whether they come back, and which
+      versions and platforms to support, the desktop application and the command-line tool report usage counts
+      to Vector. The desktop application sends a random install identifier created on your computer, your
+      account identifier when you are signed in, the application version, the operating system and CPU
+      architecture, and the number of sessions and subagent sessions started that day. The command-line
+      tool's daily account check, which already identifies your account, also reports the tool's version,
+      operating system and CPU architecture, and counts that day as a day of command-line use.
+    </p>
+    <p>
+      Usage counts never include prompts, code, file names or paths, model output, provider names or keys,
+      IP addresses, or user agents. They are stored in Vector's Supabase service as one record per install or
+      account per day. Vector's usage dashboard shows only aggregate totals, for example how many installs were
+      active in a week.
+    </p>
+    <p>
+      <strong>Downloads.</strong> Installer downloads require a Vector account. Each download is recorded
+      against the signed-in account with the installer platform, the version, and the time.
+    </p>
+    <p>
+      <strong>Retention and deletion.</strong> Usage counts and download records are deleted automatically
+      after about 13 months. Deleting your Vector account deletes the usage counts and download records linked
+      to it, including earlier days reported by an install before it was linked to your account.
+    </p>
+    <p>
+      <strong>Turning it off.</strong> Usage counts are on by default. In the desktop application, turn off
+      Settings → General → “Share usage counts” to stop check-ins. For the command-line tool, set the
+      environment variable <code>VECTOR_DISABLE_USAGE=1</code>; its daily account check still runs, because
+      sign-in depends on it, but asks Vector not to count it. Versions released before usage counts existed do
+      not report them. To limit abuse, the check-in service keeps a keyed counter derived from the network
+      address for one hour; it is separate from the usage counts and is not stored with them.
+    </p>
+    <p>
+      <strong>Website visits.</strong> Visits to public pages of the website and documentation are counted with
+      Vercel Web Analytics, a cookie-free service that reports aggregate figures such as page views, visitors,
+      referring sites, countries, browsers, and device types. It sets no cookies, and the address sent is
+      reduced to the page path, without query strings. Account, sign-in, private, and shared-session pages are
+      not counted. Vercel, which hosts the website, processes the request itself, including its network
+      address, to produce those figures.
+    </p>
+  </section>
+
+  <section>
+    <h2>11. Why information is used and who receives it</h2>
     <p>
       We use information to provide requested features, authenticate accounts, deliver communications, answer support requests, troubleshoot failures, prevent fraud and
-      abuse, secure the service, and meet legal obligations. Recipients include the account, email,
+      abuse, secure the service, understand how much Vector is used through the aggregate counts in section 10,
+      and meet legal obligations. Recipients include the account, email,
       hosting, security, and diagnostic providers described above and the model and integration providers
       involved in your selected workflow.
     </p>
@@ -251,7 +296,7 @@ export const prerender = true
     <p>
       Where a law requires a legal basis for processing, the applicable basis depends on the purpose: providing
       a service you request; legitimate interests in security, abuse prevention,
-      and service support balanced against your rights; compliance with legal obligations; or consent for
+      service support, and measuring use through usage counts, which you can turn off, balanced against your rights; compliance with legal obligations; or consent for
       optional processing such as public session sharing and remote crash diagnostics. You can withdraw consent
       for optional processing without affecting processing that was lawful before withdrawal. Required account information
       is necessary to provide those features; optional diagnostics are not a condition of using Vector.
@@ -259,7 +304,7 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>11. Storage, security, and retention</h2>
+    <h2>12. Storage, security, and retention</h2>
     <p>
       Packaged desktop builds use the operating system's secure storage for supported provider credentials
       and the local credential-vault key. Some application data, including local memory,
@@ -273,7 +318,8 @@ export const prerender = true
       and resolve account issues. Records of earlier purchases are retained as required by law, including for
       tax, accounting, fraud, and dispute obligations. Payment records of those purchases are held by our
       payment processor, Stripe, and kept only as the law requires. Support records and diagnostic or operational logs are retained according to
-      their troubleshooting and security purpose and applicable provider settings. We consider the type of
+      their troubleshooting and security purpose and applicable provider settings. Usage counts and download
+      records are kept for about 13 months. We consider the type of
       record, whether the account or issue is active, legal retention requirements, and unresolved disputes
       when deciding retention. No single deletion period applies to every category.
     </p>
@@ -286,10 +332,10 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>12. Your choices and privacy rights</h2>
+    <h2>13. Your choices and privacy rights</h2>
     <p>
       You can choose models and integrations, limit permissions, stop background work or computer use,
-      disconnect providers, turn off diagnostics and automatic sharing, unshare public sessions, edit or erase
+      disconnect providers, turn off diagnostics, usage counts, and automatic sharing, unshare public sessions, edit or erase
       local memory, and remove local sessions and other data. Removing a local session alone does not remove
       its public copy. Use the relevant provider's controls to revoke its credentials or manage records it holds.
       Deleting an account, deleting local data, and deleting provider-held content are
@@ -313,7 +359,7 @@ export const prerender = true
   </section>
 
   <section>
-    <h2>13. Children and policy updates</h2>
+    <h2>14. Children and policy updates</h2>
     <p>
       Vector is intended for adults and is not directed to children. If you believe a child has supplied
       personal information to our account or service endpoints, contact us so we can review and address it.
