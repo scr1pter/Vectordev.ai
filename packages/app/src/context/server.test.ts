@@ -46,7 +46,7 @@ describe("resolveServerList", () => {
     expect(ServerConnection.key(list[0]!) as string).toBe("https://server.example.test")
   })
 
-  test("drops reusable passwords loaded from persisted server state", () => {
+  test("keeps a password saved before the keychain move, so an upgrade never loses it", () => {
     const list = resolveServerList({
       stored: [
         {
@@ -60,7 +60,7 @@ describe("resolveServerList", () => {
 
     expect(list).toHaveLength(1)
     expect(list[0]?.type).toBe("http")
-    expect(list[0]?.http).toEqual({ url: "https://server.example.test", username: "vector" })
+    expect(list[0]?.http).toEqual({ url: "https://server.example.test", username: "vector", password: "saved" })
   })
 })
 
@@ -87,25 +87,42 @@ test("server persistence strips reusable passwords without changing the live con
 })
 
 describe("server transport policy", () => {
-  test("defaults loopback addresses to HTTP and remote addresses to HTTPS", () => {
+  test("defaults addresses on this machine or the user's network to HTTP and others to HTTPS", () => {
     expect(normalizeServerUrl("localhost:4096")).toBe("http://localhost:4096")
     expect(normalizeServerUrl("127.0.0.1:4096")).toBe("http://127.0.0.1:4096")
+    expect(normalizeServerUrl("192.168.1.20:4096")).toBe("http://192.168.1.20:4096")
+    expect(normalizeServerUrl("100.101.102.103:4096")).toBe("http://100.101.102.103:4096")
+    expect(normalizeServerUrl("devbox:4096")).toBe("http://devbox:4096")
+    expect(normalizeServerUrl("devbox.local:4096")).toBe("http://devbox.local:4096")
     expect(normalizeServerUrl("engine.example.test:4096")).toBe("https://engine.example.test:4096")
+    expect(normalizeServerUrl("http://engine.example.test:4096")).toBe("http://engine.example.test:4096")
     expect(normalizeServerUrl("ftp://engine.example.test")).toBeUndefined()
     expect(normalizeServerUrl("http://vector:secret@localhost:4096")).toBeUndefined()
     expect(normalizeServerUrl("https://engine.example.test?auth_token=secret")).toBeUndefined()
   })
 
-  test("recognizes loopback and rejects password authentication over remote plaintext", () => {
+  test("sends a password over plain HTTP only to this machine or the user's network", () => {
     expect(isLoopbackServerUrl("http://127.2.3.4:4096")).toBe(true)
     expect(isLoopbackServerUrl("http://[::1]:4096")).toBe(true)
-    expect(insecurePasswordReason({ url: "http://localhost:4096", password: "secret" })).toBeUndefined()
-    expect(insecurePasswordReason({ url: "https://engine.example.test", password: "secret" })).toBeUndefined()
+    for (const url of [
+      "http://localhost:4096",
+      "http://192.168.1.20:4096",
+      "http://10.0.0.5:4096",
+      "http://100.101.102.103:4096",
+      "http://[fd12:3456::1]:4096",
+      "http://devbox:4096",
+      "http://devbox.local:4096",
+      "https://engine.example.test",
+    ])
+      expect(insecurePasswordReason({ url, password: "secret" })).toBeUndefined()
     expect(insecurePasswordReason({ url: "http://engine.example.test", password: "secret" })).toBe(
-      "Password-authenticated remote servers require HTTPS.",
+      "server.insecure.httpsRequired",
+    )
+    expect(insecurePasswordReason({ url: "http://8.8.8.8:4096", password: "secret" })).toBe(
+      "server.insecure.httpsRequired",
     )
     expect(insecurePasswordReason({ url: "https://vector:secret@engine.example.test" })).toBe(
-      "Server credentials must not be included in URLs.",
+      "server.insecure.credentialsInUrl",
     )
   })
 })

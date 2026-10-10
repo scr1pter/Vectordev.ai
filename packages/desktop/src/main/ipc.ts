@@ -192,6 +192,12 @@ import {
 import { ciStatus, listCiRuns, prepareCiRepair, viewCiFailure } from "./ci-watch"
 import { spendLedger, type SpendPolicy } from "./spend-limits"
 import { clearFailureMemory, readFailureMemory } from "./failure-memory"
+import {
+  deleteServerCredential,
+  readServerCredential,
+  saveServerCredential,
+  type ServerCredential,
+} from "./server-credentials"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -724,6 +730,17 @@ export function registerIpcHandlers(deps: Deps) {
   )
   // The renderer reaches only its own .dat stores. vector.settings (which holds the remembered clone folder) and the
   // encrypted sign-in stores belong to the main process.
+  handle("server-credential-get", (_event: IpcMainInvokeEvent, url: string) => {
+    try {
+      return readServerCredential(url) ?? null
+    } catch {
+      return null
+    }
+  })
+  handle("server-credential-set", (_event: IpcMainInvokeEvent, url: string, credential: ServerCredential) =>
+    saveServerCredential(url, credential),
+  )
+  handle("server-credential-delete", (_event: IpcMainInvokeEvent, url: string) => deleteServerCredential(url))
   handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     if (!isRendererStoreName(name)) return null
     try {

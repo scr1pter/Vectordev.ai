@@ -264,6 +264,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     },
 
     vectorAccount: window.api.vectorAccount,
+    serverCredentials: window.api.serverCredentials,
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
 

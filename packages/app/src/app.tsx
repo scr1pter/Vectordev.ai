@@ -101,13 +101,23 @@ const SessionRoute = () => {
 const TargetSessionRoute = () => {
   const params = useParams<{ serverKey: string; id: string }>()
   const global = useGlobal()
+  const language = useLanguage()
   const conn = createMemo(() => resolveRouteServer(global.servers.list(), requireServerKey(params.serverKey)))
 
   return (
     // Owns the server-identity remount. Session changes must NOT remount this
     // subtree (SessionRouteErrorBoundary resets and createSessionLineage
     // re-resolves reactively instead); both rely on this key for server changes.
-    <Show when={conn()} keyed>
+    // A link to a server that is not in the user's list never connects to it; it says so instead.
+    <Show
+      when={conn()}
+      keyed
+      fallback={
+        <div class="flex h-full items-center justify-center p-6 text-center text-14-regular text-text-weak">
+          {language.t("app.server.unknownRoute")}
+        </div>
+      }
+    >
       {(target) => (
         <ServerSDKProvider server={() => target}>
           <ServerSyncProvider server={() => target}>

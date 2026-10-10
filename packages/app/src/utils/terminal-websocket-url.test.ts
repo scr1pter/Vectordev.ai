@@ -60,6 +60,6 @@ describe("terminalWebSocketURL", () => {
         cursor: 0,
         password: "secret",
       }),
-    ).toThrow("require HTTPS")
+    ).toThrow("server.insecure.httpsRequired")
   })
 })

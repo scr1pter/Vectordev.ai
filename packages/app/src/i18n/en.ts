@@ -375,6 +375,12 @@ export const dict = {
   "dialog.server.add.url": "Server address",
   "dialog.server.add.placeholder": "http://localhost:4096",
   "dialog.server.add.error": "Could not connect to server",
+  "app.server.unknownRoute":
+    "This link opens a session on a server that is not in your server list. Add the server first, then open the link again.",
+  "server.insecure.credentialsInUrl": "Put the username and password in their own fields, not in the address.",
+  "server.insecure.invalidAddress": "That is not a valid server address.",
+  "server.insecure.httpsRequired":
+    "A password is sent over plain HTTP only to this computer or your own network. Use an https:// address for this server.",
   "dialog.server.add.checking": "Checking...",
   "dialog.server.add.button": "Add server",
   "dialog.server.add.name": "Server name (optional)",

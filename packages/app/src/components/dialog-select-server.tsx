@@ -196,7 +196,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       if (store.addServer.password && store.addServer.username) conn.http.username = store.addServer.username
       const insecure = insecurePasswordReason(conn.http)
       if (insecure) {
-        setStore("addServer", { error: insecure })
+        setStore("addServer", { error: language.t(insecure) })
         return
       }
       const result = await checkServerHealth(conn.http)
@@ -245,7 +245,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       }
       const insecure = insecurePasswordReason(conn.http)
       if (insecure) {
-        setStore("editServer", { error: insecure })
+        setStore("editServer", { error: language.t(insecure) })
         return
       }
       const result = await checkServerHealth(conn.http)

@@ -752,6 +752,12 @@ export type ElectronAPI = {
   wslServers: WslServersAPI
   updater: UpdaterAPI
   vectorAccount: VectorAccountPlatform
+  /** Saved remote-server passwords, sealed with the OS keychain; set resolves false when none is available. */
+  serverCredentials: {
+    get: (url: string) => Promise<{ username?: string; password: string } | null>
+    set: (url: string, credential: { username?: string; password: string }) => Promise<boolean>
+    delete: (url: string) => Promise<void>
+  }
   reportBug: (input: { message: string; email?: string }) => Promise<{ delivered: boolean; error?: string }>
   askHelpAssistant: (input: {
     messages: { role: "user" | "assistant"; content: string }[]

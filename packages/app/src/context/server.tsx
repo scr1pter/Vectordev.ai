@@ -1,6 +1,7 @@
 import { createSimpleContext } from "@vectordevai/ui/context"
 import { type Accessor, batch, createEffect, createMemo, createSignal } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
+import { usePlatform } from "@/context/platform"
 import { Persist, persisted } from "@/utils/persist"
 import { pathKey } from "@/utils/path-key"
 import { ServerScope } from "@/utils/server-scope"
@@ -19,7 +20,9 @@ export function normalizeServerUrl(input: string) {
     const url = new URL(candidate)
     if (url.protocol !== "http:" && url.protocol !== "https:") return
     if (url.username || url.password || hasCredentialQuery(url)) return
-    if (!explicit && isLoopbackHostname(url.hostname)) url.protocol = "http:"
+    // `vector serve` speaks plain HTTP, so an address on this machine or the user's network keeps it; anything else
+    // typed without a scheme is reached over HTTPS.
+    if (!explicit && isLocalNetworkHostname(url.hostname)) url.protocol = "http:"
     return url.toString().replace(/\/+$/, "")
   } catch {
     return
@@ -38,6 +41,29 @@ export function isLoopbackHostname(hostname: string) {
   return /^127(?:\.\d{1,3}){3}$/.test(host)
 }
 
+/** Loopback, private, link-local and CGNAT (Tailscale) addresses, and names that only resolve on a local network. */
+export function isLocalNetworkHostname(hostname: string) {
+  const host = hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase()
+  if (isLoopbackHostname(host)) return true
+  const octets = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host)
+  if (octets) {
+    const a = Number(octets[1])
+    const b = Number(octets[2])
+    return (
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      (a === 100 && b >= 64 && b <= 127)
+    )
+  }
+  if (host.includes(":")) return /^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)
+  return !host.includes(".") || /\.(?:local|lan|home|internal|home\.arpa)$/.test(host)
+}
+
 export function isLoopbackServerUrl(input: string) {
   try {
     return isLoopbackHostname(new URL(input).hostname)
@@ -46,16 +72,19 @@ export function isLoopbackServerUrl(input: string) {
   }
 }
 
+/**
+ * Why a connection would expose its credentials, as a translation key. A password goes over plain HTTP only to this
+ * machine or the user's own network; anywhere else it needs HTTPS.
+ */
 export function insecurePasswordReason(input: ServerConnection.HttpBase) {
   try {
     const url = new URL(input.url)
-    if (url.username || url.password || hasCredentialQuery(url))
-      return "Server credentials must not be included in URLs."
-    if (!input.password || isLoopbackHostname(url.hostname) || url.protocol === "https:") return
+    if (url.username || url.password || hasCredentialQuery(url)) return "server.insecure.credentialsInUrl" as const
+    if (!input.password || url.protocol === "https:" || isLocalNetworkHostname(url.hostname)) return
   } catch {
-    return "Invalid server address."
+    return "server.insecure.invalidAddress" as const
   }
-  return "Password-authenticated remote servers require HTTPS."
+  return "server.insecure.httpsRequired" as const
 }
 
 function hasCredentialQuery(url: URL) {
@@ -218,8 +247,7 @@ export function resolveServerList(input: {
     input.props?.map((v) => [ServerConnection.key(v), v]) ?? [],
   )
 
-  for (const value of input.stored) {
-    const stored = redactStoredServer(value)
+  for (const stored of input.stored) {
     const conn: ServerConnection.Http =
       typeof stored === "string"
         ? {
@@ -345,14 +373,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const [store, setStore, _, ready] = persisted(
       {
         ...Persist.global("server", ["server.v3"]),
-        migrate: (value) => {
-          const migrated = migrateCanonicalLocalServerState(value, props.canonicalLocalServer)
-          if (!isRecord(migrated) || !Array.isArray(migrated.list)) return migrated
-          return {
-            ...migrated,
-            list: migrated.list.map((item) => (isRecord(item) ? redactStoredServer(item as StoredServer) : item)),
-          }
-        },
+        migrate: (value) => migrateCanonicalLocalServerState(value, props.canonicalLocalServer),
       },
       createStore({
         list: [] as StoredServer[],
@@ -362,9 +383,39 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     )
 
     const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
+    const credential = (x: StoredServer) => (typeof x === "string" ? undefined : "type" in x ? x.http : x)
+    const password = (x: StoredServer) => credential(x)?.password
+    const platform = usePlatform()
+    const keychain = platform.serverCredentials
     const [credentials, setCredentials] = createStore<
       Record<string, { username?: string; password: string } | undefined>
     >({})
+
+    // Saved passwords live in the OS keychain on the desktop. One still in the saved list, from before, or from a
+    // platform without a keychain, is moved there; it stays where it is until the keychain has it, so it is never lost.
+    createEffect(() => {
+      if (!ready() || !keychain) return
+      for (const item of store.list) {
+        const key = url(item)
+        const secret = password(item)
+        if (!secret) {
+          void keychain.get(key).then((saved) => {
+            if (saved) setCredentials(key, saved)
+          })
+          continue
+        }
+        const username = credential(item)?.username
+        void keychain.set(key, { username, password: secret }).then((sealed) => {
+          if (!sealed) return
+          const index = store.list.findIndex((entry) => url(entry) === key && password(entry) === secret)
+          if (index === -1) return
+          batch(() => {
+            setCredentials(key, { username, password: secret })
+            setStore("list", index, redactStoredServer(store.list[index]!))
+          })
+        })
+      }
+    })
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
       return resolveServerList({ stored: store.list, props: props.servers }).map((conn) => {
@@ -421,16 +472,17 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       if (!url_) return
       if (insecurePasswordReason({ ...input.http, url: url_ })) return
       const conn: ServerConnection.Http = { ...input, http: { ...input.http, url: url_ } }
-      const stored = redactStoredServer(conn) as ServerConnection.Http
+      // Saved with its password until the keychain effect above moves the password out of the list.
+      if (!conn.http.password) void keychain?.delete(url_)
       return batch(() => {
         if (conn.http.password)
           setCredentials(conn.http.url, { username: conn.http.username, password: conn.http.password })
         else setCredentials(conn.http.url, undefined)
         const existing = store.list.findIndex((x) => url(x) === url_)
         if (existing !== -1) {
-          setStore("list", existing, stored)
+          setStore("list", existing, conn)
         } else {
-          setStore("list", store.list.length, stored)
+          setStore("list", store.list.length, conn)
         }
         setState("active", ServerConnection.key(conn))
         return conn
@@ -440,6 +492,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     function remove(key: ServerConnection.Key) {
       const next = nextServerAfterRemoval(allServers(), key, props.defaultServer)
       const list = store.list.filter((x) => url(x) !== key)
+      void keychain?.delete(key)
       batch(() => {
         setCredentials(key, undefined)
         setStore("list", list)

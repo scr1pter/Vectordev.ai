@@ -296,6 +296,11 @@ const api: ElectronAPI = {
       set: (projectPath, taskId, input) => ipcRenderer.invoke("cloud-build-set", projectPath, taskId, input),
     },
   },
+  serverCredentials: {
+    get: (url) => ipcRenderer.invoke("server-credential-get", url),
+    set: (url, credential) => ipcRenderer.invoke("server-credential-set", url, credential),
+    delete: (url) => ipcRenderer.invoke("server-credential-delete", url),
+  },
   vectorAccount: {
     status: () => ipcRenderer.invoke("vector-account-status"),
     start: () => ipcRenderer.invoke("vector-account-start"),
