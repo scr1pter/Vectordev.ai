@@ -1,7 +1,7 @@
 import { initializeVectorAccount, vectorAccount } from "./vector-account-runtime"
 import { execFile } from "node:child_process"
-import { stat } from "node:fs/promises"
-import { basename } from "node:path"
+import { realpath, stat } from "node:fs/promises"
+import { basename, join } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
@@ -52,6 +52,7 @@ import {
   openPathApplicationCommand,
   openPathArguments,
   openPathCommand,
+  isLaunchableBundle,
   requireOpenPathApplication,
   requireOpenPathDirectory,
 } from "./open-path"
@@ -847,7 +848,20 @@ export function registerIpcHandlers(deps: Deps) {
   })
 
   handle("open-path", async (_event: IpcMainInvokeEvent, path: string, value?: unknown) => {
-    const target = requireOpenPathDirectory(path, Boolean((await stat(path).catch(() => undefined))?.isDirectory()))
+    // Checked and opened by its real path, so a link named like a folder cannot point at an application.
+    const real = typeof path === "string" ? await realpath(path).catch(() => undefined) : undefined
+    const target = requireOpenPathDirectory(real, {
+      directory: Boolean(real && (await stat(real).catch(() => undefined))?.isDirectory()),
+      bundle:
+        real !== undefined &&
+        isLaunchableBundle(
+          real,
+          await stat(join(real, "Contents", "Info.plist")).then(
+            () => true,
+            () => false,
+          ),
+        ),
+    })
     const application = requireOpenPathApplication(value)
     if (!application) return shell.openPath(target)
     const configured = openPathApplicationCommand(application, process.platform)

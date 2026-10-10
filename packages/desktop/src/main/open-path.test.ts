@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  isLaunchableBundle,
   openPathApplication,
   openPathArguments,
   openPathCommand,
@@ -18,7 +19,24 @@ describe("open path applications", () => {
     for (const value of ["/bin/sh", "cmd.exe", "../../malware", "vscode\n--args"]) {
       expect(() => requireOpenPathApplication(value)).toThrow("unsupported application")
     }
-    expect(() => requireOpenPathDirectory("/tmp/tool", false)).toThrow("existing directory")
+    expect(() => requireOpenPathDirectory("/tmp/tool", { directory: false })).toThrow("existing directory")
+    expect(() => requireOpenPathDirectory(undefined, { directory: true })).toThrow("existing directory")
+  })
+
+  test("opens a plain folder but never an application or other bundle", () => {
+    expect(requireOpenPathDirectory("/work/project", { directory: true, bundle: false })).toBe("/work/project")
+    for (const path of [
+      "/Applications/Calculator.app",
+      "/tmp/x.app/",
+      "/Library/PreferencePanes/a.prefPane",
+      "/tmp/i.pkg",
+    ])
+      expect(isLaunchableBundle(path, false)).toBe(true)
+    expect(isLaunchableBundle("/tmp/folder-named-anything", true)).toBe(true)
+    expect(isLaunchableBundle("/work/my.application-notes", false)).toBe(false)
+    expect(() => requireOpenPathDirectory("/Applications/Calculator.app", { directory: true, bundle: true })).toThrow(
+      "not applications",
+    )
   })
 
   test("only launches a resolved Windows executable", () => {

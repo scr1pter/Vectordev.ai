@@ -40,9 +40,20 @@ export function requireOpenPathApplication(value: unknown) {
   throw new Error("Vector rejected an unsupported application.")
 }
 
-export function requireOpenPathDirectory(value: unknown, isDirectory: boolean) {
-  if (typeof value === "string" && value.length > 0 && isDirectory) return value
-  throw new Error("Vector can only open an existing directory.")
+export function requireOpenPathDirectory(value: unknown, target: { directory: boolean; bundle?: boolean }) {
+  if (typeof value !== "string" || value.length === 0 || !target.directory)
+    throw new Error("Vector can only open an existing directory.")
+  if (target.bundle) throw new Error("Vector opens folders, not applications or other bundles.")
+  return value
+}
+
+// macOS launches a bundle that shell.openPath is given (an .app, a preference pane, an installer package) instead of
+// showing it, and a bundle is just a folder with Contents/Info.plist. Only a plain folder is opened.
+export function isLaunchableBundle(path: string, hasInfoPlist: boolean) {
+  if (hasInfoPlist) return true
+  return /\.(?:app|appex|action|bundle|kext|mdimporter|mpkg|pkg|plugin|prefpane|qlgenerator|saver|service|workflow)[\\/]?$/i.test(
+    path,
+  )
 }
 
 export function openPathCommand(
