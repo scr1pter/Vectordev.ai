@@ -43,7 +43,9 @@ export async function revokeAccountTokens(accountID: string, fetcher: typeof fet
     method: "POST",
     headers: { authorization: `Bearer ${kv.token}` },
   }).catch(() => undefined)
-  return Boolean(response?.ok)
+  if (!response?.ok) return false
+  const body: unknown = await response.json().catch(() => undefined)
+  return Boolean(body && typeof body === "object" && "result" in body && body.result === "OK" && !("error" in body))
 }
 
 /**

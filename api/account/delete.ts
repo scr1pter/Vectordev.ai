@@ -10,6 +10,7 @@ import {
   type ApiResponse,
 } from "../_lib/http.js"
 import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js"
+import { cancelModelPlanAccount } from "../_lib/model-plan-account.js"
 
 /**
  * Deleting a Vector account. The order matters, because the steps are not
@@ -20,7 +21,8 @@ import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js
  *      misconfigured deployment fails with nothing half-done
  *   3. revoke CLI tokens, which are stateless and would otherwise keep a
  *      terminal signed in for up to ninety days
- *   4. delete the identity itself
+ *   4. close model-plan checkout, subscriptions and inference access
+ *   5. delete the identity itself
  *
  * The response says which of those actually happened.
  */
@@ -30,9 +32,12 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     requireTrustedJsonRequest(request, 4_096)
     const body = await readJson<{ confirm?: unknown }>(request, 4_096)
     const user = await requireAccountUser(request)
-    await enforceRateLimit(request, response, { scope: "account-delete", limit: 5, windowSeconds: 60 * 60 }).catch(
-      () => undefined,
-    )
+    await enforceRateLimit(request, response, {
+      scope: "account-delete",
+      identifier: user.id,
+      limit: 5,
+      windowSeconds: 60 * 60,
+    })
 
     const confirm = typeof body.confirm === "string" ? body.confirm.trim().toLowerCase() : ""
     if (!confirm || confirm !== user.email.trim().toLowerCase()) {
@@ -53,6 +58,15 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     }
 
     const tokensRevoked = await revokeAccountTokens(user.id)
+    if (revocationConfigured() && !tokensRevoked)
+      throw new ApiError(503, "REVOCATION_FAILED", "Account access could not be revoked. Retry account deletion.")
+    await cancelModelPlanAccount(user.id).catch(() => {
+      throw new ApiError(
+        503,
+        "BILLING_DELETION_FAILED",
+        "Model billing cleanup could not finish. Retry account deletion.",
+      )
+    })
     await deleteAccountUser(admin, user.id)
 
     json(response, 200, {
@@ -84,7 +98,11 @@ async function deleteAccountUser(
     },
   })
   if (!result.ok && result.status !== 404) {
-    throw new ApiError(502, "DELETION_FAILED", "Vector could not delete the account. Nothing else was changed.")
+    throw new ApiError(
+      502,
+      "DELETION_FAILED",
+      "Model billing was closed, but Vector could not delete the identity. Retry account deletion.",
+    )
   }
 }
 

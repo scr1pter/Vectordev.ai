@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { readAccountApiResponse, takeAccountReturnPath, vectorAccountClient } from "../../../lib/account-client"
 import { FreeDownload } from "../download/FreeDownload"
 import { CliLaunchPanel } from "./CliLaunchPanel"
+import { ModelPlans } from "./ModelPlans"
 import "../download/download.css"
 import "./account.css"
 
@@ -139,6 +140,8 @@ export function AccountPage(props: { preview?: AccountState }) {
         <p className="acct-meta">{account?.user.email}</p>
 
         {error && <p className="account-error">{error}</p>}
+
+        <ModelPlans accessToken={token} preview={props.preview ? true : undefined} />
 
         <section className="acct-section">
           <h2>Download Vector</h2>
