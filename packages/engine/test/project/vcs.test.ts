@@ -340,6 +340,54 @@ describe("Vcs diff", () => {
   )
 })
 
+describe("Vcs raw diff", () => {
+  afterEach(async () => {
+    await disposeAllInstances()
+  })
+
+  it.instance(
+    "diffRaw() includes staged files before the first commit",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        // An orphan branch has no commit yet, like a repository just made with `git init`.
+        yield* git(test.directory, ["checkout", "--orphan", "fresh"])
+        yield* write(path.join(test.directory, "staged.txt"), "staged\n")
+        yield* write(path.join(test.directory, "loose.txt"), "loose\n")
+        yield* git(test.directory, ["add", "staged.txt"])
+
+        const vcs = yield* init()
+        const raw = yield* vcs.diffRaw()
+
+        expect(raw).toContain("+++ b/staged.txt")
+        expect(raw).toContain("+staged")
+        expect(raw).toContain("+++ b/loose.txt")
+      }),
+    { git: true },
+  )
+
+  worktreeIt.live("diffRaw() includes new files when the project is a folder inside the repository", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped({ git: true })
+      const sub = path.join(tmp, "packages", "app")
+      yield* write(path.join(sub, "tracked.txt"), "before\n")
+      yield* git(tmp, ["add", "."])
+      yield* git(tmp, ["commit", "--no-gpg-sign", "-m", "add app"])
+      yield* write(path.join(sub, "tracked.txt"), "after\n")
+      yield* write(path.join(sub, "new.txt"), "new\n")
+
+      const raw = yield* Effect.gen(function* () {
+        const vcs = yield* init()
+        return yield* vcs.diffRaw()
+      }).pipe(provideInstance(sub))
+
+      expect(raw).toContain("+after")
+      expect(raw).toContain("+++ b/packages/app/new.txt")
+      expect(raw).toContain("+new")
+    }),
+  )
+})
+
 describe("Vcs branches", () => {
   afterEach(async () => {
     await disposeAllInstances()

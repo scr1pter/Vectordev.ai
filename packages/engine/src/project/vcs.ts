@@ -502,9 +502,11 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
           concurrency: 2,
         })
         const tracked = hasHead ? (yield* git.patchAll(ctx.directory, "HEAD")).text : ""
+        // Before the first commit there is nothing to diff against, so staged files are new files too. Status paths
+        // are relative to the repository root, which is not the project directory when a subfolder is open.
         const untracked = yield* Effect.forEach(
-          status.filter((item) => item.code === "??"),
-          (item) => git.patchUntracked(ctx.directory, item.file).pipe(Effect.map((patch) => patch.text)),
+          status.filter((item) => item.code === "??" || !hasHead),
+          (item) => git.patchUntracked(ctx.worktree, item.file).pipe(Effect.map((patch) => patch.text)),
         )
         return [tracked, ...untracked].filter(Boolean).join("\n")
       }),

@@ -271,7 +271,9 @@ export interface ReviewClient {
   }
   vcs?: {
     get(input: { directory?: string }): Result<{ branch?: string }>
-    status?(input: { directory?: string }): Result<{ file: string; additions: number; deletions: number }[]>
+    status?(input: {
+      directory?: string
+    }): Result<{ file: string; additions: number; deletions: number; status?: string }[]>
     // The SDK names the group of the raw diff route diff2. It is the working tree against HEAD, untracked files
     // included.
     diff2?: { raw(input: { directory?: string }): Result<string> }
@@ -766,13 +768,27 @@ const VERIFY_SKIPPED_NOTE =
   "The double-check did not finish, so these findings were not re-checked. Treat them with more care before posting."
 
 // The engine's diff of the working tree against HEAD, staged and unstaged alike, with each untracked file that
-// .gitignore does not exclude as added: what `vector review --uncommitted` reviews.
+// .gitignore does not exclude as added: what `vector review --uncommitted` reviews, with its limits. The engine diffs
+// each new file on its own, so a folder that should be ignored, such as node_modules, is refused before it is read.
 async function uncommittedDiff(client: ReviewClient, directory: string) {
   const vcs = client.vcs
   if (!vcs?.diff2)
     throw new Error("This version of Vector can't read uncommitted changes. Update Vector and try again.")
-  return (await vcs.diff2.raw({ directory })).data ?? ""
+  const added = (await vcs.status?.({ directory }))?.data?.filter((file) => file.status === "added").length ?? 0
+  if (added > MAX_NEW_FILES)
+    throw new Error(
+      `There are ${added.toLocaleString("en-US")} new files. Add generated folders such as node_modules to .gitignore, or commit some of the files first.`,
+    )
+  const diff = (await vcs.diff2.raw({ directory })).data ?? ""
+  if (diff.length > MAX_DIFF_CHARS)
+    throw new Error(
+      "These changes are too large to review at once. Commit some of them, or add large generated files to .gitignore first.",
+    )
+  return diff
 }
+
+const MAX_NEW_FILES = 500
+const MAX_DIFF_CHARS = 64 * 1024 * 1024
 
 export type WorkingTreeChanges = { files: number; additions: number; deletions: number }
 

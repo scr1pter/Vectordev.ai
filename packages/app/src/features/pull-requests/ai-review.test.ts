@@ -673,6 +673,22 @@ describe("uncommitted changes", () => {
     expect(calls.create).toEqual([])
   })
 
+  test("refuses a working tree with more new files or more diff than `vector review` takes, before reading it", async () => {
+    const { client, calls } = fakeClient({ uncommitted: join(listDiff) })
+    const files = Array.from({ length: 501 }, (_, index) => ({
+      file: `node_modules/pkg${index}/index.js`,
+      additions: 1,
+      deletions: 0,
+      status: "added",
+    }))
+    client.vcs = { ...client.vcs!, status: async () => ({ data: files }) }
+    await expect(runUncommitted(client)).rejects.toThrow("There are 501 new files. Add generated folders")
+    expect(calls.raw).toEqual([])
+    const huge = fakeClient({ uncommitted: join(listDiff) + "+".repeat(64 * 1024 * 1024) })
+    await expect(runUncommitted(huge.client)).rejects.toThrow("too large to review at once")
+    expect(huge.calls.create).toEqual([])
+  })
+
   test("says so when the engine cannot return the working tree's diff", async () => {
     const { client } = fakeClient({ uncommitted: join(listDiff) })
     client.vcs = { get: async () => ({ data: {} }) }
