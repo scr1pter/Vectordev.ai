@@ -54,3 +54,50 @@ describe("SkillDiscovery destinations", () => {
     }),
   )
 })
+
+describe("SkillDiscovery limits", () => {
+  const serve = (reply: (url: string) => Response) => {
+    const requests: string[] = []
+    const http = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make((request) => {
+        requests.push(request.url)
+        return Effect.succeed(HttpClientResponse.fromWeb(request, reply(request.url)))
+      }),
+    )
+    return { http, requests }
+  }
+  const pull = (base: string, http: Layer.Layer<HttpClient.HttpClient>) =>
+    Effect.acquireRelease(Effect.promise(tmpdir), (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]())).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          return yield* (yield* SkillDiscovery.Service).pull(base)
+        }).pipe(
+          Effect.provide(
+            AppNodeBuilder.build(SkillDiscovery.node, [
+              [LayerNodePlatform.httpClient, http],
+              [Global.node, Global.layerWith({ cache: tmp.path })],
+            ]),
+          ),
+        ),
+      ),
+    )
+  const it = testEffect(Layer.empty)
+
+  it.effect("does not follow a catalog redirect to another origin", () =>
+    Effect.gen(function* () {
+      const server = serve(() => new Response("", { status: 302, headers: { location: "https://8.8.8.8/index.json" } }))
+      expect(yield* pull("https://1.1.1.1/catalog/", server.http)).toEqual([])
+      expect(server.requests).toEqual(["https://1.1.1.1/catalog/index.json"])
+    }),
+  )
+
+  it.effect("refuses a catalog index larger than its limit", () =>
+    Effect.gen(function* () {
+      const server = serve(
+        () => new Response('{"skills":[]}', { headers: { "content-length": String(2 * 1024 * 1024) } }),
+      )
+      expect(yield* pull("https://1.1.1.1/catalog/", server.http)).toEqual([])
+    }),
+  )
+})
