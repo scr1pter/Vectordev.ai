@@ -3,6 +3,10 @@ import { isIP } from "node:net"
 import { ServerAuth } from "./auth"
 
 export function assertListenSecurity(opts: { hostname: string; unsecured?: boolean }, config: ServerAuth.Info) {
+  if (ServerAuth.required(config) && !isLoopback(opts.hostname))
+    throw new SecurityConfigurationError(
+      `Refusing password authentication over cleartext transport on ${opts.hostname}. Bind loopback and use a TLS reverse proxy instead.`,
+    )
   if (ServerAuth.required(config) || opts.unsecured === true || isLoopback(opts.hostname)) return
   throw new SecurityConfigurationError(
     `Refusing to listen on ${opts.hostname} without authentication. Set VECTOR_SERVER_PASSWORD or explicitly pass --unsecured.`,

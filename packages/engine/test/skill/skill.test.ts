@@ -9,7 +9,13 @@ import { Config } from "../../src/config/config"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
-import { provideInstance, provideTmpdirInstance, testInstanceStoreLayer, tmpdir } from "../fixture/fixture"
+import {
+  provideInstance,
+  provideTmpdirInstance,
+  testInstanceStoreLayer,
+  tmpdir,
+  trustWorkspace,
+} from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import path from "path"
 import fs from "fs/promises"
@@ -106,10 +112,10 @@ description: A test skill for verification.
 # Test Skill
 
 Instructions here.
-`,
+              `,
             ),
           )
-
+          yield* Effect.promise(() => trustWorkspace(dir))
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
           expect(list.length).toBe(1)
@@ -140,6 +146,7 @@ description: Skill for dirs test.
 `,
               ),
             )
+            yield* Effect.promise(() => trustWorkspace(dir))
 
             const skill = yield* Skill.Service
             const dirs = yield* skill.dirs()
@@ -179,6 +186,7 @@ description: Second test skill.
               ),
             ]),
           )
+          yield* Effect.promise(() => trustWorkspace(dir))
 
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
@@ -228,6 +236,7 @@ Instructions here.
 `,
             ),
           )
+          yield* Effect.promise(() => trustWorkspace(dir))
 
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
@@ -432,7 +441,6 @@ description: A skill in the .agents/skills directory.
               ),
             ]),
           )
-
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
           expect(list.length).toBe(2)
@@ -471,7 +479,6 @@ description: A skill in the .agents/skills directory.
               ),
             ]),
           )
-
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
           expect(list.map((s) => s.name)).toEqual(["agent-skill"])
@@ -518,6 +525,7 @@ description: A skill in the .vector/skill directory.
               ),
             ]),
           )
+          yield* Effect.promise(() => trustWorkspace(dir))
 
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
@@ -575,6 +583,7 @@ description: A skill in the .vector/skills directory.
               ),
             ]),
           )
+          yield* Effect.promise(() => trustWorkspace(dir))
 
           const skill = yield* Skill.Service
           expect((yield* skill.dirs()).length).toBe(4)

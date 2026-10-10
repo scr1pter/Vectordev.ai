@@ -52,7 +52,7 @@ import { Format } from "../../src/format"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Review } from "../../src/review/run"
 import { SessionID } from "../../src/session/schema"
-import { TestInstance } from "../fixture/fixture"
+import { TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { httpError, reply, TestLLMServer } from "../lib/llm-server"
 import { testProviderConfig } from "../lib/test-provider"
@@ -255,6 +255,7 @@ const useServer = (cost?: typeof PRICE) =>
       JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...provider }),
     )
     yield* fs.writeWithDirs(path.join(test.directory, "src/list.ts"), LIST_SOURCE)
+    yield* Effect.promise(() => trustWorkspace(test.directory))
     return { llm, directory: test.directory }
   })
 

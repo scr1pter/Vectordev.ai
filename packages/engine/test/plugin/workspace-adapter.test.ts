@@ -11,7 +11,7 @@ import { Plugin } from "../../src/plugin/index"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
 import { InstanceState } from "../../src/effect/instance-state"
-import { disposeAllInstances, TestInstance } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
@@ -79,6 +79,7 @@ describe("plugin.workspace", () => {
           ),
         ),
       )
+      yield* Effect.promise(() => trustWorkspace(dir))
 
       const plugin = yield* Plugin.Service
       yield* plugin.init()

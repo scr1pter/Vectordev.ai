@@ -36,7 +36,6 @@ import { ConfigMarkdown } from "@/config/markdown"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@vectordevai/core/util/error"
 import { SessionProcessor } from "./processor"
-import { Tool } from "@/tool/tool"
 import { Permission } from "@/permission"
 import { SessionStatus } from "./status"
 import { LLM } from "./llm"
@@ -46,7 +45,6 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
-import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
@@ -906,7 +904,7 @@ const layer = Layer.effect(
               const mime = (yield* fsys.isDir(filepath)) ? "application/x-directory" : part.mime
 
               const { read } = yield* registry.named()
-              const execRead = (args: Parameters<typeof read.execute>[0], extra?: Tool.Context["extra"]) => {
+              const execRead = (args: Parameters<typeof read.execute>[0]) => {
                 const controller = new AbortController()
                 return read
                   .execute(args, {
@@ -914,10 +912,16 @@ const layer = Layer.effect(
                     abort: controller.signal,
                     agent: input.agent!,
                     messageID: info.id,
-                    extra: { bypassCwdCheck: true, ...extra },
                     messages: [],
                     metadata: () => Effect.void,
-                    ask: () => Effect.void,
+                    ask: (request) =>
+                      permission
+                        .ask({
+                          ...request,
+                          sessionID: input.sessionID,
+                          ruleset: Permission.merge(ag.permission, current.permission ?? []),
+                        })
+                        .pipe(Effect.orDie),
                   })
                   .pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())))
               }
@@ -956,10 +960,7 @@ const layer = Layer.effect(
                     text: `Called the Read tool with the following input: ${JSON.stringify(args)}`,
                   },
                 ]
-                const exit = yield* provider.getModel(info.model.providerID, info.model.modelID).pipe(
-                  Effect.flatMap((mdl) => execRead(args, { model: mdl })),
-                  Effect.exit,
-                )
+                const exit = yield* execRead(args).pipe(Effect.exit)
                 if (Exit.isSuccess(exit)) {
                   const result = exit.value
                   pieces.push({
@@ -1616,45 +1617,54 @@ const layer = Layer.effect(
         throw error
       }
       const agentName = cmd.agent ?? input.agent
-
-      const raw = input.arguments.match(argsRegex) ?? []
-      const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
-      const templateCommand = yield* Effect.promise(async () => cmd.template)
-
-      const placeholders = templateCommand.match(placeholderRegex) ?? []
-      let last = 0
-      for (const item of placeholders) {
-        const value = Number(item.slice(1))
-        if (value > last) last = value
+      const agent = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
+      if (!agent) {
+        const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
+        const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
+        const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
+        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        throw error
       }
+      const currentSession = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const messageID = input.messageID ?? MessageID.ascending()
 
-      const withArgs = templateCommand.replaceAll(placeholderRegex, (_, index) => {
-        const position = Number(index)
-        const argIndex = position - 1
-        if (argIndex >= args.length) return ""
-        if (position === last) return args.slice(argIndex).join(" ")
-        return args[argIndex]
+      const prepared = prepareCommandTemplate(yield* Effect.promise(async () => cmd.template), input.arguments)
+
+      // Shell snippets belong to the command template. Resolve them before inserting user arguments so an argument
+      // cannot create a new snippet or become executable shell syntax inside one.
+      const shellOutputs = yield* Effect.gen(function* () {
+        if (prepared.shellCommands.length === 0) return []
+        const shellTool = (yield* registry.all()).find((item) => item.id === ShellID.ToolID)
+        if (!shellTool) throw new Error("Shell tool is not available")
+        const controller = new AbortController()
+        return yield* Effect.forEach(
+          prepared.shellCommands,
+          (command) =>
+            shellTool
+              .execute(
+                { command },
+                {
+                  sessionID: input.sessionID,
+                  messageID,
+                  agent: agent.name,
+                  abort: controller.signal,
+                  messages: [],
+                  metadata: () => Effect.void,
+                  ask: (request) =>
+                    permission
+                      .ask({
+                        ...request,
+                        sessionID: input.sessionID,
+                        ruleset: Permission.merge(agent.permission, currentSession.permission ?? []),
+                      })
+                      .pipe(Effect.orDie),
+                },
+              )
+              .pipe(Effect.map((result) => result.output)),
+          { concurrency: "unbounded" },
+        ).pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())))
       })
-      const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
-      let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
-
-      if (placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
-        template = template + "\n\n" + input.arguments
-      }
-
-      const shellMatches = ConfigMarkdown.shell(template)
-      if (shellMatches.length > 0) {
-        const cfg = yield* config.get()
-        const sh = Shell.preferred(cfg.shell)
-        const results = yield* Effect.promise(() =>
-          Promise.all(
-            shellMatches.map(async ([, cmd]) => (await Process.text([cmd], { shell: sh, nothrow: true })).text),
-          ),
-        )
-        let index = 0
-        template = template.replace(bashRegex, () => results[index++])
-      }
-      template = template.trim()
+      const template = prepared.render(shellOutputs)
 
       const commandModel = cmd.model
         ? Provider.parseModel(cmd.model)
@@ -1668,15 +1678,6 @@ const layer = Layer.effect(
       const taskModel = isFreeSelection(selectedModel) ? selectedModel : (commandModel ?? selectedModel)
 
       yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID)
-
-      const agent = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
-      if (!agent) {
-        const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
-        const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
-        const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
-        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
-        throw error
-      }
 
       const templateParts = yield* resolvePromptParts(template)
       const inputFiles = new Set(
@@ -1714,7 +1715,7 @@ const layer = Layer.effect(
 
       const result = yield* prompt({
         sessionID: input.sessionID,
-        messageID: input.messageID,
+        messageID,
         model: userModel,
         agent: userAgent,
         parts,
@@ -1818,6 +1819,33 @@ export const CommandInput = Schema.Struct({
   ),
 })
 export type CommandInput = Schema.Schema.Type<typeof CommandInput>
+
+/** @internal Exported for focused command-template security tests. */
+export function prepareCommandTemplate(templateCommand: string, inputArguments: string) {
+  const shellMatches = ConfigMarkdown.shell(templateCommand)
+  return {
+    shellCommands: shellMatches.map(([, command]) => command),
+    render(shellOutputs: string[]) {
+      if (shellOutputs.length !== shellMatches.length) throw new Error("Missing slash-command shell output")
+      let index = 0
+      const shellResolved = templateCommand.replace(bashRegex, () => shellOutputs[index++])
+      const args = (inputArguments.match(argsRegex) ?? []).map((arg) => arg.replace(quoteTrimRegex, ""))
+      const placeholders = shellResolved.match(placeholderRegex) ?? []
+      const last = Math.max(0, ...placeholders.map((item) => Number(item.slice(1))))
+      const withArgs = shellResolved.replaceAll(placeholderRegex, (_, value) => {
+        const position = Number(value)
+        const argIndex = position - 1
+        if (argIndex >= args.length) return ""
+        if (position === last) return args.slice(argIndex).join(" ")
+        return args[argIndex]
+      })
+      const template = withArgs.replaceAll("$ARGUMENTS", inputArguments)
+      if (placeholders.length === 0 && !shellResolved.includes("$ARGUMENTS") && inputArguments.trim())
+        return `${template}\n\n${inputArguments}`.trim()
+      return template.trim()
+    },
+  }
+}
 
 /** @internal Exported for testing */
 export function createStructuredOutputTool(input: {

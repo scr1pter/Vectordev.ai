@@ -121,6 +121,7 @@ import { errorLayer } from "./middleware/error"
 import { fenceLayer } from "./middleware/fence"
 import { hostGuardLayer } from "./middleware/host"
 import { schemaErrorLayer } from "./middleware/schema-error"
+import { requestGuardLayer } from "@vectordevai/server/middleware/request-guard"
 
 export const context = Context.makeUnsafe<unknown>(new Map())
 
@@ -138,7 +139,7 @@ const cors = (corsOptions?: CorsOptions) =>
 // - eventApiRoutes: typed SSE route with instance routing context and its existing API contract.
 // - ptyConnectApiRoutes: typed WebSocket upgrade route with ticket-aware auth.
 // - instanceApiRoutes: remaining typed instance routes.
-// - uiRoute: raw catch-all fallback; auth is router middleware so public static assets can bypass it.
+// - uiRoute: public raw catch-all fallback; app-managed credentials authenticate API requests.
 const authOnlyRouterLayer = authorizationRouterMiddleware.layer.pipe(Layer.provide(ServerAuth.Config.layer))
 const httpApiAuthLayer = authorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
 const ptyConnectHttpApiAuthLayer = ptyConnectAuthorizationLayer.pipe(Layer.provide(ServerAuth.Config.layer))
@@ -202,11 +203,11 @@ const uiRoute = HttpRouter.use((router) =>
     const fs = yield* FSUtil.Service
     const client = yield* HttpClient.HttpClient
     const flags = yield* RuntimeFlags.Service
-    yield* router.add("*", "/*", (request) =>
+    yield* router.add("GET", "/*", (request) =>
       serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
     )
   }),
-).pipe(Layer.provide(authOnlyRouterLayer))
+)
 
 type RouteRequirements =
   | HttpRouter.HttpRouter
@@ -296,6 +297,7 @@ export function createRoutes(
       corsVaryFix,
       fenceLayer,
       cors(corsOptions),
+      requestGuardLayer(corsOptions).pipe(Layer.provide(ServerAuth.Config.layer)),
       ...(corsOptions?.guardedHostname === undefined ? [] : [hostGuardLayer(corsOptions.guardedHostname)]),
       AppNodeBuilderV1.build(MoveSession.node, [[LocationServiceMap.node, locationServiceMapV2]]),
       HttpServer.layerServices,

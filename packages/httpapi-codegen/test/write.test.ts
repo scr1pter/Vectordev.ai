@@ -3,9 +3,27 @@ import { Effect, FileSystem, Option } from "effect"
 import { write, type Output } from "../src"
 import { it } from "./effect"
 
+const fileInfo = (type: "Directory" | "File" | "SymbolicLink") => ({
+  type,
+  mtime: Option.none(),
+  atime: Option.none(),
+  birthtime: Option.none(),
+  dev: 0,
+  ino: Option.none(),
+  mode: 0,
+  nlink: Option.none(),
+  uid: Option.none(),
+  gid: Option.none(),
+  rdev: Option.none(),
+  size: FileSystem.Size(0),
+  blksize: Option.none(),
+  blocks: Option.none(),
+})
+
 describe("HttpApiCodegen.write", () => {
   it.effect("writes compiled files beneath the output directory", () => {
-    const writes: Array<{ readonly path: string; readonly content: string }> = []
+    const writes: Array<{ readonly path: string; readonly content: string; readonly flag?: string }> = []
+    const renames: Array<readonly [string, string]> = []
     const output: Output = {
       operations: [],
       files: [{ path: "session.ts", content: "export const session = {}" }],
@@ -14,18 +32,26 @@ describe("HttpApiCodegen.write", () => {
     return Effect.gen(function* () {
       yield* write(output, "/generated")
 
-      expect(writes).toEqual([
-        { path: "/generated/session.ts", content: "export const session = {}\n" },
-        { path: "/generated/.httpapi-codegen.json", content: '[\n  "session.ts"\n]\n' },
-      ])
+      expect(writes[0]).toEqual({
+        path: "/generated/session.ts",
+        content: "export const session = {}\n",
+        flag: undefined,
+      })
+      expect(writes[1]?.path).toStartWith("/generated/.httpapi-codegen.json.")
+      expect(writes[1]).toMatchObject({ content: '[\n  "session.ts"\n]\n', flag: "wx" })
+      expect(renames).toEqual([[writes[1]?.path, "/generated/.httpapi-codegen.json"]])
     }).pipe(
       Effect.provideService(
         FileSystem.FileSystem,
         FileSystem.makeNoop({
           exists: () => Effect.succeed(false),
           makeDirectory: () => Effect.void,
-          writeFileString: (path, content) => {
-            writes.push({ path, content })
+          rename: (from, to) => {
+            renames.push([from, to])
+            return Effect.void
+          },
+          writeFileString: (path, content, options) => {
+            writes.push({ path, content, flag: options?.flag })
             return Effect.void
           },
         }),
@@ -52,10 +78,16 @@ describe("HttpApiCodegen.write", () => {
             removed.push(path)
             return Effect.void
           },
+          rename: () => Effect.void,
           writeFileString: () => Effect.void,
         }),
       ),
-      Effect.tap(() => Effect.sync(() => expect(removed).toEqual(["/generated/old.ts"]))),
+      Effect.tap(() =>
+        Effect.sync(() => {
+          expect(removed[0]).toBe("/generated/old.ts")
+          expect(removed[1]).toStartWith("/generated/.httpapi-codegen.json.")
+        }),
+      ),
     )
   })
 
@@ -136,25 +168,40 @@ describe("HttpApiCodegen.write", () => {
         FileSystem.makeNoop({
           exists: (path) => Effect.succeed(path.endsWith("session.ts")),
           makeDirectory: () => Effect.void,
-          stat: () =>
-            Effect.succeed({
-              type: "SymbolicLink",
-              mtime: Option.none(),
-              atime: Option.none(),
-              birthtime: Option.none(),
-              dev: 0,
-              ino: Option.none(),
-              mode: 0,
-              nlink: Option.none(),
-              uid: Option.none(),
-              gid: Option.none(),
-              rdev: Option.none(),
-              size: FileSystem.Size(0),
-              blksize: Option.none(),
-              blocks: Option.none(),
-            }),
+          stat: (path) => Effect.succeed(fileInfo(path.endsWith("session.ts") ? "SymbolicLink" : "Directory")),
         }),
       ),
     ),
   )
+
+  it.effect("rejects a symbolic-link manifest before reading or writing it", () => {
+    const reads: Array<string> = []
+    const writes: Array<string> = []
+    return write({ operations: [], files: [] }, "/generated").pipe(
+      Effect.flip,
+      Effect.tap((error) =>
+        Effect.sync(() => {
+          expect(error.reason).toBe("Invalid generated file manifest: /generated/.httpapi-codegen.json")
+          expect(reads).toEqual([])
+          expect(writes).toEqual([])
+        }),
+      ),
+      Effect.provideService(
+        FileSystem.FileSystem,
+        FileSystem.makeNoop({
+          makeDirectory: () => Effect.void,
+          stat: (path) =>
+            Effect.succeed(fileInfo(path.endsWith(".httpapi-codegen.json") ? "SymbolicLink" : "Directory")),
+          readFileString: (path) => {
+            reads.push(path)
+            return Effect.succeed("[]")
+          },
+          writeFileString: (path) => {
+            writes.push(path)
+            return Effect.void
+          },
+        }),
+      ),
+    )
+  })
 })

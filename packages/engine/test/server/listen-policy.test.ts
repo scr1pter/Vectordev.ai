@@ -35,13 +35,16 @@ describe("server bind security", () => {
     }
   })
 
-  test("requires explicit unsecured permission or a nonempty owner or guest password", () => {
+  test("requires explicit unsecured permission and blocks cleartext remote password authentication", () => {
     expect(() => assertListenSecurity({ hostname: "0.0.0.0", unsecured: true }, unprotected)).not.toThrow()
     expect(() =>
       assertListenSecurity({ hostname: "0.0.0.0" }, { ...unprotected, password: Option.some("secret") }),
-    ).not.toThrow()
+    ).toThrow("cleartext")
     expect(() =>
       assertListenSecurity({ hostname: "0.0.0.0" }, { ...unprotected, guestPassword: Option.some("secret") }),
+    ).toThrow("cleartext")
+    expect(() =>
+      assertListenSecurity({ hostname: "127.0.0.1" }, { ...unprotected, password: Option.some("secret") }),
     ).not.toThrow()
     expect(() =>
       assertListenSecurity(

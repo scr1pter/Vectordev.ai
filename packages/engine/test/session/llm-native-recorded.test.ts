@@ -19,7 +19,7 @@ import { Env } from "@/env"
 import type { Agent } from "../../src/agent/agent"
 import { LLM } from "../../src/session/llm"
 import { MessageID, SessionID } from "../../src/session/schema"
-import { TestInstance } from "../fixture/fixture"
+import { TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
@@ -283,6 +283,7 @@ const driveToolLoop = (scenario: RecordedScenario) =>
     const test = yield* TestInstance
     const model = yield* Effect.promise(() => loadFixture(scenario.providerID, scenario.modelID))
     yield* writeConfig(test.directory, scenario, model)
+    yield* Effect.promise(() => trustWorkspace(test.directory))
 
     const stableID = scenario.stableID ?? scenario.providerID
     const sessionID = SessionID.make(`session-recorded-${stableID}-loop`)

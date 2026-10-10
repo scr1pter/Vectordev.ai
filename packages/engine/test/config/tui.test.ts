@@ -6,6 +6,7 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Effect, Layer } from "effect"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { Config } from "@/config/config"
 import { ConfigPlugin } from "@/config/plugin"
 import { CurrentWorkingDirectory } from "@/config/tui-cwd"
@@ -83,7 +84,17 @@ const getTuiPluginOrigins = (directory: string) =>
     ),
   )
 
-it.instance("keeps server and tui plugin merge semantics aligned", () =>
+const approveWorkspace = (directory: string) =>
+  Effect.promise(async () => {
+    const snapshot = await WorkspaceTrust.snapshot(directory, [
+      path.join(directory, "vector.json"),
+      path.join(directory, "tui.json"),
+      path.join(directory, ".vector"),
+    ])
+    await WorkspaceTrust.approve(Global.Path.state, snapshot)
+  })
+
+it.instance("keeps project TUI plugins disabled before workspace trust", () =>
   withCleanState(
     Effect.gen(function* () {
       const fs = yield* FSUtil.Service
@@ -91,33 +102,19 @@ it.instance("keeps server and tui plugin merge semantics aligned", () =>
       const local = path.join(test.directory, ".vector")
       yield* fs.makeDirectory(local, { recursive: true })
 
-      yield* fs.writeJson(path.join(Global.Path.config, "vector.json"), {
-        plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
-      })
-      yield* fs.writeJson(path.join(Global.Path.config, "tui.json"), {
-        plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
-      })
-      yield* fs.writeJson(path.join(local, "vector.json"), {
-        plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
-      })
       yield* fs.writeJson(path.join(local, "tui.json"), {
         plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
       })
 
-      const server = yield* Config.use.get()
       const tui = yield* getTuiConfig(test.directory)
       const tuiOrigins = yield* getTuiPluginOrigins(test.directory)
-      const serverPlugins = (server.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
       const tuiPlugins = (tui.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
 
-      expect(serverPlugins).toEqual(tuiPlugins)
-      expect(serverPlugins).toContain("shared-plugin@2.0.0")
-      expect(serverPlugins).not.toContain("shared-plugin@1.0.0")
-
-      const serverOrigins = server.plugin_origins ?? []
-      expect(serverOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(serverPlugins)
+      expect(tuiPlugins).toEqual([])
+      expect(tuiPlugins).not.toContain("shared-plugin@2.0.0")
+      expect(tuiPlugins).not.toContain("local-only@1.0.0")
       expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
-      expect(serverOrigins.map((item) => item.scope)).toEqual(tuiOrigins.map((item) => item.scope))
+      expect(tuiOrigins).toEqual([])
     }),
   ),
 )
@@ -747,6 +744,7 @@ it.instance("supports tuple plugin specs with options in tui.json", () =>
       yield* fs.writeJson(path.join(test.directory, "tui.json"), {
         plugin: [["acme-plugin@1.2.3", { enabled: true, label: "demo" }]],
       })
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       const origins = yield* getTuiPluginOrigins(test.directory)
@@ -776,6 +774,7 @@ it.instance("deduplicates tuple plugin specs by name with higher precedence winn
           ["second-plugin@3.0.0", { source: "project" }],
         ],
       })
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       const origins = yield* getTuiPluginOrigins(test.directory)
@@ -806,6 +805,7 @@ it.instance("tracks global and local plugin metadata in merged tui config", () =
       const test = yield* TestInstance
       yield* fs.writeJson(path.join(Global.Path.config, "tui.json"), { plugin: ["global-plugin@1.0.0"] })
       yield* fs.writeJson(path.join(test.directory, "tui.json"), { plugin: ["local-plugin@2.0.0"] })
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       const origins = yield* getTuiPluginOrigins(test.directory)

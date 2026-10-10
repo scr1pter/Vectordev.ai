@@ -2,10 +2,10 @@ import { Effect } from "effect"
 import { randomBytes } from "crypto"
 import open from "open"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { UI } from "../ui"
-import { effectCmd } from "../effect-cmd"
-import { hasArg, resolveNetworkOptions, withNetworkOptions } from "../network"
-import { getNetworkIPs } from "./web"
+import { CliError, effectCmd } from "../effect-cmd"
+import { resolveNetworkOptions, withNetworkOptions } from "../network"
 
 const GUEST_USERNAME = "guest"
 
@@ -13,25 +13,62 @@ function secret() {
   return randomBytes(18).toString("base64url")
 }
 
-// Same shape entry.tsx and the auth middleware consume: ?auth_token=<base64 user:pass>.
-function link(host: string, port: number, username: string, password: string) {
-  const token = Buffer.from(`${username}:${password}`).toString("base64")
-  return `http://${host}:${port}/?auth_token=${encodeURIComponent(token)}`
+export function inviteLink(base: string | URL, username: string, password: string) {
+  const url = new URL(base)
+  url.hash = new URLSearchParams({ auth_token: Buffer.from(`${username}:${password}`).toString("base64") }).toString()
+  return url.toString()
+}
+
+export function publicInviteURL(input: string | undefined) {
+  if (!input) return
+  const url = new URL(input)
+  if (url.protocol !== "https:") throw new Error("--public-url must use HTTPS")
+  if (url.username || url.password || url.search || url.hash)
+    throw new Error("--public-url must not contain credentials, a query, or a fragment")
+  if (url.pathname !== "/") throw new Error("--public-url must be an origin without a path")
+  return url
+}
+
+export function configureInviteAccess(
+  owner: { username: string; password: string },
+  guest: { username: string; password: string },
+) {
+  const workspaceID = Flag.VECTOR_WORKSPACE_ID ? WorkspaceV2.ID.make(Flag.VECTOR_WORKSPACE_ID) : WorkspaceV2.ID.create()
+  process.env.VECTOR_SERVER_USERNAME = owner.username
+  process.env.VECTOR_SERVER_PASSWORD = owner.password
+  process.env.VECTOR_SERVER_GUEST_USERNAME = guest.username
+  process.env.VECTOR_SERVER_GUEST_PASSWORD = guest.password
+  process.env.VECTOR_SERVER_GUEST_WORKSPACES = workspaceID
+  delete process.env.VECTOR_SERVER_GUEST_SESSIONS
+  process.env.VECTOR_WORKSPACE_ID = workspaceID
+  Flag.VECTOR_SERVER_USERNAME = owner.username
+  Flag.VECTOR_SERVER_PASSWORD = owner.password
+  Flag.VECTOR_WORKSPACE_ID = workspaceID
+  return workspaceID
 }
 
 export const InviteCommand = effectCmd({
   command: "invite",
   builder: (yargs) =>
-    withNetworkOptions(yargs).option("open", {
-      type: "boolean",
-      describe: "open your workspace in the browser",
-      default: true,
-    }),
+    withNetworkOptions(yargs)
+      .option("open", {
+        type: "boolean",
+        describe: "open your workspace in the browser",
+        default: true,
+      })
+      .option("public-url", {
+        type: "string",
+        describe: "HTTPS origin of a tunnel or reverse proxy teammates can reach",
+      }),
   describe: "start the server and print an invite link so teammates can join your live workspace",
   // Same as `web`: instances load per request via the x-vector-directory header.
   instance: false,
   handler: Effect.fn("Cli.invite")(function* (args) {
     const { Server } = yield* Effect.promise(() => import("../../server/server"))
+    const publicUrl = yield* Effect.try({
+      try: () => publicInviteURL(args["public-url"]),
+      catch: (error) => new CliError({ message: error instanceof Error ? error.message : "Invalid --public-url" }),
+    })
 
     // Two credential pairs: yours (reuse VECTOR_SERVER_PASSWORD when set) and a
     // fresh one for guests. Server.listen reads both from process.env through a
@@ -44,44 +81,25 @@ export const InviteCommand = effectCmd({
       username: process.env.VECTOR_SERVER_GUEST_USERNAME || GUEST_USERNAME,
       password: secret(),
     }
-    process.env.VECTOR_SERVER_USERNAME = owner.username
-    process.env.VECTOR_SERVER_PASSWORD = owner.password
-    process.env.VECTOR_SERVER_GUEST_USERNAME = guest.username
-    process.env.VECTOR_SERVER_GUEST_PASSWORD = guest.password
-    Flag.VECTOR_SERVER_USERNAME = owner.username
-    Flag.VECTOR_SERVER_PASSWORD = owner.password
+    configureInviteAccess(owner, guest)
 
-    // Teammates have to reach this machine, so bind every interface unless the
-    // caller picked a hostname explicitly.
-    const resolved = yield* resolveNetworkOptions(args)
-    const opts = hasArg("--hostname") ? resolved : { ...resolved, hostname: "0.0.0.0" }
+    // Password listeners stay loopback by default. Remote sharing terminates TLS
+    // at the explicitly configured public tunnel or reverse proxy.
+    const opts = yield* resolveNetworkOptions(args)
     const server = yield* Effect.promise(() => Server.listen(opts))
 
-    // localhost only when the server is bound to every interface; an explicit
-    // --hostname binds that address alone, so localhost would not answer.
-    const ownerHost = opts.hostname === "0.0.0.0" || opts.hostname === "::" ? "localhost" : opts.hostname
-    const ownerUrl = link(ownerHost, server.port, owner.username, owner.password)
-    const hosts = opts.hostname === "0.0.0.0" ? getNetworkIPs() : [opts.hostname]
+    const ownerUrl = inviteLink(server.url, owner.username, owner.password)
+    const guestUrl = inviteLink(publicUrl ?? server.url, guest.username, guest.password)
 
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()
     UI.println(UI.Style.TEXT_INFO_BOLD + "  Your workspace:    ", UI.Style.TEXT_NORMAL, ownerUrl)
-    if (hosts.length === 0) {
-      UI.println(
-        UI.Style.TEXT_WARNING_BOLD + "  Invite teammates:  ",
-        UI.Style.TEXT_NORMAL,
-        link("localhost", server.port, guest.username, guest.password),
-      )
-      UI.println(UI.Style.TEXT_WARNING + "  No network interface found; replace localhost with a reachable host.")
-    }
-    for (const host of hosts) {
-      UI.println(
-        UI.Style.TEXT_SUCCESS_BOLD + "  Invite teammates:  ",
-        UI.Style.TEXT_NORMAL,
-        link(host, server.port, guest.username, guest.password),
-      )
-    }
+    UI.println(
+      (publicUrl ? UI.Style.TEXT_SUCCESS_BOLD : UI.Style.TEXT_WARNING_BOLD) + "  Invite teammates:  ",
+      UI.Style.TEXT_NORMAL,
+      guestUrl,
+    )
     if (opts.mdns) {
       UI.println(
         UI.Style.TEXT_INFO_BOLD + "  mDNS:              ",
@@ -92,8 +110,10 @@ export const InviteCommand = effectCmd({
     UI.empty()
     UI.println(
       UI.Style.TEXT_DIM +
-        "  The invite link works for anyone on your network; from elsewhere, expose the port through your own tunnel" +
-        ` (tailscale serve ${server.port}, cloudflared tunnel --url http://localhost:${server.port}) and share that host instead.`,
+        (publicUrl
+          ? "  The invite uses your HTTPS public URL while the password listener remains local."
+          : "  This link is local only. To invite teammates, expose the listener through a TLS tunnel" +
+            ` (tailscale serve ${server.port}, cloudflared tunnel --url ${server.url.origin}) and rerun with --public-url https://your-host.`),
     )
     UI.println(
       UI.Style.TEXT_DIM +

@@ -18,8 +18,9 @@ export const Plugin = define({
     yield* ctx.skill.transform(
       Effect.fn(function* (draft) {
         const entries = yield* config.entries()
-        const directories = entries.flatMap((entry) => (entry.type === "directory" ? [entry.path] : []))
-        const items = entries.flatMap((entry) => (entry.type === "document" ? (entry.info.skills ?? []) : []))
+        const executable = entries.filter((entry) => config.executable?.(entry) !== false)
+        const directories = executable.flatMap((entry) => (entry.type === "directory" ? [entry.path] : []))
+        const items = executable.flatMap((entry) => (entry.type === "document" ? (entry.info.skills ?? []) : []))
         for (const directory of directories) {
           draft.source(
             SkillV2.DirectorySource.make({ type: "directory", path: AbsolutePath.make(path.join(directory, "skill")) }),

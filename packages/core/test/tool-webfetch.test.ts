@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Duration, Effect, Fiber, Layer, Schema } from "effect"
+import { Duration, Effect, Exit, Fiber, Layer, Schema } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
@@ -10,6 +10,7 @@ import { SessionV2 } from "@vectordevai/core/session"
 import { ToolRegistry } from "@vectordevai/core/tool/registry"
 import { WebFetchTool } from "@vectordevai/core/tool/webfetch"
 import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
+import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
 import { testEffect } from "./lib/effect"
 import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/tool"
 
@@ -19,15 +20,13 @@ const assertions: PermissionV2.AssertInput[] = []
 let respond = (_request: HttpClientRequest.HttpClientRequest) =>
   Effect.succeed(new Response("hello", { headers: { "content-type": "text/plain" } }))
 
-const http = Layer.succeed(
-  HttpClient.HttpClient,
-  HttpClient.make((request) =>
-    Effect.sync(() => requests.push({ url: request.url, headers: request.headers })).pipe(
-      Effect.andThen(respond(request)),
-      Effect.map((response) => HttpClientResponse.fromWeb(request, response)),
-    ),
+const client = HttpClient.make((request) =>
+  Effect.sync(() => requests.push({ url: request.url, headers: request.headers })).pipe(
+    Effect.andThen(respond(request)),
+    Effect.map((response) => HttpClientResponse.fromWeb(request, response)),
   ),
 )
+const http = Layer.succeed(HttpClient.HttpClient, client)
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
@@ -46,7 +45,6 @@ const toolLayer = (replacements: LayerNode.Replacements = []) =>
     ...replacements,
   ])
 const it = testEffect(toolLayer([[LayerNodePlatform.httpClient, http]]))
-const live = testEffect(toolLayer())
 
 const reset = () => {
   requests.length = 0
@@ -73,6 +71,19 @@ describe("WebFetchTool helpers", () => {
     expect(WebFetchTool.extractTextFromHTML(html)).toBe("Helloworld wide")
     expect(WebFetchTool.convertHTMLToMarkdown(html)).toBe("# Hello\n\nworld **wide**")
   })
+
+  it.effect("blocks private destinations even without an authorization callback", () =>
+    Effect.gen(function* () {
+      reset()
+      const exit = yield* WebFetchRequest.execute(client, HttpClientRequest.get("http://127.0.0.1/private")).pipe(
+        Effect.scoped,
+        Effect.exit,
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(requests).toEqual([])
+    }),
+  )
 })
 
 describe("WebFetchTool registration", () => {
@@ -97,50 +108,84 @@ describe("WebFetchTool registration", () => {
     }),
   )
 
-  it.effect("accepts localhost URLs with the same requested-URL permission check", () =>
+  it.effect("blocks private, link-local, reserved, and mapped destinations before permission or transport", () =>
     Effect.gen(function* () {
-      reset()
       const registry = yield* ToolRegistry.Service
-      const url = "http://localhost/private"
-
-      expect(yield* executeTool(registry, call({ url, format: "text" }))).toEqual({
-        type: "text",
-        value: "hello",
-      })
-      expect(assertions).toMatchObject([
-        { sessionID, action: "webfetch", resources: [url], save: ["*"], metadata: { url, format: "text" } },
-      ])
-      expect(requests.map((request) => request.url)).toEqual([url])
+      for (const url of [
+        "http://localhost/private",
+        "http://127.0.0.1/private",
+        "http://10.0.0.1/private",
+        "http://169.254.169.254/latest/meta-data",
+        "http://192.0.2.1/reserved",
+        "http://[::1]/private",
+        "http://[fe80::1]/private",
+        "http://[::ffff:127.0.0.1]/private",
+        "http://[64:ff9b::7f00:1]/private",
+      ]) {
+        reset()
+        expect(yield* executeTool(registry, call({ url, format: "text" }, `call-${url}`))).toEqual({
+          type: "error",
+          value: `Unable to fetch ${url}`,
+        })
+        expect(assertions).toEqual([])
+        expect(requests).toEqual([])
+      }
     }),
   )
 
-  live.effect("follows redirects while approving only the requested URL", () =>
-    Effect.acquireUseRelease(
-      Effect.sync(() =>
-        Bun.serve({
-          port: 0,
-          fetch: (request) =>
-            new URL(request.url).pathname === "/redirect"
-              ? new Response("", { status: 302, headers: { location: "/target" } })
-              : new Response("redirected", { headers: { "content-type": "text/plain" } }),
-        }),
-      ),
-      (server) =>
-        Effect.gen(function* () {
-          reset()
-          const registry = yield* ToolRegistry.Service
-          const url = new URL("/redirect", server.url).toString()
+  it.effect("reauthorizes each public redirect destination", () =>
+    Effect.gen(function* () {
+      reset()
+      const source = "https://1.1.1.1/redirect"
+      const target = "https://1.0.0.1/target"
+      respond = (request) =>
+        Effect.succeed(
+          request.url === source
+            ? new Response("", { status: 302, headers: { location: target } })
+            : new Response("redirected", { headers: { "content-type": "text/plain" } }),
+        )
+      const registry = yield* ToolRegistry.Service
 
-          expect(yield* executeTool(registry, call({ url, format: "text" }))).toEqual({
-            type: "text",
-            value: "redirected",
-          })
-          expect(assertions).toMatchObject([
-            { sessionID, action: "webfetch", resources: [url], save: ["*"], metadata: { url, format: "text" } },
-          ])
-        }),
-      (server) => Effect.promise(() => server.stop(true)),
-    ),
+      expect(yield* executeTool(registry, call({ url: source, format: "text" }))).toEqual({
+        type: "text",
+        value: "redirected",
+      })
+      expect(assertions.map((assertion) => assertion.resources)).toEqual([[source], [target]])
+      expect(requests.map((request) => request.url)).toEqual([source, target])
+    }),
+  )
+
+  it.effect("blocks a redirect to a private destination before permission or transport", () =>
+    Effect.gen(function* () {
+      reset()
+      const source = "https://1.1.1.1/redirect"
+      const target = "http://169.254.169.254/latest/meta-data"
+      respond = () => Effect.succeed(new Response("", { status: 302, headers: { location: target } }))
+      const registry = yield* ToolRegistry.Service
+
+      expect(yield* executeTool(registry, call({ url: source, format: "text" }))).toEqual({
+        type: "error",
+        value: `Unable to fetch ${source}`,
+      })
+      expect(assertions.map((assertion) => assertion.resources)).toEqual([[source]])
+      expect(requests.map((request) => request.url)).toEqual([source])
+    }),
+  )
+
+  it.effect("stops redirect chains at the fixed hop limit", () =>
+    Effect.gen(function* () {
+      reset()
+      const url = "https://1.1.1.1/redirect"
+      respond = () => Effect.succeed(new Response("", { status: 302, headers: { location: url } }))
+      const registry = yield* ToolRegistry.Service
+
+      expect(yield* executeTool(registry, call({ url, format: "text" }))).toEqual({
+        type: "error",
+        value: `Unable to fetch ${url}`,
+      })
+      expect(requests).toHaveLength(6)
+      expect(assertions).toHaveLength(6)
+    }),
   )
 
   it.effect("rejects non-HTTP schemes before permission or transport", () =>

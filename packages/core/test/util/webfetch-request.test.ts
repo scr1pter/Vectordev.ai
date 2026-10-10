@@ -1,36 +1,33 @@
 import { expect, test } from "bun:test"
 import { Effect, Exit } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { WebFetchRequest } from "../../src/util/webfetch-request"
 
 function fixture(reply: (index: number) => Response) {
   const requests: Array<{ url: string; agent: string | null; accept: string | null }> = []
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch(request) {
+  const client = HttpClient.make((request) =>
+    Effect.sync(() => {
       requests.push({
         url: request.url,
-        agent: request.headers.get("user-agent"),
-        accept: request.headers.get("accept"),
+        agent: request.headers["user-agent"] ?? null,
+        accept: request.headers.accept ?? null,
       })
-      return reply(requests.length)
-    },
-  })
-  return { requests, url: server.url.toString(), [Symbol.dispose]: () => server.stop(true) }
+      return HttpClientResponse.fromWeb(request, reply(requests.length))
+    }),
+  )
+  return { client, requests, url: "https://1.1.1.1/" }
 }
-const execute = (url: string) =>
+const execute = (client: HttpClient.HttpClient, url: string) =>
   Effect.gen(function* () {
-    const client = yield* HttpClient.HttpClient
     const response = yield* WebFetchRequest.execute(
       client,
       HttpClientRequest.get(url).pipe(HttpClientRequest.setHeader("Accept", "text/plain")),
     )
     return yield* response.text
-  }).pipe(Effect.scoped, Effect.provide(FetchHttpClient.layer))
+  }).pipe(Effect.scoped)
 
 test("a challenge with an unfinished body is aborted before one successful retry", async () => {
-  using sample = fixture((index) =>
+  const sample = fixture((index) =>
     index === 1
       ? new Response(
           new ReadableStream({
@@ -42,7 +39,7 @@ test("a challenge with an unfinished body is aborted before one successful retry
         )
       : new Response("restored"),
   )
-  expect(await Effect.runPromise(execute(sample.url).pipe(Effect.timeout("2 seconds")))).toBe("restored")
+  expect(await Effect.runPromise(execute(sample.client, sample.url).pipe(Effect.timeout("2 seconds")))).toBe("restored")
   expect(sample.requests).toHaveLength(2)
   expect(sample.requests[0]?.agent).toMatch(/^Mozilla\/.* Vector\//)
   expect(sample.requests[1]?.agent).toMatch(/^Vector\//)
@@ -50,19 +47,19 @@ test("a challenge with an unfinished body is aborted before one successful retry
 })
 
 test.each([401, 403, 404, 500])("ordinary HTTP %s failures are not retried", async (status) => {
-  using sample = fixture(() => new Response("denied", { status }))
-  expect(Exit.isFailure(await Effect.runPromiseExit(execute(sample.url)))).toBe(true)
+  const sample = fixture(() => new Response("denied", { status }))
+  expect(Exit.isFailure(await Effect.runPromiseExit(execute(sample.client, sample.url)))).toBe(true)
   expect(sample.requests).toHaveLength(1)
 })
 
 test("repeated challenges stop after two requests", async () => {
-  using sample = fixture(() => new Response("challenge", { status: 403, headers: { "cf-mitigated": "challenge" } }))
-  expect(Exit.isFailure(await Effect.runPromiseExit(execute(sample.url)))).toBe(true)
+  const sample = fixture(() => new Response("challenge", { status: 403, headers: { "cf-mitigated": "challenge" } }))
+  expect(Exit.isFailure(await Effect.runPromiseExit(execute(sample.client, sample.url)))).toBe(true)
   expect(sample.requests).toHaveLength(2)
 })
 
 test("a stalled retry remains inside the caller's deadline", async () => {
-  using sample = fixture((index) =>
+  const sample = fixture((index) =>
     index === 1
       ? new Response("challenge", { status: 403, headers: { "cf-mitigated": "challenge" } })
       : new Response(
@@ -73,6 +70,8 @@ test("a stalled retry remains inside the caller's deadline", async () => {
           }),
         ),
   )
-  expect(Exit.isFailure(await Effect.runPromiseExit(execute(sample.url).pipe(Effect.timeout("100 millis"))))).toBe(true)
+  expect(
+    Exit.isFailure(await Effect.runPromiseExit(execute(sample.client, sample.url).pipe(Effect.timeout("100 millis")))),
+  ).toBe(true)
   expect(sample.requests).toHaveLength(2)
 })

@@ -29,6 +29,7 @@ import { ConfigMigration } from "./config/migration"
 import { Flag } from "./flag/flag"
 import { EffectFlock } from "./util/effect-flock"
 import { Teams } from "./teams"
+import { WorkspaceTrust } from "./workspace-trust/workspace-trust"
 
 export class Info extends Schema.Class<Info>("Config.Info")({
   $schema: Schema.optional(Schema.String).annotate({
@@ -122,6 +123,7 @@ export class Directory extends Schema.Class<Directory>("Config.Directory")({
 }) {}
 
 export type Entry = Document | Directory
+export type Scope = "global" | "project"
 
 export function latest<K extends keyof Info>(entries: readonly Entry[], key: K): Info[K] | undefined {
   return entries
@@ -132,6 +134,12 @@ export function latest<K extends keyof Info>(entries: readonly Entry[], key: K):
 export interface Interface {
   /** Returns location config documents and supplemental directories from lowest to highest priority. */
   readonly entries: () => Effect.Effect<Entry[]>
+  /** Returns where a loaded entry came from. Unknown injected entries are treated as global. */
+  readonly scope?: (entry: Entry) => Scope
+  /** Project executable entries require an unchanged explicit workspace approval. */
+  readonly executable?: (entry: Entry) => boolean
+  readonly trust?: () => Effect.Effect<WorkspaceTrust.Status>
+  readonly approve?: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/v2/Config") {}
@@ -144,6 +152,7 @@ const layer = Layer.effect(
     const location = yield* Location.Service
     const policy = yield* Policy.Service
     const teams = yield* Teams.Service
+    const scopes = new WeakMap<Entry, Scope>()
     yield* ConfigMigration.discover({
       directory: location.directory,
       worktree: location.project.directory,
@@ -196,21 +205,48 @@ const layer = Layer.effect(
               stop: location.project.directory,
             })
             .pipe(Effect.orDie)
-    const directories = [
-      globalDirectory,
-      ...discovered
-        .filter((item) => path.basename(item) === ".vector")
-        .toReversed()
-        .map((directory) => AbsolutePath.make(directory)),
-    ]
+    const projectDirectories = discovered
+      .filter((item) => path.basename(item) === ".vector")
+      .toReversed()
+      .map((directory) => AbsolutePath.make(directory))
+    const directories = [globalDirectory, ...projectDirectories]
     // A config closer to the opened directory should win over one higher up.
     // Search starts nearby, so reverse the results before applying them.
     const directPaths = discovered.filter((item) => path.basename(item) !== ".vector").toReversed()
+    const tuiPaths =
+      locationIsGlobal || Flag.VECTOR_DISABLE_PROJECT_CONFIG
+        ? []
+        : yield* fs
+            .up({
+              targets: ["tui.jsonc", "tui.json"],
+              start: location.directory,
+              stop: location.project.directory,
+            })
+            .pipe(Effect.orDie)
     const direct = yield* Effect.forEach(directPaths, loadFile).pipe(
       Effect.orDie,
       Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
     )
     const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
+    for (const entry of supplementary[0] ?? []) scopes.set(entry, "global")
+    for (const entry of direct) scopes.set(entry, "project")
+    for (const group of supplementary.slice(1)) for (const entry of group) scopes.set(entry, "project")
+
+    const workspace =
+      location.project.directory === path.parse(location.project.directory).root
+        ? location.directory
+        : location.project.directory
+    const projectEntries = [...direct, ...supplementary.slice(1).flat()]
+    const trustSnapshot = yield* Effect.promise(() =>
+      WorkspaceTrust.snapshot(workspace, [
+        ...directPaths,
+        ...tuiPaths,
+        ...projectDirectories,
+        ...projectEntries.flatMap((entry) => executableInputs(entry, location.directory)),
+      ]),
+    )
+    const trustStatus = yield* Effect.promise(() => WorkspaceTrust.status(global.state, trustSnapshot))
+    const executable = (entry: Entry) => scopes.get(entry) !== "project" || (!Flag.VECTOR_PURE && trustStatus.trusted)
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.vector` files.
     const team = yield* teams.current().pipe(Effect.orDie)
@@ -230,7 +266,9 @@ const layer = Layer.effect(
     // Team defaults have the same precedence as customer-hosted configuration:
     // personal and project settings remain authoritative on this machine.
     const localConfigs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
-    const configs = [...(teamInfo ? [new Document({ type: "document", info: teamInfo })] : []), ...localConfigs]
+    const teamConfig = teamInfo ? new Document({ type: "document", info: teamInfo }) : undefined
+    if (teamConfig) scopes.set(teamConfig, "global")
+    const configs = [...(teamConfig ? [teamConfig] : []), ...localConfigs]
     // Rules use the opposite order so a user-global rule can override a
     // repository rule. Statement order inside each file stays unchanged.
     yield* policy.load([
@@ -245,6 +283,14 @@ const layer = Layer.effect(
       entries: Effect.fn("Config.entries")(function* () {
         return configs
       }),
+      scope: (entry) => scopes.get(entry) ?? "global",
+      executable,
+      trust: Effect.fn("Config.trust")(function* () {
+        return yield* Effect.promise(() => WorkspaceTrust.status(global.state, trustSnapshot))
+      }),
+      approve: Effect.fn("Config.approve")(function* () {
+        yield* Effect.promise(() => WorkspaceTrust.approve(global.state, trustSnapshot))
+      }),
     })
   }),
 )
@@ -256,3 +302,11 @@ export const node = makeLocationNode({
   layer,
   deps: [FSUtil.node, Global.node, Location.node, Policy.node, EffectFlock.node, Teams.node],
 })
+
+function executableInputs(entry: Entry, directory: string) {
+  if (entry.type !== "document") return []
+  return WorkspaceTrust.executableInputs(entry.info, {
+    source: entry.path ?? path.join(directory, "vector.json"),
+    workspace: directory,
+  })
+}

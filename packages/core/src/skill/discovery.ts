@@ -9,6 +9,7 @@ import { Global } from "../global"
 import { makeGlobalNode } from "../effect/app-node"
 import { httpClient } from "../effect/app-node-platform"
 import { AbsolutePath } from "../schema"
+import { WebFetchRequest } from "../util/webfetch-request"
 
 const skillConcurrency = 4
 const fileConcurrency = 8
@@ -86,10 +87,11 @@ const layer = Layer.effect(
     const download = Effect.fn("SkillDiscovery.download")(function* (url: string, destination: string) {
       if (yield* fs.exists(destination).pipe(Effect.orDie)) return true
       return yield* HttpClientRequest.get(url).pipe(
-        http.execute,
+        (request) => WebFetchRequest.execute(http, request, { authorize: () => Effect.void }),
         Effect.flatMap((response) => response.arrayBuffer),
         Effect.flatMap((body) => fs.writeWithDirs(destination, new Uint8Array(body))),
         Effect.as(true),
+        Effect.scoped,
         Effect.catch((error) =>
           Effect.logError("failed to download skill file", { url, error }).pipe(Effect.as(false)),
         ),
@@ -103,8 +105,9 @@ const layer = Layer.effect(
         const index = new URL("index.json", source).href
         const data = yield* HttpClientRequest.get(index).pipe(
           HttpClientRequest.acceptJson,
-          http.execute,
+          (request) => WebFetchRequest.execute(http, request, { authorize: () => Effect.void }),
           Effect.flatMap(HttpClientResponse.schemaBodyJson(Index)),
+          Effect.scoped,
           Effect.catch((error) =>
             Effect.logError("failed to fetch skill index", { url: index, error }).pipe(Effect.as(undefined)),
           ),

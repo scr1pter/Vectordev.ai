@@ -75,4 +75,21 @@ describe("Reference", () => {
       ])
     }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
   )
+
+  it.effect("rejects private and non-HTTP Git destinations before materialization", () =>
+    Effect.gen(function* () {
+      const references = yield* Reference.Service
+      for (const [name, repository] of [
+        ["loopback", "https://127.0.0.1/owner/repo.git"],
+        ["metadata", "http://169.254.169.254/repo.git"],
+        ["ssh", "ssh://git@1.1.1.1/owner/repo.git"],
+        ["git", "git://1.1.1.1/owner/repo.git"],
+        ["file", "file:///tmp/repo.git"],
+      ]) {
+        yield* references.transform((editor) => editor.add(name, Reference.GitSource.make({ type: "git", repository })))
+      }
+
+      expect(yield* references.list()).toEqual([])
+    }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
+  )
 })

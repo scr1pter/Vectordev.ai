@@ -46,14 +46,15 @@ import {
   submitPullRequestReview,
   viewPullRequest,
 } from "./github-pr"
+import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
+import { assertTrustedRenderer } from "./ipc-security"
 import {
-  getPinchZoomEnabled,
-  getWindowID,
-  isTrustedRendererUrl,
-  setPinchZoomEnabled,
-  setTitlebar,
-  updateTitlebar,
-} from "./windows"
+  openPathApplicationCommand,
+  openPathArguments,
+  openPathCommand,
+  requireOpenPathApplication,
+  requireOpenPathDirectory,
+} from "./open-path"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { runBrowserAgent } from "./browser-agent"
@@ -218,13 +219,6 @@ type Deps = {
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
 }
 
-function assertTrustedRenderer(event: IpcMainEvent | IpcMainInvokeEvent) {
-  if (event.sender.isDestroyed()) throw new Error("The requesting Vector window is closed.")
-  if (!BrowserWindow.fromWebContents(event.sender) || !isTrustedRendererUrl(event.sender.getURL())) {
-    throw new Error("Vector rejected a desktop command from an untrusted page.")
-  }
-}
-
 function handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: T) => R) {
   ipcMain.handle(channel, (event, ...args) => {
     assertTrustedRenderer(event)
@@ -258,8 +252,12 @@ export function registerIpcHandlers(deps: Deps) {
   handle("get-display-backend", () => deps.getDisplayBackend())
   handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) => deps.setDisplayBackend(backend))
   handle("parse-markdown", (_event: IpcMainInvokeEvent, markdown: string) => deps.parseMarkdown(markdown))
-  handle("check-app-exists", (_event: IpcMainInvokeEvent, appName: string) => deps.checkAppExists(appName))
-  handle("resolve-app-path", (_event: IpcMainInvokeEvent, appName: string) => deps.resolveAppPath(appName))
+  handle("check-app-exists", (_event: IpcMainInvokeEvent, value: unknown) => {
+    const application = requireOpenPathApplication(value)
+    if (!application) return false
+    const command = openPathApplicationCommand(application, process.platform)
+    return command ? deps.checkAppExists(command) : false
+  })
   handle("path-exists", async (_event: IpcMainInvokeEvent, targetPath: string) => {
     if (!targetPath?.trim()) return false
     return Boolean(await stat(targetPath).catch(() => undefined))
@@ -831,11 +829,19 @@ export function registerIpcHandlers(deps: Deps) {
     void shell.openExternal(external)
   })
 
-  handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {
-    if (!app) return shell.openPath(path)
+  handle("open-path", async (_event: IpcMainInvokeEvent, path: string, value?: unknown) => {
+    const target = requireOpenPathDirectory(path, Boolean((await stat(path).catch(() => undefined))?.isDirectory()))
+    const application = requireOpenPathApplication(value)
+    if (!application) return shell.openPath(target)
+    const configured = openPathApplicationCommand(application, process.platform)
+    if (!configured) throw new Error(`Vector cannot open paths in ${application} on this platform.`)
+    const resolved = process.platform === "win32" ? await deps.resolveAppPath(configured) : undefined
+    const executable = openPathCommand(application, process.platform, resolved)
     await new Promise<void>((resolve, reject) => {
       const [cmd, args] =
-        process.platform === "darwin" ? (["open", ["-a", app, path]] as const) : ([app, [path]] as const)
+        process.platform === "darwin"
+          ? (["open", ["-a", executable, target]] as const)
+          : ([executable, openPathArguments(application, process.platform, target)] as const)
       execFile(cmd, args, { env: untrustedChildEnvironment() }, (err) => (err ? reject(err) : resolve()))
     })
   })

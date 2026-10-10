@@ -5,11 +5,13 @@ import { HttpClient, HttpClientRequest, HttpRouter, HttpServer } from "effect/un
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { ServerAuth } from "../../src/server/auth"
 import { Authorization, authorizationLayer } from "../../src/server/routes/instance/httpapi/middleware/authorization"
+import { allowsSession, allowsWorkspace, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { EventPaths } from "../../src/server/routes/instance/httpapi/groups/event"
 import { resetDatabase } from "../fixture/db"
-import { disposeAllInstances, TestInstance } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
+import { Server } from "../../src/server/server"
 
 const credential = (username: string, password: string) => ({ username, password: Redacted.make(password) })
 
@@ -60,15 +62,37 @@ describe("ServerAuth guest credentials", () => {
     expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.none() })).toBe(false)
     expect(ServerAuth.required({ ...config, password: Option.none(), guestPassword: Option.some("") })).toBe(false)
   })
+
+  test("guest principals carry only configured workspace and session claims", () => {
+    const principal = ServerAuth.principal("guest", {
+      ...config,
+      guestWorkspaceIDs: ["wrk_allowed"],
+      guestSessionIDs: ["ses_allowed"],
+    })
+    expect(allowsWorkspace(principal, "wrk_allowed")).toBe(true)
+    expect(allowsWorkspace(principal, "wrk_other")).toBe(false)
+    expect(allowsSession(principal, "ses_allowed")).toBe(true)
+    expect(allowsSession(principal, "ses_other")).toBe(false)
+    expect(allowsWorkspace(ServerAuth.principal("owner", config), "wrk_other")).toBe(true)
+  })
 })
 
 const Api = HttpApi.make("test-guest-authorization").add(
   HttpApiGroup.make("test")
-    .add(HttpApiEndpoint.get("probe", "/probe", { success: Schema.String }))
+    .add(
+      HttpApiEndpoint.get("probe", "/probe", { success: Schema.String }),
+      HttpApiEndpoint.get("principal", "/principal", { success: Schema.String }),
+      HttpApiEndpoint.get("owner", "/api/pty", { success: Schema.String }),
+    )
     .middleware(Authorization),
 )
 
-const handlers = HttpApiBuilder.group(Api, "test", (handlers) => handlers.handle("probe", () => Effect.succeed("ok")))
+const handlers = HttpApiBuilder.group(Api, "test", (handlers) =>
+  handlers
+    .handle("probe", () => Effect.succeed("ok"))
+    .handle("principal", () => RequestPrincipal.pipe(Effect.map((principal) => principal.username)))
+    .handle("owner", () => Effect.succeed("owner")),
+)
 
 const apiLayer = HttpRouter.serve(
   HttpApiBuilder.layer(Api).pipe(Layer.provide(handlers), Layer.provide(authorizationLayer)),
@@ -88,6 +112,33 @@ const itOwnerOnly = testEffect(apiLayer.pipe(Layer.provide(ownerOnlyLayer)))
 
 const basic = (username: string, password: string) => ServerAuth.header({ username, password }) ?? ""
 const token = (username: string, password: string) => Buffer.from(`${username}:${password}`).toString("base64")
+
+async function* vectorEvents(body: ReadableStream<Uint8Array>) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  try {
+    while (true) {
+      const boundary = buffer.match(/(?:\r\n|\r|\n){2}/)
+      if (!boundary || boundary.index === undefined) {
+        const value = await reader.read()
+        if (value.done) return
+        buffer += decoder.decode(value.value, { stream: true })
+        continue
+      }
+      const record = buffer.slice(0, boundary.index)
+      buffer = buffer.slice(boundary.index + boundary[0].length)
+      const data = record
+        .split(/\r\n|\r|\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).replace(/^ /, ""))
+      if (data.length) yield JSON.parse(data.join("\n")) as Record<string, unknown>
+    }
+  } finally {
+    await reader.cancel()
+    reader.releaseLock()
+  }
+}
 const getProbe = (headers?: Record<string, string>) =>
   HttpClientRequest.get("/probe").pipe(
     headers ? HttpClientRequest.setHeaders(headers) : (request) => request,
@@ -117,11 +168,39 @@ describe("HttpApi authorization middleware with a guest pair", () => {
     }),
   )
 
-  itGuest.live("accepts the guest pair as an invite-link auth token", () =>
+  itGuest.live("enforces the owner and guest endpoint matrix", () =>
+    Effect.gen(function* () {
+      const [owner, guest] = yield* Effect.all([
+        HttpClientRequest.get("/api/pty").pipe(
+          HttpClientRequest.setHeader("authorization", basic("vector", "owner-secret")),
+          HttpClient.execute,
+        ),
+        HttpClientRequest.get("/api/pty").pipe(
+          HttpClientRequest.setHeader("authorization", basic("guest", "guest-secret")),
+          HttpClient.execute,
+        ),
+      ])
+      expect(owner.status).toBe(200)
+      expect(guest.status).toBe(403)
+    }),
+  )
+
+  itGuest.live("provides the authenticated request principal to handlers", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.get("/principal").pipe(
+        HttpClientRequest.setHeader("authorization", basic("guest", "guest-secret")),
+        HttpClient.execute,
+      )
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toBe("guest")
+    }),
+  )
+
+  itGuest.live("rejects the guest pair as a reusable query credential", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.get(`/probe?auth_token=${encodeURIComponent(token("guest", "guest-secret"))}`)
 
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(401)
     }),
   )
 
@@ -141,8 +220,70 @@ describe("HttpApi authorization middleware with a guest pair", () => {
   )
 })
 
-// Presence on the directory event stream. The test server has no password, so
-// the username comes straight from whatever credential the client presents.
+test("guest session lists and replay routes stay within canonical claims", async () => {
+  await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
+  const guest = { authorization: basic("guest", "guest-secret") }
+  const create = async (workspaceID: string) => {
+    const response = await fetch(new URL("/api/session", listener.url), {
+      method: "POST",
+      headers: owner,
+      body: JSON.stringify({ location: { directory: tmp.path, workspaceID } }),
+    })
+    expect(response.status).toBe(200)
+    return ((await response.json()) as { data: { id: string } }).data.id
+  }
+  let events: AsyncGenerator<Record<string, unknown>> | undefined
+  try {
+    const eventResponse = await fetch(new URL("/api/event", listener.url), { headers: guest })
+    expect(eventResponse.status).toBe(200)
+    events = vectorEvents(eventResponse.body!)
+    expect((await events.next()).value).toMatchObject({ type: "server.connected" })
+
+    const denied = await create("wrk_denied")
+    const allowed = await create("wrk_allowed")
+    expect((await events.next()).value).toMatchObject({ location: { workspaceID: "wrk_allowed" } })
+    const list = await fetch(new URL("/api/session", listener.url), { headers: guest })
+    expect(list.status).toBe(200)
+    expect(((await list.json()) as { data: Array<{ id: string }> }).data.map((item) => item.id)).toEqual([allowed])
+
+    expect((await fetch(new URL(`/api/session/${allowed}`, listener.url), { headers: guest })).status).toBe(200)
+    expect((await fetch(new URL(`/api/session/${denied}`, listener.url), { headers: guest })).status).toBe(403)
+    expect((await fetch(new URL(`/api/session/${allowed}/history`, listener.url), { headers: guest })).status).toBe(200)
+    expect((await fetch(new URL(`/api/session/${denied}/history`, listener.url), { headers: guest })).status).toBe(403)
+
+    expect((await fetch(new URL(`/api/session/${denied}/event`, listener.url), { headers: guest })).status).toBe(403)
+  } finally {
+    await events?.return(undefined)
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
+// Presence on the directory event stream. This test server has no password,
+// so every connection has the default owner principal regardless of headers.
 const EventData = Schema.Struct({
   id: Schema.optional(Schema.String),
   type: Schema.String,
@@ -235,7 +376,7 @@ const it = testEffect(httpApiLayer)
 
 describe("event stream presence", () => {
   it.instance(
-    "announces guests to peers and replays the roster to newcomers",
+    "announces peers and replays the roster to newcomers",
     () =>
       Effect.gen(function* () {
         const { directory } = yield* TestInstance
@@ -245,23 +386,23 @@ describe("event stream presence", () => {
 
         const guest = yield* openAbortableEventStream(directory, { authorization: basic("guest", "guest-secret") })
 
-        // The owner learns about the guest; the guest is not told about itself.
+        // The existing connection learns about the newcomer, which is not told about itself.
         const joined = yield* next(owner.events, "client.joined")
-        expect(joined.properties.username).toBe("guest")
+        expect(joined.properties.username).toBe("vector")
         expect(typeof joined.properties.clientID).toBe("string")
         expect(typeof joined.properties.at).toBe("number")
 
-        // The guest's stream opens with the roster of peers already connected.
+        // The new stream opens with the roster of peers already connected.
         expect(yield* next(guest.events, "server.connected")).toMatchObject({ type: "server.connected" })
         const peer = yield* next(guest.events, "client.joined")
         expect(peer.properties.username).toBe("vector")
         expect(peer.properties.clientID).not.toBe(joined.properties.clientID)
 
-        // Hanging up tells the owner the guest left.
+        // Hanging up tells the existing peer that the newcomer left.
         guest.close()
         const left = yield* next(owner.events, "client.left")
         expect(left.properties.clientID).toBe(joined.properties.clientID)
-        expect(left.properties.username).toBe("guest")
+        expect(left.properties.username).toBe("vector")
       }),
     { git: true, config: { formatter: false, lsp: false } },
     20_000,

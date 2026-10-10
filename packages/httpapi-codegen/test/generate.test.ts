@@ -48,6 +48,24 @@ describe("HttpApiCodegen.generate", () => {
     )
   })
 
+  test("rejects endpoint paths that can escape the configured origin", () => {
+    for (const path of ["//attacker.test/steal", "/\\attacker.test/steal", "https://attacker.test/steal"]) {
+      expect(() =>
+        compileContract(api(HttpApiEndpoint.make("GET")("get", path as never, { success: Schema.String }))),
+      ).toThrow("Invalid endpoint path: session.get")
+    }
+  })
+
+  test("emits same-origin guards before generated clients are constructed", () => {
+    const contract = compileContract(api(HttpApiEndpoint.get("get", "/session", { success: Schema.String })))
+    const promise = emitPromise(contract).files.find((file) => file.path === "client.ts")?.content
+    const effect = emitEffect(contract).files.find((file) => file.path === "client.ts")?.content
+
+    expect(promise).toContain('if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\\\"))')
+    expect(effect).toContain("const Api = sameOriginApi(HttpApi.make")
+    expect(effect).toContain("Refusing cross-origin endpoint path")
+  })
+
   test("allows Promise outputs to use an authoritative imported wire type", () => {
     const contract = compileContract(
       api(HttpApiEndpoint.get("events", "/event", { success: HttpApiSchema.StreamSse({ data: Schema.Unknown }) })),
@@ -84,7 +102,7 @@ describe("HttpApiCodegen.generate", () => {
       'import { Api } from "@example/api"',
     )
     expect(output.files.find((file) => file.path === "client.ts")?.content).toContain(
-      "HttpApiClient.ForApi<typeof Api>",
+      "HttpApiClient.ForApi<typeof SafeApi>",
     )
   })
 

@@ -241,7 +241,7 @@ describe("plugin.loader.shared", () => {
     ),
   )
 
-  it.live("resolves npm plugin specs with explicit and default versions", () =>
+  it.live("rejects bare mutable npm plugin specs and resolves exact versions", () =>
     withTmp(
       async (dir) => {
         const acme = path.join(dir, "node_modules", "acme-plugin")
@@ -276,7 +276,7 @@ describe("plugin.loader.shared", () => {
           try {
             yield* load(tmp.path)
 
-            expect(add.mock.calls).toContainEqual(["acme-plugin@latest"])
+            expect(add.mock.calls).not.toContainEqual(["acme-plugin"])
             expect(add.mock.calls).toContainEqual(["scope-plugin@2.3.4"])
           } finally {
             add.mockRestore()

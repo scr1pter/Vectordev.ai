@@ -1,5 +1,6 @@
 import { ComponentProps, splitProps } from "solid-js"
 import { usePlatform } from "@/context/platform"
+import { safeExternalUrl } from "@/utils/external-url"
 
 export interface LinkProps extends Omit<ComponentProps<"a">, "href"> {
   href: string
@@ -11,14 +12,16 @@ export function Link(props: LinkProps) {
 
   return (
     <a
-      href={local.href}
+      {...rest}
+      href={safeExternalUrl(local.href)}
+      target="_blank"
+      rel="noopener noreferrer"
       class={`text-text-strong underline ${local.class ?? ""}`}
       onClick={(event) => {
-        if (!local.href) return
         event.preventDefault()
-        platform.openLink(local.href)
+        const href = safeExternalUrl(local.href)
+        if (href) platform.openLink(href)
       }}
-      {...rest}
     >
       {local.children}
     </a>

@@ -16,6 +16,7 @@ import { Integration } from "../../integration"
 import { ModelV2 } from "../../model"
 import { ProviderV2 } from "../../provider"
 import { SessionSchema } from "../schema"
+import { WorkspaceTrust } from "../../workspace-trust/workspace-trust"
 
 export class ModelNotSelectedError extends Schema.TaggedErrorClass<ModelNotSelectedError>()(
   "SessionRunnerModel.ModelNotSelectedError",
@@ -66,11 +67,25 @@ export class UnsupportedApiError extends Schema.TaggedErrorClass<UnsupportedApiE
   }
 }
 
+export class UnsafeEndpointError extends Schema.TaggedErrorClass<UnsafeEndpointError>()(
+  "SessionRunnerModel.UnsafeEndpointError",
+  {
+    providerID: ProviderV2.ID,
+    modelID: ModelV2.ID,
+    url: Schema.String,
+  },
+) {
+  override get message() {
+    return `Provider endpoint must use HTTPS or loopback HTTP: ${this.url}`
+  }
+}
+
 export type Error =
   | ModelNotSelectedError
   | ModelUnavailableError
   | VariantUnavailableError
   | UnsupportedApiError
+  | UnsafeEndpointError
   | Integration.AuthorizationError
 
 export interface Interface {
@@ -145,7 +160,9 @@ const withDefaults = (model: ModelV2.Info, route: AnyRoute) => {
   return route.with({
     provider: model.providerID,
     endpoint: model.api.url === undefined ? undefined : { baseURL: model.api.url },
-    headers: model.request.headers,
+    headers: Object.fromEntries(
+      Object.entries(model.request.headers).filter(([, value]) => !/\{(?:env|file):[^}]+\}/.test(value)),
+    ),
     http: { body: httpBody },
     limits: { context: model.limit.context, output: model.limit.output },
   })
@@ -181,7 +198,7 @@ const apiName = (model: ModelV2.Info) =>
 export const fromCatalogModel = (
   model: ModelV2.Info,
   credential?: Credential.Value,
-): Effect.Effect<Model, UnsupportedApiError> => {
+): Effect.Effect<Model, UnsupportedApiError | UnsafeEndpointError> => {
   const resolved =
     credential?.type !== "key" || credential.metadata === undefined
       ? model
@@ -189,6 +206,11 @@ export const fromCatalogModel = (
           Object.assign(draft.request.body, credential.metadata)
         })
   const key = apiKey(resolved, credential)
+  if (resolved.api.url && !WorkspaceTrust.remoteUrlAllowed(resolved.api.url)) {
+    return Effect.fail(
+      new UnsafeEndpointError({ providerID: resolved.providerID, modelID: resolved.id, url: resolved.api.url }),
+    )
+  }
   if (resolved.api.type === "aisdk" && resolved.api.package === "@ai-sdk/openai") {
     return Effect.succeed(
       withPricing(

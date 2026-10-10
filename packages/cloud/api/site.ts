@@ -1,10 +1,12 @@
 import { head, list, BlobNotFoundError } from "@vercel/blob"
 import {
   hasFileExtension,
-  isValidFilePath,
   isValidSlug,
   mimeFor,
-  promotionPrefix,
+  publicationPathError,
+  siteResponseHeaders,
+  tenantPromotionPrefix,
+  tenantSitePath,
 } from "../src/shared"
 
 const NOT_FOUND_HTML = `<!doctype html>
@@ -32,9 +34,9 @@ function notFound(): Response {
   })
 }
 
-async function resolveBlobUrl(slug: string, path: string): Promise<string | undefined> {
+async function resolveBlobUrl(tenant: string, project: string, slug: string, path: string): Promise<string | undefined> {
   try {
-    const blob = await head(`sites/${slug}/${path}`)
+    const blob = await head(tenantSitePath(tenant, project, slug, path))
     return blob.url
   } catch (error) {
     if (error instanceof BlobNotFoundError) return undefined
@@ -44,10 +46,11 @@ async function resolveBlobUrl(slug: string, path: string): Promise<string | unde
 
 const productionCache = new Map<string, { slug: string; expiresAt: number }>()
 
-async function resolveProductionSlug(project: string): Promise<string | undefined> {
-  const cached = productionCache.get(project)
+async function resolveProductionSlug(tenant: string, project: string): Promise<string | undefined> {
+  const key = `${tenant}/${project}`
+  const cached = productionCache.get(key)
   if (cached && cached.expiresAt > Date.now()) return cached.slug
-  const records = await list({ prefix: promotionPrefix(project), limit: 1000 })
+  const records = await list({ prefix: tenantPromotionPrefix(tenant, project), limit: 1000 })
   const latest = records.blobs.toSorted(
     (a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime(),
   )[0]
@@ -55,7 +58,7 @@ async function resolveProductionSlug(project: string): Promise<string | undefine
   const payload = await fetch(latest.url).then((response) => response.json()).catch(() => undefined)
   const slug = payload && typeof payload === "object" ? Reflect.get(payload, "slug") : undefined
   if (typeof slug !== "string" || !isValidSlug(slug)) return undefined
-  productionCache.set(project, { slug, expiresAt: Date.now() + 15_000 })
+  productionCache.set(key, { slug, expiresAt: Date.now() + 15_000 })
   return slug
 }
 
@@ -65,23 +68,24 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   const url = new URL(request.url)
+  const tenant = url.searchParams.get("tenant") ?? ""
   const project = url.searchParams.get("project") ?? ""
-  const slug = project
-    ? isValidSlug(project) ? await resolveProductionSlug(project) ?? "" : ""
-    : url.searchParams.get("slug") ?? ""
+  const requestedSlug = url.searchParams.get("slug") ?? ""
+  const slug = requestedSlug ||
+    (isValidSlug(tenant) && isValidSlug(project) ? await resolveProductionSlug(tenant, project) ?? "" : "")
   const rawPath = (url.searchParams.get("path") ?? "").replace(/^\/+|\/+$/g, "")
 
-  if (!isValidSlug(slug)) return notFound()
+  if (!isValidSlug(tenant) || !isValidSlug(project) || !isValidSlug(slug)) return notFound()
   const path = rawPath === "" ? "index.html" : rawPath
-  if (!isValidFilePath(path)) return notFound()
+  if (publicationPathError(path, true)) return notFound()
 
   let resolvedPath = path
-  let blobUrl = await resolveBlobUrl(slug, resolvedPath)
+  let blobUrl = await resolveBlobUrl(tenant, project, slug, resolvedPath)
 
   // SPA-ish fallback: extensionless routes fall back to the site's index.html.
   if (!blobUrl && !hasFileExtension(path)) {
     resolvedPath = "index.html"
-    blobUrl = await resolveBlobUrl(slug, resolvedPath)
+    blobUrl = await resolveBlobUrl(tenant, project, slug, resolvedPath)
   }
   if (!blobUrl) return notFound()
 
@@ -90,9 +94,6 @@ export default async function handler(request: Request): Promise<Response> {
 
   return new Response(upstream.body, {
     status: 200,
-    headers: {
-      "content-type": upstream.headers.get("content-type") ?? mimeFor(resolvedPath),
-      "cache-control": "public, max-age=60",
-    },
+    headers: siteResponseHeaders(upstream.headers.get("content-type") ?? mimeFor(resolvedPath)),
   })
 }

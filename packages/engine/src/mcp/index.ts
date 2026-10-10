@@ -42,6 +42,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@vectordevai/schema/mcp-event"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 
 const DEFAULT_TIMEOUT = 30_000
 // Longest single stderr chunk that is written to the log.
@@ -221,10 +222,8 @@ export function resolveMcpHeaders(
 }
 
 function remoteURL(value: string) {
-  if (!URL.canParse(value)) return
+  if (!WorkspaceTrust.remoteUrlAllowed(value)) return
   const url = new URL(value)
-  if (url.protocol !== "http:" && url.protocol !== "https:") return
-  if (url.username || url.password) return
   return url
 }
 
@@ -854,7 +853,7 @@ const layer = Layer.effect(
         return {
           status: {
             status: "failed",
-            error: "MCP remote URLs must use HTTP or HTTPS and cannot contain embedded credentials.",
+            error: "MCP remote URLs must use HTTPS (or loopback HTTP) and cannot contain embedded credentials.",
           } satisfies Status,
         }
       }

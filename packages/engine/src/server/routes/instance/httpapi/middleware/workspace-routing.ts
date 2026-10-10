@@ -14,6 +14,11 @@ import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InvalidRequestError } from "../errors"
 import { outdatedDirectoryHeader, OUTDATED_CLIENT_MESSAGE } from "@vectordevai/server/location-headers"
+import {
+  allowsSession,
+  allowsWorkspace,
+  RequestPrincipal,
+} from "@vectordevai/protocol/middleware/authorization"
 
 // Query fields this middleware reads from the URL. Spread into every
 // endpoint query schema in groups that apply WorkspaceRoutingMiddleware,
@@ -32,12 +37,13 @@ type RemoteTarget = Extract<Target, { type: "remote" }>
 type RequestPlan = Data.TaggedEnum<{
   InvalidWorkspace: {}
   MissingWorkspace: { readonly workspaceID: string }
-  Local: { readonly directory: string; readonly workspaceID?: WorkspaceV2.ID }
+  Local: { readonly directory: string; readonly workspaceID?: WorkspaceV2.ID; readonly sessionID?: string }
   Remote: {
     readonly request: HttpServerRequest.HttpServerRequest
     readonly workspace: Workspace.Info
     readonly target: RemoteTarget
     readonly url: URL
+    readonly sessionID?: string
   }
 }>
 const RequestPlan = Data.taggedEnum<RequestPlan>()
@@ -154,11 +160,12 @@ function planWorkspaceRequest(
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
   workspace: Workspace.Info,
+  sessionID?: string,
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
   return Effect.gen(function* () {
     const target = yield* resolveTarget(workspace)
-    if (target.type === "remote") return RequestPlan.Remote({ request, workspace, target, url })
-    return RequestPlan.Local({ directory: target.directory, workspaceID: workspace.id })
+    if (target.type === "remote") return RequestPlan.Remote({ request, workspace, target, url, sessionID })
+    return RequestPlan.Local({ directory: target.directory, workspaceID: workspace.id, sessionID })
   })
 }
 
@@ -181,12 +188,13 @@ function planRequest(
     }
 
     if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, url)) {
-      return yield* planWorkspaceRequest(request, url, workspace)
+      return yield* planWorkspaceRequest(request, url, workspace, session?.id)
     }
 
     return RequestPlan.Local({
       directory: session?.directory || defaultDirectory(request, url),
       workspaceID: envWorkspaceID ?? workspaceID,
+      sessionID: session?.id,
     })
   })
 }
@@ -196,22 +204,38 @@ function routeWorkspace<E>(
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
   plan: RequestPlan,
 ): Effect.Effect<HttpServerResponse.HttpServerResponse, E, Socket.WebSocketConstructor | Workspace.Service> {
-  return RequestPlan.$match(plan, {
-    InvalidWorkspace: () =>
-      Effect.succeed(
-        HttpServerResponse.jsonUnsafe(
-          new InvalidRequestError({
-            message: "Invalid workspace query parameter",
-            kind: "Query",
-            field: "workspace",
-          }),
-          { status: 400 },
+  return Effect.gen(function* () {
+    const principal = yield* RequestPrincipal
+    const allowed = RequestPlan.$match(plan, {
+      InvalidWorkspace: () => true,
+      MissingWorkspace: () => principal.kind === "owner",
+      Remote: ({ workspace, sessionID }) =>
+        allowsWorkspace(principal, workspace.id) || (sessionID !== undefined && allowsSession(principal, sessionID)),
+      Local: ({ workspaceID, sessionID }) =>
+        allowsWorkspace(principal, workspaceID) || (sessionID !== undefined && allowsSession(principal, sessionID)),
+    })
+    if (!allowed)
+      return HttpServerResponse.jsonUnsafe(
+        { _tag: "ForbiddenError", message: "Guest credential is not scoped to this workspace or session" },
+        { status: 403 },
+      )
+    return yield* RequestPlan.$match(plan, {
+      InvalidWorkspace: () =>
+        Effect.succeed(
+          HttpServerResponse.jsonUnsafe(
+            new InvalidRequestError({
+              message: "Invalid workspace query parameter",
+              kind: "Query",
+              field: "workspace",
+            }),
+            { status: 400 },
+          ),
         ),
-      ),
-    MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
-    Remote: ({ request, workspace, target, url }) => proxyRemote(client, request, workspace, target, url),
-    Local: ({ directory, workspaceID }) =>
-      effect.pipe(Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory, workspaceID }))),
+      MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
+      Remote: ({ request, workspace, target, url }) => proxyRemote(client, request, workspace, target, url),
+      Local: ({ directory, workspaceID }) =>
+        effect.pipe(Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory, workspaceID }))),
+    })
   })
 }
 
@@ -221,7 +245,10 @@ function routeHttpApiWorkspace<E>(
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   E,
-  Session.Service | Workspace.Service | HttpServerRequest.HttpServerRequest | Socket.WebSocketConstructor
+  | Session.Service
+  | Workspace.Service
+  | HttpServerRequest.HttpServerRequest
+  | Socket.WebSocketConstructor
 > {
   return Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest

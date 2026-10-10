@@ -3,7 +3,7 @@ export * as Shell from "./shell"
 import path from "path"
 import { spawn, type ChildProcess } from "child_process"
 import { readFile } from "fs/promises"
-import { statSync } from "fs"
+import { realpathSync, statSync } from "fs"
 import { setTimeout as sleep } from "node:timers/promises"
 import { untrustedChildEnvironment } from "./child-environment"
 import { Flag } from "./flag/flag"
@@ -88,13 +88,27 @@ function rooted(file: string) {
   return path.isAbsolute(FSUtil.windowsPath(file))
 }
 
-function resolve(file: string) {
-  const shell = full(file)
+function resolve(file: string, opts?: { canonical?: boolean; directory?: string }) {
+  const shell = full(
+    opts?.directory && !rooted(file) && (file.includes("/") || file.includes("\\"))
+      ? path.resolve(opts.directory, file)
+      : file,
+  )
   if (rooted(shell)) {
-    if (stat(shell)?.isFile()) return shell
+    const target = opts?.canonical ? canonical(shell) : shell
+    if (target && stat(target)?.isFile()) return target
     return
   }
-  return which(shell) ?? undefined
+  const target = which(shell) ?? undefined
+  return target && opts?.canonical ? canonical(target) : target
+}
+
+function canonical(file: string) {
+  try {
+    return realpathSync(file)
+  } catch {
+    return
+  }
 }
 
 function win() {
@@ -113,9 +127,9 @@ async function unix() {
   return ["/bin/bash", "/bin/zsh", "/bin/sh"]
 }
 
-function select(file: string | undefined, opts?: { acceptable?: boolean }) {
+function select(file: string | undefined, opts?: { acceptable?: boolean; canonical?: boolean; directory?: string }) {
   if (file && (!opts?.acceptable || ok(file))) {
-    const shell = resolve(file)
+    const shell = resolve(file, opts)
     if (shell) return shell
   }
   if (process.platform === "win32") return win()[0]
@@ -204,8 +218,8 @@ export function args(file: string, command: string, cwd: string) {
 let defaultPreferred: string | undefined
 let defaultAcceptable: string | undefined
 
-export function preferred(configShell?: string) {
-  if (configShell) return select(configShell)
+export function preferred(configShell?: string, directory?: string) {
+  if (configShell) return select(configShell, { canonical: true, directory })
   defaultPreferred ??= select(process.env.SHELL)
   return defaultPreferred
 }

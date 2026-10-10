@@ -1,11 +1,12 @@
 import type { CliRenderer } from "@opentui/core"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { readFile, rm, writeFile } from "node:fs/promises"
+import { readFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import type { Stream } from "node:stream"
 import { resolveZedDbPath, resolveZedSelection } from "./editor-zed"
+import { createPrivateTempFile } from "./util/private-temp"
 
 type EditorStdio = "inherit" | "pipe" | "ignore" | number | Stream
 
@@ -23,20 +24,23 @@ export function normalizePromptContent(content: string) {
   return content
 }
 
+export async function createEditorTempFile(value: string) {
+  return createPrivateTempFile("vector-editor-", "prompt.md", value)
+}
+
 export async function openEditor(input: { value: string; renderer: CliRenderer; cwd?: string; stdin?: EditorStdio }) {
   const editor = process.env.VISUAL || process.env.EDITOR
   if (!editor) return
-  const file = path.join(os.tmpdir(), `${Date.now()}.md`)
-  await writeFile(file, input.value)
+  const temporary = await createEditorTempFile(input.value)
   input.renderer.suspend()
   input.renderer.currentRenderBuffer.clear()
   try {
     await new Promise<void>((resolve, reject) => {
       const parts = editor.split(" ")
-      const child = spawn(parts[0]!, [...parts.slice(1), file], {
+      const child = spawn(parts[0]!, [...parts.slice(1), temporary.file], {
         cwd: input.cwd && existsSync(input.cwd) ? input.cwd : process.cwd(),
         stdio: [input.stdin ?? "inherit", "inherit", "inherit"],
-        shell: process.platform === "win32",
+        shell: false,
       })
       child.on("error", reject)
       child.on("exit", (code, signal) => {
@@ -44,9 +48,9 @@ export async function openEditor(input: { value: string; renderer: CliRenderer; 
         reject(new Error(`Editor exited with ${signal ? `signal ${signal}` : `code ${code}`}`))
       })
     })
-    return (await readFile(file, "utf8")) || undefined
+    return (await readFile(temporary.file, "utf8")) || undefined
   } finally {
-    await rm(file, { force: true }).catch(() => {})
+    await temporary.cleanup().catch(() => {})
     input.renderer.currentRenderBuffer.clear()
     input.renderer.resume()
     input.renderer.requestRender()
@@ -75,10 +79,12 @@ export function discoverEditorConnection(directory: string) {
             : []
           const score = Math.max(0, ...folders.map(contains))
           if (!score) return []
+          const authToken = typeof value.authToken === "string" ? value.authToken.trim() : ""
+          if (!authToken) return []
           return [
             {
               url: `ws://127.0.0.1:${port}`,
-              authToken: typeof value.authToken === "string" ? value.authToken : undefined,
+              authToken,
               source: `lock:${port}`,
               score,
               mtime: statSync(file).mtimeMs,

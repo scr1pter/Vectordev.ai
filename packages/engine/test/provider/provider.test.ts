@@ -11,7 +11,13 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Global } from "@vectordevai/core/global"
-import { disposeAllInstances, provideInstanceEffect, tmpdirScoped, TestInstance } from "../fixture/fixture"
+import {
+  disposeAllInstances,
+  provideInstanceEffect,
+  tmpdirScoped,
+  TestInstance,
+  trustWorkspace,
+} from "../fixture/fixture"
 import { markPluginDependenciesReady } from "../fixture/plugin"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
@@ -1981,6 +1987,7 @@ it.effect("plugin config providers persist after instance dispose", () =>
         ].join("\n"),
       ),
     )
+    yield* Effect.promise(() => trustWorkspace(dir))
 
     const loadAndList = Effect.gen(function* () {
       const plugin = yield* Plugin.Service
@@ -2026,6 +2033,7 @@ it.instance(
         ].join("\n"),
       ),
     )
+    yield* Effect.promise(() => trustWorkspace(instance.directory))
 
     yield* set("ANTHROPIC_API_KEY", "test-anthropic-key")
     yield* set("OPENAI_API_KEY", "test-openai-key")
@@ -2149,6 +2157,7 @@ it.instance("plugin-defined provider models retain custom provenance with a stor
     `,
       ),
     )
+    yield* Effect.promise(() => trustWorkspace(instance.directory))
     yield* set("VECTOR_AUTH_CONTENT", JSON.stringify({ "acme-gateway": { type: "api", key: "fixture-company-key" } }))
     const providers = yield* list
     expect(providers[ProviderV2.ID.make("acme-gateway")]).toMatchObject({

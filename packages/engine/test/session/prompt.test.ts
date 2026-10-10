@@ -8,7 +8,7 @@ import { LLMEvent } from "@vectordevai/llm"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { expect } from "bun:test"
+import { expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -54,13 +54,15 @@ import { Truncate } from "@/tool/truncate"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Format } from "../../src/format"
-import { TestInstance } from "../fixture/fixture"
+import { TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { Global } from "@vectordevai/core/global"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -357,7 +359,10 @@ const writeConfig = Effect.fn("test.writeConfig")(function* (dir: string, config
 const useServerConfig = Effect.fn("test.useServerConfig")(function* (config: (url: string) => Partial<ConfigV1.Info>) {
   const { directory: dir } = yield* TestInstance
   const llm = yield* TestLLMServer
+  const file = path.join(dir, "vector.json")
   yield* writeConfig(dir, config(llm.url))
+  const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [file]))
+  yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
   return { dir, llm }
 })
 
@@ -2328,6 +2333,43 @@ unix(
 )
 
 unixNoLLMServer(
+  "command ! expansion respects shell permission denial",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const { prompt, chat } = yield* boot()
+
+        const exit = yield* prompt.command({ sessionID: chat.id, command: "blocked", arguments: "" }).pipe(Effect.exit)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(yield* Effect.promise(() => Bun.file(path.join(dir, "slash-shell-bypass")).exists())).toBe(false)
+      }),
+    ),
+  {
+    git: true,
+    config: {
+      ...cfg,
+      permission: { bash: "deny" },
+      command: {
+        blocked: {
+          template: "Blocked: !`touch slash-shell-bypass`",
+        },
+      },
+    },
+  },
+  30_000,
+)
+
+test("command arguments cannot inject shell interpolation", () => {
+  const injected = "!`touch slash-argument-injection`"
+  const prepared = SessionPrompt.prepareCommandTemplate("Inspect: $ARGUMENTS", injected)
+
+  expect(prepared.shellCommands).toEqual([])
+  expect(prepared.render([])).toContain(injected)
+})
+
+unixNoLLMServer(
   "cancel interrupts shell and resolves cleanly",
   () =>
     withSh(() =>
@@ -2612,6 +2654,87 @@ noLLMServer.instance(
 )
 
 // Missing file handling
+
+noLLMServer.instance(
+  "task-generated sensitive text attachments require read approval",
+  () =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({
+        title: "Child",
+        parentID: parent.id,
+        agent: "general",
+        permission: [{ permission: "read", pattern: "task-secret.pem", action: "ask" }],
+      })
+      yield* writeText(path.join(directory, "task-secret.pem"), "TASK_ATTACHMENT_SECRET=hidden")
+      const parts = yield* prompt.resolvePromptParts("Inspect @task-secret.pem")
+      expect(parts.some((part) => part.type === "file")).toBe(true)
+
+      const fiber = yield* prompt
+        .prompt({ sessionID: child.id, agent: "general", model: ref, noReply: true, parts })
+        .pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const request = (yield* permission.list()).find((item) => item.permission === "read")
+          if (request) return request
+          const exit = fiber.pollUnsafe()
+          if (!exit) return
+          return yield* Effect.fail(
+            new Error(
+              `attachment prompt completed before approval: ${Exit.isFailure(exit) ? Cause.pretty(exit.cause) : JSON.stringify(exit.value.parts)}`,
+            ),
+          )
+        }),
+        "task attachment did not request sensitive read permission",
+        "15 seconds",
+      )
+
+      expect(request.patterns).toContain("task-secret.pem")
+      yield* permission.reply({ requestID: request.id, reply: "reject" })
+      expect(Exit.isSuccess(yield* Fiber.await(fiber))).toBe(true)
+    }),
+  { git: true, config: cfg },
+)
+
+noLLMServer.instance(
+  "task-generated external binary attachments require external-directory approval",
+  () =>
+    Effect.gen(function* () {
+      const external = yield* tmpdirScoped()
+      const image = path.join(external, "outside.png")
+      yield* (yield* FSUtil.Service).writeWithDirs(
+        image,
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({ title: "Child", parentID: parent.id, agent: "general" })
+      const parts = yield* prompt.resolvePromptParts(`Inspect @${image}`)
+
+      const fiber = yield* prompt
+        .prompt({ sessionID: child.id, agent: "general", model: ref, noReply: true, parts })
+        .pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        permission.list().pipe(Effect.map((items) => items.find((item) => item.permission === "external_directory"))),
+        "task attachment did not request external-directory permission",
+        "15 seconds",
+      )
+
+      expect(request.patterns.some((pattern) => pattern.includes(path.basename(external)))).toBe(true)
+      yield* permission.reply({ requestID: request.id, reply: "reject" })
+      expect(Exit.isSuccess(yield* Fiber.await(fiber))).toBe(true)
+    }),
+  { config: cfg },
+)
 
 noLLMServer.instance(
   "does not fail the prompt when a file part is missing",

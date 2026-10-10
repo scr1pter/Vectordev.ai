@@ -5,6 +5,7 @@ import { Api } from "../api"
 import { SessionsCursor } from "@vectordevai/protocol/groups/session"
 import {
   ConflictError,
+  ForbiddenError,
   InvalidCursorError,
   InvalidRequestError,
   MessageNotFoundError,
@@ -13,6 +14,11 @@ import {
   UnknownError,
 } from "@vectordevai/protocol/errors"
 import { AbsolutePath } from "@vectordevai/core/schema"
+import {
+  allowsSession,
+  allowsWorkspace,
+  RequestPrincipal,
+} from "@vectordevai/protocol/middleware/authorization"
 
 const DefaultSessionsLimit = 50
 const DefaultSessionHistoryLimit = 50
@@ -74,10 +80,14 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
               limit: ctx.query.limit ?? DefaultSessionsLimit,
             })
             .pipe(Effect.catch((error) => Effect.logError("Failed to list Vector sessions", error).pipe(Effect.as([]))))
-          const first = sessions[0]
-          const last = sessions.at(-1)
+          const principal = yield* RequestPrincipal
+          const allowed = sessions.filter(
+            (item) => allowsSession(principal, item.id) || allowsWorkspace(principal, item.location.workspaceID),
+          )
+          const first = allowed[0]
+          const last = allowed.at(-1)
           return {
-            data: sessions,
+            data: allowed,
             cursor: {
               previous: first
                 ? SessionsCursor.make({
@@ -106,6 +116,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.create",
         Effect.fn(function* (ctx) {
+          const principal = yield* RequestPrincipal
+          if (principal.kind === "guest" && !allowsWorkspace(principal, ctx.payload.location?.workspaceID))
+            return yield* new ForbiddenError({ message: "Guest sessions require an allowed workspace" })
           return {
             data: yield* session.create({
               id: ctx.payload.id,
@@ -119,10 +132,17 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.active",
         Effect.fn(function* () {
+          const principal = yield* RequestPrincipal
+          const allowed = yield* Effect.filter(Array.from(yield* session.active), (sessionID) =>
+            allowsSession(principal, sessionID)
+              ? Effect.succeed(true)
+              : session.get(sessionID).pipe(
+                  Effect.map((item) => allowsWorkspace(principal, item.location.workspaceID)),
+                  Effect.catch(() => Effect.succeed(false)),
+                ),
+          )
           return {
-            data: Object.fromEntries(
-              Array.from(yield* session.active, (sessionID) => [sessionID, { type: "running" as const }]),
-            ),
+            data: Object.fromEntries(allowed.map((sessionID) => [sessionID, { type: "running" as const }])),
           }
         }),
       )

@@ -65,6 +65,26 @@ if [ ! -x "$SOURCE/Contents/MacOS/Vector" ]; then
   fail "The downloaded update does not contain a valid Vector.app"
 fi
 
+if ! /usr/bin/codesign --verify --deep --strict --verbose=2 "$SOURCE"; then
+  fail "The downloaded update has an invalid code signature"
+fi
+
+CURRENT_TEAM=$(/usr/bin/codesign -d --verbose=4 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p' | /usr/bin/head -n 1)
+SOURCE_TEAM=$(/usr/bin/codesign -d --verbose=4 "$SOURCE" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p' | /usr/bin/head -n 1)
+if [ -z "$CURRENT_TEAM" ] || [ "$SOURCE_TEAM" != "$CURRENT_TEAM" ]; then
+  fail "The downloaded update does not match Vector's signing identity"
+fi
+
+CURRENT_REQUIREMENT=$(/usr/bin/codesign -d -r- "$TARGET" 2>&1 | /usr/bin/sed -n 's/^designated => //p' | /usr/bin/head -n 1)
+SOURCE_REQUIREMENT=$(/usr/bin/codesign -d -r- "$SOURCE" 2>&1 | /usr/bin/sed -n 's/^designated => //p' | /usr/bin/head -n 1)
+if [ -z "$CURRENT_REQUIREMENT" ] || [ "$SOURCE_REQUIREMENT" != "$CURRENT_REQUIREMENT" ]; then
+  fail "The downloaded update does not match Vector's designated requirement"
+fi
+
+if ! /usr/sbin/spctl --assess --type execute --verbose=2 "$SOURCE"; then
+  fail "The downloaded update is not notarized for this Mac"
+fi
+
 rm -rf "$BACKUP"
 if [ -e "$TARGET" ] && ! mv "$TARGET" "$BACKUP"; then
   fail "Could not move the current app aside"

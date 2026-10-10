@@ -40,7 +40,14 @@ function testLayer(
   )
   return AppNodeBuilder.build(LayerNode.group([Config.node, Policy.node]), [
     [Location.node, locationLayer],
-    [Global.node, Global.layerWith({ config: globalDirectory, home: path.join(directory, "home") })],
+    [
+      Global.node,
+      Global.layerWith({
+        config: globalDirectory,
+        home: path.join(directory, "home"),
+        state: path.join(path.dirname(globalDirectory), "state"),
+      }),
+    ],
     ...(team
       ? [
           [
@@ -885,6 +892,41 @@ describe("Config", () => {
               }),
             ),
           )
+        })
+      }),
+    ),
+  )
+
+  it.live("requires explicit trust for project executable config while keeping global config executable", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const project = path.join(tmp.path, "project")
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(global, { recursive: true })
+            await fs.mkdir(project, { recursive: true })
+            await fs.writeFile(path.join(global, "vector.json"), JSON.stringify({ plugins: ["global@1.0.0"] }))
+            await fs.writeFile(path.join(project, "vector.json"), JSON.stringify({ plugins: ["project@1.0.0"] }))
+          })
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const documents = (yield* config.entries()).filter(
+              (entry): entry is Config.Document => entry.type === "document",
+            )
+            const globalEntry = documents.find((entry) => entry.path === path.join(global, "vector.json"))!
+            const projectEntry = documents.find((entry) => entry.path === path.join(project, "vector.json"))!
+
+            expect(config.scope?.(globalEntry)).toBe("global")
+            expect(config.executable?.(globalEntry)).toBe(true)
+            expect(config.scope?.(projectEntry)).toBe("project")
+            expect(config.executable?.(projectEntry)).toBe(false)
+            expect((yield* config.trust!()).trusted).toBe(false)
+          }).pipe(Effect.provide(testLayer(project, global, project)))
         })
       }),
     ),

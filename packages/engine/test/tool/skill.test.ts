@@ -11,7 +11,7 @@ import type { Permission } from "../../src/permission"
 import type { Tool } from "@/tool/tool"
 import { SkillTool } from "../../src/tool/skill"
 import { ToolRegistry } from "@/tool/registry"
-import { disposeAllInstances, TestInstance } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
 
@@ -51,6 +51,7 @@ Use this skill.
         ),
       )
       yield* Effect.promise(() => Bun.write(path.join(skill, "scripts", "demo.txt"), "demo"))
+      yield* Effect.promise(() => trustWorkspace(dir))
 
       const home = process.env.VECTOR_TEST_HOME
       process.env.VECTOR_TEST_HOME = dir

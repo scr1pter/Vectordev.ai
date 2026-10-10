@@ -32,6 +32,7 @@ env:
 
 jobs:
   build:
+    environment: production-release
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +50,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ inputs.source_revision }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-bun
         with:
@@ -63,6 +65,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$VECTOR_SOURCE_REVISION"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$VECTOR_SOURCE_REVISION" origin/main || {
+            echo "Container source must be part of protected main."
+            exit 1
+          }
           bun packages/cloud/src/cli-container.ts
       - name: Build and run on the target architecture
         env:
@@ -122,6 +129,7 @@ jobs:
     needs: build
     if: inputs.mode == 'publish'
     runs-on: ubuntu-24.04
+    environment: production-release
     timeout-minutes: 10
     permissions:
       contents: read

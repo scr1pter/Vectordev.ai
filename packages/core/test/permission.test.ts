@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Deferred, Effect, Fiber, Layer } from "effect"
 import { AgentV2 } from "@vectordevai/core/agent"
 import { Database } from "@vectordevai/core/database/database"
@@ -103,6 +103,14 @@ function waitForRequest() {
 }
 
 describe("PermissionV2", () => {
+  test("preserves deny ceilings across trust tiers without changing ordered rules within a tier", () => {
+    const deny: PermissionV2.Ruleset = [{ action: "bash", resource: "*", effect: "deny" }]
+    const allow: PermissionV2.Ruleset = [{ action: "bash", resource: "pwd", effect: "allow" }]
+
+    expect(PermissionV2.evaluate("bash", "pwd", deny, allow).effect).toBe("deny")
+    expect(PermissionV2.evaluate("bash", "pwd", [...deny, ...allow]).effect).toBe("allow")
+  })
+
   it.effect("returns the evaluated effect and only queues prompts", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])
@@ -262,6 +270,18 @@ describe("PermissionV2", () => {
       yield* Fiber.join(fiber)
       expect(yield* service.list()).toEqual([])
       expect(yield* service.get(request.id)).toBeUndefined()
+    }),
+  )
+
+  it.effect("does not let a pending approval override a newly configured deny", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const { service, fiber, request } = yield* waitForRequest()
+      yield* setRules([{ action: "read", resource: "*", effect: "deny" }])
+      yield* service.reply({ requestID: request.id, reply: "once" })
+
+      expect(yield* Fiber.join(fiber).pipe(Effect.flip)).toBeInstanceOf(PermissionV2.DeniedError)
+      expect(yield* service.list()).toEqual([])
     }),
   )
 

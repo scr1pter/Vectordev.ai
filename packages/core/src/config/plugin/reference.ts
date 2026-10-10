@@ -20,7 +20,7 @@ export const Plugin = define({
       Effect.fn(function* (draft) {
         const entries = new Map<string, Reference.Source>()
         for (const doc of (yield* config.entries()).filter(
-          (entry): entry is Config.Document => entry.type === "document",
+          (entry): entry is Config.Document => entry.type === "document" && config.executable?.(entry) !== false,
         )) {
           const directory = doc.path ? path.dirname(doc.path) : location.directory
           for (const [name, entry] of Object.entries(doc.info.references ?? {})) {

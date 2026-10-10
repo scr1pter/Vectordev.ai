@@ -305,6 +305,7 @@ describe("HttpApi Server.listen", () => {
 
   test("plugin client requests reuse the listening server instance", async () => {
     await using tmp = await tmpdir({
+      trusted: true,
       init: async (directory) => {
         const plugin = path.join(directory, "plugin.ts")
         const initialized = path.join(directory, "initialized.txt")
@@ -413,6 +414,10 @@ describe("HttpApi Server.listen", () => {
       scopedWs.close(1000)
 
       await expectSocketRejected(socketURL(listener, info.id, tmp.path, "not-a-ticket"))
+      await expectSocketRejected(socketURL(listener, info.id, tmp.path))
+      await expectSocketRejected(socketURL(listener, info.id, tmp.path), {
+        headers: { authorization: authorization(), origin: "https://evil.example" },
+      })
 
       const reusable = await connectTicket(listener, info.id, tmp.path)
       const ws = await openSocket(socketURL(listener, info.id, tmp.path, reusable.ticket))
@@ -430,7 +435,7 @@ describe("HttpApi Server.listen", () => {
     } finally {
       await stop(listener, "timed out cleaning up rejected ticket listener").catch(() => undefined)
     }
-  })
+  }, 20_000)
 
   testPty("keeps PTY websocket tickets optional when server auth is disabled", async () => {
     await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })

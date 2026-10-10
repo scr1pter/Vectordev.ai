@@ -21,7 +21,7 @@ import {
 import { useGlobal } from "@/context/global"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
-import { normalizeServerUrl, ServerConnection, useServer } from "@/context/server"
+import { insecurePasswordReason, normalizeServerUrl, ServerConnection, useServer } from "@/context/server"
 import { type ServerHealth, useCheckServerHealth } from "@/utils/server-health"
 import { useSettings } from "@/context/settings"
 import { useTabs } from "@/context/tabs"
@@ -86,9 +86,17 @@ function useServerPreview() {
     const http: ServerConnection.HttpBase = { url: normalized }
     if (username) http.username = username
     if (password) http.password = password
+    if (insecurePasswordReason(http)) {
+      update({ status: false, checking: false })
+      return
+    }
     update({ status: undefined, checking: true })
     scheduler.schedule(
-      () => checkServerHealth(http).then((result) => result.healthy, () => false),
+      () =>
+        checkServerHealth(http).then(
+          (result) => result.healthy,
+          () => false,
+        ),
       (healthy) => update({ status: healthy, checking: false }),
     )
   }
@@ -186,6 +194,11 @@ export function useServerManagementController(options: { onSelect?: () => void; 
       if (store.addServer.name.trim()) conn.displayName = store.addServer.name.trim()
       if (store.addServer.password) conn.http.password = store.addServer.password
       if (store.addServer.password && store.addServer.username) conn.http.username = store.addServer.username
+      const insecure = insecurePasswordReason(conn.http)
+      if (insecure) {
+        setStore("addServer", { error: insecure })
+        return
+      }
       const result = await checkServerHealth(conn.http)
       if (!result.healthy) {
         setStore("addServer", { error: language.t("dialog.server.add.error") })
@@ -229,6 +242,11 @@ export function useServerManagementController(options: { onSelect?: () => void; 
         type: "http",
         displayName: name,
         http: { url: normalized, username, password },
+      }
+      const insecure = insecurePasswordReason(conn.http)
+      if (insecure) {
+        setStore("editServer", { error: insecure })
+        return
       }
       const result = await checkServerHealth(conn.http)
       if (!result.healthy) {
@@ -306,9 +324,7 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   const handleAddChange = (value: string) => {
     if (addMutation.isPending) return
     setStore("addServer", { url: value, error: "" })
-    void previewStatus(value, store.addServer.username, store.addServer.password, (next) =>
-      setStore("addServer", next),
-    )
+    void previewStatus(value, store.addServer.username, store.addServer.password, (next) => setStore("addServer", next))
   }
 
   const handleAddNameChange = (value: string) => {
@@ -319,17 +335,13 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   const handleAddUsernameChange = (value: string) => {
     if (addMutation.isPending) return
     setStore("addServer", { username: value, error: "" })
-    void previewStatus(store.addServer.url, value, store.addServer.password, (next) =>
-      setStore("addServer", next),
-    )
+    void previewStatus(store.addServer.url, value, store.addServer.password, (next) => setStore("addServer", next))
   }
 
   const handleAddPasswordChange = (value: string) => {
     if (addMutation.isPending) return
     setStore("addServer", { password: value, error: "" })
-    void previewStatus(store.addServer.url, store.addServer.username, value, (next) =>
-      setStore("addServer", next),
-    )
+    void previewStatus(store.addServer.url, store.addServer.username, value, (next) => setStore("addServer", next))
   }
 
   const handleEditChange = (value: string) => {
@@ -348,17 +360,13 @@ export function useServerManagementController(options: { onSelect?: () => void; 
   const handleEditUsernameChange = (value: string) => {
     if (editMutation.isPending) return
     setStore("editServer", { username: value, error: "" })
-    void previewStatus(store.editServer.value, value, store.editServer.password, (next) =>
-      setStore("editServer", next),
-    )
+    void previewStatus(store.editServer.value, value, store.editServer.password, (next) => setStore("editServer", next))
   }
 
   const handleEditPasswordChange = (value: string) => {
     if (editMutation.isPending) return
     setStore("editServer", { password: value, error: "" })
-    void previewStatus(store.editServer.value, store.editServer.username, value, (next) =>
-      setStore("editServer", next),
-    )
+    void previewStatus(store.editServer.value, store.editServer.username, value, (next) => setStore("editServer", next))
   }
 
   const mode = createMemo<"list" | "add" | "edit">(() => {

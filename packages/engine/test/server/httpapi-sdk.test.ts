@@ -23,7 +23,7 @@ import { errorMessage } from "../../src/util/error"
 import { TestLLMServer } from "../lib/llm-server"
 import path from "path"
 import { resetDatabase } from "../fixture/db"
-import { disposeAllInstances, TestInstance, tmpdirScoped } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance, tmpdirScoped, trustWorkspace } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { testProviderConfig } from "../lib/test-provider"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -293,7 +293,7 @@ description: A project skill visible to REST API prompts.
 
 # Project REST Skill
 `,
-    ),
+    ).pipe(Effect.andThen(Effect.promise(() => trustWorkspace(dir)))),
   )
 }
 

@@ -17,6 +17,8 @@ import type { InstanceContext } from "../../src/project/instance-context"
 import { InstanceRuntime } from "../../src/project/instance-runtime"
 import { InstanceStore } from "../../src/project/instance-store"
 import { TestLLMServer } from "../lib/llm-server"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { Global } from "@vectordevai/core/global"
 
 const noopBootstrap = Layer.succeed(InstanceBootstrap.Service, InstanceBootstrap.Service.of({ run: Effect.void }))
 export const testInstanceStoreLayer = LayerNode.compile(InstanceStore.node, [
@@ -78,6 +80,7 @@ async function stop(dir: string) {
 type TmpDirOptions<T> = {
   git?: boolean
   config?: Partial<ConfigV1.Info>
+  trusted?: boolean
   init?: (dir: string) => Promise<T>
   dispose?: (dir: string) => Promise<T>
 }
@@ -103,6 +106,7 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
   }
   const realpath = sanitizePath(await fs.realpath(dirpath))
   const extra = await options?.init?.(realpath)
+  if (options?.trusted === true || (options?.config && options.trusted !== false)) await trustWorkspace(realpath)
   const result = {
     [Symbol.asyncDispose]: async () => {
       try {
@@ -122,6 +126,7 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
 export function tmpdirScoped<E = never, R = never>(options?: {
   git?: boolean
   config?: Partial<ConfigV1.Info> | (() => Partial<ConfigV1.Info>)
+  trusted?: boolean
   init?: (directory: string) => Effect.Effect<void, E, R>
 }) {
   return Effect.gen(function* () {
@@ -160,6 +165,8 @@ export function tmpdirScoped<E = never, R = never>(options?: {
     }
 
     if (options?.init) yield* options.init(dir)
+    if (options?.trusted === true || (options?.config && options.trusted !== false))
+      yield* Effect.promise(() => trustWorkspace(dir))
 
     return dir
   })
@@ -182,7 +189,11 @@ export const disposeAllInstancesEffect = InstanceStore.Service.use((store) => st
 
 export function provideTmpdirInstance<A, E, R>(
   self: (path: string) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: Partial<ConfigV1.Info> | (() => Partial<ConfigV1.Info>) },
+  options?: {
+    git?: boolean
+    config?: Partial<ConfigV1.Info> | (() => Partial<ConfigV1.Info>)
+    trusted?: boolean
+  },
 ) {
   return Effect.gen(function* () {
     const path = yield* tmpdirScoped(options)
@@ -202,6 +213,7 @@ export const withTmpdirInstance =
   <E2 = never, R2 = never>(options?: {
     git?: boolean
     config?: Partial<ConfigV1.Info> | (() => Partial<ConfigV1.Info>)
+    trusted?: boolean
     init?: (directory: string) => Effect.Effect<void, E2, R2>
   }) =>
   <A, E, R>(self: Effect.Effect<A, E, R>) =>
@@ -212,7 +224,7 @@ export const withTmpdirInstance =
 
 export function provideTmpdirServer<A, E, R>(
   self: (input: { dir: string; llm: TestLLMServer["Service"] }) => Effect.Effect<A, E, R>,
-  options?: { git?: boolean; config?: (url: string) => Partial<ConfigV1.Info> },
+  options?: { git?: boolean; config?: (url: string) => Partial<ConfigV1.Info>; trusted?: boolean },
 ): Effect.Effect<
   A,
   E | PlatformError.PlatformError,
@@ -223,6 +235,18 @@ export function provideTmpdirServer<A, E, R>(
     return yield* provideTmpdirInstance((dir) => self({ dir, llm }), {
       git: options?.git,
       config: options?.config?.(llm.url),
+      trusted: options?.trusted,
     })
   })
+}
+
+export async function trustWorkspace(directory: string) {
+  const snapshot = await WorkspaceTrust.snapshot(directory, [
+    path.join(directory, "vector.json"),
+    path.join(directory, "vector.jsonc"),
+    path.join(directory, "tui.json"),
+    path.join(directory, "tui.jsonc"),
+    path.join(directory, ".vector"),
+  ])
+  await WorkspaceTrust.approve(Global.Path.state, snapshot)
 }

@@ -1,9 +1,17 @@
 export * as ServerAuth from "./auth"
-export { unauthorizedMessage } from "@vectordevai/server/auth"
+export {
+  assertSecurePasswordTransport,
+  isOwnerOnlyRequest,
+  ownerPrincipal,
+  principal,
+  unauthorizedMessage,
+} from "@vectordevai/server/auth"
 
 import { Flag } from "@vectordevai/core/flag/flag"
 import { legacyName } from "@vectordevai/core/flag/legacy"
-import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted } from "effect"
+import { SessionV2 } from "@vectordevai/core/session"
+import { WorkspaceV2 } from "@vectordevai/core/workspace"
+import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 export type Credentials = {
   password?: string
@@ -27,6 +35,8 @@ export type Info = {
   readonly legacyUsername?: string
   readonly guestPassword?: Option.Option<string>
   readonly guestUsername?: string
+  readonly guestWorkspaceIDs?: ReadonlyArray<string>
+  readonly guestSessionIDs?: ReadonlyArray<string>
 }
 
 export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthConfig") {
@@ -45,9 +55,15 @@ export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthC
           username: EffectConfig.string("VECTOR_SERVER_USERNAME").pipe(EffectConfig.option),
           guestPassword: EffectConfig.string("VECTOR_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
           guestUsername: EffectConfig.string("VECTOR_SERVER_GUEST_USERNAME").pipe(EffectConfig.withDefault("guest")),
+          guestWorkspaces: EffectConfig.string("VECTOR_SERVER_GUEST_WORKSPACES").pipe(EffectConfig.option),
+          guestSessions: EffectConfig.string("VECTOR_SERVER_GUEST_SESSIONS").pipe(EffectConfig.option),
         })
         return Config.of({
-          ...config,
+          password: config.password,
+          guestPassword: config.guestPassword,
+          guestUsername: config.guestUsername,
+          guestWorkspaceIDs: claims(config.guestWorkspaces, Schema.decodeUnknownOption(WorkspaceV2.ID)),
+          guestSessionIDs: claims(config.guestSessions, Schema.decodeUnknownOption(SessionV2.ID)),
           username: Option.getOrElse(config.username, () => "vector"),
           // The earlier product defaulted the owner username to its own name, and saved
           // connections and scripts still send it. The password is still required.
@@ -104,4 +120,13 @@ export function headers(credentials?: Credentials) {
   const authorization = header(credentials)
   if (!authorization) return undefined
   return { Authorization: authorization }
+}
+
+function claims<A extends string>(input: Option.Option<string>, decode: (input: unknown) => Option.Option<A>) {
+  if (Option.isNone(input)) return []
+  return input.value
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value !== "")
+    .flatMap((value): A[] => Option.match(decode(value), { onNone: () => [], onSome: (claim) => [claim] }))
 }

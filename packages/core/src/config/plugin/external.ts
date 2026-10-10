@@ -50,6 +50,7 @@ export const Plugin = define({
       const configured: { package: string; options?: Record<string, any> }[] = []
 
       for (const entry of yield* config.entries()) {
+        if (config.executable?.(entry) === false) continue
         if (entry.type === "document") {
           const directory = entry.path ? path.dirname(entry.path) : location.directory
           for (const item of entry.info.plugins ?? []) {
@@ -83,6 +84,10 @@ export const Plugin = define({
       for (const ref of configured) {
         yield* Effect.gen(function* () {
           if (borrowedOAuthPlugin(ref.package)) return
+          if (!path.isAbsolute(ref.package) && !pinned(ref.package)) {
+            yield* Effect.logWarning(`Skipped mutable plugin package ${ref.package}; use an exact version`)
+            return
+          }
           const entrypoint = path.isAbsolute(ref.package)
             ? pathToFileURL(ref.package).href
             : (yield* npm.add(ref.package)).entrypoint
@@ -115,3 +120,8 @@ export const Plugin = define({
     }).pipe(Effect.forkScoped({ startImmediately: true }))
   }),
 })
+
+function pinned(spec: string) {
+  const match = spec.match(/^(?:@[^/]+\/[^@]+|[^@/][^@]*)@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/)
+  return match !== null
+}

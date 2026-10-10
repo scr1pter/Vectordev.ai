@@ -9,14 +9,19 @@ import { eq } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { InvalidRequestError, SessionNotFoundError } from "@vectordevai/protocol/errors"
+import { ForbiddenError, InvalidRequestError, SessionNotFoundError } from "@vectordevai/protocol/errors"
+import {
+  allowsSession,
+  allowsWorkspace,
+  RequestPrincipal,
+} from "@vectordevai/protocol/middleware/authorization"
 import type { LocationServices } from "../location"
 
 export class SessionLocationMiddleware extends HttpApiMiddleware.Service<
   SessionLocationMiddleware,
   { provides: LocationServices }
 >()("@vector/HttpApiSessionLocation", {
-  error: [InvalidRequestError, SessionNotFoundError],
+  error: [InvalidRequestError, SessionNotFoundError, ForbiddenError],
 }) {}
 
 const decodeSessionID = Schema.decodeUnknownEffect(SessionV2.ID)
@@ -50,6 +55,9 @@ export const sessionLocationLayer = Layer.effect(
             sessionID,
             message: `Session not found: ${sessionID}`,
           })
+        const principal = yield* RequestPrincipal
+        if (!allowsSession(principal, sessionID) && !allowsWorkspace(principal, row.workspaceID ?? undefined))
+          return yield* new ForbiddenError({ message: "Guest credential is not scoped to this session" })
 
         return yield* effect.pipe(
           Effect.provide(

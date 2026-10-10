@@ -31,6 +31,12 @@ import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
 
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
+/** @internal Exported for focused permission-policy tests. */
+export function runPermissionReply(auto: boolean, permission: string): "once" | "reject" {
+  if (auto && permission !== "doom_loop") return "once"
+  return "reject"
+}
+
 function pick(value: string | undefined): ModelInput | undefined {
   if (!value) return undefined
   const [providerID, ...rest] = value.split("/")
@@ -949,7 +955,9 @@ export const RunCommand = effectCmd({
               const permission = event.properties
               if (!(await inRun(permission.sessionID))) continue
 
-              if (auto) {
+              // Repeated identical tool calls are a safety stop, not ordinary capability approval. Even the
+              // dangerous auto mode must stop rather than turn a stuck model loop into unbounded execution.
+              if (runPermissionReply(auto, permission.permission) === "once") {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",

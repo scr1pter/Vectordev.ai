@@ -8,7 +8,7 @@ import { Cause, Effect, Exit, Fiber } from "effect"
 import { bootstrap as cliBootstrap } from "../../src/cli/bootstrap"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
 import { InstanceStore } from "../../src/project/instance-store"
-import { disposeAllInstances, tmpdirScoped } from "../fixture/fixture"
+import { disposeAllInstances, tmpdirScoped, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { waitGlobalBusEvent } from "../server/global-bus"
 
@@ -57,6 +57,7 @@ const bootstrapFixture = Effect.gen(function* () {
       }),
     ),
   )
+  yield* Effect.promise(() => trustWorkspace(dir))
   return { directory: dir, marker }
 })
 

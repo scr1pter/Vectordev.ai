@@ -4,25 +4,29 @@ import { createStore } from "solid-js/store"
 import {
   createServerProjects,
   isInternalProjectPath,
+  insecurePasswordReason,
+  isLoopbackServerUrl,
   isManagedAgentWorkspacePath,
   isUsableProjectPath,
   migrateCanonicalLocalServerState,
   nextServerAfterRemoval,
+  normalizeServerUrl,
   pruneMissingLocalProjects,
+  redactStoredServer,
   resolveServerList,
+  resolveRouteServer,
   ServerConnection,
   validatedRouteProjectPath,
 } from "./server"
 import { ServerScope } from "@/utils/server-scope"
 
 describe("resolveServerList", () => {
-  test("lets startup auth_token credentials override a persisted same-url server", () => {
+  test("lets ephemeral startup credentials override persisted metadata for the same server", () => {
     const list = resolveServerList({
       stored: [{ url: "https://server.example.test" }],
       props: [
         {
           type: "http",
-          authToken: true,
           http: {
             url: "https://server.example.test",
             username: "vector",
@@ -39,11 +43,10 @@ describe("resolveServerList", () => {
       username: "vector",
       password: "secret",
     })
-    expect(list[0]?.type === "http" ? list[0].authToken : false).toBe(true)
     expect(ServerConnection.key(list[0]!) as string).toBe("https://server.example.test")
   })
 
-  test("keeps persisted credentials when startup has no auth_token", () => {
+  test("drops reusable passwords loaded from persisted server state", () => {
     const list = resolveServerList({
       stored: [
         {
@@ -57,12 +60,53 @@ describe("resolveServerList", () => {
 
     expect(list).toHaveLength(1)
     expect(list[0]?.type).toBe("http")
-    expect(list[0]?.http).toEqual({
-      url: "https://server.example.test",
-      username: "vector",
-      password: "saved",
-    })
-    expect(list[0]?.type === "http" ? list[0].authToken : true).toBeUndefined()
+    expect(list[0]?.http).toEqual({ url: "https://server.example.test", username: "vector" })
+  })
+})
+
+test("explicit server routes fail closed when the server key is unknown", () => {
+  const known = { type: "http", http: { url: "https://known.example.test" } } as const
+  expect(resolveRouteServer([known], "https://known.example.test")).toBe(known)
+  expect(resolveRouteServer([known], "https://unknown.example.test")).toBeUndefined()
+  expect(resolveRouteServer([known], undefined)).toBeUndefined()
+})
+
+test("server persistence strips reusable passwords without changing the live connection", () => {
+  const connection = {
+    type: "http",
+    displayName: "Remote",
+    http: { url: "https://engine.example.test", username: "vector", password: "secret" },
+  } as const
+  expect(redactStoredServer(connection)).toEqual({
+    type: "http",
+    displayName: "Remote",
+    http: { url: "https://engine.example.test", username: "vector" },
+  })
+  expect(connection.http.password).toBe("secret")
+  expect(JSON.stringify(redactStoredServer(connection))).not.toContain("secret")
+})
+
+describe("server transport policy", () => {
+  test("defaults loopback addresses to HTTP and remote addresses to HTTPS", () => {
+    expect(normalizeServerUrl("localhost:4096")).toBe("http://localhost:4096")
+    expect(normalizeServerUrl("127.0.0.1:4096")).toBe("http://127.0.0.1:4096")
+    expect(normalizeServerUrl("engine.example.test:4096")).toBe("https://engine.example.test:4096")
+    expect(normalizeServerUrl("ftp://engine.example.test")).toBeUndefined()
+    expect(normalizeServerUrl("http://vector:secret@localhost:4096")).toBeUndefined()
+    expect(normalizeServerUrl("https://engine.example.test?auth_token=secret")).toBeUndefined()
+  })
+
+  test("recognizes loopback and rejects password authentication over remote plaintext", () => {
+    expect(isLoopbackServerUrl("http://127.2.3.4:4096")).toBe(true)
+    expect(isLoopbackServerUrl("http://[::1]:4096")).toBe(true)
+    expect(insecurePasswordReason({ url: "http://localhost:4096", password: "secret" })).toBeUndefined()
+    expect(insecurePasswordReason({ url: "https://engine.example.test", password: "secret" })).toBeUndefined()
+    expect(insecurePasswordReason({ url: "http://engine.example.test", password: "secret" })).toBe(
+      "Password-authenticated remote servers require HTTPS.",
+    )
+    expect(insecurePasswordReason({ url: "https://vector:secret@engine.example.test" })).toBe(
+      "Server credentials must not be included in URLs.",
+    )
   })
 })
 

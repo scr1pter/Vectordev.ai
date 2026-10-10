@@ -1,4 +1,4 @@
-import { authTokenFromCredentials } from "@/utils/server"
+import { insecurePasswordReason } from "@/context/server"
 
 export function terminalWebSocketURL(input: {
   url: string
@@ -9,8 +9,9 @@ export function terminalWebSocketURL(input: {
   sameOrigin?: boolean
   username?: string
   password?: string
-  authToken?: boolean
 }) {
+  const insecure = insecurePasswordReason({ url: input.url, password: input.password })
+  if (insecure) throw new Error(insecure)
   const next = new URL(`${input.url}/pty/${input.id}/connect`)
   next.searchParams.set("directory", input.directory)
   next.searchParams.set("cursor", String(input.cursor))
@@ -19,10 +20,5 @@ export function terminalWebSocketURL(input: {
     next.searchParams.set("ticket", input.ticket)
     return next
   }
-  if (input.password && (!input.sameOrigin || input.authToken))
-    next.searchParams.set(
-      "auth_token",
-      authTokenFromCredentials({ username: input.username, password: input.password }),
-    )
   return next
 }

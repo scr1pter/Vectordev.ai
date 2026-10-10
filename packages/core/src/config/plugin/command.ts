@@ -20,6 +20,7 @@ export const Plugin = define({
     yield* ctx.command.transform(
       Effect.fn(function* (draft) {
         const documents = yield* Effect.forEach(yield* config.entries(), (entry) => {
+          if (config.executable?.(entry) === false) return Effect.succeed([])
           if (entry.type === "document") return Effect.succeed([{ commands: entry.info.commands }])
           return loadDirectory(fs, entry.path).pipe(
             Effect.map((commands) => [

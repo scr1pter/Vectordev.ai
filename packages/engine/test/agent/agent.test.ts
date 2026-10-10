@@ -2,7 +2,7 @@ import { afterEach, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Cause, Effect, Exit, Layer } from "effect"
 import path from "path"
-import { disposeAllInstances, TestInstance } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Agent } from "../../src/agent/agent"
 import { Auth } from "../../src/auth"
@@ -274,7 +274,7 @@ it.instance(
         expect(action("read", ".env")).toBe("ask")
         expect(action("read", "keys/server.pem")).toBe("ask")
         expect(action("bash", "git status --short")).toBe("ask")
-        expect(action("bash", "bun test")).toBe("allow")
+        expect(action("bash", "bun test")).toBe("ask")
         // An ask narrows a command the specialist may run; it never reopens one it may not.
         expect(action("bash", "git push origin main")).toBe("deny")
         expect(action("bash", "git difftool -y --extcmd=sh")).toBe("deny")
@@ -291,6 +291,20 @@ it.instance(
       },
     },
   },
+)
+
+it.instance("read-only specialists require approval before repository-controlled test and build scripts", () =>
+  Effect.gen(function* () {
+    for (const name of ["explore", "review", "judge", "security"] as const) {
+      const agent = yield* load((svc) => svc.get(name))
+      const action = (command: string) => Permission.evaluate("bash", command, agent!.permission).action
+      expect(action("bun test --preload ./malicious.ts")).toBe("ask")
+      expect(action("bun run build -- --config ./malicious.ts")).toBe("ask")
+      expect(action("npm test -- --require ./malicious.cjs")).toBe("ask")
+      expect(action("pnpm run build --config ./malicious.js")).toBe("ask")
+      expect(action("pytest -p malicious_plugin")).toBe("ask")
+    }
+  }),
 )
 
 it.instance(
@@ -775,6 +789,7 @@ description: Permission skill.
 `,
         ),
       )
+      yield* Effect.promise(() => trustWorkspace(test.directory))
 
       const home = process.env.VECTOR_TEST_HOME
       process.env.VECTOR_TEST_HOME = test.directory

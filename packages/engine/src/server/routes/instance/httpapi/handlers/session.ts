@@ -44,6 +44,11 @@ import {
 } from "../groups/session"
 import { InvalidRequestError, PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
+import {
+  allowsSession,
+  allowsWorkspace,
+  RequestPrincipal,
+} from "@vectordevai/protocol/middleware/authorization"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -71,7 +76,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
       const directory = ctx.query.directory ? yield* InstanceState.directory : undefined
-      return yield* session
+      const sessions = yield* session
         .list({
           directory: ctx.query.scope === "project" ? undefined : directory,
           scope: ctx.query.scope,
@@ -89,10 +94,24 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
             }).pipe(Effect.as([])),
           ),
         )
+      const principal = yield* RequestPrincipal
+      return sessions.filter(
+        (item) => allowsSession(principal, item.id) || allowsWorkspace(principal, item.workspaceID),
+      )
     })
 
     const status = Effect.fn("SessionHttpApi.status")(function* () {
-      return Object.fromEntries(yield* statusSvc.list())
+      const principal = yield* RequestPrincipal
+      const statuses = yield* statusSvc.list()
+      const allowed = yield* Effect.filter(statuses, ([sessionID]) =>
+        allowsSession(principal, sessionID)
+          ? Effect.succeed(true)
+          : session.get(sessionID).pipe(
+              Effect.map((item) => allowsWorkspace(principal, item.workspaceID)),
+              Effect.catch(() => Effect.succeed(false)),
+            ),
+      )
+      return Object.fromEntries(allowed)
     })
 
     const requireSession = Effect.fn("SessionHttpApi.requireSession")(function* (sessionID: SessionID) {

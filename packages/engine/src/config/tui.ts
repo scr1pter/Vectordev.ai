@@ -24,6 +24,7 @@ import { ConfigVariable } from "@/config/variable"
 import { ConfigDependencies } from "./dependencies"
 import { FormatError, FormatUnknownError } from "@/cli/error"
 import { TuiConfig } from "@vectordevai/tui/config"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 
 export const Info = TuiConfig.Info
 export type Info = TuiConfig.Info
@@ -48,9 +49,11 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@vector/TuiConfig") {}
 
 function pluginScope(file: string, ctx: { directory: string }): ConfigPlugin.Scope {
-  if (Filesystem.contains(ctx.directory, file)) return "local"
-  // if (ctx.worktree !== "/" && Filesystem.contains(ctx.worktree, file)) return "local"
-  return "global"
+  if (Filesystem.contains(Global.Path.config, file)) return "global"
+  if (Filesystem.contains(path.join(Global.Path.home, ".vector"), file)) return "global"
+  if (Flag.VECTOR_AGENT_CONFIG_DIR && Filesystem.contains(Flag.VECTOR_AGENT_CONFIG_DIR, file)) return "global"
+  if (Flag.VECTOR_TUI_CONFIG && Filesystem.resolve(Flag.VECTOR_TUI_CONFIG) === Filesystem.resolve(file)) return "global"
+  return "local"
 }
 
 function normalize(raw: Record<string, unknown>) {
@@ -84,6 +87,27 @@ function dropUnknownKeybinds(input: Record<string, unknown>) {
 const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: string }) {
   const afs = yield* FSUtil.Service
   let appliedOrder = 0
+
+  const git = yield* afs.up({ targets: [".git"], start: ctx.directory })
+  const workspace = git[0] ? path.dirname(git[0]) : ctx.directory
+  const allDirectories = yield* ConfigPaths.directories(ctx.directory, git[0] ? workspace : undefined)
+  yield* Effect.promise(() => migrateTuiConfig({ directories: allDirectories, cwd: ctx.directory }))
+  const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+    ? []
+    : yield* ConfigPaths.files("tui", ctx.directory, git[0] ? workspace : undefined)
+  const projectVectorFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+    ? []
+    : yield* ConfigPaths.files("vector", ctx.directory, git[0] ? workspace : undefined)
+  const projectDirectories = allDirectories.filter((directory) => pluginScope(directory, ctx) === "local")
+  const trustSnapshot = yield* Effect.promise(() =>
+    WorkspaceTrust.snapshot(workspace, [
+      ...projectFiles,
+      ...projectVectorFiles,
+      ...projectDirectories,
+    ]),
+  )
+  const trusted =
+    !Flag.VECTOR_PURE && (yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trustSnapshot))).trusted
 
   const resolvePlugins = (config: Info, configFilepath: string): Effect.Effect<Info> =>
     Effect.gen(function* () {
@@ -149,7 +173,9 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
 
   const mergeFile = (acc: Acc, file: string) =>
     Effect.gen(function* () {
-      const data = yield* loadFile(file)
+      const loaded = yield* loadFile(file)
+      const data = { ...loaded }
+      if (pluginScope(file, ctx) === "local" && !trusted) delete data.plugin
       if (Object.keys(data).length) {
         appliedOrder += 1
         yield* Effect.logInfo("applying tui config", { path: file, order: appliedOrder })
@@ -171,10 +197,7 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
 
   // Every config dir we may read from: global config dir, any `.vector`
   // folders between cwd and home, and VECTOR_AGENT_CONFIG_DIR.
-  const directories = yield* ConfigPaths.directories(ctx.directory)
-  yield* Effect.promise(() => migrateTuiConfig({ directories, cwd: ctx.directory }))
-
-  const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG ? [] : yield* ConfigPaths.files("tui", ctx.directory)
+  const directories = allDirectories
 
   const acc: Acc = {
     result: {},

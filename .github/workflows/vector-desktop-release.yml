@@ -37,13 +37,16 @@ env:
 jobs:
   prepare:
     name: Validate release metadata
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       unsigned: ${{ steps.release-policy.outputs.unsigned }}
     steps:
       - name: Check out release source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Validate tag, version, and release notes
         env:
@@ -88,6 +91,11 @@ jobs:
             echo "Run the workflow from the exact release tag before replacing draft assets."
             exit 1
           fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$source_commit" origin/main || {
+            echo "Release source $source_commit must be part of protected main."
+            exit 1
+          }
 
       - name: Require published CLI and plugin packages
         env:
@@ -166,7 +174,7 @@ jobs:
   catalog:
     name: Prepare one immutable release catalog
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -268,7 +276,7 @@ jobs:
   credentials:
     name: Preflight release credentials
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -319,7 +327,7 @@ jobs:
   typecheck:
     name: Typecheck (${{ matrix.package }})
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -345,7 +353,7 @@ jobs:
   test:
     name: Test (${{ matrix.name }})
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -394,7 +402,7 @@ jobs:
   build:
     name: Build smoke (${{ matrix.name }})
     needs: [prepare, catalog]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -454,7 +462,7 @@ jobs:
       - typecheck
       - test
       - build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
@@ -480,7 +488,7 @@ jobs:
             {
               echo "## Unsigned installer notice"
               echo
-              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. Installed copies receive it through Check for Updates; a new install may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
+              echo "This interim Vector release is not Apple-notarized or Windows Authenticode-signed. It is download-only and is not offered through automatic or in-app updates. A new install may show an unidentified-developer or unknown-publisher warning. Production signing is planned for a later release."
               echo
               cat release-notes.md
             } > "$unsigned_notes"
@@ -514,10 +522,12 @@ jobs:
       - catalog
       - draft
       - prepare
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 90
+    outputs:
+      artifact_digest: ${{ steps.platform-artifact.outputs.artifact-digest }}
     permissions:
-      contents: write
+      contents: read
     env:
       VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
       VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
@@ -698,22 +708,24 @@ jobs:
           grep -Fq "vector-desktop-${VECTOR_VERSION}-mac-arm64.zip" packages/desktop/dist/latest-mac.yml
           grep -Fq "vector-desktop-${VECTOR_VERSION}-mac-x64.zip" packages/desktop/dist/latest-mac.yml
 
-      - name: Upload macOS assets to draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ env.RELEASE_TAG }}
-        run: |
-          set -euo pipefail
-          gh release upload "$TAG" --clobber \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.dmg \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.dmg.blockmap \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.zip \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-arm64.zip.blockmap \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.dmg \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.dmg.blockmap \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.zip \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-mac-x64.zip.blockmap \
+      - name: Preserve verified macOS assets
+        id: platform-artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vector-desktop-mac-${{ env.RELEASE_TAG }}-${{ github.run_attempt }}
+          path: |
+            packages/desktop/dist/vector-desktop-*-mac-arm64.dmg
+            packages/desktop/dist/vector-desktop-*-mac-arm64.dmg.blockmap
+            packages/desktop/dist/vector-desktop-*-mac-arm64.zip
+            packages/desktop/dist/vector-desktop-*-mac-arm64.zip.blockmap
+            packages/desktop/dist/vector-desktop-*-mac-x64.dmg
+            packages/desktop/dist/vector-desktop-*-mac-x64.dmg.blockmap
+            packages/desktop/dist/vector-desktop-*-mac-x64.zip
+            packages/desktop/dist/vector-desktop-*-mac-x64.zip.blockmap
             packages/desktop/dist/latest-mac.yml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
   windows:
     name: Windows desktop apps
@@ -721,10 +733,12 @@ jobs:
       - catalog
       - draft
       - prepare
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 60
+    outputs:
+      artifact_digest: ${{ steps.platform-artifact.outputs.artifact-digest }}
     permissions:
-      contents: write
+      contents: read
     env:
       VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
       VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
@@ -848,31 +862,32 @@ jobs:
             throw "latest.yml does not reference the arm64 installer"
           }
 
-      - name: Upload Windows assets to draft release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ env.RELEASE_TAG }}
-        run: |
-          $assets = @(
-            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win.exe",
-            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win.exe.blockmap",
-            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe",
-            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-x64.exe.blockmap",
-            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-arm64.exe",
-            "packages/desktop/dist/vector-desktop-$env:VECTOR_VERSION-win-arm64.exe.blockmap",
-            "packages/desktop/dist/latest.yml"
-          )
-          gh release upload $env:TAG $assets --clobber
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve verified Windows assets
+        id: platform-artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vector-desktop-windows-${{ env.RELEASE_TAG }}-${{ github.run_attempt }}
+          path: |
+            packages/desktop/dist/vector-desktop-*-win.exe
+            packages/desktop/dist/vector-desktop-*-win.exe.blockmap
+            packages/desktop/dist/vector-desktop-*-win-x64.exe
+            packages/desktop/dist/vector-desktop-*-win-x64.exe.blockmap
+            packages/desktop/dist/vector-desktop-*-win-arm64.exe
+            packages/desktop/dist/vector-desktop-*-win-arm64.exe.blockmap
+            packages/desktop/dist/latest.yml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
   linux:
     name: Linux desktop apps
     needs: [draft, catalog]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      artifact_digest: ${{ steps.platform-artifact.outputs.artifact-digest }}
     permissions:
-      contents: write
+      contents: read
     env:
       VECTOR_RELEASE_CATALOG_PATH: ${{ github.workspace }}/release-catalog/api.json
       VECTOR_RELEASE_CATALOG_SHA256: ${{ needs.catalog.outputs.sha256 }}
@@ -921,16 +936,19 @@ jobs:
           file packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage | grep -Eq 'ARM aarch64|aarch64'
           grep -Fq "vector-desktop-${VECTOR_VERSION}-linux-x86_64.AppImage" packages/desktop/dist/latest-linux.yml
           grep -Fq "vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage" packages/desktop/dist/latest-linux-arm64.yml
-      - name: Upload Linux assets to draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ env.RELEASE_TAG }}
-        run: |
-          gh release upload "$TAG" --clobber \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-x86_64.AppImage \
-            packages/desktop/dist/vector-desktop-${VECTOR_VERSION}-linux-arm64.AppImage \
-            packages/desktop/dist/latest-linux.yml \
+      - name: Preserve verified Linux assets
+        id: platform-artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vector-desktop-linux-${{ env.RELEASE_TAG }}-${{ github.run_attempt }}
+          path: |
+            packages/desktop/dist/vector-desktop-*-linux-x86_64.AppImage
+            packages/desktop/dist/vector-desktop-*-linux-arm64.AppImage
+            packages/desktop/dist/latest-linux.yml
             packages/desktop/dist/latest-linux-arm64.yml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
   release:
     name: Publish release and update feeds
@@ -940,8 +958,9 @@ jobs:
       - prepare
       - windows
       - linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
+    environment: production-release
     permissions:
       contents: write
     env:
@@ -961,13 +980,37 @@ jobs:
         with:
           install-flags: --frozen-lockfile
 
-      - name: Download platform assets from draft release
+      - name: Require immutable platform artifact digests
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ env.RELEASE_TAG }}
+          MAC_DIGEST: ${{ needs.mac.outputs.artifact_digest }}
+          WINDOWS_DIGEST: ${{ needs.windows.outputs.artifact_digest }}
+          LINUX_DIGEST: ${{ needs.linux.outputs.artifact_digest }}
         run: |
-          mkdir -p release-assets
-          gh release download "$TAG" --dir release-assets --clobber
+          set -euo pipefail
+          for digest in "$MAC_DIGEST" "$WINDOWS_DIGEST" "$LINUX_DIGEST"; do
+            [[ "$digest" =~ ^(sha256:)?[a-f0-9]{64}$ ]] || {
+              echo "A platform job did not provide an immutable artifact digest."
+              exit 1
+            }
+          done
+
+      - name: Download verified macOS artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-desktop-mac-${{ env.RELEASE_TAG }}-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download verified Windows artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-desktop-windows-${{ env.RELEASE_TAG }}-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download verified Linux artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vector-desktop-linux-${{ env.RELEASE_TAG }}-${{ github.run_attempt }}
+          path: release-assets
 
       - name: Validate assets and create checksums
         run: |
@@ -1001,6 +1044,21 @@ jobs:
               exit 1
             }
           done
+          declare -A expected_names=()
+          for asset in "${expected[@]}"; do expected_names[$asset]=true; done
+          shopt -s nullglob
+          actual=(release-assets/*)
+          test "${#actual[@]}" = "${#expected[@]}" || {
+            echo "Platform artifacts contain an unexpected number of files."
+            exit 1
+          }
+          for asset in "${actual[@]}"; do
+            name=${asset##*/}
+            test "${expected_names[$name]:-}" = true || {
+              echo "Unexpected platform artifact: $name"
+              exit 1
+            }
+          done
           (
             cd release-assets
             sha256sum "${expected[@]}" > checksums.txt
@@ -1016,11 +1074,11 @@ jobs:
             checksum_alias "vector-desktop-${version}-linux-arm64.AppImage" vector-desktop-linux-arm64.AppImage
           )
 
-      - name: Upload checksums to draft release
+      - name: Upload the verified artifact set to the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
-        run: gh release upload "$TAG" release-assets/checksums.txt --clobber
+        run: gh release upload "$TAG" release-assets/* --clobber
 
       - name: Publish Vector model catalog beside installers
         env:
@@ -1532,9 +1590,8 @@ jobs:
           }
           channel=latest
           if [ "$PRERELEASE" = "true" ]; then channel=beta; fi
-          # Owner decision (2 October 2026): unsigned releases also update the in-app update feed, so every
-          # installed copy is offered them through Check for Updates. Signed releases do the same.
           scope=full
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then scope=downloads; fi
           VECTOR_RELEASE_VERSION="${TAG#v}" \
           VECTOR_RELEASE_CHANNEL="$channel" \
           VECTOR_RELEASE_PHASE=commit \
@@ -1547,6 +1604,7 @@ jobs:
           PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
           RELEASE_ORIGIN: https://42qryducihx01gl0.public.blob.vercel-storage.com
           API_ORIGIN: https://vectordev.ai
+          RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
         run: |
           set -euo pipefail
 
@@ -1609,26 +1667,38 @@ jobs:
               "stable desktop manifest"
           fi
 
-          for feed in "${feeds[@]}"; do
-            staged="$audit_dir/staged-$feed"
-            committed="$audit_dir/committed-$feed"
-            curl "${curl_args[@]}" \
-              "$origin/releases/vector-v$version/updater/$feed?$cache_buster" \
-              --output "$staged"
-            test "$(updater_version "$staged")" = "$version" || {
-              echo "Staged $feed does not advertise $version"
-              exit 1
-            }
-            fetch_exact_copy \
-              "$staged" \
-              "$origin/$committed_prefix/$feed" \
-              "$committed" \
-              "$committed_prefix/$feed"
-            test "$(updater_version "$committed")" = "$version" || {
-              echo "Committed $feed does not advertise $version"
-              exit 1
-            }
-          done
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then
+            for feed in "${feeds[@]}"; do
+              committed="$audit_dir/committed-$feed"
+              curl "${curl_args[@]}" "$origin/$committed_prefix/$feed?$cache_buster" --output "$committed"
+              test "$(updater_version "$committed")" != "$version" || {
+                echo "Unsigned release $version entered automatic update feed $feed"
+                exit 1
+              }
+            done
+            echo "Verified unsigned $version is absent from automatic update feeds."
+          else
+            for feed in "${feeds[@]}"; do
+              staged="$audit_dir/staged-$feed"
+              committed="$audit_dir/committed-$feed"
+              curl "${curl_args[@]}" \
+                "$origin/releases/vector-v$version/updater/$feed?$cache_buster" \
+                --output "$staged"
+              test "$(updater_version "$staged")" = "$version" || {
+                echo "Staged $feed does not advertise $version"
+                exit 1
+              }
+              fetch_exact_copy \
+                "$staged" \
+                "$origin/$committed_prefix/$feed" \
+                "$committed" \
+                "$committed_prefix/$feed"
+              test "$(updater_version "$committed")" = "$version" || {
+                echo "Committed $feed does not advertise $version"
+                exit 1
+              }
+            done
+          fi
 
           if [ "$PRERELEASE" = "true" ]; then
             echo "Verified beta updater pointers without replacing stable download pointers."
@@ -1746,7 +1816,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ env.RELEASE_TAG }}
           PRERELEASE: ${{ env.RELEASE_PRERELEASE }}
+          RELEASE_UNSIGNED: ${{ needs.prepare.outputs.unsigned }}
         run: |
           set -euo pipefail
-          gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
-          if [ "$PRERELEASE" != "true" ]; then gh release edit "$TAG" --latest; fi
+          if [ "$RELEASE_UNSIGNED" = "true" ]; then
+            gh release edit "$TAG" --draft=false --prerelease=false --latest=false
+          else
+            gh release edit "$TAG" --draft=false --prerelease="$PRERELEASE"
+          fi
+          if [ "$RELEASE_UNSIGNED" != "true" ] && [ "$PRERELEASE" != "true" ]; then
+            gh release edit "$TAG" --latest
+          fi

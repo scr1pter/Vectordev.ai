@@ -112,7 +112,7 @@ function emitProgress(
   emit({ runId: input.runId, stage, level, message, at: new Date().toISOString() })
 }
 
-// `path` is what resolveAgentPath found. npm installs vercel, netlify and npx as .cmd shims on Windows: a bare name
+// `path` is what resolveAgentPath found. npm installs vercel and netlify as .cmd shims on Windows: a bare name
 // never finds them there (libuv's PATH search only tries .com and .exe), and Node will not run a .cmd itself, so
 // runCli launches it through cmd.exe.
 function execOk(path: string | undefined, args: string[]) {
@@ -175,19 +175,17 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
   const vercelConnection = cachedCloudProviderConnection("vercel")
   const netlifyConnection = cachedCloudProviderConnection("netlify")
   // Each is the CLI's resolved path when it runs, so a deploy launches exactly what was detected.
-  const [vercel, netlify, npx] = await Promise.all(
-    ["vercel", "netlify", "npx"].map(async (cli) => {
+  // There is deliberately no `npx --yes` fallback: it would download and run whatever version
+  // of the CLI the registry serves at that moment, even during detection.
+  const [vercel, netlify] = await Promise.all(
+    ["vercel", "netlify"].map(async (cli) => {
       const path = await resolveAgentPath(cli, agentEnvironment())
       return (await execOk(path, ["--version"])) ? path : undefined
     }),
   )
   // Only ask who's logged in when the CLI is actually installed.
   const [vercelAccount, netlifyAccount] = await Promise.all([
-    vercel
-      ? execOut(vercel, ["whoami"])
-      : npx
-        ? execOut(npx, ["--yes", "vercel", "whoami"])
-        : Promise.resolve(undefined),
+    vercel ? execOut(vercel, ["whoami"]) : Promise.resolve(undefined),
     netlify
       ? execOut(netlify, ["status"]).then((out) => out?.match(/Email:\s*(\S+)/i)?.[1])
       : Promise.resolve(undefined),
@@ -204,22 +202,22 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
     },
     {
       id: "vercel",
-      label: vercel ? "Vercel" : "Vercel (via npx)",
-      command: vercel ? [vercel] : [npx ?? "npx", "--yes", "vercel"],
+      label: "Vercel",
+      command: vercel ? [vercel] : ["vercel"],
       loginHint: vercelConnection.connected
         ? "Connected through Vector Cloud."
         : "Connect Vercel in Vector Cloud, or sign in with the Vercel CLI.",
-      available: Boolean(vercel || npx) && Boolean(vercelConnection.connected || vercelAccount),
+      available: Boolean(vercel) && Boolean(vercelConnection.connected || vercelAccount),
       account: vercelConnection.account ?? vercelAccount,
     },
     {
       id: "netlify",
-      label: netlify ? "Netlify" : "Netlify (via npx)",
-      command: netlify ? [netlify] : [npx ?? "npx", "--yes", "netlify-cli"],
+      label: "Netlify",
+      command: netlify ? [netlify] : ["netlify"],
       loginHint: netlifyConnection.connected
         ? "Connected through Vector Cloud."
         : "Connect Netlify in Vector Cloud, or sign in with the Netlify CLI.",
-      available: Boolean(netlify || npx) && Boolean(netlifyConnection.connected || netlifyAccount),
+      available: Boolean(netlify) && Boolean(netlifyConnection.connected || netlifyAccount),
       account: netlifyConnection.account ?? netlifyAccount,
     },
   ]
@@ -766,7 +764,7 @@ export async function publishProject(
       ok: false,
       target: target.id,
       log: "",
-      error: `Choose a ${target.label.replace(" (via npx)", "")} project in Vector Cloud before publishing.`,
+      error: `Choose a ${target.label} project in Vector Cloud before publishing.`,
     }
   }
   const providerEnv: NodeJS.ProcessEnv =
@@ -805,11 +803,7 @@ export async function publishProject(
   const destinationArgs =
     target.id === "vercel"
       ? providerLink
-        ? [
-            "--project",
-            providerLink.projectId,
-            ...(providerLink.accountId ? ["--scope", providerLink.accountId] : []),
-          ]
+        ? ["--project", providerLink.projectId, ...(providerLink.accountId ? ["--scope", providerLink.accountId] : [])]
         : []
       : providerLink
         ? ["--site", providerLink.projectId]
@@ -817,13 +811,7 @@ export async function publishProject(
   const args =
     target.id === "vercel"
       ? [...target.command.slice(1), "--yes", ...destinationArgs]
-      : [
-          ...target.command.slice(1),
-          "deploy",
-          "--build",
-          ...destinationArgs,
-          ...(directProduction ? ["--prod"] : []),
-        ]
+      : [...target.command.slice(1), "deploy", "--build", ...destinationArgs, ...(directProduction ? ["--prod"] : [])]
   emitProgress(
     input,
     emit,

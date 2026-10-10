@@ -11,7 +11,7 @@ import { Pty } from "@vectordevai/core/pty"
 import { PtyTicket } from "@vectordevai/core/pty/ticket"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { resetDatabase } from "../fixture/db"
-import { disposeAllInstances, tmpdir, tmpdirScoped } from "../fixture/fixture"
+import { disposeAllInstances, tmpdir, tmpdirScoped, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const context = Context.empty() as Context.Context<unknown>
@@ -222,6 +222,7 @@ describe("v2 pty HttpApi", () => {
             JSON.stringify({ plugin: [pathToFileURL(plugin).href], formatter: false, lsp: false }),
           ),
         )
+        yield* Effect.promise(() => trustWorkspace(dir))
 
         const created = yield* HttpClientRequest.post("/api/pty").pipe(
           directoryHeader(dir),

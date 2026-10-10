@@ -5,6 +5,11 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { Api } from "../api"
+import {
+  allowsSession,
+  allowsWorkspace,
+  RequestPrincipal,
+} from "@vectordevai/protocol/middleware/authorization"
 
 const subscriberCapacity = 256
 
@@ -22,6 +27,7 @@ export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers)
     const events = yield* EventV2.Service
     return handlers.handleRaw("event.subscribe", () =>
       Effect.gen(function* () {
+        const principal = yield* RequestPrincipal
         const connected = {
           id: EventV2.ID.create(),
           type: "server.connected",
@@ -31,7 +37,17 @@ export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers)
           Effect.gen(function* () {
             // Acquiring the bounded stream installs its listener before readiness is observable.
             const live = yield* EventV2.allBounded(events, subscriberCapacity)
-            return Stream.make(connected).pipe(Stream.concat(live))
+            return Stream.make(connected).pipe(
+              Stream.concat(
+                live.pipe(
+                  Stream.filter(
+                    (event) =>
+                      allowsSession(principal, event.durable?.aggregateID ?? "") ||
+                      allowsWorkspace(principal, event.location?.workspaceID),
+                  ),
+                ),
+              ),
+            )
           }),
         ).pipe(Stream.map(eventData), Stream.pipeThroughChannel(Sse.encode()))
         const heartbeat = Stream.tick("15 seconds").pipe(Stream.map(() => ": heartbeat\n\n"))

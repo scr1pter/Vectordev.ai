@@ -13,7 +13,7 @@ import { Auth } from "../../src/auth"
 import { ProviderAuth } from "../../src/provider/auth"
 import { Provider } from "../../src/provider/provider"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
-import { TestInstance } from "../fixture/fixture"
+import { TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { NpmTest } from "../fake/npm"
 
@@ -83,6 +83,7 @@ for (const approved of [false, true]) {
             }),
           ),
         )
+        yield* Effect.promise(() => trustWorkspace(test.directory))
         const providerID = ProviderV2.ID.make("github-copilot")
         expect((yield* oauth.methods())[providerID]?.some((method) => method.type === "oauth")).toBe(approved)
         expect(providerEnvironmentAllowed(providerID)).toBe(false)

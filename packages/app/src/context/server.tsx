@@ -13,8 +13,17 @@ const HEALTH_POLL_INTERVAL_MS = 10_000
 export function normalizeServerUrl(input: string) {
   const trimmed = input.trim()
   if (!trimmed) return
-  const withProtocol = /^https?:\/\//.test(trimmed) ? trimmed : `http://${trimmed}`
-  return withProtocol.replace(/\/+$/, "")
+  const explicit = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)
+  const candidate = explicit ? trimmed : `https://${trimmed}`
+  try {
+    const url = new URL(candidate)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return
+    if (url.username || url.password || hasCredentialQuery(url)) return
+    if (!explicit && isLoopbackHostname(url.hostname)) url.protocol = "http:"
+    return url.toString().replace(/\/+$/, "")
+  } catch {
+    return
+  }
 }
 
 export function serverName(conn?: ServerConnection.Any, ignoreDisplayName = false) {
@@ -23,9 +32,40 @@ export function serverName(conn?: ServerConnection.Any, ignoreDisplayName = fals
   return conn.http.url.replace(/^https?:\/\//, "").replace(/\/+$/, "")
 }
 
+export function isLoopbackHostname(hostname: string) {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase()
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true
+  return /^127(?:\.\d{1,3}){3}$/.test(host)
+}
+
+export function isLoopbackServerUrl(input: string) {
+  try {
+    return isLoopbackHostname(new URL(input).hostname)
+  } catch {
+    return false
+  }
+}
+
+export function insecurePasswordReason(input: ServerConnection.HttpBase) {
+  try {
+    const url = new URL(input.url)
+    if (url.username || url.password || hasCredentialQuery(url))
+      return "Server credentials must not be included in URLs."
+    if (!input.password || isLoopbackHostname(url.hostname) || url.protocol === "https:") return
+  } catch {
+    return "Invalid server address."
+  }
+  return "Password-authenticated remote servers require HTTPS."
+}
+
+function hasCredentialQuery(url: URL) {
+  return [...url.searchParams.keys()].some((key) =>
+    ["access_token", "api_key", "auth_token", "key", "password", "token"].includes(key.toLowerCase()),
+  )
+}
+
 function isLocalHost(url: string) {
-  const host = url.replace(/^https?:\/\//, "").split(":")[0]
-  if (host === "localhost" || host === "127.0.0.1") return "local"
+  if (isLoopbackServerUrl(url)) return "local"
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -179,15 +219,16 @@ export function resolveServerList(input: {
   )
 
   for (const value of input.stored) {
+    const stored = redactStoredServer(value)
     const conn: ServerConnection.Http =
-      typeof value === "string"
+      typeof stored === "string"
         ? {
             type: "http" as const,
-            http: { url: value },
+            http: { url: stored },
           }
-        : "http" in value
-          ? value
-          : { type: "http", http: value }
+        : "http" in stored
+          ? stored
+          : { type: "http", http: stored }
     const key = ServerConnection.key(conn)
 
     const existing = deduped.get(key)
@@ -203,6 +244,18 @@ export function resolveServerList(input: {
   return [...deduped.values()]
 }
 
+export function redactStoredServer(value: StoredServer): StoredServer {
+  if (typeof value === "string") return value
+  if ("http" in value) {
+    const http = { ...value.http }
+    delete http.password
+    return { ...value, http }
+  }
+  const http = { ...value }
+  delete http.password
+  return http
+}
+
 export namespace ServerConnection {
   type Base = { displayName?: string; label?: string }
 
@@ -216,7 +269,6 @@ export namespace ServerConnection {
   export type Http = {
     type: "http"
     http: HttpBase
-    authToken?: boolean
   } & Base
 
   export type Sidecar = {
@@ -277,6 +329,11 @@ export function nextServerAfterRemoval(
   return next ? ServerConnection.key(next) : fallback
 }
 
+export function resolveRouteServer(servers: readonly ServerConnection.Any[], key: string | undefined) {
+  if (!key) return
+  return servers.find((server) => ServerConnection.key(server) === key)
+}
+
 export const { use: useServer, provider: ServerProvider } = createSimpleContext({
   name: "Server",
   gate: true,
@@ -288,7 +345,14 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     const [store, setStore, _, ready] = persisted(
       {
         ...Persist.global("server", ["server.v3"]),
-        migrate: (value) => migrateCanonicalLocalServerState(value, props.canonicalLocalServer),
+        migrate: (value) => {
+          const migrated = migrateCanonicalLocalServerState(value, props.canonicalLocalServer)
+          if (!isRecord(migrated) || !Array.isArray(migrated.list)) return migrated
+          return {
+            ...migrated,
+            list: migrated.list.map((item) => (isRecord(item) ? redactStoredServer(item as StoredServer) : item)),
+          }
+        },
       },
       createStore({
         list: [] as StoredServer[],
@@ -298,9 +362,17 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     )
 
     const url = (x: StoredServer) => (typeof x === "string" ? x : "type" in x ? x.http.url : x.url)
+    const [credentials, setCredentials] = createStore<
+      Record<string, { username?: string; password: string } | undefined>
+    >({})
 
     const allServers = createMemo((): Array<ServerConnection.Any> => {
-      return resolveServerList({ stored: store.list, props: props.servers })
+      return resolveServerList({ stored: store.list, props: props.servers }).map((conn) => {
+        if (conn.type !== "http") return conn
+        const credential = credentials[conn.http.url]
+        if (!credential) return conn
+        return { ...conn, http: { ...conn.http, ...credential } }
+      })
     })
 
     const [state, setState] = createStore({
@@ -347,13 +419,18 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
     function add(input: ServerConnection.Http) {
       const url_ = normalizeServerUrl(input.http.url)
       if (!url_) return
-      const conn: ServerConnection.Http = { ...input, authToken: undefined, http: { ...input.http, url: url_ } }
+      if (insecurePasswordReason({ ...input.http, url: url_ })) return
+      const conn: ServerConnection.Http = { ...input, http: { ...input.http, url: url_ } }
+      const stored = redactStoredServer(conn) as ServerConnection.Http
       return batch(() => {
+        if (conn.http.password)
+          setCredentials(conn.http.url, { username: conn.http.username, password: conn.http.password })
+        else setCredentials(conn.http.url, undefined)
         const existing = store.list.findIndex((x) => url(x) === url_)
         if (existing !== -1) {
-          setStore("list", existing, conn)
+          setStore("list", existing, stored)
         } else {
-          setStore("list", store.list.length, conn)
+          setStore("list", store.list.length, stored)
         }
         setState("active", ServerConnection.key(conn))
         return conn
@@ -364,6 +441,7 @@ export const { use: useServer, provider: ServerProvider } = createSimpleContext(
       const next = nextServerAfterRemoval(allServers(), key, props.defaultServer)
       const list = store.list.filter((x) => url(x) !== key)
       batch(() => {
+        setCredentials(key, undefined)
         setStore("list", list)
         if (state.active === key) setState("active", next)
       })

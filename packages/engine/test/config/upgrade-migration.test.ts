@@ -59,6 +59,22 @@ async function start(directory: string, env: Record<string, string>) {
   }
 }
 
+async function approve(directory: string, env: Record<string, string>) {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "run",
+      "--conditions=browser",
+      path.resolve(import.meta.dir, "../../src/index.ts"),
+      "trust",
+      "approve",
+    ],
+    { cwd: directory, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+  )
+  const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
+  expect(exitCode, stderr).toBe(0)
+}
+
 test("upgrades an earlier layout through real server startup without losing settings or sessions", async () => {
   await using tmp = await tmpdir()
   const home = path.join(tmp.path, "home")
@@ -111,8 +127,13 @@ test("upgrades an earlier layout through real server startup without losing sett
     expect(config.status).toBe(200)
     const value = await config.json()
     expect(value.permission).toMatchObject({ bash: "deny", edit: "deny", webfetch: "deny" })
-    expect(value.agent.reviewer.prompt).toContain("Review carefully")
-    expect(value.command.check.template).toContain("Check carefully")
+    if (attempt) {
+      expect(value.agent.reviewer.prompt).toContain("Review carefully")
+      expect(value.command.check.template).toContain("Check carefully")
+    } else {
+      expect(value.agent?.reviewer).toBeUndefined()
+      expect(value.command?.check).toBeUndefined()
+    }
     if (!attempt) {
       const created = await fetch(`${server.url}/session`, {
         method: "POST",
@@ -121,6 +142,7 @@ test("upgrades an earlier layout through real server startup without losing sett
       })
       expect(created.status).toBe(200)
       sessions.push((await created.json()).id)
+      await approve(directory, env)
       continue
     }
     const list = await fetch(`${server.url}/session`, { headers })

@@ -605,7 +605,7 @@ function SecretList(props: { secrets: readonly AutoReviewSecret[] }) {
                   class="text-[color:var(--vx-purple-bright)] underline underline-offset-2"
                   href={url()}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                 >
                   Create one ↗
                 </a>
@@ -1519,7 +1519,7 @@ export function PullRequests(props: {
                           class="ml-auto text-[12px] text-[color:var(--vx-purple-bright)] underline underline-offset-2"
                           href={pr().url}
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                         >
                           See it on GitHub ↗
                         </a>
@@ -1644,7 +1644,7 @@ export function PullRequests(props: {
               <div class="flex items-center gap-2 border-b border-[color:var(--vx-line)] bg-[color:color-mix(in_srgb,var(--vx-green)_8%,transparent)] px-4 py-2.5 text-[12.5px] text-[color:var(--vx-green)]">
                 <Icon name="check" />
                 <span class="flex-1">Pull request #{opened().number} is open.</span>
-                <a class="underline underline-offset-2" href={opened().url} target="_blank" rel="noreferrer">
+                <a class="underline underline-offset-2" href={opened().url} target="_blank" rel="noopener noreferrer">
                   Open on GitHub ↗
                 </a>
               </div>
@@ -1655,7 +1655,7 @@ export function PullRequests(props: {
                   secrets exist; re-run it after adding them to see a review.
                 </p>
                 <SecretList secrets={opened().secrets} />
-                <a class={`${PRIMARY} mt-4`} href={opened().secretsUrl} target="_blank" rel="noreferrer">
+                <a class={`${PRIMARY} mt-4`} href={opened().secretsUrl} target="_blank" rel="noopener noreferrer">
                   Open Actions secrets
                   <Icon name="external" />
                 </a>
@@ -1676,11 +1676,11 @@ export function PullRequests(props: {
                 />
               </p>
               <div class="mt-3 flex flex-wrap gap-2">
-                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noreferrer">
+                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noopener noreferrer">
                   View the workflow
                   <Icon name="external" />
                 </a>
-                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noreferrer">
+                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noopener noreferrer">
                   Actions secrets
                   <Icon name="external" />
                 </a>
@@ -1701,11 +1701,11 @@ export function PullRequests(props: {
                 />
               </p>
               <div class="mt-3 flex flex-wrap gap-2">
-                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noreferrer">
+                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noopener noreferrer">
                   View the workflow
                   <Icon name="external" />
                 </a>
-                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noreferrer">
+                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noopener noreferrer">
                   Actions secrets
                   <Icon name="external" />
                 </a>
@@ -1723,11 +1723,11 @@ export function PullRequests(props: {
                 <CodeText text="Add the repository secrets it lists, `VECTOR_CLI_TOKEN` and your model provider's API key, then merge it." />
               </p>
               <div class="mt-3 flex flex-wrap gap-2">
-                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noreferrer">
+                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noopener noreferrer">
                   Open the pull request
                   <Icon name="external" />
                 </a>
-                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noreferrer">
+                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noopener noreferrer">
                   Actions secrets
                   <Icon name="external" />
                 </a>
@@ -2360,7 +2360,7 @@ export function PullRequests(props: {
                 <div class="mx-auto mt-6 flex max-w-[760px] items-center gap-2 rounded-[8px] border border-[color:color-mix(in_srgb,var(--vx-green)_35%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-green)_8%,transparent)] px-4 py-2.5 text-[12.5px] text-[color:var(--vx-green)]">
                   <Icon name="check" />
                   <span class="flex-1">Pull request created.</span>
-                  <a class="underline underline-offset-2" href={createdUrl()} target="_blank" rel="noreferrer">
+                  <a class="underline underline-offset-2" href={createdUrl()} target="_blank" rel="noopener noreferrer">
                     Open on GitHub ↗
                   </a>
                 </div>
@@ -2428,7 +2428,7 @@ export function PullRequests(props: {
                       <a
                         href={pr().url}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         class={SECONDARY}
                         aria-label={`Open #${pr().number} on GitHub`}
                       >
@@ -2473,7 +2473,7 @@ export function PullRequests(props: {
                               class="block px-4 py-2 text-[11.5px] text-[color:var(--vx-purple-bright)] hover:underline"
                               href={`${pr().url}/files`}
                               target="_blank"
-                              rel="noreferrer"
+                              rel="noopener noreferrer"
                             >
                               {pr().files.length - FILES_SHOWN} more on GitHub ↗
                             </a>

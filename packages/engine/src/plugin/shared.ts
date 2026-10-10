@@ -33,6 +33,12 @@ export function parsePluginSpecifier(spec: string) {
   return { pkg: hit.name, version: hit.rawSpec }
 }
 
+export function isPinnedPluginSpecifier(spec: string) {
+  if (isPathPluginSpec(spec)) return true
+  const hit = parse(spec)
+  return hit?.type === "version" && semver.valid(hit.rawSpec) !== null
+}
+
 export type PluginSource = "file" | "npm"
 export type PluginKind = "server" | "tui"
 type PluginMode = "strict" | "detect"
@@ -206,9 +212,9 @@ export async function checkPluginCompatibility(target: string, vectorVersion: st
 
 export async function resolvePluginTarget(spec: string) {
   if (isPathPluginSpec(spec)) return resolvePathPluginTarget(spec)
+  if (!isPinnedPluginSpecifier(spec)) throw new Error(`Plugin package ${spec} must use an exact version`)
   const hit = parse(spec)
-  const pkg = hit?.name && hit.raw === hit.name ? `${hit.name}@latest` : spec
-  const result = await Npm.add(pkg)
+  const result = await Npm.add(hit?.raw ?? spec)
   return result.directory
 }
 

@@ -56,6 +56,7 @@ import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
+import { formatEditorContext } from "../../prompt/editor-context"
 
 export type PromptProps = {
   sessionID?: string
@@ -115,19 +116,6 @@ function getEditorRangeLabel(selection: EditorSelection["ranges"][number]) {
   if (!hasEditorRangeSelection(selection)) return
   if (selection.selection.start.line === selection.selection.end.line) return `#${selection.selection.start.line}`
   return `#${selection.selection.start.line}-${selection.selection.end.line}`
-}
-
-function formatEditorContext(selection: EditorSelection) {
-  const selected = selection.ranges.filter(hasEditorRangeSelection)
-  if (selected.length === 0)
-    return `<system-reminder>Note: The user opened the file "${selection.filePath}". This may or may not be relevant to the current task.</system-reminder>\n`
-
-  const ranges = selected.map((range, index) => {
-    const prefix = selected.length > 1 ? `Selection ${index + 1}: ` : ""
-    return `Note: The user selected ${prefix}${getEditorRangeLabel(range)} from "${selection.filePath}". \`\`\`${range.text}\`\`\`\n\n`
-  })
-
-  return `<system-reminder>${ranges.join("\n")} This may or may not be relevant to the current task.</system-reminder>\n`
 }
 
 let stashed: { prompt: PromptInfo; cursor: number } | undefined

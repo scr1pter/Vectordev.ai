@@ -1,12 +1,14 @@
 import { put } from "@vercel/blob"
 import { Buffer } from "node:buffer"
+import { CloudAuthorizationError, authorizeCloudRequest } from "../src/authorization"
 import {
   MAX_FILES,
   MAX_TOTAL_BYTES,
   injectBadge,
-  isValidFilePath,
   makeSlug,
   mimeFor,
+  publicationPathError,
+  tenantSitePath,
 } from "../src/shared"
 
 interface PublishFile {
@@ -18,6 +20,8 @@ interface PublishFile {
 interface PublishBody {
   name: string
   files: PublishFile[]
+  project?: string
+  allowSourceFiles?: boolean
 }
 
 function json(status: number, body: Record<string, unknown>): Response {
@@ -56,18 +60,6 @@ export default async function handler(request: Request): Promise<Response> {
     return json(405, { ok: false, error: "Method not allowed. POST a publish payload." })
   }
 
-  const expected = process.env["VECTOR_CLOUD_TOKEN"]
-  if (!expected) {
-    return json(500, {
-      ok: false,
-      error: "Server misconfigured: VECTOR_CLOUD_TOKEN is not set on this deployment.",
-    })
-  }
-  const auth = request.headers.get("authorization") ?? ""
-  if (auth !== `Bearer ${expected}`) {
-    return json(401, { ok: false, error: "Unauthorized. Pass 'authorization: Bearer <token>'." })
-  }
-
   let body: unknown
   try {
     body = await request.json()
@@ -75,7 +67,16 @@ export default async function handler(request: Request): Promise<Response> {
     return json(400, { ok: false, error: "Body must be valid JSON." })
   }
 
-  const { name, files } = (body ?? {}) as Partial<PublishBody>
+  const { name, files, project, allowSourceFiles } = (body ?? {}) as Partial<PublishBody>
+  const claims = (() => {
+    try {
+      return authorizeCloudRequest(request, typeof project === "string" ? project : undefined)
+    } catch (error) {
+      if (error instanceof CloudAuthorizationError) return json(error.status, { ok: false, error: error.message })
+      throw error
+    }
+  })()
+  if (claims instanceof Response) return claims
   if (typeof name !== "string" || name.trim().length === 0) {
     return json(400, { ok: false, error: "'name' must be a non-empty string." })
   }
@@ -96,10 +97,11 @@ export default async function handler(request: Request): Promise<Response> {
         error: "Each file needs { path: string, content: string, encoding?: 'utf8' | 'base64' }.",
       })
     }
-    if (!isValidFilePath(file.path)) {
+    const pathError = publicationPathError(file.path, allowSourceFiles === true)
+    if (pathError) {
       return json(400, {
         ok: false,
-        error: `Invalid path '${file.path}': paths must be relative, forward-slash, without '..'.`,
+        error: `Refusing to publish '${file.path}': ${pathError}.`,
       })
     }
     if (seen.has(file.path)) {
@@ -132,7 +134,7 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     await uploadAll(
       decoded.map((file) => async () => {
-        await put(`sites/${slug}/${file.path}`, file.data, {
+        await put(tenantSitePath(claims.tenant, claims.project, slug, file.path), file.data, {
           access: "public",
           contentType: mimeFor(file.path),
           addRandomSuffix: false,
@@ -147,5 +149,11 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   const origin = new URL(request.url).origin
-  return json(200, { ok: true, slug, url: `${origin}/s/${slug}/` })
+  return json(200, {
+    ok: true,
+    slug,
+    tenant: claims.tenant,
+    project: claims.project,
+    url: `${origin}/s/${claims.tenant}/${claims.project}/${slug}/`,
+  })
 }

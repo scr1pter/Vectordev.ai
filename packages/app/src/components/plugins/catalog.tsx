@@ -182,25 +182,71 @@ export type PluginDef = {
   build?: (values: Record<string, string>) => McpLocalConfig | McpRemoteConfig
 }
 
-const local = (command: string[], environment?: Record<string, string>): McpLocalConfig => ({
-  type: "local",
-  command,
-  environment,
-  enabled: true,
-  timeout: 120_000,
-})
+export function isPinnedPluginCommand(command: readonly string[]) {
+  if (command[0] === "docker") return /@sha256:[a-f\d]{64}$/i.test(command.at(-1) ?? "")
+  if (command[0] === "pipx") return /^[a-z\d._-]+==\d+\.\d+\.\d+(?:[a-z\d.+-]*)$/i.test(command[2] ?? "")
+  if (command[0] === "npx") return pinnedPackage.test(command[2] ?? "")
+  if (command[0] !== "uvx") return false
+  const from = command.indexOf("--from")
+  const target =
+    from === -1
+      ? command.find((value, index) => index > 0 && command[index - 1] !== "--python" && !value.startsWith("-"))
+      : command[from + 1]
+  return pinnedPackage.test(target ?? "") || pinnedPythonPackage.test(target ?? "")
+}
 
-const remote = (url: string, headers?: Record<string, string>): McpRemoteConfig => ({
-  type: "remote",
-  url,
-  headers,
-  // Hosted connectors without an explicit token rely on the server's OAuth
-  // auto-detection; token-based ones authenticate via headers, so detection
-  // must be disabled or the backend still attaches an OAuth provider.
-  oauth: headers ? false : undefined,
-  enabled: true,
-  timeout: 120_000,
-})
+const pinnedPackage = /^(?:@[^/@]+\/[^/@]+|[^/@][^@]*)@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/
+const pinnedPythonPackage = /^[a-z\d._-]+(?:\[[a-z\d._,-]+\])?==\d+\.\d+\.\d+(?:[a-z\d.+-]*)$/i
+
+export function isSecurePluginRemoteUrl(input: string) {
+  try {
+    const url = new URL(input)
+    const credential = [...url.searchParams.keys()].some((key) =>
+      ["access_token", "api_key", "auth_token", "key", "password", "token"].includes(key.toLowerCase()),
+    )
+    return url.protocol === "https:" && !url.username && !url.password && !credential
+  } catch {
+    return false
+  }
+}
+
+const local = (command: string[], environment?: Record<string, string>): McpLocalConfig => {
+  return {
+    type: "local",
+    command,
+    environment,
+    enabled: true,
+    timeout: 120_000,
+  }
+}
+
+export function assertPluginInstallable(config: McpLocalConfig | McpRemoteConfig) {
+  if (config.type === "local" && !isPinnedPluginCommand(config.command)) {
+    throw new Error("This plugin is blocked because its executable is not pinned to a reviewed immutable version.")
+  }
+  if (config.type === "remote" && !isSecurePluginRemoteUrl(config.url)) {
+    throw new Error("Remote plugins require a credential-free HTTPS endpoint.")
+  }
+  return config
+}
+
+const remote = (url: string, headers?: Record<string, string>): McpRemoteConfig => {
+  const parsed = new URL(url)
+  if (!isSecurePluginRemoteUrl(url)) {
+    throw new Error("Remote plugins require a credential-free HTTPS endpoint.")
+  }
+  return {
+    type: "remote",
+    url: parsed.toString(),
+    headers,
+    // Hosted connectors without an explicit token rely on the server's OAuth
+    // auto-detection; token-based ones authenticate via headers, so detection
+    // must be disabled or the backend still attaches an OAuth provider.
+    oauth: headers ? false : undefined,
+    enabled: true,
+    timeout: 120_000,
+  }
+}
 
 export const PLUGIN_CATALOG: PluginDef[] = [
   // ── Source & deploy ────────────────────────────────────────────────

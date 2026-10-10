@@ -5,7 +5,22 @@ import { adaptGroup0, Group0 } from "./session"
 import { adaptGroup1, Group1 } from "./event"
 import { adaptGroup2, Group2 } from "./system"
 
-const Api = HttpApi.make("generated").add(Group0).add(Group1).add(Group2)
+const sameOriginApi = <A,>(api: A): A => {
+  HttpApi.reflect(api as HttpApi.AnyWithProps, {
+    onGroup() {},
+    onEndpoint({ endpoint }) {
+      if (
+        endpoint.path !== "*" &&
+        (!endpoint.path.startsWith("/") || endpoint.path.startsWith("//") || endpoint.path.includes("\\"))
+      ) {
+        throw new Error(`Refusing cross-origin endpoint path: ${endpoint.path}`)
+      }
+    },
+  })
+  return api
+}
+
+const Api = sameOriginApi(HttpApi.make("generated").add(Group0).add(Group1).add(Group2))
 const adaptClient = (raw: HttpApiClient.ForApi<typeof Api>) => ({
   session: adaptGroup0(raw["session"]),
   event: adaptGroup1(raw["event"]),

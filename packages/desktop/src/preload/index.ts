@@ -127,7 +127,6 @@ const api: ElectronAPI = {
   setDisplayBackend: (backend) => ipcRenderer.invoke("set-display-backend", backend),
   parseMarkdownCommand: (markdown) => ipcRenderer.invoke("parse-markdown", markdown),
   checkAppExists: (appName) => ipcRenderer.invoke("check-app-exists", appName),
-  resolveAppPath: (appName) => ipcRenderer.invoke("resolve-app-path", appName),
   pathExists: (path) => ipcRenderer.invoke("path-exists", path),
   storeGet: (name, key) => ipcRenderer.invoke("store-get", name, key),
   storeSet: (name, key, value) => ipcRenderer.invoke("store-set", name, key, value),

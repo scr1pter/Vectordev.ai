@@ -7,6 +7,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { FileSystem } from "../filesystem"
 import { FSUtil } from "../fs-util"
 import { Location } from "../location"
+import { LocationMutation } from "../location-mutation"
 import { PermissionV2 } from "../permission"
 import { Ripgrep } from "../ripgrep"
 import { RelativePath } from "../schema"
@@ -20,8 +21,8 @@ export const Input = Schema.Struct({
   pattern: FileSystem.GrepInput.fields.pattern.annotate({
     description: "Regex pattern to search for in file contents",
   }),
-  path: RelativePath.pipe(Schema.optional).annotate({
-    description: "Relative directory to search. Defaults to the active Location.",
+  path: Schema.String.pipe(Schema.optional).annotate({
+    description: "File or directory to search. Defaults to the active Location; outside paths require approval.",
   }),
   include: FileSystem.GrepInput.fields.include.annotate({
     description: 'File glob to include in the search (for example, "*.js" or "*.{ts,tsx}")',
@@ -56,6 +57,7 @@ const layer = Layer.effectDiscard(
     const fs = yield* FSUtil.Service
     const ripgrep = yield* Ripgrep.Service
     const location = yield* Location.Service
+    const mutation = yield* LocationMutation.Service
     const permission = yield* PermissionV2.Service
 
     yield* tools
@@ -78,6 +80,19 @@ const layer = Layer.effectDiscard(
           ],
           execute: (input, context) =>
             Effect.gen(function* () {
+              const source = {
+                type: "tool" as const,
+                messageID: context.assistantMessageID,
+                callID: context.toolCallID,
+              }
+              const target = yield* mutation.resolve({ path: input.path ?? "." })
+              if (target.externalDirectory)
+                yield* permission.assert({
+                  ...LocationMutation.externalDirectoryPermission(target.externalDirectory),
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source,
+                })
               yield* permission.assert({
                 action: name,
                 resources: [input.pattern],
@@ -90,15 +105,14 @@ const layer = Layer.effectDiscard(
                 },
                 sessionID: context.sessionID,
                 agent: context.agent,
-                source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                source,
               })
-              const target = path.resolve(location.directory, input.path ?? ".")
-              const info = yield* fs.stat(target).pipe(Effect.catch(() => Effect.succeed(undefined)))
+              const info = yield* fs.stat(target.canonical).pipe(Effect.catch(() => Effect.succeed(undefined)))
               return yield* ripgrep
                 .grep({
-                  cwd: info?.type === "Directory" ? target : path.dirname(target),
+                  cwd: info?.type === "Directory" ? target.canonical : path.dirname(target.canonical),
                   pattern: input.pattern,
-                  file: info?.type === "File" ? path.basename(target) : undefined,
+                  file: info?.type === "File" ? path.basename(target.canonical) : undefined,
                   include: input.include,
                   limit: input.limit ?? Number.MAX_SAFE_INTEGER,
                 })
@@ -113,7 +127,7 @@ const layer = Layer.effectDiscard(
                             path.relative(
                               location.directory,
                               path.resolve(
-                                info?.type === "Directory" ? target : path.dirname(target),
+                                info?.type === "Directory" ? target.canonical : path.dirname(target.canonical),
                                 match.entry.path,
                               ),
                             ),
@@ -133,5 +147,5 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/grep",
   layer,
-  deps: [ToolRegistry.node, FSUtil.node, Ripgrep.node, Location.node, PermissionV2.node],
+  deps: [ToolRegistry.node, FSUtil.node, Ripgrep.node, Location.node, LocationMutation.node, PermissionV2.node],
 })

@@ -343,9 +343,10 @@ describe("PublicApi OpenAPI v2 errors", () => {
         "PtyNotFoundError",
       )
     }
-    expect(componentName(responseRef(spec.paths["/pty/{ptyID}/connect-token"]?.post?.responses?.["403"]) ?? "")).toBe(
+    expect(componentNames(spec.paths["/pty/{ptyID}/connect-token"]?.post?.responses?.["403"]).sort()).toEqual([
+      "ForbiddenError",
       "PtyForbiddenError",
-    )
+    ])
     expect(
       spec.paths["/pty/{ptyID}/connect"]?.get?.parameters
         ?.filter((parameter) => parameter.in === "query")

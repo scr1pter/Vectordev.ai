@@ -39,6 +39,7 @@ import { ConfigPlugin } from "./plugin"
 import { ConfigDependencies } from "./dependencies"
 import { ConfigVariable } from "./variable"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -63,6 +64,63 @@ function normalizeLoadedConfig(data: unknown) {
   delete copy.keybinds
   delete copy.tui
   return copy
+}
+
+function projectExecutableConfig(config: Info, trusted: boolean): Info {
+  const next = { ...config }
+  if (!trusted) {
+    const permission = authorityNarrowingPermission(next.permission)
+    if (permission) next.permission = permission
+    else delete next.permission
+    if (next.tools) {
+      next.tools = Object.fromEntries(Object.entries(next.tools).filter(([, enabled]) => !enabled))
+      if (!Object.keys(next.tools).length) delete next.tools
+    }
+    delete next.plugin
+    delete next.mcp
+    delete next.lsp
+    delete next.formatter
+    delete next.command
+    delete next.provider
+    delete next.agent
+    delete next.mode
+    delete next.shell
+    return next
+  }
+  if (next.provider) {
+    next.provider = Object.fromEntries(
+      Object.entries(next.provider).filter(([, provider]) => projectProviderEndpointsAllowed(provider)),
+    )
+  }
+  return next
+}
+
+function authorityNarrowingPermission(permission: ConfigPermissionV1.Info | undefined) {
+  if (!permission) return
+  const entries = Object.entries(permission)
+    .map(([name, rule]) => {
+      if (rule === "deny") return [name, rule] as const
+      if (typeof rule === "string") return
+      const patterns = Object.fromEntries(Object.entries(rule).filter(([, action]) => action === "deny"))
+      if (Object.keys(patterns).length) return [name, patterns] as const
+    })
+    .filter((entry) => entry !== undefined)
+  if (entries.length) return Object.fromEntries(entries)
+}
+
+function projectProviderEndpointsAllowed(provider: unknown) {
+  if (!isRecord(provider)) return true
+  const options = isRecord(provider.options) ? provider.options : undefined
+  for (const value of [options?.baseURL, options?.baseUrl]) {
+    if (typeof value === "string" && !WorkspaceTrust.remoteUrlAllowed(value)) return false
+  }
+  if (!isRecord(provider.models)) return true
+  return Object.values(provider.models).every((model) => {
+    if (!isRecord(model) || !isRecord(model.options)) return true
+    return [model.options.baseURL, model.options.baseUrl].every(
+      (value) => typeof value !== "string" || WorkspaceTrust.remoteUrlAllowed(value),
+    )
+  })
 }
 
 async function substituteWellKnownRemoteConfig(input: {
@@ -122,6 +180,8 @@ type State = {
   config: Info
   directories: string[]
   deps: Fiber.Fiber<void>[]
+  trust: WorkspaceTrust.Snapshot
+  trusted: boolean
 }
 
 export interface Interface {
@@ -135,6 +195,8 @@ export interface Interface {
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
   readonly waitForDependencies: () => Effect.Effect<void>
+  readonly trust?: () => Effect.Effect<WorkspaceTrust.Status>
+  readonly approve?: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Config") {}
@@ -239,16 +301,27 @@ const layer = Layer.effect(
       options: { path: string } | { dir: string; source: string },
       env?: Record<string, string>,
       preserveSource = false,
+      opaqueCredentials = false,
     ) {
       const source = "path" in options ? options.path : options.source
-      const expanded = yield* Effect.promise(() =>
-        ConfigVariable.substitute(
-          "path" in options
-            ? { text, type: "path", path: options.path, env }
-            : { text, type: "virtual", ...options, env },
-        ),
-      )
-      const parsed = ConfigParse.jsonc(expanded, source)
+      const parseSource =
+        "path" in options ? ({ type: "path", path: options.path } as const) : ({ type: "virtual", ...options } as const)
+      const parsed = opaqueCredentials
+        ? yield* Effect.promise(() =>
+            ConfigVariable.substituteUnknown({
+              ...parseSource,
+              value: ConfigParse.jsonc(text, source),
+              env,
+              preserve: (keys) =>
+                keys[0] === "mcp" ||
+                keys[0] === "provider" ||
+                keys.some((key) => ["headers", "environment", "options", "body"].includes(key)),
+            }),
+          )
+        : ConfigParse.jsonc(
+            yield* Effect.promise(() => ConfigVariable.substitute({ ...parseSource, text, env })),
+            source,
+          )
       const data = ConfigParse.schema(ConfigV1.Info, normalizeLoadedConfig(parsed), source)
       if (!("path" in options)) return data
 
@@ -265,12 +338,13 @@ const layer = Layer.effect(
       filepath: string,
       env?: Record<string, string>,
       preserveSource = false,
+      opaqueCredentials = false,
     ) {
       yield* Effect.logInfo("loading", { path: filepath })
       const text = yield* readConfigFile(filepath)
       if (!text) return {} as Info
       const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
-      return yield* loadConfig(normalized, { path: filepath }, env, preserveSource)
+      return yield* loadConfig(normalized, { path: filepath }, env, preserveSource, opaqueCredentials)
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
@@ -332,6 +406,23 @@ const layer = Layer.effect(
     const loadInstanceState = Effect.fn("Config.loadInstanceState")(
       function* (ctx: InstanceContext) {
         const auth = yield* authSvc.all().pipe(Effect.orDie)
+        const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+          ? []
+          : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)
+        const projectTuiFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+          ? []
+          : yield* ConfigPaths.files("tui", ctx.directory, ctx.worktree).pipe(Effect.orDie)
+        const allDirectories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
+        const projectDirectories = allDirectories.filter((directory) => containsPath(directory, ctx))
+        const trustSnapshot = yield* Effect.promise(() =>
+          WorkspaceTrust.snapshot(ctx.worktree === "/" ? ctx.directory : ctx.worktree, [
+            ...projectFiles,
+            ...projectTuiFiles,
+            ...projectDirectories,
+          ]),
+        )
+        const storedTrust = yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trustSnapshot))
+        const trusted = !Flag.VECTOR_PURE && storedTrust.trusted
 
         let result: Info = {}
         const authEnv: Record<string, string> = {}
@@ -365,8 +456,11 @@ const layer = Layer.effect(
         })
 
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
-          result = mergeConfigConcatArrays(result, next)
-          return mergePluginOrigins(source, next.plugin, kind)
+          const scope = kind ?? (containsPath(source, ctx) ? "local" : "global")
+          const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
+          const safe = projectSource ? projectExecutableConfig(next, trusted) : next
+          result = mergeConfigConcatArrays(result, safe)
+          return mergePluginOrigins(source, safe.plugin, scope)
         }
 
         for (const [key, value] of Object.entries(auth)) {
@@ -432,8 +526,8 @@ const layer = Layer.effect(
         }
 
         if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
-          for (const file of yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)) {
-            yield* merge(file, yield* loadFile(file, authEnv), "local")
+          for (const file of projectFiles) {
+            yield* merge(file, yield* loadFile(file, authEnv, false, !trusted), "local")
           }
         }
 
@@ -441,7 +535,7 @@ const layer = Layer.effect(
         result.mode = result.mode || {}
         result.plugin = result.plugin || []
 
-        const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
+        const directories = allDirectories.filter((directory) => !containsPath(directory, ctx) || trusted)
 
         if (Flag.VECTOR_AGENT_CONFIG_DIR) {
           yield* Effect.logDebug("loading config from VECTOR_AGENT_CONFIG_DIR", { path: Flag.VECTOR_AGENT_CONFIG_DIR })
@@ -449,20 +543,23 @@ const layer = Layer.effect(
 
         const deps: Fiber.Fiber<void>[] = []
 
-        for (const dir of directories) {
+        for (const dir of allDirectories) {
+          const local = containsPath(dir, ctx)
           if (dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR) {
             if (dir === Flag.VECTOR_AGENT_CONFIG_DIR) yield* importSettings(dir)
-            yield* importSettings(dir, true)
+            if (!local || trusted) yield* importSettings(dir, true)
             // Local files merge after the shared ones so machine-local settings win.
             for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
-              yield* merge(source, yield* loadFile(source, authEnv))
+              yield* merge(source, yield* loadFile(source, authEnv, false, local && !trusted))
               result.agent ??= {}
               result.mode ??= {}
               result.plugin ??= []
             }
           }
+
+          if (local && !trusted) continue
 
           // The desktop also owns .vector directories containing repository state and rules.
           const runtimeFiles =
@@ -485,10 +582,16 @@ const layer = Layer.effect(
 
         if (Flag.VECTOR_CONFIG_CONTENT) {
           const source = "VECTOR_CONFIG_CONTENT"
-          const next = yield* loadConfig(Flag.VECTOR_CONFIG_CONTENT, {
-            dir: ctx.directory,
-            source,
-          })
+          const next = yield* loadConfig(
+            Flag.VECTOR_CONFIG_CONTENT,
+            {
+              dir: ctx.directory,
+              source,
+            },
+            undefined,
+            false,
+            false,
+          )
           yield* merge(source, next, "local")
           yield* Effect.logDebug("loaded custom config from VECTOR_CONFIG_CONTENT")
         }
@@ -571,6 +674,8 @@ const layer = Layer.effect(
           config: result,
           directories,
           deps,
+          trust: trustSnapshot,
+          trusted,
         }
       },
       Effect.provideService(FSUtil.Service, fs),
@@ -594,6 +699,18 @@ const layer = Layer.effect(
     const waitForDependencies = Effect.fn("Config.waitForDependencies")(function* () {
       yield* InstanceState.useEffect(state, (s) =>
         Effect.forEach(s.deps, Fiber.join, { concurrency: "unbounded" }).pipe(Effect.asVoid),
+      )
+    })
+
+    const trust = Effect.fn("Config.trust")(function* () {
+      return yield* InstanceState.useEffect(state, (s) =>
+        Effect.promise(() => WorkspaceTrust.status(Global.Path.state, s.trust)),
+      )
+    })
+
+    const approve = Effect.fn("Config.approve")(function* () {
+      yield* InstanceState.useEffect(state, (s) =>
+        Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, s.trust)),
       )
     })
 
@@ -748,6 +865,8 @@ const layer = Layer.effect(
       invalidate,
       directories,
       waitForDependencies,
+      trust,
+      approve,
     })
   }),
 )
