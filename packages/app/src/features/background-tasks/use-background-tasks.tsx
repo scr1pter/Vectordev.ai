@@ -13,7 +13,6 @@ import {
 import { createStore, reconcile } from "solid-js/store"
 import { useNavigate, useParams } from "@solidjs/router"
 import type { Session } from "@vectordevai/sdk/v2"
-import { useLanguage } from "@/context/language"
 import { useSDK } from "@/context/sdk"
 import { useServerSync } from "@/context/server-sync"
 import { useSync } from "@/context/sync"
@@ -74,7 +73,6 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
   const sync = useSync()
   const sdk = useSDK()
   const serverSync = useServerSync()
-  const language = useLanguage()
   const navigate = useNavigate()
   const reconnects = () => serverSync().reconnects()
   const params = useParams<{ serverKey?: string }>()
@@ -266,14 +264,6 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
 
   const stopSessions = async (ids: readonly string[]) => {
     const client = sdk().client
-    // Agents shown running whose child the engine already reports idle: a
-    // card the event stream left behind, with nothing left to stop.
-    const stale = idleLiveSessions(
-      state.cards.flatMap((card) =>
-        card.agents.filter((agent) => agent.status !== "pending" && !!agent.sessionID && ids.includes(agent.sessionID)),
-      ),
-      (sessionID) => sync().data.session_status[sessionID]?.type,
-    )
     const results = await Promise.allSettled(
       ids.map((sessionID) =>
         Promise.resolve(client.session.abort({ sessionID })).then((result) => {
@@ -283,24 +273,17 @@ export function BackgroundTasksProvider(props: ParentProps<{ sessionID: Accessor
       ),
     )
     // Reload what the cards are built from, so Stop always shows where each
-    // agent really is, even with the event stream down.
+    // agent really is, even with the event stream down. An agent whose run the
+    // engine lost (it restarted mid-run) is settled as stopped by the abort.
     const root = rootID()
     await Promise.allSettled(
       [...ids, ...(root ? [root] : [])].map((sessionID) => sync().session.sync(sessionID, { force: true })),
     )
-    if (results.some((result) => result.status === "rejected")) {
-      showToast({
-        variant: "error",
-        title: "Could not stop every subagent",
-        description: "Try again, or stop the whole session from the composer.",
-      })
-      return
-    }
-    const live = state.cards.flatMap((card) => card.agents.filter((agent) => isLive(agent.status)))
-    if (!stale.some((sessionID) => live.some((agent) => agent.sessionID === sessionID))) return
+    if (results.every((result) => result.status === "fulfilled")) return
     showToast({
-      title: language.t("toast.subagent.alreadyFinished.title"),
-      description: language.t("toast.subagent.alreadyFinished.description"),
+      variant: "error",
+      title: "Could not stop every subagent",
+      description: "Try again, or stop the whole session from the composer.",
     })
   }
 
