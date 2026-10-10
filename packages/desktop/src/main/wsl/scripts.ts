@@ -107,6 +107,8 @@ export function wslServerScript(input: {
     "export WSLENV=",
     ...Object.entries(input.env).map(([key, value]) => `export ${key}=${shellEscape(value)}`),
     "export VECTOR_CLI=1",
+    // The desktop's own check-in reports its use and honours Share usage counts; a WSL server it runs never reports.
+    "export VECTOR_DISABLE_USAGE=1",
     'export XDG_STATE_HOME="$HOME/.local/state"',
     `${shellEscape(input.binary)} --print-logs --log-level ${input.logLevel} serve --hostname 127.0.0.1 --port ${input.port} </dev/null &`,
     "vector_pid=$!",
