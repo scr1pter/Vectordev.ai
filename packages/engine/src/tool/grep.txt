@@ -1,5 +1,6 @@
 - Fast content search tool that works with any codebase size
 - Searches file contents using regular expressions
+- The path is an existing literal file or directory, relative to the working directory when not absolute. It does not expand shell or glob patterns; omit it to search the working directory.
 - Supports full regex syntax (eg. "log.*Error", "function\s+\w+", etc.)
 - Filter files by pattern with the include parameter (eg. "*.js", "*.{ts,tsx}")
 - Returns file paths and line numbers with matching lines

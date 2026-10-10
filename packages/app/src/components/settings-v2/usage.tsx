@@ -144,7 +144,8 @@ export const SettingsUsageV2: Component = () => {
           <p class="settings-v2-page-kicker">Local usage</p>
           <h2 class="settings-v2-page-title">Usage & streaks</h2>
           <p class="settings-v2-page-subtitle">
-            Calculated from model responses stored by this Vector server. API keys and prompt contents are never read.
+            Tokens and activity reflect assistant responses stored by this Vector server. Recorded cost also includes
+            title generation; unpriced or incomplete model work is marked as unknown or partial.
           </p>
         </div>
         <ButtonV2 variant="neutral" icon="reset" onClick={() => void refetch()} disabled={summary.loading}>

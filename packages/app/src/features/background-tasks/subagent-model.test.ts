@@ -11,6 +11,8 @@ import {
   formatAgentCount,
   formatDuration,
   formatTokens,
+  freshestSession,
+  idleLiveSessions,
   isDismissed,
   kindLabel,
   liveAgentCount,
@@ -26,6 +28,7 @@ import {
   stripSubagentSuffix,
   subagentKind,
   subagentTitle,
+  taskPartLocations,
   type TaskSource,
 } from "./subagent-model"
 
@@ -928,6 +931,317 @@ describe("buildTaskCards", () => {
   })
 })
 
+describe("indexed task batches", () => {
+  test("one real part exposes each indexed outcome and keeps its first inline chip", () => {
+    const data = fixture()
+    addUser(data, "u", "Implement CSV and JSON")
+    addAssistant(data, "a", "u", [
+      taskPart({
+        id: "batch",
+        input: {
+          tasks: [
+            { description: "CSV", subagent_type: "general" },
+            { description: "JSON", subagent_type: "test" },
+          ],
+        },
+        metadata: {
+          taskBatch: 1,
+          status: "completed",
+          tasks: [
+            { index: 1, sessionId: "json", status: "error", error: "JSON tests failed", usage: usage(200) },
+            { index: 0, sessionId: "csv", status: "completed", usage: usage(100) },
+          ],
+        },
+      }),
+    ])
+    const cards = buildTaskCards(source(data))
+    expect(cards).toHaveLength(1)
+    expect(cards[0]!.phases).toHaveLength(1)
+    expect(
+      cards[0]!.agents.map((agent) => ({
+        key: agent.key,
+        partID: agent.partID,
+        batchIndex: agent.batchIndex,
+        sessionID: agent.sessionID,
+        status: agent.status,
+        title: agent.title,
+        error: agent.error,
+      })),
+    ).toEqual([
+      {
+        key: "batch:0",
+        partID: "batch",
+        batchIndex: 0,
+        sessionID: "csv",
+        status: "done",
+        title: "CSV",
+        error: undefined,
+      },
+      {
+        key: "batch:1",
+        partID: "batch",
+        batchIndex: 1,
+        sessionID: "json",
+        status: "failed",
+        title: "JSON",
+        error: "JSON tests failed",
+      },
+    ])
+    expect(cards[0]!.tokens).toBe(300)
+    expect(cards[0]!.status).toBe("failed")
+    expect(countAgents(cards[0]!.agents)).toBe(2)
+    expect(taskPartLocations(cards).get("batch")?.agent.batchIndex).toBe(0)
+    expect(locateTaskPart(cards, "batch")?.first).toBe(true)
+  })
+
+  test("parent failure cannot overwrite finished siblings or invent missing success", () => {
+    const data = fixture()
+    addUser(data, "u", "go")
+    addAssistant(data, "a", "u", [
+      taskPart({
+        id: "batch",
+        status: "error",
+        error: "Parent interrupted",
+        input: { tasks: [{ description: "CSV" }, { description: "JSON" }, { description: "YAML" }] },
+        metadata: {
+          taskBatch: 1,
+          tasks: [
+            { index: 0, status: "completed", sessionId: "csv" },
+            { index: 1, status: "cancelled", sessionId: "json" },
+          ],
+        },
+      }),
+    ])
+    const agents = buildTaskCards(source(data))[0]!.agents
+    expect(agents.map((agent) => agent.status)).toEqual(["done", "stopped", "failed"])
+    expect(agents.map((agent) => agent.error)).toEqual([undefined, undefined, undefined])
+    expect(agents.map((agent) => agent.sessionID)).toEqual(["csv", "json", undefined])
+  })
+
+  test("input-only children remain pending after a completed parent", () => {
+    const data = fixture()
+    addUser(data, "u", "go")
+    addAssistant(data, "a", "u", [
+      taskPart({ id: "batch", input: { tasks: [{ description: "CSV" }, { description: "JSON" }] } }),
+    ])
+    const card = buildTaskCards(source(data))[0]!
+    expect(card.agents.map((agent) => agent.status)).toEqual(["pending", "pending"])
+    expect(card.agents.map((agent) => agent.sessionID)).toEqual([undefined, undefined])
+    expect(card.agents.map((agent) => agent.startedAt)).toEqual([undefined, undefined])
+    expect(elapsedMs(card, 100_000)).toBeUndefined()
+    expect(card.tokens).toBeUndefined()
+    expect(card.live).toBe(true)
+  })
+
+  test("lost parent metadata recovers only the matching message, real call and index", () => {
+    const data = fixture()
+    addUser(data, "u", "go")
+    addAssistant(data, "a", "u", [
+      taskPart({
+        id: "batch",
+        callID: "same_call",
+        status: "error",
+        input: { tasks: [{ description: "CSV" }, { description: "JSON" }] },
+      }),
+    ])
+    data.sessions.csv = child("csv", {
+      metadata: {
+        subagent: lifecycle({
+          parentMessageID: "a",
+          callID: "same_call",
+          batchIndex: 0,
+          status: "completed",
+          usage: usage(100),
+        }),
+      },
+    })
+    data.sessions.json = child("json", {
+      metadata: {
+        subagent: lifecycle({
+          parentMessageID: "a",
+          callID: "same_call",
+          batchIndex: 1,
+          status: "error",
+          error: "Child failed",
+          usage: usage(200),
+        }),
+      },
+    })
+    data.sessions.unrelated = child("unrelated", {
+      metadata: {
+        subagent: lifecycle({
+          parentMessageID: "other_message",
+          callID: "same_call",
+          batchIndex: 0,
+          status: "completed",
+        }),
+      },
+    })
+    const cards = buildTaskCards(source(data))
+    const card = cards.find((card) => card.key === "u")!
+    expect(card.agents.map((agent) => agent.sessionID)).toEqual(["csv", "json"])
+    expect(card.agents.map((agent) => agent.status)).toEqual(["done", "failed"])
+    expect(card.tokens).toBe(300)
+    expect(cards.flatMap((card) => card.agents).filter((agent) => agent.sessionID === "csv")).toHaveLength(1)
+    expect(cards.flatMap((card) => card.agents).filter((agent) => agent.sessionID === "unrelated")).toHaveLength(1)
+  })
+
+  test("metadata-only items retain sparse indexes after history trimming", () => {
+    const data = fixture()
+    addUser(data, "u", "go")
+    addAssistant(data, "a", "u", [
+      taskPart({
+        id: "batch",
+        metadata: {
+          taskBatch: 1,
+          tasks: [{ index: 3, sessionId: "yaml", title: "YAML", status: "completed" }],
+        },
+      }),
+    ])
+    expect(buildTaskCards(source(data))[0]!.agents.map((agent) => [agent.key, agent.title, agent.sessionID])).toEqual([
+      ["batch:3", "YAML", "yaml"],
+    ])
+  })
+
+  test("reused provider call IDs do not split an extension of the same indexed run", () => {
+    const data = fixture()
+    addUser(data, "u", "go")
+    for (const messageID of ["launch", "extend"]) {
+      addAssistant(data, messageID, "u", [
+        taskPart({
+          id: messageID,
+          callID: "reused_call",
+          input: { tasks: [{ description: "CSV", ...(messageID === "extend" ? { task_id: "csv" } : {}) }] },
+          metadata: {
+            taskBatch: 1,
+            tasks: [
+              {
+                index: 0,
+                ...lifecycle({
+                  sessionId: "csv",
+                  callID: "reused_call",
+                  parentMessageId: messageID,
+                  status: "running",
+                  background: true,
+                  startedAt: 1_000,
+                  completedAt: undefined,
+                }),
+              },
+            ],
+          },
+        }),
+      ])
+    }
+    data.sessions.csv = child("csv", {
+      metadata: {
+        subagent: lifecycle({
+          callID: "reused_call",
+          batchIndex: 0,
+          parentMessageID: "launch",
+          status: "running",
+          background: true,
+          startedAt: 1_000,
+          completedAt: undefined,
+        }),
+      },
+    })
+    data.status.csv = { type: "busy" }
+    const cards = buildTaskCards(source(data))
+    expect(cards[0]!.agents.map((agent) => agent.partID)).toEqual(["launch"])
+    expect(cards[0]!.phases).toHaveLength(1)
+    expect(locateTaskPart(cards, "extend")?.first).toBe(false)
+    expect(locateTaskPart(cards, "extend")?.agent.messageID).toBe("launch")
+  })
+
+  test("one-item batches preserve extension folding and cumulative resume accounting", () => {
+    const data = fixture()
+    addUser(data, "u", "go")
+    addAssistant(data, "launch", "u", [
+      taskPart({
+        id: "first",
+        metadata: lifecycle({
+          sessionId: "csv",
+          callID: "call_first",
+          startedAt: 1_000,
+          completedAt: 9_000,
+          usage: usage(100),
+        }),
+      }),
+    ])
+    addAssistant(data, "extension", "u", [
+      taskPart({
+        id: "extend",
+        input: { tasks: [{ task_id: "csv" }] },
+        metadata: {
+          taskBatch: 1,
+          tasks: [
+            {
+              index: 0,
+              ...lifecycle({
+                sessionId: "csv",
+                callID: "call_extend",
+                startedAt: 2_000,
+                completedAt: 9_000,
+                usage: usage(100),
+              }),
+            },
+          ],
+        },
+      }),
+    ])
+    data.sessions.csv = child("csv", {
+      metadata: {
+        subagent: lifecycle({
+          callID: "call_first",
+          parentMessageID: "launch",
+          startedAt: 1_000,
+          completedAt: 9_000,
+          usage: usage(100),
+        }),
+      },
+    })
+    const extended = buildTaskCards(source(data))
+    expect(extended[0]!.agents).toHaveLength(1)
+    expect(extended[0]!.tokens).toBe(100)
+    expect(locateTaskPart(extended, "extend")?.first).toBe(false)
+    addAssistant(data, "resume", "u", [
+      taskPart({
+        id: "resume",
+        input: { tasks: [{ task_id: "csv" }] },
+        metadata: {
+          taskBatch: 1,
+          tasks: [
+            {
+              index: 0,
+              ...lifecycle({
+                sessionId: "csv",
+                callID: "call_resume",
+                startedAt: 20_000,
+                completedAt: 30_000,
+                usage: usage(250),
+              }),
+            },
+          ],
+        },
+      }),
+    ])
+    data.sessions.csv.metadata = {
+      subagent: lifecycle({
+        parentMessageID: "resume",
+        callID: "call_resume",
+        batchIndex: 0,
+        startedAt: 20_000,
+        completedAt: 30_000,
+        usage: usage(250),
+      }),
+    }
+    const resumed = buildTaskCards(source(data))[0]!
+    expect(resumed.agents.map((agent) => agent.partID)).toEqual(["first", "resume"])
+    expect(resumed.tokens).toBe(250)
+    expect(countAgents(resumed.agents)).toBe(1)
+  })
+})
+
 describe("chips, counts and dismissal", () => {
   function twoPhaseCards() {
     const data = fixture()
@@ -993,5 +1307,107 @@ describe("chips, counts and dismissal", () => {
     expect(isDismissed({ live: false }, 600)).toBe(true)
     expect(isDismissed({ live: true, endedAt: 100 }, 600)).toBe(false)
     expect(isDismissed({ live: false, endedAt: 500 }, undefined)).toBe(false)
+  })
+})
+
+describe("cards the event stream left behind", () => {
+  const running = (sessionId: string, callID: string) =>
+    lifecycle({ sessionId, callID, status: "running", background: true, completedAt: undefined, usage: undefined })
+
+  test("a finished child record outranks a task part whose mirror of it never landed", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      taskPart({ id: "prt_1", callID: "call_1", metadata: running("ses_c1", "call_1") }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", {
+      metadata: {
+        subagent: {
+          agent: "explore",
+          callID: "call_1",
+          status: "completed",
+          startedAt: 1_000,
+          completedAt: 61_000,
+          usage: usage(12_000),
+        },
+      },
+    })
+    const card = buildTaskCards(source(data))[0]!
+    expect(card.live).toBe(false)
+    expect(card.agents[0]!.status).toBe("done")
+    expect(card.agents[0]!.endedAt).toBe(61_000)
+    expect(card.agents[0]!.tokens).toBe(12_000)
+  })
+
+  test("a failed or cancelled record settles the part the same way", () => {
+    for (const [status, expected] of [
+      ["error", "failed"],
+      ["cancelled", "stopped"],
+    ] as const) {
+      const data = fixture()
+      addUser(data, "msg_u1", "go")
+      addAssistant(data, "msg_a1", "msg_u1", [
+        taskPart({ id: "prt_1", callID: "call_1", metadata: running("ses_c1", "call_1") }),
+      ])
+      data.sessions.ses_c1 = child("ses_c1", {
+        metadata: {
+          subagent: { callID: "call_1", status, startedAt: 1_000, completedAt: 5_000, error: "Rate limited" },
+        },
+      })
+      const agent = buildTaskCards(source(data))[0]!.agents[0]!
+      expect(agent.status).toBe(expected)
+      expect(agent.error).toBe(status === "error" ? "Rate limited" : undefined)
+    }
+  })
+
+  test("a record from another call or a live record never overrides the part", () => {
+    const data = fixture()
+    addUser(data, "msg_u1", "go")
+    addAssistant(data, "msg_a1", "msg_u1", [
+      // The record moved on to a later run, so it says nothing about this call.
+      taskPart({ id: "prt_1", callID: "call_1", metadata: running("ses_c1", "call_1") }),
+      // The part settled while the record still says running.
+      taskPart({
+        id: "prt_2",
+        callID: "call_2",
+        metadata: lifecycle({ sessionId: "ses_c2", callID: "call_2", status: "completed" }),
+      }),
+    ])
+    data.sessions.ses_c1 = child("ses_c1", {
+      metadata: { subagent: { callID: "call_9", status: "completed", startedAt: 90_000, completedAt: 95_000 } },
+    })
+    data.sessions.ses_c2 = child("ses_c2", {
+      metadata: { subagent: { callID: "call_2", status: "running", startedAt: 1_000 } },
+    })
+    const agents = buildTaskCards(source(data))[0]!.agents
+    expect(agents.map((agent) => agent.status)).toEqual(["running", "done"])
+  })
+
+  test("the freshest copy of a session wins, whichever source it came from", () => {
+    const stale = child("ses_c1", { time: { created: 50, updated: 60 } })
+    const fresh = child("ses_c1", { time: { created: 50, updated: 9_000 } })
+    expect(freshestSession(stale, fresh)).toBe(fresh)
+    expect(freshestSession(fresh, stale)).toBe(fresh)
+    expect(freshestSession(undefined, stale)).toBe(stale)
+    expect(freshestSession(stale, undefined)).toBe(stale)
+    expect(freshestSession(undefined, undefined)).toBeUndefined()
+    // A tie keeps the store's copy, which live events keep current.
+    const twin = child("ses_c1", { time: { created: 50, updated: 60 } })
+    expect(freshestSession(stale, twin)).toBe(stale)
+  })
+
+  test("live agents whose child is not busy or retrying need a fresh copy, cached messages or not", () => {
+    const agents = [
+      { sessionID: "ses_cached", status: "running" as const },
+      { sessionID: "ses_idle", status: "pending" as const },
+      { sessionID: "ses_busy", status: "running" as const },
+      { sessionID: "ses_retry", status: "waiting" as const },
+      { sessionID: "ses_done", status: "done" as const },
+      { sessionID: "ses_cached", status: "running" as const },
+      { sessionID: undefined, status: "pending" as const },
+    ]
+    const status: Record<string, SessionStatus["type"]> = { ses_busy: "busy", ses_retry: "retry", ses_cached: "idle" }
+    expect(idleLiveSessions(agents, (id) => status[id])).toEqual(["ses_cached", "ses_idle"])
+    expect(idleLiveSessions([], () => undefined)).toEqual([])
   })
 })

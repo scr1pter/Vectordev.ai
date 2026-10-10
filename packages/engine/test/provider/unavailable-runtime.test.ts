@@ -40,7 +40,8 @@ cliIt.live(
       expect(list.stdout).toContain("(ignored:")
       expect(list.stdout).toContain("sign-in is paused")
       expect(list.stdout).toContain("vector providers logout xai")
-      expect(list.stdout).toContain("vector providers logout openai")
+      // ChatGPT sign-in is supported again, so a saved OpenAI OAuth credential is used, not ignored.
+      expect(list.stdout).not.toContain("vector providers logout openai")
       expect(list.stdout).toContain("provider is not configured")
       expect(list.stdout).toContain("provider is disabled")
       expect(list.stdout).not.toContain("fixture-access")
@@ -57,7 +58,6 @@ cliIt.live(
       expect(providers.connected).toEqual(expect.arrayContaining(["deepseek", "company-gateway"]))
       expect(providers.unavailable.map((item) => [item.id, item.reason])).toEqual([
         ["github-copilot", "sign-in-paused"],
-        ["openai", "sign-in-paused"],
         ["xai", "sign-in-paused"],
         ["poe", "sign-in-paused"],
         ["gitlab", "sign-in-paused"],
@@ -66,6 +66,12 @@ cliIt.live(
         ["anthropic", "disabled"],
       ])
       expect(JSON.stringify(providers.unavailable)).not.toContain("fixture-access")
+      const configured = yield* Effect.promise(async () => {
+        const response = await fetch(`${server.url}/config/providers`)
+        expect(response.status).toBe(200)
+        return response.json() as Promise<{ unavailable: typeof providers.unavailable }>
+      })
+      expect(configured.unavailable).toEqual(providers.unavailable)
       server.kill()
       const run = yield* vector.run("hello", { model: "github-copilot/gpt-4.1", format: "json", env })
       const errors = run.stdout

@@ -21,9 +21,14 @@ export function designLabOwners() {
 /**
  * Accepts only a confirmed owner account whose current session came from Google.
  * Password and magic-link sessions to the same address are refused, so the lab
- * cannot be opened without the owner's Google account.
+ * cannot be opened without the owner's Google account. Other owner-only pages
+ * pass their own allowlist.
  */
-export async function requireDesignLabOwner(request: Pick<ApiRequest, "headers">, fetcher: typeof fetch = fetch) {
+export async function requireDesignLabOwner(
+  request: Pick<ApiRequest, "headers">,
+  fetcher: typeof fetch = fetch,
+  owners = designLabOwners(),
+) {
   const configuration = supabaseConfiguration()
   const token = bearerToken(request)
   if (!token) throw new ApiError(401, "SIGN_IN_REQUIRED", "Sign in to continue.")
@@ -37,7 +42,7 @@ export async function requireDesignLabOwner(request: Pick<ApiRequest, "headers">
   }
   const email = user.email.trim().toLowerCase()
   const confirmed = typeof user.email_confirmed_at === "string" && Number.isFinite(Date.parse(user.email_confirmed_at))
-  if (!confirmed || !designLabOwners().includes(email)) {
+  if (!confirmed || !owners.includes(email)) {
     throw new ApiError(403, "DESIGN_LAB_FORBIDDEN", "This page isn't available for this account.")
   }
   if (!signedInWithGoogle(user, email, token)) {

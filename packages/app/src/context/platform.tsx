@@ -104,6 +104,12 @@ type PlatformBase = {
   /** Allow native pinch/Ctrl-scroll zoom gestures (desktop only) */
   setPinchZoomEnabled?(enabled: boolean): Promise<void> | void
 
+  /** Get whether the daily usage counts check-in is on (desktop only) */
+  getUsageSharing?(): Promise<boolean>
+
+  /** Turn the daily usage counts check-in on or off (desktop only) */
+  setUsageSharing?(enabled: boolean): Promise<void>
+
   /** Run a desktop-only menu action from the app chrome */
   runDesktopMenuAction?(action: DesktopMenuAction): Promise<void> | void
 

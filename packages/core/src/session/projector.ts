@@ -115,31 +115,46 @@ function applyUsage(
   sessionID: (typeof SessionV1.Event.MessageUpdated.Type)["data"]["sessionID"],
   value: Usage,
   sign = 1,
+  timestamp = 0,
+  previous?: Usage,
 ) {
   return Effect.gen(function* () {
+    const delta = {
+      cost: value.cost * sign - (previous?.cost ?? 0),
+      unpriced: Number(Boolean(value.unpriced)) * sign - Number(Boolean(previous?.unpriced)),
+      input: value.tokens.input * sign - (previous?.tokens.input ?? 0),
+      output: value.tokens.output * sign - (previous?.tokens.output ?? 0),
+      reasoning: value.tokens.reasoning * sign - (previous?.tokens.reasoning ?? 0),
+      read: value.tokens.cache.read * sign - (previous?.tokens.cache.read ?? 0),
+      write: value.tokens.cache.write * sign - (previous?.tokens.cache.write ?? 0),
+    }
+    if (Object.values(delta).every((value) => value === 0)) return
     yield* db
       .update(SessionTable)
       .set({
-        cost: sql`${SessionTable.cost} + ${value.cost * sign}`,
-        unpriced_steps: sql`${SessionTable.unpriced_steps} + ${(value.unpriced ? 1 : 0) * sign}`,
-        tokens_input: sql`${SessionTable.tokens_input} + ${value.tokens.input * sign}`,
-        tokens_output: sql`${SessionTable.tokens_output} + ${value.tokens.output * sign}`,
-        tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${value.tokens.reasoning * sign}`,
-        tokens_cache_read: sql`${SessionTable.tokens_cache_read} + ${value.tokens.cache.read * sign}`,
-        tokens_cache_write: sql`${SessionTable.tokens_cache_write} + ${value.tokens.cache.write * sign}`,
-        time_updated: sql`${SessionTable.time_updated}`,
+        cost: sql`${SessionTable.cost} + ${delta.cost}`,
+        unpriced_steps: sql`${SessionTable.unpriced_steps} + ${delta.unpriced}`,
+        tokens_input: sql`${SessionTable.tokens_input} + ${delta.input}`,
+        tokens_output: sql`${SessionTable.tokens_output} + ${delta.output}`,
+        tokens_reasoning: sql`${SessionTable.tokens_reasoning} + ${delta.reasoning}`,
+        tokens_cache_read: sql`${SessionTable.tokens_cache_read} + ${delta.read}`,
+        tokens_cache_write: sql`${SessionTable.tokens_cache_write} + ${delta.write}`,
+        time_updated: sql`max(${SessionTable.time_updated} + 1, ${timestamp})`,
       })
       .where(eq(SessionTable.id, sessionID))
       .run()
       .pipe(Effect.orDie)
+    if (delta.cost === 0 && delta.unpriced === 0) return
     // A subagent's spend also counts towards every session above it, so a parent's total covers what it delegated.
+    // The modified time is also the freshness revision read by economics consumers. Delegated spend must
+    // invalidate a parent even when cancellation means it will never run or emit idle again.
     // UNION rather than UNION ALL stops the walk if a parent chain ever loops.
     yield* db
       .update(SessionTable)
       .set({
-        subagent_cost: sql`${SessionTable.subagent_cost} + ${value.cost * sign}`,
-        subagent_unpriced_steps: sql`${SessionTable.subagent_unpriced_steps} + ${(value.unpriced ? 1 : 0) * sign}`,
-        time_updated: sql`${SessionTable.time_updated}`,
+        subagent_cost: sql`${SessionTable.subagent_cost} + ${delta.cost}`,
+        subagent_unpriced_steps: sql`${SessionTable.subagent_unpriced_steps} + ${delta.unpriced}`,
+        time_updated: sql`max(${SessionTable.time_updated} + 1, ${timestamp})`,
       })
       .where(
         sql`${SessionTable.id} IN (WITH RECURSIVE ancestor(id) AS (SELECT parent_id FROM session WHERE id = ${sessionID} UNION SELECT session.parent_id FROM session JOIN ancestor ON session.id = ancestor.id) SELECT id FROM ancestor WHERE id IS NOT NULL)`,
@@ -257,7 +272,7 @@ const layer = Layer.effectDiscard(
         yield* insertMessage(db, event, event.data.message)
         // Revert and removal subtract a row's usage, so importing one adds it, as a replayed V1 archive does.
         const usage = messageUsage(event.data.message)
-        if (usage) yield* applyUsage(db, event.data.sessionID, usage)
+        if (usage) yield* applyUsage(db, event.data.sessionID, usage, 1, DateTime.toEpochMillis(event.data.timestamp))
       }),
     )
     yield* events.project(SessionEvent.ShareChanged, (event) =>
@@ -306,7 +321,7 @@ const layer = Layer.effectDiscard(
       } = sessionRow(event.data.info)
       return db
         .update(SessionTable)
-        .set(settings)
+        .set({ ...settings, time_updated: sql`max(${SessionTable.time_updated}, ${settings.time_updated ?? 0})` })
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
         .pipe(Effect.orDie)
@@ -319,7 +334,7 @@ const layer = Layer.effectDiscard(
             directory: event.data.location.directory,
             path: event.data.subdirectory,
             workspace_id: event.data.location.workspaceID ? WorkspaceV2.ID.make(event.data.location.workspaceID) : null,
-            time_updated: DateTime.toEpochMillis(event.data.timestamp),
+            time_updated: sql`max(${SessionTable.time_updated}, ${DateTime.toEpochMillis(event.data.timestamp)})`,
           })
           .where(eq(SessionTable.id, event.data.sessionID))
           .run()
@@ -342,6 +357,13 @@ const layer = Layer.effectDiscard(
           .onConflictDoUpdate({ target: MessageTable.id, set: { data } })
           .run()
           .pipe(Effect.orDie)
+        if (event.data.info.role === "assistant" && event.data.info.time.completed !== undefined)
+          yield* db
+            .update(SessionTable)
+            .set({ time_updated: sql`max(${SessionTable.time_updated}, ${event.data.info.time.completed})` })
+            .where(eq(SessionTable.id, sessionID))
+            .run()
+            .pipe(Effect.orDie)
       }),
     )
     yield* events.project(SessionV1.Event.MessageRemoved, (event) =>
@@ -395,14 +417,19 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         const previous = row && usage(row.data)
         const next = usage(event.data.part)
-        if (previous) yield* applyUsage(db, row.session_id, previous, -1)
-        if (next) yield* applyUsage(db, sessionID, next)
+        if (next && row?.session_id === sessionID)
+          return yield* applyUsage(db, sessionID, next, 1, event.data.time, previous)
+        if (previous) yield* applyUsage(db, row.session_id, previous, -1, event.data.time)
+        if (next) yield* applyUsage(db, sessionID, next, 1, event.data.time)
       }),
     )
     yield* events.project(SessionEvent.AgentSwitched, (event) =>
       db
         .update(SessionTable)
-        .set({ agent: event.data.agent, time_updated: DateTime.toEpochMillis(event.data.timestamp) })
+        .set({
+          agent: event.data.agent,
+          time_updated: sql`max(${SessionTable.time_updated}, ${DateTime.toEpochMillis(event.data.timestamp)})`,
+        })
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
         .pipe(Effect.orDie, Effect.andThen(run(db, event))),
@@ -411,7 +438,10 @@ const layer = Layer.effectDiscard(
       Effect.gen(function* () {
         yield* db
           .update(SessionTable)
-          .set({ model: event.data.model, time_updated: DateTime.toEpochMillis(event.data.timestamp) })
+          .set({
+            model: event.data.model,
+            time_updated: sql`max(${SessionTable.time_updated}, ${DateTime.toEpochMillis(event.data.timestamp)})`,
+          })
           .where(eq(SessionTable.id, event.data.sessionID))
           .run()
           .pipe(Effect.orDie)
@@ -470,8 +500,33 @@ const layer = Layer.effectDiscard(
         }
         const previous = rowUsage(row)
         yield* run(db, event)
-        if (previous) yield* applyUsage(db, event.data.sessionID, previous, -1)
-        yield* applyUsage(db, event.data.sessionID, event.data)
+        yield* applyUsage(
+          db,
+          event.data.sessionID,
+          event.data,
+          1,
+          DateTime.toEpochMillis(event.data.timestamp),
+          previous,
+        )
+      }),
+    )
+    yield* events.project(SessionEvent.AncillaryUsage, (event) =>
+      Effect.gen(function* () {
+        yield* applyUsage(
+          db,
+          event.data.sessionID,
+          {
+            cost: event.data.cost ?? 0,
+            unpriced:
+              event.data.unpriced ||
+              event.data.incomplete ||
+              event.data.cost === undefined ||
+              event.data.tokens === undefined,
+            tokens: event.data.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          },
+          1,
+          DateTime.toEpochMillis(event.data.timestamp),
+        )
       }),
     )
     yield* events.project(SessionEvent.Step.Failed, (event) => run(db, event))
@@ -491,22 +546,34 @@ const layer = Layer.effectDiscard(
       Effect.gen(function* () {
         yield* run(db, event)
         if (event.data.cost === undefined || event.data.tokens === undefined) return
-        yield* applyUsage(db, event.data.sessionID, {
-          cost: event.data.cost,
-          unpriced: event.data.unpriced === true,
-          tokens: event.data.tokens,
-        })
+        yield* applyUsage(
+          db,
+          event.data.sessionID,
+          {
+            cost: event.data.cost,
+            unpriced: event.data.unpriced === true,
+            tokens: event.data.tokens,
+          },
+          1,
+          DateTime.toEpochMillis(event.data.timestamp),
+        )
       }),
     )
     yield* events.project(SessionEvent.Compaction.Ended, (event) =>
       Effect.gen(function* () {
         yield* run(db, event)
         if (event.data.cost === undefined || event.data.tokens === undefined) return
-        yield* applyUsage(db, event.data.sessionID, {
-          cost: event.data.cost,
-          unpriced: event.data.unpriced === true,
-          tokens: event.data.tokens,
-        })
+        yield* applyUsage(
+          db,
+          event.data.sessionID,
+          {
+            cost: event.data.cost,
+            unpriced: event.data.unpriced === true,
+            tokens: event.data.tokens,
+          },
+          1,
+          DateTime.toEpochMillis(event.data.timestamp),
+        )
       }),
     )
     yield* events.project(SessionEvent.RevertEvent.Staged, (event) =>
@@ -514,7 +581,7 @@ const layer = Layer.effectDiscard(
         .update(SessionTable)
         .set({
           revert: { ...event.data.revert, files: event.data.revert.files ? [...event.data.revert.files] : undefined },
-          time_updated: DateTime.toEpochMillis(event.data.timestamp),
+          time_updated: sql`max(${SessionTable.time_updated}, ${DateTime.toEpochMillis(event.data.timestamp)})`,
         })
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
@@ -523,7 +590,10 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.RevertEvent.Cleared, (event) =>
       db
         .update(SessionTable)
-        .set({ revert: null, time_updated: DateTime.toEpochMillis(event.data.timestamp) })
+        .set({
+          revert: null,
+          time_updated: sql`max(${SessionTable.time_updated}, ${DateTime.toEpochMillis(event.data.timestamp)})`,
+        })
         .where(eq(SessionTable.id, event.data.sessionID))
         .run()
         .pipe(Effect.orDie, Effect.asVoid),
@@ -554,7 +624,9 @@ const layer = Layer.effectDiscard(
           removed,
           (row) => {
             const value = rowUsage(row)
-            return value ? applyUsage(db, event.data.sessionID, value, -1) : Effect.void
+            return value
+              ? applyUsage(db, event.data.sessionID, value, -1, DateTime.toEpochMillis(event.data.timestamp))
+              : Effect.void
           },
           { discard: true },
         )
@@ -577,7 +649,10 @@ const layer = Layer.effectDiscard(
           .pipe(Effect.orDie)
         yield* db
           .update(SessionTable)
-          .set({ revert: null, time_updated: DateTime.toEpochMillis(event.data.timestamp) })
+          .set({
+            revert: null,
+            time_updated: sql`max(${SessionTable.time_updated}, ${DateTime.toEpochMillis(event.data.timestamp)})`,
+          })
           .where(eq(SessionTable.id, event.data.sessionID))
           .run()
           .pipe(Effect.orDie)

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "sourceArchive": "vector-codex-20261007-7deUGe",
+  "exportKind": "allowlisted_metric_projection",
+  "candidateJsonFiles": 2815,
+  "exportedSourceRecords": 2814,
+  "omittedSourceRecords": [
+    {
+      "source": "round4/build-v11-validation-sources.json",
+      "sourceSha256": "dc83a851db6bb537c1c58c820f6e72e48d973600f7ddc3a5b3ba30d28f7249e3",
+      "sourceBytes": 3291,
+      "reason": "no_allowlisted_metrics"
+    }
+  ],
+  "excludedDirectoryCounts": {
+    "private_runtime_cache_or_checkout_directories": 1658
+  },
+  "exports": [
+    {
+      "file": "improvement-ab.metrics.json",
+      "sha256": "696f66a749a46cd797e73bd9dcfbcf05fe0c609e2946a65ef766659d032e486c",
+      "bytes": 92291,
+      "sourceRecords": 22
+    },
+    {
+      "file": "next-efficiency.metrics.json",
+      "sha256": "8f035babc85427fd247375b993a311cf607b6d45ab987f7a8537b7feeb728a71",
+      "bytes": 372796,
+      "sourceRecords": 107
+    },
+    {
+      "file": "original.metrics.json",
+      "sha256": "280b1bccc7b04a2ef32941997040def2c3ac2a0229da37a64cb1a508f4da676e",
+      "bytes": 52096,
+      "sourceRecords": 3
+    },
+    {
+      "file": "patched-vs-codex.metrics.json",
+      "sha256": "83a005f027d403267be7308ff310762eb301c398da0cef1ddb4728fa99c8372c",
+      "bytes": 135489,
+      "sourceRecords": 22
+    },
+    {
+      "file": "round3.metrics.json",
+      "sha256": "5d877cf9f2f22037f86d651ea396cdce8e09e9cfe1ff68fc4623294078bfdaa3",
+      "bytes": 575753,
+      "sourceRecords": 223
+    },
+    {
+      "file": "round4.metrics.json",
+      "sha256": "2892a6b26e678c8eff270cf7b8b2a9edc0bc6beeb2c6e401176ad67961dab1b6",
+      "bytes": 7527615,
+      "sourceRecords": 2417
+    },
+    {
+      "file": "runs.metrics.json",
+      "sha256": "b2e4394d2601117aa669471fb4f64f6bbd0cdd9de548aa55cf5fe244cc1f552e",
+      "bytes": 71851,
+      "sourceRecords": 20
+    }
+  ],
+  "semantics": [
+    "No trials are selected by performance or success; failed, incomplete and inconclusive values use the same projection.",
+    "Each array retains original row indexes and original length. A missing field was omitted by the projection; it does not mean zero, success or absence.",
+    "Different files may repeat the same trials. Do not sum counts across source records.",
+    "Opaque status and trial identifiers are hashed; free-text explanations and raw runtime data are omitted.",
+    "Hashes bind the exact original bytes available at export time. They do not establish that a run is valid or independent.",
+    "No source files are modified and no benchmark or provider request is executed by this exporter."
+  ]
+}

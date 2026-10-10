@@ -10,7 +10,7 @@ import type {
 } from "@vectordevai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@vectordevai/core/util/path"
-import { type Accessor, batch, createMemo, getOwner, onCleanup, onMount, untrack } from "solid-js"
+import { type Accessor, batch, createMemo, createSignal, getOwner, onCleanup, onMount, untrack } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import type { InitError } from "../pages/error"
@@ -159,6 +159,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
 
   let bootedAt = 0
   let bootingRoot = false
+  // Each server.connected after the first is a new stream: whatever happened while the old one was down never
+  // arrived, so views that show live session content count these to know when to reload it.
+  let connected = false
+  const [reconnects, setReconnects] = createSignal(0)
   let eventFrame: number | undefined
   let eventTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -395,6 +399,10 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
         },
         setGlobalProject: setProjects,
       })
+      if (event.type === "server.connected") {
+        if (connected) setReconnects((count) => count + 1)
+        connected = true
+      }
       if (event.type === "server.connected" || event.type === "global.disposed") {
         if (recent) return
         for (const directory of Object.keys(children.children)) {
@@ -498,6 +506,8 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     updateConfig: updateConfigMutation.mutateAsync,
     project: projectApi,
     session,
+    /** How many times the event stream has reconnected; nothing that happened while it was down was delivered. */
+    reconnects,
     mcp: {
       add: async (
         directory: string,

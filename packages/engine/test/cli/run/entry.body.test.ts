@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { ToolPart } from "@vectordevai/sdk/v2"
 import { entryBody, entryCanStream, entryDone } from "@/cli/cmd/run/entry.body"
 import type { StreamCommit, ToolSnapshot } from "@/cli/cmd/run/types"
+import { toolInlineInfo } from "@/cli/cmd/run/tool"
 
 function commit(input: Partial<StreamCommit> & Pick<StreamCommit, "kind" | "text" | "phase" | "source">): StreamCommit {
   return input
@@ -50,6 +51,84 @@ function structured(next: StreamCommit) {
 }
 
 describe("run entry body", () => {
+  test("batch task finals retain every indexed result instead of extracting the first child's text", () => {
+    const state: ToolPart["state"] = {
+      status: "completed",
+      input: { tasks: [{ description: "First" }, { description: "Second" }] },
+      title: "2 subagent tasks",
+      output: "<task_result>Only first output</task_result>\n<task_error>Second failed</task_error>",
+      metadata: {
+        taskBatch: 1,
+        status: "error",
+        tasks: [
+          { index: 1, title: "Second", status: "error", error: "Storage unavailable" },
+          { index: 0, title: "First", status: "completed", sessionId: "child-first" },
+        ],
+      },
+      time: { start: 1, end: 2 },
+    }
+    expect(structured(toolCommit({ tool: "task", state }))).toEqual({
+      kind: "task",
+      title: "# 2 Subagent tasks",
+      rows: ["First · completed", "Second · error: Storage unavailable"],
+      tail: "",
+    })
+    expect(toolInlineInfo(toolPart("task", state))).toMatchObject({ icon: "✗", title: "2 Subagent tasks" })
+    expect(structured(toolCommit({ tool: "task", state: { ...state, input: {} } }))).toMatchObject({
+      rows: ["First · completed", "Second · error: Storage unavailable"],
+    })
+    expect(
+      structured(
+        toolCommit({
+          tool: "task",
+          state: {
+            ...state,
+            input: {},
+            metadata: {
+              taskBatch: 1,
+              tasks: [{ index: 3, title: "YAML", status: "completed" }],
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({ rows: ["YAML · completed"] })
+    expect(
+      structured(
+        toolCommit({
+          tool: "task",
+          state: {
+            ...state,
+            input: {},
+            metadata: {
+              taskBatch: 1,
+              tasks: [
+                { index: 3, title: "YAML", status: "completed" },
+                { index: 3, title: "Other", status: "error" },
+              ],
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({ rows: ["Task 4 · unknown"] })
+  })
+
+  test("batch preflight errors retain pending entries without inventing completion", () => {
+    expect(
+      entryBody(
+        toolCommit({
+          tool: "task",
+          toolState: "error",
+          state: {
+            status: "error",
+            input: { tasks: [{ description: "First" }, { description: "Second" }] },
+            error: "Permission denied",
+            time: { start: 1, end: 2 },
+          },
+        }),
+      ),
+    ).toMatchObject({ type: "text", content: expect.stringContaining("Second · not started") })
+  })
+
   test("renders assistant, reasoning, and user entries in their display formats", () => {
     expect(
       entryBody(

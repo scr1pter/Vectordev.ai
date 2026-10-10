@@ -136,6 +136,7 @@ jobs:
           VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
+          VECTOR_DISABLE_USAGE: "1" # CI jobs are not a person using Vector
           VECTOR_REVIEW_PR: \${{ github.event.pull_request.number || needs.route.outputs.pr }}
           VECTOR_REVIEW_REF: \${{ needs.route.outputs.ref || github.event.pull_request.head.sha }}
           MODEL: openai/gpt-4.1
@@ -185,6 +186,7 @@ jobs:
           VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
+          VECTOR_DISABLE_USAGE: "1" # CI jobs are not a person using Vector
           USE_GITHUB_TOKEN: "true"
           # Public sharing includes conversation text, code, and tool output, including future updates.
           SHARE: "false"
@@ -268,6 +270,7 @@ jobs:
           VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
+          VECTOR_DISABLE_USAGE: "1" # CI jobs are not a person using Vector
           VECTOR_REVIEW_PR: \${{ github.event.pull_request.number || needs.route.outputs.pr }}
           VECTOR_REVIEW_REF: \${{ needs.route.outputs.ref || github.event.pull_request.head.sha }}
           MODEL: anthropic/claude-sonnet-4-5
@@ -316,6 +319,7 @@ jobs:
           VECTOR_WORKFLOW_VERSION: "2"
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           VECTOR_CLI_TOKEN: \${{ secrets.VECTOR_CLI_TOKEN }}
+          VECTOR_DISABLE_USAGE: "1" # CI jobs are not a person using Vector
           USE_GITHUB_TOKEN: "true"
           # Public sharing includes conversation text, code, and tool output, including future updates.
           SHARE: "false"

@@ -30,6 +30,7 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
       return {
         providers: Object.values(providers).map(Provider.toClientInfo),
         default: Provider.defaultModelIDs(providers),
+        unavailable: yield* providerSvc.unavailable(),
       }
     })
 

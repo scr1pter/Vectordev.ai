@@ -15,7 +15,7 @@
   "app.lander.features.shareable_links.title": "Shareable links",
   "app.lander.features.shareable_links.description": "Share a link to any sessions for reference or to debug.",
   "app.lander.features.github_copilot.description": "Log in with GitHub to use your Copilot account.",
-  "app.lander.features.chatgpt_plus_pro.description": "Connect OpenAI with your own API key.",
+  "app.lander.features.chatgpt_plus_pro.description": "Log in with OpenAI to use your ChatGPT Plus or Pro account.",
   "app.lander.features.use_any_model.title": "Use any model",
   "app.lander.features.use_any_model.prefix": "Supports 75+ LLM providers through",
   "app.lander.features.use_any_model.suffix": "including local models.",

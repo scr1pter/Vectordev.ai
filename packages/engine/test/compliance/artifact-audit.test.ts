@@ -187,7 +187,6 @@ describe("release artifact audit", () => {
     'apiKey: "public"',
     "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e",
     "Ov23li8tweQw6odWQebz",
-    "app_EMoamEEZ73f0CkXaXp7hrann",
     "b1a00492-073a-47ea-816f-4c329264a828",
   ])("borrowed registration or shared key %s fails", async (literal) => {
     const report = await audit({ "bin/vector": binary(Buffer.from(`{clientId:${literal}}`)) })
@@ -196,10 +195,14 @@ describe("release artifact audit", () => {
     expect(wide.violations.map((item) => [item.kind, item.encoding])).toEqual([["credential", "utf-16le"]])
   })
 
-  test("the borrowed Codex CLI client cannot ship in a ChatGPT sign-in request", async () => {
-    const report = await audit({ "bin/vector": binary(Buffer.from('client_id:"app_EMoamEEZ73f0CkXaXp7hrann"')) })
-    expect(report.violations.map((item) => [item.kind, item.label])).toEqual([
-      ["credential", "borrowed ChatGPT OAuth registration"],
+  // The owner re-enabled Sign in with ChatGPT on 10 October 2026 (docs/vector/owner-actions/chatgpt.md).
+  test("only the owner-approved Codex CLI client for ChatGPT sign-in passes", async () => {
+    const chatgpt = 'client_id:"app_EMoamEEZ73f0CkXaXp7hrann"'
+    expect((await audit({ "bin/vector": binary(Buffer.from(chatgpt)) })).violations).toEqual([])
+    expect((await audit({ "bin/vector": Buffer.from(chatgpt, "utf16le") })).violations).toEqual([])
+    const both = await audit({ "bin/vector": binary(Buffer.from(`${chatgpt} clientId:"Ov23li8tweQw6odWQebz"`)) })
+    expect(both.violations.map((item) => [item.kind, item.label])).toEqual([
+      ["credential", "borrowed GitHub OAuth registration"],
     ])
   })
 

@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { EventEmitter } from "node:events"
-import { createServer, type IncomingMessage, type Server as HttpServer } from "node:http"
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http"
 import net, { type AddressInfo, type Socket } from "node:net"
 import WebSocket, { WebSocketServer } from "ws"
 import { APICallError } from "ai"
 import { ProviderError } from "../../src/provider/error"
 import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
 import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
+import { OpenAITransport } from "../../src/plugin/openai/transport"
 
 describe("plugin.openai.ws", () => {
   test("derives websocket URLs and sends auth plus protocol headers", async () => {
@@ -139,6 +140,19 @@ describe("plugin.openai.ws", () => {
     expect((await readTextError(response.text())).message).toContain("Unexpected binary WebSocket frame")
     expect(invalid).toEqual(["Unexpected binary WebSocket frame"])
   })
+
+  test("rejects malformed protocol frames immediately", async () => {
+    await using server = await createWebSocketServer((socket) => {
+      socket.once("message", () => socket.send("not-json"))
+    })
+    const socket = await OpenAIWebSocket.connectResponsesWebSocket({ url: server.wsUrl, headers: {} })
+    const response = OpenAIWebSocket.streamResponsesWebSocket({
+      socket,
+      body: { stream: true },
+      onConnectionInvalid: () => socket.terminate(),
+    })
+    expect((await readTextError(response.text())).message).toBe("Invalid WebSocket response event")
+  })
 })
 
 describe("plugin.openai.ws-pool", () => {
@@ -164,6 +178,114 @@ describe("plugin.openai.ws-pool", () => {
     expect(connections).toBe(1)
     expect(messages).toBe(2)
     fetch.close()
+  })
+
+  test("records bounded transport timing without request or response contents", async () => {
+    const events: OpenAITransport.Diagnostic[] = []
+    const headers: IncomingMessage["headers"][] = []
+    await using server = await createWebSocketServer((socket, request) => {
+      headers.push(request.headers)
+      socket.on("message", () => {
+        socket.send(JSON.stringify({ type: "response.created", response: { id: "private-response" } }))
+        Array.from({ length: 30 }).forEach(() =>
+          socket.send(JSON.stringify({ type: "response.output_text.delta", delta: "private-output" })),
+        )
+        socket.send(JSON.stringify({ type: "response.completed", response: { id: "private-response" } }))
+      })
+    })
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ onDiagnostic: (event) => events.push(event) })
+    for (const requestID of ["request-one", "request-two"]) {
+      const response = await fetch(server.url, {
+        ...streamRequest({ authorization: "Bearer private-token", [OpenAITransport.REQUEST_ID_HEADER]: requestID }),
+        body: JSON.stringify({
+          stream: true,
+          model: "gpt-6-luna",
+          reasoning: { effort: "max", privateNote: "private-note" },
+          input: "private-prompt",
+          tools: [{ type: "custom", name: "apply_patch", description: "private-description" }],
+        }),
+      })
+      expect(await response.text()).toContain("[DONE]")
+      const requestEvents = events.filter((event) => event.requestID === requestID)
+      expect(requestEvents.filter((event) => event.phase === "first_frame")).toHaveLength(1)
+      expect(requestEvents.filter((event) => event.phase === "first_progress")).toHaveLength(1)
+      expect(requestEvents.filter((event) => event.phase === "terminal")).toHaveLength(1)
+      expect(requestEvents.every((event) => event.elapsedMs >= 0 && event.transport === "websocket")).toBe(true)
+      expect(requestEvents.every((event) => event.model === "gpt-6-luna" && event.reasoningEffort === "max")).toBe(true)
+      expect(requestEvents.every((event) => event.patchToolType === "custom")).toBe(true)
+      expect(requestEvents.length).toBeLessThanOrEqual(7)
+    }
+    expect(events.filter((event) => event.phase === "connected").map((event) => event.reused)).toEqual([false, true])
+    expect(headers).toHaveLength(1)
+    expect(headers[0]?.[OpenAITransport.REQUEST_ID_HEADER]).toBeUndefined()
+    expect(JSON.stringify(events)).not.toContain("private-")
+    fetch.close()
+  })
+
+  test.each(["authorization", "chatgpt-account-id", "openai-organization", "openai-project"])(
+    "rotates authenticated sockets when %s changes",
+    async (header) => {
+      let connections = 0
+      await using server = await createWebSocketServer((socket) => {
+        connections++
+        socket.on("message", () => socket.send(JSON.stringify({ type: "response.completed", response: {} })))
+      })
+      const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+      expect(await (await fetch(server.url, streamRequest({ [header]: "first" }))).text()).toContain("[DONE]")
+      expect(await (await fetch(server.url, streamRequest({ [header]: "second" }))).text()).toContain("[DONE]")
+      expect(connections).toBe(2)
+      fetch.close()
+    },
+  )
+
+  test("rotates sockets when the endpoint changes within one session", async () => {
+    const requests: string[] = []
+    await using first = await createWebSocketServer((socket) => {
+      socket.on("message", () => {
+        requests.push("first")
+        socket.send(JSON.stringify({ type: "response.completed", response: {} }))
+      })
+    })
+    await using second = await createWebSocketServer((socket) => {
+      socket.on("message", () => {
+        requests.push("second")
+        socket.send(JSON.stringify({ type: "response.completed", response: {} }))
+      })
+    })
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    await (await fetch(first.url, streamRequest())).text()
+    await (await fetch(second.url, streamRequest())).text()
+    expect(requests).toEqual(["first", "second"])
+    fetch.close()
+  })
+
+  test.each(["remove", "close"])(
+    "%s cancels an in-flight handshake without sending work",
+    async (action) => {
+      await using server = await createHangingTcpServer()
+      await using fallback = await createHttpServer()
+      const fetch = OpenAIWebSocketPool.createWebSocketFetch({
+        url: server.url,
+        connectTimeout: 10_000,
+        streamRetries: 0,
+      })
+      const first = fetch(fallback.url, streamRequest())
+      await waitFor(() => server.connections() === 1, "websocket handshake did not start")
+      if (action === "remove") fetch.remove("session-1")
+      if (action === "close") fetch.close()
+      expect(await first.catch((error: unknown) => error)).toBeInstanceOf(DOMException)
+      expect(fallback.httpRequests).toHaveLength(0)
+      fetch.close()
+    },
+    2_000,
+  )
+
+  test("a closed pool cannot start another request", async () => {
+    await using server = await createHttpServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    fetch.close()
+    await expect(fetch(server.url, streamRequest())).rejects.toThrow("WebSocket pool is closed")
+    expect(server.httpRequests).toHaveLength(0)
   })
 
   test("rotates a socket that exceeds max connection age", async () => {
@@ -271,7 +393,7 @@ describe("plugin.openai.ws-pool", () => {
     const first = await fetch(server.url, streamRequest())
     const firstText = first.text()
     fetch.remove("session-1")
-    expect((await readTextError(firstText)).message).toContain("WebSocket closed before response.completed")
+    expect((await readTextError(firstText)).message).toContain("Session was removed")
 
     const second = await fetch(server.url, streamRequest())
 
@@ -524,12 +646,12 @@ describe("plugin.openai.ws-pool", () => {
     const first = await fetch(server.url, streamRequest())
     expect((await readTextError(first.text())).message).toContain("idle timeout waiting for websocket")
     const second = await fetch(server.url, streamRequest())
+    expect((await readTextError(second.text())).message).toContain("idle timeout waiting for websocket")
     const third = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
     expect(await third.text()).toBe("http")
     expect(connections).toBe(2)
-    expect(server.httpRequests).toHaveLength(2)
+    expect(server.httpRequests).toHaveLength(1)
     fetch.close()
   })
 
@@ -552,7 +674,8 @@ describe("plugin.openai.ws-pool", () => {
 
     const second = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
+    expect((await readTextError(second.text())).message).toContain("idle timeout waiting for websocket")
+    expect(await (await fetch(server.url, streamRequest())).text()).toBe("http")
     expect(connections).toBe(2)
     expect(server.httpRequests).toHaveLength(1)
     fetch.close()
@@ -704,12 +827,12 @@ describe("plugin.openai.ws-pool", () => {
     const first = await fetch(server.url, streamRequest())
     expect((await readTextError(first.text())).message).toContain("WebSocket closed before response.completed")
     const second = await fetch(server.url, streamRequest())
+    expect((await readTextError(second.text())).message).toContain("WebSocket closed before response.completed")
     const third = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
     expect(await third.text()).toBe("http")
     expect(connections).toBe(2)
-    expect(server.httpRequests).toHaveLength(2)
+    expect(server.httpRequests).toHaveLength(1)
     fetch.close()
   })
 
@@ -770,6 +893,168 @@ describe("plugin.openai.ws-pool", () => {
     expect(connections).toBe(2)
     expect(server.httpRequests).toHaveLength(0)
     fetch.close()
+  })
+})
+
+describe("plugin.openai.http", () => {
+  test("strips internal Request headers while preserving body, signal, correlation, and init precedence", async () => {
+    const bodies: string[] = []
+    await using server = await createHttpServer((request, response) => {
+      const chunks: Buffer[] = []
+      request.on("data", (chunk: Buffer) => chunks.push(chunk))
+      request.on("end", () => {
+        bodies.push(Buffer.concat(chunks).toString())
+        response.writeHead(202, "Accepted", { "content-type": "text/plain", "x-upstream": "kept" })
+        response.end("private-response")
+      })
+    })
+    const events: OpenAITransport.Diagnostic[] = []
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ onDiagnostic: (event) => events.push(event) })
+    try {
+      const response = await fetch(
+        new Request(server.url, {
+          method: "POST",
+          headers: { "x-vector-request-id": "request-native", "x-vector-title": "true", authorization: "private-auth" },
+          body: "private-request",
+        }),
+      )
+      expect(response.status).toBe(202)
+      expect(response.statusText).toBe("Accepted")
+      expect(response.headers.get("x-upstream")).toBe("kept")
+      expect(await response.text()).toBe("private-response")
+      const override = await fetch(
+        new Request(server.url, {
+          method: "POST",
+          headers: { "x-vector-request-id": "ignored-request", authorization: "ignored-auth" },
+          body: "override-request",
+        }),
+        { headers: { "X-Vector-Request-Id": "override-id", "X-Vector-Title": "true", authorization: "override-auth" } },
+      )
+      await override.text()
+      expect(bodies).toEqual(["private-request", "override-request"])
+      expect(server.httpRequests.map((request) => request.method)).toEqual(["POST", "POST"])
+      expect(server.httpRequests.map((request) => request.headers.authorization)).toEqual([
+        "private-auth",
+        "override-auth",
+      ])
+      expect(
+        server.httpRequests.every(
+          (request) => !request.headers["x-vector-request-id"] && !request.headers["x-vector-title"],
+        ),
+      ).toBe(true)
+      expect(events.filter((event) => event.phase === "selected").map((event) => event.requestID)).toEqual([
+        "request-native",
+        "override-id",
+      ])
+      expect(events.filter((event) => event.phase === "terminal")).toHaveLength(2)
+      expect(JSON.stringify(events)).not.toContain("private-")
+    } finally {
+      fetch.close()
+    }
+  })
+
+  test.each(["object", "headers", "tuples"])("strips mixed-case internal %s init headers", async (kind) => {
+    await using server = await createHttpServer()
+    const entries: [string, string][] = [
+      ["X-Vector-Request-Id", "private-request"],
+      ["X-Vector-Title", "true"],
+      ["Authorization", "kept"],
+    ]
+    const headers =
+      kind === "object" ? Object.fromEntries(entries) : kind === "headers" ? new Headers(entries) : entries
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    try {
+      const response = await fetch(server.url, { method: "POST", headers, body: JSON.stringify({ stream: true }) })
+      expect(await response.text()).toBe("http")
+      expect(server.httpRequests[0].headers["x-vector-request-id"]).toBeUndefined()
+      expect(server.httpRequests[0].headers["x-vector-title"]).toBeUndefined()
+      expect(server.httpRequests[0].headers.authorization).toBe("kept")
+    } finally {
+      fetch.close()
+    }
+  })
+
+  test("propagates HTTP body cancellation and emits one redacted abort", async () => {
+    const cancelled = Promise.withResolvers<unknown>()
+    const events: OpenAITransport.Diagnostic[] = []
+    // Bun's native HTTP reader cancellation does not close its upstream socket. Use a real stream
+    // source to observe cancellation forwarding, including a pending read, without relying on that runtime behavior.
+    const response = await OpenAITransport.fetchHttp({
+      request: "http://localhost/v1/responses",
+      fetch: Object.assign(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode("private-first-chunk"))
+              },
+              cancel(reason) {
+                cancelled.resolve(reason)
+              },
+            }),
+          ),
+        { preconnect: fetch.preconnect },
+      ),
+      reason: "disabled",
+      trace: OpenAITransport.createTrace({ transport: "http", headers: {}, report: (event) => events.push(event) }),
+    })
+    const reader = response.body!.getReader()
+    expect((await reader.read()).done).toBe(false)
+    await reader.cancel("private-cancel-reason")
+    expect(await cancelled.promise).toBe("private-cancel-reason")
+    expect(events.filter((event) => event.phase === "abort")).toHaveLength(1)
+    expect(events.filter((event) => event.phase === "terminal")).toHaveLength(0)
+    expect(JSON.stringify(events)).not.toContain("private-")
+  })
+
+  test("propagates HTTP stream errors and emits one bounded failure", async () => {
+    const upstream = Promise.withResolvers<ServerResponse>()
+    await using server = await createHttpServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream", "content-length": "10000" })
+      response.write("private-first-chunk")
+      upstream.resolve(response)
+    })
+    const events: OpenAITransport.Diagnostic[] = []
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ onDiagnostic: (event) => events.push(event) })
+    try {
+      const response = await fetch(server.url, streamRequest({ [TITLE_HEADER]: "true" }))
+      const reader = response.body!.getReader()
+      expect((await reader.read()).done).toBe(false)
+      ;(await upstream.promise).destroy()
+      const error = await reader.read().then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      expect(error).toBeInstanceOf(Error)
+      expect(events.filter((event) => event.phase === "failure")).toHaveLength(1)
+      expect(events.filter((event) => event.phase === "terminal")).toHaveLength(0)
+      expect(JSON.stringify(events)).not.toContain("private-")
+    } finally {
+      fetch.close()
+    }
+  })
+
+  test("preserves a native Request abort signal before headers arrive", async () => {
+    const received = Promise.withResolvers<void>()
+    await using server = await createHttpServer(() => received.resolve())
+    const events: OpenAITransport.Diagnostic[] = []
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ onDiagnostic: (event) => events.push(event) })
+    const controller = new AbortController()
+    try {
+      const pending = fetch(
+        new Request(server.url, { method: "POST", body: "private-prompt", signal: controller.signal }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+      await received.promise
+      controller.abort(new DOMException("private-abort", "AbortError"))
+      expect(await pending).toBeInstanceOf(Error)
+      expect(events.filter((event) => event.phase === "abort")).toHaveLength(1)
+      expect(JSON.stringify(events)).not.toContain("private-")
+    } finally {
+      fetch.close()
+    }
   })
 })
 
@@ -839,10 +1124,11 @@ async function createRejectingWebSocketServer(onAttempt: () => void) {
   return websocketServerHandle(server, http)
 }
 
-async function createHttpServer() {
+async function createHttpServer(handle?: (request: IncomingMessage, response: ServerResponse) => void) {
   const httpRequests: IncomingMessage[] = []
   const server = createServer((request, response) => {
     httpRequests.push(request)
+    if (handle) return handle(request, response)
     response.writeHead(200, { "content-type": "text/plain" })
     response.end("http")
   })
@@ -872,7 +1158,13 @@ function websocketServerHandle(server: WebSocketServer, http: Awaited<ReturnType
 }
 
 function closeHttpServer(server: HttpServer) {
-  return new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  // Bun may stop listening while closing aborted HTTP connections.
+  server.closeAllConnections()
+  return new Promise<void>((resolve, reject) => {
+    server.close((error: NodeJS.ErrnoException | undefined) =>
+      error && error.code !== "ERR_SERVER_NOT_RUNNING" ? reject(error) : resolve(),
+    )
+  })
 }
 
 async function waitFor(predicate: () => boolean, message: string) {
@@ -882,3 +1174,60 @@ async function waitFor(predicate: () => boolean, message: string) {
     await new Promise((resolve) => setTimeout(resolve, 1))
   }
 }
+
+test.each([
+  "{broken",
+  JSON.stringify({ model: "private prompt with spaces", reasoning: { effort: "private-effort" } }),
+])("transport diagnostics ignore invalid routing fields in %s", (body) => {
+  const events: OpenAITransport.Diagnostic[] = []
+  OpenAITransport.createTrace({ transport: "http", headers: {}, body, report: (event) => events.push(event) })(
+    "selected",
+  )
+  expect(events[0].model).toBeUndefined()
+  expect(events[0].reasoningEffort).toBeUndefined()
+  expect(JSON.stringify(events)).not.toContain("private")
+})
+
+test("HTTP diagnostics capture only bounded serialized routing and patch mode", () => {
+  const events: OpenAITransport.Diagnostic[] = []
+  OpenAITransport.createTrace({
+    transport: "http",
+    headers: {},
+    body: JSON.stringify({ model: "gpt-6.1-sol", reasoning: { effort: "low" }, input: "private-prompt" }),
+    report: (event) => events.push(event),
+  })("selected")
+  expect(events[0]).toMatchObject({ model: "gpt-6.1-sol", reasoningEffort: "low", patchToolType: "absent" })
+  expect(JSON.stringify(events)).not.toContain("private-prompt")
+})
+
+test("transport diagnostics distinguish patch protocols without retaining tool contents", () => {
+  const cases: { tools: unknown; expected: OpenAITransport.Diagnostic["patchToolType"] }[] = [
+    { tools: undefined, expected: "absent" },
+    { tools: [], expected: "absent" },
+    { tools: [{ type: "function", name: "other-private-tool" }], expected: "absent" },
+    { tools: [{ type: "function", name: "apply_patch", parameters: { private: "schema" } }], expected: "function" },
+    { tools: [{ type: "custom", name: "apply_patch", description: "private-description" }], expected: "custom" },
+    { tools: [{ type: "apply_patch" }], expected: "other" },
+    { tools: [{ type: "private-type", name: "apply_patch" }], expected: "other" },
+    {
+      tools: [
+        { type: "custom", name: "apply_patch" },
+        { type: "function", name: "apply_patch" },
+      ],
+      expected: "other",
+    },
+    { tools: { private: "invalid-tools" }, expected: "other" },
+  ]
+  for (const item of cases) {
+    const events: OpenAITransport.Diagnostic[] = []
+    OpenAITransport.createTrace({
+      transport: "http",
+      headers: {},
+      body: JSON.stringify({ tools: item.tools }),
+      report: (event) => events.push(event),
+    })("selected")
+    expect(events[0].patchToolType).toBe(item.expected)
+    expect(JSON.stringify(events)).not.toContain("private")
+    expect(events[0]).not.toHaveProperty("tools")
+  }
+})

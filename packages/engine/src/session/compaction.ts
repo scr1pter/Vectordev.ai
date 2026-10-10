@@ -108,7 +108,7 @@ function turns(messages: SessionV1.WithParts[]) {
   return result
 }
 
-function splitTurn(input: {
+export function splitTurn(input: {
   messages: SessionV1.WithParts[]
   turn: Turn
   model: Provider.Model
@@ -118,18 +118,30 @@ function splitTurn(input: {
   return Effect.gen(function* () {
     if (input.budget <= 0) return undefined
     if (input.turn.end - input.turn.start <= 1) return undefined
-    for (let start = input.turn.start + 1; start < input.turn.end; start++) {
+    const first = input.turn.start + 1
+    if (
+      (yield* input.estimate({ messages: input.messages.slice(first, input.turn.end), model: input.model })) <=
+      input.budget
+    )
+      return { start: first, id: input.messages[first]!.info.id } satisfies Tail
+    // Conversion emits independent blocks per original message. Removing a prefix cannot grow the
+    // estimate, so find the earliest fitting suffix without repeatedly converting every overlapping suffix.
+    let start = first + 1
+    let end = input.turn.end
+    while (start < end) {
+      const middle = Math.floor((start + end) / 2)
       const size = yield* input.estimate({
-        messages: input.messages.slice(start, input.turn.end),
+        messages: input.messages.slice(middle, input.turn.end),
         model: input.model,
       })
-      if (size > input.budget) continue
-      return {
-        start,
-        id: input.messages[start]!.info.id,
-      } satisfies Tail
+      if (size > input.budget) {
+        start = middle + 1
+        continue
+      }
+      end = middle
     }
-    return undefined
+    if (start === input.turn.end) return undefined
+    return { start, id: input.messages[start]!.info.id } satisfies Tail
   })
 }
 

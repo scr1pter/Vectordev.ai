@@ -1,4 +1,4 @@
-import { Component, JSX, Show, createSignal, onCleanup } from "solid-js"
+import { Component, JSX, Show, createResource, createSignal, onCleanup } from "solid-js"
 import { ButtonV2 } from "@vectordevai/ui/v2/button-v2"
 import { SelectV2 } from "@vectordevai/ui/v2/select-v2"
 import { Switch } from "@vectordevai/ui/v2/switch-v2"
@@ -13,6 +13,7 @@ import "./settings-v2.css"
 
 import { useTheme } from "@vectordevai/ui/theme/context"
 import { useLanguage } from "@/context/language"
+import { usePlatform } from "@/context/platform"
 import { LocalMemoryPanel } from "@/features/memory/local-memory-panel"
 import { observeTelemetryPreference, setTelemetryEnabled, telemetryEnabled } from "@/features/privacy/telemetry"
 
@@ -216,9 +217,15 @@ export const SettingsGeneralV2: Component<{
   const settings = useSettings()
   const theme = useTheme()
   const language = useLanguage()
+  const platform = usePlatform()
   const [status, setStatus] = createSignal("")
   const [crashDiagnostics, setCrashDiagnostics] = createSignal(telemetryEnabled())
   onCleanup(observeTelemetryPreference(setCrashDiagnostics))
+  const [usageSharing, { mutate: setUsageSharing }] = createResource(
+    () => (platform.getUsageSharing ? true : false),
+    () => platform.getUsageSharing?.().catch(() => true) ?? true,
+    { initialValue: true },
+  )
   let statusTimeout: ReturnType<typeof setTimeout> | undefined
 
   const section = () => props.section ?? "general"
@@ -266,6 +273,28 @@ export const SettingsGeneralV2: Component<{
             }}
           />
         </Card>
+        <Show when={platform.getUsageSharing && platform.setUsageSharing}>
+          <Card
+            icon="share"
+            title="Usage counts"
+            description="Counted under a random install ID, and your Vector account when you are signed in. On by default."
+          >
+            <ToggleRow
+              title="Share usage counts"
+              description="Sends daily session counts and your token use by model, with your app version and OS. Never your prompts, code or files."
+              checked={usageSharing.latest}
+              onChange={(enabled) => {
+                setUsageSharing(enabled)
+                void Promise.resolve(platform.setUsageSharing?.(enabled))
+                  .then(() => announce(enabled ? "Usage counts enabled." : "Usage counts disabled."))
+                  .catch(() => {
+                    setUsageSharing(!enabled)
+                    announce("Could not save the usage counts preference.")
+                  })
+              }}
+            />
+          </Card>
+        </Show>
         <Card
           icon="reset"
           title="Local data"

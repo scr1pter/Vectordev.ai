@@ -1,4 +1,4 @@
-import { chatgptOAuthConfiguration, ownedOAuthMatches } from "../../provider-policy"
+import { CHATGPT_SIGN_IN_UNAVAILABLE, chatgptCredentialMatches, chatgptOAuthConfiguration } from "../../provider-policy"
 import { createServer } from "node:http"
 import type { IntegrationOAuthMethodRegistration } from "@vectordevai/plugin/v2/effect/integration"
 import { define } from "@vectordevai/plugin/v2/effect/plugin"
@@ -10,10 +10,9 @@ import { Integration } from "../../integration"
 import { ModelV2 } from "../../model"
 import { OauthCallbackPage } from "../../oauth/page"
 import { ProviderV2 } from "../../provider"
+import { ProviderRemotePolicy } from "../../provider-remote-policy"
 import type { PluginInternal } from "../internal"
 
-const configuration = chatgptOAuthConfiguration()
-const clientID = configuration?.clientId ?? ""
 const issuer = "https://auth.openai.com"
 const callbackPort = 1455
 const pollingSafetyMargin = 3000
@@ -32,6 +31,8 @@ type TokenResponse = {
   expires_in?: number
 }
 
+type App = NonNullable<ReturnType<typeof chatgptOAuthConfiguration>>
+
 type Claims = {
   chatgpt_account_id?: string
   organizations?: Array<{ id: string }>
@@ -47,7 +48,7 @@ const browser = {
   },
   authorize: () =>
     Effect.gen(function* () {
-      if (!configuration) return yield* Effect.fail(new Error("Built-in ChatGPT sign-in is unavailable"))
+      const app = yield* signInConfiguration()
       const pkce = yield* Effect.promise(generatePKCE)
       const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
       const code = yield* Deferred.make<string, Error>()
@@ -93,11 +94,11 @@ const browser = {
       )
       return {
         mode: "auto" as const,
-        url: authorizeURL(redirect, pkce, state),
+        url: authorizeURL(app, redirect, pkce, state),
         instructions: "Complete authorization in your browser. This window will close automatically.",
         callback: Deferred.await(code).pipe(
-          Effect.flatMap((value) => exchange(value, redirect, pkce)),
-          Effect.map((tokens) => credential(browserMethodID, tokens)),
+          Effect.flatMap((value) => exchange(app, value, redirect, pkce)),
+          Effect.map((tokens) => credential(app, browserMethodID, tokens)),
         ),
       }
     }),
@@ -113,13 +114,13 @@ const headless = {
   },
   authorize: () =>
     Effect.gen(function* () {
-      if (!configuration) return yield* Effect.fail(new Error("Built-in ChatGPT sign-in is unavailable"))
+      const app = yield* signInConfiguration()
       const device = yield* request<{ device_auth_id: string; user_code: string; interval: string }>(
         `${issuer}/api/accounts/deviceauth/usercode`,
         {
           method: "POST",
           headers: headers("application/json"),
-          body: JSON.stringify({ client_id: clientID }),
+          body: JSON.stringify({ client_id: app.clientId }),
         },
       )
       const interval = Math.max(Number.parseInt(device.interval) || 5, 1) * 1000
@@ -145,8 +146,9 @@ const headless = {
                 code_verifier: string
               }
               return credential(
+                app,
                 headlessMethodID,
-                yield* exchange(data.authorization_code, `${issuer}/deviceauth/callback`, {
+                yield* exchange(app, data.authorization_code, `${issuer}/deviceauth/callback`, {
                   verifier: data.code_verifier,
                   challenge: "",
                 }),
@@ -166,8 +168,11 @@ const headless = {
 export const OpenAIPlugin = define({
   id: "openai",
   effect: Effect.fn(function* (ctx) {
+    // Start from the last off-switch value seen, then read the current one in the background.
+    yield* Effect.promise(() => ProviderRemotePolicy.restore())
+    yield* Effect.sync(() => void ProviderRemotePolicy.check())
     yield* ctx.integration.transform((draft) => {
-      if (!configuration) return
+      if (!chatgptOAuthConfiguration()) return
       draft.method.update(browser)
       draft.method.update(headless)
     })
@@ -205,7 +210,17 @@ function headers(contentType: string) {
   return { "Content-Type": contentType, "User-Agent": `vector/${InstallationVersion}` }
 }
 
-function exchange(code: string, redirect: string, pkce: Pkce) {
+// The owner can switch ChatGPT sign-in off from vectordev.ai, so every new sign-in reads the switch first.
+function signInConfiguration() {
+  return Effect.promise(() => ProviderRemotePolicy.check(true)).pipe(
+    Effect.flatMap(() => {
+      const app = chatgptOAuthConfiguration()
+      return app ? Effect.succeed(app) : Effect.fail(new Error(CHATGPT_SIGN_IN_UNAVAILABLE))
+    }),
+  )
+}
+
+function exchange(app: App, code: string, redirect: string, pkce: Pkce) {
   return request<TokenResponse>(`${issuer}/oauth/token`, {
     method: "POST",
     headers: headers("application/x-www-form-urlencoded"),
@@ -213,35 +228,32 @@ function exchange(code: string, redirect: string, pkce: Pkce) {
       grant_type: "authorization_code",
       code,
       redirect_uri: redirect,
-      client_id: clientID,
+      client_id: app.clientId,
       code_verifier: pkce.verifier,
     }).toString(),
   })
 }
 
 function refresh(methodID: Integration.MethodID, value: Pick<Credential.OAuth, "refresh" | "metadata">) {
-  if (!ownedOAuthMatches(value, configuration))
-    return Effect.fail(
-      new Error("Built-in ChatGPT sign-in is unavailable. Use an OpenAI API key or the external Codex runtime."),
-    )
+  const app = chatgptOAuthConfiguration()
+  if (!app || !chatgptCredentialMatches(value, app)) return Effect.fail(new Error(CHATGPT_SIGN_IN_UNAVAILABLE))
   return request<TokenResponse>(`${issuer}/oauth/token`, {
     method: "POST",
     headers: headers("application/x-www-form-urlencoded"),
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: value.refresh,
-      client_id: clientID,
+      client_id: app.clientId,
     }).toString(),
   }).pipe(
     Effect.map((tokens) => {
-      const next = credential(methodID, tokens)
+      const next = credential(app, methodID, tokens)
       return Credential.OAuth.make({ ...next, metadata: { ...value.metadata, ...next.metadata } })
     }),
   )
 }
 
 function request<A>(url: string, init: RequestInit) {
-  if (!configuration) return Effect.fail(new Error("Built-in ChatGPT sign-in is unavailable"))
   return Effect.tryPromise({
     try: async (signal) => {
       const response = await fetch(url, { ...init, signal })
@@ -252,7 +264,7 @@ function request<A>(url: string, init: RequestInit) {
   })
 }
 
-function credential(methodID: Integration.MethodID, tokens: TokenResponse) {
+function credential(app: App, methodID: Integration.MethodID, tokens: TokenResponse) {
   const accountID = extractAccountID(tokens)
   return Credential.OAuth.make({
     type: "oauth",
@@ -262,7 +274,7 @@ function credential(methodID: Integration.MethodID, tokens: TokenResponse) {
     expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
     metadata: {
       ...(accountID ? { accountID } : {}),
-      oauth_client_id: clientID,
+      oauth_client_id: app.clientId,
       oauth_instance_url: issuer,
     },
   })
@@ -279,10 +291,10 @@ function base64UrlEncode(buffer: ArrayBuffer) {
   return Buffer.from(buffer).toString("base64url")
 }
 
-function authorizeURL(redirect: string, pkce: Pkce, state: string) {
+function authorizeURL(app: App, redirect: string, pkce: Pkce, state: string) {
   return `${issuer}/oauth/authorize?${new URLSearchParams({
     response_type: "code",
-    client_id: clientID,
+    client_id: app.clientId,
     redirect_uri: redirect,
     scope: "openid profile email offline_access",
     code_challenge: pkce.challenge,

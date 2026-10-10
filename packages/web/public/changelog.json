@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.106",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Agents keep working while your computer is idle, and Sign in with ChatGPT is back",
+              "description": "While any agent or subagent is running, Vector now keeps your computer from going to sleep, so long runs no longer freeze when you step away; the display can still turn off, and closing a laptop lid still puts it to sleep. When you come back to Vector after it was in the background, or after its connection to the agent engine drops, the open session and its subagent cards reload, so finished subagents no longer stay marked as running. Pressing Stop on a subagent that already finished now settles its card and says so, instead of appearing to do nothing. Sign in with ChatGPT is back: connect OpenAI with a ChatGPT Plus or Pro account to use GPT models. Vector now sends a daily usage count: how many sessions and subagent sessions ran, and, when you are signed in, token totals, recorded cost, the models and effort levels used, and streaks, with the app version and operating system. It never sends prompts, code, file names, model output, keys or IP addresses. Turn it off in Settings, General, Share usage counts."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.105",
       "highlights": [
         {

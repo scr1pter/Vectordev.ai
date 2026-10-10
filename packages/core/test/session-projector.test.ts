@@ -17,6 +17,7 @@ import { SessionMessage } from "@vectordevai/core/session/message"
 import { Prompt } from "@vectordevai/core/session/prompt"
 import { SessionMessageUpdater } from "@vectordevai/core/session/message-updater"
 import { SessionProjector } from "@vectordevai/core/session/projector"
+import { SessionV1 } from "@vectordevai/core/v1/session"
 import { SessionExecution } from "@vectordevai/core/session/execution"
 import { SessionInput } from "@vectordevai/core/session/input"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@vectordevai/core/session/sql"
@@ -263,6 +264,7 @@ describe("SessionProjector", () => {
           directory: "/project",
           title: "test",
           version: "test",
+          time_updated: 10,
         })
         .run()
         .pipe(Effect.orDie)
@@ -368,7 +370,7 @@ describe("SessionProjector", () => {
       ).toMatchObject({
         agent: "build",
         model,
-        time_updated: DateTime.toEpochMillis(created),
+        time_updated: 10,
       })
     }),
   )
@@ -783,3 +785,188 @@ describe("SessionProjector", () => {
     }),
   )
 })
+
+it.effect("ancillary usage survives replay and transcript reverts without creating messages", () =>
+  Effect.gen(function* () {
+    const database = yield* Database.Service
+    const events = yield* EventV2.Service
+    const parentID = SessionV2.ID.make("ses_ancillary_parent")
+    yield* database.db
+      .insert(ProjectTable)
+      .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+      .run()
+    yield* database.db
+      .insert(SessionTable)
+      .values([
+        {
+          id: parentID,
+          project_id: Project.ID.global,
+          slug: "parent",
+          directory: "/project",
+          title: "parent",
+          version: "test",
+        },
+        {
+          id: sessionID,
+          parent_id: parentID,
+          project_id: Project.ID.global,
+          slug: "child",
+          directory: "/project",
+          title: "child",
+          version: "test",
+        },
+      ])
+      .run()
+    const usageID = EventV2.ID.create()
+    const first = yield* events.publish(
+      SessionEvent.AncillaryUsage,
+      {
+        sessionID,
+        timestamp: created,
+        usageID,
+        purpose: "title",
+        model,
+        cost: 0.25,
+        tokens: { input: 10, output: 2, reasoning: 1, cache: { read: 4, write: 5 } },
+      },
+      { id: usageID },
+    )
+    yield* events.publish(SessionEvent.AncillaryUsage, {
+      sessionID,
+      timestamp: created,
+      usageID: EventV2.ID.create(),
+      purpose: "title",
+      model,
+      cost: 0.1,
+      unpriced: true,
+      incomplete: true,
+      tokens: { input: 7, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.id, first.id)).get()
+    if (!recorded) return yield* Effect.die("Missing ancillary event")
+    yield* events.replay({
+      id: recorded.id,
+      aggregateID: recorded.aggregate_id,
+      seq: recorded.seq,
+      type: recorded.type,
+      data: recorded.data,
+    })
+    expect(yield* database.db.select().from(SessionMessageTable).all()).toHaveLength(0)
+    const boundary = SessionMessage.ID.make("msg_ancillary_boundary")
+    yield* database.db.insert(SessionMessageTable).values(assistantRow(boundary, 10)).run()
+    yield* events.publish(SessionEvent.RevertEvent.Committed, { sessionID, messageID: boundary, timestamp: created })
+    const session = yield* database.db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get()
+    expect(session?.cost).toBeCloseTo(0.35)
+    expect(session?.unpriced_steps).toBe(1)
+    expect(session?.tokens_input).toBe(17)
+    expect(session?.tokens_output).toBe(2)
+    const parent = yield* database.db.select().from(SessionTable).where(eq(SessionTable.id, parentID)).get()
+    expect(parent?.subagent_cost).toBeCloseTo(0.35)
+    expect(parent?.subagent_unpriced_steps).toBe(1)
+    expect(parent?.tokens_input).toBe(0)
+  }),
+)
+
+it.effect("descendant spend advances ancestor freshness for equal and older timestamps without replay inflation", () =>
+  Effect.gen(function* () {
+    const database = yield* Database.Service
+    const events = yield* EventV2.Service
+    const root = SessionV2.ID.make("ses_freshness_root")
+    const child = SessionV2.ID.make("ses_freshness_child")
+    const grandchild = SessionV2.ID.make("ses_freshness_grandchild")
+    yield* database.db
+      .insert(ProjectTable)
+      .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+      .run()
+    yield* database.db
+      .insert(SessionTable)
+      .values(
+        [
+          { id: root, parent_id: null },
+          { id: child, parent_id: root },
+          { id: grandchild, parent_id: child },
+        ].map((row) => ({
+          ...row,
+          project_id: Project.ID.global,
+          slug: row.id,
+          directory: "/project",
+          title: row.id,
+          version: "test",
+          time_created: 1000,
+          time_updated: 1000,
+        })),
+      )
+      .run()
+    const get = (id: typeof root) => database.db.select().from(SessionTable).where(eq(SessionTable.id, id)).get()
+    const usageID = EventV2.ID.create()
+    yield* events.publish(
+      SessionEvent.AncillaryUsage,
+      {
+        sessionID: grandchild,
+        timestamp: DateTime.makeUnsafe(1000),
+        usageID,
+        purpose: "title",
+        model,
+        cost: 0.25,
+        tokens: { input: 4, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
+      },
+      { id: usageID },
+    )
+    const first = yield* get(root)
+    expect(first?.time_updated).toBe(1001)
+    expect(first?.subagent_cost).toBe(0.25)
+    const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.id, usageID)).get()
+    if (!recorded) return yield* Effect.die("Missing usage event")
+    yield* events.replay({
+      id: recorded.id,
+      aggregateID: recorded.aggregate_id,
+      seq: recorded.seq,
+      type: recorded.type,
+      data: recorded.data,
+    })
+    expect((yield* get(root))?.time_updated).toBe(1001)
+    yield* events.publish(SessionEvent.AncillaryUsage, {
+      sessionID: grandchild,
+      timestamp: DateTime.makeUnsafe(5000),
+      usageID: EventV2.ID.create(),
+      purpose: "title",
+      model,
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    })
+    expect((yield* get(root))?.time_updated).toBe(1001)
+    yield* events.publish(SessionEvent.AncillaryUsage, {
+      sessionID: grandchild,
+      timestamp: DateTime.makeUnsafe(1),
+      usageID: EventV2.ID.create(),
+      purpose: "title",
+      model,
+      incomplete: true,
+    })
+    const second = yield* get(root)
+    expect(second?.time_updated).toBe(1002)
+    expect(second?.subagent_unpriced_steps).toBe(1)
+    expect((yield* get(child))?.subagent_unpriced_steps).toBe(1)
+    yield* events.publish(SessionV1.Event.Updated, {
+      sessionID: root,
+      info: {
+        id: root,
+        projectID: Project.ID.global,
+        slug: root,
+        directory: "/project",
+        title: "late metadata",
+        version: "test",
+        time: { created: 1000, updated: 1000 },
+      },
+    })
+    expect(yield* get(root)).toMatchObject({
+      time_created: 1000,
+      time_updated: 1002,
+      subagent_cost: 0.25,
+      subagent_unpriced_steps: 1,
+      tokens_input: 0,
+      tokens_output: 0,
+    })
+    expect(yield* database.db.select().from(SessionMessageTable).all()).toHaveLength(0)
+  }),
+)

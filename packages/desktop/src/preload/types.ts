@@ -517,6 +517,7 @@ export type ParallelWorkspaceTurn = {
 
 export type ParallelWorkspaceRecord = {
   id: string
+  revision?: number
   name: string
   taskPrompt: string
   runtime: "vector" | "claude-code" | "codex" | "cursor"
@@ -801,6 +802,8 @@ export type ElectronAPI = {
   relaunch: () => void
   getZoomFactor: () => Promise<number>
   setZoomFactor: (factor: number) => Promise<void>
+  getUsageSharing: () => Promise<boolean>
+  setUsageSharing: (enabled: boolean) => Promise<void>
   getPinchZoomEnabled: () => Promise<boolean>
   setPinchZoomEnabled: (enabled: boolean) => Promise<void>
   onPinchZoomEnabledChanged: (cb: (enabled: boolean) => void) => () => void

@@ -14,6 +14,7 @@ import { Session } from "@/session/session"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionProcessor } from "../../src/session/processor"
+import { SessionAdmission } from "../../src/session/admission"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { SessionSummary } from "../../src/session/summary"
@@ -1191,79 +1192,267 @@ itStalledSnapshot.live(
     ),
 )
 
-for (const outcome of ["stopped", "fail"] as const) {
-  itUnfinished.live(
-    `session.processor effect tests record what a ${outcome === "fail" ? "failed" : "stopped"} step was billed as it started`,
-    () =>
-      provideTmpdirInstance(
-        (dir) =>
-          Effect.gen(function* () {
-            const database = yield* Database.Service
-            const { processors, session, provider } = yield* boot()
-            const chat = yield* session.create({})
-            const parent = yield* user(chat.id, outcome)
-            const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-            const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-            const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+for (const guarded of [false, true]) {
+  for (const outcome of ["stopped", "fail"] as const) {
+    itUnfinished.live(
+      `session.processor effect tests record what a ${outcome === "fail" ? "failed" : "stopped"} step was billed as it started${guarded ? " with admission observations" : ""}`,
+      () =>
+        provideTmpdirInstance(
+          (dir) =>
+            Effect.gen(function* () {
+              const database = yield* Database.Service
+              const { processors, session, provider } = yield* boot()
+              const chat = yield* session.create({})
+              const parent = yield* user(chat.id, outcome)
+              const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+              const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+              const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
 
-            const run = yield* handle
-              .process({
-                user: {
-                  id: parent.id,
+              const observed: number[] = []
+              const settled: SessionAdmission.Settlement[] = []
+              const run = yield* handle
+                .process({
+                  user: {
+                    id: parent.id,
+                    sessionID: chat.id,
+                    role: "user",
+                    time: parent.time,
+                    agent: parent.agent,
+                    model: { providerID: ref.providerID, modelID: ref.modelID },
+                  } satisfies SessionV1.User,
                   sessionID: chat.id,
-                  role: "user",
-                  time: parent.time,
-                  agent: parent.agent,
-                  model: { providerID: ref.providerID, modelID: ref.modelID },
-                } satisfies SessionV1.User,
-                sessionID: chat.id,
-                model: mdl,
-                agent: agent(),
-                system: [],
-                messages: [{ role: "user", content: outcome }],
-                tools: {},
-              })
-              .pipe(Effect.forkChild)
-            if (outcome === "stopped") {
-              yield* waitFor(
-                MessageV2.parts(msg.id).pipe(
-                  Effect.map((parts) => parts.find((part) => part.type === "text")),
-                  Effect.provideService(Database.Service, database),
-                ),
-                "the step never streamed",
-              )
-              yield* Fiber.interrupt(run)
-              yield* Fiber.await(run)
-            }
-            if (outcome === "fail") yield* Fiber.join(run)
+                  model: mdl,
+                  agent: agent(),
+                  system: [],
+                  messages: [{ role: "user", content: outcome }],
+                  tools: {},
+                })
+                .pipe(
+                  Effect.provideService(
+                    SessionAdmission.Current,
+                    guarded
+                      ? {
+                          sessionID: chat.id,
+                          admit: () => ({
+                            observe: (cost) => observed.push(cost),
+                            settle: (result) => settled.push(result),
+                          }),
+                        }
+                      : undefined,
+                  ),
+                  Effect.forkChild,
+                )
+              if (outcome === "stopped") {
+                yield* waitFor(
+                  MessageV2.parts(msg.id).pipe(
+                    Effect.map((parts) => parts.find((part) => part.type === "text")),
+                    Effect.provideService(Database.Service, database),
+                  ),
+                  "the step never streamed",
+                )
+                yield* Fiber.interrupt(run)
+                yield* Fiber.await(run)
+              }
+              if (outcome === "fail") yield* Fiber.join(run)
 
-            // 5K input and 175K cache write at $3 and $3.75 per million tokens, plus one output token at $15.
-            const expected = (5_000 * 3 + 175_000 * 3.75 + 15) / 1_000_000
-            const saved = yield* MessageV2.get({ sessionID: chat.id, messageID: msg.id })
-            const finished = saved.parts.filter((part) => part.type === "step-finish")
-            expect(finished).toHaveLength(1)
-            expect(finished[0]).toMatchObject({
-              reason: outcome === "fail" ? "error" : "abort",
-              tokens: { input: 5_000, cache: { write: 175_000 } },
-            })
-            expect(saved.info.role === "assistant" && saved.info.cost).toBeCloseTo(expected)
-            expect((yield* session.get(chat.id)).cost).toBeCloseTo(expected)
-          }),
-        {
-          config: {
-            provider: {
-              lmstudio: {
-                ...cfg.provider.lmstudio,
-                models: {
-                  "test-model": {
-                    ...cfg.provider.lmstudio.models["test-model"],
-                    cost: { input: 3, output: 15, cache_write: 3.75 },
+              // 5K input and 175K cache write at $3 and $3.75 per million tokens, plus one output token at $15.
+              const expected = (5_000 * 3 + 175_000 * 3.75 + 15) / 1_000_000
+              const saved = yield* MessageV2.get({ sessionID: chat.id, messageID: msg.id })
+              const finished = saved.parts.filter((part) => part.type === "step-finish")
+              expect(finished).toHaveLength(1)
+              expect(finished[0]).toMatchObject({
+                reason: outcome === "fail" ? "error" : "abort",
+                tokens: { input: 5_000, cache: { write: 175_000 } },
+              })
+              expect(saved.info.role === "assistant" && saved.info.cost).toBeCloseTo(expected)
+              expect((yield* session.get(chat.id)).cost).toBeCloseTo(expected)
+              if (guarded) {
+                expect(observed).toHaveLength(2)
+                expect(observed[0]).toBeCloseTo(expected)
+                expect(observed[1]).toBeCloseTo(expected)
+                expect(settled).toHaveLength(1)
+                expect(settled[0]?.cost).toBeCloseTo(expected)
+                expect(settled[0]?.complete).toBe(false)
+              }
+              if (!guarded) {
+                expect(observed).toEqual([])
+                expect(settled).toEqual([])
+              }
+            }),
+          {
+            config: {
+              provider: {
+                lmstudio: {
+                  ...cfg.provider.lmstudio,
+                  models: {
+                    "test-model": {
+                      ...cfg.provider.lmstudio.models["test-model"],
+                      cost: { input: 3, output: 15, cache_write: 3.75 },
+                    },
                   },
                 },
               },
             },
           },
-        },
-      ),
-  )
+        ),
+    )
+  }
 }
+
+// The transport is the real AI SDK against the local HTTP fixture. These tests count provider requests, not just
+// admission callbacks, and deliberately request SDK retries to verify guarded attempts cannot hide another call.
+const admissionTurn = Effect.fn("test.admissionTurn")(function* (dir: string, sessionID: SessionID) {
+  const { processors, provider } = yield* boot()
+  const parent = yield* user(sessionID, "admission")
+  const msg = yield* assistant(sessionID, parent.id, path.resolve(dir))
+  const model = yield* provider.getModel(ref.providerID, ref.modelID)
+  const handle = yield* processors.create({ assistantMessage: msg, sessionID, model })
+  return {
+    handle,
+    run: handle.process({
+      user: {
+        id: parent.id,
+        sessionID,
+        role: "user",
+        time: parent.time,
+        agent: "build",
+        model: ref,
+      },
+      sessionID,
+      model,
+      agent: agent(),
+      system: [],
+      messages: [{ role: "user", content: "admission" }],
+      tools: {},
+      retries: 3,
+    }),
+  }
+})
+
+it.live("session admission refusal stops before the provider without a retryable error", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { session } = yield* boot()
+        const chat = yield* session.create({})
+        const turn = yield* admissionTurn(dir, chat.id)
+        const calls: string[] = []
+        expect(
+          yield* turn.run.pipe(
+            Effect.provideService(SessionAdmission.Current, {
+              sessionID: chat.id,
+              admit: () => {
+                calls.push("admit")
+                return undefined
+              },
+            }),
+          ),
+        ).toBe("stop")
+        expect(calls).toEqual(["admit"])
+        expect(yield* llm.calls).toBe(0)
+        expect(turn.handle.message.error).toBeUndefined()
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session admission settles a failed attempt before retry and disables hidden SDK retries", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { session } = yield* boot()
+        yield* llm.error(503, { error: "temporary" })
+        yield* llm.text("must remain unused")
+        const chat = yield* session.create({})
+        const turn = yield* admissionTurn(dir, chat.id)
+        const order: string[] = []
+        const settled: SessionAdmission.Settlement[] = []
+        expect(
+          yield* turn.run.pipe(
+            Effect.provideService(SessionAdmission.Current, {
+              sessionID: chat.id,
+              admit: () => {
+                order.push("admit")
+                if (settled.length) return
+                return {
+                  settle: (result) => {
+                    order.push("settle")
+                    settled.push(result)
+                  },
+                }
+              },
+            }),
+          ),
+        ).toBe("stop")
+        expect(order).toEqual(["admit", "settle", "admit"])
+        expect(settled).toEqual([{ cost: 0, context: 0, cached: 0, complete: false }])
+        expect(yield* llm.calls).toBe(1)
+        expect(turn.handle.message.error).toBeUndefined()
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session admission settles interrupted HTTP work exactly once and isolates unrelated sessions", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { session } = yield* boot()
+        yield* llm.push(raw({ head: [], hang: true }))
+        yield* llm.push(reply().text("unrelated").usage({ input: 10, output: 1 }).stop())
+        const chat = yield* session.create({})
+        const other = yield* session.create({})
+        const turn = yield* admissionTurn(dir, chat.id)
+        const unrelated = yield* admissionTurn(dir, other.id)
+        const settled: SessionAdmission.Settlement[] = []
+        const admitted: string[] = []
+        const policy: SessionAdmission.Policy = {
+          sessionID: chat.id,
+          admit: (request) => {
+            admitted.push(request.messageID)
+            return { settle: (result) => settled.push(result) }
+          },
+        }
+        const fiber = yield* turn.run.pipe(Effect.provideService(SessionAdmission.Current, policy), Effect.forkChild)
+        yield* llm.wait(1)
+        expect(yield* unrelated.run.pipe(Effect.provideService(SessionAdmission.Current, policy))).toBe("continue")
+        yield* Fiber.interrupt(fiber)
+        expect(admitted).toHaveLength(1)
+        expect(settled).toHaveLength(1)
+        expect(settled[0]).toMatchObject({ cost: 0, complete: false })
+        expect(yield* llm.calls).toBe(2)
+        yield* llm.push(reply().text("ordinary").usage({ input: 10, output: 1 }).stop())
+        const ordinary = yield* admissionTurn(dir, chat.id)
+        expect(yield* ordinary.run).toBe("continue")
+        expect(admitted).toHaveLength(1)
+        expect(settled).toHaveLength(1)
+        expect(yield* llm.calls).toBe(3)
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session admission settles reported complete usage once despite persisted snapshot updates", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { session } = yield* boot()
+        yield* llm.push(reply().text("complete").usage({ input: 10, output: 1 }).stop())
+        const chat = yield* session.create({})
+        const turn = yield* admissionTurn(dir, chat.id)
+        const settled: SessionAdmission.Settlement[] = []
+        expect(
+          yield* turn.run.pipe(
+            Effect.provideService(SessionAdmission.Current, {
+              sessionID: chat.id,
+              admit: () => ({ settle: (result) => settled.push(result) }),
+            }),
+          ),
+        ).toBe("continue")
+        expect(settled).toHaveLength(1)
+        expect(settled[0]).toMatchObject({ complete: true, context: 10, cost: 0, usage: { totalTokens: 11 } })
+        expect(yield* llm.calls).toBe(1)
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+)

@@ -127,6 +127,11 @@ export const AttachCommand = cmd({
       return
     }
 
+    // The TUI renders on this thread, where reading this computer's usage report would stall it. The sessions shown
+    // live on the attached server, which reports its own use.
+    const { routeUsageReport } = await import("@/cli/vector-account")
+    routeUsageReport(async () => undefined)
+
     const { Effect } = await import("effect")
     const { run } = await import("../tui/layer")
     const { createLegacyTuiPluginHost } = await import("@/plugin/tui/runtime")

@@ -1,0 +1,34 @@
+# Vector usage counts: production setup
+
+Usage counts tell the owner how many people use Vector, whether they come back, which versions and platforms matter, and how much model use flows through Vector. They are counts and totals only. The source is ready; production stays dark until the steps below are done.
+
+## What is recorded
+
+- Desktop check-in, `POST /api/usage/checkin`: a random install ID, the account ID when the desktop is signed in (taken from the verified Vector account token, never from the request body), app version, OS, CPU architecture, that day's session and subagent-session counts, and, when signed in, a usage report. One row per install per UTC day; a later check-in the same day never lowers a count. A report without a verified account is dropped, by the API and again by the SQL: anyone can invent an install ID, and these totals reach share links.
+- Usage report (desktop and CLI): the numbers behind Settings > Usage & streaks, read from the local engine's `GET /experimental/session/usage`: lifetime tokens by type (input, output, reasoning, cached), recorded cost, completed chats, conversations, model responses, active days, current and longest streak, average and longest task time, tokens, tasks and cost for the last seven days with any use, the five most-used models (provider and model ID with their tokens and share) and the effort levels with their tokens, responses and share. The exact shape is `packages/schema/src/usage-report.ts`; the server and the SQL refuse anything else. Per-day values keep the largest value reported for a day, so repeated reports never add up.
+- CLI: the daily account check, `POST /api/account/cli-verify`, records one row per account per UTC day when the CLI sends `x-vector-version` and `x-vector-platform` and not `x-vector-usage: off`. Once per UTC day the CLI also sends its usage report to `/api/usage/checkin` as client `cli`, computed in-process from the same engine service. It is stored against the account from the CLI's token, in the same one row per account per day, so a person's terminals on several computers count once. The CLI's random install ID is checked but not stored. `VECTOR_DISABLE_USAGE=1` turns both off; a CI runner (`CI` set) never sends a report, and the GitHub workflows the CLI generates set `VECTOR_DISABLE_USAGE=1`. Because each computer reports its own history, the summary takes a CLI account's largest report, not its latest, and a day used on two computers keeps the larger day. Where the desktop app's engine and the CLI share one data directory (an `XDG_DATA_HOME` both inherit, as some Linux sessions export), the desktop leaves `desktop-usage.json` there after its check-in reports that history, and the CLI then sends no report of its own, so the history is not counted twice.
+- Downloads, `GET /api/download`: one row per successful installer request, against the signed-in account, with the target and version.
+- Never: prompts, code, file names or paths, model output, provider keys or credentials, IP addresses or user agents. The check-in endpoint's abuse limiter keeps an HMAC of the network address in KV for one hour, separately from the counts.
+- Retention: rows older than 400 days (about 13 months) are deleted whenever a new row is written. Account deletion calls `vector_usage_forget` before removing the identity; the foreign keys to `auth.users` also cascade.
+
+## Share links
+
+The owner can make read-only links to the dashboard for investors and partners at `/usage` (Share a read-only link). Each link has a label only the owner sees and lasts 7, 14 or 30 days; it can be turned off at any time.
+
+- The link is `https://vectordev.ai/usage#share=<token>`. The token sits in the address fragment, which browsers never send to a server or in a referrer; the page sends it to `/api/usage/summary` in the `x-vector-usage-share` header.
+- Only a SHA-256 hash of the token is stored (`vector_usage_shares`), so a link is shown once, when it is made. The owner's list shows each link's label, expiry, state and how many times it was opened; nothing about the viewer is kept.
+- A link sees the same aggregates as the owner, with no account, install or email in them. Models, and effort levels other than Vector's own, that fewer than three accounts use are left off a shared link, because a custom provider or model name could point at one person or company. Vector's own effort levels are labelled by the server, never by a report. A day on which fewer than three people were active shows no sessions, tokens, cost or tasks on a shared link, since it could be one person's day; the shared page says so.
+- Expired and revoked links answer 410 with the reason; an unknown link answers 404. At most 50 links can be live at once, and links that ended more than 90 days ago are removed.
+
+## Setup
+
+1. In Vector's Supabase project, review and run [sql/usage.sql](sql/usage.sql) in the SQL editor. It is idempotent and upgrades a database that already has the first version. It creates four tables with row-level security and no policies, and `SECURITY DEFINER` functions that only the service role may execute. Run it before deploying the site: the dashboard needs the summary's new fields and answers "unavailable" until the SQL is updated.
+2. Confirm Vercel production has `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (already used by public sessions and account deletion). Without them every check-in still answers 204 and nothing is stored.
+3. Optionally set `VECTOR_ADMIN_EMAILS` (comma-separated) to the accounts allowed to read the dashboard and manage share links. It falls back to `VECTOR_DESIGN_LAB_EMAILS`, then to the owner's address. Access also requires a Google sign-in, exactly as for the Design Lab.
+4. In the Vercel project, enable Web Analytics. The site loads the first-party `/_vercel/insights/script.js` on public pages only; until Web Analytics is enabled that script returns 404 and nothing is counted. It sets no cookies and sends only the page path.
+5. Deploy, then open `https://vectordev.ai/usage`, sign in with Google, and confirm the dashboard loads. With no check-ins yet it says so. Make a share link and open it in a private window to see what a recipient sees.
+6. Review the usage-count sections of [the privacy policy](../../../packages/web/src/pages/legal/privacy.astro) and [the terms](../../../packages/web/src/pages/legal/terms.astro) before the desktop and CLI releases that send usage reports ship.
+
+## Validation
+
+`test/usage-api.test.ts` covers the endpoints with an injected fetcher. `packages/web/test/usage-sql.test.ts` runs this exact SQL on a disposable PostgreSQL 17 through the API code; the `Vector usage counts integration` workflow runs it on pull requests that touch it. That is local verification, not evidence that the SQL was applied to the production project.

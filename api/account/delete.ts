@@ -11,6 +11,7 @@ import {
 } from "../_lib/http.js"
 import { revocationConfigured, revokeAccountTokens } from "../_lib/revocation.js"
 import { cancelModelPlanAccount } from "../_lib/model-plan-account.js"
+import { forgetUsage } from "../_lib/usage.js"
 
 /**
  * Deleting a Vector account. The order matters, because the steps are not
@@ -22,7 +23,9 @@ import { cancelModelPlanAccount } from "../_lib/model-plan-account.js"
  *   3. revoke CLI tokens, which are stateless and would otherwise keep a
  *      terminal signed in for up to ninety days
  *   4. close model-plan checkout, subscriptions and inference access
- *   5. delete the identity itself
+ *   5. erase usage counts linked to the account, before the identity: once it
+ *      is gone, an install's earlier unlinked days can no longer be found
+ *   6. delete the identity itself
  *
  * The response says which of those actually happened.
  */
@@ -67,12 +70,15 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         "Model billing cleanup could not finish. Retry account deletion.",
       )
     })
+    const usageForgotten = await forgetUsage(user.id)
     await deleteAccountUser(admin, user.id)
 
     json(response, 200, {
       deleted: true,
       email: user.email,
       cliTokens: tokensRevoked ? "revoked" : revocationConfigured() ? "revocation-failed" : "expire-within-90-days",
+      // Linked days also go with the identity through the database's foreign keys.
+      usageCounts: usageForgotten ? "deleted" : "deletion-failed",
     })
   } catch (error) {
     handleApiError(response, error)
