@@ -17,12 +17,17 @@ import {
   type CloudProviderId,
   type CloudProviderProjectLink,
   type CloudProviderResource,
-  type CloudSupabaseServices,
   type PublishProgressEvent,
   type PublishTarget,
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
+import { supabaseClient } from "./supabase/supabase-api"
+import { SupabaseAuth } from "./supabase/supabase-auth"
+import { SupabaseDatabase } from "./supabase/supabase-database"
+import { SupabaseFunctions } from "./supabase/supabase-functions"
+import { SupabaseLogs, SupabaseSecurity } from "./supabase/supabase-observe"
+import { SupabaseStorage } from "./supabase/supabase-storage"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -37,6 +42,8 @@ export type CloudSection =
   | "authentication"
   | "storage"
   | "functions"
+  | "data-logs"
+  | "security"
   | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
@@ -60,6 +67,8 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
       { id: "authentication", label: "Authentication" },
       { id: "storage", label: "Storage" },
       { id: "functions", label: "Edge functions" },
+      { id: "data-logs", label: "Database logs" },
+      { id: "security", label: "Security" },
     ],
   },
   {
@@ -118,6 +127,7 @@ function sectionIcon(id: CloudSection) {
           />
         </>
       )
+    case "data-logs":
     case "logs":
       return (
         <>
@@ -188,6 +198,7 @@ function sectionIcon(id: CloudSection) {
           />
         </>
       )
+    case "security":
     case "authentication":
       return (
         <>
@@ -309,9 +320,6 @@ export function CloudConsole(props: {
   const [manualToken, setManualToken] = createSignal("")
   const [manualTokenError, setManualTokenError] = createSignal("")
   const [buildSettings, setBuildSettings] = createSignal<CloudBuildSettings | null>(null)
-  const [supabaseServices, setSupabaseServices] = createSignal<CloudSupabaseServices>()
-  const [supabaseServicesBusy, setSupabaseServicesBusy] = createSignal(false)
-  const [supabaseServicesLoaded, setSupabaseServicesLoaded] = createSignal(false)
   const [buildDraft, setBuildDraft] = createSignal<BuildDraft>({
     framework: "",
     packageManager: "npm",
@@ -423,8 +431,6 @@ export function CloudConsole(props: {
     setDatabase(null)
     setProviderLinks([])
     setProviderSelections({})
-    setSupabaseServices(undefined)
-    setSupabaseServicesLoaded(false)
     if (api) void refreshAll()
   })
 
@@ -753,33 +759,6 @@ export function CloudConsole(props: {
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
   const providerLink = (provider: "vercel") => providerLinks().find((item) => item.provider === provider)
 
-  const supabaseDashboard = (pathname = "") => {
-    const ref = database()?.projectRef
-    if (!ref) return "https://supabase.com/dashboard/projects"
-    return `https://supabase.com/dashboard/project/${encodeURIComponent(ref)}${pathname}`
-  }
-
-  const refreshSupabaseServices = async () => {
-    if (!api || !props.projectPath) return
-    setSupabaseServicesBusy(true)
-    try {
-      setSupabaseServices(await api.services.supabase(props.projectPath, props.taskId))
-    } catch (error) {
-      setSupabaseServices(undefined)
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load Supabase services." })
-    } finally {
-      setSupabaseServicesBusy(false)
-      setSupabaseServicesLoaded(true)
-    }
-  }
-
-  createEffect(() => {
-    const current = section()
-    if (["authentication", "storage", "functions"].includes(current) && !supabaseServicesLoaded()) {
-      void refreshSupabaseServices()
-    }
-  })
-
   const connectProvider = async (provider: CloudProviderId) => {
     if (!api) return
     setProviderBusy(provider)
@@ -903,44 +882,30 @@ export function CloudConsole(props: {
     }
   }
 
-  // --- Database ------------------------------------------------------------
-  const connectSupabaseProject = async () => {
+  // --- Supabase ------------------------------------------------------------
+  // Database, auth, storage, functions, logs and security all run the desktop's
+  // Supabase commands, the same ones the agent uses through vector_cloud.
+  const supabase = supabaseClient(() => ({ projectPath: props.projectPath, taskId: props.taskId }))
+  const supabaseLinked = () => Boolean(database()?.projectRef)
+  const refreshDatabase = async () => {
     if (!api || !props.projectPath) return
-    const projectRef = providerSelections().supabase
-    if (!projectRef) return
     const scope = environment.scope()
-    setProviderBusy("supabase")
-    try {
-      const connection = await api.database.connectProject(scope.projectPath, scope.taskId, projectRef)
-      if (!environment.isCurrent(scope)) return
-      setDatabase(connection)
-      await environment.refresh()
-      if (!environment.isCurrent(scope)) return
-      setSupabaseServices(undefined)
-      setSupabaseServicesLoaded(false)
-      setNotice({
-        tone: "success",
-        text: `${connection?.projectName ?? "Supabase"} connected. Vector configured the project locally without asking you to copy API keys.`,
-      })
-    } catch (error) {
-      if (!environment.isCurrent(scope)) return
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not connect the database." })
-    } finally {
-      setProviderBusy("")
-    }
+    const next = await api.database.get(scope.projectPath, scope.taskId).catch(() => null)
+    if (!environment.isCurrent(scope)) return
+    setDatabase(next)
+    await environment.refresh()
   }
-  const disconnectDb = async () => {
-    if (!api || !props.projectPath) return
-    const scope = environment.scope()
-    try {
-      await api.database.disconnect(scope.projectPath, scope.taskId)
-      if (!environment.isCurrent(scope)) return
-      setDatabase(null)
-      setNotice({ tone: "info", text: "Supabase disconnected. Your .env keys were left in place." })
-    } catch (error) {
-      if (!environment.isCurrent(scope)) return
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not disconnect — try again." })
-    }
+  // Getters keep the spread props reactive.
+  const supabasePanel = {
+    client: supabase,
+    get linked() {
+      return supabaseLinked()
+    },
+    get projectName() {
+      return database()?.projectName ?? database()?.projectRef
+    },
+    notice: setNotice,
+    onOpenDatabase: () => setSection("database"),
   }
 
   return (
@@ -2160,15 +2125,14 @@ export function CloudConsole(props: {
               </Show>
             </Show>
 
-            {/* Database */}
+            {/* Supabase: the console and the agent run the same commands */}
             <Show when={section() === "database"}>
               <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Data for your app</div>
                   <h1>Database</h1>
                   <p>
-                    Choose a project from your connected Supabase account. Vector configures the public client values in
-                    this repository without making you copy keys between dashboards.
+                    The Supabase project this repository uses: link or create it, keep its server credentials, apply and roll back migrations, and query it.
                   </p>
                 </div>
               </div>
@@ -2184,324 +2148,82 @@ export function CloudConsole(props: {
                   </div>
                 }
               >
-                <Show
-                  when={database()}
-                  fallback={
-                    <div class="cloud-panel">
-                      <div class="cloud-panel-title">
-                        {providerConnection("supabase")?.connected ? "Choose a Supabase project" : "Connect Supabase"}
-                      </div>
-                      <Show
-                        when={providerConnection("supabase")?.connected}
-                        fallback={
-                          <>
-                            <p class="cloud-muted mt-1 text-[12px]">
-                              Connect your Supabase account in Connections using hosted sign-in or an available personal
-                              access token.
-                            </p>
-                            <button
-                              class="cloud-button mt-3"
-                              data-variant="primary"
-                              type="button"
-                              disabled={!api}
-                              onClick={() => {
-                                setSection("connections")
-                                if (cloudProviderConnectionMode(providerConnection("supabase")) === "token")
-                                  openManualToken("supabase")
-                              }}
-                            >
-                              Set up Supabase connection
-                            </button>
-                          </>
-                        }
-                      >
-                        <p class="cloud-muted mt-1 text-[12px]">
-                          Select the existing Supabase project this repository should use.
-                        </p>
-                        <div class="cloud-provider-linker mt-3">
-                          <select
-                            class="cloud-input"
-                            value={providerSelections().supabase ?? ""}
-                            onChange={(event) =>
-                              setProviderSelections((current) => ({
-                                ...current,
-                                supabase: event.currentTarget.value,
-                              }))
-                            }
-                          >
-                            <option value="">Choose a Supabase project</option>
-                            <For each={providerResources().supabase ?? []}>
-                              {(resource) => (
-                                <option value={resource.id}>
-                                  {resource.name}
-                                  {resource.region ? ` · ${resource.region}` : ""}
-                                </option>
-                              )}
-                            </For>
-                          </select>
-                          <button
-                            class="cloud-button"
-                            data-variant="primary"
-                            type="button"
-                            disabled={!api || !providerSelections().supabase || providerBusy() === "supabase"}
-                            onClick={() => void connectSupabaseProject()}
-                          >
-                            {providerBusy() === "supabase" ? "Connecting…" : "Use this project"}
-                          </button>
-                        </div>
-                      </Show>
-                    </div>
-                  }
-                >
-                  {(connection) => (
-                    <div class="cloud-panel cloud-gradient-edge">
-                      <div class="flex items-center justify-between">
-                        <div>
-                          <div class="cloud-panel-title">Supabase connected</div>
-                          <p class="cloud-muted mt-1 text-[12px]">
-                            {connection().projectName ?? connection().projectRef ?? connection().url}
-                          </p>
-                          <p class="cloud-muted text-[11px]">
-                            Connected {formatDate(connection().connectedAt)} ·{" "}
-                            {connection().managedByOAuth ? "managed through Supabase OAuth" : "local configuration"} ·
-                            client at src/lib/supabase.js
-                          </p>
-                        </div>
-                        <button
-                          class="cloud-button"
-                          data-variant="danger"
-                          type="button"
-                          disabled={!api}
-                          onClick={() => requestConfirm("disconnect-db", () => void disconnectDb())}
-                        >
-                          {confirmId() === "disconnect-db" ? "Confirm disconnect?" : "Disconnect"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </Show>
+                <SupabaseDatabase
+                  {...supabasePanel}
+                  connected={Boolean(providerConnection("supabase")?.connected)}
+                  onOpenConnections={() => {
+                    setSection("connections")
+                    if (cloudProviderConnectionMode(providerConnection("supabase")) === "token") openManualToken("supabase")
+                  }}
+                  onDatabaseChange={refreshDatabase}
+                  openLink={(url) => platform.openLink(url)}
+                />
               </Show>
             </Show>
 
-            {/* Authentication */}
             <Show when={section() === "authentication"}>
               <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Supabase identity</div>
                   <h1>Authentication</h1>
                   <p>
-                    Attach authentication to this repository through its linked Supabase project. Vector can prepare the
-                    client configuration and your agent can implement the application code against it.
+                    Where sign-in may return to, which sign-in methods are on, and who has an account.
                   </p>
                 </div>
               </div>
-              <Show
-                when={database()?.projectRef}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("authentication")}
-                    </svg>
-                    <strong>Connect Supabase first</strong>
-                    <p>Choose Database in this sidebar, connect a project, then return here.</p>
-                    <button
-                      class="cloud-button mt-4"
-                      data-variant="primary"
-                      type="button"
-                      onClick={() => setSection("database")}
-                    >
-                      Open Database
-                    </button>
-                  </div>
-                }
-              >
-                <section class="cloud-service-list">
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/users"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="shield" />
-                    </span>
-                    <span>
-                      <strong>Users</strong>
-                      <small>Manage users, identities, sessions, and invitations in Supabase.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/providers"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="providers" />
-                    </span>
-                    <span>
-                      <strong>Sign-in providers</strong>
-                      <small>Configure email, OAuth, and other supported identity providers.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/policies"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="review" />
-                    </span>
-                    <span>
-                      <strong>Authorization policies</strong>
-                      <small>Review row-level security and access policies before release.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                </section>
-              </Show>
+              <SupabaseAuth {...supabasePanel} icon={sectionIcon("authentication")} />
             </Show>
 
-            {/* Storage */}
             <Show when={section() === "storage"}>
-              <div class="cloud-heading cloud-heading-with-action">
+              <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Supabase objects</div>
                   <h1>Storage</h1>
                   <p>
-                    Inspect the buckets connected to this repository without copying service credentials into Vector.
+                    Buckets for the files your app stores, public or private.
                   </p>
                 </div>
-                <button
-                  class="cloud-button"
-                  type="button"
-                  disabled={supabaseServicesBusy()}
-                  onClick={() => void refreshSupabaseServices()}
-                >
-                  {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
-                </button>
               </div>
-              <Show
-                when={supabaseServices()?.connected}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("storage")}
-                    </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect one from Database to inspect its storage buckets.</p>
-                  </div>
-                }
-              >
-                <div class="cloud-list">
-                  <For
-                    each={supabaseServices()?.storage.buckets ?? []}
-                    fallback={
-                      <div class="cloud-empty">
-                        <strong>
-                          {supabaseServices()?.storage.available ? "No storage buckets" : "Storage unavailable"}
-                        </strong>
-                        <p>
-                          {supabaseServices()?.storage.detail ??
-                            "Create a bucket in Supabase when this application needs object storage."}
-                        </p>
-                      </div>
-                    }
-                  >
-                    {(bucket) => (
-                      <div class="cloud-row">
-                        <span class="cloud-service-icon">
-                          <Icon name="folder" />
-                        </span>
-                        <span class="min-w-0 flex-1">
-                          <strong class="block truncate text-[13px] text-white/85">{bucket.name}</strong>
-                          <small class="cloud-muted">
-                            {bucket.public ? "Public bucket" : "Private bucket"}
-                            {bucket.updatedAt ? ` · updated ${formatDate(bucket.updatedAt)}` : ""}
-                          </small>
-                        </span>
-                        <span class="cloud-status" data-tone={bucket.public ? "warning" : "success"}>
-                          {bucket.public ? "public" : "private"}
-                        </span>
-                      </div>
-                    )}
-                  </For>
-                </div>
-                <div class="mt-4 flex justify-end">
-                  <button
-                    class="cloud-button"
-                    data-variant="primary"
-                    type="button"
-                    onClick={() => platform.openLink(supabaseDashboard("/storage/buckets"))}
-                  >
-                    Open Storage
-                  </button>
-                </div>
-              </Show>
+              <SupabaseStorage {...supabasePanel} icon={sectionIcon("storage")} />
             </Show>
 
-            {/* Edge Functions */}
             <Show when={section() === "functions"}>
-              <div class="cloud-heading cloud-heading-with-action">
+              <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Serverless logic</div>
                   <h1>Edge functions</h1>
-                  <p>Inspect functions deployed in the Supabase project attached to this repository.</p>
+                  <p>
+                    Deploy the functions in supabase/functions and manage the secrets they read.
+                  </p>
                 </div>
-                <button
-                  class="cloud-button"
-                  type="button"
-                  disabled={supabaseServicesBusy()}
-                  onClick={() => void refreshSupabaseServices()}
-                >
-                  {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
-                </button>
               </div>
-              <Show
-                when={supabaseServices()?.connected}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("functions")}
-                    </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect a database project before inspecting its Edge Functions.</p>
-                  </div>
-                }
-              >
-                <div class="cloud-list">
-                  <For
-                    each={supabaseServices()?.functions.functions ?? []}
-                    fallback={
-                      <div class="cloud-empty">
-                        <strong>
-                          {supabaseServices()?.functions.available ? "No Edge Functions" : "Functions unavailable"}
-                        </strong>
-                        <p>
-                          {supabaseServices()?.functions.detail ??
-                            "No functions have been deployed in this Supabase project."}
-                        </p>
-                      </div>
-                    }
-                  >
-                    {(fn) => (
-                      <div class="cloud-row">
-                        <span class="cloud-service-icon">
-                          <Icon name="code" />
-                        </span>
-                        <span class="min-w-0 flex-1">
-                          <strong class="block truncate text-[13px] text-white/85">{fn.name}</strong>
-                          <small class="cloud-muted">
-                            {fn.slug}
-                            {fn.version ? ` · version ${fn.version}` : ""}
-                          </small>
-                        </span>
-                        <Show when={fn.status}>
-                          <span class="cloud-status">{fn.status}</span>
-                        </Show>
-                      </div>
-                    )}
-                  </For>
+              <SupabaseFunctions {...supabasePanel} icon={sectionIcon("functions")} />
+            </Show>
+
+            <Show when={section() === "data-logs"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">Supabase services</div>
+                  <h1>Database logs</h1>
+                  <p>
+                    Recent logs from the API gateway, Postgres, Auth, Storage and Edge Functions.
+                  </p>
                 </div>
-                <div class="mt-4 flex justify-end">
-                  <button
-                    class="cloud-button"
-                    data-variant="primary"
-                    type="button"
-                    onClick={() => platform.openLink(supabaseDashboard("/functions"))}
-                  >
-                    Open Functions
-                  </button>
+              </div>
+              <SupabaseLogs {...supabasePanel} icon={sectionIcon("logs")} />
+            </Show>
+
+            <Show when={section() === "security"}>
+              <div class="cloud-heading">
+                <div>
+                  <div class="cloud-kicker">Before you ship</div>
+                  <h1>Security</h1>
+                  <p>
+                    Supabase's security advisors and a scan for server keys in what Vector would publish.
+                  </p>
                 </div>
-              </Show>
+              </div>
+              <SupabaseSecurity {...supabasePanel} icon={sectionIcon("authentication")} />
             </Show>
 
             {/* Build and runtime */}
