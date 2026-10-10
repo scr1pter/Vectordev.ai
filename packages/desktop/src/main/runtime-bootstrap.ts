@@ -70,7 +70,7 @@ export async function ensureRuntime(name: RuntimeName, options?: { install?: boo
         ? "npx was not found. It ships with Node.js, so installing Node will provide it."
         : options?.install === false
           ? `${name} is not installed.`
-          : "uvx was not found. Install a trusted, pinned uv release before enabling this plugin.",
+          : "uvx was not found. Install uv from https://docs.astral.sh/uv/getting-started/installation/, then connect this plugin again.",
   }
 }
 

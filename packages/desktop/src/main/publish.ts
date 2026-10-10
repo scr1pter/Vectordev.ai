@@ -204,9 +204,12 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
       id: "vercel",
       label: "Vercel",
       command: vercel ? [vercel] : ["vercel"],
-      loginHint: vercelConnection.connected
-        ? "Connected through Vector Cloud."
-        : "Connect Vercel in Vector Cloud, or sign in with the Vercel CLI.",
+      // Publishing runs the installed CLI, so without it the target says how to get it rather than just greying out.
+      loginHint: !vercel
+        ? "Install the Vercel CLI (npm install -g vercel) to publish to Vercel."
+        : vercelConnection.connected
+          ? "Connected through Vector Cloud."
+          : "Connect Vercel in Vector Cloud, or sign in with the Vercel CLI.",
       available: Boolean(vercel) && Boolean(vercelConnection.connected || vercelAccount),
       account: vercelConnection.account ?? vercelAccount,
     },
@@ -214,9 +217,11 @@ export async function detectPublishTargets(): Promise<PublishTarget[]> {
       id: "netlify",
       label: "Netlify",
       command: netlify ? [netlify] : ["netlify"],
-      loginHint: netlifyConnection.connected
-        ? "Connected through Vector Cloud."
-        : "Connect Netlify in Vector Cloud, or sign in with the Netlify CLI.",
+      loginHint: !netlify
+        ? "Install the Netlify CLI (npm install -g netlify-cli) to publish to Netlify."
+        : netlifyConnection.connected
+          ? "Connected through Vector Cloud."
+          : "Connect Netlify in Vector Cloud, or sign in with the Netlify CLI.",
       available: Boolean(netlify) && Boolean(netlifyConnection.connected || netlifyAccount),
       account: netlifyConnection.account ?? netlifyAccount,
     },
