@@ -214,9 +214,15 @@ test("the database refuses what the API would never send", async () => {
     desktop(install, {
       usage: report({ favoriteModels: [{ providerID: "p", modelID: "my model", tokens: 1, percentage: 1 }] }),
     }),
+    ...["/Users/someone/models/qwen.gguf", "./qwen.gguf", "C:/models/qwen.gguf", "srv/home/someone/qwen.gguf"].map(
+      (modelID) =>
+        desktop(install, {
+          usage: report({ favoriteModels: [{ providerID: "llamacpp", modelID, tokens: 1, percentage: 1 }] }),
+        }),
+    ),
   ])
     await recordUsage(request as Parameters<typeof recordUsage>[0])
-  expect(statuses()).toEqual([...Array(9).fill("invalid"), "skipped", ...Array(8).fill("invalid")])
+  expect(statuses()).toEqual([...Array(9).fill("invalid"), "skipped", ...Array(12).fill("invalid")])
   expect((await database`select count(*)::int as count from public.vector_usage_daily`)[0].count).toBe(0)
 })
 

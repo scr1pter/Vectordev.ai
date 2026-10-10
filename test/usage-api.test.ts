@@ -245,6 +245,17 @@ describe("desktop check-in", () => {
       { ...checkin, usage: { ...report, days: Array(9).fill(report.days[0]) } },
       { ...checkin, usage: { ...report, days: [{ ...report.days[0], path: "/Users/someone" }] } },
       { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], modelID: "my model" }] } },
+      ...[
+        "/Users/someone/models/qwen.gguf",
+        "./models/qwen.gguf",
+        "C:/models/qwen.gguf",
+        "mnt/c/Users/someone/qwen.gguf",
+        "home/someone/qwen.gguf",
+      ].map((modelID) => ({
+        ...checkin,
+        usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], modelID }] },
+      })),
+      { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], providerID: "/opt/llm" }] } },
       { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], modelID: "m".repeat(121) }] } },
       { ...checkin, usage: { ...report, favoriteModels: Array(11).fill(report.favoriteModels[0]) } },
       { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], percentage: 101 }] } },
@@ -400,6 +411,8 @@ describe("usage report from the local summary", () => {
     favoriteModels: [
       ...report.favoriteModels.map((model) => ({ ...model, responses: 10 })),
       { providerID: "custom provider", modelID: "local", tokens: 1, responses: 1, percentage: 0 },
+      // A local server naming the model by its file path: left out, never sent.
+      { providerID: "llamacpp", modelID: "/Users/someone/models/qwen.gguf", tokens: 1, responses: 1, percentage: 0 },
     ],
     effortLevels: report.effortLevels,
   }

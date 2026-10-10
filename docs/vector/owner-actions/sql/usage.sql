@@ -92,7 +92,7 @@ grant execute on function public.vector_usage_number(jsonb, numeric, boolean) to
 -- The usage report a check-in may carry, exactly as packages/schema/src/usage-report.ts defines it: these
 -- keys and no others, bounded non-negative numbers (at most 1e12 tokens in a total and 1e10 tokens, a
 -- million tasks and a million dollars in a day, far above one computer's use), real calendar days, at most
--- 8 days, 10 models and 10 effort levels, each listed once. Each step only runs once the steps before it hold, so a malformed
+-- 8 days, 10 models and 10 effort levels, each listed once, and no model named by a file path. Each step only runs once the steps before it hold, so a malformed
 -- report is refused instead of raising an error.
 create or replace function public.vector_usage_report_valid(report jsonb)
 returns boolean language plpgsql stable security definer set search_path = public, pg_temp as $$
@@ -165,8 +165,10 @@ begin
          where field <> all (array['providerID', 'modelID', 'tokens', 'percentage']))
        or jsonb_typeof(entry->'providerID') is distinct from 'string'
        or entry->>'providerID' !~ '^[A-Za-z0-9._:/@+-]{1,120}$'
+       or entry->>'providerID' ~* '^[/.]|^[a-z]:/|(^|/)(users|home)/'
        or jsonb_typeof(entry->'modelID') is distinct from 'string'
        or entry->>'modelID' !~ '^[A-Za-z0-9._:/@+-]{1,120}$'
+       or entry->>'modelID' ~* '^[/.]|^[a-z]:/|(^|/)(users|home)/'
        or not public.vector_usage_number(entry->'tokens', 1e12, true)
        or not public.vector_usage_number(entry->'percentage', 100, false)
   ) then

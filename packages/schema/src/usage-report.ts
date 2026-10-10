@@ -23,6 +23,8 @@ const Days = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_DAYS }
 const Duration = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_DURATION }))
 const Percentage = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 100 }))
 const MODEL_ID = /^[A-Za-z0-9._:/@+-]{1,120}$/
+// A local model server (llama.cpp, MLX) often names a model by its file path, which can carry a user or folder name.
+const MODEL_PATH = /^[/.]|^[A-Za-z]:\/|(^|\/)(Users|home)\//i
 const EFFORT_ID = /^[A-Za-z0-9._:/@+-]{1,40}$/
 const EFFORT_LABEL = /^[A-Za-z0-9._:/@+ -]{1,40}$/
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
@@ -41,9 +43,14 @@ export const Day = Schema.Struct({
 }).annotate({ identifier: "UsageReport.Day" })
 export type Day = typeof Day.Type
 
+const ModelIdentifier = Schema.String.check(
+  Schema.isPattern(MODEL_ID),
+  Schema.makeFilter((value: string) => isModelIdentifier(value)),
+)
+
 export const Model = Schema.Struct({
-  providerID: Schema.String.check(Schema.isPattern(MODEL_ID)),
-  modelID: Schema.String.check(Schema.isPattern(MODEL_ID)),
+  providerID: ModelIdentifier,
+  modelID: ModelIdentifier,
   tokens: Tokens,
   percentage: Percentage,
 }).annotate({ identifier: "UsageReport.Model" })
@@ -133,7 +140,8 @@ const Summary = Schema.Struct({
 
 /**
  * Builds the report from the engine's local usage summary. Numbers are clamped into range, entries the server would
- * refuse (an unusual custom model or effort name) are left out rather than failing the whole check-in, and only the last
+ * refuse (an unusual custom model or effort name, or a model named by its file path) are left out rather than failing
+ * the whole check-in, and only the last
  * seven days and the top five models are kept. Undefined when the input is not a usage summary (the engine lists each
  * day, model and effort once, so a repeated one means something else answered).
  */
@@ -166,7 +174,7 @@ export function fromSummary(input: unknown) {
           cost: money(day.cost, MAX_DAY_COST),
         })),
       favoriteModels: summary.favoriteModels
-        .filter((model) => MODEL_ID.test(model.providerID) && MODEL_ID.test(model.modelID))
+        .filter((model) => isModelIdentifier(model.providerID) && isModelIdentifier(model.modelID))
         .slice(0, 5)
         .map((model) => ({
           providerID: model.providerID,
@@ -192,6 +200,10 @@ function isCalendarDay(value: string) {
   if (!ISO_DAY.test(value)) return false
   const date = new Date(`${value}T00:00:00Z`)
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+
+function isModelIdentifier(value: string) {
+  return MODEL_ID.test(value) && !MODEL_PATH.test(value)
 }
 
 function distinct(values: ReadonlyArray<string>) {
