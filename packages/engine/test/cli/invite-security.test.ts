@@ -63,6 +63,7 @@ describe("invite security", () => {
         mdns: false,
         "mdns-domain": "vector.local",
         unsecured: false,
+        "trusted-network": false,
         cors: [],
       }).hostname,
     ).toBe("127.0.0.1")

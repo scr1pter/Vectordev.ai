@@ -39,10 +39,10 @@ describe("server bind security", () => {
     expect(() => assertListenSecurity({ hostname: "0.0.0.0", unsecured: true }, unprotected)).not.toThrow()
     expect(() =>
       assertListenSecurity({ hostname: "0.0.0.0" }, { ...unprotected, password: Option.some("secret") }),
-    ).toThrow("cleartext")
+    ).toThrow("plain HTTP")
     expect(() =>
       assertListenSecurity({ hostname: "0.0.0.0" }, { ...unprotected, guestPassword: Option.some("secret") }),
-    ).toThrow("cleartext")
+    ).toThrow("plain HTTP")
     expect(() =>
       assertListenSecurity({ hostname: "127.0.0.1" }, { ...unprotected, password: Option.some("secret") }),
     ).not.toThrow()
@@ -52,6 +52,32 @@ describe("server bind security", () => {
         { ...unprotected, password: Option.some(""), guestPassword: Option.some("") },
       ),
     ).toThrow()
+  })
+
+  test("a password listener binds the network only when the network is declared trusted", () => {
+    const protectedConfig = { ...unprotected, password: Option.some("secret") }
+    // A container publishing only to host loopback, or a private LAN, can carry the password over plain HTTP.
+    for (const hostname of ["0.0.0.0", "::", "192.168.1.10"]) {
+      expect(() => assertListenSecurity({ hostname, trustedNetwork: true }, protectedConfig)).not.toThrow()
+      expect(() => assertListenSecurity({ hostname }, protectedConfig)).toThrow("--trusted-network")
+    }
+    // The opt-in is about carrying a password: it never stands in for one.
+    expect(() => assertListenSecurity({ hostname: "0.0.0.0", trustedNetwork: true }, unprotected)).toThrow(
+      "VECTOR_SERVER_PASSWORD",
+    )
+  })
+
+  test("a container can serve with a password on 0.0.0.0", async () => {
+    const previous = process.env.VECTOR_SERVER_PASSWORD
+    process.env.VECTOR_SERVER_PASSWORD = "container-secret"
+    try {
+      await expect(Server.listen({ hostname: "0.0.0.0", port: 0 })).rejects.toThrow("--trusted-network")
+      const listener = await Server.listen({ hostname: "0.0.0.0", port: 0, trustedNetwork: true })
+      await listener.stop(true)
+    } finally {
+      if (previous === undefined) delete process.env.VECTOR_SERVER_PASSWORD
+      else process.env.VECTOR_SERVER_PASSWORD = previous
+    }
   })
 
   test("guards the Host header only on a passwordless loopback listener", () => {

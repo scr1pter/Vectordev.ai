@@ -126,7 +126,21 @@ describe("vector serve (subprocess)", () => {
             },
           })
           .pipe(Effect.flip)
-        expect(secured.message).toContain("Refusing password authentication over cleartext transport")
+        expect(secured.message).toContain("--trusted-network")
+
+        // A container or private LAN opts in to carrying the password over plain HTTP.
+        const trusted = yield* vector.serve({
+          hostname: "0.0.0.0",
+          extraArgs: ["--trusted-network"],
+          env: {
+            VECTOR_SERVER_PASSWORD: "owner-secret",
+            VECTOR_SERVER_USERNAME: "alice",
+          },
+        })
+        const anonymous = yield* HttpClient.get(`http://127.0.0.1:${trusted.port}/config`)
+        expect(anonymous.status).toBe(401)
+        trusted.kill()
+        yield* Effect.promise(() => trusted.exited)
       }),
     60_000,
   )

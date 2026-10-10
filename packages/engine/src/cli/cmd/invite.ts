@@ -7,6 +7,7 @@ import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { UI } from "../ui"
 import { CliError, effectCmd } from "../effect-cmd"
 import { resolveNetworkOptions, withNetworkOptions } from "../network"
+import { getNetworkIPs } from "./web"
 
 const GUEST_USERNAME = "guest"
 
@@ -86,22 +87,30 @@ export const InviteCommand = effectCmd({
     configureInviteAccess(owner, guest)
 
     // Password listeners stay loopback by default. Remote sharing terminates TLS
-    // at the explicitly configured public tunnel or reverse proxy.
+    // at the explicitly configured public tunnel or reverse proxy, and a network
+    // bind needs --trusted-network, since plain HTTP carries the password.
     const opts = yield* resolveNetworkOptions(args)
     const server = yield* Effect.promise(() => Server.listen(opts))
 
-    const ownerUrl = inviteLink(server.url, owner.username, owner.password)
-    const guestUrl = inviteLink(publicUrl ?? server.url, guest.username, guest.password)
+    // A wildcard bind answers on localhost for you and on this machine's addresses for teammates.
+    const wildcard = opts.hostname === "0.0.0.0" || opts.hostname === "::"
+    const local = wildcard ? new URL(`http://localhost:${server.port}`) : server.url
+    const network = wildcard && !publicUrl ? getNetworkIPs().map((ip) => new URL(`http://${ip}:${server.port}`)) : []
+    const guestBases = publicUrl ? [publicUrl] : network.length ? network : [local]
+    const ownerUrl = inviteLink(local, owner.username, owner.password)
 
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()
     UI.println(UI.Style.TEXT_INFO_BOLD + "  Your workspace:    ", UI.Style.TEXT_NORMAL, ownerUrl)
-    UI.println(
-      (publicUrl ? UI.Style.TEXT_SUCCESS_BOLD : UI.Style.TEXT_WARNING_BOLD) + "  Invite teammates:  ",
-      UI.Style.TEXT_NORMAL,
-      guestUrl,
-    )
+    for (const base of guestBases) {
+      UI.println(
+        (publicUrl || network.length ? UI.Style.TEXT_SUCCESS_BOLD : UI.Style.TEXT_WARNING_BOLD) +
+          "  Invite teammates:  ",
+        UI.Style.TEXT_NORMAL,
+        inviteLink(base, guest.username, guest.password),
+      )
+    }
     if (opts.mdns) {
       UI.println(
         UI.Style.TEXT_INFO_BOLD + "  mDNS:              ",
@@ -114,8 +123,11 @@ export const InviteCommand = effectCmd({
       UI.Style.TEXT_DIM +
         (publicUrl
           ? "  The invite uses your HTTPS public URL while the password listener remains local."
-          : "  This link is local only. To invite teammates, expose the listener through a TLS tunnel" +
-            ` (tailscale serve ${server.port}, cloudflared tunnel --url ${server.url.origin}) and rerun with --public-url https://your-host.`),
+          : network.length
+            ? "  The invite works for teammates on this network, which you marked trusted: it carries the password over plain HTTP." +
+              " From elsewhere, use a TLS tunnel and --public-url instead."
+            : "  This link is local only. To invite teammates on a network you trust, rerun with --hostname 0.0.0.0 --trusted-network;" +
+              ` from elsewhere, expose the listener through a TLS tunnel (tailscale serve ${server.port}, cloudflared tunnel --url ${local.origin}) and rerun with --public-url https://your-host.`),
     )
     UI.println(
       UI.Style.TEXT_DIM +

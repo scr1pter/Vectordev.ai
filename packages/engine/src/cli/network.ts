@@ -24,6 +24,12 @@ const options = {
     describe: "explicitly allow a network listener without a password",
     default: false,
   },
+  "trusted-network": {
+    type: "boolean" as const,
+    describe:
+      "accept the server password over plain HTTP on a non-loopback address, on a network you trust such as a container bridge or a private LAN",
+    default: false,
+  },
   "mdns-domain": {
     type: "string" as const,
     describe: "custom domain name for mDNS service (default: vector.local)",
@@ -81,5 +87,5 @@ export function resolveNetworkOptionsNoConfig(args: NetworkOptions, config?: Con
   const argsCors = Array.isArray(args.cors) ? args.cors : args.cors ? [args.cors] : []
   const cors = [...configCors, ...argsCors]
 
-  return { hostname, port, mdns, mdnsDomain, cors, unsecured: args.unsecured }
+  return { hostname, port, mdns, mdnsDomain, cors, unsecured: args.unsecured, trustedNetwork: args["trusted-network"] }
 }

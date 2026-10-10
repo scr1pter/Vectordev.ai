@@ -2,14 +2,19 @@ import { SecurityConfigurationError } from "@vectordevai/core/flag/security"
 import { isIP } from "node:net"
 import { ServerAuth } from "./auth"
 
-export function assertListenSecurity(opts: { hostname: string; unsecured?: boolean }, config: ServerAuth.Info) {
-  if (ServerAuth.required(config) && !isLoopback(opts.hostname))
+export function assertListenSecurity(
+  opts: { hostname: string; unsecured?: boolean; trustedNetwork?: boolean },
+  config: ServerAuth.Info,
+) {
+  // Plain HTTP carries the password in every request, so a network bind needs the caller to say the network is
+  // trusted (a container bridge published only to host loopback, a private LAN) or a TLS proxy in front.
+  if (ServerAuth.required(config) && !isLoopback(opts.hostname) && opts.trustedNetwork !== true)
     throw new SecurityConfigurationError(
-      `Refusing password authentication over cleartext transport on ${opts.hostname}. Bind loopback and use a TLS reverse proxy instead.`,
+      `Refusing to send the server password over plain HTTP on ${opts.hostname}. On a network you trust, such as a container bridge or a private LAN, pass --trusted-network; otherwise bind loopback behind a TLS reverse proxy or tunnel.`,
     )
   if (ServerAuth.required(config) || opts.unsecured === true || isLoopback(opts.hostname)) return
   throw new SecurityConfigurationError(
-    `Refusing to listen on ${opts.hostname} without authentication. Set VECTOR_SERVER_PASSWORD or explicitly pass --unsecured.`,
+    `Refusing to listen on ${opts.hostname} without authentication. Set VECTOR_SERVER_PASSWORD (with --trusted-network on a network you trust), or explicitly pass --unsecured.`,
   )
 }
 

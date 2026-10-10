@@ -30,6 +30,6 @@ docker run --rm -it \
 
 Use the same mounts for `auth login`, `run`, or the TUI. The mounted project must be writable by the chosen container user; match `--user` and a writable home mount when your host ownership differs. Project language runtimes are not bundled. Keep credentials in the persistent home volume or an explicit runtime secret, never in a Docker build argument/image layer.
 
-For a server, publish only to host loopback (`-p 127.0.0.1:4096:4096`), set `VECTOR_SERVER_PASSWORD` at runtime, and run `serve --hostname 0.0.0.0 --port 4096`. The service can modify the mounted project and run tools. Use a reviewed authenticated proxy for intentional remote access.
+For a server, publish only to host loopback (`-p 127.0.0.1:4096:4096`), set `VECTOR_SERVER_PASSWORD` at runtime, and run `serve --hostname 0.0.0.0 --port 4096 --trusted-network`. The flag says the container bridge is a network you trust to carry the password over plain HTTP; without it a password server refuses a non-loopback bind. The service can modify the mounted project and run tools. Use a reviewed authenticated proxy for intentional remote access.
 
 Reviewed primary documentation: [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) and [Docker multi-platform builds](https://docs.docker.com/build/ci/github-actions/multi-platform/). The workflow uses pinned `actions/*` and the existing Bun setup action; it adds no registry login/build marketplace action.

@@ -39,6 +39,8 @@ type ListenOptions = CorsOptions & {
   mdns?: boolean
   mdnsDomain?: string
   unsecured?: boolean
+  /** Accept the password over plain HTTP on a non-loopback address; see assertListenSecurity. */
+  trustedNetwork?: boolean
   /** Set by listen() when requests must name a loopback host; see guardedHostname. */
   guardedHostname?: string
 }
