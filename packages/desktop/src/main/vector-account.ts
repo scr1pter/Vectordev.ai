@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto"
 import type { VectorAccountStatus } from "@vectordevai/app/vector-account"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 
 type StoredAccount = { ciphertext: string; email: string; expiresAt: number }
 type Pending = { state: string; verifier: string; expiresAt: number; exchanging?: boolean }
@@ -62,14 +63,19 @@ export function createVectorAccount(deps: Dependencies) {
     state.error = message
     return notify()
   }
+  const token = async () => {
+    const account = stored()
+    if (!account || account.expiresAt <= now() || !(await deps.available())) return
+    return deps.decrypt(account.ciphertext)
+  }
 
   return {
     status,
     /** Main process only: the signed-in token for requests to vectordev.ai, never sent to a renderer. */
-    async token() {
-      const account = stored()
-      if (!account || account.expiresAt <= now() || !(await deps.available())) return
-      return deps.decrypt(account.ciphertext)
+    token,
+    /** The account's Vector Codium plan and balances. The token goes only to vectordev.ai; the renderer gets the result. */
+    async codium() {
+      return ModelPlanStatus.fetchStatus(await token().catch(() => undefined), deps.fetch)
     },
     async start() {
       if (!(await deps.available())) return fail(secureStorageError)

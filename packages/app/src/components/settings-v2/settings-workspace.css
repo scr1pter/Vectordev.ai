@@ -665,6 +665,38 @@ html .settings-v2-workspace .settings-v2-nav-search input:focus-visible {
   color: #fda4af;
 }
 
+/* Vector Codium balances: label over value, in the violet Vector look. */
+.settings-v2-workspace [data-component="vector-codium"] [data-slot="codium-balance"] {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  max-width: 820px;
+  margin: 0;
+}
+
+.settings-v2-workspace [data-component="vector-codium"] [data-slot="codium-balance"] > div {
+  border: 1px solid var(--vx-line);
+  border-left: 2px solid var(--vx-purple);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.settings-v2-workspace [data-component="vector-codium"] dt {
+  color: var(--settings-muted);
+  font-size: 11px;
+}
+
+.settings-v2-workspace [data-component="vector-codium"] dd {
+  margin: 2px 0 0;
+  color: var(--settings-text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-v2-workspace [data-component="vector-codium"] [data-slot="codium-low"] {
+  color: var(--vx-amber);
+}
+
 @media (max-width: 860px) {
   .settings-v2--fullscreen[data-component="tabs-v2"][data-variant="settings"][data-orientation="vertical"]
     [data-slot="tabs-v2-list"] {

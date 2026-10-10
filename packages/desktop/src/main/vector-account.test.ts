@@ -11,7 +11,9 @@ function fixture() {
     fetchDelay: undefined as Promise<void> | undefined,
     syncDelay: undefined as Promise<void> | undefined,
     failSync: false,
+    codium: {} as Record<string, unknown>,
   }
+  const fetched: string[] = []
   const urls: string[] = []
   const tokens: Array<string | undefined> = []
   const statuses: unknown[] = []
@@ -41,8 +43,10 @@ function fixture() {
     openBrowser: async (url) => {
       urls.push(url)
     },
-    fetch: async (_url, init) => {
+    fetch: async (url, init) => {
+      fetched.push(url)
       requests.push(init)
+      if (url === "https://vectordev.ai/api/model-plans/status") return Response.json(state.codium)
       await state.fetchDelay
       return Response.json({ token, expiresAt: state.now + 100_000, user: { email: "fixture@example.test" } })
     },
@@ -56,7 +60,7 @@ function fixture() {
   })
   const callback = () =>
     `vector://auth/callback?${new URLSearchParams({ code: randomBytes(32).toString("base64url"), state: new URL(urls.at(-1)!).searchParams.get("state")! })}`
-  return { controller, state, urls, tokens, statuses, requests, token, callback }
+  return { controller, state, urls, tokens, statuses, requests, fetched, token, callback }
 }
 
 test("account success notifications wait for managed server synchronization", async () => {
@@ -218,4 +222,44 @@ test("cancelling an exchange in flight prevents storage and expired saved grants
     pending: false,
     error: "Your Vector sign-in expired. Sign in again.",
   })
+})
+
+test("Codium balances are read in the main process and only the result reaches the renderer", async () => {
+  const app = fixture()
+  expect(await app.controller.codium()).toMatchObject({ signedIn: false })
+  expect(app.fetched).toEqual([])
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  app.state.codium = {
+    enabled: true,
+    active: true,
+    access: true,
+    plan: "vector-20",
+    credits: 16,
+    remaining: 4.5,
+    periodEnd: 2_000_000,
+    cancelAtPeriodEnd: false,
+    wallet: { credits: 8, used: 1, remaining: 7 },
+  }
+  const status = await app.controller.codium()
+  expect(app.fetched.at(-1)).toBe("https://vectordev.ai/api/model-plans/status")
+  expect(new Headers(app.requests.at(-1)!.headers).get("authorization")).toBe(`Bearer ${app.token}`)
+  expect(app.requests.at(-1)!.redirect).toBe("error")
+  expect(status).toEqual({
+    signedIn: true,
+    enabled: true,
+    access: true,
+    plan: {
+      id: "vector-20",
+      name: "Codium 20",
+      credits: 1600,
+      remaining: 450,
+      renewsAt: 2_000_000,
+      cancelAtPeriodEnd: false,
+    },
+    purchased: { credits: 800, remaining: 700 },
+    remaining: 1150,
+    low: false,
+  })
+  expect(JSON.stringify(status)).not.toContain(app.token)
 })

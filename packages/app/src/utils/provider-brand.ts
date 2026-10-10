@@ -71,7 +71,7 @@ export function isCodingModel(model: PickerModel) {
   return true
 }
 
-export type AccessKind = "key" | "none"
+export type AccessKind = "key" | "codium" | "none"
 
 export type ModelAccess = {
   kind: AccessKind
@@ -84,6 +84,12 @@ export type ModelAccess = {
 }
 
 const NO_ACCESS: ModelAccess = { kind: "none", label: "", title: "", spoken: "" }
+const CODIUM_ACCESS: ModelAccess = {
+  kind: "codium",
+  label: "Codium credits",
+  title: "Uses your Vector Codium credits",
+  spoken: "uses your Codium credits",
+}
 
 export const costInput = (cost: unknown): number | undefined => {
   if (Array.isArray(cost)) {
@@ -99,6 +105,8 @@ export const costInput = (cost: unknown): number | undefined => {
 export function modelAccess(model: PickerModel): ModelAccess {
   const provider = model.provider
   if (isHiddenProvider(provider.id, provider)) return NO_ACCESS
+  // Vector Codium models are paid from the signed-in account's Codium credits, never from an API key.
+  if (provider.id === "vector-plan") return CODIUM_ACCESS
   // An OAuth loader placeholder is not evidence that an API key pays for this model.
   if (provider.options?.apiKey === "vector-oauth-dummy-key") return NO_ACCESS
   const cost = costInput(model.cost)
@@ -178,6 +186,7 @@ function specWords(model: PickerModel, now: number) {
   const words: string[] = []
   const access = modelAccess(model)
   if (access.kind === "key") words.push("api", "key")
+  if (access.kind === "codium") words.push("codium", "credits")
   if (model.capabilities?.reasoning) words.push("reasoning")
   if (isNewRelease(model, now)) words.push("new")
   const context = contextLabel(model.limit?.context).toLowerCase()

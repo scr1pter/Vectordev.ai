@@ -40,7 +40,9 @@ export const DialogSelectProvider: Component<{ directory?: Accessor<string | und
           language.locale()
           return [{ id: CUSTOM_ID, name: customLabel() }, ...providers.all().values()].filter(
             (provider) =>
-              provider.id === CUSTOM_ID || (provider.id !== "vector" && !isHiddenProvider(provider.id, provider)),
+              provider.id === CUSTOM_ID ||
+              // Vector's own providers come with the Vector account; there is nothing to connect.
+              (!["vector", "vector-plan"].includes(provider.id) && !isHiddenProvider(provider.id, provider)),
           )
         }}
         filterKeys={["id", "name"]}

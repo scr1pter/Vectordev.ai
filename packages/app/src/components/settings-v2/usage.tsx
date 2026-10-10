@@ -5,6 +5,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useLanguage } from "@/context/language"
 import { formatSessionCost } from "@/utils/session-cost"
 import { formatServerError } from "@/utils/server-errors"
+import { SettingsVectorCodium } from "../settings-vector-codium"
 import { normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
 import "./settings-v2.css"
 
@@ -151,6 +152,8 @@ export const SettingsUsageV2: Component = () => {
           Refresh
         </ButtonV2>
       </div>
+
+      <SettingsVectorCodium />
 
       <Switch>
         <Match when={summary.loading}>

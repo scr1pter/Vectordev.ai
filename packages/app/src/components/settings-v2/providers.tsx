@@ -17,6 +17,7 @@ import { brandProviderName } from "@/utils/provider-brand"
 import { SettingsSearch } from "../settings-search"
 import { SettingsVectorTeams } from "../settings-vector-teams"
 import { SettingsVectorAccount } from "../settings-vector-account"
+import { SettingsVectorCodium } from "../settings-vector-codium"
 import "./settings-v2.css"
 
 type ProviderSource = "env" | "api" | "config" | "custom"
@@ -32,7 +33,8 @@ const PROVIDER_NOTES = [
 ] as const
 
 const PROVIDER_ICON_SIZE = 16
-const HIDDEN_PROVIDER_IDS = new Set(["vector"])
+// Vector Codium has its own section with plan and balances; it has no key to disconnect.
+const HIDDEN_PROVIDER_IDS = new Set(["vector", "vector-plan"])
 
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 
@@ -153,6 +155,7 @@ export const SettingsProvidersV2: Component = () => {
 
       <div class="settings-v2-tab-body settings-v2-providers">
         <SettingsVectorAccount />
+        <SettingsVectorCodium />
         <SettingsVectorTeams />
         <div class="settings-v2-section" data-component="connected-providers-section">
           <h3 class="settings-v2-section-title">{language.t("settings.providers.section.connected")}</h3>
