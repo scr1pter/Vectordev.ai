@@ -10,6 +10,7 @@ import {
   onComposerPrompt,
   promoteFailed,
   publishPlan,
+  publishRan,
   releaseActions,
   requestComposerPrompt,
   uncommittedNote,
@@ -204,6 +205,15 @@ describe("a failed promote", () => {
     })
     expect(promoteFailed(done, new Error("")).promoteError).toBe("Vercel did not promote the preview.")
     expect(promoteFailed(done, "offline").promoteError).toBe("Vercel did not promote the preview.")
+  })
+})
+
+describe("a failed publish", () => {
+  test("offers a fix only once it reached its checks or the deploy", () => {
+    expect(publishRan({ log: "", checks: [] })).toBe(false)
+    expect(publishRan({ log: "  \n" })).toBe(false)
+    expect(publishRan({ log: "Error: Project not found" })).toBe(true)
+    expect(publishRan({ log: "", checks: [{ label: "Production build", status: "failed" }] })).toBe(true)
   })
 })
 

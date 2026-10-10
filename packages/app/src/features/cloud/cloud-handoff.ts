@@ -115,6 +115,15 @@ export function deployRepairPrompt(input: DeployEvidence) {
     .join("\n\n")
 }
 
+/**
+ * Whether a failed publish got as far as its checks or the deploy, so the
+ * project has something for Fix this deploy to fix. A publish refused before
+ * it ran (one already running, no project open, hosting not set up) does not.
+ */
+export function publishRan(result: { checks?: readonly unknown[]; log?: string }) {
+  return Boolean(result.checks?.length || result.log?.trim())
+}
+
 /** The evidence a recorded release carries: its failed checks, and the end of its log. */
 export function deploymentEvidence(deployment: CloudDeployment): DeployEvidence {
   return {

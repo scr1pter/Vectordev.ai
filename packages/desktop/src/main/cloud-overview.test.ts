@@ -189,7 +189,12 @@ describe("cloud overview", () => {
   })
 
   test("a publish that produced a deployment replaces the remembered failure", async () => {
-    recordPublishAttempt(project, true, { ok: false, target: "vercel", log: "", error: "Vercel exited with code 1." })
+    recordPublishAttempt(project, true, {
+      ok: false,
+      target: "vercel",
+      log: "Error: Project not found",
+      error: "Vercel exited with code 1.",
+    })
     expect((await cloudOverview(project)).failure).toMatchObject({ environment: "production" })
     recordPublishAttempt(project, false, { ok: true, target: "vercel", log: "", deploymentId: "dep_1" })
     const overview = await cloudOverview(project)
@@ -197,6 +202,23 @@ describe("cloud overview", () => {
     expect(overview.hosting).toEqual({ provider: "Vercel", connected: false, account: undefined, project: undefined })
     expect(overview.database).toMatchObject({ connected: false })
     expect(overview.latest).toBeUndefined()
+  })
+
+  test("a publish refused before it ran is not remembered as a failure to fix", async () => {
+    const refused = (error: string) => ({ ok: false, target: "vercel" as const, log: "", error })
+    recordPublishAttempt(project, false, refused("A publish is already running for this project."))
+    recordPublishAttempt(project, false, refused("Connect Vercel in Vector Cloud > Connections with an access token."))
+    expect((await cloudOverview(project)).failure).toBeUndefined()
+
+    // Nor does a refusal hide a real failure that is still unfixed.
+    recordPublishAttempt(project, false, {
+      ok: false,
+      target: "vercel",
+      log: "Error: Project not found",
+      error: "Vercel exited with code 1.",
+    })
+    recordPublishAttempt(project, false, refused("A publish is already running for this project."))
+    expect((await cloudOverview(project)).failure).toMatchObject({ error: "Vercel exited with code 1." })
   })
 
   test("reports a burst of changes once, follows a recreated store, and stops when asked", async () => {
@@ -217,7 +239,7 @@ describe("cloud overview", () => {
       await settle()
       expect(changes).toHaveLength(2)
 
-      recordPublishAttempt(project, false, { ok: false, target: "vercel", log: "", error: "failed" })
+      recordPublishAttempt(project, false, { ok: false, target: "vercel", log: "build failed", error: "failed" })
       await settle()
       expect(changes).toHaveLength(3)
     } finally {

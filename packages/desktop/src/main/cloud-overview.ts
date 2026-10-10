@@ -91,6 +91,11 @@ export function recordPublishAttempt(projectPath: string, production: boolean, r
     changed()
     return
   }
+  // A publish refused before it ran (one already running, no project open,
+  // hosting not set up) has nothing in the project to fix, so the screen that
+  // started it reports it. Only one that reached its checks or the deploy
+  // leaves a failure behind.
+  if (!result.checks?.length && !result.log.trim()) return
   failures.set(projectPath, {
     at: new Date().toISOString(),
     environment: production ? "production" : "preview",

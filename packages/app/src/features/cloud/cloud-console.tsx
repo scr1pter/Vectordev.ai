@@ -27,6 +27,7 @@ import {
   deploymentEvidence,
   deployRepairPrompt,
   publishPlan,
+  publishRan,
   releaseActions,
   uncommittedNote,
   type DeployEvidence,
@@ -510,7 +511,7 @@ export function CloudConsole(props: {
       } else {
         setNotice({ tone: "error", text: result.error ?? "Publish failed." })
       }
-      if (!result.ok && !result.deploymentId) {
+      if (!result.ok && !result.deploymentId && publishRan(result)) {
         setFailedPublish({
           project: projectName(),
           environment,

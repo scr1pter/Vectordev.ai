@@ -150,6 +150,7 @@ import {
   deployRepairPrompt,
   promoteFailed,
   publishPlan,
+  publishRan,
   requestComposerPrompt,
   uncommittedNote,
   type DeployEvidence,
@@ -4077,18 +4078,21 @@ export function PreviewPanel(props: {
       return
     }
     const error = result.error ?? "Publish failed."
+    // A publish refused before it ran has nothing for Fix this deploy to fix.
     setPublish({
       phase: "error",
       error,
-      evidence: {
-        project: place.project,
-        environment: "preview",
-        url: result.url,
-        error,
-        git: place.overview.git,
-        checks: result.checks ?? [],
-        log: result.log,
-      },
+      evidence: publishRan(result)
+        ? {
+            project: place.project,
+            environment: "preview",
+            url: result.url,
+            error,
+            git: place.overview.git,
+            checks: result.checks ?? [],
+            log: result.log,
+          }
+        : undefined,
     })
   }
 
