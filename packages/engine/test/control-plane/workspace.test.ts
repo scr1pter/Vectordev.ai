@@ -20,6 +20,7 @@ import { EventSequenceTable } from "@vectordevai/core/event/sql"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, provideTmpdirInstance, requireInstance, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { BackgroundJob } from "../../src/background/job"
 import { registerAdapter } from "../../src/control-plane/adapters"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { WorkspaceTable } from "@vectordevai/core/control-plane/workspace.sql"
@@ -44,6 +45,7 @@ const workspaceLayer = (experimentalWorkspaces: boolean) =>
   AppNodeBuilder.build(
     LayerNode.group([
       Workspace.node,
+      BackgroundJob.node,
       SessionNs.node,
       SessionProjector.node,
       Database.node,
@@ -865,6 +867,55 @@ describe("workspace CRUD", () => {
             .pipe(Effect.orDie))?.workspaceID,
         ).toBe(target.id)
         expect(yield* sessionSequenceOwner(session.id)).toBe(target.id)
+      })
+    },
+    { git: true },
+  )
+
+  it.instance(
+    "sessionWarp from a local workspace stops the session's background subagents and what they started",
+    () => {
+      return Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const sessionSvc = yield* SessionNs.Service
+        const jobs = yield* BackgroundJob.Service
+        const previousType = unique("warp-background-prev-local")
+        const targetType = unique("warp-background-target-local")
+        const previous = workspaceInfo(instance.project.id, previousType)
+        const target = workspaceInfo(instance.project.id, targetType)
+        yield* insertWorkspace(previous)
+        yield* insertWorkspace(target)
+        registerAdapter(instance.project.id, previousType, localAdapter(path.join(dir, previousType)).adapter)
+        registerAdapter(instance.project.id, targetType, localAdapter(path.join(dir, targetType)).adapter)
+        const session = yield* sessionSvc.create({})
+        yield* attachSessionToWorkspace(session.id, previous.id)
+        const child = yield* jobs.start({
+          id: "ses_warp_background_child",
+          type: "task",
+          metadata: { background: true, parentSessionId: session.id },
+          run: Effect.never,
+        })
+        const grandchild = yield* jobs.start({
+          id: "ses_warp_background_grandchild",
+          type: "task",
+          metadata: { background: true, parentSessionId: child.id },
+          run: Effect.never,
+        })
+        const other = yield* jobs.start({
+          id: "ses_warp_background_other",
+          type: "task",
+          metadata: { background: true, parentSessionId: "ses_someone_else" },
+          run: Effect.never,
+        })
+
+        yield* workspace.sessionWarp({ workspaceID: target.id, sessionID: session.id })
+
+        expect((yield* jobs.get(child.id))?.status).toBe("cancelled")
+        expect((yield* jobs.get(grandchild.id))?.status).toBe("cancelled")
+        expect((yield* jobs.get(other.id))?.status).toBe("running")
+        yield* jobs.cancel(other.id)
       })
     },
     { git: true },
