@@ -1792,9 +1792,9 @@ describe("tool.task", () => {
       const tool = yield* TaskTool
       const def = yield* singleTaskDefinition(tool)
       expect(flags.backgroundSubagents).toBe(true)
-      expect(def.description).toContain("Only the legacy singular brief form accepts background=true")
-      // Model-facing calls use batches; legacy singular callers retain background support.
-      expect(def.jsonSchema).toMatchObject({ required: ["tasks"] })
+      expect(def.description).toContain("a one-item tasks array may set background=true")
+      // Model-facing calls use batches, and a one-item batch can still hand its brief off to the background.
+      expect(def.jsonSchema).toMatchObject({ required: ["tasks"], properties: { background: { type: "boolean" } } })
     }),
   )
 
@@ -3727,7 +3727,7 @@ describe("task batches", () => {
     { name: "empty", input: { tasks: [] } },
     { name: "too many", input: { tasks: Array.from({ length: 9 }, (_, i) => brief(String(i))) } },
     { name: "hybrid", input: { tasks: [brief("a")], ...brief("b") } },
-    { name: "background root", input: { tasks: [brief("a")], background: true } },
+    { name: "background batch", input: { tasks: [brief("a"), brief("b")], background: true } },
     { name: "background entry", input: { tasks: [{ ...brief("a"), background: true }] } },
     { name: "duplicate brief", input: { tasks: [brief("a"), brief("a")] } },
     { name: "overlap", input: { tasks: [brief("a"), { ...brief("b"), owned_paths: ["packages/a/nested"] }] } },
@@ -3781,6 +3781,50 @@ describe("task batches", () => {
       { config: { provider: pricedProvider({ "test-model": {} }) } },
     )
   }
+
+  it.instance(
+    "a one-item batch with background returns at once and reports when its child finishes",
+    () =>
+      Effect.gen(function* () {
+        const jobs = yield* BackgroundJob.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        const gate = yield* Deferred.make<void>()
+        const notes = yield* Deferred.make<SessionPrompt.PromptInput>()
+        const result = yield* def.execute(
+          { tasks: [brief("alpha")], background: true },
+          taskContext({
+            sessionID: chat.id,
+            messageID: assistant.id,
+            promptOps: {
+              ...stubOps(),
+              prompt: (input) =>
+                input.sessionID === chat.id
+                  ? Deferred.succeed(notes, input).pipe(Effect.as(reply(input, "noted")))
+                  : Deferred.await(gate).pipe(Effect.as(reply(input, "alpha verified"))),
+            },
+          }),
+        )
+
+        expect(result.metadata).toMatchObject({
+          taskBatch: 1,
+          status: "running",
+          tasks: [{ index: 0, status: "running", background: true }],
+        })
+        expect(result.output).toContain('<task_entry index="0" state="running">')
+        expect(result.output).toContain("<summary>Background task started</summary>")
+        const child = "taskBatch" in result.metadata ? result.metadata.tasks[0]?.sessionId : undefined
+        if (!child) throw new Error("the background entry has no child session")
+        expect((yield* jobs.get(child))?.metadata?.background).toBe(true)
+
+        yield* Deferred.succeed(gate, undefined)
+        const note = yield* awaitWithTimeout(Deferred.await(notes), "the background report never reached the parent")
+        const text = note.parts[0]?.type === "text" ? note.parts[0].text : ""
+        expect(text).toContain(`<task-notification id="${child}" state="completed"`)
+        expect(text).toContain("alpha verified")
+      }),
+    { config: { provider: pricedProvider({ "test-model": {} }) } },
+  )
 
   it.instance(
     "permission refusal after the first accepted decision starts no children",

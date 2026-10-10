@@ -183,8 +183,9 @@ describe("tool.registry", () => {
       })).find((tool) => tool.id === "task")
       if (!task) throw new Error("task tool not found")
 
-      expect(task.jsonSchema).toBeUndefined()
-      expect(ToolJsonSchema.fromSchema(task.parameters).properties).toHaveProperty("background")
+      // What the model is offered: the batch form, with background beside a one-item array.
+      expect(ToolJsonSchema.fromTool(task).required).toEqual(["tasks"])
+      expect(ToolJsonSchema.fromTool(task).properties).toHaveProperty("background")
     }),
   )
 
