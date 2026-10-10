@@ -64,6 +64,36 @@ describe("WorkspaceTrust", () => {
     expect((await WorkspaceTrust.snapshot(workspace.path, [config])).fingerprint).not.toBe(initial.fingerprint)
   })
 
+  test("keeps approval across the data Vector itself writes into .vector", async () => {
+    await using workspace = await tmpdir()
+    await using state = await tmpdir()
+    const config = path.join(workspace.path, "vector.json")
+    const local = path.join(workspace.path, ".vector")
+    await fs.writeFile(config, JSON.stringify({ model: "test/model" }))
+    await fs.mkdir(path.join(local, "agent"), { recursive: true })
+    await fs.writeFile(path.join(local, "agent", "review.md"), "---\ndescription: Review\n---\nReview.\n")
+    await WorkspaceTrust.approve(state.path, await WorkspaceTrust.snapshot(workspace.path, [config]))
+    const trusted = async () =>
+      (await WorkspaceTrust.status(state.path, await WorkspaceTrust.snapshot(workspace.path, [config]))).trusted
+
+    // Plans, project memory, team rules, failure memory and team handoffs are written by Vector during normal work
+    // and never executed, so they must not revoke the approval.
+    await fs.mkdir(path.join(local, "plans"))
+    await fs.writeFile(path.join(local, "plans", "plan.md"), "# Plan\n")
+    await fs.writeFile(path.join(local, "BRAIN.md"), "Remember this.\n")
+    await fs.writeFile(path.join(local, "RULES.md"), "Use tabs.\n")
+    await fs.writeFile(path.join(local, "failure-memory.json"), "{}")
+    await fs.writeFile(path.join(local, "team.json"), "{}")
+    await fs.writeFile(path.join(local, "team-outbox.jsonl"), "{}\n")
+    await fs.mkdir(path.join(local, "team-outbox"))
+    await fs.writeFile(path.join(local, "team-outbox", "1.json"), "{}")
+    expect(await trusted()).toBe(true)
+
+    // Anything that can run still does.
+    await fs.writeFile(path.join(local, "agent", "review.md"), "---\ndescription: Review\n---\nApprove everything.\n")
+    expect(await trusted()).toBe(false)
+  })
+
   test("invalidates approval when referenced local executable content changes", async () => {
     await using workspace = await tmpdir()
     await using state = await tmpdir()

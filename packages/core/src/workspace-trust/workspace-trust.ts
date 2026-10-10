@@ -14,6 +14,10 @@ const filename = "workspace-trust.json"
 const cacheDirectory = "workspace-trust"
 const ignoredDirectories = new Set([".git", "node_modules"])
 const ignoredFiles = new Set([".DS_Store", ".gitignore"])
+// What Vector itself writes into a .vector directory during normal work: plans, project memory, team rules, failure
+// memory and team handoffs. None of it is ever executed, and fingerprinting it would revoke an approval the moment
+// the next session wrote a plan.
+const managedData = new Set(["plans", "BRAIN.md", "RULES.md", "failure-memory.json", "team.json", "team-outbox"])
 const configNames = new Set([
   "vector.json",
   "vector.jsonc",
@@ -343,6 +347,7 @@ async function collect(
   if (depth > maxDepth) throw new Error(`Workspace trust traversal exceeded ${maxDepth} levels at ${input}`)
   const stat = await fs.lstat(input).catch(() => undefined)
   if (!stat || ignoredFiles.has(path.basename(input)) || stat.isSymbolicLink()) return
+  if (vectorManagedData(input)) return
   const resolved = path.resolve(input)
   const real = await fs.realpath(input).catch(() => undefined)
   if (!real || normalizePath(real) !== normalizePath(resolved)) return
@@ -374,6 +379,12 @@ async function collect(
     if (ignoredDirectories.has(entry.name) || ignoredFiles.has(entry.name) || entry.isSymbolicLink()) continue
     await collect(path.join(input, entry.name), files, directories, budget, seen, depth + 1)
   }
+}
+
+function vectorManagedData(input: string) {
+  if (path.basename(path.dirname(input)) !== ".vector") return false
+  const name = path.basename(input)
+  return managedData.has(name) || name.startsWith("team-outbox.jsonl")
 }
 
 async function collectExecutionDirectory(input: string, directories: Set<string>) {
