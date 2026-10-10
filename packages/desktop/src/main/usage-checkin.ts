@@ -4,9 +4,13 @@ import { Option, Schema } from "effect"
 const CHECKIN_URL = "https://vectordev.ai/api/usage/checkin"
 const DAY = 24 * 60 * 60 * 1000
 const MAX_COUNT = 100_000
+// The last tick before UTC midnight lands this far ahead of it, so the end of a day is still sent as part of that day.
+const DAY_END_MARGIN = 5 * 60 * 1000
 const INSTALL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 // Only the parent link is read; titles, directories and everything else in a row are ignored.
 const SessionRows = Schema.Array(Schema.Struct({ parentID: Schema.optional(Schema.String) }))
+// The counts the server last accepted and the UTC day they belong to.
+const Sent = Schema.Struct({ day: Schema.String, sessions: Schema.Number, subagentSessions: Schema.Number })
 
 type Counts = { sessions: number; subagentSessions: number }
 type Dependencies = {
@@ -26,26 +30,37 @@ type Dependencies = {
 }
 
 /**
- * Sends one check-in per UTC day: a random install ID, the account token when signed in, the app version, OS, CPU
- * architecture and how many sessions and subagent sessions were active today. Nothing those sessions contain is sent.
+ * Reports a random install ID, the account token when signed in, the app version, OS, CPU architecture and how many
+ * sessions and subagent sessions were active in the current UTC day. Nothing those sessions contain is sent.
+ *
+ * The first check-in of a day marks the install active; later ones send the day's counts again whenever one of them has
+ * gone up, and the server keeps the largest counts it receives for an install and day.
  */
 export function createUsageCheckin(deps: Dependencies) {
   const state: {
     running?: Promise<boolean>
-    first?: ReturnType<typeof setTimeout>
-    repeat?: ReturnType<typeof setInterval>
+    timer?: ReturnType<typeof setTimeout>
   } = {}
 
   const checkin = async () => {
     if (!deps.endpoint || !deps.enabled()) return false
     const now = deps.now()
     const day = new Date(now).toISOString().slice(0, 10)
-    if (deps.store.get("sentDay") === day) return false
-    // A failed count still reports the install as active today, with nothing counted.
-    const counts = await countSessions(deps, Math.floor(now / DAY) * DAY).catch(() => ({
-      sessions: 0,
-      subagentSessions: 0,
-    }))
+    const sent = Schema.decodeUnknownOption(Sent)(deps.store.get("sent")).pipe(
+      Option.filter((value) => value.day === day),
+    )
+    const counted = await countSessions(deps, Math.floor(now / DAY) * DAY).catch(() => undefined)
+    // A failed count still reports the install as active today, once, with nothing counted. The next count that works
+    // is higher than those zeros whenever anything was used, so it replaces them.
+    if (!counted && Option.isSome(sent)) return false
+    const counts = counted ?? { sessions: 0, subagentSessions: 0 }
+    // A day's counts only grow (unless sessions are deleted), so nothing needs sending until one of them goes up.
+    if (
+      Option.isSome(sent) &&
+      counts.sessions <= sent.value.sessions &&
+      counts.subagentSessions <= sent.value.subagentSessions
+    )
+      return false
     const token = await deps.token().catch(() => undefined)
     // Switching sharing off while the sessions were being counted still stops this check-in.
     if (!deps.enabled()) return false
@@ -68,7 +83,7 @@ export function createUsageCheckin(deps: Dependencies) {
       .catch(() => undefined)
     await response?.body?.cancel().catch(() => undefined)
     if (!response?.ok) return false
-    deps.store.set("sentDay", day)
+    deps.store.set("sent", { day, ...counts })
     return true
   }
 
@@ -83,24 +98,30 @@ export function createUsageCheckin(deps: Dependencies) {
     return running
   }
 
+  const schedule = (delay: number) => {
+    const timer = setTimeout(() => {
+      void run().then(() => {
+        // stop(), or a stop() and start() while this run was in flight, leaves another timer (or none) in charge.
+        if (state.timer !== timer) return
+        const interval = deps.interval ?? 60 * 60 * 1000
+        const untilDayEnd = DAY - (deps.now() % DAY) - DAY_END_MARGIN
+        schedule(untilDayEnd > 0 ? Math.min(interval, untilDayEnd) : interval)
+      })
+    }, delay)
+    timer.unref?.()
+    state.timer = timer
+  }
+
   return {
-    /** Never throws; resolves true only when today's check-in was accepted. */
+    /** Never throws; resolves true only when a check-in was sent and accepted. */
     checkin: run,
     start() {
-      if (state.first || state.repeat) return
-      state.first = setTimeout(() => {
-        state.first = undefined
-        void run()
-        state.repeat = setInterval(() => void run(), deps.interval ?? 3 * 60 * 60 * 1000)
-        state.repeat.unref?.()
-      }, deps.delay ?? 60_000)
-      state.first.unref?.()
+      if (state.timer) return
+      schedule(deps.delay ?? 60_000)
     },
     stop() {
-      clearTimeout(state.first)
-      clearInterval(state.repeat)
-      state.first = undefined
-      state.repeat = undefined
+      clearTimeout(state.timer)
+      state.timer = undefined
     },
   }
 }
