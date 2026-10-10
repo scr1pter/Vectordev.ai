@@ -243,6 +243,31 @@ test("sends the local usage report with the check-in, read with the same engine 
   })
 })
 
+test("marks the engine's history as reported only after an accepted check-in that carried the report", async () => {
+  const marks: string[] = []
+  const app = fixture({ checkinStatus: 503 })
+  const usage = createUsageCheckin({
+    ...app.options,
+    usageInterval: 0,
+    reported: async () => {
+      marks.push(new Date(app.state.now).toISOString())
+    },
+  })
+  app.state.usage = summary()
+
+  expect(await usage.checkin()).toBe(false)
+  expect(marks).toHaveLength(0)
+
+  app.state.checkinStatus = 204
+  app.state.usage = undefined
+  expect(await usage.checkin()).toBe(true)
+  expect(marks).toHaveLength(0)
+
+  app.state.usage = summary()
+  expect(await usage.checkin()).toBe(true)
+  expect(marks).toEqual([new Date(TODAY).toISOString()])
+})
+
 test("still checks in, without the report, when the summary cannot be read", async () => {
   for (const [usage, status] of [
     [summary(), 500],

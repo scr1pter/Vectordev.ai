@@ -377,7 +377,8 @@ grant execute on function public.vector_usage_forget(uuid) to service_role;
 -- Aggregates for the owner's dashboard and its read-only share links. A person is their account when any
 -- row of that install or CLI was signed in, otherwise the install, so a signed-in desktop and CLI count
 -- once. Weeks are ISO weeks starting Monday (UTC). Model use adds up the latest usage report of each
--- install and CLI account (the desktop app and the CLI keep separate histories, so nothing is counted
+-- install and CLI account (the desktop app and the CLI keep separate histories; where an XDG_DATA_HOME
+-- both inherit gives them one, the desktop marks it and the CLI does not report it, so nothing is counted
 -- twice). Reports are kept only with an account, so the people behind a model or effort level are
 -- accounts. Nothing returned identifies an account or install.
 create or replace function public.vector_usage_summary(request jsonb)

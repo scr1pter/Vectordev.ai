@@ -39,6 +39,8 @@ type Dependencies = {
   delay?: number
   interval?: number
   usageInterval?: number
+  /** Runs after an accepted check-in that carried the usage report. */
+  reported?: () => Promise<void>
 }
 
 /**
@@ -126,6 +128,7 @@ export function createUsageCheckin(deps: Dependencies) {
       ...(tokens === undefined ? {} : { tokens }),
       ...(responses === undefined ? {} : { responses }),
     })
+    if (usage) await deps.reported?.().catch(() => undefined)
     return true
   }
 

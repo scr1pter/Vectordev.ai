@@ -29,6 +29,13 @@ const EFFORT_ID = /^[A-Za-z0-9._:/@+-]{1,40}$/
 const EFFORT_LABEL = /^[A-Za-z0-9._:/@+ -]{1,40}$/
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
 
+/**
+ * The file the desktop app leaves in its engine's data directory once its check-in has reported that history. A CLI
+ * whose data directory is the same one (an XDG_DATA_HOME both inherit, as some Linux sessions export) then leaves the
+ * history to the desktop instead of reporting it a second time.
+ */
+export const DESKTOP_MARKER = "desktop-usage.json"
+
 /** A calendar day as YYYY-MM-DD; impossible dates such as 2026-02-30 are refused. */
 export const CalendarDay = Schema.String.check(
   Schema.isPattern(ISO_DAY),

@@ -8,6 +8,7 @@ import { sendUsageReport } from "../../src/cli/usage-report"
 import { routeUsageReport, scheduleUsageReport } from "../../src/cli/vector-account"
 
 const FILE = path.join(Global.Path.data, "cli-usage.json")
+const DESKTOP_MARKER = path.join(Global.Path.data, UsageReport.DESKTOP_MARKER)
 const TOKEN = "vct_synthetic-usage-fixture"
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.UTC(2026, 9, 10, 9, 30)
@@ -58,6 +59,7 @@ function site(status = 204) {
 
 beforeEach(async () => {
   await rm(FILE, { force: true })
+  await rm(DESKTOP_MARKER, { force: true })
   delete process.env.CI
 })
 
@@ -127,6 +129,29 @@ test("VECTOR_DISABLE_USAGE, or a CI runner, sends nothing and stores nothing", a
     delete process.env.VECTOR_DISABLE_USAGE
     delete process.env.CI
   }
+})
+
+test("sends nothing when the desktop app reports this same data directory's history", async () => {
+  // An XDG_DATA_HOME that the desktop app and the CLI both inherit gives them one history; the desktop's check-in
+  // reports it and leaves this file, so the CLI reporting it as well would count it twice.
+  const fixture = site()
+  await Bun.write(DESKTOP_MARKER, "{}\n")
+  const read = { calls: 0 }
+
+  expect(
+    await sendUsageReport({
+      token: TOKEN,
+      site: fixture.origin,
+      now: NOW,
+      summary: async () => {
+        read.calls++
+        return local
+      },
+    }),
+  ).toBe(false)
+
+  expect(read.calls).toBe(0)
+  expect(fixture.state.requests).toHaveLength(0)
 })
 
 test("a report that is not accepted is tried again later the same day, from the same install", async () => {

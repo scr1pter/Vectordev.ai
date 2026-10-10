@@ -9,6 +9,8 @@ import { UsageReport } from "@vectordevai/schema/usage-report"
 // The CLI's random install ID, which the check-in contract carries (the server keeps CLI reports per account and does
 // not store it), and the last UTC day a report was accepted.
 const FILE = path.join(Global.Path.data, "cli-usage.json")
+// Present when the desktop app's engine keeps its history in this same data directory and already reports it.
+const DESKTOP_MARKER = path.join(Global.Path.data, UsageReport.DESKTOP_MARKER)
 const Stored = Schema.Struct({
   installId: Schema.String.check(Schema.isUUID(4)),
   sent: Schema.optionalKey(Schema.String),
@@ -19,7 +21,8 @@ const Stored = Schema.Struct({
  * recorded cost, the last seven days of tokens, tasks and cost, models and their token shares, effort levels, chats,
  * streaks and task timing), at most once per UTC day, with the account token the CLI already holds. Never prompts,
  * code, file names or model output. Resolves true only when the server accepted it; never rejects for a failed read or
- * send, and does nothing when VECTOR_DISABLE_USAGE is set or on a CI runner.
+ * send, and does nothing when VECTOR_DISABLE_USAGE is set, on a CI runner, or when the desktop app reports this data
+ * directory's history itself.
  */
 export async function sendUsageReport(input: {
   token: string
@@ -30,6 +33,8 @@ export async function sendUsageReport(input: {
   // A CI runner's history is a few short jobs, and as the account's newest report it would stand in for the account's
   // real computers. Generated GitHub workflows also set VECTOR_DISABLE_USAGE.
   if (truthy("VECTOR_DISABLE_USAGE") || truthy("CI")) return false
+  // The desktop app reports this same history, and both reports would be added up.
+  if (await Bun.file(DESKTOP_MARKER).exists()) return false
   const day = new Date(input.now ?? Date.now()).toISOString().slice(0, 10)
   const stored = Option.getOrUndefined(
     Schema.decodeUnknownOption(Stored)(

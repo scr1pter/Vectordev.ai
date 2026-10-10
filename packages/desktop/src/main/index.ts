@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { mkdirSync, rmSync } from "node:fs"
+import { writeFile } from "node:fs/promises"
 import * as http from "node:http"
 import { createServer } from "node:net"
 import { homedir, tmpdir } from "node:os"
@@ -60,6 +61,7 @@ import { engineEventSource, startKeepAwake } from "./keep-awake"
 import { getStore } from "./store"
 import { USAGE_STORE } from "./store-keys"
 import { createUsageCheckin, usageCheckinEndpoint } from "./usage-checkin"
+import { UsageReport } from "@vectordevai/schema/usage-report"
 
 const APP_NAMES: Record<string, string> = {
   dev: "Vector Dev",
@@ -494,6 +496,8 @@ const main = Effect.gen(function* () {
 
   yield* Fiber.await(loadingTask)
 
+  // The local engine keeps its history in <XDG_DATA_HOME>/vector, which preferAppEnv set above.
+  const engineData = process.env.XDG_DATA_HOME
   const usage = createUsageCheckin({
     endpoint: usageCheckinEndpoint({
       packaged: app.isPackaged,
@@ -509,6 +513,16 @@ const main = Effect.gen(function* () {
     version: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
+    // A note beside that history that this check-in reports it. Only a CLI given the same XDG_DATA_HOME, as some Linux
+    // sessions export to both, reads that directory, and it then leaves the history to this check-in rather than
+    // counting it twice.
+    reported: engineData
+      ? () =>
+          writeFile(
+            join(engineData, "vector", UsageReport.DESKTOP_MARKER),
+            `${JSON.stringify({ reportedBy: "Vector desktop usage check-in" })}\n`,
+          )
+      : undefined,
   })
   usage.start()
   app.once("will-quit", () => usage.stop())
