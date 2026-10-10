@@ -52,6 +52,8 @@ export type SubagentRecord = {
   parentMessageID: string
   /** The task tool call that launched the current run. Absent only when the caller had no call id. */
   callID?: string
+  /** Index within a task batch; callID remains the real provider tool call. */
+  batchIndex?: number
   model: { providerID: string; modelID: string; variant?: string }
   background: boolean
   status: SubagentStatus

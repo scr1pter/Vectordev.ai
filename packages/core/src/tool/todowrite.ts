@@ -5,6 +5,7 @@ import { Effect, Layer, Schema } from "effect"
 import { makeLocationNode } from "../effect/app-node"
 import { PermissionV2 } from "../permission"
 import { SessionTodo } from "../session/todo"
+import { TodoTransition } from "../session/todo-transition"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -13,6 +14,7 @@ export const name = "todowrite"
 
 export const Input = Schema.Struct({
   todos: Schema.Array(SessionTodo.Info).annotate({ description: "The updated todo list" }),
+  reset: TodoTransition.Reset,
 })
 
 export const Output = Schema.Struct({
@@ -34,7 +36,7 @@ const layer = Layer.effectDiscard(
       .register({
         [name]: Tool.make({
           description:
-            "Create and maintain a structured task list for the current coding session. Use it to track progress during multi-step work and keep todo statuses current.",
+            "Create and maintain a structured task list when the user requests tracking, the work has several substantial independent objectives, or extended work needs meaningful checkpoints. Otherwise skip it for one bounded bug fix, feature, or mechanical change, including its investigation and verification; multiple files or tool calls alone do not justify a list. Track substantial outcomes. Persist observed progress and new blockers before reporting final status; prose alone does not update the list. Combine known status changes and independent productive calls when possible. Mark completed only after work and required verification succeed. Keep exactly one milestone in_progress while work remains; keep the original blocked/partial milestone active, including failed verification, and add a pending blocker follow-up. Preserve user commands verbatim.",
           input: Input,
           output: Output,
           toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],
@@ -48,9 +50,16 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
-              yield* todos.update({ sessionID: context.sessionID, todos: input.todos })
+              yield* todos.updateFromModel({ sessionID: context.sessionID, todos: input.todos, reset: input.reset })
               return { todos: input.todos }
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: "Unable to update todos" }))),
+            }).pipe(
+              Effect.mapError(
+                (error) =>
+                  new ToolFailure({
+                    message: error instanceof TodoTransition.Rejected ? error.message : "Unable to update todos",
+                  }),
+              ),
+            ),
         }),
       })
       .pipe(Effect.orDie)

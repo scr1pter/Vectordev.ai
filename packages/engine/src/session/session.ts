@@ -13,6 +13,8 @@ import type { ProviderMetadata, Usage } from "@vectordevai/llm"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { Database } from "@vectordevai/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { EventV2 } from "@vectordevai/core/event"
+import { EventTable } from "@vectordevai/core/event/sql"
 import { SessionV2 } from "@vectordevai/core/session"
 import * as SessionExecutionLocal from "@vectordevai/core/session/execution/local"
 import { locationServiceMapLayer } from "@vectordevai/core/location-services"
@@ -41,12 +43,13 @@ import { SessionID, MessageID, PartID } from "./schema"
 
 import type { Provider } from "@/provider/provider"
 import { Global } from "@vectordevai/core/global"
-import { Effect, Layer, Option, Context, Schema, Types } from "effect"
+import { Effect, Layer, Option, Context, Schema, Types, DateTime } from "effect"
 import { NonNegativeInt, optional } from "@vectordevai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { SessionMessage } from "@vectordevai/schema/session-message"
+import { SessionEvent } from "@vectordevai/schema/session-event"
 
 const parentTitlePrefix = "New session - "
 const childTitlePrefix = "Child session - "
@@ -275,6 +278,7 @@ export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>
 export const UsageDay = Schema.Struct({
   date: Schema.String,
   tokens: NonNegativeInt,
+  // Known recorded spend, including ancillary model work; activity remains transcript-only.
   cost: Schema.Finite,
   tasks: NonNegativeInt,
 }).annotate({ identifier: "SessionUsageDay" })
@@ -301,7 +305,8 @@ export type UsageEffort = Types.DeepMutable<Schema.Schema.Type<typeof UsageEffor
 export const UsageSummary = Schema.Struct({
   lifetimeTokens: NonNegativeInt,
   lifetimeCost: Schema.Finite,
-  // Responses that ran on a model with no listed price; lifetimeCost leaves them out.
+  // Model work with unknown price or incomplete usage, including ancillary attempts.
+  // lifetimeCost is the known subtotal; this count is independent of transcript modelResponses.
   unpricedResponses: optional(NonNegativeInt),
   inputTokens: NonNegativeInt,
   outputTokens: NonNegativeInt,
@@ -696,6 +701,13 @@ const layer: Layer.Layer<
         .all()
         .pipe(Effect.orDie)
       const decode = Schema.decodeUnknownOption(SessionV1.Info)
+      const ancillary = yield* db
+        .select({ data: EventTable.data })
+        .from(EventTable)
+        .innerJoin(SessionTable, eq(EventTable.aggregate_id, SessionTable.id))
+        .where(eq(EventTable.type, EventV2.versionedType(SessionEvent.AncillaryUsage.type, 1)))
+        .all()
+        .pipe(Effect.orDie)
       return summarizeUsage(
         rows.flatMap((row) =>
           // `data` holds only the message body; `id`/`sessionID` live in columns but are
@@ -706,6 +718,7 @@ const layer: Layer.Layer<
             onSome: (message) => [message],
           }),
         ),
+        ancillary.map((event) => Schema.decodeUnknownSync(SessionEvent.AncillaryUsage.data)(event.data)),
       )
     })
 
@@ -1084,7 +1097,10 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
   )
 })
 
-export function summarizeUsage(messages: ReadonlyArray<typeof SessionV1.Info.Type>): UsageSummary {
+export function summarizeUsage(
+  messages: ReadonlyArray<typeof SessionV1.Info.Type>,
+  ancillary: ReadonlyArray<typeof SessionEvent.AncillaryUsage.data.Type> = [],
+): UsageSummary {
   const assistant = messages.filter((message) => message.role === "assistant").filter((message) => !message.forked)
   const days = assistant.reduce((result, message) => {
     const tokens = usageTokens(message)
@@ -1099,6 +1115,24 @@ export function summarizeUsage(messages: ReadonlyArray<typeof SessionV1.Info.Typ
     })
     return result
   }, new Map<string, { date: string; tokens: number; cost: number; tasks: Set<string> }>())
+  // Archive imports remap sessions and event IDs, but preserve the identity of the paid attempt.
+  const attempts = new Map<string, typeof SessionEvent.AncillaryUsage.data.Type | undefined>()
+  const same = Schema.toEquivalence(SessionEvent.AncillaryUsage.data)
+  ancillary.forEach((usage) => {
+    if (!attempts.has(usage.usageID)) {
+      attempts.set(usage.usageID, usage)
+      return
+    }
+    const previous = attempts.get(usage.usageID)
+    if (previous && !same(previous, { ...usage, sessionID: previous.sessionID })) attempts.set(usage.usageID, undefined)
+  })
+  attempts.forEach((usage) => {
+    // Conflicting copies have no trustworthy amount or date; count one unknown attempt below.
+    if (!usage) return
+    const date = localDateKey(DateTime.toEpochMillis(usage.timestamp))
+    const current = days.get(date) ?? { date, tokens: 0, cost: 0, tasks: new Set<string>() }
+    days.set(date, { ...current, cost: current.cost + Math.max(0, usage.cost ?? 0) })
+  })
   const activity = [...days.values()]
     .map((day): UsageDay => ({ date: day.date, tokens: day.tokens, cost: day.cost, tasks: day.tasks.size }))
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -1158,7 +1192,11 @@ export function summarizeUsage(messages: ReadonlyArray<typeof SessionV1.Info.Typ
       tokens: usageTokens(message),
     }))
   const longest = durations.reduce((a, b) => (b.ms > a.ms ? b : a), { ms: 0, tokens: 0 })
-  const unpricedResponses = assistant.filter((message) => message.unpriced).length
+  const unpricedResponses =
+    assistant.filter((message) => message.unpriced).length +
+    [...attempts.values()].filter(
+      (usage) => !usage || usage.unpriced || usage.incomplete || usage.cost === undefined || usage.tokens === undefined,
+    ).length
 
   return {
     lifetimeTokens,

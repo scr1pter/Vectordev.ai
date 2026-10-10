@@ -123,6 +123,10 @@ export function applyDirectoryEvent(input: {
   if (input.sessionContent === false && SESSION_CONTENT_EVENTS.has(event.type)) return
   const limit = Math.max(input.store.limit, input.retainedLimit ?? 0)
   switch (event.type) {
+    case "session.next.ancillary.usage": {
+      input.push(input.directory)
+      return
+    }
     case "server.instance.disposed": {
       input.push(input.directory)
       return
