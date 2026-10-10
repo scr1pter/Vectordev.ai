@@ -15,7 +15,9 @@ function at(hours: number, minutes = 0) {
   return Date.UTC(2026, 9, 9, hours, minutes)
 }
 
-function fixture(input: { listStatus?: number; checkinStatus?: number; pageSize?: number } = {}) {
+function fixture(
+  input: { listStatus?: number; checkinStatus?: number; pageSize?: number; usageInterval?: number } = {},
+) {
   const state = {
     now: TODAY,
     enabled: true,
@@ -83,6 +85,7 @@ function fixture(input: { listStatus?: number; checkinStatus?: number; pageSize?
     version: "1.99.105",
     platform: "darwin",
     arch: "arm64",
+    usageInterval: input.usageInterval,
   }
   return { state, lists, usageReads, checkins, store, options, usage: createUsageCheckin(options) }
 }
@@ -259,7 +262,8 @@ test("still checks in, without the report, when the summary cannot be read", asy
 })
 
 test("sends again when the report shows more tokens or responses, and not when only it fails", async () => {
-  const app = fixture()
+  // Read the summary on every check-in, as if each one came six hours after the last.
+  const app = fixture({ usageInterval: 0 })
   app.state.usage = summary()
   expect(await app.usage.checkin()).toBe(true)
 
@@ -287,7 +291,7 @@ test("sends again when the report shows more tokens or responses, and not when o
 })
 
 test("a failed count later in the day repeats the accepted counts when only the report grew", async () => {
-  const app = fixture()
+  const app = fixture({ usageInterval: 0 })
   app.state.sessions.push({ id: "ses_a", updated: at(9) }, { id: "ses_b", parentID: "ses_a", updated: at(10) })
   expect(await app.usage.checkin()).toBe(true)
 
@@ -295,6 +299,41 @@ test("a failed count later in the day repeats the accepted counts when only the 
   app.state.usage = summary()
   expect(await app.usage.checkin()).toBe(true)
   expect(app.checkins[1].body).toMatchObject({ sessions: 1, subagentSessions: 1, usage: { lifetimeTokens: 1_250_000 } })
+})
+
+test("reads the summary with the day's first check-in and when a count grows, otherwise every six hours", async () => {
+  const app = fixture()
+  app.state.now = at(1)
+  app.state.usage = summary()
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.usageReads).toHaveLength(1)
+
+  // An hour later nothing was counted: the summary, which scans every message, is not read.
+  app.state.now = at(2)
+  app.state.usage = summary({ lifetimeTokens: 1_300_000 })
+  expect(await app.usage.checkin()).toBe(false)
+  expect(app.usageReads).toHaveLength(1)
+
+  // A new session today reads it, and sends the grown totals with the count.
+  app.state.now = at(3)
+  app.state.sessions.push({ id: "ses_a", updated: at(2, 30) })
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.usageReads).toHaveLength(2)
+  expect(app.checkins.at(-1)?.body).toMatchObject({ sessions: 1, usage: { lifetimeTokens: 1_300_000 } })
+
+  // Six hours after that read, it is read again even though no count grew.
+  app.state.usage = summary({ lifetimeTokens: 1_400_000 })
+  app.state.now = at(8, 59)
+  expect(await app.usage.checkin()).toBe(false)
+  app.state.now = at(9)
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.usageReads).toHaveLength(3)
+  expect(app.checkins.at(-1)?.body).toMatchObject({ usage: { lifetimeTokens: 1_400_000 } })
+
+  // The next UTC day's first check-in reads it again.
+  app.state.now = at(24, 30)
+  expect(await app.usage.checkin()).toBe(true)
+  expect(app.usageReads).toHaveLength(4)
 })
 
 test("a failed count reports the install once with zero counts and the next working count replaces them", async () => {

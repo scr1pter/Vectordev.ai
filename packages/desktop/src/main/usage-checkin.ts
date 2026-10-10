@@ -7,6 +7,9 @@ const DAY = 24 * 60 * 60 * 1000
 const MAX_COUNT = 100_000
 // The last tick before UTC midnight lands this far ahead of it, so the end of a day is still sent as part of that day.
 const DAY_END_MARGIN = 5 * 60 * 1000
+// Reading the usage summary scans every message on the local engine's event loop, so while the day's counts stay the
+// same it is read at most this often.
+const USAGE_READ_INTERVAL = 6 * 60 * 60 * 1000
 const INSTALL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 // Only the parent link is read; titles, directories and everything else in a row are ignored.
 const SessionRows = Schema.Array(Schema.Struct({ parentID: Schema.optional(Schema.String) }))
@@ -35,6 +38,7 @@ type Dependencies = {
   arch: string
   delay?: number
   interval?: number
+  usageInterval?: number
 }
 
 /**
@@ -45,13 +49,15 @@ type Dependencies = {
  *
  * The first check-in of a day marks the install active; later ones send again whenever a count has gone up or the
  * report shows more tokens or model responses, and the server keeps the largest values it receives for an install and
- * day. When the report cannot be read, the check-in goes without it.
+ * day. The report is read with the first check-in of a day and whenever a count went up, otherwise at most every six
+ * hours. When the report cannot be read, the check-in goes without it.
  */
 export function createUsageCheckin(deps: Dependencies) {
   const state: {
     running?: Promise<boolean>
     timer?: ReturnType<typeof setTimeout>
-  } = {}
+    usageReadAt: number
+  } = { usageReadAt: Number.NEGATIVE_INFINITY }
 
   const checkin = async () => {
     if (!deps.endpoint || !deps.enabled()) return false
@@ -61,9 +67,6 @@ export function createUsageCheckin(deps: Dependencies) {
       Option.filter((value) => value.day === day),
     )
     const counted = await countSessions(deps, Math.floor(now / DAY) * DAY).catch(() => undefined)
-    const token = await deps.token().catch(() => undefined)
-    // The server keeps model use only from a signed-in install, so a signed-out one neither reads nor sends it.
-    const usage = token ? await readUsage(deps).catch(() => undefined) : undefined
     // A failed count still reports the install as active today, once, with nothing counted. The next count that works
     // is higher than those zeros whenever anything was used, so it replaces them. Later in the day a failed count
     // repeats what was accepted, which the server already keeps.
@@ -73,6 +76,16 @@ export function createUsageCheckin(deps: Dependencies) {
         onNone: () => ({ sessions: 0, subagentSessions: 0 }),
         onSome: (value) => ({ sessions: value.sessions, subagentSessions: value.subagentSessions }),
       })
+    const token = await deps.token().catch(() => undefined)
+    // The server keeps model use only from a signed-in install, so a signed-out one neither reads nor sends it.
+    const read =
+      Boolean(token) &&
+      (Option.isNone(sent) ||
+        counts.sessions > sent.value.sessions ||
+        counts.subagentSessions > sent.value.subagentSessions ||
+        now - state.usageReadAt >= (deps.usageInterval ?? USAGE_READ_INTERVAL))
+    if (read) state.usageReadAt = now
+    const usage = read ? await readUsage(deps).catch(() => undefined) : undefined
     // A day's counts and a report's totals only grow (unless sessions are deleted), so nothing needs sending until one
     // of them goes up.
     if (
