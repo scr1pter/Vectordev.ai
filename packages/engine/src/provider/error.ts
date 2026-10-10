@@ -4,6 +4,7 @@ import { iife } from "@/util/iife"
 import type { ProviderV2 } from "@vectordevai/core/provider"
 import { isContextOverflow } from "@vectordevai/llm"
 import { FreeModelsLimitError } from "@vectordevai/schema/free-model"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 
 export class HeaderTimeoutError extends Error {
   public override readonly name = "ProviderHeaderTimeoutError"
@@ -182,7 +183,13 @@ export type ParsedAPICallError =
 export function parseAPICallError(input: { providerID: ProviderV2.ID; error: APICallError }): ParsedAPICallError {
   const m = message(input.providerID, input.error)
   const body = json(input.error.responseBody)
-  if (isContextOverflow(m) || input.error.statusCode === 413 || body?.error?.code === "context_length_exceeded") {
+  const codium = input.providerID === ModelPlans.PROVIDER_ID
+  if (
+    isContextOverflow(m) ||
+    input.error.statusCode === 413 ||
+    body?.error?.code === "context_length_exceeded" ||
+    (codium && ModelPlans.contextFailure(input.error.responseBody))
+  ) {
     return {
       type: "context_overflow",
       message: m,
@@ -190,6 +197,17 @@ export function parseAPICallError(input: { providerID: ProviderV2.ID; error: API
     }
   }
 
+  const failure = codium ? ModelPlans.gatewayFailure(input.error.statusCode, input.error.responseBody) : undefined
+  // The app reads metadata.codium to offer the matching action, and retries skip these errors.
+  if (failure)
+    return {
+      type: "api_error",
+      message: failure.message,
+      statusCode: input.error.statusCode,
+      isRetryable: false,
+      responseBody: input.error.responseBody,
+      metadata: { codium: failure.kind, code: failure.code },
+    }
   const metadata = input.error.url ? { url: input.error.url } : undefined
   return {
     type: "api_error",

@@ -7,6 +7,7 @@ import { AgentCommand } from "./cli/cmd/agent"
 import { UpgradeCommand } from "./cli/cmd/upgrade"
 import { UninstallCommand } from "./cli/cmd/uninstall"
 import { ModelsCommand } from "./cli/cmd/models"
+import { CodiumCommand } from "./cli/cmd/codium"
 import { UI } from "./cli/ui"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { FormatError } from "./cli/error"
@@ -117,6 +118,7 @@ const cli = yargs(args)
   .command(WebCommand)
   .command(InviteCommand)
   .command(ModelsCommand)
+  .command(CodiumCommand)
   .command(StatsCommand)
   .command(ExportCommand)
   .command(ImportCommand)

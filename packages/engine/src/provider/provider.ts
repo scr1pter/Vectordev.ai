@@ -5,6 +5,7 @@ import {
 } from "@vectordevai/core/plugin/oauth-approval"
 import { ProviderSDK } from "@vectordevai/core/provider-sdk"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 import { freeModelRequest, serializeFreeModelRequest } from "@vectordevai/core/free-model-request"
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
 import { isFreeModel } from "@vectordevai/schema/free-model"
@@ -1323,6 +1324,49 @@ export function fromFreeModels(models: readonly FreeModelInfo[], providerID: "ve
   }
 }
 
+/** Vector Codium. Credentials are read at the fixed request boundary and never appear in provider info. */
+export function fromModelPlans(models: readonly ModelPlans.Model[]): Info {
+  return {
+    id: ProviderV2.ID.make(ModelPlans.PROVIDER_ID),
+    name: ModelPlans.PROVIDER_NAME,
+    source: "custom",
+    env: [],
+    options: {},
+    models: Object.fromEntries(
+      models.map((model) => [
+        model.id,
+        {
+          id: ModelV2.ID.make(model.id),
+          providerID: ProviderV2.ID.make(ModelPlans.PROVIDER_ID),
+          name: model.name,
+          api: { id: model.id, npm: "@ai-sdk/openai-compatible", url: ModelPlans.API_URL },
+          status: "active",
+          headers: {},
+          options: {},
+          release_date: "",
+          variants: {},
+          // Ceiling prices per million tokens; a step's cost prefers what the gateway reports it billed.
+          cost: {
+            input: model.inputPrice,
+            output: model.outputPrice,
+            cache: { read: model.inputPrice, write: model.inputPrice },
+          },
+          limit: { context: model.contextLength, output: model.maxOutputTokens },
+          capabilities: {
+            temperature: true,
+            reasoning: false,
+            attachment: false,
+            toolcall: true,
+            input: { text: true, audio: false, image: false, video: false, pdf: false },
+            output: { text: true, audio: false, image: false, video: false, pdf: false },
+            interleaved: false,
+          },
+        },
+      ]),
+    ),
+  }
+}
+
 function modelSuggestions(provider: Info | undefined, modelID: ModelV2.ID) {
   const available = provider
     ? Object.keys(provider.models).filter((id) => provider.models[id].status !== "deprecated")
@@ -1358,8 +1402,10 @@ const layer = Layer.effect(
     const modelCatalogSvc = yield* ModelCatalog.Service
     const runtimeFlags = yield* RuntimeFlags.Service
     const freeModels = yield* FreeModels.Service
+    const modelPlans = yield* ModelPlans.Service
     const freeCredentials = yield* FreeModels.CredentialsService
     const runtimeBridge = yield* EffectBridge.make()
+    const planID = ProviderV2.ID.make(ModelPlans.PROVIDER_ID)
 
     const state = yield* InstanceState.make<State>(() =>
       Effect.gen(function* () {
@@ -1370,6 +1416,9 @@ const layer = Layer.effect(
         )
         const catalog = mapValues(modelCatalog, fromModelCatalogProvider)
         const freeCatalog = yield* freeModels.catalog()
+        const vectorToken = yield* freeCredentials.get("vector")
+        const planCatalog = yield* modelPlans.catalog(vectorToken)
+        if (planCatalog.enabled) catalog[planID] = fromModelPlans(planCatalog.models)
         if (freeCatalog.enabled && freeCatalog.models.length)
           catalog[ProviderV2.ID.vector] = fromFreeModels(freeCatalog.models)
         const database = mapValues(catalog, toPublicInfo)
@@ -1672,7 +1721,6 @@ const layer = Layer.effect(
         }
 
         // Built-in free credentials and destinations cannot be replaced by project configuration.
-        const vectorToken = yield* freeCredentials.get("vector")
         const openRouterKey = yield* freeCredentials.get("openrouter")
         const ownedFree = openRouterKey ? yield* freeModels.forKey(openRouterKey) : []
         const router = providers[ProviderV2.ID.openrouter]
@@ -1687,6 +1735,9 @@ const layer = Layer.effect(
           if (models.length) providers[ProviderV2.ID.vector] = fromFreeModels(models)
         }
         if (!freeCatalog.enabled) delete providers[ProviderV2.ID.vector]
+        // Codium replaces every user or project override of its ID, so prices and destination stay Vector's.
+        delete providers[planID]
+        if (planCatalog.enabled && isProviderAllowed(planID)) providers[planID] = fromModelPlans(planCatalog.models)
         if (openRouterKey && isProviderAllowed(ProviderV2.ID.openrouter)) {
           providers[ProviderV2.ID.openrouter] ??= fromFreeModels([], "openrouter")
           Object.assign(providers[ProviderV2.ID.openrouter].models, fromFreeModels(ownedFree, "openrouter").models)
@@ -1788,13 +1839,56 @@ const layer = Layer.effect(
       }),
     )
 
-    const list = Effect.fn("Provider.list")(() => InstanceState.use(state, (s) => s.providers))
+    const list = Effect.fn("Provider.list")(function* () {
+      const s = yield* InstanceState.get(state)
+      const current = yield* modelPlans.catalog(yield* freeCredentials.get("vector"))
+      const cfg = yield* config.get()
+      // A plan bought, a sign-in or a sign-out must not require restarting the local engine.
+      delete s.providers[planID]
+      if (
+        current.enabled &&
+        !cfg.disabled_providers?.includes(planID) &&
+        (!cfg.enabled_providers || cfg.enabled_providers.includes(planID))
+      )
+        s.providers[planID] = fromModelPlans(current.models)
+      return s.providers
+    })
 
     const unavailable = Effect.fn("Provider.unavailable")(() => InstanceState.use(state, (s) => s.unavailable))
 
     async function resolveSDK(model: Model, s: State, envs: Record<string, string | undefined>) {
       try {
         const provider = s.providers[model.providerID]
+        if (model.providerID === planID) {
+          const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible")
+          return createOpenAICompatible({
+            name: ModelPlans.PROVIDER_ID,
+            baseURL: ModelPlans.API_URL,
+            // The account token is added inside fetch, at the fixed vectordev.ai destination.
+            apiKey: "vector-request-credential",
+            fetch: ModelPlans.createFetch({
+              modelID: model.id,
+              credential: () => runtimeBridge.promise(freeCredentials.get("vector")),
+              catalog: (token) => runtimeBridge.promise(modelPlans.catalog(token)),
+              request: modelPlans.request,
+            }),
+            metadataExtractor: {
+              extractMetadata: async ({ parsedBody }) => {
+                const cost = ModelPlans.usageCost(parsedBody)
+                return cost === undefined ? undefined : { codium: { cost } }
+              },
+              createStreamExtractor: () => {
+                const billed = { cost: undefined as number | undefined }
+                return {
+                  processChunk: (chunk) => {
+                    billed.cost = ModelPlans.usageCost(chunk) ?? billed.cost
+                  },
+                  buildMetadata: () => (billed.cost === undefined ? undefined : { codium: { cost: billed.cost } }),
+                }
+              },
+            },
+          })
+        }
         if (
           model.providerID === "vector" ||
           model.freeModel ||
@@ -1993,8 +2087,20 @@ const layer = Layer.effect(
     )
 
     const getModel = Effect.fn("Provider.getModel")(function* (providerID: ProviderV2.ID, modelID: ModelV2.ID) {
+      if (providerID === planID) yield* list()
       const s = yield* InstanceState.get(state)
       const provider = s.providers[providerID]
+      // Never move a Codium conversation to another provider; say why it cannot run.
+      if (!provider && providerID === planID)
+        return yield* new ModelNotFoundError({
+          providerID,
+          modelID,
+          unavailable: {
+            id: providerID,
+            reason: "no-models",
+            message: `Vector Codium is unavailable: sign in to Vector, and check ${ModelPlans.PURCHASE_URL}. Choose another model to continue.`,
+          },
+        })
       if (!provider) {
         const catalogProvider = s.catalog[providerID]
         const suggestions = catalogProvider
@@ -2187,7 +2293,11 @@ const layer = Layer.effect(
       if (free) return { providerID: free.providerID, modelID: free.id }
       if (s.providers[ProviderV2.ID.openrouter])
         return yield* new NoModelsError({ providerID: ProviderV2.ID.openrouter })
-      const provider = providers.find((p) => p.id !== "vector") ?? providers[0]
+      // Codium spends the account's credits, so it is the automatic choice only when nothing else can run.
+      const provider =
+        providers.find((p) => p.id !== "vector" && p.id !== planID) ??
+        providers.find((p) => p.id !== planID) ??
+        providers[0]
       if (!provider) return yield* new NoProvidersError()
       const [model] = sort(Object.values(provider.models))
       if (!model) return yield* new NoModelsError({ providerID: provider.id })
@@ -2246,6 +2356,7 @@ export const node = LayerNode.make({
     ModelCatalog.node,
     RuntimeFlags.node,
     FreeModels.node,
+    ModelPlans.node,
     FreeModels.credentialsNode,
   ],
 })
