@@ -180,6 +180,29 @@ describe("WorkspaceTrust", () => {
     expect(await fs.readFile(command.command[1], "utf8")).toBe("console.log('approved')\n")
   })
 
+  test("binds programs from this machine's PATH, such as formatters and language servers", async () => {
+    await using workspace = await tmpdir()
+    await using state = await tmpdir()
+    const config = path.join(workspace.path, "vector.json")
+    await fs.writeFile(
+      config,
+      JSON.stringify({ formatter: { custom: { command: ["git", "--version", "$FILE"], extensions: [".txt"] } } }),
+    )
+    const trusted = await WorkspaceTrust.materialize(
+      state.path,
+      await WorkspaceTrust.snapshot(workspace.path, [config]),
+    )
+
+    const command = WorkspaceTrust.materializedCommand(trusted, ["git", "--version", "$FILE"], workspace.path)
+    expect(command).toBeDefined()
+    if (!command) throw new Error("expected a bound command")
+    // Bound to the absolute program, so a PATH change cannot swap it, and still run from the approved snapshot.
+    expect(path.isAbsolute(command.command[0])).toBe(true)
+    expect(path.basename(command.command[0]).toLowerCase()).toMatch(/^git(?:\.exe)?$/)
+    expect(command.command.slice(1)).toEqual(["--version", "$FILE"])
+    expect(command.cwd).toBe(WorkspaceTrust.materializedPath(trusted, workspace.path))
+  })
+
   test("fails closed for ambiguous interpreters and package runners", async () => {
     await using workspace = await tmpdir()
     await using state = await tmpdir()
@@ -249,7 +272,8 @@ describe("WorkspaceTrust", () => {
         LUA_INIT_5_4: `@${server}`,
       }),
     ).toBeUndefined()
-    expect(WorkspaceTrust.materializedCommand(trusted, ["echo", "ready"], workspace.path)).toBeUndefined()
+    // A program inside the repository that the snapshot did not capture cannot run.
+    expect(WorkspaceTrust.materializedCommand(trusted, ["./tools/format", "$FILE"], workspace.path)).toBeUndefined()
     const safe = WorkspaceTrust.materializedCommand(trusted, ["node", "server.js"], workspace.path, {
       API_TOKEN: "secret",
     })

@@ -674,7 +674,23 @@ const layer = Layer.effect(
           const source = trustedSnapshot ? WorkspaceTrust.materializedPath(trustedSnapshot, filepath) : filepath
           const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
           const loaded = yield* loadConfig(normalized, { path: source }, env, true, opaqueCredentials)
-          return trustedSnapshot ? bindTrustedProjectExecutables(loaded, trustedSnapshot, workspace, filepath) : loaded
+          if (!trustedSnapshot) return loaded
+          const bound = bindTrustedProjectExecutables(loaded, trustedSnapshot, workspace, filepath)
+          // Trust drops what it cannot bind to approved bytes; say which, so a missing integration is explicable.
+          const dropped = (["formatter", "lsp", "mcp"] as const).flatMap((key) => {
+            const before = loaded[key]
+            const after = bound[key]
+            if (!isRecord(before) || !isRecord(after)) return []
+            return Object.keys(before)
+              .filter((name) => !(name in after))
+              .map((name) => `${key}.${name}`)
+          })
+          if (dropped.length)
+            yield* Effect.logWarning("trust left out project commands it cannot bind to approved bytes", {
+              path: filepath,
+              dropped,
+            })
+          return bound
         })
 
         let result: Info = {}

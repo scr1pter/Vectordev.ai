@@ -833,6 +833,9 @@ it.instance("runs trusted bare MCP scripts from materialized bytes and rejects a
         },
         shell: { type: "local", command: ["sh", "-c", "node server.js"] },
         safe: { type: "local", command: ["node", "server.js"], environment: { API_TOKEN: "secret" } },
+        // A program installed on this machine, and one that is not.
+        host: { type: "local", command: ["git", "--version"] },
+        missing: { type: "local", command: ["vector-test-missing-program"] },
       },
       formatter: {
         approved: { command: ["node", "server.js"], extensions: [".js"] },
@@ -841,6 +844,7 @@ it.instance("runs trusted bare MCP scripts from materialized bytes and rejects a
           command: ["node", "server.js"],
           environment: { NODE_OPTIONS: `--require=${server}` },
         },
+        hostFormatter: { command: ["git", "--version", "$FILE"], extensions: [".txt"] },
         // A built-in formatter overridden without a command still launches with this environment.
         prettier: { environment: { PATH: path.join(test.directory, "tools") } },
         biome: { environment: { BIOME_CONFIG_PATH: "biome.json" } },
@@ -887,7 +891,16 @@ it.instance("runs trusted bare MCP scripts from materialized bytes and rejects a
     expect(lsp && "command" in lsp ? lsp.command[1] : undefined).toBe(approved.command[1])
     expect(lsp && "command" in lsp ? lsp.cwd : undefined).toBe(approved.cwd)
     expect(config.lsp && typeof config.lsp === "object" ? config.lsp.preload : undefined).toBeUndefined()
+    // Formatters, language servers and MCP servers installed on this machine survive trust, bound to their
+    // absolute program and run from the approved snapshot.
+    const host = config.mcp?.host
+    const hostCommand = host && "type" in host && host.type === "local" ? host.command : []
+    expect(path.isAbsolute(hostCommand[0] ?? "")).toBe(true)
+    expect(path.basename(hostCommand[0] ?? "").toLowerCase()).toMatch(/^git(?:\.exe)?$/)
+    expect(host && "type" in host && host.type === "local" ? host.cwd : undefined).toBe(approved.cwd)
+    expect(config.mcp?.missing).toBeUndefined()
     const formatters = config.formatter && typeof config.formatter === "object" ? config.formatter : {}
+    expect(formatters.hostFormatter?.command?.slice(1)).toEqual(["--version", "$FILE"])
     expect(formatters.prettier).toBeUndefined()
     expect(formatters.biome?.environment).toEqual({ BIOME_CONFIG_PATH: "biome.json" })
 

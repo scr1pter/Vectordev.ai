@@ -295,9 +295,10 @@ export function materializedCommand(
   const directExecutable = localPath(command[0], cwd)[0]
   const script = interpreterScript(command)
   if (script === "ambiguous") return undefined
-  if (script === "unknown" && (!directExecutable || !materializedPathOption(current, directExecutable))) {
-    return undefined
-  }
+  // A program found on this machine's PATH outside the repository (prettier, gofmt, a language server) is bound to
+  // its absolute path and still runs from the approved snapshot's cwd, so relative lookups stay inside approved
+  // bytes. A program inside the repository must itself be part of the snapshot.
+  if (script === "unknown" && directExecutable && !materializedPathOption(current, directExecutable)) return undefined
   if (typeof script === "number") {
     const input = localPath(command[script], cwd, true)[0]
     if (!input || !materializedPathOption(current, input)) return undefined
