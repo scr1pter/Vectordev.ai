@@ -139,13 +139,16 @@ export async function runSupabaseCommand(command: unknown, raw: unknown, options
       return { ok: false, needsSetup: true, error: error.message, nextStep: error.nextStep }
     }
     const message = scrub({ ...project, secrets: [] }, errorMessage(error))
+    const status = error instanceof SupabaseApiError ? error.status : undefined
     return {
       ok: false,
       error: message,
       nextStep:
-        error instanceof SupabaseApiError && error.status === 401
+        status === 401
           ? "Supabase rejected Vector's saved credentials. Reconnect Supabase in Cloud Services > Integrations."
-          : undefined,
+          : status === 403
+            ? "Vector's Supabase connection is not allowed to do this. Reconnect Supabase in Cloud Services > Integrations and grant the access it asks for, or connect with a personal access token."
+            : undefined,
     }
   }
 }

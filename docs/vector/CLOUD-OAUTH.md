@@ -90,8 +90,16 @@ Grant only the management access required for the selected operations:
 
 - Vercel: user identity (`/v2/user`, including User read), selected team/project
   listing, deployment, environment variables and project domains.
-- Supabase: organization identity/listing (`/v1/organizations`), selected
-  projects, public client keys and the database operations the user approves.
+- Supabase: the OAuth app's scopes must cover every control in Cloud Services
+  and the agent's tool
+  ([scope list](https://supabase.com/docs/guides/integrations/build-a-supabase-oauth-integration/oauth-scopes)):
+  Organizations read; Projects read and write (create, pause, restore);
+  Database read and write (SQL, migrations, pooler, password rotation); Secrets
+  read and write (API keys, Edge Function secrets); Auth read and write; Edge
+  Functions read and write; Storage read; and Analytics read for logs and the
+  security advisors where the dashboard offers it. Users who connected before
+  a scope was added must reconnect for it to apply. A personal access token
+  already carries the account's full access.
 
 Do not request billing or destructive account-wide permissions. Provider
 configuration must support the identity checks: a token exchange alone is not

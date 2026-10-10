@@ -151,6 +151,23 @@ describe("projects", () => {
     })
   })
 
+  test("says to reconnect when Supabase rejects the token or does not allow the action", async () => {
+    connect()
+    linkDatabase()
+    fake.state.fail = (call) =>
+      call.path === "/v1/organizations"
+        ? Response.json({ message: "Unauthorized" }, { status: 401 })
+        : call.path.endsWith("/config/auth")
+          ? Response.json({ message: "Forbidden resource" }, { status: 403 })
+          : undefined
+    const rejected = await run("supabase_projects")
+    expect(rejected.ok).toBe(false)
+    expect(rejected.nextStep).toContain("rejected Vector's saved credentials")
+    const forbidden = await run("auth_config")
+    expect(forbidden.error).toBe("Forbidden resource")
+    expect(forbidden.nextStep).toContain("grant the access it asks for")
+  })
+
   test("links a project with the framework's public names, a TypeScript client and an ignored .env", async () => {
     connect()
     await writeFile(join(project, "package.json"), JSON.stringify({ dependencies: { next: "15.0.0" } }))
