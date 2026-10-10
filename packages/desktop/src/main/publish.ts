@@ -743,7 +743,10 @@ async function requireSupabaseSecurity(
   updateDeployment(deployment.projectPath, deployment.taskId, deployment.id, {
     checks: upsertDeploymentCheck(deployment.checks, check),
   })
-  report(check.status === "failed" ? "error" : "success", `Supabase security: ${check.details}`)
+  report(
+    check.status === "failed" ? "error" : check.status === "skipped" ? "warning" : "success",
+    `Supabase security: ${check.details}`,
+  )
   if (check.required && check.status === "failed") {
     throw new Error(`The Supabase security check failed, so production was not changed. ${check.details}`)
   }

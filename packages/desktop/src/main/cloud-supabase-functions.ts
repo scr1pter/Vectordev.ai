@@ -143,9 +143,10 @@ async function collect(folder: string): Promise<string[]> {
   return nested.flat()
 }
 
-// supabase/config.toml can turn JWT verification off per function:
+// supabase/config.toml can turn JWT verification off per function, which lets
+// anyone on the internet call it:
 // https://supabase.com/docs/guides/functions/function-configuration
-async function verifyJwt(directory: string, name: string) {
+export async function verifyJwt(directory: string, name: string) {
   const config = await readFile(join(directory, "supabase", "config.toml"), "utf8").catch(() => "")
   const section = config.split(/^\s*\[/m).find((part) => part.startsWith(`functions.${name}]`))
   const value = section?.match(/^\s*verify_jwt\s*=\s*(true|false)\s*$/m)?.[1]

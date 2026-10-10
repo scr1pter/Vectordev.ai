@@ -1,6 +1,6 @@
 import { connectDatabase, disconnectDatabase, getDatabase } from "./cloud-console"
 import { createCloudDatabase, pendingProvision, type CloudProvisionProgress } from "./cloud-provision"
-import { scaffoldSupabaseClient, supabaseFramework } from "./cloud-supabase-env"
+import { scaffoldSupabaseClient, supabaseEnvNote, supabaseFramework } from "./cloud-supabase-env"
 import {
   management,
   managementToken,
@@ -164,15 +164,20 @@ export async function linkSupabaseProject(
     },
     input.directory,
   )
-  const client = await scaffoldSupabaseClient(input.directory, await supabaseFramework(input.directory)).catch(
-    () => undefined,
-  )
+  const framework = await supabaseFramework(input.directory)
+  const client = await scaffoldSupabaseClient(input.directory, framework).catch(() => undefined)
   return {
     database: connection ? { ref: projectRef, name: connection.projectName ?? projectRef } : null,
     client,
-    nextStep: client?.dependencyMissing
-      ? "Install @supabase/supabase-js in this project so the generated client can import it."
-      : undefined,
+    nextStep:
+      [
+        client?.dependencyMissing
+          ? "Install @supabase/supabase-js in this project so the generated client can import it."
+          : "",
+        supabaseEnvNote(framework) ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ") || undefined,
   }
 }
 

@@ -35,7 +35,8 @@ export type FakeState = {
   functions: Record<string, unknown>[]
   secrets: { name: string; value: string; updated_at?: string }[]
   password?: string
-  logs: { timestamp: number; event_message: string; source: string }[]
+  // Microseconds since the epoch, or ClickHouse's DateTime64 text in UTC.
+  logs: { timestamp: number | string; event_message: string; source: string }[]
   lints: Record<string, unknown>[]
   pooler: Record<string, unknown>[]
   vercelDeployments: { url: string }[]
@@ -265,6 +266,11 @@ export async function startSupabaseFake(overrides: Partial<FakeState> = {}) {
       return Response.json(user)
     }
     const user = call.path.match(/^\/auth\/v1\/admin\/users\/([^/]+)$/)
+    // https://supabase.com/docs/reference/javascript/auth-admin-getuserbyid
+    if (user && call.method === "GET") {
+      const found = state.users.find((item) => item.id === user[1])
+      return found ? Response.json(found) : Response.json({ msg: "User not found" }, { status: 404 })
+    }
     if (user && call.method === "DELETE") {
       if (!state.users.some((item) => item.id === user[1])) {
         return Response.json({ msg: "User not found" }, { status: 404 })

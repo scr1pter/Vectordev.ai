@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
@@ -44,6 +45,7 @@ const { cloudProjectScopeKey, getDatabase, getDeployment, listEnv, recordDeploym
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
 const { startCloudBridge, stopCloudBridge } = await import("./cloud-bridge")
 const { promoteDeployment, publishProject } = await import("./publish")
+const { supabaseReleaseCheck } = await import("./cloud-supabase-security")
 const { ANON_KEY, MANAGEMENT_TOKEN, SERVICE_KEY, startSupabaseFake } = await import("../../test/supabase-fake")
 
 type Fake = Awaited<ReturnType<typeof startSupabaseFake>>
@@ -189,6 +191,16 @@ describe("projects", () => {
     expectNoSecrets(report)
   })
 
+  test("an unrecognised framework gets a guarded client and is told the names may need renaming", async () => {
+    connect()
+    await writeFile(join(project, "package.json"), JSON.stringify({ dependencies: { "@supabase/supabase-js": "2" } }))
+    const report = await run("link_database", { projectRef: "fixtureref" })
+    expect(report).toMatchObject({ ok: true, nextStep: expect.stringContaining("rename them to the prefix") })
+    expect(await readFile(join(project, "src", "lib", "supabase.js"), "utf8")).toContain(
+      'typeof process === "undefined" ? undefined : process.env.SUPABASE_URL',
+    )
+  })
+
   test("an older record without a reference finds its project from the URL", async () => {
     connect()
     linkDatabase({ projectRef: undefined })
@@ -260,9 +272,48 @@ describe("database credentials", () => {
     expect(await run("write_database_url", { consent: true })).toMatchObject({
       ok: false,
       needsSetup: true,
-      nextStep: expect.stringContaining("Rotate the database password"),
+      nextStep: expect.stringContaining("enter the current database password in Cloud Services > Database"),
     })
     expect(listEnv(project)).toEqual([])
+  })
+
+  test("a linked project's existing password, typed in the console, writes DATABASE_URL without a reset", async () => {
+    connect()
+    linkDatabase()
+    const existing = "fixture-existing-db-password"
+    // The agent never carries a password.
+    expect(await run("write_database_url", { password: existing }, "agent")).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("never through chat"),
+    })
+    const report = await run("write_database_url", { consent: true, password: existing })
+    expect(report).toMatchObject({ ok: true, variable: { key: "DATABASE_URL", visibility: "server" } })
+    expect(report.detail).toContain("Vector cannot check the password")
+    expect(listEnv(project).find((item) => item.key === "DATABASE_URL")?.value).toContain(existing)
+    expect(fake.calls.some((call) => call.path.endsWith("/database/password"))).toBe(false)
+    // Kept encrypted, so a later write needs no password again.
+    expect(JSON.stringify([...(stores.get("cloud-supabase-database")?.values() ?? [])])).not.toContain(existing)
+    expect(await run("write_database_url", { consent: true })).toMatchObject({ ok: true })
+    expectNoSecrets(report, existing)
+  })
+
+  test("DATABASE_URL is never written into a .env that git tracks", async () => {
+    connect()
+    linkDatabase()
+    execFileSync("git", ["init", "-q"], { cwd: project })
+    await writeFile(join(project, ".env"), "PUBLIC_FLAG=1\n")
+    await writeFile(join(project, ".gitignore"), ".env\n")
+    execFileSync("git", ["add", "-f", ".env", ".gitignore"], { cwd: project })
+    const report = await run("write_database_url", { consent: true, password: "fixture-existing-db-password" })
+    expect(report).toMatchObject({
+      ok: false,
+      needsSetup: true,
+      error: expect.stringContaining(".env is committed to git"),
+      nextStep: expect.stringContaining("git rm --cached .env"),
+    })
+    expect(await readFile(join(project, ".env"), "utf8")).toBe("PUBLIC_FLAG=1\n")
+    expect(await readFile(join(project, ".gitignore"), "utf8")).toBe(".env\n")
+    expect(listEnv(project).some((item) => item.key === "DATABASE_URL")).toBe(false)
   })
 
   test("rotation resets the password, writes a server-only DATABASE_URL and pushes it to Vercel", async () => {
@@ -367,10 +418,16 @@ describe("migrations", () => {
     connect()
     linkDatabase()
     const database = trackingDatabase()
-    // The agent's edit prompt names the files before anything is written.
+    // The agent's edit prompt names the files and shows both SQL texts before
+    // anything is written, and the approved version comes back with the command.
     const planned = await describeSupabaseCommand(
       "create_migration",
-      { projectPath: project, name: "Add profiles!", downSql: "drop table profiles;" },
+      {
+        projectPath: project,
+        name: "Add profiles!",
+        sql: "create table profiles (id uuid primary key);",
+        downSql: "drop table profiles;",
+      },
       [],
     )
     expect(planned).toEqual({
@@ -379,14 +436,31 @@ describe("migrations", () => {
         expect.stringMatching(/^supabase\/migrations\/\d{14}_add_profiles\.sql$/),
         expect.stringMatching(/^supabase\/migrations\/down\/\d{14}_add_profiles\.down\.sql$/),
       ],
+      statements: [
+        expect.objectContaining({ label: expect.stringContaining("Migration supabase/migrations/") }),
+        {
+          label: expect.stringContaining("which rollback_migration runs"),
+          sql: "drop table profiles;",
+          length: 20,
+          truncated: false,
+        },
+      ],
+      approved: { version: expect.stringMatching(/^\d{14}$/) },
     })
+    // An approval that waited past the next second still writes the named file.
+    const version = "20260101000000"
     const created = await run("create_migration", {
       name: "Add profiles!",
       sql: "create table profiles (id uuid primary key);",
       downSql: "drop table profiles;",
+      version,
     })
-    expect(created.file).toMatch(/^supabase\/migrations\/\d{14}_add_profiles\.sql$/)
-    expect(created.downFile).toMatch(/^supabase\/migrations\/down\/\d{14}_add_profiles\.down\.sql$/)
+    expect(created.file).toBe(`supabase/migrations/${version}_add_profiles.sql`)
+    expect(created.downFile).toBe(`supabase/migrations/down/${version}_add_profiles.down.sql`)
+    expect(await run("create_migration", { name: "again", sql: "select 1;", version })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("already exists"),
+    })
     const name = created.file.split("/").at(-1)
 
     expect(await run("migration_status")).toMatchObject({
@@ -400,7 +474,30 @@ describe("migrations", () => {
       rollback: { name, available: true, source: "file" },
     })
 
-    const rolled = await run("rollback_migration")
+    // The agent's prompt shows the down SQL; the run refuses SQL that changed
+    // after that, and the agent cannot skip the prompt's checksum.
+    const described = (await describeSupabaseCommand("rollback_migration", { projectPath: project }, [], {
+      request: fake.request,
+    })) as Report
+    expect(described).toMatchObject({
+      ok: true,
+      repeatable: false,
+      scope: { summary: expect.stringContaining(`Roll back ${name}`) },
+      statements: [{ label: expect.stringContaining(".down.sql"), sql: "drop table profiles;" }],
+      approved: { name, downChecksum: sha("drop table profiles;\n") },
+    })
+    expect(await run("rollback_migration", {}, "agent")).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Describe rollback_migration first"),
+    })
+    await writeFile(join(project, created.downFile), "drop table profiles cascade;\n")
+    expect(await run("rollback_migration", described.approved, "agent")).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("changed after it was approved"),
+    })
+    await writeFile(join(project, created.downFile), "drop table profiles;\n")
+
+    const rolled = await run("rollback_migration", described.approved, "agent")
     expect(rolled).toMatchObject({ ok: true, rolledBack: name, nextStep: expect.stringContaining("apply_migrations") })
     expect(database.statements.at(-1)?.sql).toStartWith("drop table profiles;")
     expect(database.tracked).toEqual([])
@@ -441,6 +538,26 @@ describe("migrations", () => {
       ok: false,
       error: "20260101000000_init.sql has no down migration, so Vector will not guess how to undo it.",
     })
+  })
+
+  test("warns about down SQL the Supabase command-line tool would run forward, and never rolls back with it", async () => {
+    connect()
+    linkDatabase()
+    await mkdir(join(project, "supabase", "migrations"), { recursive: true })
+    await writeFile(join(project, "supabase", "migrations", "20260101000000_a.sql"), "create table a ();")
+    await writeFile(join(project, "supabase", "migrations", "20260101000000_a.down.sql"), "drop table a;")
+    await writeFile(
+      join(project, "supabase", "migrations", "20260102000000_b.sql"),
+      "create table b ();\n-- down\ndrop table b;\n",
+    )
+    trackingDatabase({ tracked: [{ name: "20260101000000_a.sql", checksum: sha("create table a ();") }] })
+    const status = await run("migration_status")
+    expect(status.warnings).toEqual([
+      expect.stringContaining("runs 20260101000000_a.down.sql as a forward migration"),
+      expect.stringContaining("20260102000000_b.sql has a -- down section"),
+    ])
+    // A top-level .down.sql is not where Vector looks for a rollback.
+    expect(status.rollback).toEqual({ name: "20260101000000_a.sql", available: false, source: undefined })
   })
 
   test("a forward run executes only what is above a -- down section, and skips .down.sql files", async () => {
@@ -506,6 +623,32 @@ describe("SQL console", () => {
       ok: true,
       result: { rows: [[3]], readOnly: false },
     })
+  })
+
+  test("a read the role may not do is reported as it is, not as a write to confirm", async () => {
+    connect()
+    linkDatabase()
+    fake.state.sql = () => ({ error: "permission denied for table secrets_audit" })
+    const report = await run("run_sql", { sql: "select * from secrets_audit" }, "agent")
+    expect(report).toEqual({ ok: false, error: "permission denied for table secrets_audit", nextStep: undefined })
+  })
+
+  test("the agent never gets cells from credential columns; the console does", async () => {
+    connect()
+    linkDatabase()
+    fake.state.sql = () => [
+      { id: 1, email: "a@example.com", encrypted_password: "$2a$10$fixturehash", token: "fixture-refresh-token" },
+    ]
+    const agent = await run("run_sql", { sql: "select * from auth.users" }, "agent")
+    expect(agent.result).toMatchObject({
+      columns: ["id", "email", "encrypted_password", "token"],
+      rows: [[1, "a@example.com", "[hidden]", "[hidden]"]],
+      hiddenColumns: ["encrypted_password", "token"],
+    })
+    expectNoSecrets(agent, "$2a$10$fixturehash", "fixture-refresh-token")
+    const console = await run("run_sql", { sql: "select * from auth.users" })
+    expect(console.result.rows).toEqual([[1, "a@example.com", "$2a$10$fixturehash", "fixture-refresh-token"]])
+    expect(console.result.hiddenColumns).toBeUndefined()
   })
 
   test("the agent's results are bounded and scrubbed of credentials and stored values", async () => {
@@ -620,6 +763,40 @@ describe("authentication", () => {
         repeatable: false,
       })
     }
+    // A new site URL, or an address that is not one of the linked Vercel ones,
+    // is somewhere sign-in can hand over a session, so an earlier "always"
+    // for the Vercel addresses never covers it.
+    for (const widening of [
+      { siteUrl: "https://shop.example.com" },
+      { redirectUrls: ["https://attacker.example/**"] },
+      { redirectUrls: ["https://shop.vercel.app/**", "https://attacker.example/**"] },
+    ]) {
+      expect(
+        await describeSupabaseCommand("update_auth", { projectPath: project, ...widening }, [], {
+          request: fake.request,
+        }),
+      ).toMatchObject({ repeatable: false })
+    }
+    expect(
+      await describeSupabaseCommand(
+        "update_auth",
+        { projectPath: project, redirectUrls: ["https://shop.vercel.app/**"] },
+        [],
+        { request: fake.request },
+      ),
+    ).toMatchObject({ repeatable: true })
+    expect(
+      await describeSupabaseCommand(
+        "update_auth",
+        { projectPath: project, providers: { google: { clientId: "fixture-client.apps.example" } } },
+        [],
+      ),
+    ).toMatchObject({
+      scope: {
+        summary:
+          "Change Supabase Auth on shop-db: update google sign-in with the client id fixture-client.apps.example.",
+      },
+    })
     expect(await run("update_auth", { addVercelUrls: true })).toMatchObject({
       ok: true,
       auth: {
@@ -798,6 +975,22 @@ describe("logs", () => {
     expect(fake.calls.at(-1)?.query.sql).toContain("where source in ('function_edge_logs', 'function_logs')")
     expect(await run("supabase_logs", { service: "realtime" })).toMatchObject({ ok: false })
   })
+
+  // Bun honours only the first TZ a process sets, so this cannot move the zone
+  // without breaking later files; outside UTC, reading the text as local time
+  // shifts the first entry.
+  test("a timestamp that arrives as text without a zone is UTC, wherever Vector runs", async () => {
+    connect()
+    linkDatabase()
+    fake.state.logs = [
+      { timestamp: "2026-10-10 09:30:00.000000", event_message: "login failed", source: "auth_logs" },
+      { timestamp: "2026-10-10T09:31:00+02:00", event_message: "login ok", source: "auth_logs" },
+    ]
+    expect((await run("supabase_logs", { service: "auth" })).entries).toEqual([
+      { at: "2026-10-10T07:31:00.000Z", message: "login ok" },
+      { at: "2026-10-10T09:30:00.000Z", message: "login failed" },
+    ])
+  })
 })
 
 describe("security check", () => {
@@ -839,6 +1032,40 @@ describe("security check", () => {
     expect((await run("security_check")).security).toMatchObject({ status: "skipped" })
     linkDatabase()
     expect((await run("security_check")).security).toMatchObject({ status: "passed", errors: 0 })
+  })
+
+  test("advisors that could not run say what to do, and a connection without access to them does not block", async () => {
+    connect()
+    linkDatabase()
+    // An OAuth connection made before Vector asked for advisor access.
+    fake.state.fail = (call) =>
+      call.path.endsWith("/advisors/security")
+        ? Response.json({ message: "Forbidden resource" }, { status: 403 })
+        : undefined
+    const forbidden = (await run("security_check")).security
+    expect(forbidden).toMatchObject({ status: "skipped", nextStep: expect.stringContaining("Reconnect Supabase") })
+    expect(forbidden.detail).toContain("not allowed to read them")
+
+    fake.state.fail = (call) =>
+      call.path.endsWith("/advisors/security") ? Response.json({ message: "Unauthorized" }, { status: 401 }) : undefined
+    expect((await run("security_check")).security).toMatchObject({
+      status: "failed",
+      nextStep: expect.stringContaining("make Secret scan optional under Cloud Services > Build & runtime"),
+    })
+
+    // The release check carries the next step, which is what a refused
+    // production publish shows.
+    fake.state.fail = (call) =>
+      call.path.endsWith("/advisors/security")
+        ? Response.json({ message: "upstream timeout" }, { status: 504 })
+        : undefined
+    expect(
+      await supabaseReleaseCheck({ projectPath: project, required: true }, { request: fake.request }),
+    ).toMatchObject({
+      status: "failed",
+      details:
+        "Supabase's security advisors could not run: upstream timeout Run the check again in a moment. To release without it meanwhile, make Secret scan optional under Cloud Services > Build & runtime > Required release checks.",
+    })
   })
 
   test("production does not move while the check fails, and the release records why", async () => {
@@ -924,30 +1151,66 @@ describe("agent bridge", () => {
   test("describes changes for the permission prompt, with destructive ones never always-allowed", async () => {
     connect()
     linkDatabase()
-    expect(await bridgeCommand({ command: "describe", action: "run_sql", sql: "select 1" })).toEqual({
+    // Every query asks, and the prompt shows it.
+    expect(
+      await bridgeCommand({ command: "describe", action: "run_sql", sql: "select token from auth.refresh_tokens" }),
+    ).toEqual({
       ok: true,
-      repeatable: true,
+      repeatable: false,
       scope: {
         provider: "Supabase",
         project: "shop-db",
         environment: "production",
-        summary: "Run a read-only SQL query against shop-db; the rows come back to the agent.",
+        summary:
+          "Run a read-only SQL query against shop-db; the rows come back to the agent. It uses the auth schema, where Supabase keeps users' sign-in data and secrets.",
       },
+      statements: [
+        { label: "Read-only SQL", sql: "select token from auth.refresh_tokens", length: 37, truncated: false },
+      ],
     })
+    const long = `update profiles set bio = '${"x".repeat(5_000)}'`
+    expect(
+      (await bridgeCommand({ command: "describe", action: "run_sql", sql: long, write: true })).statements,
+    ).toEqual([{ label: "SQL that can change data", sql: long.slice(0, 4_000), length: long.length, truncated: true }])
+
+    setEnv(project, undefined, "STRIPE_SECRET_KEY", "fixture-stripe-value")
+    await mkdir(join(project, "supabase", "functions", "open"), { recursive: true })
+    await writeFile(join(project, "supabase", "config.toml"), "[functions.open]\nverify_jwt = false\n")
     for (const [action, extra] of [
-      ["run_sql", { write: true }],
-      ["delete_user", { userId: "00000000-0000-0000-0000-000000000000" }],
       ["delete_bucket", { bucket: "avatars" }],
       ["pause_database", {}],
       ["rotate_database_password", {}],
       ["write_database_url", {}],
-      ["rollback_migration", {}],
+      ["set_function_secrets", { secretNames: ["STRIPE_SECRET_KEY"] }],
+      ["deploy_function", { functionName: "open" }],
     ] as const) {
       expect(await bridgeCommand({ command: "describe", action, ...extra })).toMatchObject({
         ok: true,
         repeatable: false,
       })
     }
+    expect(
+      (await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "open" })).scope.summary,
+    ).toContain("verify_jwt = false for it, so anyone on the internet can call it")
+    expect(
+      await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "hello" }),
+    ).toMatchObject({
+      repeatable: true,
+    })
+    expect(
+      (
+        await bridgeCommand({
+          command: "describe",
+          action: "update_bucket",
+          bucket: "avatars",
+          fileSizeLimit: 5 * 1024 * 1024,
+          allowedMimeTypes: ["image/*"],
+        })
+      ).scope.summary,
+    ).toBe("Change the storage bucket avatars in shop-db: file size limit 5 MB; only image/* files.")
+    expect(
+      (await bridgeCommand({ command: "describe", action: "link_database", projectRef: "otherref" })).scope.summary,
+    ).toContain("This replaces the link to shop-db.")
     expect(
       await bridgeCommand({ command: "describe", action: "set_function_secrets", secretNames: ["NOPE"] }),
     ).toMatchObject({
@@ -956,6 +1219,22 @@ describe("agent bridge", () => {
       error: "NOPE is not in this project's environment.",
     })
     expect(fake.calls).toEqual([])
+
+    // A user is named by the address the user would recognise.
+    fake.state.users = [{ id: "00000000-0000-0000-0000-000000000001", email: "ada@example.com" }]
+    expect(
+      await bridgeCommand({
+        command: "describe",
+        action: "delete_user",
+        userId: "00000000-0000-0000-0000-000000000001",
+      }),
+    ).toMatchObject({
+      repeatable: false,
+      scope: {
+        summary:
+          "Delete the user ada@example.com (00000000-0000-0000-0000-000000000001) from shop-db. This cannot be undone.",
+      },
+    })
   })
 
   test("runs Supabase commands as the agent, with the agent's limits", async () => {
@@ -973,7 +1252,7 @@ describe("agent bridge", () => {
     expect(await bridgeCommand({ command: "write_database_url" })).toMatchObject({
       ok: false,
       needsSetup: true,
-      nextStep: expect.stringContaining("Rotate"),
+      nextStep: expect.stringContaining("enter the current database password"),
     })
   })
 

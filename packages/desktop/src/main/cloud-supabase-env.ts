@@ -8,7 +8,7 @@ import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 // file the app imports, and keeping the .env Vector writes out of git. Only the
 // filesystem is touched here, so cloud-console can use it without a cycle.
 
-export type SupabaseFramework = "next" | "vite" | "other"
+export type SupabaseFramework = "next" | "astro" | "expo" | "cra" | "vite" | "other"
 
 export type SupabaseClientScaffold = {
   path: string
@@ -17,21 +17,43 @@ export type SupabaseClientScaffold = {
   dependencyMissing: boolean
 }
 
+// Checked in this order: Astro and Expo projects can list vite or react too.
 export async function supabaseFramework(directory: string): Promise<SupabaseFramework> {
   const dependencies = await readDependencies(directory)
   if ("next" in dependencies) return "next"
+  if ("astro" in dependencies) return "astro"
+  if ("expo" in dependencies) return "expo"
+  if ("react-scripts" in dependencies) return "cra"
   if ("vite" in dependencies) return "vite"
   return "other"
 }
 
-// Next.js only inlines NEXT_PUBLIC_* into client bundles and Vite only VITE_*;
-// anything else reads plain names from its own runtime environment.
+// Each bundler inlines only its own prefix into browser code, and only through
+// its own accessor. Anything else gets plain names, which browser code cannot
+// read until they are renamed to its bundler's prefix.
 // https://nextjs.org/docs/app/guides/environment-variables#bundling-environment-variables-for-the-browser
+// https://docs.astro.build/en/guides/environment-variables/
+// https://docs.expo.dev/guides/environment-variables/
+// https://create-react-app.dev/docs/adding-custom-environment-variables/
 // https://vite.dev/guide/env-and-mode#env-variables
+const PUBLIC_ENV: Record<SupabaseFramework, { prefix: string; accessor: string }> = {
+  next: { prefix: "NEXT_PUBLIC_", accessor: "process.env" },
+  astro: { prefix: "PUBLIC_", accessor: "import.meta.env" },
+  expo: { prefix: "EXPO_PUBLIC_", accessor: "process.env" },
+  cra: { prefix: "REACT_APP_", accessor: "process.env" },
+  vite: { prefix: "VITE_", accessor: "import.meta.env" },
+  other: { prefix: "", accessor: "process.env" },
+}
+
 export function supabasePublicEnvNames(framework: SupabaseFramework) {
-  if (framework === "next") return { url: "NEXT_PUBLIC_SUPABASE_URL", key: "NEXT_PUBLIC_SUPABASE_ANON_KEY" }
-  if (framework === "vite") return { url: "VITE_SUPABASE_URL", key: "VITE_SUPABASE_ANON_KEY" }
-  return { url: "SUPABASE_URL", key: "SUPABASE_ANON_KEY" }
+  const prefix = PUBLIC_ENV[framework].prefix
+  return { url: `${prefix}SUPABASE_URL`, key: `${prefix}SUPABASE_ANON_KEY` }
+}
+
+// What to tell the user when Vector could not tell which names browser code reads.
+export function supabaseEnvNote(framework: SupabaseFramework) {
+  if (framework !== "other") return
+  return "Vector wrote SUPABASE_URL and SUPABASE_ANON_KEY because it did not recognise the framework. If browser code reads them, rename them to the prefix its bundler exposes (for example PUBLIC_, REACT_APP_ or EXPO_PUBLIC_) and update the generated client."
 }
 
 // Hosted projects are served from https://<ref>.supabase.co, which is how an
@@ -64,7 +86,12 @@ export async function scaffoldSupabaseClient(
 
 function supabaseClientSource(framework: SupabaseFramework) {
   const names = supabasePublicEnvNames(framework)
-  const read = (name: string) => (framework === "vite" ? `import.meta.env.${name}` : `process.env.${name}`)
+  // A bundler only inlines the exact `process.env.NAME` text, so the known
+  // frameworks read it bare; anything else may run where process is undefined.
+  const read = (name: string) =>
+    framework === "other"
+      ? `typeof process === "undefined" ? undefined : process.env.${name}`
+      : `${PUBLIC_ENV[framework].accessor}.${name}`
   return `import { createClient } from "@supabase/supabase-js"
 
 // Vector-managed Supabase client. The values are set in Vector Cloud and written
@@ -82,32 +109,41 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
 
 // Vector writes database credentials into .env, so it must not be committed.
 // git's own answer covers nested and global ignore rules; outside a repository
-// the .gitignore lines are checked directly.
-export async function ensureEnvIgnored(directory: string): Promise<{ added: boolean }> {
-  const ignored = await gitIgnores(directory, ".env")
-  if (ignored === true) return { added: false }
+// the .gitignore lines are checked directly. git never reports a tracked file
+// as ignored, and an ignore line cannot untrack it, so a tracked .env gets no
+// line added; `envTracked` is what callers check before writing a secret.
+export async function ensureEnvIgnored(directory: string): Promise<{ added: boolean; tracked: boolean }> {
+  if (await envTracked(directory)) return { added: false, tracked: true }
+  const ignored = await git(directory, ["check-ignore", "-q", ".env"])
+  if (ignored === true) return { added: false, tracked: false }
   const path = join(directory, ".gitignore")
   const existing = await lstat(path).catch(() => undefined)
   if (existing && !existing.isFile()) throw new Error("The project's .gitignore must be a regular file.")
   const text = existing ? await readFile(path, "utf8") : ""
-  if (ignored === undefined && /^\s*\/?(?:\.env|\.env\*|\*\.env|\.env\.?\*)\s*$/m.test(text)) return { added: false }
+  if (ignored === undefined && /^\s*\/?(?:\.env|\.env\*|\*\.env|\.env\.?\*)\s*$/m.test(text)) {
+    return { added: false, tracked: false }
+  }
   const separator = text && !text.endsWith("\n") ? "\n" : ""
   await writeFile(
     path,
     `${text}${separator}${text ? "\n" : ""}# Local environment written by Vector Cloud\n.env\n`,
     "utf8",
   )
-  return { added: true }
+  return { added: true, tracked: false }
 }
 
-function gitIgnores(directory: string, file: string) {
+// Whether git already tracks this repository's .env, so writing a secret there
+// would put it in the next commit.
+export async function envTracked(directory: string) {
+  return (await git(directory, ["ls-files", "--error-unmatch", "--", ".env"])) === true
+}
+
+// true on exit 0, false on exit 1, undefined when this is not a repository or
+// git is missing.
+function git(directory: string, args: string[]) {
   return new Promise<boolean | undefined>((done) =>
-    execFile(
-      "git",
-      ["check-ignore", "-q", file],
-      { cwd: directory, env: untrustedChildEnvironment(), timeout: 5_000 },
-      // 0: ignored, 1: not ignored, anything else: not a repository or no git.
-      (error) => done(!error ? true : error.code === 1 ? false : undefined),
+    execFile("git", args, { cwd: directory, env: untrustedChildEnvironment(), timeout: 5_000 }, (error) =>
+      done(!error ? true : error.code === 1 ? false : undefined),
     ),
   )
 }

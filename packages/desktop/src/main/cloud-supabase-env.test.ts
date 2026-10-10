@@ -6,6 +6,7 @@ import { join } from "node:path"
 
 import {
   ensureEnvIgnored,
+  envTracked,
   projectRefFromUrl,
   scaffoldSupabaseClient,
   supabaseFramework,
@@ -40,6 +41,18 @@ describe("public Supabase names per framework", () => {
     expect(supabasePublicEnvNames("other")).toEqual({ url: "SUPABASE_URL", key: "SUPABASE_ANON_KEY" })
   })
 
+  test("Astro, Expo and Create React App get the prefix their bundler exposes", async () => {
+    await manifest({ astro: "5.0.0", vite: "6.0.0" })
+    expect(await supabaseFramework(directory)).toBe("astro")
+    await manifest({ expo: "53.0.0", react: "19.0.0" })
+    expect(await supabaseFramework(directory)).toBe("expo")
+    await manifest({ "react-scripts": "5.0.1" })
+    expect(await supabaseFramework(directory)).toBe("cra")
+    expect(supabasePublicEnvNames("astro").url).toBe("PUBLIC_SUPABASE_URL")
+    expect(supabasePublicEnvNames("expo").url).toBe("EXPO_PUBLIC_SUPABASE_URL")
+    expect(supabasePublicEnvNames("cra").key).toBe("REACT_APP_SUPABASE_ANON_KEY")
+  })
+
   test("derives the project reference from a hosted project URL only", () => {
     expect(projectRefFromUrl("https://abcdefghijklmnopqrst.supabase.co")).toBe("abcdefghijklmnopqrst")
     expect(projectRefFromUrl("https://db.example.com")).toBeUndefined()
@@ -68,6 +81,17 @@ describe("client scaffold", () => {
     )
   })
 
+  test("an Astro client reads import.meta.env, and an unknown framework's never touches a missing process", async () => {
+    await scaffoldSupabaseClient(directory, "astro")
+    expect(await readFile(join(directory, "src", "lib", "supabase.js"), "utf8")).toContain(
+      "import.meta.env.PUBLIC_SUPABASE_URL",
+    )
+    await rm(join(directory, "src"), { recursive: true })
+    await scaffoldSupabaseClient(directory, "other")
+    const source = await readFile(join(directory, "src", "lib", "supabase.js"), "utf8")
+    expect(source).toContain('typeof process === "undefined" ? undefined : process.env.SUPABASE_URL')
+  })
+
   test("never replaces a client the project already has, in either language", async () => {
     await mkdir(join(directory, "src", "lib"), { recursive: true })
     await writeFile(join(directory, "src", "lib", "supabase.js"), "// mine")
@@ -82,25 +106,37 @@ describe(".env stays out of git", () => {
   test("adds .env to a repository's .gitignore once, and leaves an ignoring one alone", async () => {
     execFileSync("git", ["init", "-q"], { cwd: directory })
     await writeFile(join(directory, ".gitignore"), "node_modules")
-    expect(await ensureEnvIgnored(directory)).toEqual({ added: true })
+    expect(await ensureEnvIgnored(directory)).toEqual({ added: true, tracked: false })
     expect(await readFile(join(directory, ".gitignore"), "utf8")).toBe(
       "node_modules\n\n# Local environment written by Vector Cloud\n.env\n",
     )
-    expect(await ensureEnvIgnored(directory)).toEqual({ added: false })
+    expect(await ensureEnvIgnored(directory)).toEqual({ added: false, tracked: false })
   })
 
   test("respects a broader rule git already applies", async () => {
     execFileSync("git", ["init", "-q"], { cwd: directory })
     await writeFile(join(directory, ".gitignore"), ".env*\n")
-    expect(await ensureEnvIgnored(directory)).toEqual({ added: false })
+    expect(await ensureEnvIgnored(directory)).toEqual({ added: false, tracked: false })
     expect(await readFile(join(directory, ".gitignore"), "utf8")).toBe(".env*\n")
   })
 
   test("outside a repository it reads .gitignore itself and creates one when missing", async () => {
-    expect(await ensureEnvIgnored(directory)).toEqual({ added: true })
+    expect(await ensureEnvIgnored(directory)).toEqual({ added: true, tracked: false })
     expect(await readFile(join(directory, ".gitignore"), "utf8")).toBe(
       "# Local environment written by Vector Cloud\n.env\n",
     )
-    expect(await ensureEnvIgnored(directory)).toEqual({ added: false })
+    expect(await ensureEnvIgnored(directory)).toEqual({ added: false, tracked: false })
+    expect(await envTracked(directory)).toBe(false)
+  })
+
+  test("a .env git already tracks is reported, and no ignore line is piled on", async () => {
+    execFileSync("git", ["init", "-q"], { cwd: directory })
+    await writeFile(join(directory, ".env"), "PUBLIC_FLAG=1\n")
+    await writeFile(join(directory, ".gitignore"), ".env\n")
+    execFileSync("git", ["add", "-f", ".env", ".gitignore"], { cwd: directory })
+    expect(await envTracked(directory)).toBe(true)
+    expect(await ensureEnvIgnored(directory)).toEqual({ added: false, tracked: true })
+    expect(await ensureEnvIgnored(directory)).toEqual({ added: false, tracked: true })
+    expect(await readFile(join(directory, ".gitignore"), "utf8")).toBe(".env\n")
   })
 })

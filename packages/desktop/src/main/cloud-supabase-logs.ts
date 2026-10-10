@@ -77,10 +77,14 @@ export async function readSupabaseLogs(
   }
 }
 
-// Timestamps arrive as microseconds since the epoch or as text.
+// Timestamps arrive as microseconds since the epoch or as text. The column is
+// a UTC DateTime64, so text without a zone ("2026-10-10 09:30:00.000000") is
+// UTC; Date.parse would read it in the machine's own time zone.
 function timestamp(row: unknown) {
   const micros = numberField(row, "timestamp")
   if (micros !== undefined) return new Date(micros > 1e14 ? micros / 1000 : micros).toISOString()
-  const text = stringField(row, "timestamp")
-  return text && !Number.isNaN(Date.parse(text)) ? new Date(text).toISOString() : (text ?? "")
+  const text = stringField(row, "timestamp")?.trim()
+  if (!text) return ""
+  const utc = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : `${text.replace(" ", "T")}Z`
+  return Number.isNaN(Date.parse(utc)) ? text : new Date(utc).toISOString()
 }

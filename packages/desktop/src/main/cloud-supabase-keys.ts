@@ -4,7 +4,7 @@ import { applyEnv, cloudProjectScopeKey, listEnv, setEnv } from "./cloud-console
 import { getCloudProviderProjectLink, syncCloudProviderEnvironment } from "./cloud-connections"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 import { provisionedPassword } from "./cloud-provision"
-import { ensureEnvIgnored } from "./cloud-supabase-env"
+import { ensureEnvIgnored, envTracked } from "./cloud-supabase-env"
 import {
   errorMessage,
   management,
@@ -25,19 +25,27 @@ import { getStore } from "./store"
 const PASSWORD_STORE = "cloud-supabase-database"
 const DATABASE_URL = "DATABASE_URL"
 
-type PasswordRecord = { projectRef: string; password: string; rotatedAt: string }
+type PasswordRecord = { projectRef: string; password: string; savedAt: string }
 
 function readPasswordRecord(projectPath: string): PasswordRecord | undefined {
   const raw = getStore(PASSWORD_STORE).get(cloudProjectScopeKey(projectPath))
   const projectRef = stringField(raw, "projectRef")
   const password = stringField(raw, "password")
   if (!projectRef || !password) return
-  return { projectRef, password, rotatedAt: stringField(raw, "rotatedAt") ?? "" }
+  return { projectRef, password, savedAt: stringField(raw, "savedAt") ?? "" }
 }
 
-// The password Vector set last for this project: a rotation, or the one it
-// generated when it created the project. A project linked from elsewhere has
-// none until it is rotated here.
+function savePassword(context: SupabaseContext, password: string) {
+  getStore(PASSWORD_STORE).set(cloudProjectScopeKey(context.projectPath), {
+    projectRef: context.projectRef,
+    password: encryptCloudCredential(password),
+    savedAt: new Date().toISOString(),
+  } satisfies PasswordRecord)
+}
+
+// The password Vector knows for this project: one the user entered, a
+// rotation, or the one it generated when it created the project. A project
+// linked from elsewhere has none until the user enters it or rotates it here.
 function databasePassword(context: SupabaseContext): string | undefined {
   const record = readPasswordRecord(context.projectPath)
   const encrypted =
@@ -71,22 +79,35 @@ async function transactionPoolerUrl(context: SupabaseContext, password: string) 
 
 // A DATABASE_URL carries the database password, so it is written only when the
 // user said yes to exactly that, only as a server-only variable (a bundler
-// never inlines a name without a public prefix), and never shown back.
-export async function writeDatabaseUrl(context: SupabaseContext, input: { directory: string; consent?: boolean }) {
+// never inlines a name without a public prefix), only into a .env git does not
+// track, and never shown back. `password` is the current one, typed by the user
+// in the console for a project Vector did not create; the agent never sends it.
+export async function writeDatabaseUrl(
+  context: SupabaseContext,
+  input: { directory: string; consent?: boolean; password?: string },
+) {
   if (input.consent !== true) {
     throw new SupabaseSetupError(
       "Writing DATABASE_URL needs the user's explicit consent, because it contains the database password.",
       "Ask the user whether to write a server-only DATABASE_URL for this project, then run the action again with their consent.",
     )
   }
-  const password = databasePassword(context)
+  if (input.password) context.secrets.push(input.password)
+  const password = input.password ?? databasePassword(context)
   if (!password) {
     throw new SupabaseSetupError(
       `Vector does not know the database password of ${context.projectName}, because the project was not created or rotated here.`,
-      "Rotate the database password (rotate_database_password, or Cloud Services > Database), which can write DATABASE_URL at the same time. Anything else using the old password stops working.",
+      "Ask the user to enter the current database password in Cloud Services > Database, where Vector keeps it encrypted. Rotating it instead (rotate_database_password) breaks anything still using the old one.",
+    )
+  }
+  if (await envTracked(input.directory)) {
+    throw new SupabaseSetupError(
+      "Vector did not write DATABASE_URL, because this repository's .env is committed to git and the URL holds the database password.",
+      "Stop tracking it with `git rm --cached .env` (the file stays on disk), commit that, then write DATABASE_URL again.",
     )
   }
   const pooler = await transactionPoolerUrl(context, password)
+  if (input.password) savePassword(context, input.password)
   const replaced = listEnv(context.projectPath).some((item) => item.key === DATABASE_URL)
   setEnv(context.projectPath, context.taskId, DATABASE_URL, pooler.url, "server")
   const ignored = await ensureEnvIgnored(input.directory)
@@ -101,7 +122,7 @@ export async function writeDatabaseUrl(context: SupabaseContext, input: { direct
     },
     replaced,
     gitignoreUpdated: ignored.added,
-    detail: `DATABASE_URL now points at ${context.projectName} through the transaction pooler. It is server-only and written to .env; its value is never shown.`,
+    detail: `DATABASE_URL now points at ${context.projectName} through the transaction pooler. It is server-only and written to .env; its value is never shown.${input.password ? " Vector cannot check the password itself, so a wrong one shows up as a failed sign-in when the app connects." : ""}`,
   }
 }
 
@@ -114,11 +135,7 @@ export async function rotateDatabasePassword(
   const password = randomBytes(24).toString("base64url")
   context.secrets.push(password)
   await management(context, refPath(context, "/database/password"), { method: "PATCH", json: { password } })
-  getStore(PASSWORD_STORE).set(cloudProjectScopeKey(context.projectPath), {
-    projectRef: context.projectRef,
-    password: encryptCloudCredential(password),
-    rotatedAt: new Date().toISOString(),
-  } satisfies PasswordRecord)
+  savePassword(context, password)
 
   // A DATABASE_URL that already points at this project would now fail, so it
   // follows the new password; one for another database is left alone.

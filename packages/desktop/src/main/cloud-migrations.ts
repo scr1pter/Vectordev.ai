@@ -109,8 +109,10 @@ const SELECT_LEGACY = "select name from public.vector_migrations order by name;"
 const SELECT_CLI_VERSIONS = "select version from supabase_migrations.schema_migrations;"
 const MIGRATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.sql$/
 const MAX_MIGRATION_CHARS = 1_000_000
-// A rollback lives in a paired <name>.down.sql, or after a line reading
-// `-- down` (or dbmate's `-- migrate:down`) in the migration itself.
+// A rollback lives in down/<name>.down.sql, or after a line reading `-- down`
+// (or dbmate's `-- migrate:down`) in the migration itself. A <name>.down.sql
+// beside the migrations is never run forward here, though the Supabase CLI
+// would run it; migration_status warns about that.
 const DOWN_FILE = /\.down\.sql$/i
 const DOWN_MARKER = /^--\s*(?:migrate:)?down\s*$/im
 

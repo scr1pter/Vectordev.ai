@@ -13,6 +13,7 @@ import {
 } from "./cloud-supabase-api"
 import {
   AUTH_PROVIDERS,
+  authUserEmail,
   deleteAuthUser,
   getAuthConfig,
   inviteAuthUser,
@@ -26,6 +27,7 @@ import {
   migrationStatus,
   plannedMigration,
   rollbackMigration,
+  rollbackPlan,
   runSql,
 } from "./cloud-supabase-database"
 import {
@@ -35,6 +37,7 @@ import {
   listFunctions,
   listFunctionSecrets,
   setFunctionSecrets,
+  verifyJwt,
 } from "./cloud-supabase-functions"
 import { rotateDatabasePassword, writeDatabaseUrl } from "./cloud-supabase-keys"
 import { isLogService, LOG_SERVICES, readSupabaseLogs } from "./cloud-supabase-logs"
@@ -179,6 +182,8 @@ async function run(
       name: required(input, "name"),
       sql: required(input, "sql"),
       downSql: text(input, "downSql"),
+      // The version the agent's edit prompt named; without it a new one is picked.
+      version: text(input, "version"),
     })
   }
   if (command === "apply_migrations") {
@@ -193,10 +198,15 @@ async function run(
   if (command === "restore_database") return restoreSupabaseProject(context)
   if (command === "write_database_url") {
     // The agent's permission prompt for this action is the user's consent; the
-    // console sends it after its own confirmation.
+    // console sends it after its own confirmation, with the current password
+    // when the user typed one.
+    if (agent && input.password !== undefined) {
+      throw new Error("The database password is entered in Cloud Services > Database, never through chat.")
+    }
     return writeDatabaseUrl(context, {
       directory: project.directory,
       consent: agent || bool(input, "consent") === true,
+      password: text(input, "password"),
     })
   }
   if (command === "rotate_database_password") {
@@ -207,7 +217,10 @@ async function run(
     })
   }
   if (command === "rollback_migration") {
-    return rollbackMigration(context, { directory: project.directory, name: text(input, "name") })
+    // The agent runs only the down SQL its permission prompt showed.
+    const downChecksum = text(input, "downChecksum")
+    if (agent && !downChecksum) throw new Error("Describe rollback_migration first, so the user sees its down SQL.")
+    return rollbackMigration(context, { directory: project.directory, name: text(input, "name"), downChecksum })
   }
   if (command === "run_sql") {
     return runSql(context, {
@@ -367,9 +380,11 @@ function list(input: Input, key: string) {
 }
 
 // What a changing command would do, worded for the agent's permission prompt:
-// provider, project, environment and a one-line summary. `repeatable` is false
-// for anything destructive, billed or credential-bearing, so "always allow"
-// never covers it and each run asks again.
+// provider, project, environment, a one-line summary and any SQL it would run.
+// `repeatable` is false for anything destructive, billed, credential-bearing or
+// widening who can reach the project, so "always allow" never covers it and
+// each run asks again. `approved` goes back with the command, so the run does
+// exactly what the prompt showed.
 export async function describeSupabaseCommand(
   command: SupabaseCommand,
   raw: unknown,
@@ -378,33 +393,50 @@ export async function describeSupabaseCommand(
 ) {
   const input: Input = raw && typeof raw === "object" ? (raw as Input) : {}
   const scope = await resolveCloudScope(text(input, "projectPath") ?? "", workspaces)
-  const database = getDatabase(scope.projectPath, text(input, "taskId"))
+  const project = { projectPath: scope.projectPath, taskId: text(input, "taskId") }
+  const database = getDatabase(project.projectPath, project.taskId)
   const name = database ? (database.projectName ?? database.projectRef ?? database.url) : ""
-  const describe = (summary: string, repeatable: boolean, project = name) => ({
+  const describe = (
+    summary: string,
+    repeatable: boolean,
+    extra: { project?: string; statements?: Statement[]; approved?: Input } = {},
+  ) => ({
     ok: true,
     repeatable,
-    scope: { provider: "Supabase", project, environment: "production", summary },
+    scope: { provider: "Supabase", project: extra.project ?? name, environment: "production", summary },
+    statements: extra.statements,
+    approved: extra.approved,
   })
   try {
     // A file in the repository, not the cloud account: the agent asks for it
     // under its edit permission, so plan mode and edit rules still apply.
     if (command === "create_migration") {
       const planned = await plannedMigration(scope.directory, required(input, "name"))
-      return { ok: true, files: text(input, "downSql") ? [planned.file, planned.downFile] : [planned.file] }
+      const down = text(input, "downSql")
+      return {
+        ok: true,
+        files: down ? [planned.file, planned.downFile] : [planned.file],
+        statements: [
+          statement(`Migration ${planned.file}`, text(input, "sql") ?? ""),
+          ...(down ? [statement(`Down migration ${planned.downFile}, which rollback_migration runs`, down)] : []),
+        ],
+        approved: { version: planned.version },
+      }
     }
     if (command === "link_database") {
       const ref = required(input, "projectRef")
+      const replaces = database && database.projectRef !== ref ? ` This replaces the link to ${name}.` : ""
       return describe(
-        `Link the Supabase project ${ref} to this repository and write its public URL and publishable key to .env.`,
+        `Link the Supabase project ${ref} to this repository and write its public URL and publishable key to .env.${replaces}`,
         true,
-        ref,
+        { project: ref },
       )
     }
     if (command === "create_project") {
       return describe(
         `Create a new Supabase project${text(input, "organizationId") ? ` in organization ${text(input, "organizationId")}` : ""} in ${text(input, "region") ?? "us-east-1"}. Supabase bills it to that organization.`,
         false,
-        "a new project",
+        { project: "a new project" },
       )
     }
     if (!database) {
@@ -452,27 +484,54 @@ export async function describeSupabaseCommand(
       return describe(`Apply this project's pending migrations to ${name}. This changes its live database.`, true)
     }
     if (command === "rollback_migration") {
+      const plan = await rollbackPlan(await supabaseContext(project, options), {
+        directory: scope.directory,
+        name: text(input, "name"),
+      })
+      if (!plan.ok) return plan
       return describe(
-        `Roll back the most recently applied migration${text(input, "name") ? ` (${text(input, "name")})` : ""} on ${name} with its down migration. This changes the live database.`,
+        `Roll back ${plan.last.name}, the most recently applied migration on ${name}, by running ${plan.down.source === "file" ? plan.downFile : `the -- down section of ${plan.last.name}`}. This changes the live database.`,
         false,
+        {
+          statements: [statement(`Down migration ${plan.downFile}`, plan.down.sql)],
+          approved: { name: plan.last.name, downChecksum: plan.downChecksum },
+        },
       )
     }
     if (command === "run_sql") {
-      return bool(input, "write")
-        ? describe(`Run SQL that can change data in ${name}, the live database.`, false)
-        : describe(`Run a read-only SQL query against ${name}; the rows come back to the agent.`, true)
+      // Every query asks: one approval must not let later queries read
+      // whatever they like, and the prompt shows the statement itself.
+      const sql = required(input, "sql")
+      const write = bool(input, "write") === true
+      const schemas = Array.from(new Set(Array.from(sql.matchAll(SENSITIVE_SCHEMA), (match) => match[1].toLowerCase())))
+      return describe(
+        [
+          write
+            ? `Run SQL that can change data in ${name}, the live database.`
+            : `Run a read-only SQL query against ${name}; the rows come back to the agent.`,
+          schemas.length
+            ? `It uses the ${schemas.join(", ")} schema${schemas.length === 1 ? "" : "s"}, where Supabase keeps users' sign-in data and secrets.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        false,
+        { statements: [statement(write ? "SQL that can change data" : "Read-only SQL", sql)] },
+      )
     }
     if (command === "update_auth") {
       // The exact addresses are named, since each one becomes a place sign-in
       // may send a user's session.
-      const vercel = bool(input, "addVercelUrls")
-        ? (await vercelRedirectSuggestions(scope.projectPath, options.request)).redirectUrls
-        : []
+      const suggested =
+        bool(input, "addVercelUrls") || list(input, "redirectUrls")?.length
+          ? (await vercelRedirectSuggestions(scope.projectPath, options.request)).redirectUrls
+          : []
+      const vercel = bool(input, "addVercelUrls") ? suggested : []
       const providers = AUTH_PROVIDERS.flatMap((provider) => {
         const change =
           input.providers && typeof input.providers === "object" ? (input.providers as Input)[provider] : undefined
         if (!change || typeof change !== "object") return []
-        return [{ provider, enabled: bool(change as Input, "enabled") }]
+        return [{ provider, enabled: bool(change as Input, "enabled"), clientId: text(change as Input, "clientId") }]
       })
       const redirects = [...(list(input, "redirectUrls") ?? []), ...vercel]
       const parts = [
@@ -485,36 +544,61 @@ export async function describeSupabaseCommand(
         bool(input, "emailEnabled") !== undefined
           ? `turn email sign-in ${bool(input, "emailEnabled") ? "on" : "off"}`
           : "",
-        ...providers.map(
-          (item) =>
-            `${item.enabled === undefined ? "update" : item.enabled ? "turn on" : "turn off"} ${item.provider} sign-in`,
+        ...providers.map((item) =>
+          [
+            item.enabled === undefined
+              ? `update ${item.provider} sign-in`
+              : `turn ${item.provider} sign-in ${item.enabled ? "on" : "off"}`,
+            item.clientId ? `with the client id ${item.clientId}` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
         ),
       ].filter(Boolean)
       // Turning a sign-in method off or removing an address can lock users
-      // out, so it asks every time.
+      // out. A new site URL, or a redirect that is not one of the linked Vercel
+      // addresses, is somewhere a sign-in can hand over a user's session. Both
+      // ask every time.
       const narrows =
         bool(input, "emailEnabled") === false ||
         Boolean(list(input, "removeRedirectUrls")?.length) ||
         providers.some((item) => item.enabled === false)
-      return describe(`Change Supabase Auth on ${name}: ${parts.join("; ") || "no changes"}.`, !narrows)
+      const widens =
+        text(input, "siteUrl") !== undefined ||
+        (list(input, "redirectUrls") ?? []).some((url) => !suggested.includes(url))
+      return describe(`Change Supabase Auth on ${name}: ${parts.join("; ") || "no changes"}.`, !narrows && !widens)
     }
     if (command === "invite_user") {
       return describe(`Send a sign-up invitation email to ${required(input, "email")} from ${name}.`, false)
     }
     if (command === "delete_user") {
-      return describe(`Delete the user ${required(input, "userId")} from ${name}. This cannot be undone.`, false)
+      const userId = required(input, "userId")
+      const email = await authUserEmail(await supabaseContext(project, options), userId)
+      return describe(
+        `Delete the user ${email ? `${email} (${userId})` : userId} from ${name}. This cannot be undone.`,
+        false,
+      )
     }
     if (command === "create_bucket") {
       const visibility = bool(input, "public") ? "public" : "private"
+      const limits = bucketLimits(input)
       return describe(
-        `Create a ${visibility} storage bucket ${required(input, "bucket")} in ${name}.`,
+        `Create a ${visibility} storage bucket ${required(input, "bucket")} in ${name}${limits.length ? ` (${limits.join("; ")})` : ""}.`,
         visibility === "private",
       )
     }
     if (command === "update_bucket") {
       const visibility = bool(input, "public")
+      const changes = [
+        visibility === undefined
+          ? ""
+          : visibility
+            ? "make it public, so anyone with a file's URL can read it"
+            : "make it private",
+        ...bucketLimits(input),
+      ].filter(Boolean)
       return describe(
-        `Change the storage bucket ${required(input, "bucket")} in ${name}${visibility === undefined ? "" : visibility ? ": make it public, so anyone with a file's URL can read it" : ": make it private"}.`,
+        `Change the storage bucket ${required(input, "bucket")} in ${name}: ${changes.join("; ") || "no changes"}.`,
         visibility !== true,
       )
     }
@@ -525,9 +609,11 @@ export async function describeSupabaseCommand(
       )
     }
     if (command === "deploy_function") {
+      const functionName = required(input, "functionName")
+      const verified = await verifyJwt(scope.directory, functionName)
       return describe(
-        `Deploy supabase/functions/${required(input, "functionName")} to ${name} as a live Edge Function.`,
-        true,
+        `Deploy supabase/functions/${functionName} to ${name} as a live Edge Function.${verified ? "" : ` supabase/config.toml sets verify_jwt = false for it, so anyone on the internet can call it.`}`,
+        verified,
       )
     }
     if (command === "delete_function") {
@@ -545,9 +631,10 @@ export async function describeSupabaseCommand(
             "Ask the user to add the value in Cloud Services > Environment variables or Edge functions; never ask for it in chat.",
         }
       }
+      // A credential leaves Vector for Supabase, so each set asks.
       return describe(
         `Set the Edge Function secrets ${names.join(", ")} on ${name} from this project's stored environment. Their values are never shown.`,
-        true,
+        false,
       )
     }
     if (command === "delete_function_secrets") {
@@ -558,6 +645,41 @@ export async function describeSupabaseCommand(
     }
     return { ok: false, error: `${command} does not change anything, so it needs no approval.` }
   } catch (error) {
+    if (error instanceof SupabaseSetupError) {
+      return { ok: false, needsSetup: true, error: error.message, nextStep: error.nextStep }
+    }
     return { ok: false, error: errorMessage(error) }
   }
+}
+
+// Supabase keeps sign-in data and secrets in these schemas.
+const SENSITIVE_SCHEMA = /\b(auth|vault|pgsodium|storage)\s*\.\s*[a-z_"]/gi
+// Enough to read in a prompt; the character count says when there is more.
+const STATEMENT_CHARS = 4_000
+
+type Statement = { label: string; sql: string; length: number; truncated: boolean }
+
+function statement(label: string, sql: string): Statement {
+  const trimmed = sql.trim()
+  return {
+    label,
+    sql: trimmed.length > STATEMENT_CHARS ? trimmed.slice(0, STATEMENT_CHARS) : trimmed,
+    length: trimmed.length,
+    truncated: trimmed.length > STATEMENT_CHARS,
+  }
+}
+
+function bucketLimits(input: Input) {
+  const size = input.fileSizeLimit === null ? null : num(input, "fileSizeLimit")
+  const types = input.allowedMimeTypes === null ? null : list(input, "allowedMimeTypes")
+  return [
+    size === null ? "no file size limit" : size !== undefined ? `file size limit ${bytes(size)}` : "",
+    types === null || types?.length === 0 ? "any file type" : types ? `only ${types.join(", ")} files` : "",
+  ].filter(Boolean)
+}
+
+function bytes(value: number) {
+  if (value >= 1024 * 1024 && value % (1024 * 1024) === 0) return `${value / (1024 * 1024)} MB`
+  if (value >= 1024 && value % 1024 === 0) return `${value / 1024} KB`
+  return `${value.toLocaleString("en-US")} bytes`
 }

@@ -9,6 +9,7 @@ import {
   responseArray,
   serviceRoleKey,
   stringField,
+  SupabaseApiError,
   supabaseContext,
   SupabaseSetupError,
   type SupabaseContext,
@@ -44,6 +45,8 @@ export type SecurityReport = {
   warnings: number
   checkedAt: string
   detail: string
+  /** What the user can do when the check could not run. */
+  nextStep?: string
 }
 
 const MAX_SCAN_FILES = 2_000
@@ -67,10 +70,18 @@ export async function securityCheck(
   })
   const advisors = context
     ? await securityAdvisors(context).then(
-        (findings) => ({ findings, error: undefined }),
-        (error: unknown) => ({ findings: [], error: errorMessage(error) }),
+        (findings) => ({ findings, error: undefined, status: undefined }),
+        (error: unknown) => ({
+          findings: [],
+          error: errorMessage(error),
+          status: error instanceof SupabaseApiError ? error.status : undefined,
+        }),
       )
-    : { findings: [], error: "Supabase is not connected on this machine, so its advisors were not run." }
+    : {
+        findings: [],
+        error: "Supabase is not connected on this machine, so its advisors were not run.",
+        status: undefined,
+      }
   // The exact key matters most: a service key anywhere public is a full bypass
   // of row level security, whatever its shape.
   const serviceKey = context ? await serviceRoleKey(context).catch(() => undefined) : undefined
@@ -82,7 +93,12 @@ export async function securityCheck(
   const warnings = all.filter((item) => item.level === "WARN").length
   // Advisors that could not run while Supabase is connected fail closed: a
   // production release is not waved through on a check that did not happen.
-  const status = errors || (context && advisors.error) ? "failed" : context ? "passed" : "skipped"
+  // The exception is a connection that is not allowed to read them (an OAuth
+  // connection made before Vector asked for that access): that is skipped
+  // with a warning, so it does not stop every release until a reconnect.
+  const forbidden = advisors.status === 403
+  const status =
+    errors || (context && advisors.error && !forbidden) ? "failed" : context && !forbidden ? "passed" : "skipped"
   return {
     status,
     project: { ref: database.projectRef, name: database.projectName ?? database.projectRef },
@@ -95,7 +111,9 @@ export async function securityCheck(
     checkedAt,
     detail:
       status === "skipped"
-        ? `Connect Supabase in Cloud Services > Integrations to run the security advisors.${errors ? "" : " The local scan found nothing."}`
+        ? forbidden
+          ? `Supabase's security advisors did not run, because Vector's Supabase connection is not allowed to read them. The local scan found nothing.`
+          : `Connect Supabase in Cloud Services > Integrations to run the security advisors. The local scan found nothing.`
         : status === "failed"
           ? errors
             ? `${errors} security problem${errors === 1 ? "" : "s"} must be fixed before a production release.`
@@ -103,7 +121,23 @@ export async function securityCheck(
           : warnings
             ? `No blocking problems; ${warnings} warning${warnings === 1 ? "" : "s"} to review.`
             : "No security problems found.",
+    nextStep: advisorsNextStep(errors ? undefined : advisors.status, Boolean(context && advisors.error)),
   }
+}
+
+// Only for a check that did not happen: real findings say what to fix. A 403
+// is skipped rather than failed, so it needs no way around the check.
+function advisorsNextStep(status: number | undefined, failed: boolean) {
+  if (!failed) return
+  const optional =
+    "To release without it meanwhile, make Secret scan optional under Cloud Services > Build & runtime > Required release checks."
+  if (status === 403) {
+    return "Reconnect Supabase in Cloud Services > Integrations and grant the access it asks for, or connect with a personal access token."
+  }
+  if (status === 401) {
+    return `Reconnect Supabase in Cloud Services > Integrations, or connect with a personal access token. ${optional}`
+  }
+  return `Run the check again in a moment. ${optional}`
 }
 
 function empty(status: SecurityReport["status"], checkedAt: string, detail: string): SecurityReport {
@@ -221,7 +255,7 @@ export async function supabaseReleaseCheck(
     label: "Supabase security",
     status: report.status,
     required: input.required,
-    details: report.detail,
+    details: [report.detail, report.nextStep].filter(Boolean).join(" "),
     output: [
       ...report.advisors
         .filter((item) => item.level !== "INFO")

@@ -244,12 +244,25 @@ export async function inviteAuthUser(context: SupabaseContext, input: { email: s
   return { invited: { id: stringField(user, "id"), email }, detail: `Supabase sent an invitation to ${email}.` }
 }
 
+// The address a user would recognise, for a prompt that only has their id.
+// https://supabase.com/docs/reference/javascript/auth-admin-getuserbyid
+export async function authUserEmail(context: SupabaseContext, userId: string) {
+  const body = await projectService(context, `/auth/v1/admin/users/${userIdOf(userId)}`)
+  const user = body && typeof body === "object" && "user" in body ? Reflect.get(body, "user") : body
+  return stringField(user, "email") ?? stringField(user, "phone")
+}
+
 // https://supabase.com/docs/reference/javascript/auth-admin-deleteuser
 export async function deleteAuthUser(context: SupabaseContext, input: { userId: string }) {
-  const id = input.userId.trim()
+  const id = userIdOf(input.userId)
+  await projectService(context, `/auth/v1/admin/users/${id}`, { method: "DELETE" })
+  return { deleted: id, detail: `User ${id} was deleted from ${context.projectName}.` }
+}
+
+function userIdOf(value: string) {
+  const id = value.trim()
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     throw new Error("Choose a user by their Supabase user id.")
   }
-  await projectService(context, `/auth/v1/admin/users/${id}`, { method: "DELETE" })
-  return { deleted: id, detail: `User ${id} was deleted from ${context.projectName}.` }
+  return id
 }
