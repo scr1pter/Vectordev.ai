@@ -338,7 +338,7 @@ export async function promoteVercelDeployment(projectPath: string, idOrUrl: stri
       "This is a preview build, made with preview environment variables, so Vercel cannot point production at it. Publish to production instead: Vector builds it with production settings, checks it, then promotes it.",
     )
   }
-  requireChecksPassed(projectPath, deployment)
+  requireVercelChecksPassed(projectPath, deployment)
   await vercelRequest(
     context.auth,
     `/v10/projects/${encodeURIComponent(context.link.projectId)}/promote/${encodeURIComponent(deployment.id)}`,
@@ -363,7 +363,7 @@ export async function rollbackVercelDeployment(projectPath: string, idOrUrl?: st
       "Vercel can only roll back to an earlier production deployment that finished building.",
     )
   }
-  requireChecksPassed(projectPath, target)
+  requireVercelChecksPassed(projectPath, target)
   const previous = await currentProductionId(context, options.request)
   await vercelRequest(
     context.auth,
@@ -377,7 +377,7 @@ export async function rollbackVercelDeployment(projectPath: string, idOrUrl?: st
 
 // A deployment Vector checked and found broken is not pointed at production,
 // whoever asks; deployments Vector did not make carry no checks to consult.
-function requireChecksPassed(projectPath: string, deployment: VercelDeployment) {
+export function requireVercelChecksPassed(projectPath: string, deployment: VercelDeployment) {
   const failed = (releaseForProviderDeployment(projectPath, deployment)?.checks ?? []).filter(
     (check) => check.required && check.status === "failed",
   )

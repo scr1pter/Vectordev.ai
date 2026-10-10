@@ -8,6 +8,7 @@ import {
   listVercelDeployments,
   promoteVercelDeployment,
   redeployVercelDeployment,
+  requireVercelChecksPassed,
   rollbackVercelDeployment,
   type VercelDeployment,
 } from "./cloud-vercel-deployments"
@@ -246,6 +247,8 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
         : null
     if (deployment === null)
       return { ok: false as const, error: "Name the deployment to promote with deploymentId (see list_deployments)." }
+    // Nothing to approve when the move would be refused for failed checks.
+    if (deployment) requireVercelChecksPassed(scope.projectPath, deployment)
     return described(
       project,
       "production",

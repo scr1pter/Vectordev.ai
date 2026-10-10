@@ -795,6 +795,35 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     expect(await command({ command: "describe", action: "promote" })).toMatchObject({ ok: false })
   })
 
+  test("asks nothing for a promotion Vector's failed checks would refuse", async () => {
+    seed()
+    recordDeployment({
+      projectPath: project,
+      slug: "shop",
+      url: "https://shop-old.vercel.app",
+      name: "shop",
+      target: "vercel",
+      environment: "production",
+      providerDeploymentId: "dpl_old",
+      checks: [
+        {
+          id: "browser",
+          type: "browser",
+          label: "Browser smoke test",
+          status: "failed",
+          required: true,
+          checkedAt: "",
+        },
+      ],
+    })
+    const command = await bridge()
+    expect(await command({ command: "describe", action: "promote", deploymentId: "dpl_old" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Browser smoke test"),
+    })
+    expect(await command({ command: "promote", deploymentId: "dpl_old" })).toMatchObject({ ok: false })
+  })
+
   test("a publish to a never-deployed project is described as production", async () => {
     connect()
     const remote = api.addProject({ name: "fresh" })
