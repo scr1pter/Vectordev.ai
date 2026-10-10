@@ -140,12 +140,8 @@ export function SupabaseDatabase(
       const report = await props.client.rotatePassword({ writeDatabaseUrl: writeUrl(), syncVercel: syncVercel() })
       if (failed(props.notice, report)) return
       await props.onDatabaseChange()
-      props.notice({
-        tone: "success",
-        text: [report.detail, report.vercel && !report.vercel.synced && syncVercel() ? report.vercel.detail : ""]
-          .filter(Boolean)
-          .join(" "),
-      })
+      // The password changed even if a later step did not; the detail says which.
+      props.notice({ tone: report.problems?.length ? "error" : "success", text: report.detail ?? "Password rotated." })
     })
 
   const apply = () =>

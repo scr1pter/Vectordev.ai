@@ -564,13 +564,16 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
             }
           }
           // A Supabase change is approved per action, so "always" for creating a
-          // bucket never covers deleting users; the desktop withholds "always"
-          // entirely from destructive, billed or credential-bearing actions.
+          // bucket never covers deleting users. Destructive, billed or
+          // credential-bearing requests get no "always" and a pattern of their
+          // own, so an earlier "always" for a milder form of the same action (a
+          // read-only run_sql, a private bucket) never approves them.
           const pattern = [
             described.scope.provider.toLowerCase(),
             described.scope.project,
             described.scope.environment,
             ...(supabase ? [params.action] : []),
+            ...(described.repeatable === false ? ["each-time"] : []),
           ].join("/")
           yield* ctx.ask({
             permission,

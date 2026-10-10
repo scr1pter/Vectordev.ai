@@ -6,10 +6,12 @@ import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credenti
 import { provisionedPassword } from "./cloud-provision"
 import { ensureEnvIgnored } from "./cloud-supabase-env"
 import {
+  errorMessage,
   management,
   numberField,
   refPath,
   responseArray,
+  scrub,
   stringField,
   SupabaseSetupError,
   type SupabaseContext,
@@ -112,20 +114,28 @@ export async function rotateDatabasePassword(
 
   // A DATABASE_URL that already points at this project would now fail, so it
   // follows the new password; one for another database is left alone.
+  // From here on the password has changed, so a later step that fails is
+  // reported next to that fact instead of hiding it behind an error.
   const current = listEnv(context.projectPath).find((item) => item.key === DATABASE_URL)
   const follows = Boolean(current?.value.includes(context.projectRef))
+  const problems: string[] = []
   const databaseUrl =
     follows || input.writeDatabaseUrl === true
-      ? await writeDatabaseUrl(context, { directory: input.directory, consent: true }).then(() =>
-          follows ? ("updated" as const) : ("written" as const),
+      ? await writeDatabaseUrl(context, { directory: input.directory, consent: true }).then(
+          () => (follows ? ("updated" as const) : ("written" as const)),
+          (error: unknown) => {
+            problems.push(`DATABASE_URL was not updated: ${scrub(context, errorMessage(error))}`)
+            return "failed" as const
+          },
         )
       : ("unchanged" as const)
 
   const link = getCloudProviderProjectLink(context.projectPath, context.taskId, "vercel")
   const vercel =
-    input.syncVercel === true && databaseUrl !== "unchanged" && link
+    input.syncVercel === true && (databaseUrl === "written" || databaseUrl === "updated") && link
       ? await syncCloudProviderEnvironment(context.projectPath, context.taskId, "vercel", context.request).then(
-          (result) => ({ synced: true, projectName: result.projectName, changed: result.changed }),
+          (result) => ({ synced: true, projectName: result.projectName, changed: result.changed, detail: undefined }),
+          (error: unknown) => ({ synced: false, detail: `Vercel was not updated: ${scrub(context, errorMessage(error))}` }),
         )
       : {
           synced: false,
@@ -136,12 +146,19 @@ export async function rotateDatabasePassword(
                 ? "No Vercel project is linked."
                 : "No DATABASE_URL to update on Vercel.",
         }
+  if (input.syncVercel === true && !vercel.synced && vercel.detail) problems.push(vercel.detail)
   return {
     rotated: true,
     databaseUrl,
     vercel,
-    detail: `The database password of ${context.projectName} was reset and saved encrypted in Vector.${
-      databaseUrl === "unchanged" ? " Anything that used the old password must be updated." : ""
-    }${vercel.synced ? " Redeploy on Vercel for the new value to take effect." : ""}`,
+    problems,
+    detail: [
+      `The database password of ${context.projectName} was reset and saved encrypted in Vector.`,
+      databaseUrl === "unchanged" ? "Anything that used the old password must be updated." : "",
+      vercel.synced ? "Redeploy on Vercel for the new value to take effect." : "",
+      ...problems,
+    ]
+      .filter(Boolean)
+      .join(" "),
   }
 }

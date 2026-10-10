@@ -266,6 +266,23 @@ describe("database credentials", () => {
     expect(listEnv(project).find((item) => item.key === "DATABASE_URL")?.value).toContain(fake.state.password ?? "missing")
   })
 
+  test("a rotation whose later steps fail still says the password changed", async () => {
+    connect()
+    linkDatabase()
+    fake.state.fail = (call) =>
+      call.path.endsWith("/config/database/pooler") ? Response.json({ message: "pooler unavailable" }, { status: 503 }) : undefined
+    const report = await run("rotate_database_password", { writeDatabaseUrl: true })
+    expect(report).toMatchObject({
+      ok: true,
+      rotated: true,
+      databaseUrl: "failed",
+      problems: ["DATABASE_URL was not updated: pooler unavailable"],
+    })
+    expect(report.detail).toContain("was reset and saved encrypted")
+    expect(listEnv(project).some((item) => item.key === "DATABASE_URL")).toBe(false)
+    expectNoSecrets(report, fake.state.password ?? "")
+  })
+
   test("a project Vector created can write DATABASE_URL with the password it generated", async () => {
     connect()
     const created = await run("create_project", { organizationId: "org-solo" })

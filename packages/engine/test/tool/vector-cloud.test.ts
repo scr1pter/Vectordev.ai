@@ -316,7 +316,7 @@ describe("vector_cloud bridge", () => {
         })
         const asks = recordAsks()
         yield* execute(item.params, asks.ask)
-        const pattern = `supabase/shop-db/production/${item.params.action}`
+        const pattern = `supabase/shop-db/production/${item.params.action}${item.repeatable ? "" : "/each-time"}`
         expect(asks.permissions).toEqual([
           expect.objectContaining({
             permission: "vector_cloud_database",

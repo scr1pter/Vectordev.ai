@@ -135,7 +135,7 @@ export function supabaseClient(
     restore: () => run<{ detail: string; project: SupabaseProject }>("restore_database"),
     writeDatabaseUrl: () => run<{ detail: string; replaced: boolean }>("write_database_url", { consent: true }),
     rotatePassword: (input: { writeDatabaseUrl: boolean; syncVercel: boolean }) =>
-      run<{ detail: string; databaseUrl: string; vercel: { synced: boolean; detail?: string } }>(
+      run<{ detail: string; databaseUrl: string; problems: string[]; vercel: { synced: boolean; detail?: string } }>(
         "rotate_database_password",
         input,
       ),
