@@ -6,7 +6,7 @@ export const prerender = true
 
 <DocsPage id="cloud-services">
   <p>
-    Cloud Services connects the repositories you work on to your own Vercel and Supabase accounts. Resources remain
+    Vector Cloud connects the repositories you work on to your own Vercel and Supabase accounts. Resources remain
     in those accounts, with their own billing, quotas and terms. Free model inference does not make hosting or
     database operations free.
   </p>
@@ -17,10 +17,9 @@ export const prerender = true
 
   <h2 id="connect-accounts">Connect an account and select a project</h2>
   <p>
-    Open Cloud Services → Connections. When hosted sign-in is configured, finish approval in your browser. When it is
-    unavailable, supported desktop builds offer a personal access token from the provider's settings, validated and
-    encrypted on this device. Supabase setup from Database leads to the same connection flow. Vector verifies the
-    account before showing it as connected.
+    Open Vector Cloud from Home, or from the Cloud button in a session, then Connections. Choose Use access token: Vector
+    opens the provider's token page, and the token you paste is validated and encrypted on this device. Supabase setup
+    from Database leads to the same connection flow. Vector verifies the account before showing it as connected.
   </p>
   <p>
     Link the existing Vercel project that this repository should use, or choose its Supabase project in Database.
@@ -52,14 +51,26 @@ export const prerender = true
     may need to be managed directly in Vercel. You can still list projects and manage or apply local variables in Vector.
   </p>
 
+  <h2 id="publishing">Publish a preview, then promote it</h2>
+  <p>
+    Publish in a session's preview, or in Vector Cloud → Deployments, makes a preview release by default. Before it
+    runs, Vector names the Vercel project and the environment, and warns when the folder has uncommitted changes.
+    Production changes only when you promote a preview that passed its checks. When a release fails, Fix this deploy
+    starts the agent on it, with the failed checks and the end of the log as its first message. The Cloud button in a
+    session shows the project's hosting, database and latest release, and updates as they change.
+  </p>
+
   <h2 id="cloud-actions">Run cloud work from a task</h2>
   <p>
     The agent's cloud tool can inspect connections, detect build settings, prepare a linked database or authentication,
     sync variables, publish and inspect recent deployments. It asks before it publishes, changes a database or writes a
     host's environment, and the prompt names the provider, project and environment. A wildcard allow does not skip
     these prompts; only a permission rule that names the cloud action does.
-    Publishing goes to the Vercel project linked to the repository; without one, the tool returns setup guidance. A
-    failed Vercel deployment never triggers a deployment somewhere else.
+    Publishing goes to the Vercel project linked to the repository, as a preview unless you ask for production;
+    without a linked project, the tool returns setup guidance. A failed publish reaches the agent with its failed
+    checks and log lines, so it can fix the cause. A failed Vercel deployment never triggers a deployment somewhere
+    else. The agent is instructed not to ask for secret values in the chat, and to name the variable to add in
+    Environment variables instead.
   </p>
   <ul class="feature-list">
     <li><strong>Deployment checks and logs</strong><span>Publishing can run configured build, health and browser checks. Their results and provider logs show what was verified and what failed.</span></li>
