@@ -18,6 +18,9 @@ const notices = new Set([
   "DEPENDENCY_NOTICES.md",
 ])
 const borrowedClients = /Ov23li8tweQw6odWQebz|app_EMoamEEZ73f0CkXaXp7hrann|b1a00492-073a-47ea-816f-4c329264a828/
+// The owner re-enabled Sign in with ChatGPT through the Codex CLI client on 10 October 2026
+// (docs/vector/owner-actions/chatgpt.md); only the provider policy may carry that client.
+const chatgptClient = { file: "packages/core/src/provider-policy.ts", id: "app_EMoamEEZ73f0CkXaXp7hrann" }
 
 async function trackedText() {
   const command = Bun.spawn(["git", "ls-files", "-z"], { cwd: root, stdout: "pipe", stderr: "pipe" })
@@ -94,8 +97,9 @@ describe("Vector source independence", () => {
         ...text.matchAll(/(?:["']?(?:User-Agent|originator)["']?|USER_AGENT)\s*[:=]\s*(["'`])([^"'`]+)\1/gi),
         ...text.matchAll(/(?:set|setHeader)\(["'](?:User-Agent|originator)["'],\s*(["'`])([^"'`]+)\1/gi),
       ]
+      const scanned = name === chatgptClient.file ? text.replaceAll(chatgptClient.id, "") : text
       return [
-        ...(borrowedClients.test(text) ? [`borrowed registration: ${name}`] : []),
+        ...(borrowedClients.test(scanned) ? [`borrowed registration: ${name}`] : []),
         ...identities.filter((match) => !/^vector(?:[\/\s]|$)/i.test(match[2])).map((match) => `${name}: ${match[0]}`),
       ]
     })

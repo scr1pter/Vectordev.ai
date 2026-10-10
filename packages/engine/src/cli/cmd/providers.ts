@@ -1,5 +1,6 @@
 import { PluginOAuthCommand } from "./plugin-oauth"
 import { Provider } from "@/provider/provider"
+import { ProviderAuth } from "@/provider/auth"
 import { COPILOT_SIGN_IN, providerEnabled, providerUsable } from "@vectordevai/core/provider-policy"
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
@@ -44,29 +45,31 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
   provider: string,
   methodName?: string,
 ) {
-  if (!plugin.auth.methods.length) return yield* fail(`${provider} sign-in is currently unavailable in Vector.`)
+  // Read once: the owner's ChatGPT switch can turn off while the prompt is open, and the choice indexes this list.
+  const methods = ProviderAuth.visibleMethods(plugin.auth)
+  if (!methods.length) return yield* fail(`${provider} sign-in is currently unavailable in Vector.`)
   const index = yield* Effect.gen(function* () {
     if (!methodName) {
-      if (plugin.auth.methods.length <= 1) return 0
+      if (methods.length <= 1) return 0
       return yield* promptValue(
         yield* Prompt.select({
           message: "Login method",
-          options: plugin.auth.methods.map((x, index) => ({
+          options: methods.map((x, index) => ({
             label: x.label,
             value: index,
           })),
         }),
       )
     }
-    const match = plugin.auth.methods.findIndex((x) => x.label.toLowerCase() === methodName.toLowerCase())
+    const match = methods.findIndex((x) => x.label.toLowerCase() === methodName.toLowerCase())
     if (match === -1) {
       return yield* fail(
-        `Unknown method "${methodName}" for ${provider}. Available: ${plugin.auth.methods.map((x) => x.label).join(", ")}`,
+        `Unknown method "${methodName}" for ${provider}. Available: ${methods.map((x) => x.label).join(", ")}`,
       )
     }
     return match
   })
-  const method = plugin.auth.methods[index]
+  const method = methods[index]
 
   yield* Effect.sleep("10 millis")
   const inputs: Record<string, string> = {}
@@ -412,7 +415,7 @@ export const ProvidersLoginCommand = effectCmd({
           label: x.name,
           value: x.id,
           hint: {
-            openai: "API key",
+            openai: "ChatGPT Plus/Pro or API key",
           }[x.id],
         })),
       ),

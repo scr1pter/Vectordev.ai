@@ -1,6 +1,6 @@
 # Community OAuth plugins with an owned client
 
-Part 2.22 is implemented for the legacy Engine and native Core plugin loaders. Built-in provider registrations remain disabled until their separate owner actions are complete. ChatGPT sign-in remains deliberately disabled in the built-in integration. This opt-in is for independently maintained plugins whose authors own and are authorized to use their OAuth registration.
+Part 2.22 is implemented for the legacy Engine and native Core plugin loaders. Built-in provider registrations remain disabled until their separate owner actions are complete. Built-in ChatGPT sign-in is on by a separate owner decision ([chatgpt.md](chatgpt.md)). This opt-in is for independently maintained plugins whose authors own and are authorized to use their OAuth registration.
 
 ## Plugin declaration
 

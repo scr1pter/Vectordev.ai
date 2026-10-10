@@ -74,7 +74,7 @@ export function DialogConnectProvider(props: {
     providerEnabled(props.provider) ? [{ type: "api", label: language.t("provider.connect.method.apiKey") }] : [],
   )
   const enabled = createMemo(() => providerRuntimeEnabled(props.provider, provider()))
-  const [auth] = createResource(
+  const [auth, { refetch: refetchAuth }] = createResource(
     () => `${props.provider}:${enabled()}`,
     async () => {
       if (!enabled()) return []
@@ -220,6 +220,9 @@ export function DialogConnectProvider(props: {
           { throwOnError: true },
         )
         .then((x) => {
+          const authorization = x.data
+          // A method list read before the engine's options changed can name a method that starts no sign-in.
+          if (!authorization) throw new Error(language.t("common.requestFailed"))
           if (!alive.value) return
           const elapsed = Date.now() - start
           const delay = 1000 - elapsed
@@ -229,14 +232,18 @@ export function DialogConnectProvider(props: {
             timer.current = setTimeout(() => {
               timer.current = undefined
               if (!alive.value) return
-              dispatch({ type: "auth.complete", authorization: x.data! })
+              dispatch({ type: "auth.complete", authorization })
             }, delay)
             return
           }
-          dispatch({ type: "auth.complete", authorization: x.data! })
+          dispatch({ type: "auth.complete", authorization })
         })
         .catch((e) => {
           if (!alive.value) return
+          // Sign-in options can change while the app runs (the owner's ChatGPT switch), so read them again
+          // instead of offering the same stale choice.
+          serverSync().set("provider_auth", {})
+          void refetchAuth()
           dispatch({ type: "auth.error", error: formatError(e, language.t("common.requestFailed")) })
         })
     }

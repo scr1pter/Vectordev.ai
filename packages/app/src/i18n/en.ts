@@ -134,7 +134,7 @@ export const dict = {
 
   "provider.connect.unavailable":
     "{{provider}} sign-in is currently paused in Vector. Choose another provider to continue.",
-  "dialog.provider.openai.note": "GPT models for fast, capable general AI tasks",
+  "dialog.provider.openai.note": "GPT models with your ChatGPT Plus/Pro plan or an API key",
   "dialog.provider.google.note": "Gemini models for fast, structured responses",
   "dialog.provider.openrouter.note": "Free models with your own account. No payment needed.",
   "dialog.provider.vercel.note": "Unified access to AI models with smart routing",

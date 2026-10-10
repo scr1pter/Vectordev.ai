@@ -36,6 +36,8 @@ process.env["XDG_CACHE_HOME"] = path.join(dir, "cache")
 process.env["XDG_CONFIG_HOME"] = path.join(dir, "config")
 process.env["XDG_STATE_HOME"] = path.join(dir, "state")
 process.env["VECTOR_MODELS_PATH"] = path.join(import.meta.dir, "tool", "fixtures", "models-api.json")
+// Keep vectordev.ai out of tests, including the owner's live ChatGPT sign-in switch.
+process.env["VECTOR_DISABLE_MODELS_FETCH"] = "true"
 process.env["VECTOR_EXPERIMENTAL_EVENT_SYSTEM"] = "true"
 process.env["VECTOR_EXPERIMENTAL_WORKSPACES"] = "true"
 
