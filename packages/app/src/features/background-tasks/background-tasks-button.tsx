@@ -12,7 +12,11 @@ export function BackgroundTasksButton(props: { variant: "v2" | "legacy" }) {
   const tasks = useBackgroundTasks()
   const command = useCommand()
   const count = () => tasks?.runningCount() ?? 0
-  const label = () => (count() > 0 ? `Background tasks, ${count()} running` : "Background tasks")
+  const waiting = () => tasks?.waitingCount() ?? 0
+  const label = () => {
+    if (waiting() > 0) return `Background tasks, ${count()} active, ${waiting()} waiting on you`
+    return count() > 0 ? `Background tasks, ${count()} running` : "Background tasks"
+  }
   const keybind = () => command.keybind(BACKGROUND_TASKS_COMMAND)
 
   return (
@@ -20,11 +24,12 @@ export function BackgroundTasksButton(props: { variant: "v2" | "legacy" }) {
       <Show
         when={props.variant === "v2"}
         fallback={
-          <TooltipKeybind title="Background tasks" keybind={keybind()}>
+          <TooltipKeybind title={label()} keybind={keybind()}>
             <Button
               variant="ghost"
               class="vector-bg-tasks-launch titlebar-icon h-6 px-1.5 gap-1 box-border shrink-0"
               data-vector-bg-tasks-launch
+              data-waiting={waiting() > 0 ? "true" : undefined}
               onClick={() => backgroundTasksPane.toggle()}
               aria-label={label()}
               aria-expanded={backgroundTasksPane.opened()}
@@ -38,7 +43,7 @@ export function BackgroundTasksButton(props: { variant: "v2" | "legacy" }) {
           </TooltipKeybind>
         }
       >
-        <TooltipKeybind title="Background tasks" keybind={keybind()}>
+        <TooltipKeybind title={label()} keybind={keybind()}>
           <button
             type="button"
             class="vector-bg-tasks-launch"
@@ -46,6 +51,7 @@ export function BackgroundTasksButton(props: { variant: "v2" | "legacy" }) {
             data-vector-bg-tasks-launch
             data-active={backgroundTasksPane.opened() ? "true" : "false"}
             data-running={count() > 0 ? "true" : undefined}
+            data-waiting={waiting() > 0 ? "true" : undefined}
             onClick={() => backgroundTasksPane.toggle()}
             aria-label={label()}
             aria-expanded={backgroundTasksPane.opened()}

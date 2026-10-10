@@ -48,10 +48,14 @@ const {
 } = await import("./agent-teams")
 const { pendingFor } = await import("./agent-team-model")
 const {
+  createParallelWorkspace,
+  getParallelWorkspace,
   isInternalWorkspaceFile,
   nextVectorTeammateDelivery,
   pendingTeammateDelivery,
   sweepTeamOutboxes,
+  runParallelWorkspace,
+  stopParallelWorkspace,
   vectorPromptMessageId,
 } = await import("./parallel-workspaces")
 
@@ -154,6 +158,128 @@ describe("team outbox delivery while members are running", () => {
     await sweepTeamOutboxes(team.id)
 
     expect(pendingFor(getAgentTeam(team.id)!, beta.id).map((item) => item.text)).toContain("typed entry still lands")
+  })
+
+  test("one unreadable outbox does not block a healthy teammate's messages", async () => {
+    const alpha = await member("Alpha")
+    const beta = await member("Beta")
+    const team = createAgentTeam({ name: "team", topology: "collaborative", sourcePath: userDataPath })
+    addTeamMember(team.id, alpha.id)
+    addTeamMember(team.id, beta.id)
+    store.set(
+      "parallel-workspaces-state",
+      new Map([
+        ["records", [alpha, beta].map((m) => ({ ...m, sourcePath: userDataPath, mergeState: "none", logs: [] }))],
+      ]),
+    )
+    await writeFile(join(alpha.isolatedPath, ".vector", "team-outbox"), "not a directory")
+    await writeFile(
+      join(beta.isolatedPath, ".vector", "team-outbox.jsonl"),
+      `${JSON.stringify({ id: "healthy-outbox", to: "Alpha", message: "still delivered", sessionID: "ses_beta" })}\n`,
+    )
+
+    await sweepTeamOutboxes(team.id)
+
+    expect(pendingFor(getAgentTeam(team.id)!, alpha.id).map((message) => message.text)).toEqual(["still delivered"])
+    expect(getParallelWorkspace(alpha.id)?.logs[0]).toContain("remain queued for retry")
+  })
+
+  test("one failed active recipient stays pending while other teammates receive their messages", async () => {
+    const sourcePath = join(userDataPath, "project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Team\n")
+    const team = createAgentTeam({ name: "team", topology: "isolated", sourcePath })
+    const sessions: string[] = []
+    const deliveries: { sessionId: string; id: string }[] = []
+    let failingSession: string | undefined
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const path = new URL(request.url).pathname
+        if (path === "/session") {
+          const id = `ses_team_${sessions.length}`
+          sessions.push(id)
+          return Response.json({ id })
+        }
+        if (path === "/api/session/active") {
+          return Response.json({ data: Object.fromEntries(sessions.map((id) => [id, {}])) })
+        }
+        if (path.endsWith("/prompt")) {
+          const body = (await request.json()) as { id: string; prompt: { text: string } }
+          const sessionId = path.split("/")[3]!
+          if (body.prompt.text.startsWith("[vector:teammate-messages]")) {
+            deliveries.push({ sessionId, id: body.id })
+            if (sessionId === failingSession) return new Response("Temporary failure", { status: 503 })
+          }
+        }
+        return Response.json({ data: [] })
+      },
+    })
+    const engine = { url: server.url.toString(), username: null, password: null }
+    const records = []
+    try {
+      for (const name of ["Alpha", "Beta"]) {
+        const record = await createParallelWorkspace({
+          sourcePath,
+          parentSessionId: "ses_parent",
+          taskPrompt: "Inspect README.md.",
+          name,
+          teamId: team.id,
+        })
+        addTeamMember(team.id, record.id)
+        records.push(record)
+        await runParallelWorkspace(record.id, engine)
+      }
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (
+          records.every((record) =>
+            getParallelWorkspace(record.id)?.logs.some((log) => log.startsWith("Task admitted")),
+          )
+        )
+          break
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      expect(
+        records.every((record) => getParallelWorkspace(record.id)?.logs.some((log) => log.startsWith("Task admitted"))),
+      ).toBe(true)
+      const alpha = records[0]!
+      const beta = records[1]!
+      // Newer records drain first, so a failed Beta delivery used to prevent
+      // Alpha from receiving anything on every sweep.
+      failingSession = getParallelWorkspace(beta.id)?.agentSessionId
+      expect(failingSession).toBeDefined()
+      postTeamMessage({
+        teamId: team.id,
+        fromWorkspaceId: alpha.id,
+        fromName: alpha.name,
+        toWorkspaceId: beta.id,
+        text: "for Beta",
+      })
+      postTeamMessage({
+        teamId: team.id,
+        fromWorkspaceId: beta.id,
+        fromName: beta.name,
+        toWorkspaceId: alpha.id,
+        text: "for Alpha",
+      })
+
+      await sweepTeamOutboxes(team.id)
+
+      expect(pendingFor(getAgentTeam(team.id)!, alpha.id)).toEqual([])
+      expect(pendingFor(getAgentTeam(team.id)!, beta.id).map((message) => message.text)).toEqual(["for Beta"])
+      const retry = deliveries.find((delivery) => delivery.sessionId === failingSession)!
+      failingSession = undefined
+      await sweepTeamOutboxes(team.id)
+      expect(pendingFor(getAgentTeam(team.id)!, beta.id)).toEqual([])
+      expect(
+        deliveries.filter((delivery) => delivery.sessionId === retry.sessionId).map((delivery) => delivery.id),
+      ).toEqual([retry.id, retry.id])
+    } finally {
+      await Promise.all(records.map((record) => stopParallelWorkspace(record.id)))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      server.stop(true)
+    }
   })
 
   test("overlapping sweeps route one durable entry exactly once", async () => {

@@ -117,6 +117,7 @@ import {
   parallelWorkspaceNavigation,
   parallelWorkspaceToolDirectory,
   parallelWorkspaceView,
+  resolveTeamSharedPath,
   type ParallelWorkspaceView,
 } from "./layout-workspace-launch"
 
@@ -1901,20 +1902,38 @@ export default function NewLayout(props: ParentProps) {
     // attached to it as it is created. "shared-main" points the shared checkout
     // at the project itself, which is what makes agents edit main directly.
     const teamsApi = agentTeamsApi()
+    const topology = parallelTopology()
     const team = await (async () => {
-      if (parallelTopology() === "isolated" || !teamsApi) return undefined
+      if (topology === "isolated" || !teamsApi) return undefined
       const existing = openTeams().find((item) => item.id === parallelJoinTeamId())
       if (existing) return existing
       return teamsApi
         .create({
           name: parallelName().trim() || "Agent team",
-          topology: parallelTopology(),
+          topology,
           sourcePath,
           parentSessionId: scope.parentSessionId,
-          sharedPath: parallelTopology() === "shared-main" ? sourcePath : undefined,
+          sharedPath: topology === "shared-main" ? sourcePath : undefined,
         })
-        .catch(() => undefined)
+        .catch((error: unknown) => {
+          setParallelError(error instanceof Error ? error.message : String(error))
+          return undefined
+        })
     })()
+    if (topology !== "isolated" && !team) {
+      setParallelBusy(false)
+      if (!parallelError()) setParallelError("Agent teamwork is unavailable. Reconnect the workspace before launching.")
+      return
+    }
+
+    const sharedPath = await resolveTeamSharedPath({ team, list: api.list }).catch((error: unknown) => {
+      setParallelError(error instanceof Error ? error.message : String(error))
+      return null
+    })
+    if (sharedPath === null) {
+      setParallelBusy(false)
+      return
+    }
 
     const records = await runtimes.reduce(async (pending, runtime) => {
       const current = await pending
@@ -1934,9 +1953,9 @@ export default function NewLayout(props: ParentProps) {
           // The verified-completion setting is global, so an isolated agent runs
           // under the same policy as a prompt typed into the composer.
           llmJudge: settings.general.llmJudge(),
-          // The first member provisions the tree; everyone after it joins that
-          // same checkout, which is what lets teammates see each other's edits.
-          sharedPath: team ? (team.sharedPath ?? current[0]?.isolatedPath) : undefined,
+          // The first member provisions a new team's tree. Later launches join
+          // its existing checkout even when its members belong to another task.
+          sharedPath: team ? (sharedPath ?? current[0]?.isolatedPath) : undefined,
         })
         .catch((error: unknown) => {
           setParallelError(error instanceof Error ? error.message : String(error))

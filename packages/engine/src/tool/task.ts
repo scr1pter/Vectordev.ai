@@ -118,18 +118,24 @@ function dependencyIDs(job: BackgroundJob.Info) {
   return job.metadata.dependsOn.filter((item): item is string => typeof item === "string")
 }
 
+type DependencyClaim = { taskID: string; dependencies: string[] }
+
 function dependencyReaches(
   jobs: BackgroundJob.Info[],
   start: string,
   target: string,
+  claims: Set<DependencyClaim>,
   seen = new Set<string>(),
 ): boolean {
   if (start === target) return true
   if (seen.has(start)) return false
   seen.add(start)
   const job = jobs.find((item) => item.id === start)
-  if (!job) return false
-  return dependencyIDs(job).some((dependency) => dependencyReaches(jobs, dependency, target, seen))
+  if (!job || job.status !== "running") return false
+  return [
+    ...dependencyIDs(job),
+    ...[...claims].filter((claim) => claim.taskID === start).flatMap((claim) => claim.dependencies),
+  ].some((dependency) => dependencyReaches(jobs, dependency, target, claims, seen))
 }
 
 const BaseParameterFields = {
@@ -307,7 +313,9 @@ function reports(info: BackgroundJob.Info) {
 // How a child's run ends, from its last message: a stopped child cancels the job, and a failed one fails it while
 // keeping what it wrote.
 const settleRun = Effect.fnUntraced(function* (result: SessionV1.WithParts) {
-  const text = result.parts.findLast((item) => item.type === "text")?.text ?? ""
+  const text = result.parts
+    .flatMap((item) => (item.type === "text" && !item.synthetic && !item.ignored && item.text ? [item.text] : []))
+    .join("\n\n")
   const failed = result.info.role === "assistant" ? SubagentLifecycle.failure(result.info.error) : undefined
   if (!failed) return text
   if (failed.status === "cancelled") return yield* Effect.interrupt
@@ -414,6 +422,17 @@ export const TaskTool = Tool.define(
       held?: boolean
     }>()
     const claimLock = Semaphore.makeUnsafe(1)
+    // A follow-up can add prerequisites without replacing the job's original metadata. Keep those edges visible
+    // until its run settles, so another follow-up cannot close a cycle through an otherwise invisible edge.
+    const dependencyClaims = new Set<DependencyClaim>()
+    const assertDependencies = Effect.fn("TaskTool.assertDependencies")(function* (
+      taskID: string,
+      dependencies: string[],
+    ) {
+      const jobs = yield* background.list()
+      const cycle = dependencies.find((dependency) => dependencyReaches(jobs, dependency, taskID, dependencyClaims))
+      if (cycle) return yield* Effect.fail(new Error(`Dependency ${cycle} would create a task cycle.`))
+    })
 
     const dependencyFailure = Effect.fn("TaskTool.dependencyFailure")(function* (job: BackgroundJob.Info) {
       const cancelled = { cancelled: true, message: `Dependency ${job.id} was cancelled.` }
@@ -499,7 +518,7 @@ export const TaskTool = Tool.define(
         }
         const failed = yield* dependencyFailure(job)
         if (failed) return yield* Effect.fail(new Error(failed.message))
-        if (params.task_id && dependencyReaches(jobs, dependency, params.task_id)) {
+        if (params.task_id && dependencyReaches(jobs, dependency, params.task_id, dependencyClaims)) {
           return yield* Effect.fail(new Error(`Dependency ${dependency} would create a task cycle.`))
         }
       }
@@ -893,17 +912,25 @@ export const TaskTool = Tool.define(
         })
 
         const runTask = Effect.fn("TaskTool.runTask")(function* () {
-          for (const dependency of dependencies) {
-            const waited = yield* background.wait({ id: dependency })
-            if (!waited.info) {
-              return yield* Effect.fail(new Error(`Dependency ${dependency} disappeared before this task could start.`))
-            }
-            const failed = yield* dependencyFailure(waited.info)
-            // Work that was stopped stops what waits on it too, the same quiet way: a failure would report back and
-            // start a parent turn after the user pressed Stop.
-            if (failed?.cancelled) return yield* Effect.interrupt
-            if (failed) return yield* Effect.fail(new Error(failed.message))
-          }
+          // Observe every prerequisite together so a later failure or stop can settle this task immediately.
+          yield* Effect.forEach(
+            dependencies,
+            (dependency) =>
+              Effect.gen(function* () {
+                const waited = yield* background.wait({ id: dependency })
+                if (!waited.info) {
+                  return yield* Effect.fail(
+                    new Error(`Dependency ${dependency} disappeared before this task could start.`),
+                  )
+                }
+                const failed = yield* dependencyFailure(waited.info)
+                // Work that was stopped stops what waits on it too, the same quiet way: a failure would report back
+                // and start a parent turn after the user pressed Stop.
+                if (failed?.cancelled) return yield* Effect.interrupt
+                if (failed) return yield* Effect.fail(new Error(failed.message))
+              }),
+            { concurrency: "unbounded", discard: true },
+          )
           if (dependencies.length > 0) yield* transition({ status: "running" })
           // A brief is the parent model's text, so @names in it attach files but never invoke agents in the child.
           const parts = (yield* ops.resolvePromptParts(assignmentPrompt(params, ownedPaths))).filter(
@@ -1054,17 +1081,42 @@ export const TaskTool = Tool.define(
         // session does, so the child reads it at its next step. One that is queued behind its dependencies, or between
         // runs, waits for the run before it: a message with its own dependencies is not delivered until they finish, and
         // one of them failing must not stop the run already going.
-        const extendRun = Effect.fn("TaskTool.extendRun")(function* () {
-          if (batch?.multiple) return undefined
-          if ((yield* background.get(nextSession.id))?.status !== "running") return undefined
-          // A Stop pressed while this call was setting up is meant for its message too. A launch is started and then
-          // cancelled below instead, so the job it would have joined is never touched.
-          if (ctx.abort.aborted)
-            return yield* Effect.fail(new Error("Stopped before the message reached the background task."))
-          const busy = dependencies.length === 0 && (yield* statuses.get(nextSession.id)).type !== "idle"
-          if (!(yield* background.extend({ id: nextSession.id, run: guardedRun(), concurrent: busy }))) return undefined
-          return busy ? ("delivered" as const) : ("queued" as const)
-        })
+        const extendRun = Effect.fn("TaskTool.extendRun")(
+          function* () {
+            if (batch?.multiple) return undefined
+            if ((yield* background.get(nextSession.id))?.status !== "running") return undefined
+            // A Stop pressed while this call was setting up is meant for its message too. A launch is started and then
+            // cancelled below instead, so the job it would have joined is never touched.
+            if (ctx.abort.aborted)
+              return yield* Effect.fail(new Error("Stopped before the message reached the background task."))
+            yield* assertDependencies(nextSession.id, dependencies)
+            const busy = dependencies.length === 0 && (yield* statuses.get(nextSession.id)).type !== "idle"
+            const claim = { taskID: nextSession.id, dependencies }
+            const release = Effect.sync(() => dependencyClaims.delete(claim))
+            if (dependencies.length > 0) dependencyClaims.add(claim)
+            const added = yield* background
+              .extend({
+                id: nextSession.id,
+                run: guardedRun().pipe(Effect.interruptible, Effect.ensuring(release)),
+                concurrent: busy,
+              })
+              .pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) && exit.value ? Effect.void : release)))
+            if (!added) return undefined
+            // A queued extension may be cancelled before its run is entered, so its run finalizer cannot release it.
+            if (dependencies.length > 0)
+              yield* background
+                .wait({ id: nextSession.id })
+                .pipe(
+                  Effect.ensuring(release),
+                  Effect.ignore,
+                  Effect.interruptible,
+                  Effect.forkIn(scope, { startImmediately: true }),
+                )
+            return busy ? ("delivered" as const) : ("queued" as const)
+          },
+          Effect.uninterruptible,
+          claimLock.withPermits(1),
+        )
         // A foreground run reports its result to the call that started it, so another call cannot add to it and be told
         // it will be notified later.
         const foreground = Effect.fn("TaskTool.foreground")(function* (job: BackgroundJob.Info | undefined) {
@@ -1094,27 +1146,33 @@ export const TaskTool = Tool.define(
           })
         }
 
-        const info = yield* background.start({
-          id: nextSession.id,
-          type: id,
-          title,
-          metadata,
-          promotable: !batch?.multiple,
-          onPromote: batch?.multiple
-            ? undefined
-            : Effect.all([
-                Effect.sync(() => {
-                  detached = true
-                }),
-                ctx.metadata({
-                  title,
-                  metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
-                }),
-                SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
-                notify(nextSession.id),
-              ]),
-          run: guardedRun(),
-        })
+        const info = yield* claimLock.withPermits(1)(
+          assertDependencies(nextSession.id, dependencies).pipe(
+            Effect.andThen(
+              background.start({
+                id: nextSession.id,
+                type: id,
+                title,
+                metadata,
+                promotable: !batch?.multiple,
+                onPromote: batch?.multiple
+                  ? undefined
+                  : Effect.all([
+                      Effect.sync(() => {
+                        detached = true
+                      }),
+                      ctx.metadata({
+                        title,
+                        metadata: { ...partMetadata(), background: true, jobId: nextSession.id },
+                      }),
+                      SubagentLifecycle.update(sessions, nextSession.id, { background: true }),
+                      notify(nextSession.id),
+                    ]),
+                run: guardedRun(),
+              }),
+            ),
+          ),
+        )
         // start hands back the running job when a concurrent call resuming the same task_id got there first. Join that
         // run instead of dropping this call's prompt, so only the call that started it reports its result.
         if (
