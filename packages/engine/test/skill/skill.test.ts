@@ -150,8 +150,11 @@ description: Skill for dirs test.
 
             const skill = yield* Skill.Service
             const dirs = yield* skill.dirs()
-            expect(dirs).toContain(path.join(dir, ".vector", "skill", "dir-skill"))
+            const source = path.join(dir, ".vector", "skill", "dir-skill")
+            // A trusted project's skills load from the private snapshot of the approved bytes, not the live directory.
             expect(dirs.length).toBe(1)
+            expect(dirs[0]).not.toBe(source)
+            expect(dirs[0].endsWith(path.relative(path.parse(source).root, source))).toBe(true)
           }),
         ),
       { git: true },
