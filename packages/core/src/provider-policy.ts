@@ -13,9 +13,9 @@ export function providerUsable(id: string, provider?: Parameters<typeof Provider
   return ProviderPolicy.providerUsable(id, provider) || Boolean(activeOAuthApproval(id))
 }
 
-// Sign in with ChatGPT is on by the owner's written decision of 10 October 2026, which accepts that
-// OpenAI has not authorized a Vector registration and may object or block it
-// (docs/vector/owner-actions/chatgpt.md). The others need Vector-owned registrations and provider approval.
+// Sign in with ChatGPT is on because the owner asked on 10 October 2026 to re-enable it. OpenAI has not
+// authorized a Vector registration and may object or block it; the owner's confirmation of that risk is
+// pending (docs/vector/owner-actions/chatgpt.md). The others need Vector-owned registrations and provider approval.
 export const CHATGPT_SIGN_IN = true
 export const XAI_SIGN_IN = false
 export const POE_SIGN_IN = false

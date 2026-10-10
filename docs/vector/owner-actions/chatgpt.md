@@ -1,16 +1,20 @@
-# Sign in with ChatGPT: re-enabled by owner decision
+# Sign in with ChatGPT: re-enabled at the owner's request
 
-## Decision (10 October 2026)
+## Request (10 October 2026)
 
-The owner decided in writing, after being told the risks, to re-enable Vector's native Sign in with ChatGPT using the Codex CLI's public OAuth client registration. People can sign in with a ChatGPT Plus or Pro account and use the GPT models their plan includes. It is available again from the next desktop release; desktop 1.99.104 and 1.99.105 shipped with it turned off.
+On 10 October 2026 the owner asked in writing to bring the sign-in back: "please make it so that i can login with my codex account to access gpt models in vector". Vector's native Sign in with ChatGPT is re-enabled using the Codex CLI's public OAuth client registration. People can sign in with a ChatGPT Plus or Pro account and use the GPT models their plan includes. It is available again from the next desktop release; desktop 1.99.104 and 1.99.105 shipped with it turned off.
 
-This supersedes the record that disabled the sign-in pending provider authorization (commit `b37300270`). That commit's LGPL and licensing changes are unaffected.
+This supersedes the record that disabled the sign-in pending provider authorization (commit `b37300270`, PR #8). That record turned the sign-in off because OpenAI has not authorized the borrowed Codex client for Vector, citing the public statement below, and required older sign-ins without a registration stamp to sign in again; this change reverses both. That commit's LGPL and licensing changes are unaffected.
 
-## Accepted risk
+## Owner confirmation pending
+
+The request above does not record that the owner was told why `b37300270` turned the sign-in off or that the owner accepts the risks below. Before the next desktop release ships it, ask the owner to confirm both, and add their words and the date here.
+
+## Risk
 
 - OpenAI has not authorized a Vector registration. The client ID belongs to OpenAI's Codex CLI, and Vector uses it without OpenAI's permission.
 - OpenAI may object, block this client for other applications, restrict the Codex backend (`chatgpt.com/backend-api/codex`) or change its sign-in endpoints at any time and without notice. Sign-in, refresh or model calls would then fail for everyone at once.
-- The owner's acceptance of this risk does not establish provider permission. The earlier provider-approval concern is recorded in a [public statement cited by this repository](https://x.com/thsottiaux/status/2097131394199896166); that statement is not a substitute for reviewing the applicable provider agreement.
+- The owner's acceptance of this risk, once recorded, does not establish provider permission. The earlier provider-approval concern is recorded in a [public statement cited by this repository](https://x.com/thsottiaux/status/2097131394199896166); that statement is not a substitute for reviewing the applicable provider agreement.
 - If OpenAI objects, turn the sign-in off with the remote switch below, then remove it in the next release.
 
 ## What ships

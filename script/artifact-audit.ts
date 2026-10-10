@@ -42,7 +42,7 @@ const root = path.resolve(import.meta.dir, "..")
 // Bytes of surrounding text kept around each match: longer than any notice line.
 const CONTEXT = 256
 // The Codex CLI's public client for Sign in with ChatGPT is the one borrowed registration allowed: the owner
-// re-enabled it in writing on 10 October 2026 (docs/vector/owner-actions/chatgpt.md). Every other stays here.
+// asked on 10 October 2026 to re-enable it (docs/vector/owner-actions/chatgpt.md). Every other stays here.
 const credentials = [
   { label: "retired public model key assignment", value: 'apiKey:"public"' },
   { label: "retired public model key assignment", value: 'apiKey: "public"' },
