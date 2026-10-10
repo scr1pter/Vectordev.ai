@@ -22,6 +22,8 @@ const AUTH_FILE = path.join(Global.Path.data, "cli-auth.json")
 const SITE = (process.env.VECTOR_SITE_URL ?? "https://vectordev.ai").replace(/\/+$/, "")
 const DAY = 24 * 60 * 60 * 1000
 const OFFLINE_GRACE = 7 * DAY
+// Late enough that the command has opened its own database before the usage report reads it.
+const USAGE_REPORT_DELAY = 15_000
 
 type CliUser = { id: string; email: string }
 type StoredAuth = { token: string; user: CliUser; verifiedAt: number }
@@ -88,6 +90,20 @@ async function verifyToken(token: string): Promise<VerifyResult> {
   if (payload?.error?.code && REJECTION_CODES.has(payload.error.code))
     return { status: "invalid", message: payload.error.message }
   return { status: "offline" }
+}
+
+// A verified account's command also sends the day's usage report (./usage-report), a while after it starts. It is
+// fire-and-forget: the timer never keeps a finished command alive, and the report sends at most once per UTC day.
+function scheduleUsageReport(token: string) {
+  if (truthy("VECTOR_DISABLE_USAGE")) return
+  setTimeout(() => {
+    reportUsage(token).catch(() => undefined)
+  }, USAGE_REPORT_DELAY).unref()
+}
+
+async function reportUsage(token: string) {
+  const { sendUsageReport } = await import("./usage-report")
+  await sendUsageReport({ token, site: SITE })
 }
 
 // Prompt on stderr so a piped stdout never receives prompt text.
@@ -160,6 +176,7 @@ export async function ensureVectorAccount(): Promise<void> {
   const envToken = process.env.VECTOR_CLI_TOKEN
   if (envToken) {
     const verified = await verifyToken(envToken)
+    if (verified.status === "ok") scheduleUsageReport(envToken)
     if (verified.status === "ok" || verified.status === "offline") return
     UI.error("VECTOR_CLI_TOKEN is not valid. Generate a new token at " + `${SITE}/auth/cli`)
     process.exit(1)
@@ -169,10 +186,14 @@ export async function ensureVectorAccount(): Promise<void> {
   if (stored) {
     const age = Date.now() - stored.verifiedAt
     // Once per UTC day rather than once per 24 hours, because the server counts the CLI's active days from this check.
-    if (Math.floor(stored.verifiedAt / DAY) === Math.floor(Date.now() / DAY)) return
+    if (Math.floor(stored.verifiedAt / DAY) === Math.floor(Date.now() / DAY)) {
+      scheduleUsageReport(stored.token)
+      return
+    }
     const verified = await verifyToken(stored.token)
     if (verified.status === "ok") {
       await save({ token: stored.token, user: verified.user, verifiedAt: Date.now() })
+      scheduleUsageReport(stored.token)
       return
     }
     if (verified.status === "offline") {
