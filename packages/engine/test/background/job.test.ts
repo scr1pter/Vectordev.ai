@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Deferred, Effect } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import { BackgroundJob } from "@/background/job"
 import { testEffect } from "../lib/effect"
 
@@ -151,32 +151,31 @@ describe("background.job", () => {
     }),
   )
 
-  it.instance("ignores stale settlements after restarting a failed job", () =>
+  it.instance("ignores stale settlements after restarting a stopped job", () =>
     Effect.gen(function* () {
       const jobs = yield* BackgroundJob.Service
-      const fail = yield* Deferred.make<void>()
       const interrupted = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       const id = "job_test"
-      yield* jobs.start({
-        id,
-        type: "test",
-        run: Deferred.await(fail).pipe(Effect.andThen(Effect.fail(new Error("boom")))),
-      })
+      // A failed run leaves the runs added after it to finish, so a run outliving its job's settlement is one still
+      // winding down after a stop.
+      yield* jobs.start({ id, type: "test", run: Effect.never })
       yield* jobs.extend({
         id,
+        concurrent: true,
         run: Effect.never.pipe(
           Effect.ensuring(Deferred.succeed(interrupted, undefined).pipe(Effect.andThen(Deferred.await(release)))),
         ),
       })
 
-      yield* Deferred.succeed(fail, undefined)
-      expect((yield* jobs.wait({ id })).info?.status).toBe("error")
+      // The stop waits for the run to wind down, which here waits on release.
+      const stopping = yield* jobs.cancel(id).pipe(Effect.forkChild({ startImmediately: true }))
       yield* Deferred.await(interrupted)
+      expect((yield* jobs.get(id))?.status).toBe("cancelled")
       yield* jobs.start({ id, type: "test", run: Effect.never })
 
       yield* Deferred.succeed(release, undefined)
-      yield* Effect.yieldNow
+      yield* Fiber.join(stopping)
       expect((yield* jobs.get(id))?.status).toBe("running")
       yield* jobs.cancel(id)
     }),
