@@ -13,7 +13,7 @@ export const upcomingRelease = {
   label: "Upcoming — unversioned",
   title: "Features waiting on Vector's own setup",
   summary:
-    "Vector's shared free allowance stays off. Other features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Personal OpenRouter access and API-key connections do not require those hosted services. Sign in with ChatGPT comes back in the next desktop release: connect OpenAI, choose ChatGPT Pro/Plus, and use the GPT models your ChatGPT plan includes.",
+    "Vector's shared free allowance stays off. Other features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Personal OpenRouter access and API-key connections do not require those hosted services.",
   status:
     "No release date is announced for the services still awaiting setup. Shared service activation requires a separate decision. Version 2 is reserved for the final release.",
 }
@@ -21,7 +21,7 @@ export const upcomingRelease = {
 // The desktop release the download page offers today. Not every entry in release199 was published as a
 // desktop or npm release (1.99.9 has notes but no installers), so the releases page marks this one Latest.
 // Update it in the same change that publishes the next desktop installers.
-export const publishedDesktopVersion = "1.99.105"
+export const publishedDesktopVersion = "1.99.106"
 
 export const releaseSeries: VectorRelease[] = [
   {
