@@ -733,11 +733,13 @@ const layer = Layer.effect(
           const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
           const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
           if (projectSource) projectGrants ||= grantsPermission(safe)
+          // Only the keys a source sets: merging an undefined key would erase what an earlier user source declared,
+          // as an empty integration store loaded after the project would.
           else
             userPermissions = mergeConfigConcatArrays(userPermissions, {
-              permission: safe.permission,
-              tools: safe.tools,
-              agent: safe.agent,
+              ...(safe.permission && { permission: safe.permission }),
+              ...(safe.tools && { tools: safe.tools }),
+              ...(safe.agent && { agent: safe.agent }),
             })
           result = mergeConfigConcatArrays(result, safe)
           return mergePluginOrigins(source, safe.plugin, scope)
@@ -913,9 +915,9 @@ const layer = Layer.effect(
             source: managed.source,
           })
           userPermissions = mergeConfigConcatArrays(userPermissions, {
-            permission: next.permission,
-            tools: next.tools,
-            agent: next.agent,
+            ...(next.permission && { permission: next.permission }),
+            ...(next.tools && { tools: next.tools }),
+            ...(next.agent && { agent: next.agent }),
           })
           result = mergeConfigConcatArrays(result, next)
         }
