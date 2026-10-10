@@ -51,7 +51,7 @@ vector whoami</code><button class="doc-cmd-copy" type="button" aria-label="Copy 
             The token is verified at the first command of each UTC day and cached with a seven-day offline grace window, so a flaky network never locks you out of your own terminal. Only a definitive invalid or expired answer signs you out. <code>login</code>, <code>logout</code>, <code>whoami</code>, <code>completion</code>, <code>upgrade</code> and <code>uninstall</code> work signed out.
           </p>
           <p>
-            Each check also counts your account as active that day, with the CLI version, operating system and CPU architecture. Once a day the CLI also sends the totals of your local token use: tokens by type, recorded cost, tokens and tasks per day, the models and providers you use with their share of tokens, effort levels, chats and streaks. Never your prompts, code, file names or model output. Set <code>VECTOR_DISABLE_USAGE=1</code> to keep the account check without being counted and send nothing else.
+            Each check also counts your account as active that day, with the CLI version, operating system and CPU architecture. Once a day the CLI also sends the totals of your local token use: tokens by type, recorded cost, tokens and tasks per day, the models and providers you use with their share of tokens, effort levels, chats and streaks. Never your prompts, code, file names or model output. A CI runner (where <code>CI</code> is set) never sends these totals, and the workflows <code>vector github install</code> writes set <code>VECTOR_DISABLE_USAGE=1</code>. Set <code>VECTOR_DISABLE_USAGE=1</code> to keep the account check without being counted and send nothing else.
           </p>
 
           <h2 id="cli-run">One-shot and scripted runs</h2>

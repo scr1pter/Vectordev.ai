@@ -11,6 +11,8 @@ const TOKEN = "vct_synthetic-usage-fixture"
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.UTC(2026, 9, 10, 9, 30)
 const servers: ReturnType<typeof Bun.serve>[] = []
+// This suite itself may run on a CI runner, where the CLI never reports.
+const ci = process.env.CI
 
 // The engine's local summary, as GET /experimental/session/usage returns it.
 const local = {
@@ -55,11 +57,14 @@ function site(status = 204) {
 
 beforeEach(async () => {
   await rm(FILE, { force: true })
+  delete process.env.CI
 })
 
 afterEach(() => {
   servers.splice(0).forEach((server) => server.stop(true))
   delete process.env.VECTOR_DISABLE_USAGE
+  if (ci === undefined) delete process.env.CI
+  else process.env.CI = ci
 })
 
 test("sends the local usage report as the CLI with its account token, once per UTC day", async () => {
@@ -92,10 +97,15 @@ test("sends the local usage report as the CLI with its account token, once per U
   expect(await Bun.file(FILE).json()).toEqual({ installId: first.body.installId, sent: "2026-10-11" })
 })
 
-test("VECTOR_DISABLE_USAGE sends nothing and stores nothing", async () => {
-  for (const value of ["1", "true"]) {
+test("VECTOR_DISABLE_USAGE, or a CI runner, sends nothing and stores nothing", async () => {
+  for (const variables of [
+    { VECTOR_DISABLE_USAGE: "1" },
+    { VECTOR_DISABLE_USAGE: "true" },
+    // GitHub Actions and most other CI services set CI=true; a runner's few jobs must not stand in for the account.
+    { CI: "true" },
+  ]) {
     const fixture = site()
-    process.env.VECTOR_DISABLE_USAGE = value
+    Object.assign(process.env, variables)
     const read = { calls: 0 }
 
     expect(
@@ -113,6 +123,8 @@ test("VECTOR_DISABLE_USAGE sends nothing and stores nothing", async () => {
     expect(read.calls).toBe(0)
     expect(fixture.state.requests).toHaveLength(0)
     expect(await Bun.file(FILE).exists()).toBe(false)
+    delete process.env.VECTOR_DISABLE_USAGE
+    delete process.env.CI
   }
 })
 

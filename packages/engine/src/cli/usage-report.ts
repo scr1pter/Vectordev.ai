@@ -19,7 +19,7 @@ const Stored = Schema.Struct({
  * recorded cost, the last seven days of tokens, tasks and cost, models and their token shares, effort levels, chats,
  * streaks and task timing), at most once per UTC day, with the account token the CLI already holds. Never prompts,
  * code, file names or model output. Resolves true only when the server accepted it; never rejects for a failed read or
- * send, and does nothing when VECTOR_DISABLE_USAGE is set.
+ * send, and does nothing when VECTOR_DISABLE_USAGE is set or on a CI runner.
  */
 export async function sendUsageReport(input: {
   token: string
@@ -27,7 +27,9 @@ export async function sendUsageReport(input: {
   now?: number
   summary?: () => Promise<unknown>
 }) {
-  if (truthy("VECTOR_DISABLE_USAGE")) return false
+  // A CI runner's history is a few short jobs, and as the account's newest report it would stand in for the account's
+  // real computers. Generated GitHub workflows also set VECTOR_DISABLE_USAGE.
+  if (truthy("VECTOR_DISABLE_USAGE") || truthy("CI")) return false
   const day = new Date(input.now ?? Date.now()).toISOString().slice(0, 10)
   const stored = Option.getOrUndefined(
     Schema.decodeUnknownOption(Stored)(

@@ -29,7 +29,8 @@ alter table public.vector_usage_daily add column if not exists usage jsonb
 
 -- Tokens, recorded cost and tasks per install or CLI account and calendar day, as the app reports the
 -- last seven days with any use. Each report repeats days already sent, so a day keeps its largest values
--- instead of adding up.
+-- instead of adding up. Two computers of one CLI account on the same day also keep the larger: an
+-- undercount, never a double count.
 create table if not exists public.vector_usage_tokens (
   key text not null check (key ~ '^(install|account):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
   client text not null check (client in ('desktop', 'cli')),
@@ -485,12 +486,16 @@ begin
       where d.day > today - 7
       order by d.key, d.day desc
     ),
+    -- An install's latest report holds its whole history. A CLI account's computers each report their own,
+    -- and a second computer may hold far less, so the account keeps the largest report any of them sent.
     snapshots as (
       select distinct on (d.key) d.key, d.day, d.usage, coalesce(links.account, d.key) as actor
       from public.vector_usage_daily d
       join links on links.key = d.key
       where d.usage is not null
-      order by d.key, d.day desc
+      order by d.key,
+        case when d.client = 'cli' then (d.usage->'lifetimeTokens')::numeric end desc nulls last,
+        d.day desc
     ),
     reported as (
       select count(*) as reporting,
@@ -535,12 +540,14 @@ begin
       cross join lateral jsonb_array_elements(snapshots.usage->'effortLevels') as entry
       group by entry->>'id'
     ),
-    -- A streak is current only in a report from today or yesterday (UTC); an older one may have ended.
+    -- A streak is current only in a report from today or yesterday (UTC); an older one may have ended. Every
+    -- such report counts, so a person's longest current streak wins over another computer's shorter one.
     streaks as (
-      select snapshots.actor, max((snapshots.usage->'currentStreak')::numeric) as streak
-      from snapshots
-      where snapshots.day >= today - 1
-      group by snapshots.actor
+      select coalesce(links.account, d.key) as actor, max((d.usage->'currentStreak')::numeric) as streak
+      from public.vector_usage_daily d
+      join links on links.key = d.key
+      where d.usage is not null and d.day >= today - 1
+      group by coalesce(links.account, d.key)
     )
     select jsonb_build_object(
       'generatedAt', to_char(pg_catalog.now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),

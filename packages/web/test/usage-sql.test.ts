@@ -340,6 +340,19 @@ test("model use is kept only with an account that exists", async () => {
   expect((await usageSummary()).usage).toMatchObject({ reporting: 0, lifetimeTokens: 0 })
 })
 
+test("a CLI account keeps the largest report any of its computers sent", async () => {
+  const cli = { client: "cli" as const, accountId: state.account, version: "1.99.106", platform: "linux", arch: "x64" }
+  // A laptop with a long history reported yesterday; a fresh second computer reports today with far less.
+  await recordUsage({ ...cli, usage: report({ lifetimeTokens: 500_000_000, currentStreak: 5 }) })
+  await database`update public.vector_usage_daily set day = day - 1`
+  await recordUsage({ ...cli, usage: report({ lifetimeTokens: 1_000_000, currentStreak: 1 }) })
+  expect(statuses()).toEqual(["ok", "ok"])
+
+  const summary = await usageSummary()
+  expect(summary.usage).toMatchObject({ reporting: 1, lifetimeTokens: 500_000_000 })
+  expect(summary.streaks).toEqual({ one: 0, twoToSix: 1, sevenPlus: 0 })
+})
+
 test("forgetting an account also removes its per-day tokens", async () => {
   const linked = randomUUID()
   await recordUsage(
