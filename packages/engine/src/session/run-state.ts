@@ -3,6 +3,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Runner } from "@/effect/runner"
 import { BackgroundJob } from "@/background/job"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { Effect, Latch, Layer, Scope, Context } from "effect"
 import { Session } from "./session"
 import { SessionID } from "./schema"
@@ -36,6 +37,8 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const background = yield* BackgroundJob.Service
     const status = yield* SessionStatus.Service
+    const sessions = yield* Session.Service
+    const events = yield* EventV2Bridge.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
@@ -88,8 +91,19 @@ const layer = Layer.effect(
       // signal a launch still in progress checks; the sweep then stops the session's own job and the foreground work
       // left under it.
       if (existing) yield* existing.cancel
-      else yield* status.set(sessionID, { type: "idle" })
+      else yield* settleIdle(sessionID)
       yield* cancelAttachedJobs(background, sessionID)
+    })
+
+    // With no runner nothing changes, so a client that still shows the session running (it missed the events that
+    // ended the run, for example after its event stream dropped) would see Stop do nothing. The session's current
+    // info, subagent record included, brings it up to date.
+    const settleIdle = Effect.fnUntraced(function* (sessionID: SessionID) {
+      yield* status.set(sessionID, { type: "idle" })
+      yield* sessions.get(sessionID).pipe(
+        Effect.flatMap((info) => events.publish(Session.Event.Updated, { sessionID, info })),
+        Effect.catchCause((cause) => Effect.logWarning("stop could not republish the session", { sessionID, cause })),
+      )
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
@@ -162,6 +176,10 @@ function busyError(sessionID: SessionID) {
   return new Session.BusyError({ sessionID })
 }
 
-export const node = LayerNode.make({ service: Service, layer: layer, deps: [BackgroundJob.node, SessionStatus.node] })
+export const node = LayerNode.make({
+  service: Service,
+  layer: layer,
+  deps: [BackgroundJob.node, SessionStatus.node, Session.node, EventV2Bridge.node],
+})
 
 export * as SessionRunState from "./run-state"
