@@ -55,8 +55,6 @@ const readResponse = Effect.fnUntraced(function* (input: { app: TestApp; path: s
   }
 })
 
-// These projects are trusted, and trust binds a project's local server only to a command it can pin down: an
-// interpreter running an approved script, or a program on this machine's PATH such as `bun` here.
 describe("mcp HttpApi", () => {
   it.instance(
     "serves status endpoint",
@@ -74,7 +72,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["bun", "--version"],
+            command: ["echo", "demo"],
             enabled: false,
           },
         },
@@ -127,7 +125,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["bun", "--version"],
+            command: ["echo", "demo"],
             enabled: false,
           },
         },
@@ -156,7 +154,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["bun", "--version"],
+            command: ["echo", "demo"],
             enabled: false,
           },
         },
@@ -190,7 +188,7 @@ describe("mcp HttpApi", () => {
         mcp: {
           demo: {
             type: "local",
-            command: ["bun", "--version"],
+            command: ["echo", "demo"],
             enabled: false,
           },
         },

@@ -54,6 +54,17 @@ describe("server bind security", () => {
     ).toThrow()
   })
 
+  test("requires explicit unsecured permission or a nonempty owner or guest password", () => {
+    const network = { hostname: "0.0.0.0", trustedNetwork: true }
+    expect(() => assertListenSecurity({ ...network, unsecured: true }, unprotected)).not.toThrow()
+    expect(() => assertListenSecurity(network, { ...unprotected, password: Option.some("secret") })).not.toThrow()
+    expect(() => assertListenSecurity(network, { ...unprotected, guestPassword: Option.some("secret") })).not.toThrow()
+    expect(() => assertListenSecurity(network, unprotected)).toThrow()
+    expect(() =>
+      assertListenSecurity(network, { ...unprotected, password: Option.some(""), guestPassword: Option.some("") }),
+    ).toThrow()
+  })
+
   test("a password listener binds the network only when the network is declared trusted", () => {
     const protectedConfig = { ...unprotected, password: Option.some("secret") }
     // A container publishing only to host loopback, or a private LAN, can carry the password over plain HTTP.

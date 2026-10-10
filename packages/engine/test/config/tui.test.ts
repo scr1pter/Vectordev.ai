@@ -108,6 +108,47 @@ const approveWorkspace = (directory: string) =>
     await WorkspaceTrust.approve(Global.Path.state, snapshot)
   })
 
+it.instance("keeps server and tui plugin merge semantics aligned", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const local = path.join(test.directory, ".vector")
+      yield* fs.makeDirectory(local, { recursive: true })
+
+      yield* fs.writeJson(path.join(Global.Path.config, "vector.json"), {
+        plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
+      })
+      yield* fs.writeJson(path.join(Global.Path.config, "tui.json"), {
+        plugin: [["shared-plugin@1.0.0", { source: "global" }], "global-only@1.0.0"],
+      })
+      yield* fs.writeJson(path.join(local, "vector.json"), {
+        plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
+      })
+      yield* fs.writeJson(path.join(local, "tui.json"), {
+        plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
+      })
+      // Project plugins load only once the project is trusted, for the server and the TUI alike.
+      yield* approveWorkspace(test.directory)
+
+      const server = yield* Config.use.get()
+      const tui = yield* getTuiConfig(test.directory)
+      const tuiOrigins = yield* getTuiPluginOrigins(test.directory)
+      const serverPlugins = (server.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
+      const tuiPlugins = (tui.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
+
+      expect(serverPlugins).toEqual(tuiPlugins)
+      expect(serverPlugins).toContain("shared-plugin@2.0.0")
+      expect(serverPlugins).not.toContain("shared-plugin@1.0.0")
+
+      const serverOrigins = server.plugin_origins ?? []
+      expect(serverOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(serverPlugins)
+      expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
+      expect(serverOrigins.map((item) => item.scope)).toEqual(tuiOrigins.map((item) => item.scope))
+    }),
+  ),
+)
+
 it.instance("keeps project TUI plugins disabled before workspace trust", () =>
   withCleanState(
     Effect.gen(function* () {
