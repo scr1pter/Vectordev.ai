@@ -15,6 +15,7 @@ import {
   type VercelFetch,
   type VercelLinkContext,
 } from "./cloud-vercel-api"
+import { recordProductionMove, releaseForProviderDeployment } from "./cloud-console"
 import { vercelScopeSlug } from "./cloud-vercel-projects"
 
 // Deployments as Vercel knows them, including the ones a git push made, and
@@ -337,12 +338,14 @@ export async function promoteVercelDeployment(projectPath: string, idOrUrl: stri
       "This is a preview build, made with preview environment variables, so Vercel cannot point production at it. Publish to production instead: Vector builds it with production settings, checks it, then promotes it.",
     )
   }
+  requireChecksPassed(projectPath, deployment)
   await vercelRequest(
     context.auth,
     `/v10/projects/${encodeURIComponent(context.link.projectId)}/promote/${encodeURIComponent(deployment.id)}`,
     { method: "POST", request: options.request },
   )
   const url = await productionUrl(context, deployment.id, options)
+  recordProductionMove(projectPath, deployment, { productionUrl: url })
   return { deployment: { ...deployment, current: true }, productionUrl: url }
 }
 
@@ -360,17 +363,29 @@ export async function rollbackVercelDeployment(projectPath: string, idOrUrl?: st
       "Vercel can only roll back to an earlier production deployment that finished building.",
     )
   }
+  requireChecksPassed(projectPath, target)
   const previous = await currentProductionId(context, options.request)
   await vercelRequest(
     context.auth,
     `/v1/projects/${encodeURIComponent(context.link.projectId)}/rollback/${encodeURIComponent(target.id)}`,
     { method: "POST", query: { description: "Rolled back from Vector" }, request: options.request },
   )
-  return {
-    deployment: { ...target, current: true },
-    replaced: previous,
-    productionUrl: await productionUrl(context, target.id, options),
-  }
+  const url = await productionUrl(context, target.id, options)
+  recordProductionMove(projectPath, target, { productionUrl: url, rollback: true })
+  return { deployment: { ...target, current: true }, replaced: previous, productionUrl: url }
+}
+
+// A deployment Vector checked and found broken is not pointed at production,
+// whoever asks; deployments Vector did not make carry no checks to consult.
+function requireChecksPassed(projectPath: string, deployment: VercelDeployment) {
+  const failed = (releaseForProviderDeployment(projectPath, deployment)?.checks ?? []).filter(
+    (check) => check.required && check.status === "failed",
+  )
+  if (!failed.length) return
+  throw new VercelError(
+    "invalid",
+    `Vector's required release checks failed for ${deployment.id} (${failed.map((check) => check.label).join(", ")}), so production was not moved to it. Fix the cause and publish again, or run its checks again from Cloud Services > Deployments.`,
+  )
 }
 
 async function previousProduction(context: VercelLinkContext, options: VercelOptions) {

@@ -39,9 +39,7 @@ import {
   assignVercelBranchAlias,
   inspectInProject,
   promoteVercelDeployment,
-  rollbackVercelDeployment,
   vercelBuildLogs,
-  vercelRuntimeLogs,
   type VercelDeployment,
 } from "./cloud-vercel-deployments"
 import { probeVercelUrl, protectionBypassHeaders } from "./cloud-vercel-checks"
@@ -130,12 +128,6 @@ export type PublishProgressEvent = {
 }
 
 export type PublishProgressEmitter = (event: PublishProgressEvent) => void
-
-export type CloudRuntimeLogResult = {
-  log: string
-  fetchedAt: string
-  source: "provider" | "build"
-}
 
 const activePublishes = new Set<string>()
 
@@ -1022,71 +1014,6 @@ export type DeploymentActionInput = {
   runId?: string
 }
 
-// Promotion points production at a release Vector built and checked. It goes
-// through Vercel's API, so the CLI is not needed.
-export async function promoteDeployment(
-  input: DeploymentActionInput,
-  emit?: PublishProgressEmitter,
-  options: PublishOptions = {},
-): Promise<CloudDeployment> {
-  const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  if (deployment.workspaceId) {
-    throw new Error("Merge this agent workspace into the main project before promoting it to production.")
-  }
-  if (!requiredChecksPassed(deployment.checks)) {
-    throw new Error("This release has failed required checks and cannot be promoted.")
-  }
-  const progressInput = actionProgress(deployment, input.runId)
-  emitProgress(progressInput, emit, "promoting", "info", `Promoting ${deployment.url} to production.`)
-  const promoted = await promoteVercelDeployment(
-    input.projectPath,
-    deployment.providerDeploymentId ?? deployment.url,
-    options,
-  )
-  const result = markDeploymentPromoted(input.projectPath, input.taskId, input.id, {
-    productionUrl: promoted.productionUrl,
-  })
-  emitProgress(
-    progressInput,
-    emit,
-    "promoting",
-    "success",
-    `Production now serves ${promoted.productionUrl ?? deployment.url}`,
-  )
-  return result
-}
-
-export async function rollbackDeployment(
-  input: DeploymentActionInput,
-  emit?: PublishProgressEmitter,
-  options: PublishOptions = {},
-): Promise<CloudDeployment> {
-  const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  if (deployment.releaseStatus === "current") throw new Error("That release is already live in production.")
-  if (!requiredChecksPassed(deployment.checks)) {
-    throw new Error("This release has failed required checks and cannot be restored.")
-  }
-  const progressInput = actionProgress(deployment, input.runId)
-  emitProgress(progressInput, emit, "promoting", "info", `Rolling production back to ${deployment.url}.`)
-  const restored = await rollbackVercelDeployment(
-    input.projectPath,
-    deployment.providerDeploymentId ?? deployment.url,
-    options,
-  )
-  const result = markDeploymentPromoted(input.projectPath, input.taskId, input.id, {
-    productionUrl: restored.productionUrl,
-    rollback: true,
-  })
-  emitProgress(
-    progressInput,
-    emit,
-    "promoting",
-    "success",
-    `Production restored to ${restored.productionUrl ?? deployment.url}`,
-  )
-  return result
-}
-
 function actionProgress(deployment: CloudDeployment, runId?: string): PublishProjectInput {
   return {
     projectPath: deployment.deploymentPath ?? deployment.projectPath,
@@ -1095,31 +1022,6 @@ function actionProgress(deployment: CloudDeployment, runId?: string): PublishPro
     target: "vercel",
     runId,
   }
-}
-
-export async function fetchDeploymentRuntimeLogs(
-  input: DeploymentActionInput,
-  options: PublishOptions = {},
-): Promise<CloudRuntimeLogResult> {
-  const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  const fetchedAt = new Date().toISOString()
-  const result = await vercelRuntimeLogs(
-    input.projectPath,
-    deployment.providerDeploymentId ?? deployment.url,
-    200,
-    options,
-  )
-  const log = redactCloudLog(
-    deployment.projectPath,
-    deployment.taskId,
-    result.entries.map((entry) => `${entry.at ? `${new Date(entry.at).toISOString()} ` : ""}${entry.text}`).join("\n"),
-    [result.token],
-  ).slice(-40_000)
-  updateDeployment(input.projectPath, input.taskId, input.id, {
-    runtimeLog: log || "Vercel returned no runtime log lines for this deployment in the last few seconds.",
-    runtimeLogFetchedAt: fetchedAt,
-  })
-  return { log, fetchedAt, source: "provider" }
 }
 
 export async function rerunDeploymentChecks(

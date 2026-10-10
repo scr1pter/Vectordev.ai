@@ -249,9 +249,6 @@ const api: ElectronAPI = {
       remove: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-remove", projectPath, taskId, id),
       check: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-check", projectPath, taskId, id),
       checkAll: (projectPath, taskId) => ipcRenderer.invoke("cloud-deployments-check-all", projectPath, taskId),
-      promote: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-promote", projectPath, taskId, id),
-      rollback: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-rollback", projectPath, taskId, id),
-      logs: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-logs", projectPath, taskId, id),
       rerunChecks: (projectPath, taskId, id) =>
         ipcRenderer.invoke("cloud-deployments-rerun-checks", projectPath, taskId, id),
     },

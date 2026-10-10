@@ -2,13 +2,7 @@ import type { VectorAccountPlatform } from "@vectordevai/app/vector-account"
 import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
 import type { WslServersPlatform } from "@vectordevai/app/wsl/types"
 import type { UpdaterState } from "@vectordevai/app/updater"
-import type {
-  CloudRuntimeLogResult,
-  PublishProgressEvent,
-  PublishProjectInput,
-  PublishResult,
-  PublishTarget,
-} from "../main/publish"
+import type { PublishProgressEvent, PublishProjectInput, PublishResult, PublishTarget } from "../main/publish"
 import type {
   CloudBuildSettings,
   CloudDatabaseConnection,
@@ -108,13 +102,7 @@ export type {
   PullRequestReviewComment,
   PullRequestSummary,
 } from "../main/github-pr"
-export type {
-  CloudRuntimeLogResult,
-  PublishProgressEvent,
-  PublishProjectInput,
-  PublishResult,
-  PublishTarget,
-} from "../main/publish"
+export type { PublishProgressEvent, PublishProjectInput, PublishResult, PublishTarget } from "../main/publish"
 export type {
   CloudBuildSettings,
   CloudDatabaseConnection,
@@ -879,9 +867,6 @@ export type ElectronAPI = {
       remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment[]>
       check: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
       checkAll: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
-      promote: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-      rollback: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-      logs: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudRuntimeLogResult>
       rerunChecks: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
     }
     env: {

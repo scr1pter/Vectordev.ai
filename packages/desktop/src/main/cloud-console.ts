@@ -336,6 +336,50 @@ export function markDeploymentPromoted(
   return updated.find((item) => item.id === selected.id)!
 }
 
+// The release Vector recorded for a Vercel deployment, when Vector made it:
+// matched by Vercel's id, or by address for releases recorded before the id was.
+export function releaseForProviderDeployment(projectPath: string, deployment: { id: string; url: string }) {
+  const host = (value: string) => (URL.canParse(value) ? new URL(value).host : value)
+  return listDeployments(projectPath).find(
+    (item) => item.providerDeploymentId === deployment.id || host(item.url) === host(deployment.url),
+  )
+}
+
+// Production moved on Vercel (a promote or rollback from Cloud Services or the
+// agent). Vector's release for that deployment becomes current; the release
+// that was current is superseded or rolled back, even when Vercel now serves a
+// deployment Vector did not make.
+export function recordProductionMove(
+  projectPath: string,
+  deployment: { id: string; url: string },
+  input: { productionUrl?: string; rollback?: boolean },
+) {
+  const at = now()
+  const release = releaseForProviderDeployment(projectPath, deployment)
+  const records = readDeployments()
+  if (release) {
+    writeDeployments(
+      transitionReleaseRecords(records, release.id, {
+        productionUrl: input.productionUrl,
+        rollback: Boolean(input.rollback),
+        at,
+      }),
+    )
+    return
+  }
+  writeDeployments(
+    records.map((item) =>
+      item.projectPath === projectPath && supportedDeployment(item) && item.releaseStatus === "current"
+        ? {
+            ...item,
+            releaseStatus: input.rollback ? ("rolled-back" as const) : ("superseded" as const),
+            rolledBackAt: input.rollback ? at : item.rolledBackAt,
+          }
+        : item,
+    ),
+  )
+}
+
 export function removeDeployment(projectPath: string, taskId: string | undefined, id: string): CloudDeployment[] {
   const records = readDeployments()
   const removed = records.find((item) => item.id === id && item.projectPath === projectPath)

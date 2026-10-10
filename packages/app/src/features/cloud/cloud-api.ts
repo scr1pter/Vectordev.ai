@@ -177,13 +177,6 @@ export type CloudApi = {
     remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment[]>
     check: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
     checkAll: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
-    promote: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-    rollback: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-    logs: (
-      projectPath: string,
-      taskId: string | undefined,
-      id: string,
-    ) => Promise<{ log: string; fetchedAt: string; source: "provider" | "build" }>
     rerunChecks: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
   }
   env: {

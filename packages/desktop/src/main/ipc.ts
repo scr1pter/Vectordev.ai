@@ -64,11 +64,8 @@ import {
   checkAllDeploymentHealth,
   checkDeploymentHealth,
   detectPublishTargets,
-  fetchDeploymentRuntimeLogs,
-  promoteDeployment,
   publishProject,
   rerunDeploymentChecks,
-  rollbackDeployment,
   type PublishProjectInput,
 } from "./publish"
 import {
@@ -573,21 +570,6 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle("cloud-deployments-check-all", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     checkAllDeploymentHealth(projectPath, taskId),
-  )
-  handle(
-    "cloud-deployments-promote",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      promoteDeployment({ projectPath, taskId, id }),
-  )
-  handle(
-    "cloud-deployments-rollback",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      rollbackDeployment({ projectPath, taskId, id }),
-  )
-  handle(
-    "cloud-deployments-logs",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      fetchDeploymentRuntimeLogs({ projectPath, taskId, id }),
   )
   handle(
     "cloud-deployments-rerun-checks",

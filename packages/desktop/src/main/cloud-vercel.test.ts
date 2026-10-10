@@ -37,7 +37,9 @@ mock.module("./store", () => ({
 }))
 
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
-const { cloudProjectScopeKey, listEnv, setEnv } = await import("./cloud-console")
+const { cloudProjectScopeKey, listDeployments, listEnv, recordDeployment, setEnv, updateDeployment } = await import(
+  "./cloud-console"
+)
 const { getCloudProviderProjectLink, getCloudProviderRuntimeAuth } = await import("./cloud-connections")
 const { VercelError, VERCEL_TOKEN_REJECTED } = await import("./cloud-vercel-api")
 const projects = await import("./cloud-vercel-projects")
@@ -363,6 +365,55 @@ describe("Vercel deployments", () => {
     const promoted = await deployments.promoteVercelDeployment(project, staged.uid, { sleep: async () => {} })
     expect(promoted.productionUrl).toBe("https://shop.vercel.app")
     expect(seeded.remote.productionId).toBe(staged.uid)
+  })
+
+  test("never moves production to a build Vector's checks failed, and keeps Vector's history in step", async () => {
+    const seeded = seedHistory()
+    const staged = api.addDeployment({ projectId: seeded.remote.id, target: "production", created: 5_000 })
+    const release = (uid: string, environment: "preview" | "production") =>
+      recordDeployment({
+        projectPath: project,
+        slug: "shop",
+        url: `https://${uid}.vercel.app`,
+        name: "shop",
+        target: "vercel",
+        environment,
+        providerDeploymentId: uid,
+        checks: [
+          {
+            id: "health",
+            type: "health",
+            label: "Health check /",
+            status: "failed",
+            required: true,
+            checkedAt: "2026-10-01",
+          },
+        ],
+      })
+    const live = release(seeded.live.uid, "production")
+    const candidate = release(staged.uid, "preview")
+    await expect(deployments.promoteVercelDeployment(project, staged.uid)).rejects.toThrow(
+      "required release checks failed",
+    )
+    expect(seeded.remote.productionId).toBe(seeded.live.uid)
+    updateDeployment(project, undefined, candidate.id, {
+      checks: candidate.checks.map((check) => ({ ...check, status: "passed" as const })),
+    })
+    await deployments.promoteVercelDeployment(project, staged.uid, { sleep: async () => {} })
+    const after = listDeployments(project)
+    expect(after.find((item) => item.id === candidate.id)).toMatchObject({
+      releaseStatus: "current",
+      productionUrl: "https://shop.vercel.app/",
+    })
+    expect(after.find((item) => item.id === live.id)?.releaseStatus).toBe("superseded")
+    // The old release's checks failed too: rolling back to it is refused as well.
+    await expect(deployments.rollbackVercelDeployment(project, seeded.live.uid)).rejects.toThrow(
+      "required release checks failed",
+    )
+    // A deployment Vector never made carries no checks; rolling back to it
+    // marks Vector's current release rolled back.
+    await deployments.rollbackVercelDeployment(project, seeded.old.uid, { sleep: async () => {} })
+    expect(listDeployments(project).find((item) => item.id === candidate.id)?.releaseStatus).toBe("rolled-back")
   })
 
   test("rolls back to the previous production deployment by default", async () => {
