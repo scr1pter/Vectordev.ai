@@ -366,18 +366,17 @@ export function CloudConsole(props: {
     const taskId = props.taskId
     const scope = environment.scope()
     const isCurrent = () => environment.isCurrent(scope)
-    const [nextDeployments, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] =
-      await Promise.all([
-        api.deployments.list(projectPath, taskId).catch(() => []),
-        projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
-        projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
-        projectPath && workspaceApi
-          ? workspaceApi.list({ sourcePath: projectPath, parentSessionId: taskId }).catch(() => [])
-          : Promise.resolve([]),
-        api.connections.list().catch(() => []),
-        projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
-        environment.refresh(),
-      ])
+    const [nextDeployments, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] = await Promise.all([
+      api.deployments.list(projectPath, taskId).catch(() => []),
+      projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
+      projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
+      projectPath && workspaceApi
+        ? workspaceApi.list({ sourcePath: projectPath, parentSessionId: taskId }).catch(() => [])
+        : Promise.resolve([]),
+      api.connections.list().catch(() => []),
+      projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
+      environment.refresh(),
+    ])
     if (!isCurrent()) return
     setDeployments(nextDeployments)
     setDatabase(nextDatabase)
@@ -1119,8 +1118,8 @@ export function CloudConsole(props: {
                   <div class="cloud-panel-title">Publish this project</div>
                   <p class="cloud-muted mt-1 text-[12px]">
                     Vector runs the whole deploy on your own Vercel account — authorize once, then it's a single click.
-                    Your code is never proxied through Vector. A preview never changes production; a production build
-                    is checked before Vector promotes it.
+                    Your code is never proxied through Vector. A preview never changes production; a production build is
+                    checked before Vector promotes it.
                   </p>
                   <div class="cloud-segment mt-3" aria-label="Deployment environment">
                     <button
@@ -1367,50 +1366,62 @@ export function CloudConsole(props: {
                 </div>
                 <div class="cloud-list">
                   <For each={deployments()}>
-                    {(deployment) => (
-                      <div class="cloud-row">
-                        <span class="cloud-health-dot" data-status={deployment.status} />
-                        <div class="min-w-0 flex-1">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <strong class="truncate text-[13px] text-white/85">{deployment.name}</strong>
-                            <span
-                              class="cloud-status"
-                              data-tone={
-                                deployment.status === "ready"
-                                  ? "success"
-                                  : deployment.status === "unknown"
-                                    ? undefined
-                                    : "error"
-                              }
-                            >
-                              {deployment.status === "unknown" ? "not checked" : deployment.status}
-                            </span>
+                    {(deployment) => {
+                      // Deployment Protection kept the probe out: not a failure, and not unchecked either.
+                      const protectedHealth = () =>
+                        deployment.checks.find((check) => check.type === "health" && check.status === "skipped")
+                      return (
+                        <div class="cloud-row">
+                          <span class="cloud-health-dot" data-status={deployment.status} />
+                          <div class="min-w-0 flex-1">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <strong class="truncate text-[13px] text-white/85">{deployment.name}</strong>
+                              <span
+                                class="cloud-status"
+                                data-tone={
+                                  deployment.status === "ready"
+                                    ? "success"
+                                    : deployment.status === "unknown"
+                                      ? undefined
+                                      : "error"
+                                }
+                              >
+                                {deployment.status === "unknown"
+                                  ? protectedHealth()
+                                    ? "protected"
+                                    : "not checked"
+                                  : deployment.status}
+                              </span>
+                            </div>
+                            <p class="cloud-muted mt-1 truncate text-[11px]">
+                              {cleanDeploymentUrl(deployment.url) || deployment.url}
+                            </p>
+                            <Show when={deployment.healthError}>
+                              <p class="mt-1 text-[11px] text-[#f0b3b6]">{deployment.healthError}</p>
+                            </Show>
+                            <Show when={deployment.status === "unknown" && protectedHealth()}>
+                              {(check) => <p class="cloud-muted mt-1 text-[11px]">{check().details}</p>}
+                            </Show>
                           </div>
-                          <p class="cloud-muted mt-1 truncate text-[11px]">
-                            {cleanDeploymentUrl(deployment.url) || deployment.url}
-                          </p>
-                          <Show when={deployment.healthError}>
-                            <p class="mt-1 text-[11px] text-[#f0b3b6]">{deployment.healthError}</p>
-                          </Show>
+                          <div class="cloud-observation">
+                            <span>HTTP</span>
+                            <strong>{deployment.statusCode ?? "—"}</strong>
+                          </div>
+                          <div class="cloud-observation">
+                            <span>Latency</span>
+                            <strong>{formatDuration(deployment.latencyMs)}</strong>
+                          </div>
+                          <button
+                            class="cloud-button"
+                            type="button"
+                            disabled={!api || checkingId() === deployment.id}
+                            onClick={() => void checkDeployment(deployment)}
+                          >
+                            {checkingId() === deployment.id ? "Checking…" : "Check"}
+                          </button>
                         </div>
-                        <div class="cloud-observation">
-                          <span>HTTP</span>
-                          <strong>{deployment.statusCode ?? "—"}</strong>
-                        </div>
-                        <div class="cloud-observation">
-                          <span>Latency</span>
-                          <strong>{formatDuration(deployment.latencyMs)}</strong>
-                        </div>
-                        <button
-                          class="cloud-button"
-                          type="button"
-                          disabled={!api || checkingId() === deployment.id}
-                          onClick={() => void checkDeployment(deployment)}
-                        >
-                          {checkingId() === deployment.id ? "Checking…" : "Check"}
-                        </button>
-                      </div>
-                    )}
+                      )
+                    }}
                   </For>
                 </div>
               </Show>
@@ -1460,8 +1471,7 @@ export function CloudConsole(props: {
                   <h1>Environment variables</h1>
                   <p>
                     Manage variables for <strong>{projectName()}</strong>. Write them locally, and manage the linked
-                    Vercel project's variables per environment: compare, review a sync plan, or pull development
-                    values.
+                    Vercel project's variables per environment: compare, review a sync plan, or pull development values.
                   </p>
                 </div>
               </div>

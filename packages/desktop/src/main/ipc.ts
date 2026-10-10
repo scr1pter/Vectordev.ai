@@ -61,6 +61,8 @@ import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
 import { cancelBackgroundTask, clearCompletedBackgroundTasks, listBackgroundTasks } from "./background-tasks"
 import {
+  checkAllDeploymentHealth,
+  checkDeploymentHealth,
   detectPublishTargets,
   fetchDeploymentRuntimeLogs,
   promoteDeployment,
@@ -71,8 +73,6 @@ import {
 } from "./publish"
 import {
   applyEnv,
-  checkAllDeployments,
-  checkDeployment,
   connectDatabase,
   detectBuildSettings,
   disconnectDatabase,
@@ -569,10 +569,10 @@ export function registerIpcHandlers(deps: Deps) {
   handle(
     "cloud-deployments-check",
     (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      checkDeployment(projectPath, taskId, id),
+      checkDeploymentHealth({ projectPath, taskId, id }),
   )
   handle("cloud-deployments-check-all", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    checkAllDeployments(projectPath, taskId),
+    checkAllDeploymentHealth(projectPath, taskId),
   )
   handle(
     "cloud-deployments-promote",

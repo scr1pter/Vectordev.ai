@@ -38,7 +38,7 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { publishProject, runVercel, VERCEL_CLI_VERSION } = await import("./publish")
+const { checkDeploymentHealth, publishProject, runVercel, VERCEL_CLI_VERSION } = await import("./publish")
 const { cloudProjectScopeKey, listDeployments, setBuildSettings } = await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
 
@@ -337,6 +337,43 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
       status: "passed",
       details: expect.stringContaining("after promotion"),
     })
+  })
+
+  test("an Observability check of a protected preview skips the health check instead of failing it", async () => {
+    const remote = linkProject(undefined, { name: "shop", ssoProtection: { deploymentType: "preview" } })
+    api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
+    remote.productionId = "dpl_first"
+    const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
+    checks({ health: true, browser: false })
+    const protectedSite = routed((_url, sent) =>
+      sent.get("x-vercel-protection-bypass") === "bypassfixture0000000000000000000000"
+        ? new Response("ok")
+        : new Response("Authentication Required", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } }),
+    )
+    const published = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+      command: [await fakeDeployCli(`https://${preview.url}`)],
+      request: protectedSite,
+    })
+    expect(published).toMatchObject({ ok: true, protectedChecks: "skipped" })
+    const id = published.deploymentId!
+    const checked = await checkDeploymentHealth({ projectPath: project, id }, { request: protectedSite })
+    expect(checked.status).not.toBe("degraded")
+    expect(checked.checks.find((check) => check.type === "health")).toMatchObject({
+      status: "skipped",
+      details: expect.stringContaining("Cloud Services > Project settings"),
+    })
+    remote.protectionBypass = {
+      bypassfixture0000000000000000000000: { createdAt: 1, createdBy: "user_1", scope: "automation-bypass" },
+    }
+    const bypassed = await checkDeploymentHealth({ projectPath: project, id }, { request: protectedSite })
+    expect(bypassed).toMatchObject({ status: "ready", statusCode: 200 })
+    expect(bypassed.checks.find((check) => check.type === "health")).toMatchObject({ status: "passed" })
+    const broken = await checkDeploymentHealth(
+      { projectPath: project, id },
+      { request: routed(() => new Response("broken", { status: 500 })) },
+    )
+    expect(broken).toMatchObject({ status: "degraded", statusCode: 500 })
+    expect(broken.checks.find((check) => check.type === "health")).toMatchObject({ status: "failed" })
   })
 
   test("uses the project's bypass secret to check a protected preview", async () => {

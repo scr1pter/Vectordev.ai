@@ -1,4 +1,3 @@
-import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomUUID, createHash } from "node:crypto"
 import { chmodSync, constants } from "node:fs"
 import { lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
@@ -348,71 +347,11 @@ export function removeDeployment(projectPath: string, taskId: string | undefined
   return next.filter((record) => record.projectPath === projectPath && supportedDeployment(record))
 }
 
-export async function checkDeployment(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-): Promise<CloudDeployment> {
-  const records = readDeployments()
-  const deployment = records.find((item) => item.id === id && item.projectPath === projectPath)
-  if (!deployment) throw new Error("That deployment is no longer in this project's history.")
-
-  const startedAt = Date.now()
-  const checkedAt = now()
-  const settings = getBuildSettings(projectPath, taskId)
-  const healthUrl = new URL(settings?.healthPath ?? "/", deployment.url).toString()
-  const probe = await fetch(healthUrl, {
-    method: "GET",
-    redirect: "follow",
-    headers: { "user-agent": VECTOR_USER_AGENT },
-    signal: AbortSignal.timeout(12_000),
-  })
-    .then(async (response) => {
-      await response.body?.cancel().catch(() => undefined)
-      return {
-        status: response.ok ? ("ready" as const) : ("degraded" as const),
-        statusCode: response.status,
-        healthError: response.ok ? undefined : `HTTP ${response.status} ${response.statusText}`.trim(),
-      }
-    })
-    .catch((error) => ({
-      status: "unreachable" as const,
-      statusCode: undefined,
-      healthError: error instanceof Error ? error.message : String(error),
-    }))
-
-  const updated: CloudDeployment = {
-    ...deployment,
-    ...probe,
-    lastCheckedAt: checkedAt,
-    latencyMs: Date.now() - startedAt,
-    checks: upsertDeploymentCheck(deployment.checks, {
-      id: "health",
-      type: "health",
-      label: `Health check ${settings?.healthPath ?? "/"}`,
-      status: probe.status === "ready" ? "passed" : "failed",
-      required: settings?.requiredChecks.health ?? true,
-      details:
-        probe.status === "ready" ? `HTTP ${probe.statusCode} in ${Date.now() - startedAt} ms` : probe.healthError,
-      durationMs: Date.now() - startedAt,
-      checkedAt,
-    }),
-  }
-  writeDeployments(records.map((item) => (item.id === updated.id ? updated : item)))
-  return updated
-}
-
 export function upsertDeploymentCheck(
   checks: CloudDeploymentCheck[],
   check: CloudDeploymentCheck,
 ): CloudDeploymentCheck[] {
   return [...checks.filter((item) => item.id !== check.id), check]
-}
-
-export async function checkAllDeployments(projectPath: string, taskId?: string): Promise<CloudDeployment[]> {
-  const deployments = listDeployments(projectPath, taskId)
-  await Promise.all(deployments.map((item) => checkDeployment(projectPath, taskId, item.id)))
-  return listDeployments(projectPath, taskId)
 }
 
 // ---- Per-project data (env vars + database) -------------------------------
