@@ -8,7 +8,7 @@ const sessionID = "ses_vectorscope_local"
 const project = { id: "project-vectorscope-local", worktree: directory, vcs: "git", name: "Vectorscope Local" }
 const SECRETS_URL = "https://github.com/acme/app/settings/secrets/actions"
 
-type AutomaticState = "available" | "installed"
+type AutomaticState = "available" | "installed" | "on-request" | "needs-scope"
 
 // The panel through the desktop bridge, signed in to GitHub with no open pull requests. Automatic reviews start in the
 // given state; setting them up opens pull request #12 and leaves it pending.
@@ -79,7 +79,7 @@ async function openVectorscope(page: Page, input: { changes?: () => unknown[]; a
                 defaultBranch: "main",
                 secretsUrl: setup.secretsUrl,
                 source: "vector",
-                ...(state.automatic === "installed"
+                ...(state.automatic === "installed" || state.automatic === "on-request"
                   ? { url: "https://github.com/acme/app/blob/main/.github/workflows/vector.yml" }
                   : {}),
                 ...(state.automatic === "pending" ? { url: "https://github.com/acme/app/pull/12" } : {}),
@@ -117,7 +117,18 @@ async function openVectorscope(page: Page, input: { changes?: () => unknown[]; a
                 return { userCode: "WDJB-MJHT", verificationUri: "https://github.com/login/device", expiresIn: 900 }
               },
               openVerification: async () => undefined,
-              complete: () => new Promise(() => undefined),
+              // GitHub authorizes the code when the test calls __authorizeGithub; the new sign-in may change workflows.
+              complete: () =>
+                new Promise((resolve) =>
+                  Object.defineProperty(window, "__authorizeGithub", {
+                    configurable: true,
+                    value: () => {
+                      state.signedIn = true
+                      state.automatic = "available"
+                      resolve({ ok: true, login: "mira" })
+                    },
+                  }),
+                ),
               cancel: async () => undefined,
               logout: async () => {
                 state.signedIn = false
@@ -222,4 +233,22 @@ test("Vectorscope asks for GitHub's workflow permission only to set up automatic
   await expect(panel.getByText("WDJB-MJHT")).toBeVisible()
   await expect(panel).toContainText("GitHub also asks to let Vector change workflow files")
   expect((await calls(page)).start).toEqual([{ workflow: true }])
+
+  // Once GitHub authorizes it, the view goes straight on to what setting them up adds, ready to confirm.
+  await page.evaluate(() => (window as unknown as { __authorizeGithub: () => void }).__authorizeGithub())
+  await expect(panel.getByText("Show the workflow file")).toBeVisible()
+  await expect(panel.getByRole("button", { name: "Open the pull request" })).toBeEnabled()
+  expect((await calls(page)).preview).toEqual([{ model: "anthropic/claude-sonnet-4-5", keys: ["ANTHROPIC_API_KEY"] }])
+})
+
+test("Vectorscope says when reviews only run on a /vector review comment", async ({ page }) => {
+  const panel = await openVectorscope(page, { automatic: "on-request" })
+
+  const entry = panel.getByRole("button", { name: /Automatic reviews/ })
+  await expect(entry).toContainText("On: when someone comments /vector review")
+  await entry.click()
+  await expect(panel).toContainText("Reviews run when someone asks")
+  await expect(panel).toContainText("choose to review every pull request")
+  await expect(panel.getByRole("button", { name: "Open the pull request" })).toHaveCount(0)
+  expect((await calls(page)).preview).toEqual([])
 })

@@ -385,20 +385,41 @@ describe("pull requests over GitHub's API", () => {
 describe("automatic reviews", () => {
   // Repositories in each state "Set up automatic reviews" can find. acme/app still has the branch an earlier set-up
   // made, whose pull request was closed. scopes is the X-OAuth-Scopes header GitHub sends for OAuth tokens.
+  // installed is the workflow file on the default branch; refusePull is the status GitHub answers the pull request with.
   const REPOS: Record<
     string,
-    { push: boolean; scopes?: string; installed?: boolean; pending?: boolean; refuseWorkflow?: boolean }
+    { push: boolean; scopes?: string; installed?: string; refuseWorkflow?: boolean; refusePull?: number }
   > = {
     app: { push: true, scopes: "repo, workflow" },
-    done: { push: true, scopes: "repo, workflow", installed: true },
-    open: { push: true, scopes: "repo, workflow", pending: true },
+    done: { push: true, scopes: "repo, workflow", installed: "every" },
+    onrequest: { push: true, scopes: "repo, workflow", installed: "comment" },
+    open: { push: true, scopes: "repo, workflow" },
     readonly: { push: false, scopes: "repo, workflow" },
     noscope: { push: true, scopes: "repo" },
     finegrained: { push: true },
     denied: { push: true, scopes: "repo, workflow", refuseWorkflow: true },
+    rejected: { push: true, scopes: "repo, workflow", refusePull: 422 },
+    unavailable: { push: true, scopes: "repo, workflow", refusePull: 502 },
   }
+  const installedWorkflow = (kind: string) =>
+    buildWorkflowYaml({
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      keys: ["ANTHROPIC_API_KEY"],
+      autoReview: kind === "every",
+      auth: "github",
+      share: false,
+      monthlyUsd: 50,
+      version: "1.99.99",
+    })
   const MAIN = "e".repeat(40)
-  const refs = new Set([`app:refs/heads/${AUTO_REVIEW_BRANCH}`])
+  // acme/open has the set-up branch with its pull request still open; a fork's branch of the same name has one too.
+  const refs = new Set([`app:refs/heads/${AUTO_REVIEW_BRANCH}`, `open:refs/heads/${AUTO_REVIEW_BRANCH}`])
+  const openPulls = [
+    { repo: "open", head: `acme:${AUTO_REVIEW_BRANCH}`, url: "https://github.com/acme/open/pull/9" },
+    { repo: "open", head: `mira:${AUTO_REVIEW_BRANCH}`, url: "https://github.com/acme/open/pull/4" },
+    { repo: "app", head: `mira:${AUTO_REVIEW_BRANCH}`, url: "https://github.com/acme/app/pull/4" },
+  ]
   const calls: { method: string; path: string; body?: Record<string, unknown> }[] = []
   const stand = Bun.serve({
     port: 0,
@@ -426,28 +447,27 @@ describe("automatic reviews", () => {
         )
       if (rest === "/contents/.github/workflows/vector.yml" && request.method === "GET")
         return repo.installed && url.searchParams.get("ref") === "main"
-          ? Response.json({ html_url: `https://github.com/acme/${name}/blob/main/.github/workflows/vector.yml` })
+          ? Response.json({
+              html_url: `https://github.com/acme/${name}/blob/main/.github/workflows/vector.yml`,
+              // GitHub wraps the base64 content at 60 characters.
+              content: Buffer.from(installedWorkflow(repo.installed))
+                .toString("base64")
+                .replace(/(.{60})/g, "$1\n"),
+              encoding: "base64",
+            })
           : missing
+      if (rest === `/git/matching-refs/heads/${AUTO_REVIEW_BRANCH}`)
+        return Response.json(
+          [...refs]
+            .filter((ref) => ref.startsWith(`${name}:`))
+            .map((ref) => ({ ref: ref.slice(name.length + 1), object: { sha: MAIN } })),
+        )
       if (rest === "/pulls" && request.method === "GET")
-        return Response.json([
-          {
-            html_url: `https://github.com/acme/${name}/pull/3`,
-            head: { ref: "fix-typo", repo: { full_name: `acme/${name}` } },
-          },
-          // A fork's branch of the same name is someone else's.
-          {
-            html_url: `https://github.com/acme/${name}/pull/4`,
-            head: { ref: AUTO_REVIEW_BRANCH, repo: { full_name: "mira/fork" } },
-          },
-          ...(repo.pending
-            ? [
-                {
-                  html_url: `https://github.com/acme/${name}/pull/9`,
-                  head: { ref: AUTO_REVIEW_BRANCH, repo: { full_name: `acme/${name}` } },
-                },
-              ]
-            : []),
-        ])
+        return Response.json(
+          openPulls
+            .filter((pull) => pull.repo === name && pull.head === url.searchParams.get("head"))
+            .map((pull) => ({ html_url: pull.url })),
+        )
       if (rest === "/git/ref/heads/main") return Response.json({ object: { sha: MAIN } })
       if (rest === "/git/refs" && request.method === "POST") {
         const ref = `${name}:${body?.ref}`
@@ -464,7 +484,9 @@ describe("automatic reviews", () => {
           ? missing
           : Response.json({ content: { path: ".github/workflows/vector.yml" } }, { status: 201 })
       if (rest === "/pulls" && request.method === "POST")
-        return Response.json({ html_url: `https://github.com/acme/${name}/pull/12`, number: 12 }, { status: 201 })
+        return repo.refusePull
+          ? Response.json({ message: "Pull requests are restricted" }, { status: repo.refusePull })
+          : Response.json({ html_url: `https://github.com/acme/${name}/pull/12`, number: 12 }, { status: 201 })
       return missing
     },
   })
@@ -488,6 +510,12 @@ describe("automatic reviews", () => {
       state: "installed",
       url: "https://github.com/acme/done/blob/main/.github/workflows/vector.yml",
     })
+    // A workflow from `vector github install` that only reviews on a `/vector review` comment is not "every pull request".
+    expect(await state("onrequest")).toMatchObject({
+      state: "on-request",
+      url: "https://github.com/acme/onrequest/blob/main/.github/workflows/vector.yml",
+    })
+    // Found by the set-up branch's own open pull request, never a fork's branch of the same name.
     expect(await state("open")).toMatchObject({ state: "pending", url: "https://github.com/acme/open/pull/9" })
     expect((await state("readonly")).state).toBe("read-only")
     expect((await state("noscope")).state).toBe("needs-scope")
@@ -552,6 +580,7 @@ describe("automatic reviews", () => {
     calls.length = 0
     for (const [name, message] of [
       ["done", "already set up in acme/done"],
+      ["onrequest", "comments /vector review"],
       ["open", "already open in acme/open: https://github.com/acme/open/pull/9"],
       ["readonly", "write access to acme/readonly"],
       ["noscope", "sign in again"],
@@ -574,6 +603,26 @@ describe("automatic reviews", () => {
       `DELETE /repos/acme/denied/git/refs/heads/${AUTO_REVIEW_BRANCH}`,
     ])
     expect(refs.has(`denied:refs/heads/${AUTO_REVIEW_BRANCH}`)).toBe(false)
+    await expect(
+      openAutoReviewPullRequest({ ...owner, source: "gh" }, repository("denied"), workflow),
+    ).rejects.toThrow("gh auth refresh -s workflow")
+  })
+
+  test("deletes its branch when GitHub refuses the pull request, and keeps it when the answer is unknown", async () => {
+    calls.length = 0
+    await expect(openAutoReviewPullRequest(owner, repository("rejected"), workflow)).rejects.toThrow(
+      "Pull requests are restricted",
+    )
+    expect(writes().map((call) => `${call.method} ${call.path}`)).toEqual([
+      "POST /repos/acme/rejected/git/refs",
+      "PUT /repos/acme/rejected/contents/.github/workflows/vector.yml",
+      "POST /repos/acme/rejected/pulls",
+      `DELETE /repos/acme/rejected/git/refs/heads/${AUTO_REVIEW_BRANCH}`,
+    ])
+    expect(refs.has(`rejected:refs/heads/${AUTO_REVIEW_BRANCH}`)).toBe(false)
+    // A server error may come after GitHub opened the pull request, so the branch stays for the next status check.
+    await expect(openAutoReviewPullRequest(owner, repository("unavailable"), workflow)).rejects.toThrow()
+    expect(refs.has(`unavailable:refs/heads/${AUTO_REVIEW_BRANCH}`)).toBe(true)
   })
 
   test("refuses a malformed model or key name before calling GitHub", async () => {

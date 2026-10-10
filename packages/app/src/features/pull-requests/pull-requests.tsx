@@ -109,7 +109,7 @@ type PullRequestsApi = {
 // Automatic reviews in GitHub Actions: whether the repository's default branch has the workflow `vector github install`
 // writes, a pull request that adds it is open, or why this sign-in cannot add it.
 type AutoReviewStatus = {
-  state: "installed" | "pending" | "read-only" | "needs-scope" | "available"
+  state: "installed" | "on-request" | "pending" | "read-only" | "needs-scope" | "available"
   repo: string
   defaultBranch: string
   secretsUrl: string
@@ -128,6 +128,7 @@ type AutoReviewSetup = { url: string; number: number; branch: string; secrets: A
 
 const AUTOMATIC_STATE: Record<AutoReviewStatus["state"], string> = {
   installed: "On: every pull request is reviewed",
+  "on-request": "On: when someone comments /vector review",
   pending: "A pull request that turns them on is open",
   available: "Off: one pull request turns them on",
   "read-only": "Off: needs write access to the repository",
@@ -757,6 +758,7 @@ export function PullRequests(props: {
 
   const clearProjectState = () => {
     discardReview()
+    setWorkflowSignIn(false)
     setList([])
     setSelected(undefined)
     setReview(undefined)
@@ -819,6 +821,8 @@ export function PullRequests(props: {
     })
     if (!current()) return
     setStatus(access)
+    // Signed in, by the device flow or a GitHub CLI login it fell back to: the next sign-in asks for "repo" again.
+    if (access?.authenticated) setWorkflowSignIn(false)
     if (!access?.authenticated || !projectPath) {
       setBusy(undefined)
       return
@@ -894,6 +898,7 @@ export function PullRequests(props: {
       if (!open) {
         projectRevision++
         refreshRequest++
+        setWorkflowSignIn(false)
         selectionRequests.invalidate()
         ciRequests.invalidate()
         discardReview()
@@ -932,23 +937,39 @@ export function PullRequests(props: {
 
   // Shows what setting up automatic reviews would do, with the workflow file it would add. Nothing reaches GitHub
   // until the user confirms.
-  const openAutomaticReviews = async () => {
+  const openAutomaticReviews = () => {
     if (reviewRun()) return
     selectionRequests.invalidate()
     setBusy(undefined)
     setSelected(undefined)
     setCreateOpen(false)
+    previewFor = undefined
     setPanel({ view: "automatic-reviews", chosen: undefined, preview: undefined, opened: undefined })
+  }
+
+  // The workflow file shown is built whenever the view can use one, not only when it opens: "Sign in again" or
+  // "Check again" can turn needs-scope into available, and a provider connected meanwhile gives the agent a model.
+  // previewFor is the model and keys last asked for, so a failed preview is not retried on every workspace poll.
+  let previewFor: string | undefined
+  createEffect(() => {
+    if (panel.view !== "automatic-reviews" || panel.automatic?.state !== "available") return
     const chosen = props.automaticReviewModel?.()
     const bridge = api()?.autoReview
-    if (!chosen || chosen.reason || !bridge || panel.automatic?.state !== "available") return
-    const workflow = await bridge.preview({ model: chosen.model, keys: chosen.keys }).catch((cause: unknown) => {
-      setError(pullRequestErrorMessage(cause))
-      return undefined
-    })
-    if (workflow && panel.view === "automatic-reviews")
-      setPanel({ chosen: { model: chosen.model, keys: chosen.keys }, preview: workflow })
-  }
+    if (!chosen || chosen.reason || !bridge) return
+    const key = JSON.stringify([chosen.model, chosen.keys])
+    if (key === previewFor) return
+    previewFor = key
+    void bridge
+      .preview({ model: chosen.model, keys: chosen.keys })
+      .catch((cause: unknown) => {
+        if (previewFor === key) setError(pullRequestErrorMessage(cause))
+        return undefined
+      })
+      .then((workflow) => {
+        if (workflow && previewFor === key && panel.view === "automatic-reviews")
+          setPanel({ chosen: { model: chosen.model, keys: chosen.keys }, preview: workflow })
+      })
+  })
 
   const setUpAutomaticReviews = async () => {
     const bridge = api()?.autoReview
@@ -1667,6 +1688,31 @@ export function PullRequests(props: {
             </section>
           )}
         </Match>
+        <Match when={panel.automatic?.state === "on-request" && panel.automatic}>
+          {(automatic) => (
+            <section class="mt-5 rounded-[10px] border border-[color:color-mix(in_srgb,var(--vx-green)_35%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-green)_8%,transparent)] px-4 py-3.5">
+              <div class="flex items-center gap-2 text-[13px] font-semibold text-[color:var(--vx-green)]">
+                <Icon name="check" />
+                Reviews run when someone asks
+              </div>
+              <p class="mt-1.5 text-[12px] leading-relaxed text-[color:var(--vx-text-subtle)]">
+                <CodeText
+                  text={`\`${automatic().defaultBranch}\` has \`.github/workflows/vector.yml\`, which reviews a pull request when someone comments \`/vector review\` on it. To review every pull request when it opens and on every push, run \`vector github install\` and choose to review every pull request.`}
+                />
+              </p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <a class={SECONDARY} href={automatic().url} target="_blank" rel="noreferrer">
+                  View the workflow
+                  <Icon name="external" />
+                </a>
+                <a class={GHOST} href={automatic().secretsUrl} target="_blank" rel="noreferrer">
+                  Actions secrets
+                  <Icon name="external" />
+                </a>
+              </div>
+            </section>
+          )}
+        </Match>
         <Match when={panel.automatic?.state === "pending" && panel.automatic}>
           {(automatic) => (
             <section class="mt-5 rounded-[10px] border border-[color:color-mix(in_srgb,var(--vx-amber)_35%,transparent)] bg-[color:color-mix(in_srgb,var(--vx-amber)_8%,transparent)] px-4 py-3.5">
@@ -2131,13 +2177,13 @@ export function PullRequests(props: {
                         "bg-[color:var(--vx-surface-raised)]": panel.view === "automatic-reviews",
                         "hover:enabled:bg-[color:var(--vx-surface)]": panel.view !== "automatic-reviews",
                       }}
-                      onClick={() => void openAutomaticReviews()}
+                      onClick={() => openAutomaticReviews()}
                     >
                       <span
                         class="size-1.5 shrink-0 rounded-full"
                         style={{
                           background:
-                            automatic().state === "installed"
+                            automatic().state === "installed" || automatic().state === "on-request"
                               ? "var(--vx-green)"
                               : automatic().state === "pending"
                                 ? "var(--vx-amber)"
