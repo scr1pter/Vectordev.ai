@@ -27,6 +27,7 @@ import { VercelDomains } from "./vercel/vercel-domains"
 import { VercelEnvironment } from "./vercel/vercel-environment"
 import { VercelLink } from "./vercel/vercel-link"
 import { VercelLogs } from "./vercel/vercel-logs"
+import { vercelApi } from "./vercel/vercel-api"
 import { publishOutcome } from "./vercel/vercel-model"
 import { VercelSettings } from "./vercel/vercel-settings"
 import "./cloud-console.css"
@@ -302,6 +303,9 @@ export function CloudConsole(props: {
   const [agentWorkspaces, setAgentWorkspaces] = createSignal<CloudAgentWorkspace[]>([])
   // Bumped after a publish so the Vercel deployment list reads the new one.
   const [vercelRefresh, setVercelRefresh] = createSignal(0)
+  // The linked Vercel project has never been deployed: Vercel makes its first
+  // deployment production whatever Vector asks for, so publishing confirms.
+  const [firstRelease, setFirstRelease] = createSignal(false)
   const environment = createCloudEnvironment({ api: () => api, notice: setNotice })
   const envVars = () => environment.state.variables
   const [database, setDatabase] = createSignal<CloudDatabaseConnection>(null)
@@ -394,7 +398,10 @@ export function CloudConsole(props: {
         items: await api.providers.resources(provider).catch(() => []),
       })),
     )
+    const vercel = nextLinks.some((item) => item.provider === "vercel") ? vercelApi() : undefined
+    const vercelStatus = vercel ? await vercel.status(projectPath).catch(() => undefined) : undefined
     if (!isCurrent()) return
+    setFirstRelease(Boolean(vercelStatus?.project && !vercelStatus.project.productionDeploymentId))
     setProviderResources(
       Object.fromEntries(resources.map((entry) => [entry.provider, entry.items])) as Partial<
         Record<CloudProviderId, CloudProviderResource[]>
@@ -463,6 +470,7 @@ export function CloudConsole(props: {
         runId,
       })
       setNotice(publishOutcome(result, override?.workspace?.name))
+      if (result.ok) setFirstRelease(false)
       if (result.deploymentId || result.providerDeploymentId) setVercelRefresh((value) => value + 1)
       if (api && (result.deploymentId || result.url)) {
         setDeployments(await api.deployments.list(props.projectPath, props.taskId).catch(() => deployments()))
@@ -1140,11 +1148,11 @@ export function CloudConsole(props: {
                   <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       class="cloud-button ml-auto"
-                      data-variant={deploymentEnvironment() === "production" ? "warning" : "primary"}
+                      data-variant={deploymentEnvironment() === "production" || firstRelease() ? "warning" : "primary"}
                       type="button"
                       disabled={!publish || publishing() || !vercelTarget()?.available || !providerLink("vercel")}
                       onClick={() =>
-                        deploymentEnvironment() === "production"
+                        deploymentEnvironment() === "production" || firstRelease()
                           ? requestConfirm("publish-production", () => void runPublish())
                           : void runPublish()
                       }
@@ -1152,12 +1160,20 @@ export function CloudConsole(props: {
                       {publishing()
                         ? "Publishing…"
                         : confirmId() === "publish-production"
-                          ? `Confirm: publish ${vercelProjectName()} to production on Vercel?`
+                          ? deploymentEnvironment() === "production"
+                            ? `Confirm: publish ${vercelProjectName()} to production on Vercel?`
+                            : `Confirm: ${vercelProjectName()}'s first deployment goes live in production?`
                           : deploymentEnvironment() === "production"
                             ? "Publish to production →"
                             : "Publish preview →"}
                     </button>
                   </div>
+                  <Show when={firstRelease()}>
+                    <p class="cloud-muted mt-2 text-[11px]">
+                      {vercelProjectName()} has never been deployed, and Vercel makes a project's first deployment
+                      production, whichever you choose. Release checks run after it is live.
+                    </p>
+                  </Show>
                   <Show when={publish && vercelTarget()}>
                     {(target) => (
                       <p class="cloud-muted mt-2 text-[11px]">
@@ -1265,9 +1281,20 @@ export function CloudConsole(props: {
                                 data-variant="primary"
                                 type="button"
                                 disabled={!publish || publishing()}
-                                onClick={() => void runPublish({ environment: "preview", workspace })}
+                                onClick={() =>
+                                  firstRelease()
+                                    ? requestConfirm(
+                                        `publish-${workspace.id}`,
+                                        () => void runPublish({ environment: "preview", workspace }),
+                                      )
+                                    : void runPublish({ environment: "preview", workspace })
+                                }
                               >
-                                {preview() ? "Redeploy preview" : "Publish preview"}
+                                {confirmId() === `publish-${workspace.id}`
+                                  ? "Confirm: first deployment goes to production?"
+                                  : preview()
+                                    ? "Redeploy preview"
+                                    : "Publish preview"}
                               </button>
                             </div>
                           )

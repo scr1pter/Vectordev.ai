@@ -24,7 +24,8 @@ import {
   type VercelBridgeOptions,
   type VercelCommandFields,
 } from "./cloud-vercel-bridge"
-import { autoLinkVercelProject } from "./cloud-vercel-projects"
+import { vercelLinkContext, type VercelFetch } from "./cloud-vercel-api"
+import { autoLinkVercelProject, readVercelProject } from "./cloud-vercel-projects"
 
 const MAX_BODY_BYTES = 64 * 1024
 
@@ -219,7 +220,7 @@ function configuredPublishTargets(input: CloudCommandInput) {
 // What a changing action would touch, worded for the permission prompt: the
 // provider, the provider-side project and the environment. A report that is not
 // ok means the action cannot run yet, so the tool relays it without asking.
-function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
+async function describeCloudAction(input: CloudCommandInput, workspace: CloudScope, request?: VercelFetch) {
   // Vector's local Supabase and publish descriptions are below; every Vercel
   // action, including the environment sync, describes itself.
   const scope = (provider: "Vercel" | "Supabase", project: string, environment: string, summary: string) => ({
@@ -229,6 +230,19 @@ function describeCloudAction(input: CloudCommandInput, workspace: CloudScope) {
   if (input.action === "publish") {
     const target = configuredPublishTargets(input)[0]
     if (!target) return publishSetup()
+    // Vercel makes a project's first deployment production whatever it was
+    // asked for, so that publish is described as the production release it is.
+    const project = await vercelLinkContext(input.projectPath)
+      .then((context) => readVercelProject(context, request))
+      .catch(() => undefined)
+    if (project && !project.productionDeploymentId) {
+      return scope(
+        "Vercel",
+        target.projectName,
+        "production",
+        `Publish ${workspace.directory !== workspace.projectPath ? "this agent workspace" : "this project"} to the Vercel project ${target.projectName}. It has never been deployed, and Vercel makes a project's first deployment production, so this goes live at its production address; release checks run after.`,
+      )
+    }
     if (workspace.directory !== workspace.projectPath) {
       return scope(
         "Vercel",
@@ -320,7 +334,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     if (input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)) {
       return describeVercelAction(input, scope, options.vercel)
     }
-    return describeCloudAction(input, scope)
+    return describeCloudAction(input, scope, options.vercel?.request)
   }
   if (
     VERCEL_COMMANDS.some((item) => item === input.command) ||
