@@ -13,21 +13,51 @@ export function providerUsable(id: string, provider?: Parameters<typeof Provider
   return ProviderPolicy.providerUsable(id, provider) || Boolean(activeOAuthApproval(id))
 }
 
-// Re-enabling these requires Vector-owned registrations and provider approval.
-export const CHATGPT_SIGN_IN = false
+// Sign in with ChatGPT is on by the owner's written decision of 10 October 2026, which accepts that
+// OpenAI has not authorized a Vector registration and may object or block it
+// (docs/vector/owner-actions/chatgpt.md). The others need Vector-owned registrations and provider approval.
+export const CHATGPT_SIGN_IN = true
 export const XAI_SIGN_IN = false
 export const POE_SIGN_IN = false
 export const DIGITALOCEAN_SIGN_IN = false
 export const GITLAB_SIGN_IN = false
 
-// A configured registration does not enable sign-in: provider approval must be
-// recorded and the release policy explicitly enabled before these flows ship.
-export const CHATGPT_CLIENT_ID = ""
-export function chatgptOAuthConfiguration(environment: NodeJS.ProcessEnv = process.env, enabled = CHATGPT_SIGN_IN) {
+// The Codex CLI's public client registration, the only one Vector has used for ChatGPT sign-in.
+// VECTOR_OPENAI_OAUTH_CLIENT_ID swaps in a registration OpenAI approves for Vector.
+export const CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+export const CHATGPT_SIGN_IN_UNAVAILABLE = "ChatGPT sign-in is temporarily unavailable; connect OpenAI with an API key."
+
+// The owner's remote off-switch, as last read from vectordev.ai (see provider-remote-policy.ts).
+// It starts on so a first run without the website still offers the sign-in.
+const remote = { chatgptSignIn: true }
+export function applyRemoteProviderPolicy(policy: { chatgptSignIn: boolean }) {
+  remote.chatgptSignIn = policy.chatgptSignIn
+}
+
+export function chatgptOAuthConfiguration(
+  environment: NodeJS.ProcessEnv = process.env,
+  enabled = CHATGPT_SIGN_IN && remote.chatgptSignIn,
+) {
   if (!enabled) return
   const clientId = environment.VECTOR_OPENAI_OAUTH_CLIENT_ID?.trim() || CHATGPT_CLIENT_ID
   if (!/^[A-Za-z0-9._-]{8,256}$/.test(clientId)) return
   return { clientId, origin: "https://auth.openai.com" }
+}
+
+// Sign-ins saved before 1.99.104 carry no registration stamp. They all came from the built-in client,
+// so they stay usable with it, and need a new sign-in once another registration is configured.
+export function chatgptCredentialMatches(
+  credential: { clientId?: string; enterpriseUrl?: string; metadata?: Readonly<Record<string, unknown>> },
+  configuration = chatgptOAuthConfiguration(),
+) {
+  const stamped = [
+    credential.clientId,
+    credential.enterpriseUrl,
+    credential.metadata?.oauth_client_id,
+    credential.metadata?.oauth_instance_url,
+  ].some((value) => value !== undefined)
+  if (!stamped) return configuration?.clientId === CHATGPT_CLIENT_ID
+  return ownedOAuthMatches(credential, configuration)
 }
 
 // Register a separate, least-privilege Vector application after Copilot partner approval.
@@ -193,7 +223,7 @@ export function providerCredentialAllowed(
   if (!providerEnabled(id) || (!providerAllowed(id) && !userDefined)) return false
   if (id.startsWith("github-copilot") && credential.type === "oauth")
     return ownedOAuthMatches(credential, copilotOAuthConfiguration())
-  if (id === "openai" && credential.type === "oauth") return ownedOAuthMatches(credential, chatgptOAuthConfiguration())
+  if (id === "openai" && credential.type === "oauth") return chatgptCredentialMatches(credential)
   if (id === "xai" && credential.type === "oauth") return ownedOAuthMatches(credential, xaiOAuthConfiguration())
   if (id === "digitalocean" && credential.type === "oauth")
     return ownedOAuthMatches(credential, digitalOceanOAuthConfiguration())

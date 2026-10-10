@@ -13,7 +13,8 @@
  * - the former product name, case-insensitive, in UTF-8 and both UTF-16 byte orders,
  *   except inside the precise allowlist below;
  * - retired upstream hosts;
- * - borrowed OAuth registrations and shared-key literals.
+ * - borrowed OAuth registrations and shared-key literals, except the ChatGPT sign-in client the
+ *   owner re-enabled on 10 October 2026.
  *
  * The former name is never written here. Like packages/core/src/flag/legacy.ts and the
  * upstream-free compliance test, it is derived from the MIT notice in THIRD_PARTY_NOTICES.md.
@@ -40,12 +41,13 @@ import { Readable } from "node:stream"
 const root = path.resolve(import.meta.dir, "..")
 // Bytes of surrounding text kept around each match: longer than any notice line.
 const CONTEXT = 256
+// The Codex CLI's public client for Sign in with ChatGPT is the one borrowed registration allowed: the owner
+// re-enabled it in writing on 10 October 2026 (docs/vector/owner-actions/chatgpt.md). Every other stays here.
 const credentials = [
   { label: "retired public model key assignment", value: 'apiKey:"public"' },
   { label: "retired public model key assignment", value: 'apiKey: "public"' },
   { label: "retired shared key hash", value: "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e" },
   { label: "borrowed GitHub OAuth registration", value: "Ov23li8tweQw6odWQebz" },
-  { label: "borrowed ChatGPT OAuth registration", value: "app_EMoamEEZ73f0CkXaXp7hrann" },
   { label: "borrowed OAuth registration", value: "b1a00492-073a-47ea-816f-4c329264a828" },
 ]
 // Bun's default trusted-package table is alphabetical; the entry sits between these

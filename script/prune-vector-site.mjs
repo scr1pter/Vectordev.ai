@@ -47,6 +47,9 @@ const keep = new Set([
   "changelog.json",
   // The model catalog every installed app refreshes from (packages/core/src/model-catalog.ts DEFAULT_MIRROR).
   "models",
+  // The owner's off-switch for Sign in with ChatGPT that every installed app reads
+  // (packages/core/src/provider-remote-policy.ts POLICY_URL, docs/vector/owner-actions/chatgpt.md).
+  "policy",
   "vector-logo.png",
   "vector-space-backdrop.png",
 ])

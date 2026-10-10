@@ -13,6 +13,7 @@ import { testEffect } from "../lib/effect"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { Config } from "@/config/config"
+import { applyRemoteProviderPolicy } from "@vectordevai/core/provider-policy"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([CrossSpawnSpawner.node, FSUtil.node])))
 
@@ -38,7 +39,7 @@ function providerAuthLayer(directory: string, plugins: string[]) {
 }
 
 describe("plugin.auth-override", () => {
-  for (const providerID of ["openai", "xai", "digitalocean", "gitlab"]) {
+  for (const providerID of ["xai", "digitalocean", "gitlab"]) {
     it.instance(`plugin OAuth for ${providerID} stays paused while API method indexes remain aligned`, () =>
       Effect.gen(function* () {
         const tmp = yield* TestInstance
@@ -73,6 +74,30 @@ describe("plugin.auth-override", () => {
       }),
     )
   }
+
+  it.instance("the owner's off-switch hides ChatGPT sign-in from provider auth and refuses its callback", () =>
+    Effect.gen(function* () {
+      const tmp = yield* TestInstance
+      yield* Effect.gen(function* () {
+        const auth = yield* ProviderAuth.Service
+        const openai = ProviderV2.ID.openai
+        expect((yield* auth.methods())[openai]?.map((method) => method.type)).toEqual(["oauth", "oauth", "api"])
+        applyRemoteProviderPolicy({ chatgptSignIn: false })
+        const paused = yield* Effect.gen(function* () {
+          const methods = (yield* auth.methods())[openai]
+          // Index 0 is now the API key, which starts no sign-in.
+          const authorization = yield* auth.authorize({ providerID: openai, method: 0 })
+          const callback = yield* auth.callback({ providerID: openai, method: 0 }).pipe(Effect.exit)
+          return { methods, authorization, callback }
+        }).pipe(Effect.ensuring(Effect.sync(() => applyRemoteProviderPolicy({ chatgptSignIn: true }))))
+        expect(paused.methods).toEqual([{ type: "api", label: "Manually enter API Key" }])
+        expect(paused.authorization).toBeUndefined()
+        expect(Exit.isFailure(paused.callback)).toBe(true)
+        if (Exit.isFailure(paused.callback)) expect(Cause.pretty(paused.callback.cause)).toContain("paused in Vector")
+        expect((yield* auth.methods())[openai]).toHaveLength(3)
+      }).pipe(Effect.provide(providerAuthLayer(tmp.directory, [])))
+    }),
+  )
 
   it.instance(
     "user plugin cannot re-enable paused github-copilot authentication",

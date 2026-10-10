@@ -1,4 +1,5 @@
-import { providerEnabled, providerOAuthAllowed } from "@vectordevai/core/provider-policy"
+import { CHATGPT_SIGN_IN_UNAVAILABLE, providerEnabled, providerOAuthAllowed } from "@vectordevai/core/provider-policy"
+import { ProviderRemotePolicy } from "@vectordevai/core/provider-remote-policy"
 import { pluginOAuthAllowed } from "../plugin/oauth"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import type { AuthOAuthResult, Hooks } from "@vectordevai/plugin"
@@ -187,6 +188,12 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
         })
       }
       if (method.type !== "oauth") return
+      if (input.providerID === ProviderV2.ID.openai) {
+        // The owner can switch ChatGPT sign-in off from vectordev.ai; read the switch before opening a browser.
+        yield* Effect.promise(() => ProviderRemotePolicy.check(true))
+        if (!pluginOAuthAllowed(hooks[input.providerID]))
+          return yield* new ValidationFailed({ field: "providerID", message: CHATGPT_SIGN_IN_UNAVAILABLE })
+      }
 
       if (method.prompts && input.inputs) {
         for (const prompt of method.prompts) {

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { Provider } from "../../src/provider/provider"
+import os from "os"
+import {
+  CHATGPT_CLIENT_ID,
+  CHATGPT_SIGN_IN_UNAVAILABLE,
+  applyRemoteProviderPolicy,
+} from "@vectordevai/core/provider-policy"
 import {
   CodexAuthPlugin,
   parseJwtClaims,
@@ -16,34 +21,40 @@ function createTestJwt(payload: object): string {
 }
 
 describe("plugin.codex", () => {
-  test("paused ChatGPT sign-in preserves API catalog models and costs", async () => {
+  test("a ChatGPT sign-in keeps every GPT-5 and GPT-6 model at no cost and drops older OpenAI models", async () => {
     const hooks = await CodexAuthPlugin({} as never)
-    const provider = Provider.fromModelCatalogProvider({
-      id: "openai",
-      name: "OpenAI",
-      env: [],
-      npm: "@ai-sdk/openai",
-      api: "https://api.openai.com/v1",
-      models: {
-        "gpt-5.5": {
-          id: "gpt-5.5",
-          name: "GPT-5.5",
-          release_date: "2026-01-01",
-          attachment: false,
-          reasoning: true,
-          temperature: false,
-          tool_call: true,
-          cost: { input: 1, output: 2 },
-          limit: { context: 1_050_000, output: 128_000 },
-        },
-      },
-    })
-    const models = await hooks.provider!.models!(provider, {
-      auth: { type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 },
-    })
-    expect(models).toBe(provider.models)
-    expect(models["gpt-5.5"].cost.input).toBe(1)
-    expect(models["gpt-5.5"].limit.context).toBe(1_050_000)
+    const ids = [
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6.1-sol",
+      "gpt-5.6-sol",
+      "gpt-5.5",
+      "codex-mini-latest",
+      "gpt-4o",
+      "o3",
+    ]
+    const provider = {
+      models: Object.fromEntries(
+        ids.map((id) => [
+          id,
+          {
+            id,
+            api: { id },
+            cost: { input: 1, output: 2, cache: { read: 0, write: 0 } },
+            limit: { context: 1_050_000, output: 128_000 },
+          },
+        ]),
+      ),
+    }
+    const models = await hooks.provider!.models!(provider as never, { auth: { type: "oauth" } } as never)
+    expect(Object.keys(models).sort()).toEqual(
+      ["codex-mini-latest", "gpt-5.5", "gpt-5.6-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"].sort(),
+    )
+    expect(models["gpt-6-astra"].cost.input).toBe(0)
+    // The Codex backend's 272K window, not the API's 1,050,000.
+    expect(models["gpt-6-astra"].limit).toEqual({ context: 400_000, input: 272_000, output: 128_000 })
+    expect(models["gpt-6.1-sol"].limit.input).toBe(272_000)
+    expect(models["codex-mini-latest"].limit.context).toBe(1_050_000)
   })
 
   test("escapes provider errors in callback HTML", () => {
@@ -180,34 +191,172 @@ describe("plugin.codex", () => {
     await enabled.dispose?.()
   })
 
-  test("offers API keys and never refreshes or routes a cached ChatGPT credential", async () => {
-    const requests: string[] = []
+  test("offers ChatGPT sign-in alongside API keys and uses a cached ChatGPT credential", async () => {
+    const hooks = await CodexAuthPlugin({} as never)
+    expect(hooks.auth?.methods.map((method) => method.label)).toEqual([
+      "ChatGPT Pro/Plus (browser)",
+      "ChatGPT Pro/Plus (headless)",
+      "Manually enter API Key",
+    ])
+    const options = await hooks.auth!.loader!(
+      async () => ({
+        type: "oauth",
+        refresh: "placeholder",
+        access: "placeholder",
+        expires: 0,
+      }),
+      { models: {} } as never,
+    )
+    expect(Object.keys(options)).not.toHaveLength(0)
+  })
+
+  test("refreshes a saved ChatGPT sign-in as Vector and stamps the registration it came from", async () => {
+    const requests: Array<{ path: string; body: string; authorization: string | null }> = []
     using server = Bun.serve({
       port: 0,
       async fetch(request) {
-        requests.push(await request.text())
-        return Response.json({ access_token: "test-access", refresh_token: "test-refresh", expires_in: 3600 })
+        const path = new URL(request.url).pathname
+        requests.push({ path, body: await request.text(), authorization: request.headers.get("authorization") })
+        if (path === "/oauth/token")
+          return Response.json({ access_token: "test-access", refresh_token: "test-refresh", expires_in: 3600 })
+        return Response.json({ ok: true })
       },
     })
-    const hooks = await CodexAuthPlugin({} as never, {
-      issuer: server.url.toString(),
-      codexApiEndpoint: new URL("/responses", server.url).href,
-      experimentalWebSockets: true,
+    const saved: unknown[] = []
+    const hooks = await CodexAuthPlugin(
+      { client: { auth: { set: async (input: unknown) => saved.push(input) } } } as never,
+      { issuer: server.url.toString(), codexApiEndpoint: new URL("/responses", server.url).href },
+    )
+    // Saved before 1.99.104, so it carries no registration stamp.
+    const options = await hooks.auth!.loader!(
+      async () => ({ type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 }),
+      { models: {} } as never,
+    )
+    const response = await (options.fetch as typeof fetch)("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: "Bearer placeholder" },
+      body: "{}",
     })
-    expect(hooks.auth?.methods.map((method) => method.label)).toEqual(["Manually enter API Key"])
-    for (const expires of [0, Date.now() + 3_600_000]) {
-      const options = await hooks.auth!.loader!(
-        async () => ({
+    expect(response.ok).toBe(true)
+    expect(requests.map((request) => request.path)).toEqual(["/oauth/token", "/responses"])
+    expect(new URLSearchParams(requests[0].body).get("client_id")).toBe(CHATGPT_CLIENT_ID)
+    expect(requests[1].authorization).toBe("Bearer test-access")
+    expect(saved).toEqual([
+      {
+        path: { id: "openai" },
+        body: expect.objectContaining({
           type: "oauth",
-          refresh: "placeholder",
-          access: "placeholder",
-          expires,
+          access: "test-access",
+          refresh: "test-refresh",
+          clientId: CHATGPT_CLIENT_ID,
+          enterpriseUrl: "https://auth.openai.com",
         }),
-        { models: {} } as never,
-      )
-      expect(options).toEqual({})
+      },
+    ])
+    const headers = { headers: {} as Record<string, string> }
+    await hooks["chat.headers"]!({ model: { providerID: "openai" }, sessionID: "session" } as never, headers as never)
+    expect(headers.headers.originator).toBe("vector")
+    expect(headers.headers["User-Agent"]).toStartWith("vector/")
+  })
+
+  test("the owner's off-switch hides ChatGPT sign-in, refuses a new one and stops a saved one", async () => {
+    const requests: string[] = []
+    using server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        requests.push(request.url)
+        return Response.json({})
+      },
+    })
+    const hooks = await CodexAuthPlugin({} as never, { issuer: server.url.toString() })
+    // Picked from a list read before the owner switched sign-in off.
+    const browser = hooks.auth!.methods[0]
+    const provider = { models: { "gpt-5.5": { id: "gpt-5.5", api: { id: "gpt-5.5" } } } }
+    const oauth = { type: "oauth" as const, refresh: "placeholder", access: "placeholder", expires: 0 }
+    applyRemoteProviderPolicy({ chatgptSignIn: false })
+    try {
+      expect(hooks.auth!.methods.map((method) => method.label)).toEqual(["Manually enter API Key"])
+      if (browser.type !== "oauth") throw new Error("expected the browser OAuth method")
+      await expect(browser.authorize()).rejects.toThrow(CHATGPT_SIGN_IN_UNAVAILABLE)
+      expect(await hooks.auth!.loader!(async () => oauth, { models: {} } as never)).toEqual({})
+      expect(await hooks.provider!.models!(provider as never, { auth: oauth } as never)).toBe(provider.models as never)
+    } finally {
+      applyRemoteProviderPolicy({ chatgptSignIn: true })
     }
+    expect(hooks.auth!.methods).toHaveLength(3)
     expect(requests).toEqual([])
-    await hooks.dispose?.()
+  })
+
+  describe("browser sign-in callback server", () => {
+    const start = async (options: Parameters<typeof CodexAuthPlugin>[1] = {}) => {
+      const hooks = await CodexAuthPlugin({} as never, options)
+      const method = hooks.auth!.methods[0]
+      if (method.type !== "oauth") throw new Error("expected the browser OAuth method")
+      const authorization = await method.authorize()
+      if (authorization.method !== "auto") throw new Error("expected an automatic callback")
+      return {
+        state: new URL(authorization.url).searchParams.get("state")!,
+        // Settle into a value right away, as the sign-in dialog awaits it, so a rejection is never unhandled.
+        failure: authorization.callback().then(
+          () => undefined,
+          (error: Error) => error.message,
+        ),
+      }
+    }
+    const reachable = (host: string) =>
+      fetch(`http://${host}:1455/`, { signal: AbortSignal.timeout(2_000) }).then(
+        () => true,
+        () => false,
+      )
+
+    test("listens on loopback only and closes after a provider error", async () => {
+      const attempt = await start()
+      expect(await reachable("127.0.0.1")).toBe(true)
+      // A wildcard listen (no host) binds "::" dual-stack, which answers on IPv6 loopback too. This holds
+      // on any machine, unlike the LAN check below, which needs a non-internal IPv4 address.
+      expect(await reachable("[::1]")).toBe(false)
+      const lan = Object.values(os.networkInterfaces())
+        .flatMap((items) => items ?? [])
+        .find((item) => item.family === "IPv4" && !item.internal)
+      if (lan) expect(await reachable(lan.address)).toBe(false)
+
+      const response = await fetch(
+        `http://127.0.0.1:1455/auth/callback?error=access_denied&state=${encodeURIComponent(attempt.state)}`,
+      )
+      expect(response.status).toBe(200)
+      expect(await attempt.failure).toBe("access_denied")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
+
+    test("ignores cancel and error requests that do not carry the sign-in state", async () => {
+      const attempt = await start()
+
+      expect((await fetch("http://127.0.0.1:1455/cancel")).status).toBe(400)
+      expect((await fetch("http://127.0.0.1:1455/auth/callback?error=access_denied&state=wrong")).status).toBe(400)
+      expect((await fetch("http://127.0.0.1:1455/auth/callback?code=stolen")).status).toBe(400)
+      expect(await Promise.race([attempt.failure, Bun.sleep(50).then(() => "pending")])).toBe("pending")
+
+      expect((await fetch(`http://127.0.0.1:1455/cancel?state=${encodeURIComponent(attempt.state)}`)).status).toBe(200)
+      expect(await attempt.failure).toBe("Login cancelled")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
+
+    test("closes after a sign-in times out", async () => {
+      const attempt = await start({ callbackTimeout: 50 })
+      expect(await reachable("127.0.0.1")).toBe(true)
+      expect(await attempt.failure).toBe("OAuth callback timeout - authorization took too long")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
+
+    test("a newer sign-in replaces an unfinished one and keeps the server up", async () => {
+      const first = await start()
+      const second = await start()
+      expect(await first.failure).toBe("Login cancelled")
+      expect(await reachable("127.0.0.1")).toBe(true)
+
+      await fetch(`http://127.0.0.1:1455/cancel?state=${encodeURIComponent(second.state)}`)
+      expect(await second.failure).toBe("Login cancelled")
+      expect(await reachable("127.0.0.1")).toBe(false)
+    })
   })
 })

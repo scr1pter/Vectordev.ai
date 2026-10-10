@@ -1,4 +1,9 @@
-import { chatgptOAuthConfiguration, ownedOAuthMatches } from "@vectordevai/core/provider-policy"
+import {
+  CHATGPT_SIGN_IN_UNAVAILABLE,
+  chatgptCredentialMatches,
+  chatgptOAuthConfiguration,
+} from "@vectordevai/core/provider-policy"
+import { ProviderRemotePolicy } from "@vectordevai/core/provider-remote-policy"
 import type { Hooks, PluginInput } from "@vectordevai/plugin"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { OAUTH_DUMMY_KEY } from "../../auth"
@@ -8,8 +13,6 @@ import { createServer } from "http"
 import { OpenAIWebSocketPool } from "./ws-pool"
 import { OauthCallbackPage } from "@vectordevai/core/oauth/page"
 
-const configuration = chatgptOAuthConfiguration()
-const CLIENT_ID = configuration?.clientId ?? ""
 const ISSUER = "https://auth.openai.com"
 const CODEX_API_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 const OAUTH_PORT = 1455
@@ -75,10 +78,18 @@ export function extractAccountId(tokens: TokenResponse): string | undefined {
   return undefined
 }
 
-function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string): string {
+// The owner can switch ChatGPT sign-in off from vectordev.ai, so every new sign-in reads the switch first.
+async function signInConfiguration() {
+  await ProviderRemotePolicy.check(true)
+  const app = chatgptOAuthConfiguration()
+  if (!app) throw new Error(CHATGPT_SIGN_IN_UNAVAILABLE)
+  return app
+}
+
+function buildAuthorizeUrl(clientId: string, redirectUri: string, pkce: PkceCodes, state: string): string {
   const params = new URLSearchParams({
     response_type: "code",
-    client_id: CLIENT_ID,
+    client_id: clientId,
     redirect_uri: redirectUri,
     scope: "openid profile email offline_access",
     code_challenge: pkce.challenge,
@@ -106,8 +117,12 @@ interface CodexAuthPluginOptions {
   callbackTimeout?: number
 }
 
-async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: PkceCodes): Promise<TokenResponse> {
-  if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
+async function exchangeCodeForTokens(
+  clientId: string,
+  code: string,
+  redirectUri: string,
+  pkce: PkceCodes,
+): Promise<TokenResponse> {
   const response = await fetch(`${ISSUER}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -115,7 +130,7 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
       grant_type: "authorization_code",
       code,
       redirect_uri: redirectUri,
-      client_id: CLIENT_ID,
+      client_id: clientId,
       code_verifier: pkce.verifier,
     }).toString(),
   })
@@ -125,15 +140,14 @@ async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: Pk
   return response.json()
 }
 
-async function refreshAccessToken(refreshToken: string, issuer = ISSUER): Promise<TokenResponse> {
-  if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
+async function refreshAccessToken(clientId: string, refreshToken: string, issuer = ISSUER): Promise<TokenResponse> {
   const response = await fetch(`${issuer}/oauth/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refreshToken,
-      client_id: CLIENT_ID,
+      client_id: clientId,
     }).toString(),
   })
   if (!response.ok) {
@@ -146,6 +160,7 @@ async function refreshAccessToken(refreshToken: string, issuer = ISSUER): Promis
 export const renderOAuthError = (error: string) => OauthCallbackPage.error(error, { provider: "ChatGPT" })
 
 interface PendingOAuth {
+  clientId: string
   pkce: PkceCodes
   state: string
   resolve: (tokens: TokenResponse) => void
@@ -205,7 +220,7 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
     res.end(OauthCallbackPage.success({ provider: "ChatGPT" }))
     releaseOAuth(current)
-    exchangeCodeForTokens(code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
+    exchangeCodeForTokens(current.clientId, code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
       .then((tokens) => current.resolve(tokens))
       .catch((err) => current.reject(err))
   })
@@ -239,9 +254,10 @@ function releaseOAuth(entry: PendingOAuth) {
   if (!pendingOAuth) stopOAuthServer()
 }
 
-function waitForOAuthCallback(pkce: PkceCodes, state: string, wait: number): Promise<TokenResponse> {
+function waitForOAuthCallback(clientId: string, pkce: PkceCodes, state: string, wait: number): Promise<TokenResponse> {
   return new Promise((resolve, reject) => {
     const entry: PendingOAuth = {
+      clientId,
       pkce,
       state,
       resolve: (tokens) => {
@@ -281,6 +297,141 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
   const codexApiEndpoint = options.codexApiEndpoint ?? CODEX_API_ENDPOINT
   let websocketFetchInstalled = false
   const websocketFetches: Array<ReturnType<typeof OpenAIWebSocketPool.createWebSocketFetch>> = []
+  // Start from the last off-switch value seen, then read the current one in the background.
+  await ProviderRemotePolicy.restore()
+  void ProviderRemotePolicy.check()
+  const methods = [
+    {
+      label: "ChatGPT Pro/Plus (browser)",
+      type: "oauth",
+      authorize: async () => {
+        const app = await signInConfiguration()
+        const { redirectUri } = await startOAuthServer()
+        const pkce = await generatePKCE()
+        const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
+        const authUrl = buildAuthorizeUrl(app.clientId, redirectUri, pkce, state)
+
+        const callbackPromise = waitForOAuthCallback(
+          app.clientId,
+          pkce,
+          state,
+          options.callbackTimeout ?? 5 * 60 * 1000,
+        )
+        // The client may never ask for the result (it closed the dialog), so a timeout or a
+        // newer sign-in rejecting this one must not surface as an unhandled rejection.
+        callbackPromise.catch(() => undefined)
+
+        return {
+          url: authUrl,
+          instructions: "Complete authorization in your browser. This window will close automatically.",
+          method: "auto" as const,
+          callback: async () => {
+            const tokens = await callbackPromise
+            const accountId = extractAccountId(tokens)
+            return {
+              type: "success" as const,
+              refresh: tokens.refresh_token,
+              access: tokens.access_token,
+              expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+              clientId: app.clientId,
+              enterpriseUrl: ISSUER,
+              accountId,
+            }
+          },
+        }
+      },
+    },
+    {
+      label: "ChatGPT Pro/Plus (headless)",
+      type: "oauth",
+      authorize: async () => {
+        const app = await signInConfiguration()
+        const deviceResponse = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": `vector/${InstallationVersion}`,
+          },
+          body: JSON.stringify({ client_id: app.clientId }),
+        })
+
+        if (!deviceResponse.ok) throw new Error("Failed to initiate device authorization")
+
+        const deviceData = (await deviceResponse.json()) as {
+          device_auth_id: string
+          user_code: string
+          interval: string
+        }
+        const interval = Math.max(parseInt(deviceData.interval) || 5, 1) * 1000
+
+        return {
+          url: `${ISSUER}/codex/device`,
+          instructions: `Enter code: ${deviceData.user_code}`,
+          method: "auto" as const,
+          async callback() {
+            while (true) {
+              const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "User-Agent": `vector/${InstallationVersion}`,
+                },
+                body: JSON.stringify({
+                  device_auth_id: deviceData.device_auth_id,
+                  user_code: deviceData.user_code,
+                }),
+              })
+
+              if (response.ok) {
+                const data = (await response.json()) as {
+                  authorization_code: string
+                  code_verifier: string
+                }
+
+                const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                  body: new URLSearchParams({
+                    grant_type: "authorization_code",
+                    code: data.authorization_code,
+                    redirect_uri: `${ISSUER}/deviceauth/callback`,
+                    client_id: app.clientId,
+                    code_verifier: data.code_verifier,
+                  }).toString(),
+                })
+
+                if (!tokenResponse.ok) {
+                  throw new Error(`Token exchange failed: ${tokenResponse.status}`)
+                }
+
+                const tokens: TokenResponse = await tokenResponse.json()
+
+                return {
+                  type: "success" as const,
+                  refresh: tokens.refresh_token,
+                  access: tokens.access_token,
+                  expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                  clientId: app.clientId,
+                  enterpriseUrl: ISSUER,
+                  accountId: extractAccountId(tokens),
+                }
+              }
+
+              if (response.status !== 403 && response.status !== 404) {
+                return { type: "failed" as const }
+              }
+
+              await sleep(interval + OAUTH_POLLING_SAFETY_MARGIN_MS)
+            }
+          },
+        }
+      },
+    },
+    {
+      label: "Manually enter API Key",
+      type: "api",
+    },
+  ] satisfies NonNullable<Hooks["auth"]>["methods"]
 
   return {
     async dispose() {
@@ -294,7 +445,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
     provider: {
       id: "openai",
       async models(provider, ctx) {
-        if (ctx.auth?.type !== "oauth" || !ownedOAuthMatches(ctx.auth, configuration)) return provider.models
+        if (ctx.auth?.type !== "oauth" || !chatgptCredentialMatches(ctx.auth)) return provider.models
 
         return Object.fromEntries(
           Object.entries(provider.models)
@@ -332,7 +483,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       provider: "openai",
       async loader(getAuth) {
         const auth = await getAuth()
-        if (auth.type === "oauth" && !ownedOAuthMatches(auth, configuration)) return {}
+        if (auth.type === "oauth" && !chatgptCredentialMatches(auth)) return {}
         const websocketFetch = options.experimentalWebSockets
           ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch })
           : undefined
@@ -367,16 +518,14 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
             const currentAuth = await getAuth()
             if (currentAuth.type !== "oauth")
               return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
-            if (!ownedOAuthMatches(currentAuth, configuration))
-              throw new Error(
-                "Built-in ChatGPT sign-in is unavailable. Use an OpenAI API key or the external Codex runtime.",
-              )
+            const app = chatgptOAuthConfiguration()
+            if (!app || !chatgptCredentialMatches(currentAuth, app)) throw new Error(CHATGPT_SIGN_IN_UNAVAILABLE)
 
             const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
 
             if (!currentAuth.access || currentAuth.expires < Date.now()) {
               if (!refreshPromise) {
-                refreshPromise = refreshAccessToken(currentAuth.refresh, issuer)
+                refreshPromise = refreshAccessToken(app.clientId, currentAuth.refresh, issuer)
                   .then(async (tokens) => {
                     const accountId = extractAccountId(tokens) || authWithAccount.accountId
                     await input.client.auth.set({
@@ -386,7 +535,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                         refresh: tokens.refresh_token,
                         access: tokens.access_token,
                         expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                        clientId: CLIENT_ID,
+                        clientId: app.clientId,
                         enterpriseUrl: ISSUER,
                         ...(accountId && { accountId }),
                       },
@@ -443,135 +592,10 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           },
         }
       },
-      methods: (
-        [
-          {
-            label: "ChatGPT Pro/Plus (browser)",
-            type: "oauth",
-            authorize: async () => {
-              if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
-              const { redirectUri } = await startOAuthServer()
-              const pkce = await generatePKCE()
-              const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)).buffer)
-              const authUrl = buildAuthorizeUrl(redirectUri, pkce, state)
-
-              const callbackPromise = waitForOAuthCallback(pkce, state, options.callbackTimeout ?? 5 * 60 * 1000)
-              // The client may never ask for the result (it closed the dialog), so a timeout or a
-              // newer sign-in rejecting this one must not surface as an unhandled rejection.
-              callbackPromise.catch(() => undefined)
-
-              return {
-                url: authUrl,
-                instructions: "Complete authorization in your browser. This window will close automatically.",
-                method: "auto" as const,
-                callback: async () => {
-                  const tokens = await callbackPromise
-                  const accountId = extractAccountId(tokens)
-                  return {
-                    type: "success" as const,
-                    refresh: tokens.refresh_token,
-                    access: tokens.access_token,
-                    expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                    clientId: CLIENT_ID,
-                    enterpriseUrl: ISSUER,
-                    accountId,
-                  }
-                },
-              }
-            },
-          },
-          {
-            label: "ChatGPT Pro/Plus (headless)",
-            type: "oauth",
-            authorize: async () => {
-              if (!configuration) throw new Error("Built-in ChatGPT sign-in is unavailable")
-              const deviceResponse = await fetch(`${ISSUER}/api/accounts/deviceauth/usercode`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "User-Agent": `vector/${InstallationVersion}`,
-                },
-                body: JSON.stringify({ client_id: CLIENT_ID }),
-              })
-
-              if (!deviceResponse.ok) throw new Error("Failed to initiate device authorization")
-
-              const deviceData = (await deviceResponse.json()) as {
-                device_auth_id: string
-                user_code: string
-                interval: string
-              }
-              const interval = Math.max(parseInt(deviceData.interval) || 5, 1) * 1000
-
-              return {
-                url: `${ISSUER}/codex/device`,
-                instructions: `Enter code: ${deviceData.user_code}`,
-                method: "auto" as const,
-                async callback() {
-                  while (true) {
-                    const response = await fetch(`${ISSUER}/api/accounts/deviceauth/token`, {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        "User-Agent": `vector/${InstallationVersion}`,
-                      },
-                      body: JSON.stringify({
-                        device_auth_id: deviceData.device_auth_id,
-                        user_code: deviceData.user_code,
-                      }),
-                    })
-
-                    if (response.ok) {
-                      const data = (await response.json()) as {
-                        authorization_code: string
-                        code_verifier: string
-                      }
-
-                      const tokenResponse = await fetch(`${ISSUER}/oauth/token`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                        body: new URLSearchParams({
-                          grant_type: "authorization_code",
-                          code: data.authorization_code,
-                          redirect_uri: `${ISSUER}/deviceauth/callback`,
-                          client_id: CLIENT_ID,
-                          code_verifier: data.code_verifier,
-                        }).toString(),
-                      })
-
-                      if (!tokenResponse.ok) {
-                        throw new Error(`Token exchange failed: ${tokenResponse.status}`)
-                      }
-
-                      const tokens: TokenResponse = await tokenResponse.json()
-
-                      return {
-                        type: "success" as const,
-                        refresh: tokens.refresh_token,
-                        access: tokens.access_token,
-                        expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                        clientId: CLIENT_ID,
-                        enterpriseUrl: ISSUER,
-                        accountId: extractAccountId(tokens),
-                      }
-                    }
-
-                    if (response.status !== 403 && response.status !== 404) {
-                      return { type: "failed" as const }
-                    }
-
-                    await sleep(interval + OAUTH_POLLING_SAFETY_MARGIN_MS)
-                  }
-                },
-              }
-            },
-          },
-          {
-            label: "Manually enter API Key",
-            type: "api",
-          },
-        ] satisfies NonNullable<Hooks["auth"]>["methods"]
-      ).filter((method) => configuration || method.type !== "oauth"),
+      // Read on every listing, so the owner's off-switch hides ChatGPT sign-in without a restart.
+      get methods() {
+        return methods.filter((method) => method.type !== "oauth" || chatgptOAuthConfiguration())
+      },
     },
     "chat.headers": async (input, output) => {
       if (input.model.providerID !== "openai") return
