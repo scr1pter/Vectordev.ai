@@ -773,7 +773,11 @@ describe("model plan HTTP inference", () => {
       max_tokens: 1,
       response_format: {
         type: "json_schema",
-        json_schema: { name: "fixture", schema: { type: "object", description: "x".repeat(model.contextLength) } },
+        json_schema: {
+          name: "fixture",
+          // Four bytes of request count as one token.
+          schema: { type: "object", description: "x".repeat(model.contextLength * 4) },
+        },
       },
     })
     expect(response.status).toBe(400)
