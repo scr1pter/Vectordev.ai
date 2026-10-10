@@ -39,9 +39,9 @@ type Dependencies = {
 
 /**
  * Reports a random install ID, the account token when signed in, the app version, OS, CPU architecture, how many
- * sessions and subagent sessions were active in the current UTC day, and the usage report behind Settings > Usage &
- * streaks (token totals, cost, models and their token shares, effort levels, chats, streaks, task timing). Nothing those
- * sessions contain is sent.
+ * sessions and subagent sessions were active in the current UTC day, and, when signed in, the usage report behind
+ * Settings > Usage & streaks (token totals, cost, models and their token shares, effort levels, chats, streaks, task
+ * timing). Nothing those sessions contain is sent.
  *
  * The first check-in of a day marks the install active; later ones send again whenever a count has gone up or the
  * report shows more tokens or model responses, and the server keeps the largest values it receives for an install and
@@ -61,7 +61,9 @@ export function createUsageCheckin(deps: Dependencies) {
       Option.filter((value) => value.day === day),
     )
     const counted = await countSessions(deps, Math.floor(now / DAY) * DAY).catch(() => undefined)
-    const usage = await readUsage(deps).catch(() => undefined)
+    const token = await deps.token().catch(() => undefined)
+    // The server keeps model use only from a signed-in install, so a signed-out one neither reads nor sends it.
+    const usage = token ? await readUsage(deps).catch(() => undefined) : undefined
     // A failed count still reports the install as active today, once, with nothing counted. The next count that works
     // is higher than those zeros whenever anything was used, so it replaces them. Later in the day a failed count
     // repeats what was accepted, which the server already keeps.
@@ -81,7 +83,6 @@ export function createUsageCheckin(deps: Dependencies) {
         (usage.lifetimeTokens <= (sent.value.tokens ?? -1) && usage.modelResponses <= (sent.value.responses ?? -1)))
     )
       return false
-    const token = await deps.token().catch(() => undefined)
     // Switching sharing off while the sessions were being counted still stops this check-in.
     if (!deps.enabled()) return false
     const response = await deps

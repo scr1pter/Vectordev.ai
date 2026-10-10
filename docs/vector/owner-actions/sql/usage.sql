@@ -200,7 +200,8 @@ grant execute on function public.vector_usage_report_valid(jsonb) to service_rol
 
 -- One row per install (desktop) or account (CLI) per UTC day. A repeated check-in on the same day
 -- never lowers a count, keeps the usage report with the most lifetime tokens, and an account stays
--- attached once known. The CLI is keyed by its account, so one person's terminals on several computers
+-- attached once known. A usage report is kept only with an account that exists: anyone can invent an
+-- install ID, and these totals reach the dashboard's share links. The CLI is keyed by its account, so one person's terminals on several computers
 -- are one row a day. Rows older than 400 days (about 13 months) are removed here, so retention needs no
 -- separate job.
 -- SECURITY DEFINER lets the server's service role check auth.users without reading that table.
@@ -268,6 +269,9 @@ begin
   else
     usage_key := 'install:' || (request->>'installId');
   end if;
+  if usage_account is null then
+    usage_report := null;
+  end if;
 
   delete from public.vector_usage_daily where day < usage_day - 400;
   delete from public.vector_usage_tokens where day < usage_day - 400;
@@ -295,7 +299,7 @@ begin
     updated_at = pg_catalog.now();
 
   -- Days outside retention, or more than a day ahead of UTC (a local calendar day can be), are skipped.
-  if request ? 'usage' then
+  if usage_report is not null then
     insert into public.vector_usage_tokens as existing (key, client, day, account_id, tokens, cost, tasks)
     select usage_key, usage_client, (entry->>'date')::date, usage_account,
       (entry->'tokens')::numeric::bigint, (entry->'cost')::numeric, (entry->'tasks')::numeric::integer
@@ -371,7 +375,8 @@ grant execute on function public.vector_usage_forget(uuid) to service_role;
 -- row of that install or CLI was signed in, otherwise the install, so a signed-in desktop and CLI count
 -- once. Weeks are ISO weeks starting Monday (UTC). Model use adds up the latest usage report of each
 -- install and CLI account (the desktop app and the CLI keep separate histories, so nothing is counted
--- twice). Nothing returned identifies an account or install.
+-- twice). Reports are kept only with an account, so the people behind a model or effort level are
+-- accounts. Nothing returned identifies an account or install.
 create or replace function public.vector_usage_summary(request jsonb)
 returns jsonb language plpgsql stable security definer set search_path = public, pg_temp as $$
 declare

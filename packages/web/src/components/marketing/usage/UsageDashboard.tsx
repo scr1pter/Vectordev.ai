@@ -1104,7 +1104,7 @@ function ShareLinks(props: { authorize: () => Promise<string | undefined> }) {
           <h2 id="usage-shares-title">Share a read-only link</h2>
           <p>
             For investors and partners: these aggregate numbers, read-only, with no names, emails or accounts. Models
-            and custom effort levels that fewer than three people use are left off. Only a fingerprint of each link is
+            and custom effort levels that fewer than three accounts use are left off. Only a fingerprint of each link is
             kept, so copy it when you make it.
           </p>
         </div>

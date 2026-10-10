@@ -31,7 +31,14 @@ const SHARE_TOKEN = /^[A-Za-z0-9_-]{43}$/
 // Models and custom effort levels used by fewer people than this are left off a shared link: a custom provider,
 // model or effort name could point at one person or company. Vector's own effort levels name nobody.
 const SHARE_MINIMUM_PEOPLE = 3
-const BUILT_IN_EFFORTS = new Set(["default", "light", "balanced", "extra", "max"])
+// Vector's own effort levels, as the engine labels them. Their labels come from here, never from a report.
+const BUILT_IN_EFFORTS = new Map([
+  ["default", "Default"],
+  ["light", "Light"],
+  ["balanced", "Balanced"],
+  ["extra", "Extra"],
+  ["max", "Max"],
+])
 
 const Version = Schema.String.check(Schema.isMaxLength(32), Schema.isPattern(VERSION))
 const Count = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000 }))
@@ -156,12 +163,15 @@ export function forgetUsage(accountId: string, fetcher: typeof fetch = fetch) {
 export async function usageSummary(fetcher: typeof fetch = fetch) {
   const summary = Option.getOrUndefined(decodeSummary(await ownerRpc("vector_usage_summary", {}, fetcher)))
   if (!summary) throw unavailable()
-  return summary
+  return {
+    ...summary,
+    efforts: summary.efforts.map((effort) => ({ ...effort, label: BUILT_IN_EFFORTS.get(effort.id) ?? effort.label })),
+  }
 }
 
 /**
  * The summary as a read-only share link shows it: the same aggregates, without the models and custom effort levels
- * fewer than three people use. Shares stay fractions of everyone's tokens, so what is left out shows as the remainder.
+ * fewer than three accounts use (model use is kept only with an account, so its people are accounts). Shares stay fractions of everyone's tokens, so what is left out shows as the remainder.
  */
 export function shareableSummary(summary: UsageSummary.Summary): UsageSummary.Summary {
   return {

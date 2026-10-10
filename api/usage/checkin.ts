@@ -29,7 +29,9 @@ export async function handleCheckin(request: ApiRequest, response: ApiResponse, 
       (error: unknown) => error instanceof ApiError && error.code === "RATE_LIMITED",
     )
     const accountId = usageAccount(request)
-    const usage = input.usage ? { usage: input.usage } : {}
+    // Model use is kept only with a verified account: anyone can invent an install ID, and these totals reach the
+    // dashboard's share links. Without one the desktop's counts are still recorded.
+    const usage = input.usage && accountId ? { usage: input.usage } : {}
     // The CLI is counted per account, so without a verified account there is nothing to attach its report to.
     if (!limited && input.client === "cli" && accountId)
       await recordUsage(
@@ -38,7 +40,17 @@ export async function handleCheckin(request: ApiRequest, response: ApiResponse, 
       )
     if (!limited && input.client === "desktop")
       await recordUsage(
-        { ...input, installId: input.installId.toLowerCase(), ...(accountId ? { accountId } : {}), ...usage },
+        {
+          client: "desktop",
+          installId: input.installId.toLowerCase(),
+          version: input.version,
+          platform: input.platform,
+          arch: input.arch,
+          sessions: input.sessions,
+          subagentSessions: input.subagentSessions,
+          ...(accountId ? { accountId } : {}),
+          ...usage,
+        },
         fetcher,
       )
     response.statusCode = 204

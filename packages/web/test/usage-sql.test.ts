@@ -279,12 +279,14 @@ test("a usage report keeps each day's largest values and the report with the mos
   )
   await recordUsage(
     desktop(install, {
+      accountId: state.account,
       usage: report({ lifetimeTokens: 900_000, days: [{ date: day(0), tokens: 250, tasks: 6, cost: 1 }] }),
     }),
   )
   // Too old for retention and too far ahead of UTC: skipped, not refused.
   await recordUsage(
     desktop(install, {
+      accountId: state.account,
       usage: report({
         days: [
           { date: day(-401), tokens: 1, tasks: 1, cost: 0 },
@@ -324,10 +326,28 @@ test("the CLI reports through one row per account per day", async () => {
   expect(days).toEqual([{ tokens: 50 }])
 })
 
+test("model use is kept only with an account that exists", async () => {
+  const anonymous = randomUUID()
+  const deleted = randomUUID()
+  const usage = report({ days: [{ date: day(0), tokens: 9, tasks: 1, cost: 0 }] })
+  await recordUsage(desktop(anonymous, { usage }))
+  await recordUsage(desktop(deleted, { accountId: randomUUID(), usage }))
+  expect(statuses()).toEqual(["ok", "ok"])
+  // Both still count as active installs, without their reports.
+  const rows = await database`select key, usage from public.vector_usage_daily order by key`
+  expect(rows).toEqual([`install:${anonymous}`, `install:${deleted}`].sort().map((key) => ({ key, usage: null })))
+  expect((await database`select count(*)::int as count from public.vector_usage_tokens`)[0].count).toBe(0)
+  expect((await usageSummary()).usage).toMatchObject({ reporting: 0, lifetimeTokens: 0 })
+})
+
 test("forgetting an account also removes its per-day tokens", async () => {
   const linked = randomUUID()
-  await recordUsage(desktop(linked, { usage: report({ days: [{ date: day(-2), tokens: 9, tasks: 1, cost: 0 }] }) }))
-  await recordUsage(desktop(linked, { accountId: state.account }))
+  await recordUsage(
+    desktop(linked, {
+      accountId: state.account,
+      usage: report({ days: [{ date: day(-2), tokens: 9, tasks: 1, cost: 0 }] }),
+    }),
+  )
   await recordUsage({
     client: "cli",
     accountId: state.account,
@@ -438,7 +458,9 @@ test("the summary counts people once across desktop and CLI, by day, week and co
 
 test("the summary adds up model use from each install's latest report", async () => {
   const signedIn = randomUUID()
-  const anonymous = randomUUID()
+  const other = randomUUID()
+  const otherAccount = randomUUID()
+  await database`insert into auth.users(id) values (${otherAccount})`
   await recordUsage(
     desktop(signedIn, {
       accountId: state.account,
@@ -469,7 +491,8 @@ test("the summary adds up model use from each install's latest report", async ()
     }),
   })
   await recordUsage(
-    desktop(anonymous, {
+    desktop(other, {
+      accountId: otherAccount,
       usage: report({
         lifetimeTokens: 200_000,
         currentStreak: 4,
@@ -506,7 +529,7 @@ test("the summary adds up model use from each install's latest report", async ()
   // The signed-in desktop and its CLI are one person: their longest current streak counts.
   expect(summary.streaks).toEqual({ one: 0, twoToSix: 1, sevenPlus: 1 })
   const text = JSON.stringify(summary)
-  for (const identity of [state.account, signedIn, anonymous]) expect(text).not.toContain(identity)
+  for (const identity of [state.account, signedIn, other, otherAccount]) expect(text).not.toContain(identity)
 })
 
 test("totals that add up past 2^53 still reach the dashboard", async () => {

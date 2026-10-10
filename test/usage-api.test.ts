@@ -176,15 +176,16 @@ describe("desktop check-in", () => {
     expect(sent).not.toContain(token)
   })
 
-  test("counts a check-in without an account when there is no token or it is not valid", async () => {
+  test("counts a check-in without an account when there is no token or it is not valid, and drops its report", async () => {
     const forged = `vct_${Buffer.from(JSON.stringify({ v: 1, sub: ACCOUNT, email: "x@y.z", exp: Date.now() + 1e9 })).toString("base64url")}.forged`
     for (const headers of [{}, { authorization: `Bearer ${forged}` }, { authorization: "Bearer not-a-vector-token" }]) {
       const storage = supabase()
       const result = await invoke(
         (request, response) => handleCheckin(request, response, storage.fetcher),
-        post(checkin, headers),
+        post({ ...checkin, usage: report }, headers),
       )
       expect(result.status).toBe(204)
+      // Anyone can invent an install ID, so model use without a verified account never reaches the totals.
       expect(storage.calls.map((call) => call.body)).toEqual([{ request: checkin }])
     }
   })
@@ -683,6 +684,26 @@ describe("usage summary", () => {
         })
       ).status,
     ).toBe(403)
+  })
+
+  test("labels Vector's own effort levels itself, whatever a report called them", async () => {
+    const storage = backend(person(OWNER), {
+      ...summary,
+      efforts: [
+        { ...summary.efforts[0], label: "zz visit evil.example" },
+        { id: "max", label: "Visit evil.example", tokens: 5, responses: 1, people: 1, share: 0 },
+        summary.efforts[1],
+      ],
+    })
+    const result = await invoke((request, response) => handleUsageSummary(request, response, storage.fetcher), {
+      method: "GET",
+      headers: session(),
+    })
+    expect((result.body as typeof summary).efforts.map((effort) => [effort.id, effort.label])).toEqual([
+      ["default", "Default"],
+      ["max", "Max"],
+      ["thinking-hard", "Thinking hard"],
+    ])
   })
 
   test("reads totals that many reports add up past 2^53", async () => {

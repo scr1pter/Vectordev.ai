@@ -319,13 +319,18 @@ test("a failed count reports the install once with zero counts and the next work
   expect(app.checkins[1].body).toMatchObject({ sessions: 1, subagentSessions: 1 })
 })
 
-test("leaves out the account header when signed out", async () => {
+test("leaves out the account header and the usage report when signed out", async () => {
   const app = fixture()
   app.state.token = undefined
+  app.state.usage = summary()
 
   expect(await app.usage.checkin()).toBe(true)
 
   expect(app.checkins[0].authorization).toBeNull()
+  // The server keeps model use only with an account, so a signed-out install does not read the summary at all.
+  expect(app.checkins[0].body).not.toHaveProperty("usage")
+  expect(app.usageReads).toHaveLength(0)
+  expect(await app.usage.checkin()).toBe(false)
 })
 
 test("retries later the same day when the check-in is not accepted", async () => {
