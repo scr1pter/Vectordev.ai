@@ -5,6 +5,7 @@ import { Global } from "@vectordevai/core/global"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
 import { UsageReport } from "@vectordevai/schema/usage-report"
 import { sendUsageReport } from "../../src/cli/usage-report"
+import { routeUsageReport, scheduleUsageReport } from "../../src/cli/vector-account"
 
 const FILE = path.join(Global.Path.data, "cli-usage.json")
 const TOKEN = "vct_synthetic-usage-fixture"
@@ -169,4 +170,22 @@ test("reads the summary in-process from the engine service behind /experimental/
   const usage = fixture.state.requests[0]?.body.usage
   expect(UsageReport.decode(usage)._tag).toBe("Some")
   expect(usage).toMatchObject({ lifetimeTokens: expect.any(Number), days: expect.any(Array) })
+})
+
+test("a scheduled report goes where the command routes it, so the TUI can send it from its server worker", async () => {
+  const sent: Array<{ token: string; site: string }> = []
+  routeUsageReport(async (input) => {
+    sent.push(input)
+  })
+  try {
+    process.env.VECTOR_DISABLE_USAGE = "1"
+    scheduleUsageReport("vct_disabled-fixture", 0)
+    delete process.env.VECTOR_DISABLE_USAGE
+    scheduleUsageReport(TOKEN, 0)
+    for (let count = 0; count < 200 && sent.length === 0; count++) await Bun.sleep(5)
+    await Bun.sleep(20)
+    expect(sent).toEqual([{ token: TOKEN, site: expect.stringMatching(/^https?:\/\//) }])
+  } finally {
+    routeUsageReport((input) => sendUsageReport(input))
+  }
 })

@@ -92,18 +92,29 @@ async function verifyToken(token: string): Promise<VerifyResult> {
   return { status: "offline" }
 }
 
-// A verified account's command also sends the day's usage report (./usage-report), a while after it starts. It is
-// fire-and-forget: the timer never keeps a finished command alive, and the report sends at most once per UTC day.
-function scheduleUsageReport(token: string) {
-  if (truthy("VECTOR_DISABLE_USAGE")) return
-  setTimeout(() => {
-    reportUsage(token).catch(() => undefined)
-  }, USAGE_REPORT_DELAY).unref()
+// Where the day's usage report is read and sent: this thread, unless the command routes it elsewhere.
+const usageReport = {
+  send: async (input: { token: string; site: string }): Promise<unknown> => {
+    const { sendUsageReport } = await import("./usage-report")
+    return sendUsageReport(input)
+  },
 }
 
-async function reportUsage(token: string) {
-  const { sendUsageReport } = await import("./usage-report")
-  await sendUsageReport({ token, site: SITE })
+/**
+ * Sends the day's usage report through `send` instead of this thread. Reading it scans every message synchronously, so
+ * the TUI, which renders on this thread, hands it to its server worker.
+ */
+export function routeUsageReport(send: (input: { token: string; site: string }) => Promise<unknown>) {
+  usageReport.send = send
+}
+
+// A verified account's command also sends the day's usage report (./usage-report), a while after it starts. It is
+// fire-and-forget: the timer never keeps a finished command alive, and the report sends at most once per UTC day.
+export function scheduleUsageReport(token: string, delay = USAGE_REPORT_DELAY) {
+  if (truthy("VECTOR_DISABLE_USAGE")) return
+  setTimeout(() => {
+    usageReport.send({ token, site: SITE }).catch(() => undefined)
+  }, delay).unref()
 }
 
 // Prompt on stderr so a piped stdout never receives prompt text.

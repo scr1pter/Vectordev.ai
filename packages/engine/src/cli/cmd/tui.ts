@@ -209,6 +209,8 @@ export const TuiThreadCommand = cmd({
 
       const worker = new Worker(file)
       const client = Rpc.client<typeof rpc>(worker)
+      const { routeUsageReport } = await import("@/cli/vector-account")
+      routeUsageReport((report) => client.call("usageReport", report))
       const reload = () => {
         client.call("reload", undefined).catch(() => {})
       }
