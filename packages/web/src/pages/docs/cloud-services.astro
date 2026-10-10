@@ -63,7 +63,7 @@ export const prerender = true
   <ul class="feature-list">
     <li><strong>Deployment checks and logs</strong><span>Publishing can run configured build, health and browser checks. Their results and provider logs show what was verified and what failed.</span></li>
     <li><strong>Database setup</strong><span>Reuse a linked Supabase project, or explicitly approve creation in a chosen organization. Provider quotas and billing still apply. Vector does not automatically upgrade plans or move creation to another organization after a limit.</span></li>
-    <li><strong>Repository migrations</strong><span>Inspect a dry-run plan before applying .sql migrations to the linked database. Applied filenames are recorded and execution stops at the first failure.</span></li>
+    <li><strong>Repository migrations</strong><span>Inspect a dry-run plan before applying .sql migrations to the linked database. Each file runs in one transaction with its record, which Vector keeps with a checksum in a private schema your app's API keys cannot reach. Files the Supabase CLI already applied are skipped, an applied file that was edited stops the run, and execution stops at the first failure.</span></li>
     <li><strong>Account control</strong><span>Disconnect removes Vector's local credential. Supabase OAuth revocation is attempted; local removal alone does not prove provider consent was revoked.</span></li>
   </ul>
   <p class="note">

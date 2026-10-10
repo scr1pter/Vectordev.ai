@@ -150,6 +150,19 @@ three default to ask for every agent; a wildcard `"*": "allow"` does not approve
 them, only a rule that names them. A migration dry run only reads, so it uses
 `vector_cloud_inspect`, which is allowed by default.
 
+## Repository migrations
+
+`apply_migrations` runs the repository's `.sql` files against the linked
+Supabase database in filename order. Vector records each applied file with a
+SHA-256 checksum in `vector.schema_migrations`: a schema outside Supabase's Data
+API, with row level security on, no policies and no access for the `anon` and
+`authenticated` roles. Rows an older release kept in `public.vector_migrations`
+move there on the next run and that table is dropped. Versions recorded by the
+Supabase CLI in `supabase_migrations.schema_migrations` count as applied. Each
+file is sent together with its tracking insert as one query, which Postgres runs
+as one transaction. If an applied file's checksum no longer matches, nothing
+runs until the file is restored; write a new migration for the change instead.
+
 ## Publishing and release checks
 
 Vector publishes to the Vercel project linked to the repository. Without a

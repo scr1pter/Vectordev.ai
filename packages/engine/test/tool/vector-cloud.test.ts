@@ -246,6 +246,36 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
+  it.instance("reports which migrations the Supabase CLI applied and which files changed", () =>
+    Effect.gen(function* () {
+      yield* bridge(
+        {
+          ok: true,
+          error: "0001_init.sql failed: 0001_init.sql changed after it was applied.",
+          migrations: {
+            dryRun: true,
+            directory: "supabase/migrations",
+            projectRef: "shopref",
+            alreadyApplied: ["0001_init.sql", "20240101000000_cli.sql"],
+            appliedByCli: ["20240101000000_cli.sql"],
+            changed: ["0001_init.sql"],
+            pending: ["0002_likes.sql"],
+            applied: [],
+            failed: { name: "0001_init.sql", error: "0001_init.sql changed after it was applied." },
+          },
+        },
+        200,
+        scope("Supabase", "shop-db", "production", "Read which migrations shop-db has applied."),
+      )
+      const result = yield* execute({ action: "apply_migrations", dryRun: true })
+      expect(result.output).toContain("1 migration(s) would run against Supabase project shopref (production)")
+      expect(result.output).toContain("Recorded by the Supabase CLI, so not run again: 20240101000000_cli.sql")
+      expect(result.output).toContain(
+        "Changed after they were applied, so nothing runs until they are restored: 0001_init.sql",
+      )
+    }),
+  )
+
   it.instance("rejects a response without an explicit operation result", () =>
     Effect.gen(function* () {
       yield* bridge({ error: "Unauthorized" }, 401)

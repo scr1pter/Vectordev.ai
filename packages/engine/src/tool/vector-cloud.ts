@@ -95,6 +95,8 @@ type CloudReport = {
     discovered?: string[]
     skipped?: string[]
     alreadyApplied?: string[]
+    appliedByCli?: string[]
+    changed?: string[]
     pending?: string[]
     applied?: string[]
     failed?: { name?: string; error?: string }
@@ -205,9 +207,15 @@ function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudRe
     if (!migrations) return lines(report.error, report.nextStep) || "No migrations were applied."
     return lines(
       migrations.dryRun
-        ? `Migration plan for ${migrations.directory} (dry run: nothing was applied).`
-        : `Migrations in ${migrations.directory}.`,
+        ? `Migration plan for ${migrations.directory} (dry run: nothing was applied). ${migrations.pending?.length ?? 0} migration(s) would run against Supabase project ${migrations.projectRef} (production).`
+        : `Migrations in ${migrations.directory}, applied to Supabase project ${migrations.projectRef} (production).`,
       `Already applied: ${nameList(migrations.alreadyApplied)}`,
+      migrations.appliedByCli?.length
+        ? `Recorded by the Supabase CLI, so not run again: ${nameList(migrations.appliedByCli)}`
+        : undefined,
+      migrations.changed?.length
+        ? `Changed after they were applied, so nothing runs until they are restored: ${nameList(migrations.changed)}`
+        : undefined,
       migrations.dryRun
         ? `Would apply, in order: ${nameList(migrations.pending)}`
         : `Applied now, in order: ${nameList(migrations.applied)}`,
