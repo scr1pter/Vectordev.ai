@@ -3,6 +3,8 @@ import { join } from "node:path"
 
 import { app, BrowserWindow } from "electron"
 
+import { bypassHeadersFor } from "./cloud-vercel-checks"
+
 export type CloudBrowserCheckResult = {
   ok: boolean
   details: string
@@ -11,8 +13,9 @@ export type CloudBrowserCheckResult = {
   screenshotPath?: string
 }
 
-// `headers` go with the first request only; a Vercel protection bypass also
-// asks for a cookie so the page's own requests get through.
+// `headers` (a Vercel protection bypass) go with every request to the checked
+// deployment's own origin and with none to any other host, so a redirect to a
+// sign-in provider or a third-party script never receives the secret.
 export async function runCloudBrowserCheck(
   url: string,
   deploymentId: string,
@@ -32,6 +35,11 @@ export async function runCloudBrowserCheck(
     },
   })
 
+  // The check's partition is its own session, so this listener sees only its requests.
+  window.webContents.session.webRequest.onBeforeSendHeaders((details, callback) =>
+    callback({ requestHeaders: { ...details.requestHeaders, ...bypassHeadersFor(details.url, url, headers) } }),
+  )
+
   window.webContents.on("console-message", (details, level, message, line, source) => {
     const resolvedLevel = typeof details.level === "string" ? details.level : level >= 2 ? "error" : "info"
     const resolvedMessage = typeof details.message === "string" ? details.message : message
@@ -47,11 +55,7 @@ export async function runCloudBrowserCheck(
   let timeout: ReturnType<typeof setTimeout> | undefined
   const loadError = await Promise.race([
     window
-      .loadURL(url, {
-        extraHeaders: Object.entries(headers)
-          .map(([name, value]) => `${name}: ${value}`)
-          .join("\n"),
-      })
+      .loadURL(url)
       .then(() => undefined)
       .catch((error: unknown) => (error instanceof Error ? error.message : String(error))),
     new Promise<string>((resolve) => {

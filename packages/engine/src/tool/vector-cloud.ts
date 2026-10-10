@@ -38,7 +38,7 @@ export const Parameters = Schema.Struct({
   }),
   deploymentId: Schema.optional(Schema.String).annotate({
     description:
-      "For logs, inspect_deployment, promote, rollback, redeploy and cancel_deployment: a deployment id (dpl_...) or URL from list_deployments. logs defaults to the newest deployment; rollback defaults to the previous production deployment.",
+      "For logs, inspect_deployment, promote, rollback, redeploy and cancel_deployment: a deployment id (dpl_...) or URL from list_deployments. logs defaults to the newest deployment; rollback defaults to the last deployment that served production and passed Vector's checks.",
   }),
   limit: Schema.optional(Schema.Number).annotate({
     description:

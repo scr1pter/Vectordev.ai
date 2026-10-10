@@ -28,6 +28,10 @@ export type FakeDeployment = {
   name: string
   projectId: string
   readyState: string
+  /** STAGED: a production build that has not served production; PROMOTED: one that has. */
+  readySubstate?: "STAGED" | "PROMOTED"
+  /** false when the create request asked Vercel not to move production's domains to it. */
+  autoAssignCustomDomains?: boolean
   target: "production" | null
   created: number
   source?: string
@@ -177,6 +181,7 @@ export function fakeVercel(options: { token?: string } = {}) {
         if (!deployment) return notFound()
         project.productionId = deployment.uid
         deployment.alias = productionAliases(project)
+        deployment.readySubstate = "PROMOTED"
         return new Response(null, { status: 201 })
       }
       // https://vercel.com/docs/rest-api/projects/point-production-traffic-to-a-previous-production-deployment-by-id
@@ -186,6 +191,7 @@ export function fakeVercel(options: { token?: string } = {}) {
           return Response.json({ error: { code: "invalid", message: "Not a production deployment" } }, { status: 422 })
         }
         project.productionId = deployment.uid
+        deployment.readySubstate = "PROMOTED"
         return new Response(null, { status: 201 })
       }
       // https://vercel.com/docs/rest-api/logs/get-logs-for-a-deployment: stream+json that stays open
@@ -343,7 +349,13 @@ export function fakeVercel(options: { token?: string } = {}) {
     }
     // https://vercel.com/docs/rest-api/deployments/create-a-new-deployment (a redeploy)
     if (method === "POST" && path === "/v13/deployments") {
-      const input = body as { name: string; project: string; deploymentId: string; target?: string }
+      const input = body as {
+        name: string
+        project: string
+        deploymentId: string
+        target?: string
+        autoAssignCustomDomains?: boolean
+      }
       const from = findDeployment(input.deploymentId)
       if (!from) return notFound()
       const deployment = addDeployment({
@@ -352,6 +364,7 @@ export function fakeVercel(options: { token?: string } = {}) {
         target: input.target === "production" ? "production" : null,
         readyState: "QUEUED",
         source: "redeploy",
+        autoAssignCustomDomains: input.autoAssignCustomDomains,
       })
       return Response.json(deploymentBody(deployment))
     }
@@ -435,6 +448,7 @@ export function fakeVercel(options: { token?: string } = {}) {
       name: deployment.name,
       projectId: deployment.projectId,
       readyState: deployment.readyState,
+      readySubstate: deployment.readyState === "READY" ? deployment.readySubstate : undefined,
       state: deployment.readyState,
       target: deployment.target,
       created: deployment.created,
@@ -473,6 +487,8 @@ export function fakeVercel(options: { token?: string } = {}) {
       name: input.name ?? project?.name ?? "app",
       projectId: input.projectId,
       readyState: input.readyState ?? "READY",
+      readySubstate: input.readySubstate,
+      autoAssignCustomDomains: input.autoAssignCustomDomains,
       target: input.target ?? null,
       created: input.created ?? 1_700_000_000_000 + sequence * 1_000,
       source: input.source ?? "cli",

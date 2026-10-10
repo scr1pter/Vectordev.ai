@@ -1,10 +1,8 @@
-import { VECTOR_USER_AGENT } from "./user-agent"
-import { getCloudProviderProjectLink, getCloudProviderRuntimeAuth } from "./cloud-connections"
+import { getCloudProviderProjectLink } from "./cloud-connections"
 import { listDeployments, redactCloudLog, type CloudDeployment } from "./cloud-console"
 import {
   listVercelDeployments,
   vercelBuildLogs,
-  vercelLogEntries,
   vercelRuntimeLogs,
   type VercelDeployment,
 } from "./cloud-vercel-deployments"
@@ -65,31 +63,6 @@ export const MAX_LOG_LINES = 500
 const MAX_LOG_CHARS = 12_000
 const MAX_LINE_CHARS = 400
 
-function stringField(value: unknown, key: string): string | undefined {
-  if (!value || typeof value !== "object") return undefined
-  const field = Reflect.get(value, key)
-  return typeof field === "string" && field ? field : undefined
-}
-
-async function providerJson(token: string, url: string | URL, request: CloudFetch): Promise<unknown> {
-  const response = await request(url.toString(), {
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${token}`,
-      "user-agent": VECTOR_USER_AGENT,
-    },
-    signal: AbortSignal.timeout(20_000),
-  })
-  const body: unknown = await response.json().catch(() => undefined)
-  if (response.ok) return body
-  throw new Error(
-    stringField(body, "message") ??
-      stringField(body, "error_description") ??
-      stringField(body, "error") ??
-      `Provider returned HTTP ${response.status}.`,
-  )
-}
-
 export function boundLogLines(limit: number | undefined): number {
   if (typeof limit !== "number" || !Number.isFinite(limit)) return DEFAULT_LOG_LINES
   return Math.max(1, Math.min(Math.floor(limit), MAX_LOG_LINES))
@@ -138,36 +111,14 @@ export function truncateLogTail(
 }
 
 function recordedLogEntries(deployment: CloudDeployment): CloudLogEntry[] {
-  const entries: CloudLogEntry[] = []
-  if (deployment.runtimeLog) entries.push({ text: deployment.runtimeLog })
-  if (deployment.log) entries.push({ text: deployment.log })
-  for (const check of deployment.checks) {
-    if (!check.output) continue
-    entries.push({ text: `[${check.label}] ${check.status}\n${check.output}` })
-  }
-  if (deployment.healthError) entries.push({ text: `[error] ${deployment.healthError}` })
-  return entries
-}
-
-function deploymentHost(deployment: CloudDeployment): string {
-  return URL.canParse(deployment.url) ? new URL(deployment.url).host : deployment.url
-}
-
-async function vercelEntries(
-  deployment: CloudDeployment,
-  lines: number,
-  request: CloudFetch,
-  auth: { token?: string; teamId?: string },
-) {
-  if (!auth.token) throw new Error("Connect Vercel in Vector Cloud > Connections to read its deployment logs.")
-  const url = new URL(
-    `/v3/deployments/${encodeURIComponent(deploymentHost(deployment))}/events`,
-    "https://api.vercel.com",
-  )
-  url.searchParams.set("limit", String(lines))
-  url.searchParams.set("direction", "backward")
-  if (auth.teamId) url.searchParams.set("teamId", auth.teamId)
-  return vercelLogEntries(await providerJson(auth.token, url, request))
+  return [
+    ...(deployment.runtimeLog ? [{ text: deployment.runtimeLog }] : []),
+    ...(deployment.log ? [{ text: deployment.log }] : []),
+    ...deployment.checks.flatMap((check) =>
+      check.output ? [{ text: `[${check.label}] ${check.status}\n${check.output}` }] : [],
+    ),
+    ...(deployment.healthError ? [{ text: `[error] ${deployment.healthError}` }] : []),
+  ]
 }
 
 export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch = fetch): Promise<CloudLogReport> {
@@ -202,8 +153,7 @@ export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch 
           .then((items) => items[0])
           .catch(() => undefined)
       : undefined
-  const fromProvider = !recorded && (requested || latest)
-  if (fromProvider) return providerLogs(input, requested ?? latest!.id, source, lines, request)
+  if (!recorded && (requested || latest)) return providerLogs(input, requested ?? latest!.id, source, lines, request)
   const deployment = recorded ?? deployments[0]
   if (!deployment) {
     return {
@@ -225,43 +175,38 @@ export async function fetchCloudLogs(input: CloudLogsInput, request: CloudFetch 
     return providerLogs(input, deployment.providerDeploymentId ?? deployment.url, source, lines, request, deployment)
   }
 
-  let logSource: "provider" | "build" = "provider"
-  let detail: string | undefined
-  let entries: CloudLogEntry[] = []
-  // Every listed deployment is a Vercel one (see listDeployments).
-  const auth = await getCloudProviderRuntimeAuth("vercel")
-  try {
-    entries = await vercelEntries(deployment, lines, request, auth)
-  } catch (error) {
-    detail = error instanceof Error ? error.message : String(error)
-  }
-  if (!entries.length) {
-    logSource = "build"
-    detail = detail
-      ? `${detail} Falling back to the build output Vector recorded.`
-      : "The provider returned no log events; showing the build output Vector recorded."
-    entries = recordedLogEntries(deployment)
-  }
-
-  const tail = truncateLogTail(entries, lines)
+  // The build output comes from the linked project, in its own team, as every
+  // other Vercel read does; without a link, or when Vercel has none, Vector's
+  // own record of the publish stands in.
+  const read = linked
+    ? await vercelBuildLogs(input.projectPath, deployment.providerDeploymentId ?? deployment.url, lines, { request })
+        .then((result) => ({ entries: result.entries, token: result.token }))
+        .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }))
+    : { error: "No Vercel project is linked, so Vercel's build log cannot be read." }
+  const fromProvider = "entries" in read && read.entries.length > 0
+  const tail = truncateLogTail(fromProvider ? read.entries : recordedLogEntries(deployment), lines)
   return {
     ok: true,
     deploymentId: deployment.id,
     url: deployment.productionUrl ?? deployment.url,
     logs: {
       provider: deployment.target,
-      source: logSource,
+      source: fromProvider ? "provider" : "build",
       environment: deployment.environment,
       status: deployment.status,
       createdAt: deployment.createdAt,
       fetchedAt: new Date().toISOString(),
-      detail,
+      detail: fromProvider
+        ? undefined
+        : "error" in read
+          ? `${read.error} Falling back to the build output Vector recorded.`
+          : "Vercel returned no build events; showing the build output Vector recorded.",
       lines: tail.lines,
       droppedLines: tail.droppedLines,
       truncated: tail.truncated,
       // Provider output routinely echoes the env vars a build was given, so the
       // tail leaves here through the same redaction the publish log uses.
-      tail: redactCloudLog(input.projectPath, deployment.taskId, tail.log, [auth.token]),
+      tail: redactCloudLog(input.projectPath, deployment.taskId, tail.log, "token" in read ? [read.token] : []),
     },
   }
 }

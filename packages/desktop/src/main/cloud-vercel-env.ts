@@ -70,6 +70,8 @@ const MAX_VALUE_BYTES = 64 * 1024
 
 type RemoteEntry = VercelRemoteEnv & { valueHash?: string }
 
+type SyncOutcome = { operation: Operation } | { skipped: VercelEnvPlan["skipped"][number] } | { unchanged: number }
+
 type Operation =
   | { kind: "create"; key: string; targets: VercelEnvTarget[]; valueHash: string }
   | { kind: "update"; key: string; targets: VercelEnvTarget[]; entry: RemoteEntry; valueHash: string }
@@ -314,34 +316,39 @@ async function prepareSync(
 ) {
   const remote = (await remoteEntries(context, true, request)).filter((entry) => !entry.gitBranch)
   const local = listEnv(projectPath)
-  const operations: Operation[] = []
-  const skipped: VercelEnvPlan["skipped"] = []
-  let unchanged = 0
-  for (const variable of local) {
+  // Per local variable: create it where Vercel has none, update what an
+  // earlier Vector sync wrote, and leave alone what was set outside a sync.
+  const outcomes = local.flatMap((variable): SyncOutcome[] => {
     const valueHash = hashValue(variable.value)
     const missing = targets.filter(
       (target) => !remote.some((entry) => entry.key === variable.key && entry.targets.includes(target)),
     )
-    if (missing.length) operations.push({ kind: "create", key: variable.key, targets: missing, valueHash })
-    for (const entry of remote.filter((item) => item.key === variable.key)) {
-      const covered = entry.targets.filter((target) => targets.includes(target))
-      if (!covered.length) continue
-      if (!entry.syncedByVector) {
-        skipped.push({ key: entry.key, targets: covered, reason: "set outside a Vector sync" })
-        continue
-      }
-      if (entry.valueHash === valueHash) {
-        unchanged += covered.length
-        continue
-      }
-      operations.push({ kind: "update", key: entry.key, targets: covered, entry, valueHash })
-    }
-  }
-  for (const entry of remote) {
-    if (!entry.syncedByVector || local.some((variable) => variable.key === entry.key)) continue
+    return [
+      ...(missing.length
+        ? [{ operation: { kind: "create" as const, key: variable.key, targets: missing, valueHash } }]
+        : []),
+      ...remote
+        .filter((entry) => entry.key === variable.key)
+        .flatMap((entry): SyncOutcome[] => {
+          const covered = entry.targets.filter((target) => targets.includes(target))
+          if (!covered.length) return []
+          if (!entry.syncedByVector) {
+            return [{ skipped: { key: entry.key, targets: covered, reason: "set outside a Vector sync" } }]
+          }
+          if (entry.valueHash === valueHash) return [{ unchanged: covered.length }]
+          return [{ operation: { kind: "update", key: entry.key, targets: covered, entry, valueHash } }]
+        }),
+    ]
+  })
+  // What an earlier Vector sync wrote and the local environment no longer has.
+  const deletes = remote.flatMap((entry): Operation[] => {
+    if (!entry.syncedByVector || local.some((variable) => variable.key === entry.key)) return []
     const covered = entry.targets.filter((target) => targets.includes(target))
-    if (covered.length) operations.push({ kind: "delete", key: entry.key, targets: covered, entry })
-  }
+    return covered.length ? [{ kind: "delete", key: entry.key, targets: covered, entry }] : []
+  })
+  const operations = [...outcomes.flatMap((item) => ("operation" in item ? [item.operation] : [])), ...deletes]
+  const skipped = outcomes.flatMap((item) => ("skipped" in item ? [item.skipped] : []))
+  const unchanged = outcomes.reduce((sum, item) => sum + ("unchanged" in item ? item.unchanged : 0), 0)
   // The id covers every write and every value it would send, so approving a
   // plan approves exactly these writes and nothing that changed since.
   const id = createHash("sha256")

@@ -38,7 +38,9 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { checkDeploymentHealth, publishProject, runVercel, VERCEL_CLI_VERSION } = await import("./publish")
+const { checkAllDeploymentHealth, checkDeploymentHealth, publishProject, runVercel, VERCEL_CLI_VERSION } = await import(
+  "./publish"
+)
 const { cloudProjectScopeKey, listDeployments, setBuildSettings } = await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
 
@@ -299,81 +301,150 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
     ])
   })
 
-  test("checks a protected production build on the production domain after promotion", async () => {
+  // Standard Protection, the default for new Vercel projects, covers every
+  // generated URL, the production build's own included.
+  function stageProtectedProduction(protectionBypass: Parameters<typeof api.addProject>[0]["protectionBypass"] = {}) {
     const remote = linkProject(undefined, {
       name: "shop",
-      ssoProtection: { deploymentType: "all_except_custom_domains" },
+      ssoProtection: { deploymentType: "prod_deployment_urls_and_all_previews" },
+      protectionBypass,
     })
-    api.addDeployment({ projectId: remote.id, uid: "dpl_old", target: "production" })
+    api.addDeployment({ projectId: remote.id, uid: "dpl_old", target: "production", readySubstate: "PROMOTED" })
     remote.productionId = "dpl_old"
     const staged = api.addDeployment({
       projectId: remote.id,
       uid: "dpl_new",
       url: "shop-new.vercel.app",
       target: "production",
+      readySubstate: "STAGED",
+    })
+    return { remote, staged }
+  }
+
+  const protectedSite = (seen: string[]) =>
+    routed((url, sent) => {
+      seen.push(url.host)
+      return sent.get("x-vercel-protection-bypass") === "bypassfixture0000000000000000000000"
+        ? new Response("ok")
+        : new Response("", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } })
+    })
+
+  test("leaves production alone when Deployment Protection keeps the checks out of a production build", async () => {
+    const { remote, staged } = stageProtectedProduction()
+    checks({ health: true, browser: true })
+    const seen: string[] = []
+    const result = await publishProject({ projectPath: project, target: "vercel", production: true }, undefined, {
+      command: [await fakeDeployCli(`https://${staged.url}`)],
+      sleep: async () => {},
+      request: protectedSite(seen),
+      browserCheck: async () => {
+        throw new Error("a protected deployment is not rendered")
+      },
+    })
+    expect(result.error).toContain("production was not moved")
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: "checks_blocked",
+      protectedChecks: "skipped",
+      providerDeploymentId: "dpl_new",
+    })
+    expect(remote.productionId).toBe("dpl_old")
+    expect(api.requests("POST").some((item) => item.path.includes("/promote/"))).toBe(false)
+    expect(seen).toEqual(["shop-new.vercel.app"])
+    expect(result.checks?.filter((check) => check.type === "health" || check.type === "browser")).toEqual([
+      expect.objectContaining({ type: "health", status: "skipped", required: true }),
+      expect.objectContaining({ type: "browser", status: "skipped", required: true }),
+    ])
+    expect(listDeployments(project)[0]).toMatchObject({ releaseStatus: "preview", providerDeploymentId: "dpl_new" })
+  })
+
+  test("with the bypass secret, checks the protected production build itself before promoting it", async () => {
+    const { remote, staged } = stageProtectedProduction({
+      bypassfixture0000000000000000000000: { createdAt: 1, createdBy: "user_1", scope: "automation-bypass" },
     })
     checks({ health: true, browser: true })
+    const seen: string[] = []
     const browsed: string[] = []
     const result = await publishProject({ projectPath: project, target: "vercel", production: true }, undefined, {
       command: [await fakeDeployCli(`https://${staged.url}`)],
       sleep: async () => {},
-      request: routed((url) =>
-        url.host === "shop.vercel.app"
-          ? new Response("ok")
-          : new Response("", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } }),
-      ),
+      request: protectedSite(seen),
       browserCheck: async (url) => {
-        browsed.push(url)
+        browsed.push(`${url} promoted=${remote.productionId === "dpl_new"}`)
         return { ok: true, details: "Rendered.", output: "", durationMs: 1 }
       },
     })
-    expect(result).toMatchObject({
-      ok: true,
-      protectedChecks: "checked-after-promotion",
-      productionUrl: "https://shop.vercel.app",
+    expect(result).toMatchObject({ ok: true, environment: "production", productionUrl: "https://shop.vercel.app" })
+    expect(result.protectedChecks).toBeUndefined()
+    expect(seen).toEqual(["shop-new.vercel.app"])
+    expect(browsed).toEqual(["https://shop-new.vercel.app promoted=false"])
+    expect(remote.productionId).toBe("dpl_new")
+  })
+
+  test("refuses to publish a site with no build step while its .env would be served", async () => {
+    const remote = linkProject()
+    api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
+    remote.productionId = "dpl_first"
+    const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
+    checks({ health: false, browser: false })
+    await writeFile(join(project, ".env"), "API_URL=https://api.example\n")
+    const options = { command: [await fakeDeployCli(`https://${preview.url}`)] }
+    const blocked = await publishProject({ projectPath: project, target: "vercel" }, undefined, options)
+    expect(blocked).toMatchObject({ ok: false, errorCode: "checks_failed" })
+    expect(blocked.checks?.find((check) => check.type === "secrets")).toMatchObject({
+      status: "failed",
+      output: expect.stringContaining(".env:0 · public at /.env"),
     })
-    expect(browsed).toEqual(["https://shop.vercel.app"])
-    expect(result.checks?.find((check) => check.type === "health")).toMatchObject({
-      status: "passed",
-      details: expect.stringContaining("after promotion"),
+    expect(api.requests("GET").some((item) => item.path.includes("dpl_p"))).toBe(false)
+    await writeFile(join(project, ".vercelignore"), "node_modules\n.env\n")
+    expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, options)).toMatchObject({
+      ok: true,
+    })
+    // A site that builds serves its output, and its build may read .env.
+    await writeFile(join(project, ".vercelignore"), "")
+    await writeFile(join(project, "package.json"), JSON.stringify({ scripts: { build: "vite build" } }))
+    expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, options)).toMatchObject({
+      ok: true,
     })
   })
 
-  test("an Observability check of a protected preview skips the health check instead of failing it", async () => {
+  test("an Observability check reports protection as protected and never touches the release checks", async () => {
     const remote = linkProject(undefined, { name: "shop", ssoProtection: { deploymentType: "preview" } })
     api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
     remote.productionId = "dpl_first"
     const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
     checks({ health: true, browser: false })
-    const protectedSite = routed((_url, sent) =>
+    const protectedPreview = routed((_url, sent) =>
       sent.get("x-vercel-protection-bypass") === "bypassfixture0000000000000000000000"
         ? new Response("ok")
         : new Response("Authentication Required", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } }),
     )
     const published = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
       command: [await fakeDeployCli(`https://${preview.url}`)],
-      request: protectedSite,
+      request: protectedPreview,
     })
     expect(published).toMatchObject({ ok: true, protectedChecks: "skipped" })
     const id = published.deploymentId!
-    const checked = await checkDeploymentHealth({ projectPath: project, id }, { request: protectedSite })
+    const releaseChecks = listDeployments(project)[0].checks
+    const checked = await checkDeploymentHealth({ projectPath: project, id }, { request: protectedPreview })
+    expect(checked).toMatchObject({ probe: "protected", statusCode: 401 })
     expect(checked.status).not.toBe("degraded")
-    expect(checked.checks.find((check) => check.type === "health")).toMatchObject({
-      status: "skipped",
-      details: expect.stringContaining("Cloud Services > Project settings"),
-    })
     remote.protectionBypass = {
       bypassfixture0000000000000000000000: { createdAt: 1, createdBy: "user_1", scope: "automation-bypass" },
     }
-    const bypassed = await checkDeploymentHealth({ projectPath: project, id }, { request: protectedSite })
-    expect(bypassed).toMatchObject({ status: "ready", statusCode: 200 })
-    expect(bypassed.checks.find((check) => check.type === "health")).toMatchObject({ status: "passed" })
+    const bypassed = await checkDeploymentHealth({ projectPath: project, id }, { request: protectedPreview })
+    expect(bypassed).toMatchObject({ status: "ready", statusCode: 200, probe: "ok" })
+    // A failing probe marks the release degraded, but the checks that gate
+    // promotion and rollback stay as the release check left them.
     const broken = await checkDeploymentHealth(
       { projectPath: project, id },
       { request: routed(() => new Response("broken", { status: 500 })) },
     )
-    expect(broken).toMatchObject({ status: "degraded", statusCode: 500 })
-    expect(broken.checks.find((check) => check.type === "health")).toMatchObject({ status: "failed" })
+    expect(broken).toMatchObject({ status: "degraded", statusCode: 500, probe: "failed" })
+    expect(broken.checks).toEqual(releaseChecks)
+    const all = await checkAllDeploymentHealth(project, undefined, { request: protectedPreview })
+    expect(all[0]).toMatchObject({ status: "ready", probe: "ok" })
+    expect(all[0].checks).toEqual(releaseChecks)
   })
 
   test("uses the project's bypass secret to check a protected preview", async () => {

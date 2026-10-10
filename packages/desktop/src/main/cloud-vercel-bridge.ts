@@ -6,6 +6,7 @@ import {
   cancelVercelDeployment,
   inspectInProject,
   listVercelDeployments,
+  previousProduction,
   promoteVercelDeployment,
   redeployVercelDeployment,
   requireVercelChecksPassed,
@@ -184,11 +185,7 @@ export async function describeVercelAction(
   scope: CloudScope,
   options: VercelBridgeOptions = {},
 ) {
-  try {
-    return await describe(input, scope, options)
-  } catch (error) {
-    return vercelErrorReport(error)
-  }
+  return describe(input, scope, options).catch(vercelErrorReport)
 }
 
 async function describe(input: VercelBridgeInput, scope: CloudScope, options: VercelBridgeOptions) {
@@ -240,21 +237,22 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
     )
   }
   if (action === "promote" || action === "rollback") {
+    if (action === "promote" && !input.deploymentId)
+      return { ok: false as const, error: "Name the deployment to promote with deploymentId (see list_deployments)." }
+    // A rollback without an id is resolved now, so the prompt names the
+    // deployment that will serve production and the approved run uses it.
     const deployment = input.deploymentId
       ? await inspectInProject(context, input.deploymentId, options.request)
-      : action === "rollback"
-        ? undefined
-        : null
-    if (deployment === null)
-      return { ok: false as const, error: "Name the deployment to promote with deploymentId (see list_deployments)." }
+      : await previousProduction(scope.projectPath, context, options)
     // Nothing to approve when the move would be refused for failed checks.
-    if (deployment) requireVercelChecksPassed(scope.projectPath, deployment)
+    requireVercelChecksPassed(scope.projectPath, deployment)
     return described(
       project,
       "production",
       action === "promote"
-        ? `Point production traffic of the Vercel project ${project} at ${deployment?.url} (${deployment?.id}).`
-        : `Roll production of the Vercel project ${project} back to ${deployment ? `${deployment.url} (${deployment.id})` : "the previous production deployment"}. Vercel stops assigning new production deployments to the domains until one is promoted again.`,
+        ? `Point production traffic of the Vercel project ${project} at ${deployment.url} (${deployment.id}).`
+        : `Roll production of the Vercel project ${project} back to ${deployment.url} (${deployment.id}). Vercel stops assigning new production deployments to the domains until one is promoted again.`,
+      { deploymentId: deployment.id },
     )
   }
   if (action === "redeploy" || action === "cancel_deployment") {
@@ -265,7 +263,7 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
       project,
       deployment.target,
       action === "redeploy"
-        ? `Rebuild ${deployment.url} (${deployment.id}) on the Vercel project ${project} as a new ${deployment.target} deployment.${deployment.target === "production" ? " Production switches to it when the build is ready." : ""}`
+        ? `Rebuild ${deployment.url} (${deployment.id}) on the Vercel project ${project} as a new ${deployment.target} deployment.${deployment.target === "production" ? " It is built without taking production's domains, so production does not move until it is promoted." : ""}`
         : `Cancel the ${deployment.state.toLowerCase()} ${deployment.target} deployment ${deployment.id} on the Vercel project ${project}.`,
     )
   }
@@ -298,7 +296,7 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
     return described(
       project,
       "development → local .env",
-      `Write ${written.length} development value(s) from the Vercel project ${project} into this project's .env: ${written.map((item) => `${item.key} (${item.action})`).join(", ")}.`,
+      `Write ${written.length} development value(s) from the Vercel project ${project} into Vector's environment for this project and its .env: ${written.map((item) => `${item.key} (${item.action})`).join(", ")}. The agent can read .env, and publishing uploads it to Vercel with the source (a site without a build step must leave it out with .vercelignore).`,
       { planId: plan.id },
     )
   }
@@ -332,11 +330,7 @@ async function describe(input: VercelBridgeInput, scope: CloudScope, options: Ve
 }
 
 export async function runVercelCommand(input: VercelBridgeInput, scope: CloudScope, options: VercelBridgeOptions = {}) {
-  try {
-    return await run(input, scope, options)
-  } catch (error) {
-    return vercelErrorReport(error)
-  }
+  return run(input, scope, options).catch(vercelErrorReport)
 }
 
 async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelBridgeOptions) {
@@ -371,7 +365,7 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
     )
   }
   if (command === "vercel_project") {
-    const status = await vercelProjectStatus(projectPath, scope.directory, request)
+    const status = await vercelProjectStatus(projectPath, scope.directory, request, { autoLink: false })
     if (!status.connected) {
       return vercelErrorReport(
         new VercelError("not_connected", "Vercel is not connected. Connect it in Cloud Services > Integrations."),
@@ -380,7 +374,12 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
     if (!status.link) {
       return {
         ok: true,
-        text: `Vercel is connected${status.account ? ` as ${status.account}` : ""}, but no project is linked. Use vercel_projects then link_project, or create_project.`,
+        text: [
+          `Vercel is connected${status.account ? ` as ${status.account}` : ""}, but no project is linked.`,
+          status.candidate
+            ? `This repository's .vercel/project.json names projectId ${status.candidate.projectId}${status.candidate.teamId ? ` (teamId ${status.candidate.teamId})` : ""}; link it with link_project, which the user approves.`
+            : "Use vercel_projects then link_project, or create_project.",
+        ].join(" "),
       }
     }
     const project = status.project
@@ -599,7 +598,10 @@ async function run(input: VercelBridgeInput, scope: CloudScope, options: VercelB
       `Started ${redeployed.deployment.id} (${redeployed.deployment.target}) rebuilding ${redeployed.from.id}: ${redeployed.deployment.url}`,
       {
         url: redeployed.deployment.url,
-        nextStep: "Check it with inspect_deployment; read logs with source build if it fails.",
+        nextStep:
+          redeployed.deployment.target === "production"
+            ? "Production did not move: the build does not take production's domains. Check it with inspect_deployment (logs with source build if it fails); when it is READY, promote it only if the user wants production on it."
+            : "Check it with inspect_deployment; read logs with source build if it fails.",
       },
     )
   }

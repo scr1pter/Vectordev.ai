@@ -73,7 +73,8 @@ export const VercelParameters = {
     description: "For update_project_settings. An empty string returns it to automatic detection.",
   }),
   nodeVersion: Schema.optional(Schema.String).annotate({
-    description: "For update_project_settings: 24.x, 22.x, 20.x or 18.x.",
+    description:
+      "For update_project_settings: 24.x or 22.x. Vercel no longer builds new deployments with 20.x or 18.x.",
   }),
   key: Schema.optional(Schema.String).annotate({ description: "For set_env and remove_env: the variable name." }),
   value: Schema.optional(Schema.String).annotate({
@@ -111,4 +112,4 @@ export function vercelPermission(action: string) {
 }
 
 export const VERCEL_GUIDANCE =
-  "Vercel: publish makes a preview; pass production: true only when the user asked to ship to production, and Vector then builds production, runs the release checks and promotes it. list_deployments shows Vercel's own history including git pushes; inspect_deployment and logs (source build or runtime) explain a failure. When production breaks, offer rollback first (no deploymentId rolls back to the previous production deployment). Project setup: vercel_scopes, vercel_projects, link_project or create_project, vercel_project and update_project_settings. Variables: list_env shows names only; set_env and remove_env change one variable per environment, and set_env without a value copies the one the user stored in Vector; env_diff compares local values by hash; env_plan shows what sync_environment would write and the user approves that plan; pull_env writes development values into .env. Domains: list_domains, add_domain, verify_domain and remove_domain report the exact DNS records to set. If checks report Deployment Protection, offer enable_protection_bypass."
+  "Vercel: publish makes a preview; pass production: true only when the user asked to ship to production, and Vector then builds production, runs the release checks and promotes it only if they pass. list_deployments shows Vercel's own history including git pushes; inspect_deployment and logs (source build or runtime) explain a failure. When production breaks, offer rollback first (no deploymentId rolls back to the last deployment that served production and passed Vector's checks). redeploy of a production deployment builds it without moving production; promote it afterwards only if the user wants it live. Project setup: vercel_scopes, vercel_projects, link_project or create_project, vercel_project and update_project_settings. Variables: list_env shows names only; set_env and remove_env change one variable per environment, and set_env without a value copies the one the user stored in Vector; env_diff compares local values by hash; env_plan shows what sync_environment would write and the user approves that plan; pull_env writes development values into .env, which you can read and which publishing uploads with the source. Domains: list_domains, add_domain, verify_domain and remove_domain report the exact DNS records to set. If checks report Deployment Protection, offer enable_protection_bypass."

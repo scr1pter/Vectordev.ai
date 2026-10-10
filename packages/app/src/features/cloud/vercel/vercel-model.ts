@@ -1,5 +1,11 @@
 import type { CloudDeployment, PublishResult } from "../cloud-api"
-import type { VercelDeployment, VercelEnvTargetState, VercelProjectSettings, VercelRemoteEnv } from "./vercel-api"
+import type {
+  VercelDeployment,
+  VercelEnvTargetState,
+  VercelProjectDetails,
+  VercelProjectSettings,
+  VercelRemoteEnv,
+} from "./vercel-api"
 
 // What the Vercel screens show and offer, kept apart from the components so
 // the rules can be tested without a renderer.
@@ -15,8 +21,8 @@ export function deploymentTone(deployment: Pick<VercelDeployment, "state">) {
 
 export type DeploymentAction = "cancel" | "redeploy" | "promote" | "rollback"
 
-// Vercel promotes a production build made after the current one (a staged
-// release) and rolls back to one made before it. A preview cannot be pointed
+// Vercel promotes a production build that has not served production yet (a
+// staged release) and rolls back to one that has. A preview cannot be pointed
 // at production: it was built with preview variables.
 export function deploymentActions(
   deployment: VercelDeployment,
@@ -25,10 +31,40 @@ export function deploymentActions(
 ): DeploymentAction[] {
   if (RUNNING.includes(deployment.state)) return ["cancel"]
   if (deployment.state !== "READY") return ["redeploy"]
-  const failedChecks = release?.checks.some((check) => check.required && check.status === "failed") ?? false
-  if (deployment.target !== "production" || deployment.current || failedChecks) return ["redeploy"]
-  const later = !current || deployment.createdAt > current.createdAt
+  if (deployment.target !== "production" || deployment.current || checksFailed(release)) return ["redeploy"]
+  const later = !current || deployment.substate === "STAGED" || deployment.createdAt > current.createdAt
   return ["redeploy", later ? "promote" : "rollback"]
+}
+
+// What "Roll back production" returns to, chosen as the desktop chooses it
+// when no deployment is named: the newest production deployment before the
+// current one that served production and whose Vector checks did not fail.
+export function rollbackTarget(
+  deployments: VercelDeployment[],
+  current: VercelDeployment | undefined,
+  releases: CloudDeployment[],
+) {
+  if (!current) return undefined
+  return deployments.find((deployment) => {
+    if (deployment.target !== "production" || deployment.current || deployment.state !== "READY") return false
+    if (deployment.createdAt >= current.createdAt) return false
+    const release = matchRelease(deployment, releases)
+    if (checksFailed(release)) return false
+    return deployment.substate ? deployment.substate !== "STAGED" : !release || Boolean(release.promotedAt)
+  })
+}
+
+function checksFailed(release?: Pick<CloudDeployment, "checks">) {
+  return release?.checks.some((check) => check.required && check.status === "failed") ?? false
+}
+
+// Vercel Authentication beyond "preview", or a password, covers production
+// builds' own URLs, so without a bypass secret Vector's checks cannot open a
+// production build and production does not move.
+export function productionChecksBlocked(project: Pick<VercelProjectDetails, "protection"> | undefined) {
+  if (!project || project.protection.bypassReady) return false
+  if (project.protection.passwordProtection) return true
+  return Boolean(project.protection.vercelAuthentication && project.protection.vercelAuthentication !== "preview")
 }
 
 export function matchRelease(deployment: VercelDeployment, releases: CloudDeployment[]) {
@@ -144,10 +180,7 @@ export function publishOutcome(result: PublishResult, workspaceName?: string) {
       `${production ? "Production release" : workspaceName ? `Preview of ${workspaceName}` : "Preview"} live at ${result.url}.`,
       production ? "" : "Production did not change.",
       result.protectedChecks === "skipped"
-        ? "Deployment Protection kept Vector's checks out of this preview; let them through in Project settings."
-        : "",
-      result.protectedChecks === "checked-after-promotion"
-        ? "Deployment Protection kept Vector's checks out of the build, so production was checked after promotion."
+        ? `Deployment Protection kept Vector's checks out of this ${production ? "release" : "preview"}; let them through in Project settings.`
         : "",
       ...(result.notes ?? []),
     ]

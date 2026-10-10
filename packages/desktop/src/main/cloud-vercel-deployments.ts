@@ -4,6 +4,7 @@ import {
   arrayField,
   numberField,
   objectField,
+  parseJson,
   stringField,
   vercelFailure,
   vercelLinkContext,
@@ -41,6 +42,11 @@ export type VercelDeployment = {
   createdAt: string
   /** Production traffic points at this deployment right now. */
   current: boolean
+  /**
+   * Vercel's readySubstate: STAGED never served production (a build made with
+   * --skip-domain and not promoted), PROMOTED has.
+   */
+  substate?: "STAGED" | "ROLLING" | "PROMOTED"
   source?: string
   branch?: string
   commitSha?: string
@@ -66,6 +72,7 @@ const STATES: VercelDeploymentState[] = [
   "DELETED",
 ]
 const RUNNING: VercelDeploymentState[] = ["QUEUED", "INITIALIZING", "BUILDING"]
+const SUBSTATES = ["STAGED", "ROLLING", "PROMOTED"] as const
 
 // https://vercel.com/docs/rest-api/deployments/list-deployments
 export async function listVercelDeployments(
@@ -138,6 +145,7 @@ function deploymentSummary(value: unknown, current?: string): VercelDeployment |
   const created = numberField(value, "createdAt") ?? numberField(value, "created")
   const creator = objectField(value, "creator")
   const alias = arrayField(value, "alias").filter((item): item is string => typeof item === "string")
+  const substate = stringField(value, "readySubstate")
   return {
     id,
     url: `https://${host.replace(/^https?:\/\//, "")}`,
@@ -146,6 +154,7 @@ function deploymentSummary(value: unknown, current?: string): VercelDeployment |
     target: stringField(value, "target") === "production" ? "production" : "preview",
     createdAt: created ? new Date(created).toISOString() : new Date(0).toISOString(),
     current: Boolean(current && current === id),
+    substate: SUBSTATES.find((item) => item === substate),
     source: stringField(value, "source"),
     branch:
       stringField(meta, "githubCommitRef") ??
@@ -219,52 +228,52 @@ export async function vercelRuntimeLogs(
   const deployment = await inspectInProject(context, idOrUrl, options.request)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), options.waitMs ?? 6_000)
-  const entries: VercelLogEntry[] = []
-  try {
-    const response = await vercelResponse(
-      context.auth,
-      `/v1/projects/${encodeURIComponent(context.link.projectId)}/deployments/${encodeURIComponent(deployment.id)}/runtime-logs`,
-      { request: options.request, signal: controller.signal },
-    )
-    if (!response.ok) {
-      throw vercelFailure(response.status, await response.json().catch(() => undefined), context.auth.token)
-    }
-    const reader = response.body?.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ""
-    // The stream never ends on its own: once lines have arrived, a short
-    // silence means the backlog is through.
-    const idle = options.idleMs ?? 1_500
-    while (reader && entries.length < limit) {
-      const chunk = await Promise.race([
-        reader.read(),
-        ...(entries.length ? [wait(idle).then(() => ({ done: true as const, value: undefined }))] : []),
-      ]).catch(() => ({ done: true as const, value: undefined }))
-      if (chunk.done) break
-      buffer += decoder.decode(chunk.value, { stream: true })
-      const lines = buffer.split("\n")
-      buffer = lines.pop() ?? ""
-      entries.push(...lines.flatMap(runtimeEntry))
-    }
-    entries.push(...runtimeEntry(buffer))
-  } catch (error) {
-    if (!controller.signal.aborted) throw error
-  } finally {
-    clearTimeout(timer)
-    controller.abort()
-  }
+  const entries = await vercelResponse(
+    context.auth,
+    `/v1/projects/${encodeURIComponent(context.link.projectId)}/deployments/${encodeURIComponent(deployment.id)}/runtime-logs`,
+    { request: options.request, signal: controller.signal },
+  )
+    .then(async (response) => {
+      if (!response.ok) {
+        throw vercelFailure(response.status, await response.json().catch(() => undefined), context.auth.token)
+      }
+      return readRuntimeLines(response.body, limit, options.idleMs ?? 1_500)
+    })
+    // Running out of time before Vercel answered is an empty read, not a failure.
+    .catch((error: unknown) => {
+      if (controller.signal.aborted) return []
+      throw error
+    })
+    .finally(() => {
+      clearTimeout(timer)
+      controller.abort()
+    })
   return { deployment, entries: entries.slice(-limit), token: context.auth.token }
+}
+
+// The stream never ends on its own: once lines have arrived, a short silence
+// means the backlog is through. A read that fails, as it does when the time
+// runs out, ends with what has arrived.
+async function readRuntimeLines(body: ReadableStream<Uint8Array> | null, limit: number, idleMs: number) {
+  const reader = body?.getReader()
+  if (!reader) return []
+  const decoder = new TextDecoder()
+  const read = async (entries: VercelLogEntry[], buffer: string): Promise<VercelLogEntry[]> => {
+    if (entries.length >= limit) return [...entries, ...runtimeEntry(buffer)]
+    const chunk = await Promise.race([
+      reader.read(),
+      ...(entries.length ? [wait(idleMs).then(() => ({ done: true as const, value: undefined }))] : []),
+    ]).catch(() => ({ done: true as const, value: undefined }))
+    if (chunk.done) return [...entries, ...runtimeEntry(buffer)]
+    const lines = (buffer + decoder.decode(chunk.value, { stream: true })).split("\n")
+    return read([...entries, ...lines.slice(0, -1).flatMap(runtimeEntry)], lines.at(-1) ?? "")
+  }
+  return read([], "")
 }
 
 function runtimeEntry(line: string): VercelLogEntry[] {
   if (!line.trim()) return []
-  const value: unknown = (() => {
-    try {
-      return JSON.parse(line)
-    } catch {
-      return undefined
-    }
-  })()
+  const value = parseJson(line)
   const message = stringField(value, "message")
   if (!message) return []
   const at = numberField(value, "timestampInMs")
@@ -301,8 +310,10 @@ export async function cancelVercelDeployment(projectPath: string, idOrUrl: strin
 }
 
 // https://vercel.com/docs/rest-api/deployments/create-a-new-deployment: a
-// redeploy names the existing deployment and keeps its target, so redeploying
-// a production deployment replaces what production serves once it is ready.
+// redeploy names the existing deployment and keeps its target. A production
+// rebuild is created with autoAssignCustomDomains: false, which is what the
+// CLI's --skip-domain sends, so production does not move to an unchecked build;
+// promoting it is a separate, approved step.
 export async function redeployVercelDeployment(projectPath: string, idOrUrl: string, options: VercelOptions = {}) {
   const context = await vercelLinkContext(projectPath)
   const deployment = await inspectInProject(context, idOrUrl, options.request)
@@ -313,7 +324,7 @@ export async function redeployVercelDeployment(projectPath: string, idOrUrl: str
       name: context.link.projectName,
       project: context.link.projectId,
       deploymentId: deployment.id,
-      ...(deployment.target === "production" ? { target: "production" } : {}),
+      ...(deployment.target === "production" ? { target: "production", autoAssignCustomDomains: false } : {}),
     },
     request: options.request,
   })
@@ -355,7 +366,7 @@ export async function rollbackVercelDeployment(projectPath: string, idOrUrl?: st
   const context = await vercelLinkContext(projectPath)
   const target = idOrUrl
     ? await inspectInProject(context, idOrUrl, options.request)
-    : await previousProduction(context, options)
+    : await previousProduction(projectPath, context, options)
   if (target.current) throw new VercelError("invalid", `Deployment ${target.id} is already serving production.`)
   if (target.target !== "production" || target.state !== "READY") {
     throw new VercelError(
@@ -378,17 +389,25 @@ export async function rollbackVercelDeployment(projectPath: string, idOrUrl?: st
 // A deployment Vector checked and found broken is not pointed at production,
 // whoever asks; deployments Vector did not make carry no checks to consult.
 export function requireVercelChecksPassed(projectPath: string, deployment: VercelDeployment) {
-  const failed = (releaseForProviderDeployment(projectPath, deployment)?.checks ?? []).filter(
-    (check) => check.required && check.status === "failed",
-  )
+  const failed = failedChecks(projectPath, deployment)
   if (!failed.length) return
   throw new VercelError(
     "invalid",
-    `Vector's required release checks failed for ${deployment.id} (${failed.map((check) => check.label).join(", ")}), so production was not moved to it. Fix the cause and publish again, or run its checks again from Cloud Services > Deployments.`,
+    `Vector's required release checks failed for ${deployment.id} (${failed.map((check) => check.label).join(", ")}), so production was not moved to it. Fix the cause and publish again. If the failure came from outside the release, the user can run its checks again with Run checks in Cloud Services > Deployments.`,
   )
 }
 
-async function previousProduction(context: VercelLinkContext, options: VercelOptions) {
+function failedChecks(projectPath: string, deployment: VercelDeployment) {
+  return (releaseForProviderDeployment(projectPath, deployment)?.checks ?? []).filter(
+    (check) => check.required && check.status === "failed",
+  )
+}
+
+// The deployment a rollback without an id returns production to: the newest
+// production deployment before the current one that actually served
+// production and that Vector's checks did not fail. A build Vector staged
+// with --skip-domain and never promoted is passed over, whatever its age.
+export async function previousProduction(projectPath: string, context: VercelLinkContext, options: VercelOptions) {
   const current = await currentProductionId(context, options.request)
   const history = await vercelPages(context.auth, "/v6/deployments", "deployments", {
     cursor: "until",
@@ -401,33 +420,52 @@ async function previousProduction(context: VercelLinkContext, options: VercelOpt
     const deployment = deploymentSummary(item, current)
     return deployment ? [deployment] : []
   })
-  const currentIndex = deployments.findIndex((item) => item.current)
-  const previous = deployments.slice(currentIndex + 1).find((item) => !item.current && item.state === "READY")
+  const previous = deployments
+    .slice(deployments.findIndex((item) => item.current) + 1)
+    .find(
+      (item) =>
+        !item.current &&
+        item.state === "READY" &&
+        servedProduction(projectPath, item) &&
+        !failedChecks(projectPath, item).length,
+    )
   if (!previous) {
     throw new VercelError(
       "not_found",
-      `The Vercel project ${context.link.projectName} has no earlier production deployment to roll back to.`,
+      `The Vercel project ${context.link.projectName} has no earlier production deployment that served production and passed Vector's checks, so there is nothing to roll back to.`,
     )
   }
   return previous
 }
 
+// Vercel's readySubstate says so directly. Without it, a release Vector
+// recorded counts only once Vector saw it serve production.
+function servedProduction(projectPath: string, deployment: VercelDeployment) {
+  if (deployment.substate) return deployment.substate !== "STAGED"
+  const release = releaseForProviderDeployment(projectPath, deployment)
+  return !release || release.promotedAt !== undefined
+}
+
 // Promotion and rollback answer before every domain has moved; production is
 // reported once the project names this deployment as its production target.
-async function productionUrl(context: VercelLinkContext, deploymentId: string, options: VercelOptions) {
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const project = await vercelRequest(context.auth, `/v9/projects/${encodeURIComponent(context.link.projectId)}`, {
-      request: options.request,
-    })
-    const production = objectField(objectField(project, "targets"), "production")
-    if (stringField(production, "id") === deploymentId) {
-      const aliases = arrayField(production, "alias").filter((item): item is string => typeof item === "string")
-      const host = aliases.find((item) => !item.endsWith(".vercel.app")) ?? aliases[0] ?? stringField(production, "url")
-      return host ? `https://${host}` : undefined
-    }
+async function productionUrl(
+  context: VercelLinkContext,
+  deploymentId: string,
+  options: VercelOptions,
+  attempt = 0,
+): Promise<string | undefined> {
+  if (attempt >= 10) return undefined
+  const project = await vercelRequest(context.auth, `/v9/projects/${encodeURIComponent(context.link.projectId)}`, {
+    request: options.request,
+  })
+  const production = objectField(objectField(project, "targets"), "production")
+  if (stringField(production, "id") !== deploymentId) {
     await (options.sleep ?? wait)(1_500)
+    return productionUrl(context, deploymentId, options, attempt + 1)
   }
-  return undefined
+  const aliases = arrayField(production, "alias").filter((item): item is string => typeof item === "string")
+  const host = aliases.find((item) => !item.endsWith(".vercel.app")) ?? aliases[0] ?? stringField(production, "url")
+  return host ? `https://${host}` : undefined
 }
 
 // The same alias Vercel gives a branch's git deployments

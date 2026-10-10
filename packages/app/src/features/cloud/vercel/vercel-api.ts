@@ -48,6 +48,8 @@ export type VercelProjectStatus = {
   connected: boolean
   account?: string
   link?: VercelProjectLink
+  /** The project a .vercel/project.json names, when nothing is linked yet. */
+  candidate?: { projectId: string; teamId?: string }
   project?: VercelProjectDetails
   error?: string
 }
@@ -71,6 +73,8 @@ export type VercelDeployment = {
   target: "production" | "preview"
   createdAt: string
   current: boolean
+  /** STAGED never served production (built with --skip-domain, not promoted); PROMOTED has. */
+  substate?: "STAGED" | "ROLLING" | "PROMOTED"
   source?: string
   branch?: string
   commitSha?: string
@@ -214,4 +218,5 @@ export function vercelErrorText(error: unknown, fallback: string) {
 
 export const VERCEL_ENV_TARGETS: VercelEnvTarget[] = ["production", "preview", "development"]
 
-export const VERCEL_NODE_VERSIONS = ["24.x", "22.x", "20.x", "18.x"]
+// Vercel turned Node.js 18 off in 2025 and Node.js 20 on October 1, 2026.
+export const VERCEL_NODE_VERSIONS = ["24.x", "22.x"]

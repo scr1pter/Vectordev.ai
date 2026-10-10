@@ -1,3 +1,5 @@
+import { Option, Schema } from "effect"
+
 import { VECTOR_USER_AGENT } from "./user-agent"
 import {
   getCloudProviderProjectLink,
@@ -140,12 +142,11 @@ export async function vercelResponse(
   })
 }
 
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
+const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+
+// Undefined for text that is not JSON, such as an HTML error page.
+export function parseJson(text: string): unknown {
+  return Option.getOrUndefined(decodeJson(text))
 }
 
 // Vercel answers errors as { error: { code, message, invalidToken? } }.
@@ -188,9 +189,7 @@ export async function vercelPages(
   },
 ): Promise<unknown[]> {
   const max = options.max ?? 1_000
-  const items: unknown[] = []
-  let cursor: number | string | undefined
-  for (let page = 0; page < MAX_PAGES && items.length < max; page++) {
+  const page = async (items: unknown[], cursor: number | string | undefined, count: number): Promise<unknown[]> => {
     const body = await vercelRequest(auth, path, {
       query: {
         ...options.query,
@@ -202,12 +201,13 @@ export async function vercelPages(
     })
     // A few older endpoints answer with a bare array and no pagination.
     if (Array.isArray(body)) return [...items, ...body].slice(0, max)
-    items.push(...arrayField(body, key))
+    const collected = [...items, ...arrayField(body, key)]
     const next = objectField(objectField(body, "pagination"), "next")
-    if ((typeof next !== "number" && typeof next !== "string") || next === "" || next === cursor) break
-    cursor = next
+    const more = (typeof next === "number" || typeof next === "string") && next !== "" && next !== cursor
+    if (!more || collected.length >= max || count + 1 >= MAX_PAGES) return collected.slice(0, max)
+    return page(collected, next, count + 1)
   }
-  return items.slice(0, max)
+  return page([], undefined, 0)
 }
 
 export async function vercelAuth(scope?: VercelScopeChoice): Promise<VercelAuth> {

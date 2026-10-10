@@ -1,5 +1,6 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
 import type { VercelFetch } from "./cloud-vercel-api"
+import type { VercelProtection } from "./cloud-vercel-projects"
 
 // Vercel Deployment Protection puts previews (and, with Standard Protection,
 // every generated deployment URL) behind Vercel Authentication or a password.
@@ -21,53 +22,73 @@ export function protectionBypassHeaders(secret?: string): Record<string, string>
   return secret ? { "x-vercel-protection-bypass": secret, "x-vercel-set-bypass-cookie": "true" } : {}
 }
 
+// The bypass secret opens every protected deployment of the project, so it
+// only goes to the origin the check was pointed at. A redirect to a sign-in
+// provider, or to any other host, never receives it.
+export function bypassHeadersFor(requestUrl: string, checkedUrl: string, headers: Record<string, string>) {
+  return URL.canParse(requestUrl) &&
+    URL.canParse(checkedUrl) &&
+    new URL(requestUrl).origin === new URL(checkedUrl).origin
+    ? headers
+    : {}
+}
+
+// Vercel Authentication set to "preview" leaves production deployment URLs
+// open; the stricter modes and Password Protection cover every generated URL.
+export function protectsDeployment(protection: VercelProtection | undefined, target: "production" | "preview") {
+  if (!protection) return false
+  if (protection.passwordProtection) return true
+  if (!protection.vercelAuthentication) return false
+  return target === "preview" || protection.vercelAuthentication !== "preview"
+}
+
 export async function probeVercelUrl(
   url: string,
   options: { bypass?: string; projectProtected?: boolean; request?: VercelFetch; timeoutMs?: number } = {},
 ): Promise<VercelProbe> {
   const startedAt = Date.now()
-  let current = url
-  try {
-    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      const response = await (options.request ?? fetch)(current, {
-        method: "GET",
-        redirect: "manual",
-        headers: { "user-agent": VECTOR_USER_AGENT, ...protectionBypassHeaders(options.bypass) },
-        signal: AbortSignal.timeout(options.timeoutMs ?? 12_000),
-      })
-      const location = response.headers.get("location")
-      if (response.status >= 300 && response.status < 400 && location) {
-        await response.body?.cancel().catch(() => undefined)
-        const next = new URL(location, current)
-        if (isVercelLogin(next))
-          return { kind: "protected", statusCode: response.status, latencyMs: Date.now() - startedAt }
-        current = next.toString()
-        continue
-      }
-      if (response.ok) {
-        await response.body?.cancel().catch(() => undefined)
-        return { kind: "ok", statusCode: response.status, latencyMs: Date.now() - startedAt }
-      }
-      const body = response.status === 401 || response.status === 403 ? await response.text().catch(() => "") : ""
-      if (body === "") await response.body?.cancel().catch(() => undefined)
-      if (protectedResponse(response, body, options.projectProtected)) {
-        return { kind: "protected", statusCode: response.status, latencyMs: Date.now() - startedAt }
-      }
-      return {
-        kind: "failed",
-        statusCode: response.status,
-        error: `HTTP ${response.status} ${response.statusText}`.trim(),
-        latencyMs: Date.now() - startedAt,
-      }
+  const elapsed = () => Date.now() - startedAt
+  // Redirects are followed by hand, so a hop to Vercel's sign-in page reads as
+  // protection and the bypass header stays with the checked origin.
+  const hop = async (current: string, redirects: number): Promise<VercelProbe> => {
+    if (redirects > MAX_REDIRECTS) return { kind: "failed", error: "Too many redirects.", latencyMs: elapsed() }
+    const response = await (options.request ?? fetch)(current, {
+      method: "GET",
+      redirect: "manual",
+      headers: {
+        "user-agent": VECTOR_USER_AGENT,
+        ...bypassHeadersFor(current, url, protectionBypassHeaders(options.bypass)),
+      },
+      signal: AbortSignal.timeout(options.timeoutMs ?? 12_000),
+    })
+    const location = response.headers.get("location")
+    if (response.status >= 300 && response.status < 400 && location) {
+      await response.body?.cancel().catch(() => undefined)
+      const next = new URL(location, current)
+      if (isVercelLogin(next)) return { kind: "protected", statusCode: response.status, latencyMs: elapsed() }
+      return hop(next.toString(), redirects + 1)
     }
-    return { kind: "failed", error: "Too many redirects.", latencyMs: Date.now() - startedAt }
-  } catch (error) {
+    if (response.ok) {
+      await response.body?.cancel().catch(() => undefined)
+      return { kind: "ok", statusCode: response.status, latencyMs: elapsed() }
+    }
+    const body = response.status === 401 || response.status === 403 ? await response.text().catch(() => "") : ""
+    if (body === "") await response.body?.cancel().catch(() => undefined)
+    if (protectedResponse(response, body, options.projectProtected)) {
+      return { kind: "protected", statusCode: response.status, latencyMs: elapsed() }
+    }
     return {
       kind: "failed",
-      error: error instanceof Error ? error.message : String(error),
-      latencyMs: Date.now() - startedAt,
+      statusCode: response.status,
+      error: `HTTP ${response.status} ${response.statusText}`.trim(),
+      latencyMs: elapsed(),
     }
   }
+  return hop(url, 0).catch((error: unknown) => ({
+    kind: "failed" as const,
+    error: error instanceof Error ? error.message : String(error),
+    latencyMs: elapsed(),
+  }))
 }
 
 function isVercelLogin(url: URL) {

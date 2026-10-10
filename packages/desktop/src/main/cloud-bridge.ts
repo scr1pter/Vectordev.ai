@@ -25,7 +25,8 @@ import {
   type VercelCommandFields,
 } from "./cloud-vercel-bridge"
 import { vercelLinkContext, type VercelFetch } from "./cloud-vercel-api"
-import { autoLinkVercelProject, readVercelProject } from "./cloud-vercel-projects"
+import { protectsDeployment } from "./cloud-vercel-checks"
+import { readVercelProject, vercelProjectCandidate } from "./cloud-vercel-projects"
 
 const MAX_BODY_BYTES = 64 * 1024
 
@@ -251,12 +252,32 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
         `Publish this agent workspace to the Vercel project ${target.projectName} as a preview at its branch address. Production changes only after it is merged into the main project.`,
       )
     }
+    // Nothing to approve when Deployment Protection would keep the checks out
+    // of the production build: production would not move.
+    const settings = getBuildSettings(input.projectPath, input.taskId)
+    const checked = (settings?.requiredChecks.health ?? true) || (settings?.requiredChecks.browser ?? true)
+    if (
+      input.production === true &&
+      project &&
+      checked &&
+      !project.protection.bypassReady &&
+      protectsDeployment(project.protection, "production")
+    ) {
+      return {
+        ok: false,
+        needsSetup: true,
+        errorCode: "checks_blocked",
+        error: `Vercel Deployment Protection covers the production builds of ${target.projectName}, and Vector has no Protection Bypass for Automation secret, so its release checks could not open the build and production would not move.`,
+        nextStep:
+          "Offer enable_protection_bypass (the user approves it) so the checks can open protected builds, then publish to production again.",
+      }
+    }
     return input.production === true
       ? scope(
           "Vercel",
           target.projectName,
           "production",
-          `Build this project for production on the Vercel project ${target.projectName}, run the release checks, then point production traffic at it.`,
+          `Build this project for production on the Vercel project ${target.projectName} and run the release checks on that build. Production traffic moves to it only if they pass.`,
         )
       : scope(
           "Vercel",
@@ -344,9 +365,12 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   }
   const database = getDatabase(input.projectPath, input.taskId)
   if (input.command === "status") {
-    await autoLinkVercelProject(input.projectPath, scope.directory, options.vercel?.request).catch(() => undefined)
     const connections = (["vercel", "supabase"] as const).map(cachedCloudProviderConnection)
     const targets = configuredPublishTargets(input)
+    // A .vercel/project.json is only a suggestion: linking asks the user first.
+    const candidate = getCloudProviderProjectLink(input.projectPath, input.taskId, "vercel")
+      ? undefined
+      : await vercelProjectCandidate(input.projectPath, scope.directory)
     return {
       ok: true,
       configured: targets.length > 0,
@@ -358,6 +382,9 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
       deployments: deploymentSummaries(input),
       connections,
       vercel: vercelStatusSummary(input.projectPath),
+      nextStep: candidate
+        ? `This repository's .vercel/project.json names the Vercel project ${candidate.projectId}${candidate.teamId ? ` (teamId ${candidate.teamId})` : ""}. Link it with link_project, which the user approves, before publishing.`
+        : undefined,
     }
   }
   if (input.command === "detect_build") {
@@ -455,15 +482,14 @@ const SETUP_CODES = ["not_connected", "not_linked", "no_node", "token_rejected"]
 
 function publishNextStep(result: PublishResult, isolated: boolean) {
   if (result.ok) {
-    if (isolated) {
-      return `This agent workspace's preview is at ${result.url}; tell the user. Merge the workspace into the main project before promoting it to production.`
+    if (result.environment === "production") {
+      return isolated
+        ? `Vercel made this agent workspace's release production, because it was the project's first deployment: it is live at ${result.url}. Tell the user.`
+        : undefined
     }
-    if (result.environment === "preview") {
-      return "This is a preview; production did not change. Publish with production: true only when the user asks to ship to production."
-    }
-    return result.protectedChecks === "checked-after-promotion"
-      ? "Deployment Protection kept the checks off the deployment's own URL, so they ran on the production domain after promotion."
-      : undefined
+    return isolated
+      ? `This agent workspace's preview is at ${result.url}; tell the user. Merge the workspace into the main project before promoting it to production.`
+      : "This is a preview; production did not change. Publish with production: true only when the user asks to ship to production."
   }
   if (result.errorCode === "no_node")
     return "Ask the user to install Node.js 18 or later (nodejs.org), then publish again."
@@ -473,9 +499,12 @@ function publishNextStep(result: PublishResult, isolated: boolean) {
     return "Link a project with link_project (see vercel_projects) or create_project, or ask the user to connect Vercel in Cloud Services > Integrations."
   }
   if (result.errorCode === "build_failed") return "Read the build output above, fix the cause, and publish again."
+  if (result.errorCode === "checks_blocked") {
+    return "Production did not change. Offer enable_protection_bypass (the user approves it) so the checks can open protected builds, then publish to production again."
+  }
   if (result.errorCode === "checks_failed") {
     return result.environment === "production"
-      ? "Production is serving a release whose checks failed. Offer to roll back with rollback (no deploymentId rolls back to the previous production deployment), then fix and publish again."
+      ? "Production is serving a release whose checks failed. Offer to roll back with rollback (with no deploymentId it returns to the last deployment that served production and passed Vector's checks), then fix and publish again."
       : "Read the failed checks above, fix the cause, and publish again."
   }
   return "Read the error and log above before trying again."

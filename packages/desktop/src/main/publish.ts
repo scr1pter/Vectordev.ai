@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { stat } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
@@ -22,6 +22,9 @@ import { cachedCloudProviderConnection } from "./cloud-connections"
 import { extractDeployUrl } from "./publish-url"
 import { agentEnvironment, resolveAgentPath, runCli, shimmedCommand } from "./external-agents"
 import {
+  objectField,
+  parseJson,
+  stringField,
   vercelLinkContext,
   vercelRequest,
   VercelError,
@@ -29,12 +32,7 @@ import {
   type VercelFetch,
   type VercelLinkContext,
 } from "./cloud-vercel-api"
-import {
-  autoLinkVercelProject,
-  readVercelProject,
-  vercelBypassSecret,
-  type VercelProtection,
-} from "./cloud-vercel-projects"
+import { autoLinkVercelProject, readVercelProject, vercelBypassSecret } from "./cloud-vercel-projects"
 import {
   assignVercelBranchAlias,
   inspectInProject,
@@ -42,12 +40,12 @@ import {
   vercelBuildLogs,
   type VercelDeployment,
 } from "./cloud-vercel-deployments"
-import { probeVercelUrl, protectionBypassHeaders } from "./cloud-vercel-checks"
+import { probeVercelUrl, protectionBypassHeaders, protectsDeployment, type VercelProbe } from "./cloud-vercel-checks"
 import type { CloudBrowserCheckResult } from "./cloud-browser-check"
 
 // Publish the user's app to their own Vercel account. Every release is first
 // an immutable deployment that Vector checks; production only moves when the
-// user asked for it and the checks passed. Vector never proxies the code.
+// user asked for it and the checks ran and passed. Vector never proxies the code.
 
 export type PublishTargetId = "vercel"
 
@@ -69,7 +67,7 @@ export type PublishTarget = {
   problem?: "no_node" | "not_connected"
 }
 
-export type PublishErrorCode = VercelErrorCode | "checks_failed" | "build_failed" | "deploy_failed"
+export type PublishErrorCode = VercelErrorCode | "checks_failed" | "checks_blocked" | "build_failed" | "deploy_failed"
 
 export type PublishResult = {
   ok: boolean
@@ -86,7 +84,7 @@ export type PublishResult = {
   alias?: string
   checks?: CloudDeploymentCheck[]
   /** Deployment Protection kept Vector's checks out of the deployment's own URL. */
-  protectedChecks?: "skipped" | "checked-after-promotion"
+  protectedChecks?: "skipped"
   notes?: string[]
 }
 
@@ -426,6 +424,7 @@ async function runPreflightChecks(
     await Promise.all([
       scanProjectSecrets(input.projectPath),
       deployRoot ? scanProjectSecrets(deployRoot, input.projectPath) : [],
+      servedEnvFile(input.projectPath, settings),
     ])
   ).flat()
   const secretsRequired = settings?.requiredChecks.secrets ?? true
@@ -460,6 +459,27 @@ async function runPreflightChecks(
   }
 }
 
+// The secret scan skips .env files, which are expected to hold secrets. The
+// Vercel CLI still uploads .env (it leaves out only .env.local and
+// .env.*.local), and a site with no build step is served from its own root, so
+// the variables Vector writes there would be public at /.env. A site that
+// builds serves its output instead, and its build may read .env.
+async function servedEnvFile(directory: string, settings: CloudBuildSettings | null) {
+  if (settings?.buildCommand) return []
+  const [env, manifest, ignored] = await Promise.all([
+    stat(join(directory, ".env")).catch(() => undefined),
+    readFile(join(directory, "package.json"), "utf8")
+      .then(parseJson)
+      .catch(() => undefined),
+    readFile(join(directory, ".vercelignore"), "utf8").catch(() => ""),
+  ])
+  if (!env?.isFile() || stringField(objectField(manifest, "scripts"), "build")) return []
+  if (ignored.split(/\r?\n/).some((line) => [".env", "/.env", ".env*", "/.env*"].includes(line.trim()))) return []
+  return [
+    { file: ".env", line: 0, kind: "public at /.env, since this site has no build step: add .env to .vercelignore" },
+  ]
+}
+
 function requiredChecksPassed(checks: CloudDeploymentCheck[]): boolean {
   return checks.every((check) => !check.required || check.status === "passed" || check.status === "skipped")
 }
@@ -469,44 +489,25 @@ type CheckAccess = {
   bypass?: string
   /** Deployment Protection covers the URL being checked. */
   protectedUrl: boolean
-  /** The URL is the production domain, checked because the deployment's own URL was protected. */
-  afterPromotion?: boolean
 }
 
-function protectedDetail(afterPromotion: boolean) {
-  return afterPromotion
-    ? "Protected by Vercel Deployment Protection; checked on the production domain instead."
-    : "Protected by Vercel Deployment Protection, so Vector could not open it. Enable Protection Bypass for Automation in Cloud Services > Project settings to check protected deployments."
-}
+const PROTECTED_DETAIL =
+  "Protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Cloud Services > Project settings so Vector can check protected deployments."
 
-// The health probe of a release check, also run on its own from Observability.
-// Deployment Protection leaves the check "skipped" and the release's status
-// as it was: a sign-in page says nothing about whether the app works.
-async function healthCheck(
-  input: PublishProjectInput,
-  deployment: CloudDeployment,
-  settings: CloudBuildSettings | null,
-  access: CheckAccess,
-  url: string,
-  options: PublishOptions,
-  emit?: PublishProgressEmitter,
-) {
-  const scope = scopeFor(input)
-  const where = access.afterPromotion ? ` on ${url} after promotion` : ""
-  const healthPath = settings?.healthPath ?? "/"
-  emitProgress(input, emit, "checking", "info", `Checking ${healthPath}${where}.`)
-  const probe = await probeVercelUrl(new URL(healthPath, url).toString(), {
+// One probe of the release's health path, as the release check and
+// Observability both run it.
+function probeHealth(settings: CloudBuildSettings | null, access: CheckAccess, url: string, options: PublishOptions) {
+  return probeVercelUrl(new URL(settings?.healthPath ?? "/", url).toString(), {
     bypass: access.bypass,
     projectProtected: access.protectedUrl,
     request: options.request,
   })
-  const details =
-    probe.kind === "ok"
-      ? `HTTP ${probe.statusCode} in ${probe.latencyMs} ms${where}`
-      : probe.kind === "protected"
-        ? protectedDetail(access.afterPromotion === true)
-        : `${probe.error ?? "Health check failed."}${where}`
-  const updated = updateDeployment(scope.projectPath, scope.taskId, deployment.id, {
+}
+
+// What a probe says about the release. Deployment Protection leaves its status
+// as it was: a sign-in page says nothing about whether the app works.
+function probeFields(deployment: CloudDeployment, probe: VercelProbe): Partial<CloudDeployment> {
+  return {
     status:
       probe.kind === "ok"
         ? "ready"
@@ -518,7 +519,34 @@ async function healthCheck(
     statusCode: probe.statusCode,
     latencyMs: probe.latencyMs,
     healthError: probe.kind === "failed" ? probe.error : undefined,
+    probe: probe.kind,
     lastCheckedAt: new Date().toISOString(),
+  }
+}
+
+// The health check of a release check. Deployment Protection leaves it
+// "skipped" with the reason, not "failed".
+async function healthCheck(
+  input: PublishProjectInput,
+  deployment: CloudDeployment,
+  settings: CloudBuildSettings | null,
+  access: CheckAccess,
+  url: string,
+  options: PublishOptions,
+  emit?: PublishProgressEmitter,
+) {
+  const scope = scopeFor(input)
+  const healthPath = settings?.healthPath ?? "/"
+  emitProgress(input, emit, "checking", "info", `Checking ${healthPath}.`)
+  const probe = await probeHealth(settings, access, url, options)
+  const details =
+    probe.kind === "ok"
+      ? `HTTP ${probe.statusCode} in ${probe.latencyMs} ms`
+      : probe.kind === "protected"
+        ? PROTECTED_DETAIL
+        : (probe.error ?? "Health check failed.")
+  const updated = updateDeployment(scope.projectPath, scope.taskId, deployment.id, {
+    ...probeFields(deployment, probe),
     checks: upsertDeploymentCheck(
       deployment.checks,
       makeCheck({
@@ -544,7 +572,8 @@ async function healthCheck(
 
 // Health and browser checks against `url`. A check Deployment Protection kept
 // out is "skipped" with the reason, not "failed": nothing about the release
-// itself is known to be wrong.
+// itself is known to be wrong. `blocked` says a required check was kept out,
+// so the release is not known to work either.
 async function runPostDeployChecks(
   input: PublishProjectInput,
   deployment: CloudDeployment,
@@ -555,81 +584,55 @@ async function runPostDeployChecks(
   emit?: PublishProgressEmitter,
 ) {
   const scope = scopeFor(input)
-  const afterPromotion = access.afterPromotion === true
-  const where = afterPromotion ? ` on ${url} after promotion` : ""
-  const blockedDetail = protectedDetail(afterPromotion)
-  let current = deployment
-  let blocked = access.protectedUrl && !access.bypass
-  if (settings?.requiredChecks.health ?? true) {
-    const health = await healthCheck(input, current, settings, access, url, options, emit)
-    current = health.deployment
-    blocked = health.kind === "protected"
-  }
+  const health =
+    (settings?.requiredChecks.health ?? true)
+      ? await healthCheck(input, deployment, settings, access, url, options, emit)
+      : undefined
+  const checked = health?.deployment ?? deployment
+  // Without a health probe to go by, the project's protection settings decide.
+  const kept = health ? health.kind === "protected" : access.protectedUrl && !access.bypass
+  const browser = (check: Omit<CloudDeploymentCheck, "checkedAt" | "id" | "type" | "label">) =>
+    updateDeployment(scope.projectPath, scope.taskId, checked.id, {
+      checks: upsertDeploymentCheck(
+        checked.checks,
+        makeCheck({ id: "browser", type: "browser", label: "Browser smoke test", ...check }),
+      ),
+    })
   if (!(settings?.requiredChecks.browser ?? true)) {
-    current = updateDeployment(scope.projectPath, scope.taskId, current.id, {
-      checks: upsertDeploymentCheck(
-        current.checks,
-        makeCheck({
-          id: "browser",
-          type: "browser",
-          label: "Browser smoke test",
-          status: "skipped",
-          required: false,
-          details: "Browser smoke testing is disabled in Build & runtime.",
-        }),
-      ),
-    })
-    return { deployment: current, blocked }
-  }
-  if (blocked) {
-    current = updateDeployment(scope.projectPath, scope.taskId, current.id, {
-      checks: upsertDeploymentCheck(
-        current.checks,
-        makeCheck({
-          id: "browser",
-          type: "browser",
-          label: "Browser smoke test",
-          status: "skipped",
-          required: true,
-          details: blockedDetail,
-        }),
-      ),
-    })
-    emitProgress(input, emit, "checking", "warning", blockedDetail)
-    return { deployment: current, blocked }
-  }
-  emitProgress(input, emit, "checking", "info", `Rendering the deployment in Vector's isolated browser${where}.`)
-  const headers = protectionBypassHeaders(access.bypass)
-  const browser = options.browserCheck
-    ? await options.browserCheck(url, current.id, headers)
-    : await import("./cloud-browser-check").then((module) => module.runCloudBrowserCheck(url, current.id, headers))
-  current = updateDeployment(scope.projectPath, scope.taskId, current.id, {
-    checks: upsertDeploymentCheck(
-      current.checks,
-      makeCheck({
-        id: "browser",
-        type: "browser",
-        label: "Browser smoke test",
-        status: browser.ok ? "passed" : "failed",
-        required: true,
-        details: `${browser.details}${where}`,
-        output: browser.output,
-        durationMs: browser.durationMs,
-        screenshotPath: browser.screenshotPath,
+    return {
+      deployment: browser({
+        status: "skipped",
+        required: false,
+        details: "Browser smoke testing is disabled in Build & runtime.",
       }),
-    ),
-  })
-  emitProgress(input, emit, "checking", browser.ok ? "success" : "error", browser.details)
-  return { deployment: current, blocked }
+      blocked: health?.kind === "protected",
+    }
+  }
+  if (kept) {
+    emitProgress(input, emit, "checking", "warning", PROTECTED_DETAIL)
+    return { deployment: browser({ status: "skipped", required: true, details: PROTECTED_DETAIL }), blocked: true }
+  }
+  emitProgress(input, emit, "checking", "info", "Rendering the deployment in Vector's isolated browser.")
+  const rendered = await renderDeployment(options, url, checked.id, protectionBypassHeaders(access.bypass))
+  emitProgress(input, emit, "checking", rendered.ok ? "success" : "error", rendered.details)
+  return {
+    deployment: browser({
+      status: rendered.ok ? "passed" : "failed",
+      required: true,
+      details: rendered.details,
+      output: rendered.output,
+      durationMs: rendered.durationMs,
+      screenshotPath: rendered.screenshotPath,
+    }),
+    blocked: false,
+  }
 }
 
-// Vercel Authentication set to "preview" leaves production deployment URLs
-// open; the stricter modes and Password Protection cover every generated URL.
-function protectsDeployment(protection: VercelProtection | undefined, target: "production" | "preview") {
-  if (!protection) return false
-  if (protection.passwordProtection) return true
-  if (!protection.vercelAuthentication) return false
-  return target === "preview" || protection.vercelAuthentication !== "preview"
+// The isolated browser loads Electron, so it is imported only when a check renders.
+async function renderDeployment(options: PublishOptions, url: string, id: string, headers: Record<string, string>) {
+  if (options.browserCheck) return options.browserCheck(url, id, headers)
+  const { runCloudBrowserCheck } = await import("./cloud-browser-check")
+  return runCloudBrowserCheck(url, id, headers)
 }
 
 export async function publishProject(
@@ -852,6 +855,27 @@ async function deployAndCheck(
       notes,
     }
   }
+  // A production build Deployment Protection kept the checks out of is not
+  // known to work, so production stays where it is. Checking the production
+  // domain after promoting would put the release live first.
+  if (production && !remote.current && checked.blocked) {
+    return {
+      ...failure(
+        input,
+        emit,
+        `Vercel Deployment Protection kept Vector's release checks out of this production build, so production was not moved to it. Turn on Protection Bypass for Automation in Cloud Services > Project settings, then publish to production again.`,
+        "checks_blocked",
+      ),
+      url: deployment.url,
+      log,
+      deploymentId: deployment.id,
+      providerDeploymentId: remote.id,
+      environment: "preview",
+      checks: deployment.checks,
+      protectedChecks: "skipped",
+      notes,
+    }
+  }
 
   const alias =
     input.workspaceId && git?.branch && git.branch !== "detached"
@@ -915,40 +939,6 @@ async function deployAndCheck(
     "productionUrl" in promoted && typeof promoted.productionUrl === "string" ? promoted.productionUrl : undefined
   deployment = markDeploymentPromoted(scope.projectPath, scope.taskId, deployment.id, { productionUrl })
   emitProgress(input, emit, "promoting", "success", `Production now serves ${productionUrl ?? remote.url}.`)
-
-  // The deployment's own URL was protected; the production domain usually is
-  // not, so the checks run there now.
-  if (checked.blocked && productionUrl) {
-    const after = await runPostDeployChecks(
-      input,
-      deployment,
-      settings,
-      { bypass: access.bypass, protectedUrl: false, afterPromotion: true },
-      productionUrl,
-      options,
-      emit,
-    )
-    deployment = after.deployment
-    if (!requiredChecksPassed(deployment.checks)) {
-      return {
-        ...failure(
-          input,
-          emit,
-          `Production now serves this release, and its checks failed on ${productionUrl}. Roll back to the previous production deployment if the site is broken.`,
-          "checks_failed",
-        ),
-        url: productionUrl,
-        log,
-        deploymentId: deployment.id,
-        providerDeploymentId: remote.id,
-        environment: "production",
-        productionUrl,
-        checks: deployment.checks,
-        protectedChecks: "checked-after-promotion",
-        notes,
-      }
-    }
-  }
   emitProgress(input, emit, "complete", "success", "Production release is live.")
   return {
     ok: true,
@@ -960,7 +950,6 @@ async function deployAndCheck(
     environment: "production",
     productionUrl,
     checks: deployment.checks,
-    protectedChecks: checked.blocked ? (productionUrl ? "checked-after-promotion" : "skipped") : undefined,
     notes,
   }
 }
@@ -1033,49 +1022,69 @@ export async function rerunDeploymentChecks(
     actionProgress(deployment, input.runId),
     deployment,
     getBuildSettings(input.projectPath, input.taskId),
-    await releaseCheckAccess(input.projectPath, deployment, options),
+    releaseAccess(await projectCheckAccess(input.projectPath, options), deployment),
     deployment.url,
     options,
   )
   return checked.deployment
 }
 
-// Observability's probe of one release: the release check's health probe, so
-// a protected preview reads as protected rather than broken. A release whose
-// project is no longer linked is probed without protection details.
+// Observability's probe of one release: how it answers now. It leaves the
+// release checks alone, because those decide whether production may move to
+// the release, and one transient failure here must not block a later rollback.
+// A release whose project is no longer linked is probed without protection details.
 export async function checkDeploymentHealth(input: DeploymentActionInput, options: PublishOptions = {}) {
-  const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  const health = await healthCheck(
-    actionProgress(deployment, input.runId),
-    deployment,
+  return probeRelease(
+    getDeployment(input.projectPath, input.taskId, input.id),
     getBuildSettings(input.projectPath, input.taskId),
-    await releaseCheckAccess(input.projectPath, deployment, options).catch(() => ({ protectedUrl: false })),
-    deployment.url,
+    await projectCheckAccess(input.projectPath, options).catch(() => undefined),
     options,
   )
-  return health.deployment
 }
 
+// Each probe is a request to the user's own app, so only a few run at once;
+// the project's protection is read once for all of them.
+const PROBE_BATCH = 4
+
 export async function checkAllDeploymentHealth(projectPath: string, taskId?: string, options: PublishOptions = {}) {
-  await Promise.all(
-    listDeployments(projectPath, taskId).map((item) =>
-      checkDeploymentHealth({ projectPath, taskId, id: item.id }, options),
-    ),
+  const releases = listDeployments(projectPath, taskId)
+  const settings = getBuildSettings(projectPath, taskId)
+  const access = await projectCheckAccess(projectPath, options).catch(() => undefined)
+  const batches = Array.from({ length: Math.ceil(releases.length / PROBE_BATCH) }, (_, index) =>
+    releases.slice(index * PROBE_BATCH, (index + 1) * PROBE_BATCH),
   )
+  for (const batch of batches) {
+    await Promise.all(batch.map((deployment) => probeRelease(deployment, settings, access, options)))
+  }
   return listDeployments(projectPath, taskId)
 }
 
-async function releaseCheckAccess(
-  projectPath: string,
+async function probeRelease(
   deployment: CloudDeployment,
+  settings: CloudBuildSettings | null,
+  access: ProjectCheckAccess | undefined,
   options: PublishOptions,
-): Promise<CheckAccess> {
+) {
+  const probe = await probeHealth(settings, releaseAccess(access, deployment), deployment.url, options)
+  return updateDeployment(deployment.projectPath, deployment.taskId, deployment.id, probeFields(deployment, probe))
+}
+
+type ProjectCheckAccess = Awaited<ReturnType<typeof projectCheckAccess>>
+
+async function projectCheckAccess(projectPath: string, options: PublishOptions) {
   const context = await vercelLinkContext(projectPath)
-  const project = await readVercelProject(context, options.request).catch(() => undefined)
+  const [project, bypass] = await Promise.all([
+    readVercelProject(context, options.request).catch(() => undefined),
+    vercelBypassSecret(context, options.request).catch(() => undefined),
+  ])
+  return { bypass, protection: project?.protection }
+}
+
+function releaseAccess(access: ProjectCheckAccess | undefined, deployment: CloudDeployment): CheckAccess {
   return {
-    bypass: await vercelBypassSecret(context, options.request).catch(() => undefined),
+    bypass: access?.bypass,
     protectedUrl: protectsDeployment(
-      project?.protection,
+      access?.protection,
       deployment.releaseStatus === "current" ? "production" : "preview",
     ),
   }

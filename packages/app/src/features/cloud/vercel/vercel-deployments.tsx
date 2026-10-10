@@ -3,7 +3,7 @@ import { createStore } from "solid-js/store"
 import { usePlatform } from "@/context/platform"
 import { cloudApi, type CloudDeployment } from "../cloud-api"
 import { vercelApi, vercelErrorText, type VercelDeployment, type VercelProjectStatus } from "./vercel-api"
-import { deploymentActions, deploymentTone, matchRelease, type DeploymentAction } from "./vercel-model"
+import { deploymentActions, deploymentTone, matchRelease, rollbackTarget, type DeploymentAction } from "./vercel-model"
 import { createConfirm, formatWhen, VercelLinkRequired, type VercelNotice } from "./vercel-ui"
 
 type LogView = { id: string; source: "build" | "runtime"; text: string; fetchedAt?: string; loading: boolean }
@@ -31,6 +31,7 @@ export function VercelDeployments(props: {
     logs: undefined as LogView | undefined,
   })
   const current = createMemo(() => state.deployments.find((item) => item.current))
+  const previous = createMemo(() => rollbackTarget(state.deployments, current(), state.releases))
 
   const load = async () => {
     if (!api || !props.projectPath) return
@@ -73,7 +74,7 @@ export function VercelDeployments(props: {
         const result = await api.redeploy(props.projectPath, deployment.id)
         props.notice({
           tone: "success",
-          text: `Rebuilding as ${result.deployment.id}${result.deployment.target === "production" ? "; production switches to it when it is ready" : ""}.`,
+          text: `Rebuilding as ${result.deployment.id}${result.deployment.target === "production" ? ". Production stays where it is until you promote the new build." : "."}`,
         })
       }
       if (action === "promote") {
@@ -95,11 +96,12 @@ export function VercelDeployments(props: {
     }
   }
 
-  const rollbackPrevious = async () => {
+  // The target shown on the button is the one rolled back to.
+  const rollbackPrevious = async (target: VercelDeployment) => {
     if (!api) return
     setState("busy", "rollback-previous")
     try {
-      const result = await api.rollback(props.projectPath)
+      const result = await api.rollback(props.projectPath, target.id)
       props.notice({ tone: "success", text: `Production rolled back to ${result.deployment.url}.` })
       await load()
     } catch (caught) {
@@ -178,8 +180,12 @@ export function VercelDeployments(props: {
     props.notice({ tone: "info", text: "Repair context copied. Paste it into the composer." })
   }
 
-  const actionLabel = (action: DeploymentAction, id: string) => {
-    if (confirm.armed(`${action}-${id}`)) return `Confirm ${action === "rollback" ? "roll back" : action}?`
+  // A production rebuild does not take production's domains; the confirm says so.
+  const actionLabel = (action: DeploymentAction, deployment: VercelDeployment) => {
+    if (confirm.armed(`${action}-${deployment.id}`)) {
+      if (action === "redeploy" && deployment.target === "production") return "Confirm rebuild? Production stays put"
+      return `Confirm ${action === "rollback" ? "roll back" : action}?`
+    }
     if (action === "rollback") return "Roll back to this"
     return action === "cancel" ? "Cancel build" : action === "promote" ? "Promote" : "Redeploy"
   }
@@ -196,21 +202,18 @@ export function VercelDeployments(props: {
           </p>
         </div>
         <div class="vercel-actions">
-          <Show
-            when={
-              current() &&
-              state.deployments.some((item) => item.target === "production" && !item.current && item.state === "READY")
-            }
-          >
-            <button
-              class="cloud-button"
-              data-variant="warning"
-              type="button"
-              disabled={Boolean(state.busy)}
-              onClick={() => confirm.request("rollback-previous", () => void rollbackPrevious())}
-            >
-              {confirm.armed("rollback-previous") ? "Confirm roll back?" : "Roll back production"}
-            </button>
+          <Show when={previous()}>
+            {(target) => (
+              <button
+                class="cloud-button"
+                data-variant="warning"
+                type="button"
+                disabled={Boolean(state.busy)}
+                onClick={() => confirm.request("rollback-previous", () => void rollbackPrevious(target()))}
+              >
+                {confirm.armed("rollback-previous") ? `Confirm roll back to ${target().id}?` : "Roll back production"}
+              </button>
+            )}
           </Show>
           <button class="cloud-button" type="button" disabled={state.loading} onClick={() => void load()}>
             {state.loading ? "Refreshing…" : "Refresh"}
@@ -387,9 +390,7 @@ export function VercelDeployments(props: {
                             confirm.request(`${action}-${deployment.id}`, () => void act(deployment, action))
                           }
                         >
-                          {state.busy === `${action}-${deployment.id}`
-                            ? "Working…"
-                            : actionLabel(action, deployment.id)}
+                          {state.busy === `${action}-${deployment.id}` ? "Working…" : actionLabel(action, deployment)}
                         </button>
                       )}
                     </For>

@@ -358,7 +358,7 @@ describe("cloud bridge publish destination", () => {
     expect((await describe({ action: "publish", production: false })).scope.environment).toBe("preview")
     expect((await describe({ action: "publish", production: true })).scope).toMatchObject({
       environment: "production",
-      summary: expect.stringContaining("run the release checks, then point production traffic at it"),
+      summary: expect.stringContaining("Production traffic moves to it only if they pass"),
     })
     for (const action of ["prepare_database", "prepare_auth", "apply_migrations"]) {
       expect(await describe({ action })).toMatchObject({ ok: false, needsSetup: true })
@@ -404,9 +404,17 @@ describe("cloud bridge publish destination", () => {
       const published: PublishProjectInput[] = []
       const bridge = await startCloudBridge({
         workspaces: () => [{ id: "ws-1", name: "Agent 1", sourcePath: project, isolatedPath: worktree }],
+        // The second publish is a never-deployed project's first deployment,
+        // which Vercel makes production whatever Vector asks for.
         publish: async (input) => {
           published.push(input)
-          return { ok: true, target: input.target, log: "", url: "https://agent-preview.vercel.app" }
+          return {
+            ok: true,
+            target: input.target,
+            log: "",
+            url: "https://agent-preview.vercel.app",
+            environment: published.length > 1 ? ("production" as const) : ("preview" as const),
+          }
         },
       })
       const command = async (input: Record<string, unknown>) =>
@@ -431,6 +439,9 @@ describe("cloud bridge publish destination", () => {
           production: false,
         }),
       ])
+      expect((await command({ command: "publish" })).nextStep).toContain(
+        "Vercel made this agent workspace's release production",
+      )
 
       // Migrations are discovered in the worktree, where the agent wrote them,
       // and the database is looked up in the project's scope.

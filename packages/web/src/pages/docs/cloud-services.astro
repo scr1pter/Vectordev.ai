@@ -25,7 +25,7 @@ export const prerender = true
   <p>
     For Vercel, pick the personal account or team the project lives in, then link one of its projects or create a new
     one with a framework and root directory. A repository already deployed with the Vercel CLI is linked from its
-    .vercel/project.json automatically. Choose the Supabase project in Database.
+    .vercel/project.json when you open Cloud Services; an agent asks before linking it. Choose the Supabase project in Database.
     From 1.99.99, the desktop uses an encrypted temporary callback relay for Vercel, and PKCE for Supabase. Provider client secrets stay on the server. Management tokens are not returned to the renderer after saving.
   </p>
 
@@ -49,6 +49,8 @@ export const prerender = true
     branch. Compare with local compares values by hash. A sync first shows its plan: it creates what is missing and
     updates or deletes only variables an earlier Vector sync wrote, and nothing is written until you apply that plan.
     Pull development values copies readable development values into this project's .env after you review them.
+    Publishing uploads .env with the source, so a site without a build step, which Vercel serves from its root, must
+    leave it out with .vercelignore; until then its publish stops at the secret scan.
     Supabase setup adds public client values, including the VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY aliases used
     by the generated client. Secret, service-role, management and user-session keys are rejected for that browser
     configuration.
@@ -59,14 +61,16 @@ export const prerender = true
     Publish makes a preview unless you choose production and confirm it. A production build is made without moving
     your domains, checked, and promoted only when the required checks pass. Deployments lists everything Vercel has
     for the project, including git pushes, with Vector's checks attached to the releases it made. From there you can
-    read build or runtime logs, cancel a build, redeploy, promote a later production build, or roll production back.
+    read build or runtime logs, cancel a build, redeploy, promote a staged production build, or roll production back
+    to the last deployment that served it and passed Vector's checks. A production redeploy is built without moving
+    your domains; promote it when you want it live.
     An agent working in a parallel workspace can publish a preview of its worktree; it gets a stable address for its
     branch, shown on the workspace and reported in the task.
   </p>
   <p>
     If Deployment Protection asks visitors to sign in, Vector's checks cannot open a preview. Project settings can
-    create a Protection Bypass for Automation secret, kept in Vector's vault, so they can; without it production is
-    checked after promotion. Project settings also edit Vercel's framework, root directory, build, output and install
+    create a Protection Bypass for Automation secret, kept in Vector's vault, so they can. Without it, a production
+    build the checks cannot open is not promoted, and production stays where it is. Project settings also edit Vercel's framework, root directory, build, output and install
     commands and Node.js version. Domains attaches a domain you own and shows the exact records Vercel asks for, an A
     record for an apex domain or a CNAME for a subdomain, plus any verification record, then verifies them and reports
     the certificate.

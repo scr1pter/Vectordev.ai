@@ -181,7 +181,7 @@ export function VercelSettings(props: { projectPath: string; notice: VercelNotic
                 {protection().bypassReady
                   ? "Vector holds a Protection Bypass for Automation secret, so its release checks can open protected deployments."
                   : protection().vercelAuthentication || protection().passwordProtection
-                    ? "Vector's release checks cannot open protected previews until you let them through; production is checked after promotion instead."
+                    ? "Vector's release checks cannot open protected deployments until you let them through, and a production build they cannot check is not promoted."
                     : "If you turn protection on, let Vector's checks through here."}
               </p>
               <Show when={!protection().bypassReady}>

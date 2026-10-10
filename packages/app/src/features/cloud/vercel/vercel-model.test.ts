@@ -5,7 +5,9 @@ import {
   deploymentActions,
   groupRemoteEnv,
   matchRelease,
+  productionChecksBlocked,
   publishOutcome,
+  rollbackTarget,
   settingsPatch,
   suggestedProjectName,
   vercelFramework,
@@ -50,6 +52,49 @@ describe("Vercel deployment actions", () => {
     expect(
       deploymentActions(deployment({ id: "new", createdAt: "2026-10-06T00:00:00.000Z" }), current, failed),
     ).toEqual(["redeploy"])
+  })
+
+  test("a staged production build, older or not, is promoted rather than rolled back to", () => {
+    expect(
+      deploymentActions(
+        deployment({ id: "staged", createdAt: "2026-10-04T00:00:00.000Z", substate: "STAGED" }),
+        current,
+      ),
+    ).toEqual(["redeploy", "promote"])
+  })
+
+  test("rolls back only to a deployment that served production and passed Vector's checks", () => {
+    const good = deployment({ id: "good", createdAt: "2026-10-01T00:00:00.000Z", substate: "PROMOTED" })
+    const staged = deployment({ id: "staged", createdAt: "2026-10-03T00:00:00.000Z", substate: "STAGED" })
+    const broken = deployment({ id: "broken", createdAt: "2026-10-04T00:00:00.000Z", substate: "PROMOTED" })
+    const newer = deployment({ id: "newer", createdAt: "2026-10-06T00:00:00.000Z", substate: "STAGED" })
+    const releases = [
+      { id: "r1", providerDeploymentId: "broken", url: "", checks: [{ required: true, status: "failed" }] },
+    ] as CloudDeployment[]
+    // Vercel lists newest first.
+    const listed = [newer, current, broken, staged, good]
+    expect(rollbackTarget(listed, current, releases)?.id).toBe("good")
+    expect(rollbackTarget([newer, current, broken, staged], current, releases)).toBeUndefined()
+    expect(rollbackTarget(listed, undefined, releases)).toBeUndefined()
+    // Without Vercel's substate, a release Vector staged and never promoted is passed over.
+    const unknown = deployment({ id: "unknown", createdAt: "2026-10-02T00:00:00.000Z" })
+    const vectorStaged = [
+      { id: "r2", providerDeploymentId: "unknown", url: "", checks: [{ required: true, status: "passed" }] },
+    ] as CloudDeployment[]
+    expect(rollbackTarget([current, unknown, good], current, vectorStaged)?.id).toBe("good")
+    expect(rollbackTarget([current, unknown], current, [])?.id).toBe("unknown")
+  })
+
+  test("knows when Deployment Protection keeps the checks out of production builds", () => {
+    const protection = (vercelAuthentication: string | null, bypassReady = false, passwordProtection = false) => ({
+      protection: { vercelAuthentication, bypassReady, passwordProtection },
+    })
+    expect(productionChecksBlocked(protection("prod_deployment_urls_and_all_previews"))).toBe(true)
+    expect(productionChecksBlocked(protection("all"))).toBe(true)
+    expect(productionChecksBlocked(protection("preview"))).toBe(false)
+    expect(productionChecksBlocked(protection(null, false, true))).toBe(true)
+    expect(productionChecksBlocked(protection("all", true))).toBe(false)
+    expect(productionChecksBlocked(undefined)).toBe(false)
   })
 
   test("finds Vector's own evidence for a Vercel deployment by id or address", () => {

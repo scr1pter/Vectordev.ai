@@ -57,6 +57,8 @@ export type CloudDeployment = {
   statusCode?: number
   latencyMs?: number
   healthError?: string
+  /** How the last health probe ended; "protected" means Deployment Protection kept Vector out. */
+  probe?: "ok" | "failed" | "protected"
   checks: CloudDeploymentCheck[]
   git?: CloudGitMetadata
   /** Vercel's own id (dpl_...) for this release. */
@@ -180,6 +182,7 @@ function readDeployments(): CloudDeployment[] {
       statusCode: typeof item.statusCode === "number" ? item.statusCode : undefined,
       latencyMs: typeof item.latencyMs === "number" ? item.latencyMs : undefined,
       healthError: typeof item.healthError === "string" ? item.healthError : undefined,
+      probe: item.probe === "ok" || item.probe === "failed" || item.probe === "protected" ? item.probe : undefined,
       checks: Array.isArray(item.checks) ? item.checks.filter(isCloudDeploymentCheck) : [],
       git: isCloudGitMetadata(item.git) ? item.git : undefined,
       providerDeploymentId: typeof item.providerDeploymentId === "string" ? item.providerDeploymentId : undefined,

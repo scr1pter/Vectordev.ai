@@ -28,7 +28,7 @@ import { VercelEnvironment } from "./vercel/vercel-environment"
 import { VercelLink } from "./vercel/vercel-link"
 import { VercelLogs } from "./vercel/vercel-logs"
 import { vercelApi } from "./vercel/vercel-api"
-import { publishOutcome } from "./vercel/vercel-model"
+import { productionChecksBlocked, publishOutcome } from "./vercel/vercel-model"
 import { VercelSettings } from "./vercel/vercel-settings"
 import "./cloud-console.css"
 
@@ -306,6 +306,9 @@ export function CloudConsole(props: {
   // The linked Vercel project has never been deployed: Vercel makes its first
   // deployment production whatever Vector asks for, so publishing confirms.
   const [firstRelease, setFirstRelease] = createSignal(false)
+  // Deployment Protection covers production builds and Vector has no bypass
+  // secret: a production publish would stop before promotion.
+  const [productionBlocked, setProductionBlocked] = createSignal(false)
   const environment = createCloudEnvironment({ api: () => api, notice: setNotice })
   const envVars = () => environment.state.variables
   const [database, setDatabase] = createSignal<CloudDatabaseConnection>(null)
@@ -402,6 +405,7 @@ export function CloudConsole(props: {
     const vercelStatus = vercel ? await vercel.status(projectPath).catch(() => undefined) : undefined
     if (!isCurrent()) return
     setFirstRelease(Boolean(vercelStatus?.project && !vercelStatus.project.productionDeploymentId))
+    setProductionBlocked(productionChecksBlocked(vercelStatus?.project))
     setProviderResources(
       Object.fromEntries(resources.map((entry) => [entry.provider, entry.items])) as Partial<
         Record<CloudProviderId, CloudProviderResource[]>
@@ -495,13 +499,22 @@ export function CloudConsole(props: {
     try {
       const updated = await api.deployments.check(props.projectPath, props.taskId, deployment.id)
       setDeployments((items) => items.map((item) => (item.id === updated.id ? updated : item)))
-      setNotice({
-        tone: updated.status === "ready" ? "success" : "error",
-        text:
-          updated.status === "ready"
-            ? `${updated.name} responded with HTTP ${updated.statusCode} in ${formatDuration(updated.latencyMs)}.`
-            : `${updated.name} is ${updated.status}: ${updated.healthError ?? "health check failed"}`,
-      })
+      setNotice(
+        updated.probe === "protected"
+          ? {
+              tone: "info",
+              text: `${updated.name} is protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Project settings to check it.`,
+            }
+          : updated.probe === "ok"
+            ? {
+                tone: "success",
+                text: `${updated.name} responded with HTTP ${updated.statusCode} in ${formatDuration(updated.latencyMs)}.`,
+              }
+            : {
+                tone: "error",
+                text: `${updated.name} is ${updated.status}: ${updated.healthError ?? "health check failed"}`,
+              },
+      )
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Health check failed." })
     } finally {
@@ -526,10 +539,11 @@ export function CloudConsole(props: {
     try {
       const next = await api.deployments.checkAll(props.projectPath, props.taskId)
       setDeployments(next)
-      const healthy = next.filter((item) => item.status === "ready").length
+      const healthy = next.filter((item) => item.probe === "ok").length
+      const protectedCount = next.filter((item) => item.probe === "protected").length
       setNotice({
         tone: healthy === next.length ? "success" : "info",
-        text: `${healthy} of ${next.length} deployments are healthy.`,
+        text: `${healthy} of ${next.length} deployments are healthy.${protectedCount ? ` ${protectedCount} could not be opened because of Deployment Protection.` : ""}`,
       })
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Health checks failed." })
@@ -1138,7 +1152,7 @@ export function CloudConsole(props: {
                   <p class="cloud-muted mt-1 text-[12px]">
                     Vector runs the whole deploy on your own Vercel account — authorize once, then it's a single click.
                     Your code is never proxied through Vector. A preview never changes production; a production build is
-                    checked before Vector promotes it.
+                    checked first, and production moves to it only if the checks pass.
                   </p>
                   <div class="cloud-segment mt-3" aria-label="Deployment environment">
                     <button
@@ -1179,6 +1193,13 @@ export function CloudConsole(props: {
                             : "Publish preview →"}
                     </button>
                   </div>
+                  <Show when={deploymentEnvironment() === "production" && !firstRelease() && productionBlocked()}>
+                    <p class="cloud-muted mt-2 text-[11px]">
+                      Vercel Deployment Protection covers {vercelProjectName()}'s production builds, so Vector cannot
+                      check them and production will not move. Turn on Protection Bypass for Automation in Project
+                      settings first.
+                    </p>
+                  </Show>
                   <Show when={firstRelease()}>
                     <p class="cloud-muted mt-2 text-[11px]">
                       {vercelProjectName()} has never been deployed, and Vercel makes a project's first deployment
@@ -1291,7 +1312,9 @@ export function CloudConsole(props: {
                                 class="cloud-button"
                                 data-variant="primary"
                                 type="button"
-                                disabled={!publish || publishing()}
+                                disabled={
+                                  !publish || publishing() || !vercelTarget()?.available || !providerLink("vercel")
+                                }
                                 onClick={() =>
                                   firstRelease()
                                     ? requestConfirm(

@@ -16,6 +16,7 @@ import {
   linkTeamId,
   numberField,
   objectField,
+  parseJson,
   stringField,
   vercelAuth,
   vercelLinkContext,
@@ -49,7 +50,11 @@ export type VercelProjectSummary = {
   updatedAt?: string
 }
 
-export const VERCEL_NODE_VERSIONS = ["24.x", "22.x", "20.x", "18.x"] as const
+// The versions new deployments can build with: Vercel turned Node.js 18 off in
+// 2025 and Node.js 20 on October 1, 2026
+// (https://vercel.com/docs/functions/runtimes/node-js/node-js-versions,
+// https://vercel.com/changelog/node-js-20-is-being-deprecated).
+export const VERCEL_NODE_VERSIONS = ["24.x", "22.x"] as const
 export type VercelNodeVersion = (typeof VERCEL_NODE_VERSIONS)[number]
 
 export type VercelProjectSettings = {
@@ -84,6 +89,8 @@ export type VercelProjectStatus = {
   connected: boolean
   account?: string
   link?: CloudProviderProjectLink
+  /** The project a .vercel/project.json names, when nothing is linked yet. */
+  candidate?: VercelProjectCandidate
   project?: VercelProjectDetails
   /** Why the linked project could not be read, worded for the user. */
   error?: string
@@ -198,9 +205,13 @@ export async function unlinkVercelProject(projectPath: string) {
   return { unlinked: true }
 }
 
+export type VercelProjectCandidate = { projectId: string; teamId?: string }
+
 // A repository the user already deployed with the Vercel CLI carries
-// .vercel/project.json ({ projectId, orgId }). Vector links that project rather
-// than asking the user to find it again. A worktree has its own copy.
+// .vercel/project.json ({ projectId, orgId }). Cloud Services links that
+// project rather than asking the user to find it again. A worktree has its own
+// copy. Anything an agent can write is only a candidate there: the agent links
+// with link_project, which asks the user.
 export async function autoLinkVercelProject(
   projectPath: string,
   directory = projectPath,
@@ -209,25 +220,31 @@ export async function autoLinkVercelProject(
   const existing = getCloudProviderProjectLink(projectPath, undefined, "vercel")
   if (existing) return existing
   if (!cachedCloudProviderConnection("vercel").connected) return
-  const file =
-    (await readVercelProjectFile(directory)) ??
-    (directory === projectPath ? undefined : await readVercelProjectFile(projectPath))
-  if (!file) return
-  const auth = await vercelAuth(file.orgId?.startsWith("team_") ? file.orgId : null)
-  const project = await vercelRequest(auth, `/v9/projects/${encodeURIComponent(file.projectId)}`, { request }).catch(
-    () => undefined,
-  )
+  const candidate = await vercelProjectCandidate(projectPath, directory)
+  if (!candidate) return
+  const auth = await vercelAuth(candidate.teamId ?? null)
+  const project = await vercelRequest(auth, `/v9/projects/${encodeURIComponent(candidate.projectId)}`, {
+    request,
+  }).catch(() => undefined)
   if (!project) return
   return saveLink(projectPath, project, auth, ".vercel/project.json")
 }
 
-async function readVercelProjectFile(directory: string) {
-  const parsed: unknown = await readFile(join(directory, ".vercel", "project.json"), "utf8")
-    .then((text) => JSON.parse(text))
+export async function vercelProjectCandidate(projectPath: string, directory = projectPath) {
+  return (
+    (await readVercelProjectFile(directory)) ??
+    (directory === projectPath ? undefined : await readVercelProjectFile(projectPath))
+  )
+}
+
+async function readVercelProjectFile(directory: string): Promise<VercelProjectCandidate | undefined> {
+  const parsed = await readFile(join(directory, ".vercel", "project.json"), "utf8")
+    .then(parseJson)
     .catch(() => undefined)
   const projectId = stringField(parsed, "projectId")
   if (!projectId) return
-  return { projectId, orgId: stringField(parsed, "orgId") }
+  const orgId = stringField(parsed, "orgId")
+  return { projectId, teamId: orgId?.startsWith("team_") ? orgId : undefined }
 }
 
 function saveLink(projectPath: string, project: unknown, auth: VercelAuth, linkedFrom?: string) {
@@ -246,15 +263,27 @@ function saveLink(projectPath: string, project: unknown, auth: VercelAuth, linke
   })
 }
 
+// `autoLink` is for Cloud Services, where the user is looking; the agent's
+// status reports the candidate instead.
 export async function vercelProjectStatus(
   projectPath: string,
   directory = projectPath,
   request?: VercelFetch,
+  options: { autoLink?: boolean } = {},
 ): Promise<VercelProjectStatus> {
   const connection = cachedCloudProviderConnection("vercel")
   if (!connection.connected) return { connected: false }
-  const link = await autoLinkVercelProject(projectPath, directory, request).catch(() => undefined)
-  if (!link) return { connected: true, account: connection.account }
+  const link =
+    options.autoLink === false
+      ? getCloudProviderProjectLink(projectPath, undefined, "vercel")
+      : await autoLinkVercelProject(projectPath, directory, request).catch(() => undefined)
+  if (!link) {
+    return {
+      connected: true,
+      account: connection.account,
+      candidate: await vercelProjectCandidate(projectPath, directory),
+    }
+  }
   const project = await readVercelProject(await vercelLinkContext(projectPath), request).catch((error: unknown) =>
     error instanceof Error ? error : new Error(String(error)),
   )
@@ -366,20 +395,6 @@ function optionalRootDirectory(value?: string) {
   return directory
 }
 
-// The framework identifiers Vercel uses for what Vector's build detection names.
-export function vercelFrameworkFor(detected?: string) {
-  const known: Record<string, string> = {
-    "Next.js": "nextjs",
-    Nuxt: "nuxtjs",
-    SvelteKit: "sveltekit",
-    Astro: "astro",
-    Remix: "remix",
-    Vite: "vite",
-    "Create React App": "create-react-app",
-  }
-  return detected ? known[detected] : undefined
-}
-
 // Protection Bypass for Automation lets Vector's release checks open protected
 // deployments. The secret is kept in Vector's vault, never shown or logged.
 // https://vercel.com/docs/rest-api/projects/update-protection-bypass-for-automation
@@ -402,13 +417,17 @@ export async function enableVercelProtectionBypass(projectPath: string, request?
 // The secret Vector generated, or one the user created in Vercel's settings.
 export async function vercelBypassSecret(context: VercelLinkContext, request?: VercelFetch) {
   const stored = getStore(BYPASS_STORE).get(context.link.projectId)
-  if (typeof stored === "string") {
-    try {
-      return decryptCloudCredential(stored)
-    } catch {
-      getStore(BYPASS_STORE).delete(context.link.projectId)
-    }
-  }
+  // A secret the vault can no longer decrypt is dropped, and Vercel's own is read instead.
+  const decrypted =
+    typeof stored === "string"
+      ? await Promise.resolve(stored)
+          .then(decryptCloudCredential)
+          .catch(() => {
+            getStore(BYPASS_STORE).delete(context.link.projectId)
+            return undefined
+          })
+      : undefined
+  if (decrypted) return decrypted
   const project = await vercelRequest(context.auth, `/v9/projects/${encodeURIComponent(context.link.projectId)}`, {
     request,
   }).catch(() => undefined)

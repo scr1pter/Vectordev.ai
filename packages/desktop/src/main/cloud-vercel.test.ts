@@ -46,7 +46,7 @@ const projects = await import("./cloud-vercel-projects")
 const deployments = await import("./cloud-vercel-deployments")
 const env = await import("./cloud-vercel-env")
 const domains = await import("./cloud-vercel-domains")
-const { probeVercelUrl } = await import("./cloud-vercel-checks")
+const { bypassHeadersFor, probeVercelUrl } = await import("./cloud-vercel-checks")
 const { startCloudBridge, stopCloudBridge } = await import("./cloud-bridge")
 
 let project = ""
@@ -208,23 +208,26 @@ describe("Vercel projects", () => {
       framework: "Vite",
       buildCommand: "",
       outputDirectory: "dist",
-      nodeVersion: "20.x",
+      nodeVersion: "24.x",
     })
     expect(api.requests("PATCH").at(-1)?.body).toEqual({
       framework: "vite",
       buildCommand: null,
       outputDirectory: "dist",
-      nodeVersion: "20.x",
+      nodeVersion: "24.x",
     })
     expect(updated.settings).toMatchObject({
       framework: "vite",
       buildCommand: null,
       outputDirectory: "dist",
-      nodeVersion: "20.x",
+      nodeVersion: "24.x",
     })
-    await expect(projects.updateVercelProjectSettings(project, { nodeVersion: "16.x" })).rejects.toThrow(
-      "Node.js version",
-    )
+    // Vercel no longer builds new deployments with Node.js 18 or 20.
+    for (const retired of ["16.x", "18.x", "20.x"]) {
+      await expect(projects.updateVercelProjectSettings(project, { nodeVersion: retired })).rejects.toThrow(
+        "Node.js version",
+      )
+    }
     await expect(projects.updateVercelProjectSettings(project, {})).rejects.toThrow("at least one")
   })
 
@@ -348,12 +351,20 @@ describe("Vercel deployments", () => {
     )
     expect((await deployments.cancelVercelDeployment(project, seeded.building.uid)).state).toBe("CANCELED")
     const redeployed = await deployments.redeployVercelDeployment(project, seeded.live.uid)
+    // A production rebuild does not take production's domains, as --skip-domain does not.
     expect(api.requests("POST").at(-1)).toMatchObject({
       path: "/v13/deployments",
       query: { forceNew: "1" },
-      body: { name: "shop", project: seeded.remote.id, deploymentId: seeded.live.uid, target: "production" },
+      body: {
+        name: "shop",
+        project: seeded.remote.id,
+        deploymentId: seeded.live.uid,
+        target: "production",
+        autoAssignCustomDomains: false,
+      },
     })
     expect(redeployed.deployment.target).toBe("production")
+    expect(seeded.remote.productionId).toBe(seeded.live.uid)
     await deployments.redeployVercelDeployment(project, seeded.preview.uid)
     expect(api.requests("POST").at(-1)?.body).not.toHaveProperty("target")
   })
@@ -414,6 +425,66 @@ describe("Vercel deployments", () => {
     // marks Vector's current release rolled back.
     await deployments.rollbackVercelDeployment(project, seeded.old.uid, { sleep: async () => {} })
     expect(listDeployments(project).find((item) => item.id === candidate.id)?.releaseStatus).toBe("rolled-back")
+  })
+
+  test("rolls back by default to the last deployment that served production and passed Vector's checks", async () => {
+    const seeded = seedHistory()
+    seeded.old.readySubstate = "PROMOTED"
+    // Newer than the good one but older than live: staged by a production
+    // publish whose checks failed, so it never served anyone.
+    const staged = api.addDeployment({
+      projectId: seeded.remote.id,
+      target: "production",
+      created: 1_500,
+      readySubstate: "STAGED",
+    })
+    const failed = api.addDeployment({
+      projectId: seeded.remote.id,
+      target: "production",
+      created: 1_800,
+      readySubstate: "PROMOTED",
+    })
+    recordDeployment({
+      projectPath: project,
+      slug: "shop",
+      url: `https://${failed.url}`,
+      name: "shop",
+      target: "vercel",
+      environment: "preview",
+      providerDeploymentId: failed.uid,
+      checks: [
+        {
+          id: "browser",
+          type: "browser",
+          label: "Browser smoke test",
+          status: "failed",
+          required: true,
+          checkedAt: "2026-10-01",
+        },
+      ],
+    })
+    const rolled = await deployments.rollbackVercelDeployment(project, undefined, { sleep: async () => {} })
+    expect(rolled.deployment.id).toBe(seeded.old.uid)
+    expect(api.requests("POST").some((item) => item.path.endsWith(`/rollback/${staged.uid}`))).toBe(false)
+    seeded.old.readySubstate = "STAGED"
+    seeded.remote.productionId = seeded.live.uid
+    await expect(deployments.rollbackVercelDeployment(project)).rejects.toThrow("nothing to roll back to")
+  })
+
+  test("without Vercel's substate, a release Vector staged and never promoted is not a rollback target", async () => {
+    const seeded = seedHistory()
+    const staged = api.addDeployment({ projectId: seeded.remote.id, target: "production", created: 1_500 })
+    recordDeployment({
+      projectPath: project,
+      slug: "shop",
+      url: `https://${staged.url}`,
+      name: "shop",
+      target: "vercel",
+      environment: "preview",
+      providerDeploymentId: staged.uid,
+    })
+    const rolled = await deployments.rollbackVercelDeployment(project, undefined, { sleep: async () => {} })
+    expect(rolled.deployment.id).toBe(seeded.old.uid)
   })
 
   test("rolls back to the previous production deployment by default", async () => {
@@ -723,6 +794,43 @@ describe("release checks against Deployment Protection", () => {
       await site.stop(true)
     }
   })
+
+  test("never sends the bypass secret to another host a redirect points at", async () => {
+    const received: (string | null)[] = []
+    const elsewhere = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        received.push(request.headers.get("x-vercel-protection-bypass"))
+        return new Response("sign in")
+      },
+    })
+    const app = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url)
+        if (request.headers.get("x-vercel-protection-bypass") !== "bypass-secret-fixture") {
+          return new Response("", { status: 401, headers: { "set-cookie": "_vercel_sso_nonce=n" } })
+        }
+        if (url.pathname === "/") return Response.redirect(new URL("/home", url).toString(), 302)
+        // localhost is another origin than 127.0.0.1, as an auth provider would be.
+        return Response.redirect(`http://localhost:${elsewhere.port}/login`, 302)
+      },
+    })
+    try {
+      const probe = await probeVercelUrl(app.url.toString(), { bypass: "bypass-secret-fixture" })
+      expect(probe.kind).toBe("ok")
+      expect(received).toEqual([null])
+      expect(bypassHeadersFor(`http://localhost:${elsewhere.port}/login`, app.url.toString(), { a: "b" })).toEqual({})
+      expect(bypassHeadersFor(new URL("/assets/app.js", app.url).toString(), app.url.toString(), { a: "b" })).toEqual({
+        a: "b",
+      })
+    } finally {
+      await app.stop(true)
+      await elsewhere.stop(true)
+    }
+  })
 })
 
 describe("vector_cloud Vercel actions over the bridge", () => {
@@ -783,11 +891,13 @@ describe("vector_cloud Vercel actions over the bridge", () => {
         summary: expect.stringContaining("dpl_old"),
       },
     })
+    // The rollback target is resolved before asking, and the approved run uses it.
     expect(await command({ command: "describe", action: "rollback" })).toMatchObject({
-      scope: { environment: "production", summary: expect.stringContaining("the previous production deployment") },
+      scope: { environment: "production", summary: expect.stringContaining("(dpl_old)") },
+      carry: { deploymentId: "dpl_old" },
     })
     expect(await command({ command: "describe", action: "redeploy", deploymentId: "dpl_live" })).toMatchObject({
-      scope: { environment: "production", summary: expect.stringContaining("Production switches to it") },
+      scope: { environment: "production", summary: expect.stringContaining("production does not move") },
     })
     expect(await command({ command: "describe", action: "add_domain", domain: "shop.example" })).toMatchObject({
       scope: { environment: "production" },
@@ -822,6 +932,46 @@ describe("vector_cloud Vercel actions over the bridge", () => {
       error: expect.stringContaining("Browser smoke test"),
     })
     expect(await command({ command: "promote", deploymentId: "dpl_old" })).toMatchObject({ ok: false })
+  })
+
+  test("asks nothing for a production publish whose checks Deployment Protection would keep out", async () => {
+    const seeded = seed()
+    seeded.remote.ssoProtection = { deploymentType: "prod_deployment_urls_and_all_previews" }
+    const command = await bridge()
+    expect(await command({ command: "describe", action: "publish", production: true })).toMatchObject({
+      ok: false,
+      errorCode: "checks_blocked",
+      nextStep: expect.stringContaining("enable_protection_bypass"),
+    })
+    // A preview never moves production, so it is still described.
+    expect(await command({ command: "describe", action: "publish" })).toMatchObject({
+      ok: true,
+      scope: { environment: "preview" },
+    })
+    await command({ command: "enable_protection_bypass" })
+    expect(await command({ command: "describe", action: "publish", production: true })).toMatchObject({
+      ok: true,
+      scope: { environment: "production", summary: expect.stringContaining("only if they pass") },
+    })
+  })
+
+  test("status and vercel_project only report the project .vercel/project.json names", async () => {
+    connect()
+    const remote = api.addProject({ name: "from-cli", teamId: "team_1" })
+    await mkdir(join(project, ".vercel"))
+    await writeFile(join(project, ".vercel", "project.json"), JSON.stringify({ projectId: remote.id, orgId: "team_1" }))
+    const command = await bridge()
+    const status = await command({ command: "status" })
+    expect(status.nextStep).toContain(`names the Vercel project ${remote.id} (teamId team_1)`)
+    expect(status).toMatchObject({ ok: true, configured: false, nextStep: expect.stringContaining("link_project") })
+    const described = await command({ command: "vercel_project" })
+    expect(described.text).toContain(`names projectId ${remote.id} (teamId team_1)`)
+    expect(getCloudProviderProjectLink(project, undefined, "vercel")).toBeUndefined()
+    // Linking goes through link_project, which the tool asks about first.
+    expect(await command({ command: "describe", action: "link_project", projectId: remote.id })).toMatchObject({
+      ok: true,
+      scope: { environment: "project link" },
+    })
   })
 
   test("a publish to a never-deployed project is described as production", async () => {

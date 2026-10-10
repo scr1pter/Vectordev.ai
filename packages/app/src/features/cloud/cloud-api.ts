@@ -29,6 +29,8 @@ export type CloudDeployment = {
   statusCode?: number
   latencyMs?: number
   healthError?: string
+  /** How the last health probe ended; "protected" means Deployment Protection kept Vector out. */
+  probe?: "ok" | "failed" | "protected"
   checks: CloudDeploymentCheck[]
   git?: CloudGitMetadata
   /** Vercel's own id (dpl_...) for this release. */
@@ -257,7 +259,7 @@ export type PublishResult = {
   productionUrl?: string
   alias?: string
   checks?: CloudDeploymentCheck[]
-  protectedChecks?: "skipped" | "checked-after-promotion"
+  protectedChecks?: "skipped"
   notes?: string[]
 }
 
