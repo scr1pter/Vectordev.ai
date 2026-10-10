@@ -8,6 +8,9 @@ const Day = Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/))
 const Share = Schema.NullOr(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })))
 const Client = Schema.Literals(["desktop", "cli"])
 const Label = Schema.String.check(Schema.isMaxLength(32))
+const Money = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
+const Fraction = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+const Identifier = Schema.String.check(Schema.isMaxLength(120))
 
 export const Totals = Schema.Struct({
   accounts: Count,
@@ -30,6 +33,10 @@ export const Daily = Schema.Struct({
   cli: Count,
   sessions: Count,
   subagentSessions: Count,
+  // Model use on that calendar day as each install or CLI account reported it (local days).
+  tokens: Count,
+  cost: Money,
+  tasks: Count,
 }).annotate({ identifier: "UsageSummary.Daily" })
 export type Daily = typeof Daily.Type
 
@@ -66,6 +73,55 @@ export const Platform = Schema.Struct({ client: Client, platform: Label, arch: L
   identifier: "UsageSummary.Platform",
 })
 
+// Model use across everyone, from the latest usage report of each install and CLI account (Settings > Usage & streaks).
+export const Usage = Schema.Struct({
+  // Installs and CLI accounts that have sent a usage report.
+  reporting: Count,
+  lifetimeTokens: Count,
+  lifetimeCost: Money,
+  inputTokens: Count,
+  outputTokens: Count,
+  reasoningTokens: Count,
+  cachedTokens: Count,
+  completedChats: Count,
+  conversations: Count,
+  modelResponses: Count,
+  tokens7: Count,
+  previousTokens7: Count,
+  cost7: Money,
+  previousCost7: Money,
+  // Tokens in the last 7 days per weekly active person; null while nobody was active.
+  tokensPerActive7: Schema.NullOr(Count),
+}).annotate({ identifier: "UsageSummary.Usage" })
+export type Usage = typeof Usage.Type
+
+// Estimated from each install's five most-used models, by their latest lifetime tokens.
+export const Model = Schema.Struct({
+  providerID: Identifier,
+  modelID: Identifier,
+  tokens: Count,
+  people: Count,
+  // Share of the tokens of every listed model across everyone.
+  share: Fraction,
+}).annotate({ identifier: "UsageSummary.Model" })
+export type Model = typeof Model.Type
+
+export const Effort = Schema.Struct({
+  id: Identifier,
+  label: Identifier,
+  tokens: Count,
+  responses: Count,
+  people: Count,
+  share: Fraction,
+}).annotate({ identifier: "UsageSummary.Effort" })
+export type Effort = typeof Effort.Type
+
+// People whose latest report (today or yesterday) shows a current streak of days in a row with a task.
+export const Streaks = Schema.Struct({ one: Count, twoToSix: Count, sevenPlus: Count }).annotate({
+  identifier: "UsageSummary.Streaks",
+})
+export type Streaks = typeof Streaks.Type
+
 export const Summary = Schema.Struct({
   generatedAt: Schema.String.check(Schema.isMaxLength(40)),
   today: Day,
@@ -77,5 +133,29 @@ export const Summary = Schema.Struct({
   funnel: Schema.Array(Funnel).check(Schema.isMaxLength(60)),
   versions: Schema.Array(Version).check(Schema.isMaxLength(100)),
   platforms: Schema.Array(Platform).check(Schema.isMaxLength(100)),
+  usage: Usage,
+  models: Schema.Array(Model).check(Schema.isMaxLength(40)),
+  efforts: Schema.Array(Effort).check(Schema.isMaxLength(40)),
+  streaks: Streaks,
 }).annotate({ identifier: "UsageSummary.Summary" })
 export type Summary = typeof Summary.Type
+
+// What a read-only share link (/usage#share=...) receives: the same aggregates, and when the link stops working.
+export const Shared = Schema.Struct({
+  shared: Schema.Struct({ expiresAt: Schema.String.check(Schema.isMaxLength(40)) }),
+  summary: Summary,
+}).annotate({ identifier: "UsageSummary.Shared" })
+export type Shared = typeof Shared.Type
+
+// A share link as the owner sees it. The link itself is shown once, when it is created; only its hash is stored.
+export const Link = Schema.Struct({
+  id: Schema.String.check(Schema.isUUID()),
+  label: Schema.String.check(Schema.isMaxLength(80)),
+  createdAt: Schema.String.check(Schema.isMaxLength(40)),
+  expiresAt: Schema.String.check(Schema.isMaxLength(40)),
+  revokedAt: Schema.NullOr(Schema.String.check(Schema.isMaxLength(40))),
+  lastViewedAt: Schema.NullOr(Schema.String.check(Schema.isMaxLength(40))),
+  views: Count,
+  state: Schema.Literals(["active", "expired", "revoked"]),
+}).annotate({ identifier: "UsageSummary.Link" })
+export type Link = typeof Link.Type

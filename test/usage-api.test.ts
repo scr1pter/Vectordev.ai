@@ -6,9 +6,19 @@ import { handleDownload } from "../api/download"
 import { mintCliToken } from "../api/_lib/cli-token"
 import { installerFromManifest, parseDownloadManifest, PUBLIC_DOWNLOAD_TARGETS } from "../api/_lib/downloads"
 import { ApiError, type ApiRequest, type ApiResponse } from "../api/_lib/http"
-import { forgetUsage, recordDownload, recordUsage, usageAccount } from "../api/_lib/usage"
+import { createHash } from "node:crypto"
+import {
+  forgetUsage,
+  recordDownload,
+  recordUsage,
+  SHARE_HEADER,
+  shareableSummary,
+  usageAccount,
+} from "../api/_lib/usage"
 import { handleCheckin } from "../api/usage/checkin"
+import { handleUsageShares } from "../api/usage/shares"
 import { handleUsageSummary } from "../api/usage/summary"
+import { UsageReport } from "../packages/schema/src/usage-report"
 
 const ACCOUNT = "9db2bb31-81d5-43cb-b4a1-f1d3d799c9cb"
 const INSTALL = "5f0c7c2e-3b1a-4c8e-9f2d-6a7b8c9d0e1f"
@@ -68,10 +78,7 @@ function supabase(routes: Record<string, () => Response> = {}) {
   return { calls, fetcher }
 }
 
-function invoke(
-  handler: (request: ApiRequest, response: ApiResponse) => Promise<void>,
-  request: Partial<ApiRequest>,
-) {
+function invoke(handler: (request: ApiRequest, response: ApiResponse) => Promise<void>, request: Partial<ApiRequest>) {
   return new Promise<{ status: number; headers: Record<string, string>; body: unknown }>((resolve, reject) => {
     const headers: Record<string, string> = {}
     const response = {
@@ -101,6 +108,36 @@ const checkin = {
 
 function post(body: unknown, headers: Record<string, string> = {}): Partial<ApiRequest> {
   return { method: "POST", headers: { "content-type": "application/json", ...headers }, body }
+}
+
+// The numbers behind Settings > Usage & streaks, as the desktop app and the CLI send them.
+const report = {
+  lifetimeTokens: 1_250_000,
+  lifetimeCost: 18.42,
+  inputTokens: 800_000,
+  outputTokens: 250_000,
+  reasoningTokens: 50_000,
+  cachedTokens: 150_000,
+  completedChats: 41,
+  conversations: 12,
+  activeDays: 9,
+  currentStreak: 3,
+  longestStreak: 6,
+  averageTaskMs: 41_500,
+  longestTaskMs: 912_000,
+  modelResponses: 320,
+  days: [
+    { date: "2026-10-08", tokens: 120_000, tasks: 4, cost: 1.5 },
+    { date: "2026-10-09", tokens: 90_000, tasks: 3, cost: 0.75 },
+  ],
+  favoriteModels: [
+    { providerID: "anthropic", modelID: "claude-sonnet-4-5", tokens: 900_000, percentage: 72 },
+    { providerID: "openrouter", modelID: "x-ai/grok-code-fast-1:free", tokens: 350_000, percentage: 28 },
+  ],
+  effortLevels: [
+    { id: "default", label: "Default", tokens: 1_000_000, responses: 280, percentage: 80 },
+    { id: "max", label: "Max", tokens: 250_000, responses: 40, percentage: 20 },
+  ],
 }
 
 describe("desktop check-in", () => {
@@ -170,7 +207,9 @@ describe("desktop check-in", () => {
   test("refuses storage that is not https", async () => {
     process.env.SUPABASE_URL = "http://vector.supabase.co"
     const storage = supabase()
-    expect((await invoke((request, response) => handleCheckin(request, response, storage.fetcher), post(checkin))).status).toBe(204)
+    expect(
+      (await invoke((request, response) => handleCheckin(request, response, storage.fetcher), post(checkin))).status,
+    ).toBe(204)
     expect(storage.calls).toHaveLength(0)
   })
 
@@ -191,23 +230,87 @@ describe("desktop check-in", () => {
       { ...checkin, prompt: "fix the bug in /Users/someone/secret.ts" },
       { installId: INSTALL, client: "desktop" },
       [checkin],
+      { ...checkin, usage: { ...report, prompt: "fix the bug" } },
+      { ...checkin, usage: { ...report, lifetimeTokens: -1 } },
+      { ...checkin, usage: { ...report, lifetimeCost: 2e9 } },
+      { ...checkin, usage: { ...report, completedChats: 1.5 } },
+      { ...checkin, usage: { ...report, days: [{ ...report.days[0], date: "2026-02-30" }] } },
+      { ...checkin, usage: { ...report, days: [report.days[0], report.days[0]] } },
+      { ...checkin, usage: { ...report, days: Array(9).fill(report.days[0]) } },
+      { ...checkin, usage: { ...report, days: [{ ...report.days[0], path: "/Users/someone" }] } },
+      { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], modelID: "my model" }] } },
+      { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], modelID: "m".repeat(121) }] } },
+      { ...checkin, usage: { ...report, favoriteModels: Array(11).fill(report.favoriteModels[0]) } },
+      { ...checkin, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], percentage: 101 }] } },
+      { ...checkin, usage: { ...report, effortLevels: [{ ...report.effortLevels[0], label: "a\nb" }] } },
+      { ...checkin, usage: { ...report, effortLevels: [{ id: "max", label: "Max", tokens: 1, percentage: 1 }] } },
+      { ...checkin, usage: (({ days, ...rest }) => rest)(report) },
+      { ...checkin, usage: "everything" },
     ]
     for (const body of invalid) {
       const storage = supabase()
-      const result = await invoke(
-        (request, response) => handleCheckin(request, response, storage.fetcher),
-        post(body),
-      )
+      const result = await invoke((request, response) => handleCheckin(request, response, storage.fetcher), post(body))
       expect(result.status).toBe(400)
       expect(result.body).toMatchObject({ error: { code: "USAGE_INVALID" } })
       expect(storage.calls).toHaveLength(0)
     }
   })
 
+  test("records the usage report exactly as sent", async () => {
+    const storage = supabase()
+    const token = mintCliToken({ id: ACCOUNT, email: "user@example.com" }).token
+    const result = await invoke(
+      (request, response) => handleCheckin(request, response, storage.fetcher),
+      post({ ...checkin, usage: report }, { authorization: `Bearer ${token}` }),
+    )
+    expect(result.status).toBe(204)
+    expect(storage.calls.map((call) => call.body)).toEqual([
+      { request: { ...checkin, accountId: ACCOUNT, usage: report } },
+    ])
+  })
+
+  test("accepts the upper bounds of a usage report", async () => {
+    const storage = supabase()
+    const usage = {
+      ...report,
+      lifetimeTokens: 1e15,
+      lifetimeCost: 1e9,
+      currentStreak: 100_000,
+      longestTaskMs: 1e12,
+      days: Array.from({ length: 8 }, (_, index) => ({
+        date: `2026-10-0${index + 1}`,
+        tokens: 1e15,
+        tasks: 1e9,
+        cost: 1e9,
+      })),
+      favoriteModels: Array.from({ length: 10 }, (_, index) => ({
+        providerID: "p".repeat(120),
+        modelID: `vendor/model-${index}:free@v1+x`,
+        tokens: 1e15,
+        percentage: 100,
+      })),
+      effortLevels: Array.from({ length: 10 }, (_, index) => ({
+        id: `level-${index}`,
+        label: `Level ${index}`,
+        tokens: 1e15,
+        responses: 1e9,
+        percentage: 100,
+      })),
+    }
+    const result = await invoke(
+      (request, response) => handleCheckin(request, response, storage.fetcher),
+      post({ ...checkin, usage }),
+    )
+    expect(result.status).toBe(204)
+    expect(storage.calls).toHaveLength(1)
+  })
+
   test("accepts the upper bound of each count and a prerelease version", async () => {
     const storage = supabase()
     const body = { ...checkin, version: "1.99.106-beta.2", sessions: 100_000, subagentSessions: 0 }
-    expect((await invoke((request, response) => handleCheckin(request, response, storage.fetcher), post(body))).status).toBe(204)
+    expect(
+      (await invoke((request, response) => handleCheckin(request, response, storage.fetcher), post(body))).status,
+    ).toBe(204)
     expect(storage.calls[0]?.body).toEqual({ request: body })
   })
 
@@ -216,9 +319,112 @@ describe("desktop check-in", () => {
     const handler = (request: ApiRequest, response: ApiResponse) => handleCheckin(request, response, storage.fetcher)
     expect((await invoke(handler, { method: "GET" })).status).toBe(405)
     expect((await invoke(handler, post(checkin, { "content-type": "text/plain" }))).status).toBe(415)
-    expect((await invoke(handler, post(checkin, { "content-length": "5000" }))).status).toBe(413)
-    expect((await invoke(handler, post({ ...checkin, padding: "x".repeat(5_000) }))).status).toBe(413)
+    expect((await invoke(handler, post(checkin, { "content-length": "17000" }))).status).toBe(413)
+    expect((await invoke(handler, post({ ...checkin, padding: "x".repeat(17_000) }))).status).toBe(413)
     expect(storage.calls).toHaveLength(0)
+  })
+})
+
+describe("CLI check-in", () => {
+  const cli = { installId: INSTALL, client: "cli", version: "1.99.106", platform: "linux", arch: "x64", usage: report }
+
+  test("records the report against the token's account, one row per account, without the install ID", async () => {
+    const storage = supabase()
+    const token = mintCliToken({ id: ACCOUNT, email: "user@example.com" }).token
+    const result = await invoke(
+      (request, response) => handleCheckin(request, response, storage.fetcher),
+      post(cli, { authorization: `Bearer ${token}` }),
+    )
+    expect(result.status).toBe(204)
+    expect(storage.calls.map((call) => call.body)).toEqual([
+      {
+        request: {
+          client: "cli",
+          accountId: ACCOUNT,
+          version: "1.99.106",
+          platform: "linux",
+          arch: "x64",
+          usage: report,
+        },
+      },
+    ])
+    expect(JSON.stringify(storage.calls)).not.toContain(INSTALL)
+  })
+
+  test("records nothing without a valid account token", async () => {
+    for (const headers of [{}, { authorization: "Bearer vct_forged.token" }]) {
+      const storage = supabase()
+      const result = await invoke(
+        (request, response) => handleCheckin(request, response, storage.fetcher),
+        post(cli, headers),
+      )
+      expect(result.status).toBe(204)
+      expect(storage.calls).toHaveLength(0)
+    }
+  })
+
+  test("accepts every platform the CLI runs on and refuses desktop-only fields", async () => {
+    const storage = supabase()
+    const handler = (request: ApiRequest, response: ApiResponse) => handleCheckin(request, response, storage.fetcher)
+    expect((await invoke(handler, post({ ...cli, platform: "freebsd", arch: "riscv64" }))).status).toBe(204)
+    for (const body of [
+      { ...cli, platform: "plan9" },
+      { ...cli, arch: "mips" },
+      { ...cli, sessions: 3 },
+      { ...cli, installId: "not-a-uuid" },
+      { ...cli, usage: { ...report, favoriteModels: [{ ...report.favoriteModels[0], providerID: "" }] } },
+    ])
+      expect((await invoke(handler, post(body))).status).toBe(400)
+  })
+})
+
+describe("usage report from the local summary", () => {
+  const summary = {
+    ...report,
+    unpricedResponses: 2,
+    peakTokens: 300_000,
+    longestTaskTokens: 40_000,
+    averageTokensPerChat: 30_000,
+    days: Array.from({ length: 10 }, (_, index) => ({
+      date: `2026-09-${String(20 + index)}`,
+      tokens: 1_000 * index,
+      cost: 0.1234567 * index,
+      tasks: index,
+    })),
+    favoriteModels: [
+      ...report.favoriteModels.map((model) => ({ ...model, responses: 10 })),
+      { providerID: "custom provider", modelID: "local", tokens: 1, responses: 1, percentage: 0 },
+    ],
+    effortLevels: report.effortLevels,
+  }
+
+  test("keeps the last seven days and the listed fields, and leaves out what the server would refuse", () => {
+    const built = UsageReport.fromSummary(summary)
+    expect(built?.days.map((day) => day.date)).toEqual([
+      "2026-09-23",
+      "2026-09-24",
+      "2026-09-25",
+      "2026-09-26",
+      "2026-09-27",
+      "2026-09-28",
+      "2026-09-29",
+    ])
+    expect(built?.days[0]?.cost).toBe(0.37037)
+    expect(built?.favoriteModels).toEqual(report.favoriteModels)
+    expect(Object.keys(built ?? {}).sort()).toEqual(Object.keys(report).sort())
+    expect(UsageReport.decode(built)._tag).toBe("Some")
+  })
+
+  test("clamps numbers into range and refuses something that is not a summary", () => {
+    const built = UsageReport.fromSummary({
+      ...summary,
+      lifetimeTokens: -5,
+      lifetimeCost: Number.NaN,
+      currentStreak: 1e9,
+    })
+    expect(built).toMatchObject({ lifetimeTokens: 0, lifetimeCost: 0, currentStreak: 100_000 })
+    expect(UsageReport.fromSummary({ lifetimeTokens: 1 })).toBeUndefined()
+    expect(UsageReport.fromSummary("usage")).toBeUndefined()
   })
 })
 
@@ -226,11 +432,16 @@ describe("account from a desktop token", () => {
   const headers = (authorization?: string) => ({ headers: authorization ? { authorization } : {} })
 
   test("resolves the account a valid Vector token was minted for", () => {
-    expect(usageAccount(headers(`Bearer ${mintCliToken({ id: ACCOUNT, email: "user@example.com" }).token}`))).toBe(ACCOUNT)
+    expect(usageAccount(headers(`Bearer ${mintCliToken({ id: ACCOUNT, email: "user@example.com" }).token}`))).toBe(
+      ACCOUNT,
+    )
   })
 
   test("ignores expired, forged, malformed and non-account tokens", () => {
-    const expired = mintCliToken({ id: ACCOUNT, email: "user@example.com" }, Date.now() - 91 * 24 * 60 * 60 * 1000).token
+    const expired = mintCliToken(
+      { id: ACCOUNT, email: "user@example.com" },
+      Date.now() - 91 * 24 * 60 * 60 * 1000,
+    ).token
     const notAnAccount = mintCliToken({ id: "preview", email: "user@example.com" }).token
     const valid = mintCliToken({ id: ACCOUNT, email: "user@example.com" }).token
     const [payload] = valid.slice(4).split(".")
@@ -272,7 +483,9 @@ describe("recording helpers", () => {
       throw new Error("unreachable")
     }) as unknown as typeof fetch
     expect(await recordUsage({ ...checkin, client: "desktop" }, failing)).toBeUndefined()
-    expect(await recordDownload({ accountId: ACCOUNT, target: "mac-arm64", version: "1.99.105" }, failing)).toBeUndefined()
+    expect(
+      await recordDownload({ accountId: ACCOUNT, target: "mac-arm64", version: "1.99.105" }, failing),
+    ).toBeUndefined()
     expect(await forgetUsage(ACCOUNT, failing)).toBe(false)
     const refused = supabase({ "/rest/v1/rpc/vector_usage_forget": () => new Response("{}", { status: 404 }) })
     expect(await forgetUsage(ACCOUNT, refused.fetcher)).toBe(false)
@@ -308,7 +521,19 @@ describe("usage summary", () => {
       sessions7: 310,
       subagentSessions7: 95,
     },
-    daily: [{ day: "2026-10-09", active: 11, desktop: 9, cli: 3, sessions: 40, subagentSessions: 12 }],
+    daily: [
+      {
+        day: "2026-10-09",
+        active: 11,
+        desktop: 9,
+        cli: 3,
+        sessions: 40,
+        subagentSessions: 12,
+        tokens: 2_400_000,
+        cost: 31.5,
+        tasks: 52,
+      },
+    ],
     weekly: [
       { week: "2026-09-28", active: 20, desktop: 17, cli: 5, growth: null },
       { week: "2026-10-05", active: 24, desktop: 20, cli: 6, growth: 0.2 },
@@ -318,6 +543,32 @@ describe("usage summary", () => {
     funnel: [{ week: "2026-10-05", signups: 6, downloaded: 4, active: 3 }],
     versions: [{ client: "desktop", version: "1.99.105", active: 18 }],
     platforms: [{ client: "desktop", platform: "darwin", arch: "arm64", active: 15 }],
+    usage: {
+      reporting: 30,
+      lifetimeTokens: 98_000_000,
+      lifetimeCost: 1_204.5,
+      inputTokens: 60_000_000,
+      outputTokens: 20_000_000,
+      reasoningTokens: 6_000_000,
+      cachedTokens: 12_000_000,
+      completedChats: 2_400,
+      conversations: 800,
+      modelResponses: 21_000,
+      tokens7: 14_000_000,
+      previousTokens7: 11_000_000,
+      cost7: 180.25,
+      previousCost7: 150,
+      tokensPerActive7: 583_333,
+    },
+    models: [
+      { providerID: "anthropic", modelID: "claude-sonnet-4-5", tokens: 60_000_000, people: 18, share: 0.62 },
+      { providerID: "acme-internal", modelID: "acme/coder-7b", tokens: 2_000_000, people: 1, share: 0.02 },
+    ],
+    efforts: [
+      { id: "default", label: "Default", tokens: 70_000_000, responses: 15_000, people: 2, share: 0.7 },
+      { id: "thinking-hard", label: "Thinking hard", tokens: 1_000_000, responses: 30, people: 1, share: 0.01 },
+    ],
+    streaks: { one: 6, twoToSix: 9, sevenPlus: 3 },
   }
 
   function session(method = "oauth") {
@@ -343,10 +594,10 @@ describe("usage summary", () => {
 
   test("shows the owner the summary, uncached", async () => {
     const storage = backend(person(OWNER))
-    const result = await invoke(
-      (request, response) => handleUsageSummary(request, response, storage.fetcher),
-      { method: "GET", headers: session() },
-    )
+    const result = await invoke((request, response) => handleUsageSummary(request, response, storage.fetcher), {
+      method: "GET",
+      headers: session(),
+    })
     expect(result.status).toBe(200)
     expect(result.body).toEqual(summary)
     expect(result.headers["cache-control"]).toBe("no-store")
@@ -448,6 +699,187 @@ describe("usage summary", () => {
     expect(result.status).toBe(405)
     expect(storage.calls).toHaveLength(0)
   })
+
+  const TOKEN = "Q2hhcmFjdGVycyBvZiBhIHNoYXJlIGxpbmsgdG9rZW4"
+  const hash = createHash("sha256").update(TOKEN).digest("hex")
+  const opened = (answer: unknown) =>
+    supabase({
+      "/rest/v1/rpc/vector_usage_share_open": () => Response.json(answer),
+      "/rest/v1/rpc/vector_usage_summary": () => Response.json(summary),
+    })
+
+  test("a share link reads the aggregates read-only, without its owner's session", async () => {
+    const storage = opened({ status: "ok", expiresAt: "2026-10-24T09:00:00Z" })
+    const result = await invoke((request, response) => handleUsageSummary(request, response, storage.fetcher), {
+      method: "GET",
+      headers: { [SHARE_HEADER]: TOKEN },
+    })
+    expect(result.status).toBe(200)
+    expect(result.headers["cache-control"]).toBe("no-store")
+    expect(result.body).toEqual({ shared: { expiresAt: "2026-10-24T09:00:00Z" }, summary: shareableSummary(summary) })
+    expect(storage.calls.map((call) => [call.url, call.body])).toEqual([
+      [`${SUPABASE}/rest/v1/rpc/vector_usage_share_open`, { request: { tokenHash: hash } }],
+      [`${SUPABASE}/rest/v1/rpc/vector_usage_summary`, { request: {} }],
+    ])
+    expect(JSON.stringify(storage.calls)).not.toContain(TOKEN)
+  })
+
+  test("a share link leaves out models and custom effort levels fewer than three people use", () => {
+    const shared = shareableSummary(summary)
+    expect(shared.models.map((model) => model.modelID)).toEqual(["claude-sonnet-4-5"])
+    expect(shared.efforts.map((effort) => effort.id)).toEqual(["default"])
+    expect({ ...shared, models: summary.models, efforts: summary.efforts }).toEqual(summary)
+  })
+
+  test("an expired, revoked, unknown or malformed link says why and reads nothing", async () => {
+    for (const [answer, status, code] of [
+      [{ status: "expired" }, 410, "SHARE_EXPIRED"],
+      [{ status: "revoked" }, 410, "SHARE_REVOKED"],
+      [{ status: "missing" }, 404, "SHARE_NOT_FOUND"],
+      [{ status: "surprise" }, 503, "USAGE_UNAVAILABLE"],
+    ] as const) {
+      const storage = opened(answer)
+      const result = await invoke((request, response) => handleUsageSummary(request, response, storage.fetcher), {
+        method: "GET",
+        headers: { [SHARE_HEADER]: TOKEN },
+      })
+      expect(result.status).toBe(status)
+      expect(result.body).toMatchObject({ error: { code } })
+      expect(storage.calls.map((call) => call.url)).toEqual([`${SUPABASE}/rest/v1/rpc/vector_usage_share_open`])
+    }
+    for (const token of ["short", `${TOKEN}=`, `${TOKEN} ${TOKEN}`]) {
+      const storage = opened({ status: "ok", expiresAt: "2026-10-24T09:00:00Z" })
+      const result = await invoke((request, response) => handleUsageSummary(request, response, storage.fetcher), {
+        method: "GET",
+        headers: { [SHARE_HEADER]: token },
+      })
+      expect(result.status).toBe(404)
+      expect(storage.calls).toHaveLength(0)
+    }
+  })
+})
+
+describe("share links", () => {
+  const link = {
+    id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+    label: "Seed round",
+    createdAt: "2026-10-10T09:00:00Z",
+    expiresAt: "2026-10-24T09:00:00Z",
+    revokedAt: null,
+    lastViewedAt: null,
+    views: 0,
+    state: "active",
+  }
+
+  function session() {
+    const payload = Buffer.from(JSON.stringify({ amr: [{ method: "oauth", timestamp: 1 }] })).toString("base64url")
+    return { authorization: `Bearer header.${payload}.signature` }
+  }
+
+  function backend(email = OWNER, rpc: Record<string, () => Response> = {}) {
+    return supabase({
+      "/auth/v1/user": () =>
+        Response.json({
+          id: ACCOUNT,
+          email,
+          email_confirmed_at: "2026-09-01T12:00:00.000Z",
+          identities: [{ provider: "google", identity_data: { email, email_verified: true } }],
+        }),
+      "/rest/v1/rpc/vector_usage_share_create": () => Response.json({ status: "ok", share: link }),
+      "/rest/v1/rpc/vector_usage_share_list": () => Response.json({ status: "ok", shares: [link] }),
+      "/rest/v1/rpc/vector_usage_share_revoke": () => Response.json({ status: "ok" }),
+      ...rpc,
+    })
+  }
+
+  const run = (storage: ReturnType<typeof supabase>, request: Partial<ApiRequest>) =>
+    invoke((req, res) => handleUsageShares(req, res, storage.fetcher), request)
+
+  test("the owner creates a link: its token is answered once and only its hash is stored", async () => {
+    const storage = backend()
+    const result = await run(storage, post({ label: "  Seed round  ", days: 14 }, session()))
+    expect(result.status).toBe(201)
+    const body = result.body as { token: string; share: unknown }
+    expect(body.token).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(body.share).toEqual(link)
+    expect(storage.calls[1]).toMatchObject({
+      url: `${SUPABASE}/rest/v1/rpc/vector_usage_share_create`,
+      body: {
+        request: { tokenHash: createHash("sha256").update(body.token).digest("hex"), label: "Seed round", days: 14 },
+      },
+    })
+    expect(JSON.stringify(storage.calls)).not.toContain(body.token)
+    const again = await run(backend(), post({ label: "Seed round", days: 14 }, session()))
+    expect((again.body as { token: string }).token).not.toBe(body.token)
+  })
+
+  test("refuses a link without a label, with a long or control-character label, or another expiry", async () => {
+    for (const body of [
+      { label: "", days: 7 },
+      { label: "   ", days: 7 },
+      { label: "x".repeat(81), days: 7 },
+      { label: "a\u0000b", days: 7 },
+      { label: "Seed", days: 10 },
+      { label: "Seed", days: "7" },
+      { label: "Seed", days: 7, token: "mine" },
+    ]) {
+      const storage = backend()
+      const result = await run(storage, post(body, session()))
+      expect(result.status).toBe(400)
+      expect(result.body).toMatchObject({ error: { code: "SHARE_INVALID" } })
+      expect(storage.calls.some((call) => call.url.includes("/rpc/"))).toBe(false)
+    }
+  })
+
+  test("lists and revokes for the owner", async () => {
+    const storage = backend()
+    expect(await run(storage, { method: "GET", headers: session() })).toMatchObject({
+      status: 200,
+      body: { shares: [link] },
+    })
+    const revoked = await run(storage, { method: "DELETE", url: `/api/usage/shares?id=${link.id}`, headers: session() })
+    expect(revoked.status).toBe(204)
+    expect(storage.calls.at(-1)).toMatchObject({
+      url: `${SUPABASE}/rest/v1/rpc/vector_usage_share_revoke`,
+      body: { request: { id: link.id } },
+    })
+    const missing = backend(OWNER, {
+      "/rest/v1/rpc/vector_usage_share_revoke": () => Response.json({ status: "missing" }),
+    })
+    expect(
+      (await run(missing, { method: "DELETE", url: `/api/usage/shares?id=${link.id}`, headers: session() })).status,
+    ).toBe(404)
+    const malformed = backend()
+    expect(
+      (await run(malformed, { method: "DELETE", url: "/api/usage/shares?id=nope", headers: session() })).status,
+    ).toBe(400)
+    expect(malformed.calls.some((call) => call.url.includes("/rpc/"))).toBe(false)
+  })
+
+  test("needs the owner's Google session for every method", async () => {
+    for (const request of [
+      { method: "GET" },
+      post({ label: "Seed", days: 7 }),
+      { method: "DELETE", url: `/api/usage/shares?id=${link.id}` },
+    ]) {
+      const storage = backend()
+      expect((await run(storage, request)).status).toBe(401)
+      const other = backend("someone@example.com")
+      expect((await run(other, { ...request, headers: { ...request.headers, ...session() } })).status).toBe(403)
+      expect([...storage.calls, ...other.calls].some((call) => call.url.includes("/rpc/"))).toBe(false)
+    }
+    expect((await run(backend(), { method: "PUT", headers: session() })).status).toBe(405)
+  })
+
+  test("reports the live-link limit and unavailable storage", async () => {
+    const full = backend(OWNER, { "/rest/v1/rpc/vector_usage_share_create": () => Response.json({ status: "limit" }) })
+    expect(await run(full, post({ label: "Seed", days: 7 }, session()))).toMatchObject({
+      status: 409,
+      body: { error: { code: "SHARE_LIMIT" } },
+    })
+    const down = backend(OWNER, { "/rest/v1/rpc/vector_usage_share_list": () => new Response("down", { status: 503 }) })
+    expect((await run(down, { method: "GET", headers: session() })).status).toBe(503)
+  })
 })
 
 describe("installer downloads", () => {
@@ -490,14 +922,14 @@ describe("installer downloads", () => {
   })
 
   test("still redirects when recording fails or never answers", async () => {
-    for (const record of [
-      () => Promise.reject(new Error("storage down")),
-      () => new Promise<void>(() => undefined),
-    ]) {
-      const result = await invoke((request, response) => handleDownload(request, response, installer, authenticate, record), {
-        method: "GET",
-        query: { target: "windows-x64" },
-      })
+    for (const record of [() => Promise.reject(new Error("storage down")), () => new Promise<void>(() => undefined)]) {
+      const result = await invoke(
+        (request, response) => handleDownload(request, response, installer, authenticate, record),
+        {
+          method: "GET",
+          query: { target: "windows-x64" },
+        },
+      )
       expect(result.status).toBe(307)
       expect(result.headers.location).toBe(
         `https://vector.public.blob.vercel-storage.com/releases/vector-v${version}/vector-desktop-win-x64.exe`,
@@ -516,10 +948,13 @@ describe("installer downloads", () => {
       method: "GET",
       query: { target: "mac-arm64" },
     })
-    const missing = await invoke((request, response) => handleDownload(request, response, installer, authenticate, record), {
-      method: "GET",
-      query: { target: "mac-m9" },
-    })
+    const missing = await invoke(
+      (request, response) => handleDownload(request, response, installer, authenticate, record),
+      {
+        method: "GET",
+        query: { target: "mac-m9" },
+      },
+    )
     expect(missing.status).toBe(404)
     expect(recorded).toEqual([])
   })

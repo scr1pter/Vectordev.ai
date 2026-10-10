@@ -1,7 +1,16 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test"
 import { SQL } from "bun"
 import { randomUUID } from "node:crypto"
-import { forgetUsage, recordDownload, recordUsage, usageSummary } from "../../../api/_lib/usage"
+import {
+  createShare,
+  forgetUsage,
+  listShares,
+  openShare,
+  recordDownload,
+  recordUsage,
+  revokeShare,
+  usageSummary,
+} from "../../../api/_lib/usage"
 
 // Dedicated disposable databases only: these tests execute the real usage SQL through the API code.
 const url = new URL(process.env.VECTOR_TEST_POSTGRES_URL ?? "postgres://127.0.0.1/vector_shares_test")
@@ -29,6 +38,14 @@ const upstream = Bun.serve({
           return transaction`select public.vector_usage_forget(${body.account ?? null}::uuid) as result`
         if (name === "vector_usage_summary")
           return transaction`select public.vector_usage_summary(${json}::jsonb) as result`
+        if (name === "vector_usage_share_create")
+          return transaction`select public.vector_usage_share_create(${json}::jsonb) as result`
+        if (name === "vector_usage_share_list")
+          return transaction`select public.vector_usage_share_list(${json}::jsonb) as result`
+        if (name === "vector_usage_share_revoke")
+          return transaction`select public.vector_usage_share_revoke(${json}::jsonb) as result`
+        if (name === "vector_usage_share_open")
+          return transaction`select public.vector_usage_share_open(${json}::jsonb) as result`
         throw new Error(`Unexpected RPC ${name}`)
       })
       .catch((error: unknown) => {
@@ -43,6 +60,27 @@ const upstream = Bun.serve({
 const keys = ["NODE_ENV", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]
 const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
 const state = { account: "", today: "" }
+
+const report = (extra: Record<string, unknown> = {}) => ({
+  lifetimeTokens: 1_000_000,
+  lifetimeCost: 12.5,
+  inputTokens: 600_000,
+  outputTokens: 200_000,
+  reasoningTokens: 50_000,
+  cachedTokens: 150_000,
+  completedChats: 40,
+  conversations: 12,
+  activeDays: 9,
+  currentStreak: 3,
+  longestStreak: 5,
+  averageTaskMs: 42_000,
+  longestTaskMs: 600_000,
+  modelResponses: 300,
+  days: [] as Array<{ date: string; tokens: number; tasks: number; cost: number }>,
+  favoriteModels: [{ providerID: "anthropic", modelID: "claude-sonnet-4-5", tokens: 700_000, percentage: 70 }],
+  effortLevels: [{ id: "default", label: "Default", tokens: 1_000_000, responses: 300, percentage: 100 }],
+  ...extra,
+})
 
 const desktop = (installId: string, extra: Record<string, unknown> = {}) => ({
   client: "desktop" as const,
@@ -81,7 +119,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   results.length = 0
-  await database`truncate public.vector_usage_daily, public.vector_usage_downloads`
+  await database`truncate public.vector_usage_daily, public.vector_usage_downloads, public.vector_usage_tokens, public.vector_usage_shares`
   state.account = randomUUID()
   await database`insert into auth.users(id) values (${state.account})`
   state.today = (await database`select ((now() at time zone 'utc')::date)::text as today`)[0].today
@@ -95,6 +133,9 @@ afterAll(async () => {
     else process.env[key] = value
   })
 })
+
+const day = (offset: number) =>
+  new Date(Date.parse(`${state.today}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10)
 
 const statuses = () =>
   results.map((entry) => {
@@ -157,9 +198,23 @@ test("the database refuses what the API would never send", async () => {
     desktop(install, { accountId: "someone" }),
     { client: "cli", version: "1.99.105", platform: "linux", arch: "x64" },
     { client: "server", version: "1.99.105", platform: "linux", arch: "x64", accountId: state.account },
+    desktop(install, { usage: { ...report(), prompt: "fix the bug" } }),
+    desktop(install, { usage: report({ lifetimeTokens: -1 }) }),
+    desktop(install, { usage: report({ days: [{ date: "2026-02-30", tokens: 1, tasks: 1, cost: 0 }] }) }),
+    desktop(install, {
+      usage: report({
+        days: [
+          { date: "2026-10-01", tokens: 1, tasks: 1, cost: 0 },
+          { date: "2026-10-01", tokens: 2, tasks: 1, cost: 0 },
+        ],
+      }),
+    }),
+    desktop(install, {
+      usage: report({ favoriteModels: [{ providerID: "p", modelID: "my model", tokens: 1, percentage: 1 }] }),
+    }),
   ])
     await recordUsage(request as Parameters<typeof recordUsage>[0])
-  expect(statuses()).toEqual([...Array(9).fill("invalid"), "skipped", "invalid"])
+  expect(statuses()).toEqual([...Array(9).fill("invalid"), "skipped", ...Array(6).fill("invalid")])
   expect((await database`select count(*)::int as count from public.vector_usage_daily`)[0].count).toBe(0)
 })
 
@@ -176,7 +231,8 @@ test("recording removes days older than 400, and downloads older than 400 days",
   await recordDownload({ accountId: state.account, target: "mac-arm64", version: "1.99.105" })
   expect(statuses()).toEqual(["ok", "ok"])
   expect(
-    (await database`select count(*)::int as count from public.vector_usage_daily where key = ${`install:${old}`}`)[0].count,
+    (await database`select count(*)::int as count from public.vector_usage_daily where key = ${`install:${old}`}`)[0]
+      .count,
   ).toBe(1)
   const downloads = await database`select target from public.vector_usage_downloads`
   expect(downloads).toEqual([{ target: "mac-arm64" }])
@@ -204,6 +260,104 @@ test("deleting an identity elsewhere also removes its linked rows", async () => 
   await database`delete from auth.users where id = ${state.account}`
   expect((await database`select count(*)::int as count from public.vector_usage_daily`)[0].count).toBe(0)
   expect((await database`select count(*)::int as count from public.vector_usage_downloads`)[0].count).toBe(0)
+})
+
+test("a usage report keeps each day's largest values and the report with the most lifetime tokens", async () => {
+  const install = randomUUID()
+  await recordUsage(
+    desktop(install, {
+      accountId: state.account,
+      usage: report({
+        days: [
+          { date: day(-1), tokens: 200, tasks: 3, cost: 1.25 },
+          { date: day(0), tokens: 300, tasks: 4, cost: 2 },
+        ],
+      }),
+    }),
+  )
+  await recordUsage(
+    desktop(install, {
+      usage: report({ lifetimeTokens: 900_000, days: [{ date: day(0), tokens: 250, tasks: 6, cost: 1 }] }),
+    }),
+  )
+  // Too old for retention and too far ahead of UTC: skipped, not refused.
+  await recordUsage(
+    desktop(install, {
+      usage: report({
+        days: [
+          { date: day(-401), tokens: 1, tasks: 1, cost: 0 },
+          { date: day(3), tokens: 1, tasks: 1, cost: 0 },
+        ],
+      }),
+    }),
+  )
+  expect(statuses()).toEqual(["ok", "ok", "ok"])
+  const days = await database`
+    select day::text as day, tokens::int as tokens, tasks, cost::float as cost, account_id::text as account
+    from public.vector_usage_tokens order by day`
+  expect(days).toEqual([
+    { day: day(-1), tokens: 200, tasks: 3, cost: 1.25, account: state.account },
+    { day: state.today, tokens: 300, tasks: 6, cost: 2, account: state.account },
+  ])
+  const stored = await database`select usage from public.vector_usage_daily`
+  expect(stored[0].usage.lifetimeTokens).toBe(1_000_000)
+  expect(stored[0].usage.days).toBeUndefined()
+})
+
+test("the CLI reports through one row per account per day", async () => {
+  const cli = { client: "cli" as const, accountId: state.account, version: "1.99.106", platform: "linux", arch: "x64" }
+  await recordUsage(cli)
+  await recordUsage({
+    ...cli,
+    usage: report({ lifetimeTokens: 250_000, days: [{ date: day(0), tokens: 50, tasks: 1, cost: 0 }] }),
+  })
+  await recordUsage({
+    ...cli,
+    usage: report({ lifetimeTokens: 10, days: [{ date: day(0), tokens: 5, tasks: 1, cost: 0 }] }),
+  })
+  expect(statuses()).toEqual(["ok", "ok", "ok"])
+  const rows = await database`select key, (usage->>'lifetimeTokens')::int as lifetime from public.vector_usage_daily`
+  expect(rows).toEqual([{ key: `account:${state.account}`, lifetime: 250_000 }])
+  const days = await database`select tokens::int as tokens from public.vector_usage_tokens`
+  expect(days).toEqual([{ tokens: 50 }])
+})
+
+test("forgetting an account also removes its per-day tokens", async () => {
+  const linked = randomUUID()
+  await recordUsage(desktop(linked, { usage: report({ days: [{ date: day(-2), tokens: 9, tasks: 1, cost: 0 }] }) }))
+  await recordUsage(desktop(linked, { accountId: state.account }))
+  await recordUsage({
+    client: "cli",
+    accountId: state.account,
+    version: "1.99.106",
+    platform: "linux",
+    arch: "x64",
+    usage: report({ days: [{ date: day(0), tokens: 1, tasks: 1, cost: 0 }] }),
+  })
+  expect(await forgetUsage(state.account)).toBe(true)
+  expect((await database`select count(*)::int as count from public.vector_usage_tokens`)[0].count).toBe(0)
+})
+
+test("share links: made once, opened by hash, expire and are revoked", async () => {
+  const created = await createShare({ label: " Seed round ", days: 7 })
+  expect(created.token).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  expect(created.share).toMatchObject({ label: "Seed round", state: "active", views: 0, revokedAt: null })
+  const stored = await database`select token_hash from public.vector_usage_shares`
+  expect(stored[0].token_hash).toMatch(/^[0-9a-f]{64}$/)
+  expect(JSON.stringify(stored)).not.toContain(created.token)
+
+  expect(await openShare(created.token)).toEqual({ expiresAt: created.share.expiresAt })
+  expect((await listShares())[0]).toMatchObject({ views: 1, state: "active" })
+  await expect(openShare("A".repeat(43))).rejects.toMatchObject({ code: "SHARE_NOT_FOUND" })
+
+  await database`update public.vector_usage_shares set created_at = now() - interval '8 days', expires_at = now() - interval '1 day'`
+  await expect(openShare(created.token)).rejects.toMatchObject({ code: "SHARE_EXPIRED" })
+
+  const other = await createShare({ label: "Partner", days: 30 })
+  await revokeShare(other.share.id)
+  await expect(openShare(other.token)).rejects.toMatchObject({ code: "SHARE_REVOKED" })
+  await expect(revokeShare(randomUUID())).rejects.toMatchObject({ code: "SHARE_NOT_FOUND" })
+  expect((await listShares()).map((share) => share.state)).toEqual(["revoked", "expired"])
 })
 
 test("the summary counts people once across desktop and CLI, by day, week and cohort", async () => {
@@ -237,7 +391,17 @@ test("the summary counts people once across desktop and CLI, by day, week and co
     subagentSessions7: 2,
   })
   expect(summary.daily).toHaveLength(90)
-  expect(summary.daily.at(-1)).toEqual({ day: state.today, active: 2, desktop: 2, cli: 1, sessions: 5, subagentSessions: 2 })
+  expect(summary.daily.at(-1)).toEqual({
+    day: state.today,
+    active: 2,
+    desktop: 2,
+    cli: 1,
+    sessions: 5,
+    subagentSessions: 2,
+    tokens: 0,
+    cost: 0,
+    tasks: 0,
+  })
   expect(summary.daily.at(-8)).toMatchObject({ active: 1, desktop: 1, cli: 0, sessions: 9 })
   expect(summary.daily.slice(0, -8).every((day) => day.active === 0)).toBe(true)
 
@@ -268,6 +432,79 @@ test("the summary counts people once across desktop and CLI, by day, week and co
     { client: "desktop", platform: "darwin", arch: "arm64", active: 1 },
     { client: "desktop", platform: "linux", arch: "x64", active: 1 },
   ])
+})
+
+test("the summary adds up model use from each install's latest report", async () => {
+  const signedIn = randomUUID()
+  const anonymous = randomUUID()
+  await recordUsage(
+    desktop(signedIn, {
+      accountId: state.account,
+      usage: report({
+        currentStreak: 8,
+        days: [
+          { date: day(-8), tokens: 40, tasks: 1, cost: 0.5 },
+          { date: day(0), tokens: 100, tasks: 2, cost: 1 },
+        ],
+        effortLevels: [
+          { id: "default", label: "Default", tokens: 600_000, responses: 200, percentage: 60 },
+          { id: "max", label: "Max", tokens: 400_000, responses: 100, percentage: 40 },
+        ],
+      }),
+    }),
+  )
+  await recordUsage({
+    client: "cli",
+    accountId: state.account,
+    version: "1.99.106",
+    platform: "linux",
+    arch: "x64",
+    usage: report({
+      lifetimeTokens: 300_000,
+      lifetimeCost: 2,
+      currentStreak: 1,
+      days: [{ date: day(0), tokens: 50, tasks: 1, cost: 0.25 }],
+    }),
+  })
+  await recordUsage(
+    desktop(anonymous, {
+      usage: report({
+        lifetimeTokens: 200_000,
+        currentStreak: 4,
+        favoriteModels: [
+          { providerID: "anthropic", modelID: "claude-sonnet-4-5", tokens: 150_000, percentage: 75 },
+          { providerID: "openrouter", modelID: "x-ai/grok-code-fast-1:free", tokens: 50_000, percentage: 25 },
+        ],
+      }),
+    }),
+  )
+  expect(statuses()).toEqual(["ok", "ok", "ok"])
+
+  const summary = await usageSummary()
+  expect(summary.usage).toMatchObject({
+    reporting: 3,
+    lifetimeTokens: 1_500_000,
+    lifetimeCost: 27,
+    completedChats: 120,
+    tokens7: 150,
+    previousTokens7: 40,
+    cost7: 1.25,
+    previousCost7: 0.5,
+    tokensPerActive7: 75,
+  })
+  expect(summary.daily.at(-1)).toMatchObject({ tokens: 150, tasks: 3, cost: 1.25 })
+  expect(summary.models).toEqual([
+    { providerID: "anthropic", modelID: "claude-sonnet-4-5", tokens: 1_550_000, people: 2, share: 0.9688 },
+    { providerID: "openrouter", modelID: "x-ai/grok-code-fast-1:free", tokens: 50_000, people: 1, share: 0.0313 },
+  ])
+  expect(summary.efforts.map((effort) => [effort.id, effort.tokens, effort.people])).toEqual([
+    ["default", 2_600_000, 2],
+    ["max", 400_000, 1],
+  ])
+  // The signed-in desktop and its CLI are one person: their longest current streak counts.
+  expect(summary.streaks).toEqual({ one: 0, twoToSix: 1, sevenPlus: 1 })
+  const text = JSON.stringify(summary)
+  for (const identity of [state.account, signedIn, anonymous]) expect(text).not.toContain(identity)
 })
 
 test("retention fills in a finished week", async () => {
@@ -304,11 +541,20 @@ test("browsers can neither call the functions nor read the tables", async () => 
         or has_function_privilege('anon', 'public.vector_usage_forget(uuid)', 'EXECUTE')
         or has_function_privilege('authenticated', 'public.vector_usage_forget(uuid)', 'EXECUTE')
         or has_function_privilege('anon', 'public.vector_usage_summary(jsonb)', 'EXECUTE')
-        or has_function_privilege('authenticated', 'public.vector_usage_summary(jsonb)', 'EXECUTE') as rpc,
+        or has_function_privilege('authenticated', 'public.vector_usage_summary(jsonb)', 'EXECUTE')
+        or has_function_privilege('anon', 'public.vector_usage_share_create(jsonb)', 'EXECUTE')
+        or has_function_privilege('authenticated', 'public.vector_usage_share_open(jsonb)', 'EXECUTE')
+        or has_function_privilege('anon', 'public.vector_usage_share_list(jsonb)', 'EXECUTE')
+        or has_function_privilege('authenticated', 'public.vector_usage_share_revoke(jsonb)', 'EXECUTE')
+        or has_function_privilege('anon', 'public.vector_usage_report_valid(jsonb)', 'EXECUTE') as rpc,
       has_table_privilege('anon', 'public.vector_usage_daily', 'SELECT')
         or has_table_privilege('authenticated', 'public.vector_usage_daily', 'SELECT')
         or has_table_privilege('anon', 'public.vector_usage_downloads', 'SELECT')
-        or has_table_privilege('authenticated', 'public.vector_usage_downloads', 'SELECT') as tables,
+        or has_table_privilege('authenticated', 'public.vector_usage_downloads', 'SELECT')
+        or has_table_privilege('anon', 'public.vector_usage_tokens', 'SELECT')
+        or has_table_privilege('authenticated', 'public.vector_usage_tokens', 'SELECT')
+        or has_table_privilege('anon', 'public.vector_usage_shares', 'SELECT')
+        or has_table_privilege('authenticated', 'public.vector_usage_shares', 'SELECT') as tables,
       has_function_privilege('service_role', 'public.vector_usage_summary(jsonb)', 'EXECUTE') as server`
   expect(rows).toEqual([{ rpc: false, tables: false, server: true }])
 })

@@ -6,6 +6,7 @@ on:
       - api/_lib/usage.ts
       - api/usage/**
       - packages/schema/src/usage-summary.ts
+      - packages/schema/src/usage-report.ts
       - packages/web/test/usage-sql.test.ts
       - docs/vector/owner-actions/sql/usage.sql
       - .github/workflows/vector-usage.yml
