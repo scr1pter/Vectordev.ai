@@ -1,6 +1,8 @@
 import { afterEach, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Cause, Effect, Exit, Layer } from "effect"
+import fs from "fs/promises"
+import os from "os"
 import path from "path"
 import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -717,6 +719,95 @@ it.instance(
       },
     },
   },
+)
+
+it.instance(
+  "a trusted project's allow cannot lift a user-global deny",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* Config.Service
+      const dir = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "vector-global-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+      )
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(dir, "vector.json"),
+          JSON.stringify({
+            permission: { bash: { "*": "deny", "git status*": "allow" }, edit: { "*.lock": "deny" } },
+            tools: { webfetch: false },
+            agent: { build: { permission: { websearch: "deny" } } },
+          }),
+        ),
+      )
+      const previous = Global.Path.config
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          ;(Global.Path as { config: string }).config = dir
+        }).pipe(Effect.andThen(config.invalidate())),
+        () =>
+          Effect.sync(() => {
+            ;(Global.Path as { config: string }).config = previous
+          }).pipe(Effect.andThen(config.invalidate())),
+      )
+
+      const build = yield* load((svc) => svc.get("build"))
+      const plan = yield* load((svc) => svc.get("plan"))
+      const action = (agent: Agent.Info | undefined, permission: string, pattern: string) =>
+        Permission.evaluate(permission, pattern, agent!.permission).action
+      const explore = yield* load((svc) => svc.get("explore"))
+      expect(action(build, "bash", "curl https://example.com")).toBe("deny")
+      expect(action(plan, "bash", "curl https://example.com")).toBe("deny")
+      expect(action(explore, "bash", "git diff")).toBe("deny")
+      expect(action(explore, "edit", "src/index.ts")).toBe("deny")
+      // The user's own exception to the deny still holds.
+      expect(action(build, "bash", "git status")).toBe("allow")
+      expect(action(build, "edit", "bun.lock")).toBe("deny")
+      expect(action(build, "webfetch", "https://example.com")).toBe("deny")
+      expect(action(build, "websearch", "query")).toBe("deny")
+      // The project still decides wherever the user's global config denies nothing.
+      expect(action(build, "edit", "src/index.ts")).toBe("allow")
+      expect(action(build, "read", "src/index.ts")).toBe("allow")
+    }),
+  {
+    config: {
+      permission: { bash: "allow", edit: "allow", webfetch: "allow", websearch: "allow" },
+      agent: { build: { permission: { bash: { "curl *": "allow" }, websearch: "allow" } } },
+    },
+  },
+)
+
+it.instance(
+  "a user-global deny keeps its own exceptions when the project adds no permissions",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* Config.Service
+      const dir = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "vector-global-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+      )
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(dir, "vector.json"),
+          JSON.stringify({ permission: { bash: { "*": "deny", "git status*": "allow" } } }),
+        ),
+      )
+      const previous = Global.Path.config
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          ;(Global.Path as { config: string }).config = dir
+        }).pipe(Effect.andThen(config.invalidate())),
+        () =>
+          Effect.sync(() => {
+            ;(Global.Path as { config: string }).config = previous
+          }).pipe(Effect.andThen(config.invalidate())),
+      )
+
+      const build = yield* load((svc) => svc.get("build"))
+      expect(Permission.evaluate("bash", "git status", build!.permission).action).toBe("allow")
+      expect(Permission.evaluate("bash", "rm -rf /", build!.permission).action).toBe("deny")
+    }),
+  { config: { model: "test/model" } },
 )
 
 it.instance("global tmp directory children are allowed for external_directory", () =>

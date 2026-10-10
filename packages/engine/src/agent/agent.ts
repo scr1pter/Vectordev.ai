@@ -497,13 +497,32 @@ const layer = Layer.effect(
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
 
-        // Rebuilt after the config loop above, so a read-only specialist's own config rules are narrowed like the user's.
+        // A trusted project's config merges over the user's, so a project allow can replace a user-global deny.
+        // Replay the user's own rules from their first deny on, after everything else, so each such deny holds again
+        // and the user's later exceptions to it keep working.
+        const ceiling = yield* config.permissionCeiling()
+        const userCeiling = (name: string) => {
+          if (!ceiling) return []
+          const rules = [
+            ...Permission.fromConfig(ceiling.permission),
+            ...Permission.fromConfig(ceiling.agent[name] ?? {}),
+          ]
+          const first = rules.findIndex((rule) => rule.action === "deny")
+          return first === -1 ? [] : rules.slice(first)
+        }
+        for (const [name, item] of Object.entries(agents)) {
+          if (!(name in readonlySpecialists)) item.permission = Permission.merge(item.permission, userCeiling(name))
+        }
+
+        // Rebuilt after the config loop above, so a read-only specialist's own config rules, and the user ceiling, are
+        // narrowed like the user's.
         for (const name of Object.keys(readonlySpecialists)) {
           const item = agents[name]
           if (!item) continue
           item.permission = readonlySpecialist(name, [
             ...user,
             ...Permission.fromConfig(cfg.agent?.[name]?.permission ?? {}),
+            ...userCeiling(name),
           ])
         }
 

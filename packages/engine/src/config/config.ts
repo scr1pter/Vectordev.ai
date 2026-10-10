@@ -219,6 +219,32 @@ function authorityNarrowingPermission(permission: ConfigPermissionV1.Info | unde
   if (entries.length) return Object.fromEntries(entries)
 }
 
+function toolPermissions(tools: Record<string, boolean>) {
+  return Object.fromEntries(
+    Object.entries(tools).map(([tool, enabled]) => [
+      tool === "write" || tool === "patch" ? "edit" : tool,
+      enabled ? "allow" : "deny",
+    ]),
+  ) as Record<string, ConfigPermissionV1.Action>
+}
+
+// Whether a project source allows or asks for anything, which could replace a user deny once merged.
+function grantsPermission(config: Pick<Info, "permission" | "tools" | "agent" | "mode">) {
+  const permissions = [
+    config.permission,
+    ...Object.values(config.agent ?? {}).map((agent) => agent?.permission),
+    ...Object.values(config.mode ?? {}).map((mode) => mode?.permission),
+  ]
+  return (
+    Object.values(config.tools ?? {}).some(Boolean) ||
+    permissions.some((permission) =>
+      Object.values(permission ?? {}).some((rule) =>
+        typeof rule === "string" ? rule !== "deny" : Object.values(rule).some((action) => action !== "deny"),
+      ),
+    )
+  )
+}
+
 function projectProviderEndpointsAllowed(provider: unknown) {
   if (!isRecord(provider)) return true
   const options = isRecord(provider.options) ? provider.options : undefined
@@ -293,6 +319,14 @@ type State = {
   deps: Fiber.Fiber<void>[]
   trust: WorkspaceTrust.Snapshot
   trusted: boolean
+  ceiling: PermissionCeiling | undefined
+}
+
+// The permissions the user's own config sources declare, merged without any project file. Set only when a
+// trusted project grants something, because the merged config then lets a project allow replace a user deny.
+export type PermissionCeiling = {
+  permission: ConfigPermissionV1.Info
+  agent: Record<string, ConfigPermissionV1.Info>
 }
 
 export interface Interface {
@@ -308,6 +342,7 @@ export interface Interface {
   readonly waitForDependencies: () => Effect.Effect<void>
   readonly trust?: () => Effect.Effect<WorkspaceTrust.Status>
   readonly approve?: () => Effect.Effect<void>
+  readonly permissionCeiling: () => Effect.Effect<PermissionCeiling | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Config") {}
@@ -624,10 +659,21 @@ const layer = Layer.effect(
           result.plugin_origins = plugins
         })
 
+        // The user's own sources merged alone, and whether a trusted project granted any permission over them.
+        let userPermissions: Pick<Info, "permission" | "tools" | "agent"> = {}
+        let projectGrants = false
+
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
           const scope = kind ?? (containsPath(source, ctx) ? "local" : "global")
           const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
           const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
+          if (projectSource) projectGrants ||= grantsPermission(safe)
+          else
+            userPermissions = mergeConfigConcatArrays(userPermissions, {
+              permission: safe.permission,
+              tools: safe.tools,
+              agent: safe.agent,
+            })
           result = mergeConfigConcatArrays(result, safe)
           return mergePluginOrigins(source, safe.plugin, scope)
         }
@@ -752,8 +798,13 @@ const layer = Layer.effect(
           if (runtimeFiles) yield* ensureGitignore(dir).pipe(Effect.orDie)
 
           result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(runtimeDir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(runtimeDir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(runtimeDir)))
+          const agents = mergeDeep(
+            yield* Effect.promise(() => ConfigAgent.load(runtimeDir)),
+            yield* Effect.promise(() => ConfigAgent.loadMode(runtimeDir)),
+          )
+          if (local) projectGrants ||= grantsPermission({ agent: agents })
+          else userPermissions = mergeConfigConcatArrays(userPermissions, { agent: agents })
+          result.agent = mergeDeep(result.agent ?? {}, agents)
           // Auto-discovered plugins under `.vector/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
           const list = yield* Effect.promise(() => ConfigPlugin.load(runtimeDir))
@@ -787,13 +838,16 @@ const layer = Layer.effect(
         // macOS managed preferences (.mobileconfig deployed via MDM) override everything
         const managed = yield* Effect.promise(() => ConfigManaged.readManagedPreferences())
         if (managed) {
-          result = mergeConfigConcatArrays(
-            result,
-            yield* loadConfig(managed.text, {
-              dir: path.dirname(managed.source),
-              source: managed.source,
-            }),
-          )
+          const next = yield* loadConfig(managed.text, {
+            dir: path.dirname(managed.source),
+            source: managed.source,
+          })
+          userPermissions = mergeConfigConcatArrays(userPermissions, {
+            permission: next.permission,
+            tools: next.tools,
+            agent: next.agent,
+          })
+          result = mergeConfigConcatArrays(result, next)
         }
 
         for (const [name, mode] of Object.entries(result.mode ?? {})) {
@@ -807,24 +861,15 @@ const layer = Layer.effect(
 
         if (Flag.VECTOR_PERMISSION) {
           try {
-            result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.VECTOR_PERMISSION))
+            const permission = JSON.parse(Flag.VECTOR_PERMISSION)
+            result.permission = mergeDeep(result.permission ?? {}, permission)
+            userPermissions.permission = mergeDeep(userPermissions.permission ?? {}, permission)
           } catch (err) {
             yield* Effect.logWarning("VECTOR_PERMISSION contains invalid JSON, skipping", { err })
           }
         }
 
-        if (result.tools) {
-          const perms: Record<string, ConfigPermissionV1.Action> = {}
-          for (const [tool, enabled] of Object.entries(result.tools)) {
-            const action: ConfigPermissionV1.Action = enabled ? "allow" : "deny"
-            if (tool === "write" || tool === "edit" || tool === "patch") {
-              perms.edit = action
-              continue
-            }
-            perms[tool] = action
-          }
-          result.permission = mergeDeep(perms, result.permission ?? {})
-        }
+        if (result.tools) result.permission = mergeDeep(toolPermissions(result.tools), result.permission ?? {})
 
         if (!result.username) {
           try {
@@ -856,6 +901,17 @@ const layer = Layer.effect(
           deps,
           trust: trustSnapshot,
           trusted,
+          ceiling:
+            trusted && projectGrants
+              ? {
+                  permission: mergeDeep(toolPermissions(userPermissions.tools ?? {}), userPermissions.permission ?? {}),
+                  agent: Object.fromEntries(
+                    Object.entries(userPermissions.agent ?? {}).flatMap(([name, agent]) =>
+                      agent?.permission ? [[name, agent.permission]] : [],
+                    ),
+                  ),
+                }
+              : undefined,
         }
       },
       Effect.provideService(FSUtil.Service, fs),
@@ -880,6 +936,10 @@ const layer = Layer.effect(
       yield* InstanceState.useEffect(state, (s) =>
         Effect.forEach(s.deps, Fiber.join, { concurrency: "unbounded" }).pipe(Effect.asVoid),
       )
+    })
+
+    const permissionCeiling = Effect.fn("Config.permissionCeiling")(function* () {
+      return yield* InstanceState.use(state, (s) => s.ceiling)
     })
 
     const trust = Effect.fn("Config.trust")(function* () {
@@ -1047,6 +1107,7 @@ const layer = Layer.effect(
       waitForDependencies,
       trust,
       approve,
+      permissionCeiling,
     })
   }),
 )
