@@ -427,6 +427,60 @@ describe("Vercel deployments", () => {
     expect(listDeployments(project).find((item) => item.id === candidate.id)?.releaseStatus).toBe("rolled-back")
   })
 
+  test("holds production while the linked Supabase project fails its security check, and records why", async () => {
+    const seeded = seedHistory()
+    const staged = api.addDeployment({ projectId: seeded.remote.id, target: "production", created: 5_000 })
+    const candidate = recordDeployment({
+      projectPath: project,
+      slug: "shop",
+      url: `https://${staged.url}`,
+      name: "shop",
+      target: "vercel",
+      environment: "preview",
+      providerDeploymentId: staged.uid,
+    })
+    // Supabase is linked but not connected here, so only the local scan runs;
+    // a service_role key in a public variable is enough to stop the move.
+    stores.set(
+      "cloud-projects",
+      new Map([
+        [
+          cloudProjectScopeKey(project),
+          {
+            env: [],
+            domains: [],
+            build: null,
+            database: {
+              provider: "supabase",
+              url: "https://fixtureref.supabase.co",
+              anonKey: "sb_publishable_fixture_key",
+              projectRef: "fixtureref",
+              projectName: "shop-db",
+              connectedAt: "2026-10-01",
+            },
+          },
+        ],
+      ]),
+    )
+    const jwt = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ role: "service_role" })).toString("base64url")}.signaturesignature`
+    setEnv(project, undefined, "VITE_SUPABASE_KEY", jwt, "public")
+    const reported: string[] = []
+    await expect(
+      deployments.promoteVercelDeployment(project, staged.uid, { report: (level) => reported.push(level) }),
+    ).rejects.toThrow("The Supabase security check failed, so production was not moved")
+    expect(seeded.remote.productionId).toBe(seeded.live.uid)
+    expect(api.requests("POST").some((item) => item.path.includes("/promote/"))).toBe(false)
+    expect(reported).toEqual(["error"])
+    expect(listDeployments(project).find((item) => item.id === candidate.id)).toMatchObject({
+      releaseStatus: "preview",
+      checks: [expect.objectContaining({ id: "supabase-security", status: "failed", required: true })],
+    })
+    // A rollback returns to a release that already served production, so the
+    // check does not hold it.
+    await deployments.rollbackVercelDeployment(project, seeded.old.uid, { sleep: async () => {} })
+    expect(seeded.remote.productionId).toBe(seeded.old.uid)
+  })
+
   test("rolls back by default to the last deployment that served production and passed Vector's checks", async () => {
     const seeded = seedHistory()
     seeded.old.readySubstate = "PROMOTED"

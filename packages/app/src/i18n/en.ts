@@ -1083,9 +1083,9 @@ export const dict = {
   "settings.permissions.tool.vector_cloud_publish.title": "Publish",
   "settings.permissions.tool.vector_cloud_publish.description":
     "Deploy, promote, roll back, redeploy or cancel releases on your Vercel account",
-  "settings.permissions.tool.vector_cloud_database.title": "Database",
+  "settings.permissions.tool.vector_cloud_database.title": "Supabase",
   "settings.permissions.tool.vector_cloud_database.description":
-    "Create, configure or change the schema of your Supabase database",
+    "Create, link or change your Supabase project: schema, SQL, auth, storage, Edge Functions and secrets",
   "settings.permissions.tool.vector_cloud_environment.title": "Host environment",
   "settings.permissions.tool.vector_cloud_environment.description":
     "Change your Vercel project's environment variables, or pull its development values into .env",

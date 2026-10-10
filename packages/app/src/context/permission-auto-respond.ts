@@ -38,12 +38,20 @@ function sessionLineage(session: { id: string; parentID?: string }[], sessionID:
   return ids
 }
 
+// Vector Cloud marks a destructive, billed or credential-bearing action as
+// asking every time (no "always" patterns), and auto-accept must not answer
+// it either: the user decides each one.
+export function asksEveryTime(permission: { permission?: string; always?: string[] }) {
+  return Boolean(permission.permission?.startsWith("vector_cloud_") && permission.always?.length === 0)
+}
+
 export function autoRespondsPermission(
   autoAccept: Record<string, boolean>,
   session: { id: string; parentID?: string }[],
-  permission: { sessionID: string },
+  permission: { sessionID: string; permission?: string; always?: string[] },
   directory?: string,
 ) {
+  if (asksEveryTime(permission)) return false
   const value = sessionLineage(session, permission.sessionID)
     .map((id) => accepted(autoAccept, id, directory))
     .find((item): item is boolean => item !== undefined)

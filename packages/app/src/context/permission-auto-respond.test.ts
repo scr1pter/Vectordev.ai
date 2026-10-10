@@ -15,6 +15,28 @@ const permission = (sessionID: string) =>
   }) as Pick<PermissionRequest, "sessionID">
 
 describe("autoRespondsPermission", () => {
+  test("never answers a Vector Cloud action that asks every time", () => {
+    const sessions = [session({ id: "root" })]
+    const request = (always: string[]) => ({ sessionID: "root", permission: "vector_cloud_database", always })
+    expect(autoRespondsPermission({ root: true }, sessions, request([]), "/tmp/project")).toBe(false)
+    expect(
+      autoRespondsPermission(
+        { root: true },
+        sessions,
+        request(["supabase/shop-db/production/create_bucket"]),
+        "/tmp/project",
+      ),
+    ).toBe(true)
+    expect(
+      autoRespondsPermission(
+        { root: true },
+        sessions,
+        { sessionID: "root", permission: "bash", always: [] },
+        "/tmp/project",
+      ),
+    ).toBe(true)
+  })
+
   test("uses a parent session's directory-scoped auto-accept", () => {
     const directory = "/tmp/project"
     const sessions = [session({ id: "root" }), session({ id: "child", parentID: "root" })]

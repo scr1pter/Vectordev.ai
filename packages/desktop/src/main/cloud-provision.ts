@@ -61,11 +61,20 @@ export type CloudProvisionInput = {
   force?: boolean
 }
 
+export type CloudProvisionProgress = {
+  stage: "checking" | "creating" | "waiting" | "linking"
+  message: string
+  projectRef?: string
+  status?: string
+}
+
 export type CloudProvisionOptions = {
   request?: CloudFetch
   wait?: (ms: number) => Promise<void>
   pollAttempts?: number
   pollIntervalMs?: number
+  /** Called as creation moves along, so the console can show more than a spinner. */
+  progress?: (event: CloudProvisionProgress) => void
 }
 
 const API = "https://api.supabase.com/v1"
@@ -148,6 +157,27 @@ function writeProvisionRecord(projectPath: string, record: ProvisionRecord): voi
 
 function clearProvisionRecord(projectPath: string): void {
   getStore(PROVISION_STORE).delete(cloudProjectScopeKey(projectPath))
+}
+
+// A project Vector created that never finished linking: the app closed or the
+// wait ran out. The console offers to finish it instead of creating another.
+export function pendingProvision(projectPath: string) {
+  const record = readProvisionRecord(projectPath)
+  if (!record || record.linkedAt) return
+  return {
+    projectRef: record.projectRef,
+    projectName: record.projectName,
+    region: record.region,
+    organizationId: record.organizationId,
+    createdAt: record.createdAt,
+  }
+}
+
+// The generated password of a project Vector created, still encrypted. Only the
+// project it was generated for gets it back.
+export function provisionedPassword(projectPath: string, projectRef: string): string | undefined {
+  const record = readProvisionRecord(projectPath)
+  return record?.projectRef === projectRef ? record.password : undefined
 }
 
 async function supabaseJson(token: string, url: string, request: CloudFetch, init?: RequestInit): Promise<unknown> {
@@ -247,6 +277,7 @@ async function waitForHealthyProject(
     attempts: number
     intervalMs: number
     tolerateMissing: boolean
+    progress?: (event: CloudProvisionProgress) => void
   },
 ): Promise<PollResult> {
   let status: string | undefined
@@ -270,6 +301,12 @@ async function waitForHealthyProject(
     } else {
       status = stringField(project, "status") ?? status
       region = stringField(project, "region") ?? region
+      options.progress?.({
+        stage: "waiting",
+        projectRef,
+        status,
+        message: `Supabase reports the project as ${status ?? "starting"} (check ${attempt} of ${options.attempts}).`,
+      })
       if (status === HEALTHY_STATUS) return { healthy: true, status, region, attempts: attempt }
       if (status && FAILED_STATUSES.has(status)) return { healthy: false, status, region, attempts: attempt }
     }
@@ -298,10 +335,17 @@ async function linkCreatedProject(
   record: ProvisionRecord,
   poll: PollResult,
   request: CloudFetch,
+  progress?: (event: CloudProvisionProgress) => void,
 ): Promise<CloudProvisionReport> {
+  progress?.({
+    stage: "linking",
+    projectRef: record.projectRef,
+    message: `Connecting ${record.projectName} to this project.`,
+  })
   const anonKey = await fetchAnonKey(token, record.projectRef, request)
-  // The manual flow's own helper: it writes SUPABASE_URL/SUPABASE_ANON_KEY into
-  // the project's managed env, scaffolds src/lib/supabase.js and flushes .env.
+  // The manual flow's own helper: it writes the project URL and public key into
+  // the project's managed env under the framework's public names, scaffolds the
+  // client (supabase.ts or .js), keeps .env out of git and flushes .env.
   const connection = await connectDatabase(
     input.projectPath,
     input.taskId,
@@ -356,6 +400,7 @@ async function provision(
     }
   }
 
+  options.progress?.({ stage: "checking", message: "Checking your Supabase account." })
   const token = await getSupabaseManagementToken(request)
   if (!token) {
     return {
@@ -383,8 +428,9 @@ async function provision(
       attempts,
       intervalMs,
       tolerateMissing: false,
+      progress: options.progress,
     })
-    if (resumed.healthy) return linkCreatedProject(input, token, pending, resumed, request)
+    if (resumed.healthy) return linkCreatedProject(input, token, pending, resumed, request, options.progress)
     if (resumed.missing) {
       clearProvisionRecord(input.projectPath)
       return {
@@ -435,6 +481,7 @@ async function provision(
   // Postgres connection string. It is never returned and never logged.
   const password = randomBytes(24).toString("base64url")
   context.secrets.push(password)
+  options.progress?.({ stage: "creating", message: `Creating ${name} in ${chosen.name} (${region}).` })
   const created = await supabaseJson(token, `${API}/projects`, request, {
     method: "POST",
     body: JSON.stringify({ name, organization_id: chosen.id, region, db_pass: password }),
@@ -461,9 +508,10 @@ async function provision(
     attempts,
     intervalMs,
     tolerateMissing: true,
+    progress: options.progress,
   })
   if (!poll.healthy) return notHealthyReport(record, poll, intervalMs)
-  return linkCreatedProject(input, token, record, poll, request)
+  return linkCreatedProject(input, token, record, poll, request, options.progress)
 }
 
 function notHealthyReport(record: ProvisionRecord, poll: PollResult, intervalMs: number): CloudProvisionReport {

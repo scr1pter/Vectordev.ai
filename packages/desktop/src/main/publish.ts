@@ -917,9 +917,28 @@ async function deployAndCheck(
   }
 
   emitProgress(input, emit, "promoting", "info", `Promoting ${remote.url} to production.`)
-  const promoted = await promoteVercelDeployment(scope.projectPath, remote.id, options).catch((error: unknown) => error)
+  const promoted = await promoteVercelDeployment(scope.projectPath, remote.id, {
+    ...options,
+    report: (level, message) => emitProgress(input, emit, "checking", level, message),
+  }).catch((error: unknown) => error)
   if (promoted instanceof Error || !promoted || typeof promoted !== "object") {
     const message = promoted instanceof Error ? promoted.message : "unknown error"
+    // The Supabase security check runs as part of the promotion and records
+    // itself on the release; a refusal from it is a failed check, and the
+    // build stays reachable at its own address.
+    const checks = getDeployment(scope.projectPath, scope.taskId, deployment.id).checks
+    if (!requiredChecksPassed(checks)) {
+      return {
+        ...failure(input, emit, message, "checks_failed"),
+        url: deployment.url,
+        log,
+        deploymentId: deployment.id,
+        providerDeploymentId: remote.id,
+        environment: "preview",
+        checks,
+        notes,
+      }
+    }
     return {
       ...failure(
         input,

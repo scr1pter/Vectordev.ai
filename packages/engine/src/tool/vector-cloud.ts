@@ -1,6 +1,9 @@
+import { createTwoFilesPatch } from "diff"
 import { Effect, Schema } from "effect"
+import path from "path"
 
 import { InstanceState } from "@/effect/instance-state"
+import { trimDiff } from "./edit"
 import { Tool } from "./tool"
 import {
   isVercelAction,
@@ -25,6 +28,71 @@ const Action = Schema.Literals([
   "logs",
   "apply_migrations",
   ...VERCEL_ACTIONS,
+  "supabase_projects",
+  "link_database",
+  "unlink_database",
+  "pause_database",
+  "restore_database",
+  "write_database_url",
+  "rotate_database_password",
+  "migration_status",
+  "create_migration",
+  "rollback_migration",
+  "run_sql",
+  "auth_config",
+  "update_auth",
+  "auth_users",
+  "invite_user",
+  "delete_user",
+  "create_bucket",
+  "update_bucket",
+  "delete_bucket",
+  "deploy_function",
+  "delete_function",
+  "function_secrets",
+  "set_function_secrets",
+  "delete_function_secrets",
+  "supabase_logs",
+  "security_check",
+])
+
+type Action = Schema.Schema.Type<typeof Action>
+
+// Supabase actions that change the linked project or the user's account. Each
+// asks under vector_cloud_database after the desktop describes it; the desktop
+// marks destructive, billed or credential-bearing ones as never "always".
+const SUPABASE_CHANGES = new Set<Action>([
+  "link_database",
+  "unlink_database",
+  "pause_database",
+  "restore_database",
+  "write_database_url",
+  "rotate_database_password",
+  "rollback_migration",
+  "run_sql",
+  "update_auth",
+  "invite_user",
+  "delete_user",
+  "create_bucket",
+  "update_bucket",
+  "delete_bucket",
+  "deploy_function",
+  "delete_function",
+  "set_function_secrets",
+  "delete_function_secrets",
+])
+
+// Supabase actions answered by the desktop's shared Supabase commands.
+const SUPABASE_ACTIONS = new Set<Action>([
+  ...SUPABASE_CHANGES,
+  "supabase_projects",
+  "migration_status",
+  "create_migration",
+  "auth_config",
+  "auth_users",
+  "function_secrets",
+  "supabase_logs",
+  "security_check",
 ])
 
 export const Parameters = Schema.Struct({
@@ -60,10 +128,103 @@ export const Parameters = Schema.Struct({
       "For create_database, create a new Supabase project even though this project already has a database connected. Defaults to false.",
   }),
   ...VercelParameters,
+  projectRef: Schema.optional(Schema.String).annotate({
+    description: "For link_database, the reference of a Supabase project from supabase_projects.",
+  }),
+  migrationName: Schema.optional(Schema.String).annotate({
+    description:
+      "For create_migration, a short name such as add_profiles. For rollback_migration, the applied migration file to roll back (only the most recent applied one can be).",
+  }),
+  sql: Schema.optional(Schema.String).annotate({
+    description: "For create_migration, the SQL of the new migration. For run_sql, the query to run.",
+  }),
+  downSql: Schema.optional(Schema.String).annotate({
+    description:
+      "For create_migration, SQL that undoes the migration. Without it the migration cannot be rolled back from Vector.",
+  }),
+  allowWrite: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "For run_sql, allow the query to change data. Defaults to false, which runs it read-only. Set it only when the user wants that change made to the live database.",
+  }),
+  maxRows: Schema.optional(Schema.Number).annotate({
+    description: "For run_sql, the most rows to return. Defaults to 50, capped at 200.",
+  }),
+  siteUrl: Schema.optional(Schema.String).annotate({
+    description: "For update_auth, the site URL Supabase Auth sends users back to by default.",
+  }),
+  redirectUrls: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description:
+      "For update_auth, redirect URLs to add to the allow list (Supabase globs such as https://app.example.com/** work).",
+  }),
+  removeRedirectUrls: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "For update_auth, redirect URLs to remove from the allow list.",
+  }),
+  addVercelUrls: Schema.optional(Schema.Boolean).annotate({
+    description: "For update_auth, also allow the linked Vercel project's production and preview addresses.",
+  }),
+  emailEnabled: Schema.optional(Schema.Boolean).annotate({
+    description: "For update_auth, turn email sign-in on or off.",
+  }),
+  authProvider: Schema.optional(Schema.Literals(["google", "github", "apple"])).annotate({
+    description:
+      "For update_auth, the OAuth provider to change. Its client secret is entered by the user in Cloud Services > Authentication, never in chat.",
+  }),
+  providerEnabled: Schema.optional(Schema.Boolean).annotate({
+    description: "For update_auth with authProvider, turn that provider's sign-in on or off.",
+  }),
+  clientId: Schema.optional(Schema.String).annotate({
+    description: "For update_auth with authProvider, the provider's OAuth client id.",
+  }),
+  email: Schema.optional(Schema.String).annotate({ description: "For invite_user, the address to invite." }),
+  userId: Schema.optional(Schema.String).annotate({ description: "For delete_user, the user's id from auth_users." }),
+  page: Schema.optional(Schema.Number).annotate({ description: "For auth_users, the page of 50 users to read." }),
+  bucket: Schema.optional(Schema.String).annotate({
+    description: "For create_bucket, update_bucket and delete_bucket, the bucket name.",
+  }),
+  publicBucket: Schema.optional(Schema.Boolean).annotate({
+    description:
+      "For create_bucket and update_bucket, whether anyone with a file's URL can read it. Buckets are private by default.",
+  }),
+  fileSizeLimit: Schema.optional(Schema.Number).annotate({
+    description: "For create_bucket and update_bucket, the largest file in bytes.",
+  }),
+  allowedMimeTypes: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "For create_bucket and update_bucket, allowed MIME types such as image/*.",
+  }),
+  emptyBucket: Schema.optional(Schema.Boolean).annotate({
+    description: "For delete_bucket, delete every file in it first. Without it a bucket with files is not deleted.",
+  }),
+  functionName: Schema.optional(Schema.String).annotate({
+    description: "For deploy_function and delete_function, the function's folder name under supabase/functions.",
+  }),
+  secretNames: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description:
+      "For set_function_secrets, names of this project's stored environment variables whose values become function secrets. For delete_function_secrets, the secrets to delete.",
+  }),
+  service: Schema.optional(Schema.Literals(["api", "postgres", "auth", "storage", "functions"])).annotate({
+    description: "For supabase_logs, which service's logs to read.",
+  }),
+  minutes: Schema.optional(Schema.Number).annotate({
+    description: "For supabase_logs, how far back to read. Defaults to 60, at most 1440.",
+  }),
+  search: Schema.optional(Schema.String).annotate({
+    description: "For supabase_logs, only lines containing this text.",
+  }),
+  writeDatabaseUrl: Schema.optional(Schema.Boolean).annotate({
+    description: "For rotate_database_password, also write the new server-only DATABASE_URL.",
+  }),
+  syncVercel: Schema.optional(Schema.Boolean).annotate({
+    description: "For rotate_database_password, also push this project's environment to the linked Vercel project.",
+  }),
 })
 
+// SQL a prompt shows, cut to a readable length; `length` is the whole of it.
+type Statement = { label: string; sql: string; length: number; truncated: boolean }
+
 type CloudReport = {
+  [key: string]: unknown
   ok: boolean
+  repeatable?: boolean
   scope?: { provider: string; project: string; environment: string; summary: string }
   /** From describe: what the approved action runs with, such as the id of the plan the user saw. */
   carry?: Record<string, unknown>
@@ -77,6 +238,10 @@ type CloudReport = {
   alias?: string
   protectedChecks?: string
   notes?: string[]
+  /** The SQL the action would run or write, for the permission prompt. */
+  statements?: Statement[]
+  /** Sent back with the command, so it does exactly what the prompt showed. */
+  approved?: Record<string, unknown>
   error?: string
   needsSetup?: boolean
   needsChoice?: boolean
@@ -128,7 +293,7 @@ type CloudReport = {
 }
 
 type Metadata = {
-  action: Schema.Schema.Type<typeof Action>
+  action: Action
   projectPath: string
   url?: string
 }
@@ -155,8 +320,9 @@ function bridgeRequest(input: Record<string, unknown>, signal: AbortSignal) {
   })
 }
 
-function toolTitle(action: Schema.Schema.Type<typeof Action>) {
+function toolTitle(action: Action) {
   if (isVercelAction(action)) return "Vercel"
+  if (SUPABASE_ACTIONS.has(action)) return "Supabase"
   if (action === "publish") return "Publish with Vector Cloud"
   if (action === "logs") return "Read deployment logs"
   if (action === "apply_migrations") return "Apply database migrations"
@@ -177,7 +343,7 @@ function nameList(values?: string[]) {
 // has to read as an instruction rather than as a failed run.
 const SETUP_HINT = "Connect an account in Vector Cloud > Connections (Vercel or Supabase), then try again."
 
-function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudReport) {
+function formatReport(action: Action, report: CloudReport) {
   if (report.text && (isVercelAction(action) || action === "list_deployments" || action === "sync_environment")) {
     return lines(report.text, report.nextStep)
   }
@@ -218,6 +384,7 @@ function formatReport(action: Schema.Schema.Type<typeof Action>, report: CloudRe
       report.nextStep ?? SETUP_HINT,
     )
   }
+  if (SUPABASE_ACTIONS.has(action)) return formatSupabase(action, report)
   if (action === "logs") {
     if (!report.logs) return lines(report.error, report.nextStep) || "No deployment logs are available."
     const logs = report.logs
@@ -336,16 +503,112 @@ function formatPublish(report: CloudReport) {
   )
 }
 
+// Supabase replies carry names, counts and settings, never credentials or env
+// values; the desktop scrubs them before they arrive here.
+function formatSupabase(action: Action, report: CloudReport) {
+  const data = Object.fromEntries(Object.entries(report).filter(([key]) => key !== "ok"))
+  if (action === "run_sql") {
+    const result = report.result as
+      | {
+          columns: string[]
+          rows: unknown[][]
+          rowCount: number
+          truncated: boolean
+          readOnly: boolean
+          hiddenColumns?: string[]
+        }
+      | undefined
+    const project = report.project as { name?: string } | undefined
+    if (!result) return JSON.stringify(data)
+    return lines(
+      `${result.readOnly ? "Read-only query" : "Write"} on Supabase project ${project?.name ?? ""}: ${result.rows.length} of ${result.rowCount} row(s)${result.truncated ? " (truncated)" : ""}.`,
+      result.hiddenColumns?.length
+        ? `Hidden because they hold sign-in credentials: ${result.hiddenColumns.join(", ")}. The user can see them in Cloud Services > Database.`
+        : undefined,
+      result.columns.length ? result.columns.join(" | ") : undefined,
+      ...result.rows.map((row) => row.map((cell) => (cell === null ? "null" : String(cell))).join(" | ")),
+    )
+  }
+  if (action === "supabase_logs") {
+    const entries = (report.entries as { at: string; message: string }[] | undefined) ?? []
+    return lines(
+      `${report.label} logs from ${report.from} to ${report.to}: ${entries.length} line(s)${report.truncated ? ", older lines not shown" : ""}.`,
+      entries.length
+        ? `--- newest last ---\n${entries.map((entry) => `${entry.at} ${entry.message}`).join("\n")}`
+        : "No log lines in that window.",
+    )
+  }
+  if (action === "security_check") {
+    const security = report.security as
+      | {
+          status: string
+          detail: string
+          nextStep?: string
+          advisors: { level: string; title: string; entity?: string; remediation?: string }[]
+          environment: { level: string; where: string; reason: string }[]
+          bundle: { level: string; where: string; reason: string }[]
+        }
+      | undefined
+    if (!security) return JSON.stringify(data)
+    return lines(
+      `Supabase security check: ${security.status}. ${security.detail}`,
+      security.nextStep,
+      ...security.advisors.map(
+        (item) =>
+          `${item.level} · ${item.title}${item.entity ? ` · ${item.entity}` : ""}${item.remediation ? ` (${item.remediation})` : ""}`,
+      ),
+      ...[...security.environment, ...security.bundle].map((item) => `${item.level} · ${item.where} ${item.reason}`),
+    )
+  }
+  return `Supabase ${action.replaceAll("_", " ")}:\n${JSON.stringify(data, null, 2)}`
+}
+
+function supabaseFields(params: Schema.Schema.Type<typeof Parameters>) {
+  return {
+    projectRef: params.projectRef,
+    name: params.migrationName,
+    sql: params.sql,
+    downSql: params.downSql,
+    write: params.allowWrite,
+    maxRows: params.maxRows,
+    siteUrl: params.siteUrl,
+    redirectUrls: params.redirectUrls,
+    removeRedirectUrls: params.removeRedirectUrls,
+    addVercelUrls: params.addVercelUrls,
+    emailEnabled: params.emailEnabled,
+    providers: params.authProvider
+      ? { [params.authProvider]: { enabled: params.providerEnabled, clientId: params.clientId } }
+      : undefined,
+    email: params.email,
+    userId: params.userId,
+    page: params.page,
+    bucket: params.bucket,
+    public: params.publicBucket,
+    fileSizeLimit: params.fileSizeLimit,
+    allowedMimeTypes: params.allowedMimeTypes,
+    empty: params.emptyBucket,
+    functionName: params.functionName,
+    secretNames: params.secretNames,
+    service: params.service,
+    minutes: params.minutes,
+    search: params.search,
+    writeDatabaseUrl: params.writeDatabaseUrl,
+    syncVercel: params.syncVercel,
+  }
+}
+
 export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
   "vector_cloud",
   Effect.succeed({
     description:
-      "Controls Vector Cloud for the active project: Vercel for hosting and Supabase for data. Use it before building authentication, accounts, databases, persistence, environment-backed features, or publishing. Inspect cloud_connections before provider work; use database_status plus prepare_database or prepare_auth before implementing Supabase-backed code; and use supabase_services to inspect storage and Edge Functions. When a feature needs a database and database_status reports none, do not stop and send the user to a dashboard: offer create_database, which creates a real Supabase project on their connected Supabase account and wires it in so prepare_database, supabase_services and apply_migrations work straight afterwards. Prefer an existing database over creating one — if the user already has a Supabase project for this app, ask them to link it in Vector Cloud > Database, and never create a second project for a project that already has one unless the user asks. create_database creates something the user's account is billed for, so if it reports several organizations, ask the user which one and call it again with that organizationId rather than picking one, and if it reports a plan or quota limit, relay Supabase's own words instead of retrying. publish deploys to the Vercel project linked to this repository; if none is linked, link or create one with the Vercel actions below or relay the setup step, and never try another host. Hosting and database operations follow the connected account's billing and do not guarantee zero cost. When a published app errors, 500s, renders blank, or otherwise misbehaves, read its logs with the logs action before guessing at a cause or asking the user to paste an error. After writing or changing a .sql migration file, apply it with apply_migrations so the connected database actually has the schema the code expects; call it with dryRun first when you want to see the pending files. Never claim a resource was created unless this tool reports it. " +
+      "Controls Vector Cloud for the active project: Vercel for hosting and Supabase for data. Use it before building authentication, accounts, databases, persistence, environment-backed features, or publishing. Inspect cloud_connections before provider work; use database_status plus prepare_database or prepare_auth before implementing Supabase-backed code; and use supabase_services to inspect storage and Edge Functions. When a feature needs a database and database_status reports none, do not stop and send the user to a dashboard: offer create_database, which creates a real Supabase project on their connected Supabase account and wires it in so prepare_database, supabase_services and apply_migrations work straight afterwards. Prefer an existing database over creating one — if the user already has a Supabase project for this app, find it with supabase_projects and link it with link_database, and never create a second project for a project that already has one unless the user asks. create_database creates something the user's account is billed for, so if it reports several organizations, ask the user which one and call it again with that organizationId rather than picking one, and if it reports a plan or quota limit, relay Supabase's own words instead of retrying. publish deploys to the Vercel project linked to this repository; if none is linked, link or create one with the Vercel actions below or relay the setup step, and never try another host. Hosting and database operations follow the connected account's billing and do not guarantee zero cost. When a published app errors, 500s, renders blank, or otherwise misbehaves, read its logs with the logs action before guessing at a cause or asking the user to paste an error. After writing or changing a .sql migration file, apply it with apply_migrations so the connected database actually has the schema the code expects; call it with dryRun first when you want to see the pending files. Never claim a resource was created unless this tool reports it. " +
+      "Supabase control for the linked project: supabase_projects lists organizations and projects; link_database and unlink_database; pause_database and restore_database; write_database_url writes a server-only DATABASE_URL, only when the user wants one; rotate_database_password resets the password and can rewrite DATABASE_URL and push the environment to Vercel. Database: migration_status; create_migration writes a timestamped file (pass downSql so it can be rolled back); apply_migrations; rollback_migration undoes only the latest applied migration and only with its down migration; run_sql runs read-only unless allowWrite. Auth: auth_config; update_auth for the site URL, redirect URLs (addVercelUrls adds the linked Vercel production and preview addresses), email sign-in and Google, GitHub or Apple sign-in; auth_users, invite_user, delete_user. Storage: create_bucket, update_bucket, delete_bucket (supabase_services lists buckets and functions). Edge Functions: deploy_function from supabase/functions/<name>, delete_function, function_secrets (names only), set_function_secrets from names of stored environment variables, delete_function_secrets. supabase_logs reads api, postgres, auth, storage or functions logs, so check them when a Supabase-backed feature fails. security_check runs Supabase's security advisors and a scan for leaked server keys; a production publish requires it to pass while Secret scan is a required release check, which it is by default. Every changing action asks the user first, unless they allowed that kind of action always or turned on auto-accept; run_sql and other destructive, billed or credential-bearing actions ask every time. run_sql hides cells in columns named like passwords, tokens or secrets. OAuth client secrets and other secret values are entered by the user in Cloud Services, never pasted into chat. " +
       VERCEL_GUIDANCE,
     parameters: Parameters,
     execute: (params, ctx) =>
       Effect.gen(function* () {
         const instance = yield* InstanceState.context
+        const supabase = SUPABASE_ACTIONS.has(params.action)
         const request = {
           projectPath: instance.directory,
           taskId: ctx.sessionID,
@@ -373,12 +636,59 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
           gitBranch: params.gitBranch,
           envType: params.envType,
           domain: params.domain,
+          ...(supabase ? supabaseFields(params) : {}),
         }
-        // Publishing, database changes and host environment writes act on the
-        // user's own accounts, so each asks first. The bridge describes the
-        // provider, project and environment the action would touch, and the
-        // prompt shows them. A migration dry run only reads, so it uses a
-        // separate permission that is allowed by default.
+        // Runs the action with what its prompt approved: the id of the exact
+        // environment plan the user saw, the migration file it named, or the
+        // checksum of the down SQL it showed.
+        const run = (approved?: Record<string, unknown>) =>
+          Effect.promise(() => bridgeRequest({ ...request, ...approved, command: params.action }, ctx.abort)).pipe(
+            Effect.map((report) => ({
+              title: toolTitle(params.action),
+              metadata: { action: params.action, projectPath: instance.directory, url: report.url },
+              output: formatReport(params.action, report),
+            })),
+          )
+        // A new migration is a file in the repository, so it asks like any other
+        // edit (plan mode refuses it), and the prompt shows the SQL of both the
+        // migration and its down file, which rollback_migration later runs.
+        if (params.action === "create_migration") {
+          const planned = yield* Effect.promise(() =>
+            bridgeRequest({ ...request, command: "describe", action: params.action }, ctx.abort),
+          )
+          const files = Array.isArray(planned.files)
+            ? planned.files.filter((item): item is string => typeof item === "string")
+            : []
+          if (!planned.ok || !files.length) {
+            return {
+              title: toolTitle(params.action),
+              metadata: { action: params.action, projectPath: instance.directory },
+              output: formatReport(params.action, planned),
+            }
+          }
+          yield* ctx.ask({
+            permission: "edit",
+            patterns: files.map((file) => path.relative(instance.worktree, path.join(instance.directory, file))),
+            always: ["*"],
+            metadata: {
+              filepath: path.join(instance.directory, files[0]),
+              diff: files
+                .map((file, index) => {
+                  const filepath = path.join(instance.directory, file)
+                  const sql = index === 0 ? params.sql : params.downSql
+                  return trimDiff(createTwoFilesPatch(filepath, filepath, "", `${sql?.trim() ?? ""}\n`))
+                })
+                .join("\n"),
+              statements: planned.statements,
+            },
+          })
+          return yield* run(planned.approved)
+        }
+        // Publishing, database changes, hosting settings and host environment
+        // writes act on the user's own accounts, so each asks first. The bridge
+        // describes the provider, project and environment the action would
+        // touch, and the prompt shows them. A migration dry run only reads, so it
+        // uses a separate permission that is allowed by default.
         const permission =
           vercelPermission(params.action) ??
           (params.action === "publish"
@@ -390,7 +700,8 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
                 : params.action === "apply_migrations" ||
                     params.action === "create_database" ||
                     params.action === "prepare_database" ||
-                    params.action === "prepare_auth"
+                    params.action === "prepare_auth" ||
+                    SUPABASE_CHANGES.has(params.action)
                   ? "vector_cloud_database"
                   : undefined)
         const described = permission
@@ -407,45 +718,38 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
             output: formatReport(params.action, described),
           }
         }
-        if (permission && described?.scope) {
-          // A Vercel action's approval names the action too, so "always" for one
-          // (say, adding a domain) never approves another (removing one).
-          const pattern = [
-            described.scope.provider.toLowerCase(),
-            described.scope.project,
-            described.scope.environment,
-            ...(isVercelAction(params.action) ? [params.action] : []),
-          ].join("/")
-          yield* ctx.ask({
-            permission,
-            patterns: [pattern],
-            always: [pattern],
-            metadata: {
-              projectPath: instance.directory,
-              ...described.scope,
-              production: params.action === "publish" ? params.production === true : undefined,
-              dryRun: params.action === "apply_migrations" ? params.dryRun === true : undefined,
-              organizationId: params.organizationId,
-              region: params.region,
-              force: params.action === "create_database" ? params.force === true : undefined,
-              action: isVercelAction(params.action) || params.action === "sync_environment" ? params.action : undefined,
-            },
-          })
-        }
-        // The approved action runs with what was described, such as the id
-        // of the exact environment plan the user saw.
-        const report = yield* Effect.promise(() =>
-          bridgeRequest({ ...request, ...described?.carry, command: params.action }, ctx.abort),
-        )
-        return {
-          title: toolTitle(params.action),
+        if (!permission || !described?.scope) return yield* run()
+        // A provider action's approval names the action too, so "always" for one
+        // (adding a domain, creating a bucket) never approves another (removing
+        // a domain, deleting users). Destructive, billed or credential-bearing
+        // requests get no "always" and a pattern of their own, so an earlier
+        // "always" for a milder form of the same action (a read-only run_sql, a
+        // private bucket) never approves them.
+        const named = supabase || isVercelAction(params.action) || params.action === "sync_environment"
+        const pattern = [
+          described.scope.provider.toLowerCase(),
+          described.scope.project,
+          described.scope.environment,
+          ...(supabase || isVercelAction(params.action) ? [params.action] : []),
+          ...(described.repeatable === false ? ["each-time"] : []),
+        ].join("/")
+        yield* ctx.ask({
+          permission,
+          patterns: [pattern],
+          always: described.repeatable === false ? [] : [pattern],
           metadata: {
-            action: params.action,
             projectPath: instance.directory,
-            url: report.url,
+            action: named ? params.action : undefined,
+            ...described.scope,
+            production: params.action === "publish" ? params.production === true : undefined,
+            dryRun: params.action === "apply_migrations" ? params.dryRun === true : undefined,
+            organizationId: params.organizationId,
+            region: params.region,
+            force: params.action === "create_database" ? params.force === true : undefined,
+            statements: described.statements,
           },
-          output: formatReport(params.action, report),
-        }
+        })
+        return yield* run({ ...described.carry, ...described.approved })
       }),
   }),
 )

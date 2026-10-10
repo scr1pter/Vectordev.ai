@@ -15,8 +15,8 @@ import type {
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudSupabaseServices,
 } from "../main/cloud-connections"
+import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
 import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
@@ -119,9 +119,6 @@ export type {
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudSupabaseBucket,
-  CloudSupabaseFunction,
-  CloudSupabaseServices,
 } from "../main/cloud-connections"
 export type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 export type {
@@ -883,27 +880,13 @@ export type ElectronAPI = {
     }
     database: {
       get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
-      connect: (
-        projectPath: string,
-        taskId: string | undefined,
-        input: {
-          provider: "supabase"
-          url: string
-          anonKey: string
-          projectRef?: string
-          projectName?: string
-          managedByOAuth?: boolean
-        },
-      ) => Promise<CloudDatabaseConnection>
-      connectProject: (
-        projectPath: string,
-        taskId: string | undefined,
-        projectRef: string,
-      ) => Promise<CloudDatabaseConnection>
-      disconnect: (projectPath: string, taskId?: string) => Promise<void>
     }
-    services: {
-      supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
+    supabase: {
+      run: (
+        command: SupabaseCommand,
+        input: Record<string, unknown>,
+      ) => Promise<{ ok: boolean; error?: string; needsSetup?: boolean; nextStep?: string } & Record<string, unknown>>
+      subscribe: (cb: (event: SupabaseProgressEvent) => void) => () => void
     }
     build: {
       get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>

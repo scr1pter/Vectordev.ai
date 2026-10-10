@@ -70,9 +70,7 @@ import {
 } from "./publish"
 import {
   applyEnv,
-  connectDatabase,
   detectBuildSettings,
-  disconnectDatabase,
   getBuildSettings,
   getDatabase,
   listDeployments,
@@ -85,14 +83,13 @@ import {
 import {
   connectCloudProvider,
   connectCloudProviderWithToken,
-  connectSupabaseProject,
   disconnectCloudProvider,
-  getSupabaseServiceSnapshot,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
   listCloudProviderResources,
   type CloudProviderId,
 } from "./cloud-connections"
+import { runSupabaseCommand } from "./cloud-supabase"
 import { vercelIpc, VERCEL_IPC_PREFIX } from "./cloud-vercel-ipc"
 import {
   detectGithub,
@@ -150,6 +147,7 @@ import {
   mergeParallelWorkspace,
   mergeParallelWorkspaceSelection,
   openParallelWorkspacePullRequest,
+  parallelWorkspaceCloudScopes,
   refreshParallelWorkspace,
   removeParallelWorkspaceRecord,
   runParallelWorkspace,
@@ -540,20 +538,22 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-provider-links-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listCloudProviderProjectLinks(projectPath, taskId),
   )
-  // The Vercel controls in Cloud Services (window.api.cloud.vercel), one
+  // The Vercel controls in Vector Cloud (window.api.cloud.vercel), one
   // channel each; the agent's vector_cloud actions call the same functions.
   for (const [name, listener] of Object.entries(vercelIpc)) {
     const call = listener as (...args: unknown[]) => unknown
     handle(`${VERCEL_IPC_PREFIX}${name}`, (_event: IpcMainInvokeEvent, ...args: unknown[]) => call(...args))
   }
 
-  handle(
-    "cloud-supabase-project-connect",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, projectRef: string) =>
-      connectSupabaseProject(projectPath, taskId, projectRef),
-  )
-  handle("cloud-supabase-services", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    getSupabaseServiceSnapshot(projectPath, taskId),
+  // Every Supabase control in the console, through the same commands the agent uses.
+  handle("cloud-supabase", (event: IpcMainInvokeEvent, command: unknown, input: unknown) =>
+    runSupabaseCommand(command, input, {
+      caller: "console",
+      workspaces: parallelWorkspaceCloudScopes,
+      progress: (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send("cloud-supabase-progress", progress)
+      },
+    }),
   )
   handle("cloud-deployments-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listDeployments(projectPath, taskId),
@@ -608,18 +608,6 @@ export function registerIpcHandlers(deps: Deps) {
 
   handle("cloud-db-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getDatabase(projectPath, taskId),
-  )
-  handle(
-    "cloud-db-connect",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      input: { provider: "supabase"; url: string; anonKey: string },
-    ) => connectDatabase(projectPath, taskId, input),
-  )
-  handle("cloud-db-disconnect", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    disconnectDatabase(projectPath, taskId),
   )
   handle("cloud-build-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getBuildSettings(projectPath, taskId),

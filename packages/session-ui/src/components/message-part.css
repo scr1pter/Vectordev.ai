@@ -796,6 +796,23 @@
     }
   }
 
+  [data-slot="permission-statement"] {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    min-width: 0;
+
+    pre {
+      margin: 0;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: var(--surface-weak);
+      font-family: var(--font-family-mono);
+      line-height: var(--line-height-large);
+    }
+  }
+
   [data-slot="permission-footer"] {
     display: flex;
     align-items: center;

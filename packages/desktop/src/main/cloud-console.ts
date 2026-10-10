@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto"
 import { chmodSync, constants } from "node:fs"
-import { lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { lstat, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 
 import { getStore } from "./store"
@@ -8,6 +8,13 @@ import { transitionReleaseRecords } from "./cloud-release-state"
 import { redactText } from "./security-redaction"
 import { isSupabasePublicKey } from "./cloud-public-key"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
+import {
+  ensureEnvIgnored,
+  projectRefFromUrl,
+  scaffoldSupabaseClient,
+  supabaseFramework,
+  supabasePublicEnvNames,
+} from "./cloud-supabase-env"
 
 // The Vector Cloud console is the desktop-side brain behind the full-page
 // dashboard: it tracks real deployments, writes env vars into the project's
@@ -888,25 +895,18 @@ function requireProject(projectPath: string): string {
 // ---- Database connector (Supabase) ----------------------------------------
 
 export function getDatabase(projectPath: string, taskId?: string): CloudDatabaseConnection {
-  return readProject(projectPath).database
+  const database = readProject(projectPath).database
+  // Records saved before the reference was stored still name their project in
+  // the URL, and every Management API call needs it.
+  if (!database || database.projectRef) return database
+  return { ...database, projectRef: projectRefFromUrl(database.url) }
 }
 
-const SUPABASE_CLIENT_SNIPPET = `import { createClient } from "@supabase/supabase-js"
-
-// Vector-managed Supabase client. Values come from your project's env — set via
-// the Vector Cloud console (Database + Environment Variables), written to .env.
-const supabaseUrl =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_SUPABASE_URL) ||
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.SUPABASE_URL) ||
-  (typeof process !== "undefined" && process.env && process.env.SUPABASE_URL)
-
-const supabaseAnonKey =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) ||
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.SUPABASE_ANON_KEY) ||
-  (typeof process !== "undefined" && process.env && process.env.SUPABASE_ANON_KEY)
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
-`
+// Only the stored record changes; .env and the variables stay as they are.
+export function saveDatabase(projectPath: string, connection: CloudDatabaseConnection): void {
+  const data = readProject(projectPath)
+  writeProject(projectPath, { ...data, database: connection })
+}
 
 export async function connectDatabase(
   projectPath: string,
@@ -941,36 +941,27 @@ export async function connectDatabase(
     provider: "supabase",
     url,
     anonKey,
-    projectRef: input.projectRef?.trim() || undefined,
+    projectRef: input.projectRef?.trim() || projectRefFromUrl(url),
     projectName: input.projectName?.trim() || undefined,
     managedByOAuth: input.managedByOAuth === true,
     connectedAt: now(),
   }
 
-  // Merge the credentials into the project's managed env vars so a later
-  // applyEnv writes them to .env alongside everything else.
-  setEnv(projectPath, taskId, "SUPABASE_URL", url, "public")
-  setEnv(projectPath, taskId, "SUPABASE_ANON_KEY", anonKey, "public")
-  setEnv(projectPath, taskId, "VITE_SUPABASE_URL", url, "public")
-  setEnv(projectPath, taskId, "VITE_SUPABASE_ANON_KEY", anonKey, "public")
+  // Only the names the framework's bundler exposes to browser code, so a
+  // Next.js app is not handed VITE_* values it can never read.
+  const framework = await supabaseFramework(directory)
+  const names = supabasePublicEnvNames(framework)
+  setEnv(projectPath, taskId, names.url, url, "public")
+  setEnv(projectPath, taskId, names.key, anonKey, "public")
 
   const data = readProject(projectPath)
   writeProject(projectPath, { ...data, database: connection })
 
-  // Scaffold a minimal client so `import { supabase }` just works. Never
-  // clobber an existing file, and don't fail the connection if src/ is locked.
-  try {
-    const libDir = join(directory, "src", "lib")
-    const clientPath = join(libDir, "supabase.js")
-    const alreadyExists = await stat(clientPath).catch(() => undefined)
-    if (!alreadyExists) {
-      await mkdir(libDir, { recursive: true })
-      await writeFile(clientPath, SUPABASE_CLIENT_SNIPPET, "utf8")
-    }
-  } catch {
-    // Best-effort scaffold; the stored connection + env vars are the real payoff.
-  }
-
+  // A minimal client so `import { supabase }` just works. It never replaces an
+  // existing file, and a locked src/ does not fail the connection.
+  await scaffoldSupabaseClient(directory, framework).catch(() => undefined)
+  // A .gitignore that is a link or directory is the user's own arrangement.
+  await ensureEnvIgnored(directory).catch(() => undefined)
   await applyEnv(projectPath, taskId, directory)
 
   return connection

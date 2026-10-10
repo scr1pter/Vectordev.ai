@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { cloudPermissionScope } from "./cloud-permission-scope"
+import { cloudPermissionScope, permissionStatements } from "./cloud-permission-scope"
 
 describe("cloud permission scope", () => {
   test("shows the provider, project and environment a cloud action would touch", () => {
@@ -37,5 +37,28 @@ describe("cloud permission scope", () => {
       summary: undefined,
       rows: [{ label: "Project", value: "shop-db" }],
     })
+  })
+
+  test("shows the SQL a prompt is about, saying when it was cut", () => {
+    expect(
+      permissionStatements({
+        metadata: {
+          statements: [
+            { label: "Read-only SQL", sql: "select token from auth.refresh_tokens", length: 37, truncated: false },
+            { label: "Down migration down/1_a.down.sql", sql: "drop table a;", length: 12_345, truncated: true },
+            { label: "empty", sql: "  " },
+            "not a statement",
+          ],
+        },
+      }),
+    ).toEqual([
+      { label: "Read-only SQL", sql: "select token from auth.refresh_tokens", note: undefined },
+      {
+        label: "Down migration down/1_a.down.sql",
+        sql: "drop table a;",
+        note: "Showing the first 13 of 12,345 characters.",
+      },
+    ])
+    expect(permissionStatements({ metadata: {} })).toEqual([])
   })
 })

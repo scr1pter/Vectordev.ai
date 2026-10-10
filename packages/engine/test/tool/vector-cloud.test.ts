@@ -276,6 +276,268 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
+  it.instance("asks per Supabase action, never offers always for destructive ones, and maps its fields", () =>
+    Effect.gen(function* () {
+      const cases = [
+        {
+          params: { action: "run_sql", sql: "delete from sessions", allowWrite: true } as const,
+          repeatable: false,
+          sent: { sql: "delete from sessions", write: true },
+        },
+        {
+          params: { action: "create_bucket", bucket: "avatars", publicBucket: false } as const,
+          repeatable: true,
+          sent: { bucket: "avatars", public: false },
+        },
+        {
+          params: {
+            action: "update_auth",
+            authProvider: "google",
+            providerEnabled: true,
+            clientId: "google-client",
+            redirectUrls: ["https://shop.example.com/**"],
+          } as const,
+          repeatable: true,
+          sent: {
+            providers: { google: { enabled: true, clientId: "google-client" } },
+            redirectUrls: ["https://shop.example.com/**"],
+          },
+        },
+        {
+          params: { action: "delete_user", userId: "00000000-0000-0000-0000-000000000000" } as const,
+          repeatable: false,
+          sent: { userId: "00000000-0000-0000-0000-000000000000" },
+        },
+      ]
+      for (const item of cases) {
+        const described = scope("Supabase", "shop-db", "production", `Change shop-db with ${item.params.action}.`)
+        const requests = yield* bridge({ ok: true }, 200, {
+          report: { ...(described.report as object), repeatable: item.repeatable },
+        })
+        const asks = recordAsks()
+        yield* execute(item.params, asks.ask)
+        const pattern = `supabase/shop-db/production/${item.params.action}${item.repeatable ? "" : "/each-time"}`
+        expect(asks.permissions).toEqual([
+          expect.objectContaining({
+            permission: "vector_cloud_database",
+            patterns: [pattern],
+            always: item.repeatable ? [pattern] : [],
+            metadata: expect.objectContaining({ provider: "Supabase", project: "shop-db", action: item.params.action }),
+          }),
+        ])
+        expect(requests.map((request) => request.command)).toEqual(["describe", item.params.action])
+        expect(requests[1]).toMatchObject(item.sent)
+      }
+    }),
+  )
+
+  it.instance("a denied Supabase change never reaches the project", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge(
+        { ok: true },
+        200,
+        scope("Supabase", "shop-db", "production", "Delete the storage bucket avatars from shop-db."),
+      )
+      const result = yield* execute({ action: "delete_bucket", bucket: "avatars", emptyBucket: true }, () =>
+        Effect.die(new Error("permission rejected")),
+      ).pipe(Effect.exit)
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(requests).toEqual([expect.objectContaining({ command: "describe", action: "delete_bucket", empty: true })])
+    }),
+  )
+
+  it.instance("writes a new migration only after the edit permission, which plan mode refuses", () =>
+    Effect.gen(function* () {
+      const files = [
+        "supabase/migrations/20261010120000_add_profiles.sql",
+        "supabase/migrations/down/20261010120000_add_profiles.down.sql",
+      ]
+      const statements = [
+        {
+          label: `Migration ${files[0]}`,
+          sql: "create table profiles (id uuid primary key);",
+          length: 44,
+          truncated: false,
+        },
+        { label: `Down migration ${files[1]}`, sql: "drop table profiles;", length: 20, truncated: false },
+      ]
+      const params = {
+        action: "create_migration",
+        migrationName: "add profiles",
+        sql: "create table profiles (id uuid primary key);",
+        downSql: "drop table profiles;",
+      } as const
+      const requests = yield* bridge({ ok: true, file: files[0] }, 200, {
+        report: { ok: true, files, statements, approved: { version: "20261010120000" } },
+      })
+      const asks = recordAsks()
+      const result = yield* execute(params, asks.ask)
+      // Both files are in the prompt: the down SQL is what rollback_migration
+      // later runs against the live database.
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "edit",
+          patterns: [
+            expect.stringMatching(/supabase\/migrations\/20261010120000_add_profiles\.sql$/),
+            expect.stringMatching(/supabase\/migrations\/down\/20261010120000_add_profiles\.down\.sql$/),
+          ],
+          metadata: expect.objectContaining({
+            filepath: expect.stringContaining(files[0]),
+            diff: expect.stringContaining("+create table profiles (id uuid primary key);"),
+            statements,
+          }),
+        }),
+      ])
+      expect(String(asks.permissions[0].metadata.diff)).toContain("+drop table profiles;")
+      expect(requests.map((item) => item.command)).toEqual(["describe", "create_migration"])
+      // The file written is the one the prompt named.
+      expect(requests[1]).toMatchObject({ name: "add profiles", sql: params.sql, version: "20261010120000" })
+      expect(result.output).toContain(files[0])
+
+      const refused = yield* bridge({ ok: true }, 200, { report: { ok: true, files } })
+      const denied = yield* execute(params, () => Effect.die(new Error("edit is denied in plan mode"))).pipe(
+        Effect.exit,
+      )
+      expect(Exit.isFailure(denied)).toBe(true)
+      expect(refused.map((item) => item.command)).toEqual(["describe"])
+    }),
+  )
+
+  it.instance("shows the SQL a database change runs, and runs only what was shown", () =>
+    Effect.gen(function* () {
+      const statements = [
+        {
+          label: "Down migration supabase/migrations/down/20261010120000_add_profiles.down.sql",
+          sql: "drop table profiles;",
+          length: 20,
+          truncated: false,
+        },
+      ]
+      const requests = yield* bridge({ ok: true, rolledBack: "20261010120000_add_profiles.sql" }, 200, {
+        report: {
+          ok: true,
+          repeatable: false,
+          scope: {
+            provider: "Supabase",
+            project: "shop-db",
+            environment: "production",
+            summary: "Roll back 20261010120000_add_profiles.sql.",
+          },
+          statements,
+          approved: { name: "20261010120000_add_profiles.sql", downChecksum: "abc123" },
+        },
+      })
+      const asks = recordAsks()
+      yield* execute({ action: "rollback_migration" }, asks.ask)
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "vector_cloud_database",
+          always: [],
+          metadata: expect.objectContaining({ summary: "Roll back 20261010120000_add_profiles.sql.", statements }),
+        }),
+      ])
+      expect(requests.map((item) => item.command)).toEqual(["describe", "rollback_migration"])
+      expect(requests[1]).toMatchObject({ name: "20261010120000_add_profiles.sql", downChecksum: "abc123" })
+    }),
+  )
+
+  it.instance("reads Supabase logs, query results and the security check without asking", () =>
+    Effect.gen(function* () {
+      const asks = recordAsks()
+      yield* bridge({
+        ok: true,
+        label: "Auth",
+        from: "2026-10-10T09:00:00.000Z",
+        to: "2026-10-10T10:00:00.000Z",
+        truncated: false,
+        entries: [{ at: "2026-10-10T09:30:00.000Z", message: "login failed: invalid grant" }],
+      })
+      const logs = yield* execute({ action: "supabase_logs", service: "auth" }, asks.ask)
+      expect(logs.output).toContain("Auth logs from 2026-10-10T09:00:00.000Z")
+      expect(logs.output).toContain("2026-10-10T09:30:00.000Z login failed: invalid grant")
+
+      yield* bridge({
+        ok: true,
+        security: {
+          status: "failed",
+          detail: "1 security problem must be fixed before a production release.",
+          advisors: [
+            { level: "ERROR", title: "RLS Disabled in Public", entity: "public.orders", remediation: "Enable RLS" },
+          ],
+          environment: [],
+          bundle: [{ level: "ERROR", where: "assets/index.js", reason: "ships a Supabase secret key" }],
+        },
+      })
+      const security = yield* execute({ action: "security_check" }, asks.ask)
+      expect(security.output).toContain("Supabase security check: failed.")
+      expect(security.output).toContain("ERROR · RLS Disabled in Public · public.orders (Enable RLS)")
+      expect(security.output).toContain("ERROR · assets/index.js ships a Supabase secret key")
+      expect(asks.permissions).toEqual([])
+    }),
+  )
+
+  it.instance("shows run_sql rows as a table, and relays a refused write", () =>
+    Effect.gen(function* () {
+      const described = scope("Supabase", "shop-db", "production", "Run a read-only SQL query against shop-db.")
+      yield* bridge(
+        {
+          ok: true,
+          project: { ref: "shopref", name: "shop-db" },
+          result: {
+            columns: ["id", "email"],
+            rows: [
+              [1, "a@example.com"],
+              [2, null],
+            ],
+            rowCount: 2,
+            truncated: false,
+            readOnly: true,
+          },
+        },
+        200,
+        described,
+      )
+      const result = yield* execute({ action: "run_sql", sql: "select id, email from profiles" })
+      expect(result.output).toContain("Read-only query on Supabase project shop-db: 2 of 2 row(s).")
+      expect(result.output).toContain("id | email\n1 | a@example.com\n2 | null")
+
+      yield* bridge(
+        {
+          ok: true,
+          project: { ref: "shopref", name: "shop-db" },
+          result: {
+            columns: ["id", "encrypted_password"],
+            rows: [[1, "[hidden]"]],
+            rowCount: 1,
+            truncated: false,
+            readOnly: true,
+            hiddenColumns: ["encrypted_password"],
+          },
+        },
+        200,
+        described,
+      )
+      const hidden = yield* execute({ action: "run_sql", sql: "select id, encrypted_password from auth.users" })
+      expect(hidden.output).toContain("Hidden because they hold sign-in credentials: encrypted_password.")
+
+      yield* bridge(
+        {
+          ok: false,
+          needsConfirmation: true,
+          error: "Supabase refused this query in read-only mode.",
+          nextStep: "Run it again with allowWrite only if the user wants this change made to the live database.",
+        },
+        400,
+        described,
+      )
+      const refused = yield* execute({ action: "run_sql", sql: "delete from profiles" })
+      expect(refused.output).toContain(
+        "Vector Cloud could not run run_sql: Supabase refused this query in read-only mode.",
+      )
+      expect(refused.output).toContain("allowWrite")
+    }),
+  )
+
   it.instance("rejects a response without an explicit operation result", () =>
     Effect.gen(function* () {
       yield* bridge({ error: "Unauthorized" }, 401)

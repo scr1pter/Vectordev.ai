@@ -1,0 +1,200 @@
+/* Supabase screens inside the Cloud console: the console's glass panels and
+   hairlines, plus the few shapes it had no need for (tables, chips, a SQL
+   editor, confirmation strips). */
+
+.sb-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sb-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sb-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.sb-field > span {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+.sb-field select.cloud-input {
+  appearance: auto;
+  color-scheme: dark;
+}
+
+.sb-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sb-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12.5px;
+}
+.sb-check input {
+  accent-color: var(--vx-purple, #9374ec);
+}
+
+.sb-textarea {
+  width: 100%;
+  min-height: 132px;
+  padding: 10px 12px;
+  border: 1px solid var(--vx-line-strong, var(--vx-line));
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+  font-family: var(--vx-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  resize: vertical;
+  outline: none;
+}
+.sb-textarea:focus {
+  border-color: color-mix(in oklab, var(--cc-purple) 55%, transparent);
+  box-shadow: 0 0 0 3px rgba(147, 116, 236, 0.16);
+}
+
+.sb-table-wrap {
+  max-height: 380px;
+  overflow: auto;
+  border: 1px solid var(--cc-line);
+  border-radius: 7px;
+}
+.sb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--vx-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+.sb-table th {
+  position: sticky;
+  top: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--cc-line);
+  background: var(--vx-stage, #1b1a1f);
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.sb-table td {
+  max-width: 360px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--cc-line);
+  color: rgba(255, 255, 255, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: top;
+}
+.sb-table tr:last-child td {
+  border-bottom: 0;
+}
+.sb-null {
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.sb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--cc-line);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.78);
+  font-family: var(--vx-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+.sb-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sb-chip button {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  line-height: 1;
+}
+.sb-chip button:hover {
+  background: rgba(230, 120, 125, 0.18);
+  color: #f0989c;
+}
+
+.sb-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid rgba(214, 169, 92, 0.32);
+  border-radius: 7px;
+  background: rgba(214, 169, 92, 0.07);
+  color: #ead2a8;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.sb-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.65);
+}
+.sb-progress li {
+  list-style: none;
+}
+.sb-progress li:last-child {
+  color: #fff;
+}
+
+.sb-finding {
+  display: grid;
+  gap: 4px;
+}
+.sb-finding p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .sb-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sb-panel-head {
+    flex-direction: column;
+  }
+}

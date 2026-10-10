@@ -156,6 +156,7 @@ describe("managed cloud environment", () => {
   })
 
   test("wires public Supabase credentials into the generated Vite browser client", async () => {
+    await writeFile(join(project, "package.json"), JSON.stringify({ devDependencies: { vite: "fixture" } }))
     await connectDatabase(project, undefined, {
       provider: "supabase",
       url: "https://fixture-project.supabase.co",
@@ -230,7 +231,8 @@ describe("managed cloud environment", () => {
     }
     const anonKey = jwt({ iss: "supabase", ref: "fixture", role: "anon" })
     await connectDatabase(project, undefined, { provider: "supabase", url: "https://fixture.supabase.co", anonKey })
-    expect(listEnv(project)).toContainEqual({ key: "VITE_SUPABASE_ANON_KEY", value: anonKey, visibility: "public" })
+    // Without a framework that bundles client env, the plain names are written.
+    expect(listEnv(project)).toContainEqual({ key: "SUPABASE_ANON_KEY", value: anonKey, visibility: "public" })
   })
 })
 

@@ -41,7 +41,7 @@ mock.module("./store", () => ({
 const { checkAllDeploymentHealth, checkDeploymentHealth, publishProject, runVercel, VERCEL_CLI_VERSION } = await import(
   "./publish"
 )
-const { cloudProjectScopeKey, listDeployments, setBuildSettings } = await import("./cloud-console")
+const { cloudProjectScopeKey, listDeployments, setBuildSettings, setEnv } = await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
 
 let directory = ""
@@ -272,6 +272,71 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
       releaseStatus: "current",
       productionUrl: "https://shop.vercel.app/",
     })
+  })
+
+  test("keeps production where it is while the linked Supabase project fails its security check", async () => {
+    const remote = linkProject()
+    api.addDeployment({ projectId: remote.id, uid: "dpl_old", target: "production" })
+    remote.productionId = "dpl_old"
+    const staged = api.addDeployment({
+      projectId: remote.id,
+      uid: "dpl_new",
+      url: "shop-new.vercel.app",
+      target: "production",
+    })
+    stores.set(
+      "cloud-projects",
+      new Map([
+        [
+          cloudProjectScopeKey(project),
+          {
+            env: [],
+            domains: [],
+            build: null,
+            database: {
+              provider: "supabase",
+              url: "https://fixtureref.supabase.co",
+              anonKey: "sb_publishable_fixture_key",
+              projectRef: "fixtureref",
+              projectName: "shop-db",
+              connectedAt: "2026-10-01",
+            },
+          },
+        ],
+      ]),
+    )
+    checks({ health: true, browser: false })
+    // Supabase is linked but not connected here, so only the local scan runs;
+    // a service_role key in a public variable is enough to stop the promotion.
+    const jwt = `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify({ role: "service_role" })).toString("base64url")}.signaturesignature`
+    setEnv(project, undefined, "VITE_SUPABASE_KEY", jwt, "public")
+    const events: string[] = []
+    const result = await publishProject(
+      { projectPath: project, target: "vercel", production: true, runId: "run-1" },
+      (event) => events.push(`${event.stage}:${event.level}`),
+      {
+        command: [await fakeDeployCli(`https://${staged.url}`)],
+        sleep: async () => {},
+        request: routed(() => new Response("ok")),
+      },
+    )
+    expect(result).toMatchObject({
+      ok: false,
+      errorCode: "checks_failed",
+      url: "https://shop-new.vercel.app/",
+      providerDeploymentId: "dpl_new",
+      environment: "preview",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "supabase-security", status: "failed", required: true }),
+      ]),
+    })
+    expect(result.error).toContain("The Supabase security check failed, so production was not moved to dpl_new.")
+    expect(JSON.stringify(result)).not.toContain(jwt)
+    expect(remote.productionId).toBe("dpl_old")
+    expect(api.requests("POST").some((item) => item.path.includes("/promote/"))).toBe(false)
+    expect(events).toContain("checking:error")
+    expect(events.at(-1)).toBe("failed:error")
+    expect(listDeployments(project)[0]).toMatchObject({ releaseStatus: "preview", providerDeploymentId: "dpl_new" })
   })
 
   test("a protected preview is reported as protected, not as a failed release", async () => {

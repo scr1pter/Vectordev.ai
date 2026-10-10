@@ -18,3 +18,30 @@ export function cloudPermissionScope(request: Pick<PermissionRequest, "permissio
   if (!summary && !rows.length) return
   return { summary, rows }
 }
+
+// The SQL a prompt is about: a query, a migration and its down file, or the
+// down SQL a rollback runs. The engine sends it cut to a readable length with
+// the full length beside it, for any permission (a new migration asks under
+// edit). Entries that are not this shape are dropped.
+export function permissionStatements(request: Pick<PermissionRequest, "metadata">) {
+  const raw = request.metadata.statements
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item: unknown) => {
+    if (!item || typeof item !== "object") return []
+    const label = Reflect.get(item, "label")
+    const sql = Reflect.get(item, "sql")
+    const length = Reflect.get(item, "length")
+    if (typeof label !== "string" || typeof sql !== "string" || !sql.trim()) return []
+    const total = typeof length === "number" && length > sql.length ? length : sql.length
+    return [
+      {
+        label,
+        sql,
+        note:
+          total > sql.length
+            ? `Showing the first ${sql.length.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} characters.`
+            : undefined,
+      },
+    ]
+  })
+}

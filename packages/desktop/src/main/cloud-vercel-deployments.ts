@@ -16,7 +16,14 @@ import {
   type VercelFetch,
   type VercelLinkContext,
 } from "./cloud-vercel-api"
-import { recordProductionMove, releaseForProviderDeployment } from "./cloud-console"
+import {
+  getBuildSettings,
+  recordProductionMove,
+  releaseForProviderDeployment,
+  updateDeployment,
+  upsertDeploymentCheck,
+} from "./cloud-console"
+import { supabaseReleaseCheck } from "./cloud-supabase-security"
 import { vercelScopeSlug } from "./cloud-vercel-projects"
 
 // Deployments as Vercel knows them, including the ones a git push made, and
@@ -57,7 +64,12 @@ export type VercelDeployment = {
   aliases: string[]
 }
 
-export type VercelOptions = { request?: VercelFetch; sleep?: (ms: number) => Promise<void> }
+export type VercelOptions = {
+  request?: VercelFetch
+  sleep?: (ms: number) => Promise<void>
+  /** Where a publish shows the Supabase security check's progress. */
+  report?: (level: "success" | "warning" | "error", message: string) => void
+}
 
 export type VercelLogEntry = { at?: number; text: string }
 
@@ -350,6 +362,7 @@ export async function promoteVercelDeployment(projectPath: string, idOrUrl: stri
     )
   }
   requireVercelChecksPassed(projectPath, deployment)
+  await requireSupabaseSecurity(projectPath, deployment, options.report)
   await vercelRequest(
     context.auth,
     `/v10/projects/${encodeURIComponent(context.link.projectId)}/promote/${encodeURIComponent(deployment.id)}`,
@@ -395,6 +408,40 @@ export function requireVercelChecksPassed(projectPath: string, deployment: Verce
     "invalid",
     `Vector's required release checks failed for ${deployment.id} (${failed.map((check) => check.label).join(", ")}), so production was not moved to it. Fix the cause and publish again. If the failure came from outside the release, the user can run its checks again with Run checks in Cloud Services > Deployments.`,
   )
+}
+
+// Production only moves to a deployment while the linked Supabase project passes
+// its security check: Supabase's advisors plus a scan of the public environment
+// and the local build output for server credentials. Vector's release for the
+// deployment keeps the result either way, so Vector Cloud shows why production
+// did not change. A rollback is not held by it: it returns to a release that
+// already served production.
+async function requireSupabaseSecurity(
+  projectPath: string,
+  deployment: VercelDeployment,
+  report: VercelOptions["report"],
+) {
+  const release = releaseForProviderDeployment(projectPath, deployment)
+  const check = await supabaseReleaseCheck({
+    projectPath,
+    taskId: release?.taskId,
+    directory: release?.deploymentPath ?? projectPath,
+    required: getBuildSettings(projectPath, release?.taskId)?.requiredChecks.secrets ?? true,
+  })
+  if (!check) return
+  if (release) {
+    updateDeployment(projectPath, release.taskId, release.id, { checks: upsertDeploymentCheck(release.checks, check) })
+  }
+  report?.(
+    check.status === "failed" ? "error" : check.status === "skipped" ? "warning" : "success",
+    `Supabase security: ${check.details}`,
+  )
+  if (check.required && check.status === "failed") {
+    throw new VercelError(
+      "invalid",
+      `The Supabase security check failed, so production was not moved to ${deployment.id}. ${check.details}`,
+    )
+  }
 }
 
 function failedChecks(projectPath: string, deployment: VercelDeployment) {

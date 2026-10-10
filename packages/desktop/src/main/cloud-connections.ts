@@ -8,7 +8,7 @@ import {
   readCloudOAuthCallback,
 } from "./cloud-oauth-relay"
 
-import { cloudProjectScopeKey, connectDatabase, getDatabase, type CloudDatabaseConnection } from "./cloud-console"
+import { cloudProjectScopeKey } from "./cloud-console"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { validateCloudProviderToken, type CloudProviderId } from "./cloud-provider-token"
@@ -53,43 +53,6 @@ export type CloudProviderProjectLink = {
   /** Set when Vector linked the project from the repository's .vercel/project.json. */
   linkedFrom?: string
   linkedAt: string
-}
-
-export type CloudSupabaseBucket = {
-  id: string
-  name: string
-  public: boolean
-  createdAt?: string
-  updatedAt?: string
-}
-
-export type CloudSupabaseFunction = {
-  id: string
-  name: string
-  slug: string
-  status?: string
-  version?: number
-  createdAt?: string
-  updatedAt?: string
-}
-
-export type CloudSupabaseServices = {
-  connected: boolean
-  projectRef?: string
-  projectName?: string
-  region?: string
-  dashboardUrl?: string
-  detail?: string
-  storage: {
-    available: boolean
-    buckets: CloudSupabaseBucket[]
-    detail?: string
-  }
-  functions: {
-    available: boolean
-    functions: CloudSupabaseFunction[]
-    detail?: string
-  }
 }
 
 type StoredConnection = {
@@ -335,18 +298,6 @@ function stringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined
   const field = Reflect.get(value, key)
   return typeof field === "string" && field ? field : undefined
-}
-
-function numberField(value: unknown, key: string): number | undefined {
-  if (!value || typeof value !== "object") return undefined
-  const field = Reflect.get(value, key)
-  return typeof field === "number" && Number.isFinite(field) ? field : undefined
-}
-
-function booleanField(value: unknown, key: string): boolean | undefined {
-  if (!value || typeof value !== "object") return undefined
-  const field = Reflect.get(value, key)
-  return typeof field === "boolean" ? field : undefined
 }
 
 async function providerJson(
@@ -639,119 +590,4 @@ export async function unlinkCloudProviderProject(
   else store.delete(cloudProjectScopeKey(projectPath))
   await removeStoreFileIfEmpty(LINKS_STORE)
   return next
-}
-
-export async function connectSupabaseProject(
-  projectPath: string,
-  taskId: string | undefined,
-  projectRef: string,
-): Promise<CloudDatabaseConnection> {
-  const auth = await accessToken("supabase")
-  const projects = await listCloudProviderResources("supabase")
-  const project = projects.find((item) => item.id === projectRef)
-  if (!project) throw new Error("That Supabase project is no longer available.")
-  const keys = await providerJson(
-    auth.token,
-    `https://api.supabase.com/v1/projects/${encodeURIComponent(projectRef)}/api-keys`,
-  )
-  if (!Array.isArray(keys)) throw new Error("Supabase did not return project API keys.")
-  const publicKeyRecord =
-    keys.find((item) => stringField(item, "type") === "publishable") ??
-    keys.find((item) => stringField(item, "name") === "anon") ??
-    keys.find((item) => stringField(item, "type") === "anon")
-  const anonKey = stringField(publicKeyRecord, "api_key")
-  if (!anonKey) {
-    throw new Error("Supabase did not expose a publishable or anon key for this project.")
-  }
-  return connectDatabase(projectPath, taskId, {
-    provider: "supabase",
-    url: project.url ?? `https://${projectRef}.supabase.co`,
-    anonKey,
-    projectRef,
-    projectName: project.name,
-    managedByOAuth: true,
-  })
-}
-
-function serviceError(result: PromiseSettledResult<unknown>): string | undefined {
-  if (result.status === "fulfilled") return
-  return result.reason instanceof Error ? result.reason.message : String(result.reason)
-}
-
-function responseArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value
-  if (!value || typeof value !== "object") return []
-  const data = Reflect.get(value, "data")
-  return Array.isArray(data) ? data : []
-}
-
-export async function getSupabaseServiceSnapshot(projectPath: string, taskId?: string): Promise<CloudSupabaseServices> {
-  const database = getDatabase(projectPath, taskId)
-  const projectRef = database?.projectRef
-  if (!database || !projectRef) {
-    return {
-      connected: false,
-      detail: "Connect a Supabase project in Vector Cloud > Database first.",
-      storage: { available: false, buckets: [], detail: "No Supabase project is linked." },
-      functions: { available: false, functions: [], detail: "No Supabase project is linked." },
-    }
-  }
-
-  const auth = await accessToken("supabase")
-  const [bucketsResult, functionsResult, projectsResult] = await Promise.allSettled([
-    providerJson(auth.token, `https://api.supabase.com/v1/projects/${encodeURIComponent(projectRef)}/storage/buckets`),
-    providerJson(auth.token, `https://api.supabase.com/v1/projects/${encodeURIComponent(projectRef)}/functions`),
-    listCloudProviderResources("supabase"),
-  ])
-  const project =
-    projectsResult.status === "fulfilled" ? projectsResult.value.find((item) => item.id === projectRef) : undefined
-  const bucketValues = bucketsResult.status === "fulfilled" ? responseArray(bucketsResult.value) : []
-  const functionValues = functionsResult.status === "fulfilled" ? responseArray(functionsResult.value) : []
-
-  return {
-    connected: true,
-    projectRef,
-    projectName: database.projectName ?? project?.name,
-    region: project?.region,
-    dashboardUrl: `https://supabase.com/dashboard/project/${encodeURIComponent(projectRef)}`,
-    storage: {
-      available: bucketsResult.status === "fulfilled",
-      detail: serviceError(bucketsResult),
-      buckets: bucketValues
-        .map((bucket): CloudSupabaseBucket | undefined => {
-          const id = stringField(bucket, "id") ?? stringField(bucket, "name")
-          const name = stringField(bucket, "name")
-          if (!id || !name) return
-          return {
-            id,
-            name,
-            public: booleanField(bucket, "public") === true,
-            createdAt: stringField(bucket, "created_at"),
-            updatedAt: stringField(bucket, "updated_at"),
-          }
-        })
-        .filter((bucket): bucket is CloudSupabaseBucket => Boolean(bucket)),
-    },
-    functions: {
-      available: functionsResult.status === "fulfilled",
-      detail: serviceError(functionsResult),
-      functions: functionValues
-        .map((fn): CloudSupabaseFunction | undefined => {
-          const id = stringField(fn, "id") ?? stringField(fn, "slug")
-          const name = stringField(fn, "name") ?? stringField(fn, "slug")
-          const slug = stringField(fn, "slug") ?? name
-          if (!id || !name || !slug) return
-          return {
-            id,
-            name,
-            slug,
-            status: stringField(fn, "status"),
-            version: numberField(fn, "version"),
-            createdAt: stringField(fn, "created_at"),
-            updatedAt: stringField(fn, "updated_at"),
-          }
-        })
-        .filter((fn): fn is CloudSupabaseFunction => Boolean(fn)),
-    },
-  }
 }
