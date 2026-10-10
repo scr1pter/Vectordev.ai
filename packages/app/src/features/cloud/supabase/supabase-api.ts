@@ -38,6 +38,8 @@ export type MigrationState = {
     failed?: { name: string; error: string }
   }
   rollback?: { name: string; available: boolean; source?: "file" | "section" }
+  /** Files the Supabase command-line tool would run differently from Vector. */
+  warnings?: string[]
 }
 
 export type SqlResult = {
@@ -150,7 +152,10 @@ export function supabaseClient(
     unlink: () => run<{ detail: string }>("unlink_database"),
     pause: () => run<{ detail: string; project: SupabaseProject }>("pause_database"),
     restore: () => run<{ detail: string; project: SupabaseProject }>("restore_database"),
-    writeDatabaseUrl: () => run<{ detail: string; replaced: boolean }>("write_database_url", { consent: true }),
+    // `password` is the project's current database password, for a project
+    // Vector did not create; Vector keeps it encrypted.
+    writeDatabaseUrl: (password?: string) =>
+      run<{ detail: string; replaced: boolean }>("write_database_url", { consent: true, password }),
     rotatePassword: (input: { writeDatabaseUrl: boolean; syncVercel: boolean }) =>
       run<{ detail: string; databaseUrl: string; problems: string[]; vercel: { synced: boolean; detail?: string } }>(
         "rotate_database_password",

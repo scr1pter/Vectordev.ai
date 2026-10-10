@@ -25,6 +25,7 @@ export function SupabaseDatabase(
   const [migrations, setMigrations] = createSignal<MigrationState>()
   const [writeUrl, setWriteUrl] = createSignal(true)
   const [syncVercel, setSyncVercel] = createSignal(false)
+  const [password, setPassword] = createSignal("")
   const [sql, setSql] = createSignal("select * from information_schema.tables where table_schema = 'public' limit 50;")
   const [result, setResult] = createSignal<SqlResult>()
   const [pendingWrite, setPendingWrite] = createSignal("")
@@ -57,7 +58,7 @@ export function SupabaseDatabase(
       if (!report.needsSetup) failed(props.notice, report)
       return
     }
-    setMigrations({ migrations: report.migrations, rollback: report.rollback })
+    setMigrations({ migrations: report.migrations, rollback: report.rollback, warnings: report.warnings })
   }
 
   createEffect(
@@ -91,7 +92,7 @@ export function SupabaseDatabase(
         tone: "success",
         text: `Linked. Vector wrote the project's public URL and key to .env${
           report.client?.created ? ` and created ${report.client.path}` : ""
-        }.${report.client?.dependencyMissing ? " Install @supabase/supabase-js so the client can import it." : ""}`,
+        }.${report.nextStep ? ` ${report.nextStep}` : ""}`,
       })
     })
 
@@ -129,8 +130,9 @@ export function SupabaseDatabase(
 
   const writeDatabaseUrl = () =>
     act("database-url", async () => {
-      const report = await props.client.writeDatabaseUrl()
+      const report = await props.client.writeDatabaseUrl(password().trim() || undefined)
       if (failed(props.notice, report)) return
+      setPassword("")
       await props.onDatabaseChange()
       props.notice({ tone: "success", text: report.detail ?? "DATABASE_URL written." })
     })
@@ -386,6 +388,19 @@ export function SupabaseDatabase(
                 {confirm.armed() === "database-url" ? "Write the password into .env?" : "Write DATABASE_URL"}
               </button>
             </PanelHead>
+            <label class="sb-field mt-3">
+              <span>
+                Current database password, for a project Vector did not create. Vector keeps it encrypted and never
+                shows it; leave it empty if Vector created or rotated the password.
+              </span>
+              <input
+                class="cloud-input"
+                type="password"
+                autocomplete="off"
+                value={password()}
+                onInput={(event) => setPassword(event.currentTarget.value)}
+              />
+            </label>
             <div class="sb-actions mt-3">
               <label class="sb-check">
                 <input
@@ -465,6 +480,9 @@ export function SupabaseDatabase(
                 )}
               </Show>
             </PanelHead>
+            <For each={migrations()?.warnings ?? []}>
+              {(warning) => <p class="cloud-muted mt-3 text-[12px]">{warning}</p>}
+            </For>
             <Show when={migrations()?.migrations}>
               {(state) => (
                 <div class="cloud-list mt-3">

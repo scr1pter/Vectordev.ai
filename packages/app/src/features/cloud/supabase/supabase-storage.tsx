@@ -1,5 +1,6 @@
 import { createEffect, createSignal, For, on, Show, type JSX } from "solid-js"
 import type { StorageBucket } from "./supabase-api"
+import { sizeLimitBytes, sizeLimitText } from "./supabase-limits"
 import { createConfirm, failed, formatWhen, NotLinked, PanelHead, type SupabasePanelProps } from "./supabase-ui"
 import "./supabase.css"
 
@@ -48,10 +49,15 @@ export function SupabaseStorage(props: SupabasePanelProps & { icon: JSX.Element 
 
   const create = () =>
     act("create", async () => {
+      const size = sizeLimitBytes(sizeMb())
+      if (!size.ok) {
+        props.notice({ tone: "error", text: size.error })
+        return
+      }
       const report = await props.client.createBucket({
         bucket: name().trim(),
         public: makePublic(),
-        fileSizeLimit: bytes(sizeMb()),
+        fileSizeLimit: size.value ?? undefined,
         allowedMimeTypes: mimeTypes(types()),
       })
       if (failed(props.notice, report)) return
@@ -73,17 +79,22 @@ export function SupabaseStorage(props: SupabasePanelProps & { icon: JSX.Element 
 
   const edit = (bucket: StorageBucket) => {
     setEditing(editing() === bucket.id ? "" : bucket.id)
-    setEditSizeMb(bucket.fileSizeLimit ? String(Number((bucket.fileSizeLimit / 1024 / 1024).toFixed(2))) : "")
+    setEditSizeMb(sizeLimitText(bucket.fileSizeLimit))
     setEditTypes(bucket.allowedMimeTypes?.join(", ") ?? "")
   }
 
-  // An empty field clears that limit.
+  // An empty field clears that limit; an unchanged one is left alone.
   const saveLimits = (bucket: StorageBucket) =>
     act(`limits-${bucket.id}`, async () => {
+      const size = sizeLimitBytes(editSizeMb(), bucket.fileSizeLimit)
+      if (!size.ok) {
+        props.notice({ tone: "error", text: size.error })
+        return
+      }
       const allowed = mimeTypes(editTypes())
       const report = await props.client.updateBucket({
         bucket: bucket.id,
-        fileSizeLimit: bytes(editSizeMb()) ?? null,
+        fileSizeLimit: size.value,
         allowedMimeTypes: allowed.length ? allowed : null,
       })
       if (failed(props.notice, report)) return
@@ -279,11 +290,6 @@ export function SupabaseStorage(props: SupabasePanelProps & { icon: JSX.Element 
       </div>
     </Show>
   )
-}
-
-function bytes(megabytes: string) {
-  const value = Number(megabytes.trim())
-  return megabytes.trim() && value > 0 ? Math.round(value * 1024 * 1024) : undefined
 }
 
 function mimeTypes(text: string) {

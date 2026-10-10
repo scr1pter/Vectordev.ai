@@ -4,7 +4,7 @@ import { Button } from "@vectordevai/ui/button"
 import { DockPrompt } from "@vectordevai/session-ui/dock-prompt"
 import { Icon } from "@vectordevai/ui/icon"
 import { useLanguage } from "@/context/language"
-import { cloudPermissionScope } from "./cloud-permission-scope"
+import { cloudPermissionScope, permissionStatements } from "./cloud-permission-scope"
 
 export function SessionPermissionDock(props: {
   request: PermissionRequest
@@ -20,6 +20,7 @@ export function SessionPermissionDock(props: {
     return value
   }
   const cloudScope = () => cloudPermissionScope(props.request)
+  const statements = () => permissionStatements(props.request)
 
   return (
     <DockPrompt
@@ -39,14 +40,17 @@ export function SessionPermissionDock(props: {
             <Button variant="ghost" size="normal" onClick={() => props.onDecide("reject")} disabled={props.responding}>
               {language.t("ui.permission.deny")}
             </Button>
-            <Button
-              variant="secondary"
-              size="normal"
-              onClick={() => props.onDecide("always")}
-              disabled={props.responding}
-            >
-              {language.t("ui.permission.allowAlways")}
-            </Button>
+            {/* No "always" patterns means the request asks every time, so the button would act as once. */}
+            <Show when={props.request.always.length > 0}>
+              <Button
+                variant="secondary"
+                size="normal"
+                onClick={() => props.onDecide("always")}
+                disabled={props.responding}
+              >
+                {language.t("ui.permission.allowAlways")}
+              </Button>
+            </Show>
             <Button variant="primary" size="normal" onClick={() => props.onDecide("once")} disabled={props.responding}>
               {language.t("ui.permission.allowOnce")}
             </Button>
@@ -87,6 +91,23 @@ export function SessionPermissionDock(props: {
           </>
         )}
       </Show>
+
+      <For each={statements()}>
+        {(item) => (
+          <div data-slot="permission-row">
+            <span data-slot="permission-spacer" aria-hidden="true" />
+            <div data-slot="permission-statement">
+              <div class="text-12-medium text-text-base">{item.label}</div>
+              <pre class="text-12-regular text-text-base max-h-48 overflow-auto whitespace-pre-wrap break-words">
+                {item.sql}
+              </pre>
+              <Show when={item.note}>
+                <div data-slot="permission-hint">{item.note}</div>
+              </Show>
+            </div>
+          </div>
+        )}
+      </For>
 
       <Show when={!cloudScope() && props.request.patterns.length > 0}>
         <div data-slot="permission-row">
