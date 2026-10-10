@@ -60,7 +60,7 @@ async function openVectorscope(page: Page, input: { changes?: () => unknown[]; a
           detail: "Signs the workflow in to your Vector account.",
           url: "https://vectordev.ai/auth/cli",
         },
-        { name: "ANTHROPIC_API_KEY", detail: "Your anthropic API key." },
+        { name: "ANTHROPIC_API_KEY", detail: "Your model provider's API key." },
       ]
       Object.defineProperty(window, "__vectorscopeCalls", { value: calls })
       Object.defineProperty(window, "api", {

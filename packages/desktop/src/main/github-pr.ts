@@ -561,7 +561,7 @@ export function autoReviewWorkflow(input: { model: unknown; keys: unknown }, ver
         detail: "Signs the workflow in to your Vector account. Create one at vectordev.ai/auth/cli.",
         url: VECTOR_TOKEN_URL,
       },
-      ...keys.map((name) => ({ name, detail: `Your ${model.provider} API key.` })),
+      ...keys.map((name) => ({ name, detail: "Your model provider's API key." })),
     ],
   }
 }
