@@ -418,6 +418,12 @@
   font-style: normal;
   white-space: nowrap;
 }
+.cloud-service-list em[data-tone="success"] {
+  color: #8fd8ac;
+}
+.cloud-service-list em[data-tone="warning"] {
+  color: #e2c089;
+}
 .cloud-service-icon {
   display: grid;
   width: 30px;

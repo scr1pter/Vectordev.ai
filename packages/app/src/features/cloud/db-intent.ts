@@ -1,9 +1,9 @@
 // Detects when a prompt to the Vector agent is really asking for something that
 // needs a database — auth, accounts, or data persistence. The shell listens for
-// the "vector:db-intent" event this powers and surfaces a one-click "Set up
-// database" proposal (Supabase) for the active project. It only PROPOSES; the
-// user still confirms and the real backend (env writes + client scaffold) runs
-// from the Vector Cloud Database panel.
+// the "vector:db-intent" event this powers and proposes setting up a Supabase
+// database for the active project: asking the agent to do it (which checks
+// database_status, then links or creates one after the user confirms), or
+// opening the project's Database screen in Vector Cloud. It only PROPOSES.
 
 export const DB_INTENT_EVENT = "vector:db-intent"
 

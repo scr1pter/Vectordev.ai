@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { DialogGithubPush } from "@/components/session-github-push"
 import { DialogGitlabPush } from "@/components/session-gitlab-push"
@@ -23,6 +23,7 @@ import {
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
+import { deploymentEvidence, deployRepairPrompt } from "./cloud-handoff"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -63,9 +64,9 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
     ],
   },
   {
-    label: "Connections",
+    label: "Setup",
     items: [
-      { id: "connections", label: "Integrations" },
+      { id: "connections", label: "Connections" },
       { id: "settings", label: "Project settings" },
     ],
   },
@@ -272,7 +273,8 @@ export function CloudConsole(props: {
   projectPath: string
   taskId?: string
   onClose: () => void
-  onRepair?: (context: string) => void
+  /** Starts the agent on a failed release, with `prompt` (redacted evidence) as its first message. */
+  onRepair: (prompt: string) => void
   initialSection?: CloudSection
   embedded?: boolean
 }) {
@@ -283,11 +285,19 @@ export function CloudConsole(props: {
   const publish = publishApi()
   const workspaceApi = cloudAgentWorkspaceApi()
   const [section, setSection] = createSignal<CloudSection>(props.initialSection ?? "overview")
+  // A deep link that names a section opens it, even when Cloud is already open.
+  createEffect(
+    on(
+      () => props.initialSection,
+      (value) => value && setSection(value),
+      { defer: true },
+    ),
+  )
   const [notice, setNotice] = createSignal<Notice>()
 
   const [publishTargets, setPublishTargets] = createSignal<PublishTarget[]>([])
   const vercelTarget = () => publishTargets().find((item) => item.id === "vercel")
-  const [deploymentEnvironment, setDeploymentEnvironment] = createSignal<"preview" | "production">("production")
+  const [deploymentEnvironment, setDeploymentEnvironment] = createSignal<"preview" | "production">("preview")
   const [publishing, setPublishing] = createSignal(false)
   const [activeRunId, setActiveRunId] = createSignal("")
   const [publishEvents, setPublishEvents] = createSignal<PublishProgressEvent[]>([])
@@ -482,7 +492,7 @@ export function CloudConsole(props: {
       } else {
         setNotice({
           tone: "error",
-          text: result.error ?? "Publish failed — make sure the CLI is installed and you're logged in.",
+          text: result.error ?? "Publish failed. Open the release's evidence for the cause.",
         })
       }
       if (api && (result.deploymentId || result.url)) {
@@ -629,28 +639,9 @@ export function CloudConsole(props: {
     }
   }
 
-  const repairDeployment = async (deployment: CloudDeployment) => {
-    const evidence = [
-      `Repair the deployment for ${deployment.name}.`,
-      `Deployment: ${cleanDeploymentUrl(deployment.url) || deployment.url}`,
-      deployment.git
-        ? `Git: ${deployment.git.branch} at ${deployment.git.commitShort}${deployment.git.dirty ? " (dirty)" : ""}`
-        : "",
-      ...deployment.checks
-        .filter((check) => check.status === "failed")
-        .map((check) => `${check.label}: ${check.details ?? "failed"}\n${check.output ?? ""}`),
-      deployment.runtimeLog ?? deployment.log ?? "",
-      "Find the root cause, make the smallest safe fix, run the relevant checks, and explain what changed.",
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-    if (props.onRepair) {
-      props.onRepair(evidence)
-      return
-    }
-    await navigator.clipboard?.writeText(evidence).catch(() => undefined)
-    setNotice({ tone: "info", text: "Repair context copied. Return to the agent and paste it into the composer." })
-  }
+  // Logs and check output arrive from the desktop already redacted.
+  const repairDeployment = (deployment: CloudDeployment) =>
+    props.onRepair(deployRepairPrompt(deploymentEvidence(deployment)))
 
   const detectBuild = async () => {
     if (!api || !props.projectPath) return
@@ -752,6 +743,37 @@ export function CloudConsole(props: {
   // --- Provider connections ------------------------------------------------
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
   const providerLink = (provider: "vercel") => providerLinks().find((item) => item.provider === provider)
+
+  // Whether this project can publish now, from the same state publishing
+  // checks: a connected Vercel account with a linked project, or a machine
+  // already signed in with the Vercel CLI.
+  const hostingState = createMemo(() => {
+    const connected = providerConnection("vercel")?.connected
+    const link = providerLink("vercel")
+    const target = vercelTarget()
+    // Connected but unable to run the deploy: the hint says what this machine lacks.
+    if (connected && target && !target.available) {
+      return { tone: "warning", label: "Cannot publish yet", detail: target.loginHint, fix: false }
+    }
+    if (connected && link) return { tone: "success", label: `Vercel · ${link.projectName}`, detail: "", fix: false }
+    if (connected) {
+      return {
+        tone: "warning",
+        label: "Link a Vercel project",
+        detail: "Vercel is connected. Link one of its projects to this repository in Connections to publish.",
+        fix: true,
+      }
+    }
+    if (target?.available) {
+      return { tone: "success", label: `Vercel CLI · ${target.account ?? "signed in"}`, detail: "", fix: false }
+    }
+    return {
+      tone: undefined,
+      label: "Not connected",
+      detail: "Connect Vercel in Connections with an access token to publish this project.",
+      fix: true,
+    }
+  })
 
   const supabaseDashboard = (pathname = "") => {
     const ref = database()?.projectRef
@@ -955,7 +977,7 @@ export function CloudConsole(props: {
         </button>
         <img src="/vector-logo.png" alt="" class="size-9 rounded-[10px] object-cover" draggable={false} />
         <div class="min-w-0">
-          <div class="text-[13px] font-semibold text-white">Cloud Services</div>
+          <div class="text-[13px] font-semibold text-white">Vector Cloud</div>
           <div class="max-w-[440px] truncate text-[11px] text-white/45">
             {props.projectPath || "Open a project to manage its cloud"}
           </div>
@@ -1061,7 +1083,7 @@ export function CloudConsole(props: {
                     <strong>Deploy and publish</strong>
                     <small>Build, verify, promote, and roll back releases.</small>
                   </span>
-                  <em>{publishTargets().filter((item) => item.available).length} targets ready</em>
+                  <em data-tone={hostingState().tone}>{hostingState().label}</em>
                 </button>
                 <button type="button" onClick={() => setSection("database")}>
                   <span class="cloud-service-icon">
@@ -1071,7 +1093,13 @@ export function CloudConsole(props: {
                     <strong>Data services</strong>
                     <small>Database, authentication, storage, and functions.</small>
                   </span>
-                  <em>{database() ? "Supabase linked" : "Setup needed"}</em>
+                  <em data-tone={database() ? "success" : undefined}>
+                    {database()
+                      ? `Supabase · ${database()?.projectName ?? database()?.projectRef ?? "connected"}`
+                      : providerConnection("supabase")?.connected
+                        ? "Choose a Supabase project"
+                        : "No database"}
+                  </em>
                 </button>
               </section>
             </Show>
@@ -1083,8 +1111,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Your accounts</div>
                   <h1>Cloud connections</h1>
                   <p>
-                    Sign in once, then let Vector publish, link projects, and configure your database through your own
-                    accounts. Provider tokens stay encrypted on this device.
+                    Connect your Vercel and Supabase accounts once, then publish, link projects, and configure your
+                    database here or by asking Vector. Access tokens stay encrypted on this device.
                   </p>
                 </div>
               </div>
@@ -1144,13 +1172,11 @@ export function CloudConsole(props: {
                             >
                               {connectionMode() === "connected"
                                 ? "Connected"
-                                : connectionMode() === "oauth"
-                                  ? "Not connected"
-                                  : connectionMode() === "token"
-                                    ? "Manual connection"
-                                    : connectionMode() === "checking"
-                                      ? "Checking…"
-                                      : "Unavailable"}
+                                : connectionMode() === "checking"
+                                  ? "Checking…"
+                                  : connectionMode() === "unavailable"
+                                    ? "Unavailable"
+                                    : "Not connected"}
                             </span>
                           </div>
                           <p class="cloud-muted mt-1 text-[12px]">
@@ -1159,7 +1185,7 @@ export function CloudConsole(props: {
                                 ? `Signed in as ${connection()?.account}`
                                 : "Account authorized"
                               : connectionMode() === "token"
-                                ? "Hosted sign-in is not configured. Connect with a personal access token encrypted on this device."
+                                ? `Connect with a ${providerLabel(provider)} access token. It takes about two minutes, and the token stays encrypted on this device.`
                                 : (connection()?.detail ?? "Checking provider availability…")}
                           </p>
 
@@ -1399,9 +1425,19 @@ export function CloudConsole(props: {
                       data-variant="primary"
                       type="button"
                       disabled={!publish || publishing()}
-                      onClick={() => void runPublish()}
+                      onClick={() =>
+                        deploymentEnvironment() === "production"
+                          ? requestConfirm("publish-production", () => void runPublish())
+                          : void runPublish()
+                      }
                     >
-                      {publishing() ? "Publishing…" : "Publish →"}
+                      {publishing()
+                        ? "Publishing…"
+                        : confirmId() === "publish-production"
+                          ? `Confirm production release${providerLink("vercel") ? ` to ${providerLink("vercel")?.projectName}` : ""}?`
+                          : deploymentEnvironment() === "production"
+                            ? "Publish to production →"
+                            : "Publish preview →"}
                     </button>
                   </div>
                   <Show when={publish && vercelTarget()}>
@@ -1421,11 +1457,15 @@ export function CloudConsole(props: {
                   <Show when={!publish}>
                     <p class="cloud-muted mt-2 text-[11px]">Publishing runs in Vector Desktop.</p>
                   </Show>
-                  <Show when={publish && vercelTarget() && !vercelTarget()?.available}>
-                    <p class="cloud-muted mt-2 text-[11px]">
-                      No publisher detected. Install the Vercel CLI (<code>npm i -g vercel</code>) and run{" "}
-                      <code>vercel login</code> in Terminal, then reopen this panel.
-                    </p>
+                  <Show when={publish && hostingState().tone !== "success"}>
+                    <div class="cloud-inline-empty mt-3">
+                      <span>{hostingState().detail}</span>
+                      <Show when={hostingState().fix}>
+                        <button class="cloud-button" type="button" onClick={() => setSection("connections")}>
+                          Open Connections
+                        </button>
+                      </Show>
+                    </div>
                   </Show>
                   <Show when={publishEvents().length}>
                     <div class="cloud-pipeline mt-4">
@@ -1518,7 +1558,7 @@ export function CloudConsole(props: {
                       {sectionIcon("deployments")}
                     </svg>
                     <strong>Nothing published yet</strong>
-                    <p>Open a project, hit Publish in the preview, and your live apps appear here.</p>
+                    <p>Publish a preview above, or ask Vector to publish one, and its releases appear here.</p>
                   </div>
                 }
               >
@@ -1675,18 +1715,25 @@ export function CloudConsole(props: {
                                 class="cloud-button"
                                 data-variant="primary"
                                 type="button"
-                                onClick={() => void repairDeployment(deployment)}
+                                onClick={() => repairDeployment(deployment)}
                               >
-                                Repair with Vector
+                                Fix this deploy
                               </button>
                             </Show>
                             <button
                               class="cloud-button"
                               type="button"
                               disabled={!publish || publishing()}
-                              onClick={() => void runPublish({ environment: deployment.environment })}
+                              onClick={() =>
+                                deployment.environment === "production"
+                                  ? requestConfirm(
+                                      `redeploy-${deployment.id}`,
+                                      () => void runPublish({ environment: "production" }),
+                                    )
+                                  : void runPublish({ environment: "preview" })
+                              }
                             >
-                              Redeploy
+                              {confirmId() === `redeploy-${deployment.id}` ? "Confirm production release?" : "Redeploy"}
                             </button>
                             <button
                               class="cloud-button"
@@ -2196,8 +2243,8 @@ export function CloudConsole(props: {
                         fallback={
                           <>
                             <p class="cloud-muted mt-1 text-[12px]">
-                              Connect your Supabase account in Connections using hosted sign-in or an available personal
-                              access token.
+                              Connect your Supabase account in Connections with an access token, then choose the project
+                              this repository should use.
                             </p>
                             <button
                               class="cloud-button mt-3"
@@ -2512,7 +2559,7 @@ export function CloudConsole(props: {
                   <h1>Build & runtime</h1>
                   <p>
                     Detect the project framework and keep its install, build, output, and Node settings attached to this
-                    repository. Cloud Services uses these settings for its build before publishing.
+                    repository. Vector Cloud uses these settings for its build before publishing.
                   </p>
                 </div>
               </div>
