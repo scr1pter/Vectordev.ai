@@ -14,6 +14,7 @@
 // permissionInfo() extracts display info (icon, title, lines, diff) from
 // the request, delegating to tool.ts for tool-specific formatting.
 import type { PermissionRequest } from "@vectordevai/sdk/v2"
+import { PermissionV2 } from "@vectordevai/core/permission"
 import type { PermissionReply } from "./types"
 import { toolPath, toolPermissionInfo } from "./tool"
 
@@ -28,6 +29,7 @@ export type PermissionBodyState = {
   selected: PermissionOption
   message: string
   submitting: boolean
+  allowAlways: boolean
 }
 
 export type PermissionInfo = {
@@ -67,22 +69,25 @@ function patterns(request: PermissionRequest): string[] {
   return request.patterns.filter((item): item is string => typeof item === "string")
 }
 
-export function createPermissionBodyState(requestID: string): PermissionBodyState {
+export function createPermissionBodyState(
+  request: Pick<PermissionRequest, "id" | "permission" | "always">,
+): PermissionBodyState {
   return {
-    requestID,
+    requestID: request.id,
     stage: "permission",
     selected: "once",
     message: "",
     submitting: false,
+    allowAlways: PermissionV2.canAlwaysApprove(request.permission, request.always),
   }
 }
 
-export function permissionOptions(stage: PermissionStage): PermissionOption[] {
-  if (stage === "permission") {
-    return ["once", "always", "reject"]
+export function permissionOptions(state: PermissionBodyState): PermissionOption[] {
+  if (state.stage === "permission") {
+    return state.allowAlways ? ["once", "always", "reject"] : ["once", "reject"]
   }
 
-  if (stage === "always") {
+  if (state.stage === "always" && state.allowAlways) {
     return ["confirm", "cancel"]
   }
 
@@ -151,7 +156,7 @@ export function permissionReply(requestID: string, reply: PermissionReply["reply
 }
 
 export function permissionShift(state: PermissionBodyState, dir: -1 | 1): PermissionBodyState {
-  const list = permissionOptions(state.stage)
+  const list = permissionOptions(state)
   if (list.length === 0) {
     return state
   }
@@ -178,6 +183,7 @@ export function permissionRun(state: PermissionBodyState, requestID: string, opt
 
   if (state.stage === "permission") {
     if (option === "always") {
+      if (!state.allowAlways) return { state }
       return {
         state: {
           ...state,
@@ -203,7 +209,7 @@ export function permissionRun(state: PermissionBodyState, requestID: string, opt
     }
   }
 
-  if (state.stage !== "always") {
+  if (state.stage !== "always" || !state.allowAlways) {
     return { state }
   }
 

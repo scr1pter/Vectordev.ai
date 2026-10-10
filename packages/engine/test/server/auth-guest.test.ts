@@ -12,6 +12,8 @@ import { disposeAllInstances, TestInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
 import { Server } from "../../src/server/server"
+import { Flag } from "@vectordevai/core/flag/flag"
+import { SessionV2 } from "@vectordevai/core/session"
 
 const credential = (username: string, password: string) => ({ username, password: Redacted.make(password) })
 
@@ -67,10 +69,12 @@ describe("ServerAuth guest credentials", () => {
     const principal = ServerAuth.principal("guest", {
       ...config,
       guestWorkspaceIDs: ["wrk_allowed"],
+      guestWorkspaceDirectories: { wrk_allowed: process.cwd() },
       guestSessionIDs: ["ses_allowed"],
     })
     expect(allowsWorkspace(principal, "wrk_allowed")).toBe(true)
     expect(allowsWorkspace(principal, "wrk_other")).toBe(false)
+    expect(principal.kind === "guest" && principal.workspaceDirectories.get("wrk_allowed")).toBe(process.cwd())
     expect(allowsSession(principal, "ses_allowed")).toBe(true)
     expect(allowsSession(principal, "ses_other")).toBe(false)
     expect(allowsWorkspace(ServerAuth.principal("owner", config), "wrk_other")).toBe(true)
@@ -222,31 +226,38 @@ describe("HttpApi authorization middleware with a guest pair", () => {
 
 test("guest session lists and replay routes stay within canonical claims", async () => {
   await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+  await using other = await tmpdir({ config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
   const keys = [
     "VECTOR_SERVER_USERNAME",
     "VECTOR_SERVER_PASSWORD",
     "VECTOR_SERVER_GUEST_USERNAME",
     "VECTOR_SERVER_GUEST_PASSWORD",
     "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_SERVER_GUEST_SESSIONS",
     "VECTOR_DISABLE_DEFAULT_PLUGINS",
   ] as const
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  const claimedID = SessionV2.ID.create()
   Object.assign(process.env, {
     VECTOR_SERVER_USERNAME: "vector",
     VECTOR_SERVER_PASSWORD: "owner-secret",
     VECTOR_SERVER_GUEST_USERNAME: "guest",
     VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
     VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_SERVER_GUEST_SESSIONS: claimedID,
     VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
   })
   const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
   const owner = { authorization: basic("vector", "owner-secret"), "content-type": "application/json" }
   const guest = { authorization: basic("guest", "guest-secret") }
-  const create = async (workspaceID: string) => {
+  const create = async (workspaceID: string, directory = tmp.path, id?: SessionV2.ID) => {
     const response = await fetch(new URL("/api/session", listener.url), {
       method: "POST",
       headers: owner,
-      body: JSON.stringify({ location: { directory: tmp.path, workspaceID } }),
+      body: JSON.stringify({ id, location: { directory, workspaceID } }),
     })
     expect(response.status).toBe(200)
     return ((await response.json()) as { data: { id: string } }).data.id
@@ -260,18 +271,97 @@ test("guest session lists and replay routes stay within canonical claims", async
 
     const denied = await create("wrk_denied")
     const allowed = await create("wrk_allowed")
+    const escaped = await create("wrk_allowed", other.path)
+    const claimed = await create("wrk_allowed", other.path, claimedID)
+    expect(claimed).toBe(claimedID)
     expect((await events.next()).value).toMatchObject({ location: { workspaceID: "wrk_allowed" } })
     const list = await fetch(new URL("/api/session", listener.url), { headers: guest })
     expect(list.status).toBe(200)
-    expect(((await list.json()) as { data: Array<{ id: string }> }).data.map((item) => item.id)).toEqual([allowed])
+    const ids = ((await list.json()) as { data: Array<{ id: string }> }).data.map((item) => item.id)
+    expect(ids).toContain(allowed)
+    expect(ids).toContain(claimed)
+    expect(ids).not.toContain(denied)
+    expect(ids).not.toContain(escaped)
 
     expect((await fetch(new URL(`/api/session/${allowed}`, listener.url), { headers: guest })).status).toBe(200)
     expect((await fetch(new URL(`/api/session/${denied}`, listener.url), { headers: guest })).status).toBe(403)
+    expect((await fetch(new URL(`/api/session/${escaped}`, listener.url), { headers: guest })).status).toBe(403)
     expect((await fetch(new URL(`/api/session/${allowed}/history`, listener.url), { headers: guest })).status).toBe(200)
     expect((await fetch(new URL(`/api/session/${denied}/history`, listener.url), { headers: guest })).status).toBe(403)
 
     expect((await fetch(new URL(`/api/session/${denied}/event`, listener.url), { headers: guest })).status).toBe(403)
+
+    await events.return(undefined)
+    events = undefined
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+
+    const legacyList = await fetch(new URL("/session", listener.url), { headers: guest })
+    expect(legacyList.status).toBe(200)
+    const legacyIDs = ((await legacyList.json()) as Array<{ id: string }>).map((item) => item.id)
+    expect(legacyIDs).toContain(allowed)
+    expect(legacyIDs).toContain(claimed)
+    expect(legacyIDs).not.toContain(escaped)
+
+    const selectedList = await fetch(new URL(`/session?directory=${encodeURIComponent(other.path)}`, listener.url), {
+      headers: guest,
+    })
+    expect(selectedList.status).toBe(200)
+    const selectedIDs = ((await selectedList.json()) as Array<{ id: string }>).map((item) => item.id)
+    expect(selectedIDs).toContain(allowed)
+    expect(selectedIDs).not.toContain(escaped)
+
+    const status = await fetch(new URL("/session/status", listener.url), { headers: guest })
+    expect(status.status).toBe(200)
+    expect(await status.json()).not.toHaveProperty(escaped)
+
+    const allowedRead = await fetch(
+      new URL(`/session/${allowed}?directory=${encodeURIComponent(other.path)}`, listener.url),
+      { headers: guest },
+    )
+    expect(allowedRead.status).toBe(200)
+    expect(((await allowedRead.json()) as { directory: string }).directory).toBe(tmp.path)
+    expect(
+      (
+        await fetch(new URL(`/session/${escaped}?directory=${encodeURIComponent(other.path)}`, listener.url), {
+          headers: guest,
+        })
+      ).status,
+    ).toBe(403)
+    const claimedRead = await fetch(
+      new URL(`/session/${claimed}?directory=${encodeURIComponent(tmp.path)}`, listener.url),
+      { headers: guest },
+    )
+    expect(claimedRead.status).toBe(200)
+    expect(((await claimedRead.json()) as { directory: string }).directory).toBe(other.path)
+
+    const deniedMutation = await fetch(new URL(`/session/${escaped}`, listener.url), {
+      method: "PATCH",
+      headers: { ...guest, "content-type": "application/json" },
+      body: JSON.stringify({ title: "guest-must-not-write" }),
+    })
+    expect(deniedMutation.status).toBe(403)
+    const allowedMutation = await fetch(new URL(`/session/${allowed}`, listener.url), {
+      method: "PATCH",
+      headers: { ...guest, "content-type": "application/json" },
+      body: JSON.stringify({ title: "guest-can-write" }),
+    })
+    expect(allowedMutation.status).toBe(200)
+    const ownerRead = await fetch(new URL(`/session/${escaped}`, listener.url), { headers: owner })
+    expect(ownerRead.status).toBe(200)
+    expect(((await ownerRead.json()) as { title: string }).title).not.toBe("guest-must-not-write")
+
+    const claimedMutation = await fetch(new URL(`/session/${claimed}`, listener.url), {
+      method: "PATCH",
+      headers: { ...guest, "content-type": "application/json" },
+      body: JSON.stringify({ title: "explicit-session-claim" }),
+    })
+    expect(claimedMutation.status).toBe(200)
+    expect((await claimedMutation.json()) as { directory: string; title: string }).toMatchObject({
+      directory: other.path,
+      title: "explicit-session-claim",
+    })
   } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
     await events?.return(undefined)
     await listener.stop(true)
     for (const key of keys) {

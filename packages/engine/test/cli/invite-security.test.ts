@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Flag } from "@vectordevai/core/flag/flag"
+import { realpathSync } from "node:fs"
 import { configureInviteAccess, inviteLink, publicInviteURL } from "../../src/cli/cmd/invite"
 import { resolveNetworkOptionsNoConfig } from "../../src/cli/network"
 
@@ -9,6 +10,7 @@ const environmentKeys = [
   "VECTOR_SERVER_GUEST_USERNAME",
   "VECTOR_SERVER_GUEST_PASSWORD",
   "VECTOR_SERVER_GUEST_WORKSPACES",
+  "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
   "VECTOR_SERVER_GUEST_SESSIONS",
   "VECTOR_WORKSPACE_ID",
 ] as const
@@ -76,6 +78,9 @@ describe("invite security", () => {
 
     expect(workspaceID.startsWith("wrk_")).toBe(true)
     expect(process.env.VECTOR_SERVER_GUEST_WORKSPACES).toBe(workspaceID)
+    expect(JSON.parse(process.env.VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES!)).toEqual({
+      [workspaceID]: realpathSync(process.cwd()),
+    })
     expect(process.env.VECTOR_SERVER_GUEST_SESSIONS).toBeUndefined()
     expect(process.env.VECTOR_WORKSPACE_ID).toBe(workspaceID)
     expect(String(Flag.VECTOR_WORKSPACE_ID)).toBe(workspaceID)

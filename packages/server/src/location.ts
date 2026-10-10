@@ -1,12 +1,13 @@
 import { Location } from "@vectordevai/core/location"
 import { LocationServiceMap } from "@vectordevai/core/location-services"
+import { PtyTicket } from "@vectordevai/core/pty/ticket"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import { Effect, Layer } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { ForbiddenError, InvalidRequestError } from "@vectordevai/protocol/errors"
-import { allowsWorkspace, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
+import { guestWorkspaceDirectory, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { outdatedDirectoryHeader, OUTDATED_CLIENT_MESSAGE } from "./location-headers"
 
 export type LocationServices = Layer.Success<ReturnType<(typeof LocationServiceMap.Service)["get"]>>
@@ -53,6 +54,7 @@ export const layer = Layer.effect(
   LocationMiddleware,
   Effect.gen(function* () {
     const locations = yield* LocationServiceMap.Service
+    const tickets = yield* PtyTicket.Service
     return LocationMiddleware.of((effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
@@ -63,9 +65,25 @@ export const layer = Layer.effect(
             kind: "client_outdated",
             field: header,
           })
-        const location = ref(request)
-        if (!allowsWorkspace(yield* RequestPrincipal, location.workspaceID))
+        const requested = ref(request)
+        const principal = yield* RequestPrincipal
+        if (principal.kind === "pty-ticket") {
+          const valid = yield* tickets.consume({
+            ptyID: principal.ptyID,
+            ticket: principal.ticket,
+            directory: requested.directory,
+            workspaceID: requested.workspaceID,
+          })
+          if (!valid) return yield* new ForbiddenError({ message: "Invalid PTY connect ticket" })
+          return yield* effect.pipe(Effect.provide(locations.get(requested)))
+        }
+        const guestDirectory = guestWorkspaceDirectory(principal, requested.workspaceID)
+        if (principal.kind === "guest" && guestDirectory === undefined)
           return yield* new ForbiddenError({ message: "Guest credential is not scoped to this workspace" })
+        const location =
+          principal.kind === "guest"
+            ? Location.Ref.make({ directory: AbsolutePath.make(guestDirectory!), workspaceID: requested.workspaceID })
+            : requested
         return yield* effect.pipe(Effect.provide(locations.get(location)))
       }),
     )

@@ -31,7 +31,7 @@ import { testEffect } from "../lib/effect"
 import path from "path"
 import fs from "fs/promises"
 import os from "os"
-import { pathToFileURL } from "url"
+import { fileURLToPath, pathToFileURL } from "url"
 import { Global } from "@vectordevai/core/global"
 import { ProjectV2 } from "@vectordevai/core/project"
 import { Filesystem } from "@/util/filesystem"
@@ -730,6 +730,43 @@ it.instance("keeps project MCP and provider secret references opaque before trus
       expect((yield* Config.Service.use((service) => service.trust!())).trusted).toBe(false)
     }),
   ),
+)
+
+it.instance("fails closed when approved project config changes before loading", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* FSUtil.use.writeWithDirs(path.join(test.directory, "approved.ts"), "export default {}\n")
+    yield* writeTrustedConfigEffect(test.directory, { plugin: ["./approved.ts"] })
+    yield* writeConfigEffect(test.directory, { plugin: ["./changed.ts"] })
+
+    const config = yield* Config.use.get()
+    expect(config.plugin).toEqual([])
+    expect((yield* Config.Service.use((service) => service.trust!())).trusted).toBe(false)
+  }),
+)
+
+it.instance("binds trusted project executable inputs to the approved private copy", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const plugin = path.join(test.directory, "plugin.ts")
+    const shell = path.join(test.directory, "shell")
+    yield* FSUtil.use.writeWithDirs(plugin, "export default 'approved'\n")
+    yield* FSUtil.use.writeWithDirs(shell, "#!/bin/sh\necho approved\n")
+    yield* writeTrustedConfigEffect(test.directory, { plugin: ["./plugin.ts"], shell: "./shell" })
+
+    const config = yield* Config.use.get()
+    const spec = ConfigPlugin.pluginSpecifier(config.plugin?.[0] ?? "")
+    const target = fileURLToPath(spec)
+    expect(target).not.toBe(plugin)
+    expect(yield* FSUtil.use.readFileString(target)).toBe("export default 'approved'\n")
+    expect(config.shell).not.toBe(shell)
+    expect(yield* FSUtil.use.readFileString(config.shell!)).toBe("#!/bin/sh\necho approved\n")
+
+    yield* FSUtil.use.writeFileString(plugin, "export default 'changed'\n")
+    yield* FSUtil.use.writeFileString(shell, "#!/bin/sh\necho changed\n")
+    expect(yield* FSUtil.use.readFileString(target)).toBe("export default 'approved'\n")
+    expect(yield* FSUtil.use.readFileString(config.shell!)).toBe("#!/bin/sh\necho approved\n")
+  }),
 )
 
 it.instance("drops project wildcard allow permission before trust", () =>
@@ -2359,7 +2396,7 @@ configIt({
   () =>
     Effect.gen(function* () {
       const config = yield* Config.use.get()
-      expect(config.shell).toBe("/fixture-shell")
+      expect(config.model).toBe("fixture/model")
     }),
-  { config: { shell: "/fixture-shell" } },
+  { config: { model: "fixture/model" } },
 )

@@ -4,7 +4,7 @@ import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "e
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { ForbiddenError, UnauthorizedError } from "@vectordevai/protocol/errors"
 import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
-import { hasPtyConnectTicketURL } from "@/server/shared/pty-ticket"
+import { ptyConnectTicket } from "@/server/shared/pty-ticket"
 import { isPublicUIPath } from "@/server/shared/public-ui"
 export {
   Authorization as ServerAuthorization,
@@ -166,8 +166,15 @@ export const ptyConnectAuthorizationLayer = Layer.effect(
         const url = new URL(request.url, "http://localhost")
         if (url.searchParams.has("auth_token"))
           return yield* validateCredential(effect, emptyCredential(), config, request)
-        if (hasPtyConnectTicketURL(url))
-          return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
+        const connection = ptyConnectTicket(url)
+        if (connection)
+          return yield* effect.pipe(
+            Effect.provideService(RequestPrincipal, {
+              kind: "pty-ticket",
+              username: config.username,
+              ...connection,
+            }),
+          )
         if (!ServerAuth.required(config))
           return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
         return yield* credentialFromHeaders(request).pipe(

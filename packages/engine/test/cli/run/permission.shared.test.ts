@@ -6,6 +6,7 @@ import {
   permissionCancel,
   permissionEscape,
   permissionInfo,
+  permissionOptions,
   permissionReject,
   permissionRun,
 } from "@/cli/cmd/run/permission.shared"
@@ -24,7 +25,7 @@ function req(input: Partial<PermissionRequest> = {}): PermissionRequest {
 
 describe("run permission shared", () => {
   test("replies immediately for allow once", () => {
-    const out = permissionRun(createPermissionBodyState("perm-1"), "perm-1", "once")
+    const out = permissionRun(createPermissionBodyState(req()), "perm-1", "once")
 
     expect(out.reply).toEqual({
       requestID: "perm-1",
@@ -33,7 +34,7 @@ describe("run permission shared", () => {
   })
 
   test("requires confirmation for allow always", () => {
-    const next = permissionRun(createPermissionBodyState("perm-1"), "perm-1", "always")
+    const next = permissionRun(createPermissionBodyState(req({ always: ["*"] })), "perm-1", "always")
     expect(next.state.stage).toBe("always")
     expect(next.state.selected).toBe("confirm")
     expect(next.reply).toBeUndefined()
@@ -50,7 +51,7 @@ describe("run permission shared", () => {
   })
 
   test("builds trimmed reject replies and stage transitions", () => {
-    const next = permissionRun(createPermissionBodyState("perm-1"), "perm-1", "reject")
+    const next = permissionRun(createPermissionBodyState(req()), "perm-1", "reject")
     expect(next.state.stage).toBe("reject")
 
     const out = permissionReject({ ...next.state, message: "  use rg  " }, "perm-1")
@@ -65,7 +66,7 @@ describe("run permission shared", () => {
       selected: "reject",
     })
 
-    expect(permissionEscape(createPermissionBodyState("perm-1"))).toMatchObject({
+    expect(permissionEscape(createPermissionBodyState(req()))).toMatchObject({
       stage: "reject",
       selected: "reject",
     })
@@ -75,6 +76,15 @@ describe("run permission shared", () => {
       selected: "always",
     })
   })
+
+  test.each(["browser_sensitive", "computer_observe", "computer_interact", "computer_sensitive"])(
+    "does not offer or accept permanent approval for %s",
+    (permission) => {
+      const state = createPermissionBodyState(req({ permission, always: ["*"] }))
+      expect(permissionOptions(state)).toEqual(["once", "reject"])
+      expect(permissionRun(state, "perm-1", "always")).toEqual({ state })
+    },
+  )
 
   test("maps supported permission types into display info", () => {
     expect(

@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { randomBytes } from "crypto"
+import { realpathSync } from "node:fs"
 import open from "open"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
@@ -39,6 +40,7 @@ export function configureInviteAccess(
   process.env.VECTOR_SERVER_GUEST_USERNAME = guest.username
   process.env.VECTOR_SERVER_GUEST_PASSWORD = guest.password
   process.env.VECTOR_SERVER_GUEST_WORKSPACES = workspaceID
+  process.env.VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES = JSON.stringify({ [workspaceID]: realpathSync(process.cwd()) })
   delete process.env.VECTOR_SERVER_GUEST_SESSIONS
   process.env.VECTOR_WORKSPACE_ID = workspaceID
   Flag.VECTOR_SERVER_USERNAME = owner.username

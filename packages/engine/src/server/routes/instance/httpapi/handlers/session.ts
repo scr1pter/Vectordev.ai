@@ -46,7 +46,8 @@ import { InvalidRequestError, PermissionNotFoundError, notFound } from "../error
 import * as SessionError from "./session-errors"
 import {
   allowsSession,
-  allowsWorkspace,
+  guestWorkspaceDirectory,
+  type Principal,
   RequestPrincipal,
 } from "@vectordevai/protocol/middleware/authorization"
 
@@ -55,6 +56,11 @@ const tryParseJson = (text: string) =>
     try: () => JSON.parse(text) as unknown,
     catch: () => new HttpApiError.BadRequest({}),
   })
+
+function allowsSessionLocation(principal: Principal, item: Session.Info) {
+  if (allowsSession(principal, item.id)) return true
+  return guestWorkspaceDirectory(principal, item.workspaceID) === item.directory
+}
 
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
@@ -95,9 +101,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           ),
         )
       const principal = yield* RequestPrincipal
-      return sessions.filter(
-        (item) => allowsSession(principal, item.id) || allowsWorkspace(principal, item.workspaceID),
-      )
+      return sessions.filter((item) => allowsSessionLocation(principal, item))
     })
 
     const status = Effect.fn("SessionHttpApi.status")(function* () {
@@ -107,7 +111,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         allowsSession(principal, sessionID)
           ? Effect.succeed(true)
           : session.get(sessionID).pipe(
-              Effect.map((item) => allowsWorkspace(principal, item.workspaceID)),
+              Effect.map((item) => allowsSessionLocation(principal, item)),
               Effect.catch(() => Effect.succeed(false)),
             ),
       )

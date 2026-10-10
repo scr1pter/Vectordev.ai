@@ -26,12 +26,15 @@ describe("canAlwaysAllowPermission", () => {
     expect(canAlwaysAllowPermission("webfetch", ["https://example.com"])).toBe(true)
   })
 
-  test.each(["computer_observe", "computer_interact", "computer_sensitive", "computer_future_action"])(
-    "never offers permanent approval for %s",
-    (permission) => {
-      expect(canAlwaysAllowPermission(permission, ["window:42:0"])).toBe(false)
-    },
-  )
+  test.each([
+    "browser_sensitive",
+    "computer_observe",
+    "computer_interact",
+    "computer_sensitive",
+    "computer_future_action",
+  ])("never offers permanent approval for %s", (permission) => {
+    expect(canAlwaysAllowPermission(permission, ["window:42:0"])).toBe(false)
+  })
 })
 
 describe("computerPermissionDetails", () => {

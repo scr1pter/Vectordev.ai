@@ -12,7 +12,7 @@ import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { ForbiddenError, InvalidRequestError, SessionNotFoundError } from "@vectordevai/protocol/errors"
 import {
   allowsSession,
-  allowsWorkspace,
+  guestWorkspaceDirectory,
   RequestPrincipal,
 } from "@vectordevai/protocol/middleware/authorization"
 import type { LocationServices } from "../location"
@@ -56,14 +56,18 @@ export const sessionLocationLayer = Layer.effect(
             message: `Session not found: ${sessionID}`,
           })
         const principal = yield* RequestPrincipal
-        if (!allowsSession(principal, sessionID) && !allowsWorkspace(principal, row.workspaceID ?? undefined))
+        const sessionAllowed = allowsSession(principal, sessionID)
+        const guestDirectory = guestWorkspaceDirectory(principal, row.workspaceID ?? undefined)
+        if (!sessionAllowed && guestDirectory !== row.directory)
           return yield* new ForbiddenError({ message: "Guest credential is not scoped to this session" })
 
         return yield* effect.pipe(
           Effect.provide(
             locations.get(
               Location.Ref.make({
-                directory: AbsolutePath.make(row.directory),
+                directory: AbsolutePath.make(
+                  sessionAllowed || principal.kind === "owner" ? row.directory : guestDirectory!,
+                ),
                 workspaceID: row.workspaceID ? WorkspaceV2.ID.make(row.workspaceID) : undefined,
               }),
             ),

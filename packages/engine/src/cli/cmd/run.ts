@@ -33,7 +33,8 @@ type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
 /** @internal Exported for focused permission-policy tests. */
 export function runPermissionReply(auto: boolean, permission: string): "once" | "reject" {
-  if (auto && permission !== "doom_loop") return "once"
+  if (auto && permission !== "doom_loop" && permission !== "browser_sensitive" && !permission.startsWith("computer_"))
+    return "once"
   return "reject"
 }
 
@@ -353,6 +354,8 @@ export const RunCommand = effectCmd({
           process.exit(1)
         }
       })()
+      if (args.attach)
+        ServerAuth.assertSecurePasswordTransport(args.attach, args.password ?? process.env.VECTOR_SERVER_PASSWORD)
       const attachHeaders = args.attach
         ? ServerAuth.headers({ password: args.password, username: args.username })
         : undefined

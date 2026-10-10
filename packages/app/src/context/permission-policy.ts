@@ -4,7 +4,7 @@ export function canAutoAcceptPermission(permission?: string) {
 }
 
 export function canAlwaysAllowPermission(permission?: string, always?: readonly string[]) {
-  if (permission?.startsWith("computer_")) return false
+  if (permission === "browser_sensitive" || permission?.startsWith("computer_")) return false
   return Boolean(always?.length)
 }
 
@@ -12,7 +12,7 @@ export function computerPermissionDetails(input: {
   permission: string
   patterns: readonly string[]
   metadata: Record<string, unknown>
-}) {
+}): { action: string; target: string | undefined; proposedText: string | undefined } | undefined {
   if (!input.permission.startsWith("computer_")) return
   const action = typeof input.metadata.action === "string" ? input.metadata.action : ""
   return {
@@ -32,7 +32,7 @@ function computerActionLabel(action: string, metadata: Record<string, unknown>, 
   if (action === "scroll") return "Scroll in the selected app"
   if (action === "drag") return "Drag the pointer in the selected app"
   if (action === "type") {
-    const length = typeof metadata.text === "string" ? [...metadata.text].length : undefined
+    const length = typeof metadata.text === "string" ? Array.from(metadata.text).length : undefined
     return length === undefined ? "Type text in the selected app" : `Type ${length} character${length === 1 ? "" : "s"}`
   }
   if (action === "press") {
@@ -58,17 +58,20 @@ function computerTargetLabel(metadata: Record<string, unknown>, patterns: readon
   return patterns.find((pattern) => pattern !== "*" && !/^window:\d+:\d+$/.test(pattern))
 }
 
-function coordinate(x: unknown, y: unknown) {
+function coordinate(x: unknown, y: unknown): string | undefined {
   if (typeof x !== "number" || !Number.isFinite(x) || typeof y !== "number" || !Number.isFinite(y)) return
   return `${Math.round(x)}, ${Math.round(y)}`
 }
 
 function safeLabel(value: unknown, limit: number) {
   if (typeof value !== "string") return ""
-  return value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, limit)
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .trim()
+    .slice(0, limit)
 }
 
-function record(value: unknown) {
+function record(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return
-  return value as Record<string, unknown>
+  return Object.fromEntries(Object.entries(value))
 }

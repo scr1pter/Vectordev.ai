@@ -21,6 +21,8 @@ import { Workspace } from "../../src/control-plane/workspace"
 import { InstanceRef, WorkspaceRef } from "../../src/effect/instance-ref"
 import { Project } from "../../src/project/project"
 import { Session } from "../../src/session/session"
+import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { PtyTicket } from "@vectordevai/core/pty/ticket"
 import {
   InstanceContextMiddleware,
   instanceContextLayer,
@@ -49,7 +51,15 @@ const testStateLayer = Layer.effectDiscard(
 
 const workspaceLayer = workspaceLayerWithRuntimeFlags({ experimentalWorkspaces: true })
 
-const it = testEffect(Layer.mergeAll(testStateLayer, NodeHttpServer.layerTest, NodeServices.layer, workspaceLayer))
+const it = testEffect(
+  Layer.mergeAll(
+    testStateLayer,
+    NodeHttpServer.layerTest,
+    NodeServices.layer,
+    workspaceLayer,
+    LayerNode.compile(PtyTicket.node),
+  ),
+)
 
 const instanceContextTestLayer = Layer.mergeAll(
   instanceContextLayer,

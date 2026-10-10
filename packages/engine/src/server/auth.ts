@@ -36,6 +36,7 @@ export type Info = {
   readonly guestPassword?: Option.Option<string>
   readonly guestUsername?: string
   readonly guestWorkspaceIDs?: ReadonlyArray<string>
+  readonly guestWorkspaceDirectories?: Readonly<Record<string, string>>
   readonly guestSessionIDs?: ReadonlyArray<string>
 }
 
@@ -56,6 +57,9 @@ export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthC
           guestPassword: EffectConfig.string("VECTOR_SERVER_GUEST_PASSWORD").pipe(EffectConfig.option),
           guestUsername: EffectConfig.string("VECTOR_SERVER_GUEST_USERNAME").pipe(EffectConfig.withDefault("guest")),
           guestWorkspaces: EffectConfig.string("VECTOR_SERVER_GUEST_WORKSPACES").pipe(EffectConfig.option),
+          guestWorkspaceDirectories: EffectConfig.string("VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES").pipe(
+            EffectConfig.option,
+          ),
           guestSessions: EffectConfig.string("VECTOR_SERVER_GUEST_SESSIONS").pipe(EffectConfig.option),
         })
         return Config.of({
@@ -63,6 +67,7 @@ export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthC
           guestPassword: config.guestPassword,
           guestUsername: config.guestUsername,
           guestWorkspaceIDs: claims(config.guestWorkspaces, Schema.decodeUnknownOption(WorkspaceV2.ID)),
+          guestWorkspaceDirectories: directoryClaims(config.guestWorkspaceDirectories),
           guestSessionIDs: claims(config.guestSessions, Schema.decodeUnknownOption(SessionV2.ID)),
           username: Option.getOrElse(config.username, () => "vector"),
           // The earlier product defaulted the owner username to its own name, and saved
@@ -79,7 +84,7 @@ export class Config extends Context.Service<Config, Info>()("@vector/ServerAuthC
 // the opposite of what configuring a password means.
 export function required(config: Info) {
   const set = (value: Option.Option<string> | undefined) =>
-    Option.isSome(value ?? Option.none()) && (value as Option.Some<string>).value !== ""
+    Option.match(value ?? Option.none(), { onNone: () => false, onSome: (item) => item !== "" })
   return set(config.password) || set(config.guestPassword)
 }
 
@@ -129,4 +134,14 @@ function claims<A extends string>(input: Option.Option<string>, decode: (input: 
     .map((value) => value.trim())
     .filter((value) => value !== "")
     .flatMap((value): A[] => Option.match(decode(value), { onNone: () => [], onSome: (claim) => [claim] }))
+}
+
+function directoryClaims(input: Option.Option<string>) {
+  if (Option.isNone(input)) return {}
+  const json = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(input.value)
+  if (Option.isNone(json)) return {}
+  return Option.getOrElse(
+    Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.String))(json.value),
+    () => ({}),
+  )
 }

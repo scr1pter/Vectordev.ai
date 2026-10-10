@@ -5,6 +5,7 @@ import { Wildcard } from "@vectordevai/core/util/wildcard"
 import { Deferred, Effect, Layer, Context } from "effect"
 import os from "os"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
+import { PermissionV2 } from "@vectordevai/core/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 
 export const Event = PermissionV1.Event
@@ -123,15 +124,19 @@ const layer = Layer.effect(
       const { approved, pending } = yield* InstanceState.get(state)
       const existing = pending.get(input.requestID)
       if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
+      const reply =
+        input.reply === "always" && !PermissionV2.canAlwaysApprove(existing.info.permission, existing.info.always)
+          ? "once"
+          : input.reply
 
       pending.delete(input.requestID)
       yield* events.publish(Event.Replied, {
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,
-        reply: input.reply,
+        reply,
       })
 
-      if (input.reply === "reject") {
+      if (reply === "reject") {
         yield* Deferred.fail(
           existing.deferred,
           input.message
@@ -153,7 +158,7 @@ const layer = Layer.effect(
       }
 
       yield* Deferred.succeed(existing.deferred, undefined)
-      if (input.reply === "once") return
+      if (reply === "once") return
 
       for (const pattern of existing.info.always) {
         approved.push({

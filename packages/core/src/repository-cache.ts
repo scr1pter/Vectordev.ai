@@ -7,6 +7,7 @@ import { Repository } from "./repository"
 import { AbsolutePath } from "./schema"
 import { makeGlobalNode } from "./effect/app-node"
 import { EffectFlock } from "./util/effect-flock"
+import { WebFetchRequest } from "./util/webfetch-request"
 
 export type Result = {
   readonly repository: string
@@ -121,6 +122,46 @@ export const validateBranch = Effect.fn("RepositoryCache.validateBranch")(functi
   })
 })
 
+const parseTransport = Effect.fn("RepositoryCache.parseTransport")(function* (reference: Repository.RemoteReference) {
+  const url = yield* Effect.try({
+    try: () => new URL(reference.remote),
+    catch: (error) =>
+      new InvalidRepositoryError({
+        repository: reference.label,
+        message: `Unsupported Git transport: ${errorMessage(error)}`,
+      }),
+  })
+  if (url.protocol === "file:") return undefined
+  if (url.protocol !== "https:")
+    return yield* new InvalidRepositoryError({
+      repository: reference.label,
+      message: "Automatic references require an HTTPS Git URL",
+    })
+  if (url.username || url.password || url.search || url.hash)
+    return yield* new InvalidRepositoryError({
+      repository: reference.label,
+      message: "Automatic Git URLs cannot contain credentials, query parameters, or fragments",
+    })
+  return url
+})
+
+const resolveTransport = Effect.fn("RepositoryCache.resolveTransport")(function* (
+  reference: Repository.RemoteReference,
+  url: URL | undefined,
+) {
+  if (!url) return undefined
+  const destination = yield* WebFetchRequest.resolvePublicDestination(url).pipe(
+    Effect.mapError(
+      (error) => new InvalidRepositoryError({ repository: reference.label, message: errorMessage(error) }),
+    ),
+  )
+  return {
+    hostname: destination.hostname,
+    port: destination.port,
+    addresses: destination.addresses,
+  }
+})
+
 const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFlock.Service | Global.Service> =
   Layer.effect(
     Service,
@@ -134,6 +175,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
         ensure: Effect.fn("RepositoryCache.ensure")(function* (input) {
           if (input.branch) yield* validateBranch(input.branch)
 
+          const transportUrl = yield* parseTransport(input.reference)
           const repository = input.reference.label
           const localPath = Repository.cachePath(global.repos, input.reference)
           const cloneTarget = Repository.parse(input.reference.remote) ?? input.reference
@@ -147,7 +189,12 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                 const existing = yield* git.repo.discover(AbsolutePath.make(localPath))
                 const origin = existing ? yield* git.remote.get(existing) : undefined
                 const originReference = origin ? Repository.parse(origin) : undefined
-                const reuse = Boolean(existing && originReference && Repository.same(originReference, cloneTarget))
+                const reuse = Boolean(
+                  existing &&
+                    origin === input.reference.remote &&
+                    originReference &&
+                    Repository.same(originReference, cloneTarget),
+                )
                 if (exists && !reuse) {
                   yield* cacheOperation(fs.remove(localPath, { recursive: true }), "remove stale cache", localPath)
                 }
@@ -158,6 +205,8 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                   refresh: input.refresh,
                   branchMatches: input.branch ? currentBranch === input.branch : undefined,
                 })
+                const transport =
+                  status === "cached" ? undefined : yield* resolveTransport(input.reference, transportUrl)
 
                 if (status === "cloned") {
                   yield* git.repo
@@ -165,6 +214,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                       remote: input.reference.remote,
                       directory: AbsolutePath.make(localPath),
                       branch: input.branch,
+                      transport,
                     })
                     .pipe(Effect.mapError((error) => new CloneFailedError({ repository, message: error.message })))
                 }
@@ -173,16 +223,16 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                   if (!existing)
                     return yield* new FetchFailedError({ repository, message: "Repository is unavailable" })
                   yield* git.sync
-                    .fetchRemotes(existing)
+                    .fetchRemotes(existing, { remoteUrl: input.reference.remote, transport })
                     .pipe(Effect.mapError((error) => new FetchFailedError({ repository, message: error.message })))
 
                   if (input.branch) {
                     const requestedBranch = input.branch
                     yield* git.sync
-                      .fetchBranch(existing, { branch: requestedBranch })
+                      .fetchBranch(existing, { branch: requestedBranch, remoteUrl: input.reference.remote, transport })
                       .pipe(Effect.mapError((error) => new FetchFailedError({ repository, message: error.message })))
 
-                    yield* git.sync.checkoutRemoteBranch(existing, { branch: requestedBranch }).pipe(
+                    yield* git.sync.checkoutRemoteBranch(existing, { branch: requestedBranch, transport }).pipe(
                       Effect.mapError(
                         (error) =>
                           new CheckoutFailedError({
@@ -195,7 +245,7 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                   }
 
                   yield* git.sync
-                    .resetHard(existing, yield* resetTarget(git, existing, input.branch))
+                    .resetHard(existing, yield* resetTarget(git, existing, input.branch), transport)
                     .pipe(Effect.mapError((error) => new ResetFailedError({ repository, message: error.message })))
                 }
 

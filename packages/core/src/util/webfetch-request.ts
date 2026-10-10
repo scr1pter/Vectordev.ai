@@ -18,6 +18,15 @@ export interface Options {
   readonly authorize: (url: string) => Effect.Effect<void, unknown>
 }
 
+export type PublicDestination = {
+  readonly url: URL
+  readonly hostname: string
+  readonly port: number
+  readonly addresses: readonly string[]
+}
+
+export type DestinationResolver = (hostname: string) => Promise<readonly LookupAddress[]>
+
 /** Follow a bounded redirect chain only after authorizing every concrete destination. */
 export const execute = (http: HttpClient.HttpClient, request: HttpClientRequest.HttpClientRequest, options?: Options) =>
   Effect.gen(function* () {
@@ -63,10 +72,10 @@ export const execute = (http: HttpClient.HttpClient, request: HttpClientRequest.
       request: HttpClientRequest.HttpClientRequest,
       redirects: number,
     ): Effect.fn.Return<HttpClientResponse.HttpClientResponse, unknown, Scope.Scope> {
-      const destination = new URL(request.url)
-      const addresses = yield* resolvePublicDestination(destination)
+      const destination = yield* parsePublicDestination(request.url)
       if (options) yield* options.authorize(request.url)
-      const current = yield* attempt(request, addresses)
+      const resolved = yield* resolvePublicDestination(destination)
+      const current = yield* attempt(request, resolved.addresses)
       const location = current.response.headers.location
       if (![301, 302, 303, 307, 308].includes(current.response.status) || !location)
         return yield* HttpClientResponse.filterStatusOk(current.response)
@@ -85,7 +94,26 @@ export const execute = (http: HttpClient.HttpClient, request: HttpClientRequest.
 
 export const assertPublicDestination = (input: string | URL) => resolvePublicDestination(input).pipe(Effect.asVoid)
 
-const resolvePublicDestination = (input: string | URL) =>
+export const resolvePublicDestination = (
+  input: string | URL,
+  resolver: DestinationResolver = (hostname) => lookup(hostname, { all: true, verbatim: true }),
+) =>
+  Effect.gen(function* () {
+    const url = yield* parsePublicDestination(input)
+    const hostname = normalizedHostname(url)
+    const literal = isIP(hostname)
+    const addresses = literal
+      ? [hostname]
+      : yield* Effect.tryPromise({
+          try: () => resolver(hostname),
+          catch: (cause) => new Error(`Unable to resolve ${hostname}`, { cause }),
+        }).pipe(Effect.map((records) => records.map((record) => record.address)))
+    if (addresses.length === 0 || addresses.some(isPrivateAddress))
+      return yield* Effect.fail(new Error("Private network destinations are not allowed"))
+    return { url, hostname, port: Number(url.port || (url.protocol === "https:" ? 443 : 80)), addresses }
+  })
+
+const parsePublicDestination = (input: string | URL) =>
   Effect.gen(function* () {
     const url = yield* Effect.try({
       try: () => (input instanceof URL ? input : new URL(input)),
@@ -93,23 +121,24 @@ const resolvePublicDestination = (input: string | URL) =>
     })
     if (url.protocol !== "http:" && url.protocol !== "https:")
       return yield* Effect.fail(new Error("URL must use http:// or https://"))
-    const hostname = url.hostname
-      .replace(/^\[|\]$/g, "")
-      .replace(/\.$/, "")
-      .toLowerCase()
-    if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost"))
+    if (url.username || url.password) return yield* Effect.fail(new Error("URL credentials are not allowed"))
+    const hostname = normalizedHostname(url)
+    if (
+      !hostname ||
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      (isIP(hostname) !== 0 && isPrivateAddress(hostname))
+    )
       return yield* Effect.fail(new Error("Private network destinations are not allowed"))
-    const literal = isIP(hostname)
-    const addresses = literal
-      ? [hostname]
-      : yield* Effect.tryPromise({
-          try: () => lookup(hostname, { all: true, verbatim: true }),
-          catch: (cause) => new Error(`Unable to resolve ${hostname}`, { cause }),
-        }).pipe(Effect.map((records) => records.map((record) => record.address)))
-    if (addresses.length === 0 || addresses.some(isPrivateAddress))
-      return yield* Effect.fail(new Error("Private network destinations are not allowed"))
-    return addresses
+    return url
   })
+
+function normalizedHostname(url: URL) {
+  return url.hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase()
+}
 
 export function isPrivateAddress(input: string) {
   const address = input.replace(/^\[|\]$/g, "").split("%", 1)[0] ?? ""

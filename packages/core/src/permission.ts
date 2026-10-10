@@ -17,6 +17,14 @@ const missingAgentPermissions: Permission.Ruleset = [{ action: "*", resource: "*
 export const ID = Permission.ID
 export type ID = typeof ID.Type
 
+function isSensitiveAction(action: string) {
+  return action === "browser_sensitive" || action.startsWith("computer_")
+}
+
+export function canAlwaysApprove(action: string, resources: readonly string[] | undefined) {
+  return !isSensitiveAction(action) && Boolean(resources?.length)
+}
+
 export const Source = Permission.Source
 export type Source = typeof Source.Type
 
@@ -129,9 +137,12 @@ const layer = Layer.effect(
     )
 
     const savedRules = EffectRuntime.fnUntraced(function* () {
-      return (yield* saved.list({ projectID: location.project.id })).map(
-        (item): Permission.Rule => ({ action: item.action, resource: item.resource, effect: "allow" }),
-      )
+      const items = yield* saved.list({ projectID: location.project.id })
+      const unsafe = items.filter((item) => isSensitiveAction(item.action))
+      yield* EffectRuntime.forEach(unsafe, (item) => saved.remove(item.id), { discard: true })
+      return items
+        .filter((item) => !isSensitiveAction(item.action))
+        .map((item): Permission.Rule => ({ action: item.action, resource: item.resource, effect: "allow" }))
     })
 
     const configured = EffectRuntime.fn("PermissionV2.configured")(function* (
@@ -222,13 +233,17 @@ const layer = Layer.effect(
         EffectRuntime.gen(function* () {
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
+          const reply =
+            input.reply === "always" && !canAlwaysApprove(existing.request.action, existing.request.save)
+              ? "once"
+              : input.reply
           yield* events.publish(Event.Replied, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
-            reply: input.reply,
+            reply,
           })
 
-          if (input.reply === "reject") {
+          if (reply === "reject") {
             yield* Deferred.fail(
               existing.deferred,
               input.message ? new CorrectedError({ feedback: input.message }) : new RejectedError(),
@@ -256,7 +271,7 @@ const layer = Layer.effect(
             return
           }
 
-          if (input.reply === "always" && existing.request.save?.length) {
+          if (reply === "always" && existing.request.save?.length) {
             yield* saved.add({
               projectID: location.project.id,
               action: existing.request.action,
@@ -265,7 +280,7 @@ const layer = Layer.effect(
           }
           yield* Deferred.succeed(existing.deferred, undefined)
           pending.delete(input.requestID)
-          if (input.reply !== "always" || !existing.request.save?.length) return
+          if (reply !== "always" || !existing.request.save?.length) return
 
           const rememberedRules = yield* savedRules()
           for (const [id, item] of pending) {

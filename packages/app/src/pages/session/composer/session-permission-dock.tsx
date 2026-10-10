@@ -4,6 +4,7 @@ import { Button } from "@vectordevai/ui/button"
 import { DockPrompt } from "@vectordevai/session-ui/dock-prompt"
 import { Icon } from "@vectordevai/ui/icon"
 import { useLanguage } from "@/context/language"
+import { canAlwaysAllowPermission } from "@/context/permission-policy"
 
 export function SessionPermissionDock(props: {
   request: PermissionRequest
@@ -37,14 +38,16 @@ export function SessionPermissionDock(props: {
             <Button variant="ghost" size="normal" onClick={() => props.onDecide("reject")} disabled={props.responding}>
               {language.t("ui.permission.deny")}
             </Button>
-            <Button
-              variant="secondary"
-              size="normal"
-              onClick={() => props.onDecide("always")}
-              disabled={props.responding}
-            >
-              {language.t("ui.permission.allowAlways")}
-            </Button>
+            <Show when={canAlwaysAllowPermission(props.request.permission, props.request.always)}>
+              <Button
+                variant="secondary"
+                size="normal"
+                onClick={() => props.onDecide("always")}
+                disabled={props.responding}
+              >
+                {language.t("ui.permission.allowAlways")}
+              </Button>
+            </Show>
             <Button variant="primary" size="normal" onClick={() => props.onDecide("once")} disabled={props.responding}>
               {language.t("ui.permission.allowOnce")}
             </Button>

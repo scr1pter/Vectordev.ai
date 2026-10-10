@@ -273,6 +273,52 @@ describe("PermissionV2", () => {
     }),
   )
 
+  it.effect("does not persist a sensitive permanent approval", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const service = yield* PermissionV2.Service
+      const asked = yield* Deferred.make<PermissionV2.Request>()
+      const events = yield* EventV2.Service
+      const unsubscribe = yield* events.listen((event) =>
+        event.type === PermissionV2.Event.Asked.type
+          ? Deferred.succeed(asked, event.data as PermissionV2.Request).pipe(Effect.asVoid)
+          : Effect.void,
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const fiber = yield* service
+        .assert(assertion({ action: "computer_sensitive", resources: ["window:42:0"], save: ["window:42:0"] }))
+        .pipe(Effect.forkScoped)
+      const request = yield* Deferred.await(asked)
+      yield* service.reply({ requestID: request.id, reply: "always" })
+      yield* Fiber.join(fiber)
+
+      const { db } = yield* Database.Service
+      expect(
+        yield* db.select().from(PermissionTable).where(eq(PermissionTable.project_id, Project.ID.global)).all(),
+      ).toEqual([])
+    }),
+  )
+
+  it.effect("purges previously saved sensitive approvals instead of authorizing them", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({
+        projectID: Project.ID.global,
+        action: "computer_sensitive",
+        resources: ["window:42:0"],
+      })
+
+      const service = yield* PermissionV2.Service
+      expect(
+        yield* service.ask(
+          assertion({ action: "computer_sensitive", resources: ["window:42:0"], save: ["window:42:0"] }),
+        ),
+      ).toEqual({ id: PermissionV2.ID.create("per_test"), effect: "ask" })
+      expect(yield* saved.list({ projectID: Project.ID.global })).toEqual([])
+    }),
+  )
+
   it.effect("does not let a pending approval override a newly configured deny", () =>
     Effect.gen(function* () {
       yield* setup()

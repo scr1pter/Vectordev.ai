@@ -4,11 +4,10 @@ import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer } from "effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
-import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Global } from "@vectordevai/core/global"
 import { Repository } from "@vectordevai/core/repository"
 import { RepositoryCache } from "@vectordevai/core/repository-cache"
-import { git, gitRemote } from "./fixture/git"
+import { commit, git, gitRemote } from "./fixture/git"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
@@ -48,6 +47,21 @@ describe("RepositoryCache", () => {
     ),
   )
 
+  it.live("refreshes from the exact configured remote URL", () =>
+    withRemote((fixture) =>
+      Effect.gen(function* () {
+        const cache = yield* RepositoryCache.Service
+        yield* cache.ensure({ reference: fixture.reference })
+        yield* Effect.promise(() => commit(fixture.source, "two\n", "second"))
+
+        const refreshed = yield* cache.ensure({ reference: fixture.reference, refresh: true })
+
+        expect(refreshed.status).toBe("refreshed")
+        expect(yield* read(path.join(refreshed.localPath, "README.md"))).toBe("two\n")
+      }).pipe(Effect.provide(cacheLayer(fixture.root))),
+    ),
+  )
+
   it.live("replaces an existing checkout whose origin does not match", () =>
     withRemote((fixture) =>
       Effect.gen(function* () {
@@ -75,6 +89,20 @@ describe("RepositoryCache", () => {
 
         const invalidBranch = yield* Effect.flip(cache.ensure({ reference: fixture.reference, branch: "../unsafe" }))
         expect(invalidBranch).toBeInstanceOf(RepositoryCache.InvalidBranchError)
+        const initial = yield* cache.ensure({ reference: fixture.reference })
+
+        const insecureRemote = yield* Effect.flip(
+          cache.ensure({ reference: { ...fixture.reference, remote: "http://example.com/owner/repo.git" } }),
+        )
+        expect(insecureRemote).toBeInstanceOf(RepositoryCache.InvalidRepositoryError)
+
+        const credentialQuery = yield* Effect.flip(
+          cache.ensure({
+            reference: { ...fixture.reference, remote: "https://example.com/owner/repo.git?token=secret" },
+          }),
+        )
+        expect(credentialQuery).toBeInstanceOf(RepositoryCache.InvalidRepositoryError)
+        expect(yield* read(path.join(initial.localPath, "README.md"))).toBe("one\n")
 
         const cloneFailure = yield* Effect.flip(
           cache.ensure({

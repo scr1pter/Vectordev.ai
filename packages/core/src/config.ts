@@ -2,6 +2,7 @@ export * as Config from "./config"
 
 import { makeLocationNode } from "./effect/app-node"
 import path from "path"
+import { fileURLToPath } from "node:url"
 import { type ParseError, parse } from "jsonc-parser"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Permission } from "@vectordevai/schema/permission"
@@ -138,6 +139,8 @@ export interface Interface {
   readonly scope?: (entry: Entry) => Scope
   /** Project executable entries require an unchanged explicit workspace approval. */
   readonly executable?: (entry: Entry) => boolean
+  /** Resolves approved project executable content to its private captured copy. */
+  readonly executablePath?: (entry: Entry, input: string) => string
   readonly trust?: () => Effect.Effect<WorkspaceTrust.Status>
   readonly approve?: () => Effect.Effect<void>
 }
@@ -165,8 +168,13 @@ const layer = Layer.effect(
     const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
     const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
 
-    const loadFile = Effect.fnUntraced(function* (filepath: string) {
-      const text = yield* fs.readFileStringSafe(filepath)
+    const loadFile = Effect.fnUntraced(function* (
+      filepath: string,
+      snapshot?: WorkspaceTrust.Snapshot,
+      trusted?: WorkspaceTrust.TrustedSnapshot,
+      workspace?: string,
+    ) {
+      const text = snapshot ? WorkspaceTrust.readFileString(snapshot, filepath) : yield* fs.readFileStringSafe(filepath)
       if (!text) return
 
       const errors: ParseError[] = []
@@ -179,15 +187,25 @@ const layer = Layer.effect(
           : decodeInfo(input),
       )
       if (!info) return
-      return new Document({ type: "document", path: filepath, info })
+      return new Document({
+        type: "document",
+        path: filepath,
+        info: trusted && workspace ? bindTrustedProjectExecutables(info, trusted, filepath, workspace) : info,
+      })
     })
 
-    const loadDirectory = Effect.fnUntraced(function* (directory: AbsolutePath) {
+    const loadDirectory = Effect.fnUntraced(function* (
+      directory: AbsolutePath,
+      snapshot?: WorkspaceTrust.Snapshot,
+      trusted?: WorkspaceTrust.TrustedSnapshot,
+      workspace?: string,
+      runtimeDirectory = directory,
+    ) {
       return [
-        ...(yield* Effect.forEach(names, (file) => loadFile(path.join(directory, file))).pipe(
-          Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
-        )),
-        new Directory({ type: "directory", path: directory }),
+        ...(yield* Effect.forEach(names, (file) =>
+          loadFile(path.join(directory, file), snapshot, trusted, workspace),
+        ).pipe(Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)))),
+        new Directory({ type: "directory", path: runtimeDirectory }),
       ]
     })
 
@@ -223,30 +241,45 @@ const layer = Layer.effect(
               stop: location.project.directory,
             })
             .pipe(Effect.orDie)
-    const direct = yield* Effect.forEach(directPaths, loadFile).pipe(
-      Effect.orDie,
-      Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
-    )
-    const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
-    for (const entry of supplementary[0] ?? []) scopes.set(entry, "global")
-    for (const entry of direct) scopes.set(entry, "project")
-    for (const group of supplementary.slice(1)) for (const entry of group) scopes.set(entry, "project")
-
     const workspace =
       location.project.directory === path.parse(location.project.directory).root
         ? location.directory
         : location.project.directory
-    const projectEntries = [...direct, ...supplementary.slice(1).flat()]
     const trustSnapshot = yield* Effect.promise(() =>
-      WorkspaceTrust.snapshot(workspace, [
-        ...directPaths,
-        ...tuiPaths,
-        ...projectDirectories,
-        ...projectEntries.flatMap((entry) => executableInputs(entry, location.directory)),
-      ]),
+      WorkspaceTrust.snapshot(workspace, [...directPaths, ...tuiPaths, ...projectDirectories]),
     )
     const trustStatus = yield* Effect.promise(() => WorkspaceTrust.status(global.state, trustSnapshot))
-    const executable = (entry: Entry) => scopes.get(entry) !== "project" || (!Flag.VECTOR_PURE && trustStatus.trusted)
+    const trustedSnapshot =
+      !Flag.VECTOR_PURE && trustStatus.trusted
+        ? yield* Effect.promise(() => WorkspaceTrust.materialize(global.state, trustSnapshot))
+        : undefined
+    const direct = yield* Effect.forEach(directPaths, (file) =>
+      loadFile(file, trustSnapshot, trustedSnapshot, workspace),
+    ).pipe(
+      Effect.orDie,
+      Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
+    )
+    const supplementary = [
+      yield* loadDirectory(globalDirectory).pipe(Effect.orDie),
+      ...(yield* Effect.forEach(projectDirectories, (directory) =>
+        loadDirectory(
+          directory,
+          trustSnapshot,
+          trustedSnapshot,
+          workspace,
+          trustedSnapshot ? AbsolutePath.make(WorkspaceTrust.materializedPath(trustedSnapshot, directory)) : directory,
+        ),
+      ).pipe(Effect.orDie)),
+    ]
+    for (const entry of supplementary[0] ?? []) scopes.set(entry, "global")
+    for (const entry of direct) scopes.set(entry, "project")
+    for (const group of supplementary.slice(1)) for (const entry of group) scopes.set(entry, "project")
+
+    const executable = (entry: Entry) => scopes.get(entry) !== "project" || trustedSnapshot !== undefined
+    const executablePath = (entry: Entry, input: string) =>
+      scopes.get(entry) === "project" && trustedSnapshot
+        ? WorkspaceTrust.materializedPath(trustedSnapshot, input)
+        : input
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.vector` files.
     const team = yield* teams.current().pipe(Effect.orDie)
@@ -276,7 +309,11 @@ const layer = Layer.effect(
       ...localConfigs
         .filter((config): config is Document => config.type === "document")
         .toReversed()
-        .flatMap((config) => config.info.experimental?.policies ?? []),
+        .flatMap((config) => {
+          const statements = config.info.experimental?.policies ?? []
+          if (scopes.get(config) !== "project" || trustStatus.trusted) return statements
+          return statements.filter((statement) => statement.effect === "deny")
+        }),
     ])
 
     return Service.of({
@@ -285,6 +322,7 @@ const layer = Layer.effect(
       }),
       scope: (entry) => scopes.get(entry) ?? "global",
       executable,
+      executablePath,
       trust: Effect.fn("Config.trust")(function* () {
         return yield* Effect.promise(() => WorkspaceTrust.status(global.state, trustSnapshot))
       }),
@@ -303,10 +341,68 @@ export const node = makeLocationNode({
   deps: [FSUtil.node, Global.node, Location.node, Policy.node, EffectFlock.node, Teams.node],
 })
 
-function executableInputs(entry: Entry, directory: string) {
-  if (entry.type !== "document") return []
-  return WorkspaceTrust.executableInputs(entry.info, {
-    source: entry.path ?? path.join(directory, "vector.json"),
-    workspace: directory,
-  })
+function bindTrustedProjectExecutables(
+  info: Info,
+  trusted: WorkspaceTrust.TrustedSnapshot,
+  source: string,
+  workspace: string,
+) {
+  const shell = info.shell ? trustedExecutableValue(info.shell, path.dirname(source), trusted) : undefined
+  const formatter =
+    info.formatter && typeof info.formatter === "object"
+      ? rewriteCommandEntries(info.formatter, workspace, trusted)
+      : info.formatter
+  const lsp = info.lsp && typeof info.lsp === "object" ? rewriteCommandEntries(info.lsp, workspace, trusted) : info.lsp
+  const mcp = info.mcp
+    ? new ConfigMCP.Info({
+        ...info.mcp,
+        servers: info.mcp.servers
+          ? Object.fromEntries(
+              Object.entries(info.mcp.servers)
+                .map(([name, server]): [string, ConfigMCP.Local | ConfigMCP.Remote | undefined] => {
+                  if (server.type !== "local") return [name, server]
+                  const cwd = server.cwd ? path.resolve(workspace, server.cwd) : workspace
+                  const command = server.command.map((value) => trustedExecutableValue(value, cwd, trusted))
+                  if (command.some((value) => value === undefined)) return [name, undefined]
+                  const local = command.some((value, index) => value !== server.command[index])
+                  return [
+                    name,
+                    new ConfigMCP.Local({
+                      ...server,
+                      command: command as string[],
+                      ...(local && server.cwd ? { cwd: WorkspaceTrust.materializedPath(trusted, cwd) } : {}),
+                    }),
+                  ]
+                })
+                .filter((entry): entry is [string, ConfigMCP.Local | ConfigMCP.Remote] => entry[1] !== undefined),
+            )
+          : undefined,
+      })
+    : undefined
+  return new Info({ ...info, shell, formatter, lsp, mcp })
+}
+
+function rewriteCommandEntries<T extends Record<string, object>>(
+  value: T,
+  base: string,
+  trusted: WorkspaceTrust.TrustedSnapshot,
+): T {
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([name, entry]) => {
+      if (!entry || typeof entry !== "object" || !("command" in entry) || !Array.isArray(entry.command)) {
+        return [[name, entry]]
+      }
+      const command = entry.command.map((item) => trustedExecutableValue(item, base, trusted))
+      if (command.some((item) => item === undefined)) return []
+      return [[name, { ...entry, command }]]
+    }),
+  ) as T
+}
+
+function trustedExecutableValue(value: unknown, base: string, trusted: WorkspaceTrust.TrustedSnapshot) {
+  if (typeof value !== "string") return
+  if (value.startsWith("file:")) return WorkspaceTrust.materializedPathOption(trusted, fileURLToPath(value))
+  if (URL.canParse(value)) return value
+  if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\")) return value
+  return WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, value))
 }

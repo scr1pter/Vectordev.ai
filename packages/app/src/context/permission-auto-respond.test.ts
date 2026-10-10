@@ -94,6 +94,21 @@ describe("autoRespondsPermission", () => {
       ),
     ).toBe(false)
   })
+
+  test.each(["browser_sensitive", "computer_observe", "computer_interact", "computer_sensitive"])(
+    "never auto-approves %s",
+    (name) => {
+      const directory = "/tmp/project"
+      expect(
+        autoRespondsPermission(
+          { [`${base64Encode(directory)}/*`]: true, root: true },
+          [session({ id: "root" })],
+          permission("root", name),
+          directory,
+        ),
+      ).toBe(false)
+    },
+  )
 })
 
 describe("isDirectoryAutoAccepting", () => {

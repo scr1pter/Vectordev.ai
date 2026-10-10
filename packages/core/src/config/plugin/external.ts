@@ -62,7 +62,10 @@ export const Plugin = define({
               }
               return ref.package
             })()
-            configured.push({ package: packageName, options: ref.options })
+            configured.push({
+              package: config.executablePath?.(entry, packageName) ?? packageName,
+              options: ref.options,
+            })
           }
         }
 
@@ -77,7 +80,7 @@ export const Plugin = define({
             })
             .pipe(Effect.orElseSucceed(() => []))
           files.sort()
-          for (const file of files) configured.push({ package: file })
+          for (const file of files) configured.push({ package: config.executablePath?.(entry, file) ?? file })
         }
       }
 

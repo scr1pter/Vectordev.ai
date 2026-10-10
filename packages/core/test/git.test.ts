@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
@@ -12,7 +12,86 @@ import { testEffect } from "./lib/effect"
 
 const it = testEffect(LayerNode.compile(Git.node))
 
+test("HTTP transport pins validated addresses and disables redirects", () => {
+  const args = Git.httpTransportArgs(
+    {
+      hostname: "git.example.test",
+      port: 443,
+      addresses: ["203.0.113.8", "2001:db8::8"],
+    },
+    "http://127.0.0.1:49152",
+  )
+  expect(args).toContain("http.followRedirects=false")
+  expect(args).toContain("http.proxy=http://127.0.0.1:49152")
+  expect(args).toContain("protocol.allow=never")
+  expect(args).toContain("protocol.https.allow=always")
+  expect(args).toContain("protocol.file.allow=never")
+  expect(args).toContain("filter.lfs.process=")
+  expect(args).toContain("http.curloptResolve=git.example.test:443:203.0.113.8")
+  expect(args).toContain("http.curloptResolve=git.example.test:443:[2001:db8::8]")
+
+  const env = Git.httpTransportEnvironment("http://127.0.0.1:49152")
+  expect(env.GIT_CONFIG_NOSYSTEM).toBe("1")
+  expect(env.GIT_CONFIG_COUNT).toBe("0")
+  expect(env.GIT_ALLOW_PROTOCOL).toBe("https")
+  expect(env.GIT_LFS_SKIP_SMUDGE).toBe("1")
+  expect(env.HTTPS_PROXY).toBe("http://127.0.0.1:49152")
+  expect(env.NO_PROXY).toBe("")
+  expect(env).not.toHaveProperty("GIT_DIR")
+  expect(env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY")
+
+  const transport = { hostname: "git.example.test", port: 443, addresses: ["8.8.8.8"] }
+  expect(Git.allowsHttpTransportTarget(transport, "git.example.test:443")).toBe(true)
+  expect(Git.allowsHttpTransportTarget(transport, "git.example.test:8443")).toBe(false)
+  expect(Git.allowsHttpTransportTarget(transport, "169.254.169.254:80")).toBe(false)
+  expect(Git.allowsHttpTransportTarget(transport, "localhost:443")).toBe(false)
+})
+
 describe("Git", () => {
+  it.live("ignores ambient URL rewrites for protected network clones", () =>
+    withRemote((fixture) =>
+      Effect.gen(function* () {
+        const config = path.join(fixture.root, "ambient.gitconfig")
+        yield* Effect.promise(() =>
+          fs.writeFile(config, `[url "${fixture.remote}"]\n\tinsteadOf = https://git.example.test/repo.git\n`),
+        )
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const value = process.env.GIT_CONFIG_GLOBAL
+            process.env.GIT_CONFIG_GLOBAL = config
+            return value
+          }),
+          (value) =>
+            Effect.sync(() => {
+              if (value === undefined) delete process.env.GIT_CONFIG_GLOBAL
+              else process.env.GIT_CONFIG_GLOBAL = value
+            }),
+        )
+        const target = AbsolutePath.make(path.join(fixture.root, "protected-checkout"))
+        const git = yield* Git.Service
+        const error = yield* Effect.flip(
+          git.repo.clone({
+            remote: "https://git.example.test/repo.git",
+            directory: target,
+            transport: { hostname: "git.example.test", port: 1, addresses: ["127.0.0.1"] },
+          }),
+        )
+
+        expect(error).toBeInstanceOf(Git.OperationError)
+        expect(error.message).not.toContain("GIT_CONFIG")
+        expect(error.message).toMatch(/CONNECT|connect/i)
+        expect(
+          yield* Effect.promise(() =>
+            fs.stat(path.join(target, "README.md")).then(
+              () => true,
+              () => false,
+            ),
+          ),
+        ).toBe(false)
+      }),
+    ),
+  )
+
   it.live("clones a remote and reads checkout metadata", () =>
     withRemote((fixture) =>
       Effect.gen(function* () {

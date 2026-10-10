@@ -16,6 +16,7 @@ import { PluginHost } from "@vectordevai/core/plugin/host"
 import { Reference } from "@vectordevai/core/reference"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { SkillV2 } from "@vectordevai/core/skill"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "../plugin/fixture"
 import { tmpdir } from "../fixture/tmpdir"
@@ -130,6 +131,68 @@ describe("ConfigExternalPlugin", () => {
           )
           yield* Effect.sleep("20 millis")
           expect(yield* Effect.promise(() => fs.stat(marker).catch(() => undefined))).toBeUndefined()
+        }),
+      ),
+    ),
+  )
+
+  it.live("imports the approved plugin bytes from a private snapshot after the live file changes", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => Promise.all([tmpdir(), tmpdir()])),
+      (directories) =>
+        Effect.promise(() => Promise.all(directories.map((directory) => directory[Symbol.asyncDispose]()))),
+    ).pipe(
+      Effect.flatMap(([tmp, state]) =>
+        Effect.gen(function* () {
+          const plugins = yield* PluginV2.Service
+          const fsUtil = yield* FSUtil.Service
+          const location = yield* Location.Service
+          const npm = yield* Npm.Service
+          const host = yield* PluginHost.make(plugins)
+          const plugin = path.join(tmp.path, "plugin.ts")
+          const configFile = path.join(tmp.path, "vector.json")
+          const marker = path.join(tmp.path, "imported.txt")
+          yield* Effect.promise(async () => {
+            await Bun.write(configFile, JSON.stringify({ plugins: ["./plugin.ts"] }))
+            await Bun.write(
+              plugin,
+              `await Bun.write(${JSON.stringify(marker)}, "approved")\nexport default { id: "approved", effect: () => {} }\n`,
+            )
+          })
+          const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
+          yield* Effect.promise(() => WorkspaceTrust.approve(state.path, snapshot))
+          const trusted = yield* Effect.promise(() => WorkspaceTrust.materialize(state.path, snapshot))
+          yield* Effect.promise(() =>
+            Bun.write(
+              plugin,
+              `await Bun.write(${JSON.stringify(marker)}, "changed")\nexport default { id: "changed", effect: () => {} }\n`,
+            ),
+          )
+          const document = new Config.Document({
+            type: "document",
+            path: configFile,
+            info: decode({ plugins: ["./plugin.ts"] }),
+          })
+
+          yield* ConfigExternalPlugin.Plugin.effect(host).pipe(
+            Effect.provideService(PluginV2.Service, plugins),
+            Effect.provideService(FSUtil.Service, fsUtil),
+            Effect.provideService(Location.Service, location),
+            Effect.provideService(Npm.Service, npm),
+            Effect.provideService(
+              Config.Service,
+              Config.Service.of({
+                entries: () => Effect.succeed([document]),
+                executable: () => true,
+                executablePath: (_, input) => WorkspaceTrust.materializedPath(trusted, input),
+              }),
+            ),
+          )
+          for (let attempt = 0; attempt < 100; attempt++) {
+            if (yield* fsUtil.existsSafe(marker)) break
+            yield* Effect.sleep("10 millis")
+          }
+          expect(yield* fsUtil.readFileString(marker)).toBe("approved")
         }),
       ),
     ),

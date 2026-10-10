@@ -1,4 +1,5 @@
 import { SessionV2 } from "@vectordevai/core/session"
+import { Location } from "@vectordevai/core/location"
 import { DateTime, Effect, Stream } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -16,12 +17,19 @@ import {
 import { AbsolutePath } from "@vectordevai/core/schema"
 import {
   allowsSession,
-  allowsWorkspace,
+  guestWorkspaceDirectory,
+  type Principal,
   RequestPrincipal,
 } from "@vectordevai/protocol/middleware/authorization"
 
 const DefaultSessionsLimit = 50
 const DefaultSessionHistoryLimit = 50
+
+function allowsSessionLocation(principal: Principal, item: SessionV2.Info) {
+  if (allowsSession(principal, item.id)) return true
+  if (principal.kind === "owner") return true
+  return guestWorkspaceDirectory(principal, item.location.workspaceID) === item.location.directory
+}
 
 export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handlers) =>
   Effect.gen(function* () {
@@ -81,9 +89,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             })
             .pipe(Effect.catch((error) => Effect.logError("Failed to list Vector sessions", error).pipe(Effect.as([]))))
           const principal = yield* RequestPrincipal
-          const allowed = sessions.filter(
-            (item) => allowsSession(principal, item.id) || allowsWorkspace(principal, item.location.workspaceID),
-          )
+          const allowed = sessions.filter((item) => allowsSessionLocation(principal, item))
           const first = allowed[0]
           const last = allowed.at(-1)
           return {
@@ -117,14 +123,20 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
         "session.create",
         Effect.fn(function* (ctx) {
           const principal = yield* RequestPrincipal
-          if (principal.kind === "guest" && !allowsWorkspace(principal, ctx.payload.location?.workspaceID))
+          const requested = ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) }
+          const guestDirectory = guestWorkspaceDirectory(principal, requested.workspaceID)
+          if (principal.kind === "guest" && guestDirectory === undefined)
             return yield* new ForbiddenError({ message: "Guest sessions require an allowed workspace" })
+          const location =
+            principal.kind === "guest"
+              ? Location.Ref.make({ directory: AbsolutePath.make(guestDirectory!), workspaceID: requested.workspaceID })
+              : requested
           return {
             data: yield* session.create({
               id: ctx.payload.id,
               agent: ctx.payload.agent,
               model: ctx.payload.model,
-              location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
+              location,
             }),
           }
         }),
@@ -137,7 +149,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             allowsSession(principal, sessionID)
               ? Effect.succeed(true)
               : session.get(sessionID).pipe(
-                  Effect.map((item) => allowsWorkspace(principal, item.location.workspaceID)),
+                  Effect.map((item) => allowsSessionLocation(principal, item)),
                   Effect.catch(() => Effect.succeed(false)),
                 ),
           )

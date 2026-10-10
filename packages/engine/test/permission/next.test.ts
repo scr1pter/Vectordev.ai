@@ -1264,6 +1264,43 @@ const approve = (permission: string, always: string[]) =>
   })
 
 it.instance(
+  "ask - sensitive permissions cannot be approved permanently",
+  () =>
+    Effect.forEach(["browser_sensitive", "computer_sensitive"], (permission, index) =>
+      Effect.gen(function* () {
+        const sessionID = SessionID.make(`session_sensitive_${index}`)
+        const first = yield* ask({
+          id: PermissionV1.ID.make(`per_sensitive_${index}_first`),
+          sessionID,
+          permission,
+          patterns: ["*"],
+          metadata: {},
+          always: ["*"],
+          ruleset: [],
+        }).pipe(Effect.forkScoped)
+        const [pending] = yield* waitForPending(1)
+        yield* reply({ requestID: pending.id, reply: "always" })
+        yield* Fiber.join(first)
+
+        const second = yield* ask({
+          id: PermissionV1.ID.make(`per_sensitive_${index}_second`),
+          sessionID,
+          permission,
+          patterns: ["*"],
+          metadata: {},
+          always: ["*"],
+          ruleset: [],
+        }).pipe(Effect.forkScoped)
+        const [next] = yield* waitForPending(1)
+        expect(next.id).toBe(PermissionV1.ID.make(`per_sensitive_${index}_second`))
+        yield* reply({ requestID: next.id, reply: "reject" })
+        expect(yield* Fiber.join(second).pipe(Effect.flip)).toBeInstanceOf(PermissionV1.RejectedError)
+      }),
+    ),
+  { git: true },
+)
+
+it.instance(
   "ask - an always approval does not override the session's deny",
   () =>
     Effect.gen(function* () {

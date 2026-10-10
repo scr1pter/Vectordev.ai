@@ -1,4 +1,5 @@
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
+import { PtyTicket } from "@vectordevai/core/pty/ticket"
 import type { Target } from "@/control-plane/types"
 import { Workspace } from "@/control-plane/workspace"
 import { WorkspaceAdapterRuntime } from "@/control-plane/workspace-adapter-runtime"
@@ -17,6 +18,8 @@ import { outdatedDirectoryHeader, OUTDATED_CLIENT_MESSAGE } from "@vectordevai/s
 import {
   allowsSession,
   allowsWorkspace,
+  guestWorkspaceDirectory,
+  type Principal,
   RequestPrincipal,
 } from "@vectordevai/protocol/middleware/authorization"
 
@@ -44,6 +47,7 @@ type RequestPlan = Data.TaggedEnum<{
     readonly target: RemoteTarget
     readonly url: URL
     readonly sessionID?: string
+    readonly sessionDirectory?: string
   }
 }>
 const RequestPlan = Data.taggedEnum<RequestPlan>()
@@ -160,12 +164,24 @@ function planWorkspaceRequest(
   request: HttpServerRequest.HttpServerRequest,
   url: URL,
   workspace: Workspace.Info,
-  sessionID?: string,
+  session?: Session.Info,
 ): Effect.Effect<RequestPlan, never, Workspace.Service> {
   return Effect.gen(function* () {
     const target = yield* resolveTarget(workspace)
-    if (target.type === "remote") return RequestPlan.Remote({ request, workspace, target, url, sessionID })
-    return RequestPlan.Local({ directory: target.directory, workspaceID: workspace.id, sessionID })
+    if (target.type === "remote")
+      return RequestPlan.Remote({
+        request,
+        workspace,
+        target,
+        url,
+        sessionID: session?.id,
+        sessionDirectory: session?.directory,
+      })
+    return RequestPlan.Local({
+      directory: session?.directory ?? target.directory,
+      workspaceID: workspace.id,
+      sessionID: session?.id,
+    })
   })
 }
 
@@ -188,7 +204,7 @@ function planRequest(
     }
 
     if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, url)) {
-      return yield* planWorkspaceRequest(request, url, workspace, session?.id)
+      return yield* planWorkspaceRequest(request, url, workspace, session)
     }
 
     return RequestPlan.Local({
@@ -199,20 +215,68 @@ function planRequest(
   })
 }
 
+function invalidPtyTicket() {
+  return HttpServerResponse.jsonUnsafe(
+    { _tag: "ForbiddenError", message: "Invalid PTY connect ticket" },
+    { status: 403 },
+  )
+}
+
+function routePtyTicket<E>(
+  client: HttpClient.HttpClient,
+  effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
+  plan: RequestPlan,
+  principal: Extract<Principal, { readonly kind: "pty-ticket" }>,
+) {
+  return Effect.gen(function* () {
+    const tickets = yield* PtyTicket.Service
+    return yield* RequestPlan.$match(plan, {
+      InvalidWorkspace: () => Effect.succeed(invalidPtyTicket()),
+      MissingWorkspace: () => Effect.succeed(invalidPtyTicket()),
+      Remote: ({ request, workspace, target, url }) => proxyRemote(client, request, workspace, target, url),
+      Local: ({ directory, workspaceID }) =>
+        Effect.gen(function* () {
+          const valid = yield* tickets.consume({
+            ptyID: principal.ptyID,
+            ticket: principal.ticket,
+            directory,
+            workspaceID,
+          })
+          if (!valid) return invalidPtyTicket()
+          return yield* effect.pipe(
+            Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory, workspaceID })),
+          )
+        }),
+    })
+  })
+}
+
 function routeWorkspace<E>(
   client: HttpClient.HttpClient,
   effect: Effect.Effect<HttpServerResponse.HttpServerResponse, E, WorkspaceRouteContext>,
   plan: RequestPlan,
-): Effect.Effect<HttpServerResponse.HttpServerResponse, E, Socket.WebSocketConstructor | Workspace.Service> {
+): Effect.Effect<
+  HttpServerResponse.HttpServerResponse,
+  E,
+  PtyTicket.Service | Socket.WebSocketConstructor | Workspace.Service
+> {
   return Effect.gen(function* () {
     const principal = yield* RequestPrincipal
+    if (principal.kind === "pty-ticket") return yield* routePtyTicket(client, effect, plan, principal)
     const allowed = RequestPlan.$match(plan, {
       InvalidWorkspace: () => true,
       MissingWorkspace: () => principal.kind === "owner",
-      Remote: ({ workspace, sessionID }) =>
-        allowsWorkspace(principal, workspace.id) || (sessionID !== undefined && allowsSession(principal, sessionID)),
-      Local: ({ workspaceID, sessionID }) =>
-        allowsWorkspace(principal, workspaceID) || (sessionID !== undefined && allowsSession(principal, sessionID)),
+      Remote: ({ workspace, sessionID, sessionDirectory }) =>
+        sessionID === undefined
+          ? allowsWorkspace(principal, workspace.id)
+          : allowsSession(principal, sessionID) ||
+            guestWorkspaceDirectory(principal, workspace.id) === sessionDirectory,
+      Local: ({ directory, workspaceID, sessionID }) => {
+        if (principal.kind === "owner") return true
+        if (sessionID !== undefined)
+          return allowsSession(principal, sessionID) || guestWorkspaceDirectory(principal, workspaceID) === directory
+        return guestWorkspaceDirectory(principal, workspaceID) !== undefined
+      },
     })
     if (!allowed)
       return HttpServerResponse.jsonUnsafe(
@@ -233,8 +297,19 @@ function routeWorkspace<E>(
         ),
       MissingWorkspace: ({ workspaceID }) => Effect.succeed(missingWorkspaceResponse(workspaceID)),
       Remote: ({ request, workspace, target, url }) => proxyRemote(client, request, workspace, target, url),
-      Local: ({ directory, workspaceID }) =>
-        effect.pipe(Effect.provideService(WorkspaceRouteContext, WorkspaceRouteContext.of({ directory, workspaceID }))),
+      Local: ({ directory, workspaceID, sessionID }) =>
+        effect.pipe(
+          Effect.provideService(
+            WorkspaceRouteContext,
+            WorkspaceRouteContext.of({
+              directory:
+                principal.kind === "guest" && (sessionID === undefined || !allowsSession(principal, sessionID))
+                  ? guestWorkspaceDirectory(principal, workspaceID)!
+                  : directory,
+              workspaceID,
+            }),
+          ),
+        ),
     })
   })
 }
@@ -247,6 +322,7 @@ function routeHttpApiWorkspace<E>(
   E,
   | Session.Service
   | Workspace.Service
+  | PtyTicket.Service
   | HttpServerRequest.HttpServerRequest
   | Socket.WebSocketConstructor
 > {
@@ -280,10 +356,12 @@ export const workspaceRoutingLayer = Layer.effect(
     const makeWebSocket = yield* Socket.WebSocketConstructor
     const workspace = yield* Workspace.Service
     const client = yield* HttpClient.HttpClient
+    const tickets = yield* PtyTicket.Service
     return WorkspaceRoutingMiddleware.of((effect) =>
       routeHttpApiWorkspace(client, effect).pipe(
         Effect.provideService(Socket.WebSocketConstructor, makeWebSocket),
         Effect.provideService(Workspace.Service, workspace),
+        Effect.provideService(PtyTicket.Service, tickets),
       ),
     )
   }),

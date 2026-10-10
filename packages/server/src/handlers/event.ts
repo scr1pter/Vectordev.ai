@@ -7,7 +7,7 @@ import * as Sse from "effect/unstable/encoding/Sse"
 import { Api } from "../api"
 import {
   allowsSession,
-  allowsWorkspace,
+  guestWorkspaceDirectory,
   RequestPrincipal,
 } from "@vectordevai/protocol/middleware/authorization"
 
@@ -40,11 +40,12 @@ export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers)
             return Stream.make(connected).pipe(
               Stream.concat(
                 live.pipe(
-                  Stream.filter(
-                    (event) =>
-                      allowsSession(principal, event.durable?.aggregateID ?? "") ||
-                      allowsWorkspace(principal, event.location?.workspaceID),
-                  ),
+                  Stream.filter((event) => {
+                    if (allowsSession(principal, event.durable?.aggregateID ?? "")) return true
+                    if (principal.kind === "owner") return true
+                    const directory = guestWorkspaceDirectory(principal, event.location?.workspaceID)
+                    return directory !== undefined && directory === event.location?.directory
+                  }),
                 ),
               ),
             )

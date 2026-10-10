@@ -17,14 +17,53 @@ function fixture(reply: (index: number) => Response) {
   )
   return { client, requests, url: "https://1.1.1.1/" }
 }
-const execute = (client: HttpClient.HttpClient, url: string) =>
+const execute = (client: HttpClient.HttpClient, url: string, options?: WebFetchRequest.Options) =>
   Effect.gen(function* () {
     const response = yield* WebFetchRequest.execute(
       client,
       HttpClientRequest.get(url).pipe(HttpClientRequest.setHeader("Accept", "text/plain")),
+      options,
     )
     return yield* response.text
   }).pipe(Effect.scoped)
+
+test("authorization happens before DNS resolution", async () => {
+  const sample = fixture(() => new Response("unexpected"))
+  let authorizations = 0
+  const error = await Effect.runPromise(
+    Effect.flip(
+      execute(sample.client, "https://permission-denied-before-dns.invalid/", {
+        authorize: () => {
+          authorizations++
+          return Effect.fail(new Error("permission denied before DNS"))
+        },
+      }),
+    ),
+  )
+  expect(error).toBeInstanceOf(Error)
+  if (!(error instanceof Error)) throw new Error("Expected authorization error")
+  expect(error.message).toBe("permission denied before DNS")
+  expect(authorizations).toBe(1)
+  expect(sample.requests).toHaveLength(0)
+})
+
+test("rejects a private address returned by DNS", async () => {
+  const error = await Effect.runPromise(
+    Effect.flip(
+      WebFetchRequest.resolvePublicDestination("https://rebinding.example/", () =>
+        Promise.resolve([{ address: "127.0.0.1", family: 4 }]),
+      ),
+    ),
+  )
+  expect(error.message).toBe("Private network destinations are not allowed")
+})
+
+test("rejects URL credentials", async () => {
+  const error = await Effect.runPromise(
+    Effect.flip(WebFetchRequest.resolvePublicDestination("https://user:secret@example.com/")),
+  )
+  expect(error.message).toBe("URL credentials are not allowed")
+})
 
 test("a challenge with an unfinished body is aborted before one successful retry", async () => {
   const sample = fixture((index) =>

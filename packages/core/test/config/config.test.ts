@@ -9,13 +9,13 @@ import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { ConfigMigrateV1 } from "@vectordevai/core/v1/config/migrate"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
-import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
 import { Location } from "@vectordevai/core/location"
 import { Policy } from "@vectordevai/core/policy"
 import { Teams } from "@vectordevai/core/teams"
 import { Project } from "@vectordevai/core/project"
 import { AbsolutePath } from "@vectordevai/core/schema"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { location } from "../fixture/location"
 import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
@@ -825,6 +825,61 @@ describe("Config", () => {
     ),
   )
 
+  it.live("only accepts authority-narrowing policy from an untrusted project", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const root = path.join(tmp.path, "repo")
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(global, { recursive: true })
+            await fs.mkdir(root, { recursive: true })
+            await fs.writeFile(
+              path.join(root, "vector.json"),
+              JSON.stringify({
+                experimental: {
+                  policies: [
+                    { effect: "allow", action: "provider.use", resource: "openai" },
+                    { effect: "deny", action: "provider.use", resource: "anthropic" },
+                  ],
+                },
+              }),
+            )
+          })
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const policy = yield* Policy.Service
+
+            expect((yield* config.trust!()).trusted).toBe(false)
+            expect(yield* policy.evaluate("provider.use", "openai", "allow")).toBe("deny")
+            expect(yield* policy.evaluate("provider.use", "anthropic", "allow")).toBe("deny")
+          }).pipe(
+            Effect.provide(
+              testLayer(root, global, root, undefined, {
+                enabled: true,
+                orgs: [],
+                active: {
+                  id: "12345678-1234-4234-8234-123456789012",
+                  name: "Fixture team",
+                  revision: 1,
+                  config: {
+                    experimental: {
+                      policies: [{ effect: "deny", action: "provider.use", resource: "openai" }],
+                    },
+                  },
+                },
+              }),
+            ),
+          )
+        })
+      }),
+    ),
+  )
+
   it.live("loads global, ancestor, and .vector configuration up to the project boundary", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
@@ -929,6 +984,67 @@ describe("Config", () => {
           }).pipe(Effect.provide(testLayer(project, global, project)))
         })
       }),
+    ),
+  )
+
+  it.live("fails closed when approved project config changes before loading", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const configFile = path.join(tmp.path, "vector.json")
+          yield* Effect.promise(() => fs.writeFile(configFile, JSON.stringify({ plugins: ["approved@1.0.0"] })))
+          const approved = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
+          yield* Effect.promise(() => WorkspaceTrust.approve(path.join(tmp.path, "state"), approved))
+          yield* Effect.promise(() => fs.writeFile(configFile, JSON.stringify({ plugins: ["changed@1.0.0"] })))
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const project = (yield* config.entries()).find(
+              (entry): entry is Config.Document => entry.type === "document" && entry.path === configFile,
+            )!
+            expect(config.executable?.(project)).toBe(false)
+            expect((yield* config.trust!()).trusted).toBe(false)
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
+    ),
+  )
+
+  it.live("binds trusted project executable paths to approved bytes", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const configFile = path.join(tmp.path, "vector.json")
+          const shell = path.join(tmp.path, "shell")
+          yield* Effect.promise(() =>
+            Promise.all([
+              fs.writeFile(configFile, JSON.stringify({ shell: "./shell" })),
+              fs.writeFile(shell, "approved\n"),
+            ]),
+          )
+          const approved = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
+          yield* Effect.promise(() => WorkspaceTrust.approve(path.join(tmp.path, "state"), approved))
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const project = (yield* config.entries()).find(
+              (entry): entry is Config.Document => entry.type === "document" && entry.path === configFile,
+            )!
+            expect(config.executable?.(project)).toBe(true)
+            expect(project.info.shell).not.toBe(shell)
+            expect(yield* Effect.promise(() => fs.readFile(project.info.shell!, "utf8"))).toBe("approved\n")
+
+            yield* Effect.promise(() => fs.writeFile(shell, "changed\n"))
+            expect(yield* Effect.promise(() => fs.readFile(project.info.shell!, "utf8"))).toBe("approved\n")
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
     ),
   )
 })

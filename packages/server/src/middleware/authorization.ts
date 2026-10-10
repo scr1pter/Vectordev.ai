@@ -2,7 +2,7 @@ import { ServerAuth } from "../auth"
 import { ForbiddenError, UnauthorizedError } from "@vectordevai/protocol/errors"
 import { Authorization, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 export { Authorization } from "@vectordevai/protocol/middleware/authorization"
-import { hasPtyConnectTicketURL } from "@vectordevai/protocol/groups/pty"
+import { ptyConnectTicket } from "@vectordevai/protocol/groups/pty"
 import { Effect, Encoding, Layer, Redacted } from "effect"
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 
@@ -51,8 +51,15 @@ export const authorizationLayer = Layer.effect(
         if (url.searchParams.has("auth_token")) return yield* unauthorized(emptyCredential(), config)
         // Browsers cannot set headers on WebSocket upgrades, so a ticketed PTY connect skips
         // credential checks here; the connect handler consumes and validates the ticket.
-        if (hasPtyConnectTicketURL(url))
-          return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
+        const connection = ptyConnectTicket(url)
+        if (connection)
+          return yield* effect.pipe(
+            Effect.provideService(RequestPrincipal, {
+              kind: "pty-ticket",
+              username: config.username,
+              ...connection,
+            }),
+          )
         if (!ServerAuth.required(config))
           return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
         const credential = yield* credentialFromRequest(request)
@@ -60,9 +67,7 @@ export const authorizationLayer = Layer.effect(
         if (!identity) return yield* unauthorized(credential, config)
         if (identity === "guest" && ServerAuth.isOwnerOnlyRequest(request.method, url.pathname))
           return yield* new ForbiddenError({ message: "This operation requires the server owner" })
-        return yield* effect.pipe(
-          Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)),
-        )
+        return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
       }),
     )
   }),
