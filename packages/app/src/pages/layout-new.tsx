@@ -2966,6 +2966,8 @@ export default function NewLayout(props: ParentProps) {
               setOnboardingOpen(true)
               const best = bestOwnFreeModel(byokProviders.connected().flatMap((item) => Object.values(item.models)))
               if (!best) return language.t("freeModels.start.unavailable")
+              // The composer picks the most recent model first, so a model used before this sign-in never wins.
+              byokModels.recent.push({ providerID: "openrouter", modelID: best.id })
               return language.t("freeModels.start.readyForProject", { model: freeModelName(best) })
             }}
           />
