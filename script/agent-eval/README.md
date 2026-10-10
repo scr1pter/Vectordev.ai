@@ -1,8 +1,8 @@
 # Agent eval harness
 
-The repository has hundreds of test files that verify Vector's _code_. This
-directory is the only thing that measures Vector's _agent_ — whether the thing
-we ship gets better or worse between releases.
+This directory contains public fixture smoke tests and offline runtime
+measurements. They help detect regressions; they do not establish that one
+coding agent is better than another.
 
 It works by building small throwaway repositories on disk, pointing a coding
 agent at one of them with a prompt, and then checking objectively whether the
@@ -20,7 +20,7 @@ bun script/agent-eval/run.ts --compare vector,claude-code,codex,cursor --tasks a
 | Flag              | Meaning                                                            |
 | ----------------- | ------------------------------------------------------------------ |
 | `--runtime <id>`  | `vector`, `claude-code`, `codex`, or `cursor` (default `vector`)   |
-| `--compare <ids>` | Comma-separated runtimes, run in sequence and printed side by side |
+| `--compare <ids>` | Comma-separated runtimes, interleaved per task with rotating order |
 | `--tasks <spec>`  | `all` (default) or a comma-separated list of task ids              |
 | `--model <id>`    | Passed through to the runtime's own `--model` flag                 |
 | `--out <path>`    | Where to write the JSON report (default: a file in `$TMPDIR`)      |
@@ -65,6 +65,9 @@ sees it, so the pass bar cannot drift to fit a result.
 Every task nominates **protected files** — usually the tests that define
 success. Changing one invalidates the run outright, because deleting the test is
 otherwise the cheapest way to make a suite pass.
+Fixture configuration is also protected. Checks run in an evaluator-owned
+grading tree rebuilt from pristine configuration and tests, with the agent's
+source edits and ordinary helper files copied in. Symlinks are rejected.
 
 ## How a task is scored
 
@@ -74,11 +77,16 @@ check instead of the harness guessing one. For these fixtures it is always
 `bun test`. Some tasks add content assertions (for example: after the rename,
 the old symbol must not appear anywhere in `src/`).
 
-A task **passes** when all three hold:
+A task **passes** when all four hold:
 
 1. the check exits 0,
 2. no protected file was modified,
 3. every content assertion holds.
+4. the agent exits successfully, emits a terminal completion event, and does not
+   time out or report a runtime error.
+
+The report records artifact correctness separately from agent completion, and
+records agent, validation, and total elapsed time separately.
 
 Diff surface comes from git: the harness commits the pristine fixture, and after
 the run stages everything and diffs against that baseline. That survives an
@@ -100,6 +108,8 @@ Mutation scoring only applies to `test-writing-parse-duration`. Once the agent's
 tests are green, the harness breaks the implementation four different ways, one
 at a time, and re-runs the suite. Each mutation the suite fails to notice costs
 a quarter of the score. Without this, `expect(true).toBe(true)` would score 100.
+Timeouts, missing commands, and import or syntax errors do not count as caught
+mutations; Bun must report an actual failed test.
 
 Scoring lives in `score.ts` and is pure — no disk, no processes — so a recorded
 run can be re-scored with different weights without spending another model call.
@@ -107,7 +117,7 @@ run can be re-scored with different weights without spending another model call.
 
 ## What a run cost
 
-Every run also records what it spent, read from the runtime's own JSON event
+Every run records available cost and usage metadata from the runtime's JSON event
 stream by `meter.ts` (pure, like `score.ts`, and covered by `meter.test.ts`):
 cost in USD, provider requests, and tokens split into uncached input, cache
 reads, cache writes, output, and the reasoning part of output.
@@ -128,32 +138,59 @@ as unknown, never as zero.
 
 Compare cost only between runs on the same model: a cheaper model is not a
 more efficient agent.
+Vector's prices are catalog estimates, and other runtime reports are not billing
+invoices. Missing or invalid prices keep total cost unknown; the known subtotal
+is reported separately. Incomplete token coverage also keeps aggregate tokens
+unknown. The live runner records `budgetEnforced: false`; it does not implement
+a hard dollar cap and must not be used as proof that an API budget was enforced.
 
 ## Request cost without a model
 
-`footprint.ts` measures what Vector sends, with no API key, no network and no
-model variance. It runs the real `vector run` against a local fake model server
-that plays a fixed script of tool calls on one of the fixtures, records every
-request, and prices each one under Anthropic's prompt-caching rules (Claude
-Sonnet 4.5 list prices, 5-minute cache writes, breakpoints as the request
-places them, nothing under 1,024 tokens cached).
+`footprint.ts` runs real Vector, Claude Code, or Codex processes against a
+loopback fake model server. It uses predetermined tool calls and makes no paid
+model requests. The report records `actualSpendUsd: 0` and
+`qualityMeasured: false`: successful scripted edits verify runtime execution,
+not coding intelligence. Its protocol model names are labels; no model runs.
 
 ```
 bun script/agent-eval/footprint.ts
 bun script/agent-eval/footprint.ts --scenario delegate-explore --out report.json
+bun script/agent-eval/footprint.ts --runtime vector,codex --repeat 3 --out /tmp/footprint.json
+bun script/agent-eval/footprint.ts --runtime vector,codex --codex /path/to/codex --repeat 3
 ```
 
 Per request it reports the system prompt, tool definitions and messages, the
 input read from and written to the cache, and the cost; per scenario the share
 of input read from the cache, the fixed tokens every request pays, the cost with
 and without caching, and the size of each tool definition for the main agent and
-for a subagent. The same build always gives the same numbers, so run it before
-and after a change to see exactly what the change saved. Tokens are estimated as
-characters / 4, the same way everywhere.
+for a subagent. Tokens are estimates using characters / 4, not provider token
+counts. Estimated costs use hypothetical Sonnet rates and separate Anthropic
+explicit-cache and Responses implicit-cache assumptions; compare the common
+no-cache estimate separately. Reported wire bytes, elapsed time, tool calls, and
+diff size are runtime observations. Repeated runs expose timing variance.
+
+A run enters comparisons only after all scripted steps finish, the process exits
+successfully, evaluator tests pass, and protected and unexpected files are
+unchanged. Current Responses streams include argument and text deltas, and the
+fake server adapts patches to the CLI's advertised tool schema. Unsupported tools
+or protocols invalidate the run. Runtime versions and execution order are saved.
 
 Scenarios: `solo-fix` (run the tests, read, edit, re-run), `delegate-explore`
-(an explore subagent finds the bug, the parent fixes it) and `long-loop` (a
-12-step investigation, to show how the cache holds up as a loop grows).
+(an explore subagent finds the bug, the parent fixes it), `delegate-general`
+(a general subagent fixes it), and `long-loop` (a 12-step investigation and fix).
+The delegation scenarios flatten their work for Codex in this harness, so they
+are labeled different workflows and excluded from paired winner comparisons.
+
+To measure large tool-output handling through the real Core service:
+
+```
+bun script/agent-eval/output-bound.ts --out /tmp/output-bound.json
+```
+
+This runs normal and oversized ASCII/Unicode cases in isolated child processes,
+records medians after warmup, verifies stored contents and preview hashes, and
+reports total process peak RSS. Compare previews as well as latency after changes;
+process RSS is not an isolated allocation measurement.
 
 ## Unavailable is not zero
 
@@ -200,6 +237,9 @@ Be honest about the ceiling here. This harness does **not** measure:
 
 Nine tasks that run honestly are worth more than fifty that are hand-waved, but
 this set is still a smoke test for agent quality, not a benchmark of real-repository work.
+The fixtures, objective checks, and mutations are public. They are a development
+suite, not an independent holdout. A broad quality claim needs unseen repository
+tasks, a pinned shared model, and repeatable grading in addition to this suite.
 
 ## Reading results responsibly
 

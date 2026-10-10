@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // Offline request-cost benchmark. Runs a real agent (Vector's `vector run`, the Claude Code CLI or the Codex CLI)
 // against a local fake model server (Anthropic Messages, or OpenAI Responses for Codex) that plays a fixed script of
-// tool calls, records every request the agent sends, and prices each one under the provider's prompt-caching rules. No API key, no network and no model variance: the same
-// build always produces the same numbers, and two runtimes doing the same steps can be compared exactly. It measures
+// tool calls, records every request the agent sends, and estimates request sizes and hypothetical cost. No paid API
+// calls and no model variance. Timing and request envelopes still vary by machine and CLI release. It measures
 // what each runtime sends, not how well a model would do with it; the live harness in run.ts measures that.
 //
 //   bun script/agent-eval/footprint.ts                              Vector, every scenario
@@ -11,10 +11,11 @@
 //   bun script/agent-eval/footprint.ts --scenario solo-fix --out report.json
 
 import { spawn, spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { taskById } from "./tasks"
+import { codexCall, completedRun, responseStream, type Call } from "./footprint-protocol"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 const ENGINE = join(REPO_ROOT, "packages", "engine", "src", "index.ts")
@@ -120,22 +121,26 @@ const SCENARIOS: Scenario[] = [
       { kind: "list", pattern: "**/*.ts" },
       { kind: "read", path: "README.md" },
       { kind: "search", pattern: "export function" },
-      { kind: "read", path: "src/args.ts" },
+      { kind: "read", path: "src/parse-args.ts" },
       { kind: "read", path: "src/logger.ts" },
       { kind: "read", path: "src/config.ts" },
       { kind: "search", pattern: "TODO" },
-      { kind: "bash", command: "git status --short", description: "Check the working tree" },
+      {
+        kind: "edit",
+        path: "src/parse-args.ts",
+        from: "    const next = argv[index + 1]",
+        to: '    const separator = token.indexOf("=")\n    if (separator !== -1) {\n      flags[token.slice(2, separator)] = token.slice(separator + 1)\n      continue\n    }\n    const next = argv[index + 1]',
+      },
       TEST,
       { kind: "list", pattern: "test/**/*.ts" },
-      { kind: "answer", text: "Investigation finished; the failing case is in src/args.ts." },
+      { kind: "answer", text: "Fixed --key=value handling in src/parse-args.ts; the suite passes." },
     ],
   },
 ]
 
-type Call = { name: string; input: Record<string, unknown> } | { name: string; custom: string } | { text: string }
-
-// The steps a runtime plays. Codex has no subagents, so it does a subagent's steps itself: the same work, without
-// the hand-off and without the subagent's report.
+// This harness currently flattens Codex delegation into parent steps. It does
+// not exercise Codex's native delegation; these scenarios are explicitly
+// different workflows and cannot establish a comparative winner.
 function stepsFor(runtime: Runtime, scenario: Scenario) {
   if (runtime !== "codex") return scenario.steps
   return scenario.steps.filter((step) => step.kind !== "delegate" && !(step.kind === "answer" && step.sub))
@@ -201,7 +206,7 @@ function toolCall(runtime: Runtime, step: Step, dir: string): Call {
   }
 }
 
-type Recorded = { body: Record<string, unknown>; output: string }
+type Recorded = { body: Record<string, unknown>; output: string; toolCall: boolean }
 
 type Block = { key: string; tokens: number; breakpoint: boolean }
 
@@ -239,46 +244,156 @@ if (unknown.length > 0) {
 }
 
 const reports: Array<Record<string, unknown>> = []
+const repeat = Number(flags.repeat ?? 1)
+if (!Number.isInteger(repeat) || repeat < 1 || repeat > 20) {
+  process.stderr.write("--repeat must be an integer between 1 and 20\n")
+  process.exit(2)
+}
+if (!Number.isFinite(Number(flags.timeout ?? 240)) || Number(flags.timeout ?? 240) <= 0) {
+  process.stderr.write("--timeout must be a positive number of seconds\n")
+  process.exit(2)
+}
+const startedAt = new Date().toISOString()
+const sourceBefore = await sourceProvenance()
 for (const scenario of scenarios) {
-  for (const runtime of runtimes as Runtime[]) {
-    process.stderr.write(`\n=== ${runtime} · ${scenario.id}: ${scenario.title} ===\n`)
-    const cli = runtime === "claude-code" ? "claude" : runtime === "codex" ? CODEX : undefined
-    if (cli && spawnSync(cli, ["--version"]).status !== 0) {
-      process.stderr.write(`  unavailable: the ${cli} CLI was not found\n`)
-      reports.push({ scenario: scenario.id, runtime, unavailable: true })
-      continue
+  for (const attempt of Array.from({ length: repeat }, (_, index) => index + 1)) {
+    // Alternate first mover to reduce warm-cache and process-order bias.
+    const order = attempt % 2 === 1 ? runtimes : runtimes.toReversed()
+    for (const [position, runtime] of (order as Runtime[]).entries()) {
+      process.stderr.write(`\n=== ${runtime} · ${scenario.id}: ${scenario.title} ===\n`)
+      const cli = runtime === "claude-code" ? "claude" : runtime === "codex" ? CODEX : undefined
+      if (cli && spawnSync(cli, ["--version"]).status !== 0) {
+        process.stderr.write(`  unavailable: the ${cli} CLI was not found\n`)
+        reports.push({
+          scenario: scenario.id,
+          runtime,
+          attempt,
+          order: position + 1,
+          unavailable: true,
+          comparable: false,
+        })
+        continue
+      }
+      const recorded = await runScenario(scenario, runtime)
+      if ("error" in recorded) {
+        process.stderr.write(`  ${recorded.unavailable ? "unavailable" : "failed"}: ${recorded.error}\n`)
+        reports.push({
+          scenario: scenario.id,
+          runtime,
+          attempt,
+          order: position + 1,
+          error: recorded.error,
+          unavailable: recorded.unavailable,
+          comparable: false,
+        })
+        continue
+      }
+      const costs = price(recorded.requests)
+      const definitions = toolDefinitions(recorded.requests)
+      if (!recorded.complete)
+        process.stderr.write("  invalid run: completion or objective validation failed; excluded from comparison\n")
+      process.stdout.write(
+        `\n${runtime} · ${scenario.id} — ${scenario.title}\n${render(costs)}\n${renderDefinitions(definitions)}\n`,
+      )
+      reports.push({
+        scenario: scenario.id,
+        runtime,
+        attempt,
+        order: position + 1,
+        workflow: scenario.id.startsWith("delegate-") ? "different-delegation-workflow" : "paired-script",
+        comparable: recorded.complete && !scenario.id.startsWith("delegate-"),
+        complete: recorded.complete,
+        exitCode: recorded.exitCode,
+        unplayed: recorded.unplayed,
+        elapsedMs: recorded.elapsedMs,
+        validation: recorded.validation,
+        diff: recorded.diff,
+        diagnostics: recorded.diagnostics,
+        protocolErrors: recorded.protocolErrors,
+        scriptedToolCalls: stepsFor(runtime, scenario).filter((step) => step.kind !== "answer").length,
+        toolCallsSent: recorded.requests.filter((request) => request.toolCall).length,
+        wireInputBytes: recorded.requests.reduce(
+          (total, request) => total + Buffer.byteLength(JSON.stringify(request.body), "utf8"),
+          0,
+        ),
+        requests: costs,
+        totals: totals(costs),
+        toolDefinitions: definitions,
+      })
     }
-    const recorded = await runScenario(scenario, runtime)
-    if ("error" in recorded) {
-      process.stderr.write(`  failed: ${recorded.error}\n`)
-      reports.push({ scenario: scenario.id, runtime, error: recorded.error })
-      continue
-    }
-    const costs = price(recorded.requests)
-    const definitions = toolDefinitions(recorded.requests)
-    process.stdout.write(
-      `\n${runtime} · ${scenario.id} — ${scenario.title}\n${render(costs)}\n${renderDefinitions(definitions)}\n`,
-    )
-    reports.push({
-      scenario: scenario.id,
-      runtime,
-      exitCode: recorded.exitCode,
-      unplayed: recorded.unplayed,
-      requests: costs,
-      totals: totals(costs),
-      toolDefinitions: definitions,
-    })
   }
 }
 if (runtimes.length > 1) process.stdout.write(`\nSide by side\n${renderComparison(reports)}\n`)
 
 const out = flags.out ?? join(tmpdir(), `vector-footprint-${Date.now()}.json`)
-await writeFile(out, JSON.stringify({ model: MODEL, price: PRICE, scenarios: reports }, null, 2) + "\n")
+const sourceAfter = await sourceProvenance()
+await writeFile(
+  out,
+  JSON.stringify(
+    {
+      version: 2,
+      mode: "offline-scripted-overhead",
+      actualSpendUsd: 0,
+      qualityMeasured: false,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      platform: `${process.platform}-${process.arch}`,
+      bun: Bun.version,
+      revision: sourceBefore.revision,
+      source: {
+        before: sourceBefore,
+        after: sourceAfter,
+        productionSourceStable: sourceBefore.production.workingSha256 === sourceAfter.production.workingSha256,
+      },
+      codex: runtimes.includes("codex")
+        ? spawnSync(CODEX, ["--version"], { encoding: "utf8" }).stdout?.trim()
+        : undefined,
+      model: {
+        vector: MODEL,
+        codex: CODEX_MODEL,
+        note: "Protocol labels only; no model ran. Identical scripted steps, different API envelopes.",
+      },
+      estimates: {
+        tokenizer: "ceil(characters/4)",
+        price: PRICE,
+        note: "Hypothetical Sonnet rates; Anthropic explicit and Responses implicit cache simulations are different assumptions, not measured provider bills.",
+      },
+      repetitions: repeat,
+      comparisons: scenarios.flatMap((scenario) =>
+        Array.from({ length: repeat }, (_, index) => {
+          const paired = reports.filter((report) => report.scenario === scenario.id && report.attempt === index + 1)
+          return {
+            scenario: scenario.id,
+            attempt: index + 1,
+            comparable:
+              runtimes.length > 1 && paired.length === runtimes.length && paired.every((report) => report.comparable),
+            reason: scenario.id.startsWith("delegate-")
+              ? "different delegation workflows"
+              : paired.some((report) => report.unavailable)
+                ? "runtime unavailable"
+                : paired.some((report) => !report.complete)
+                  ? "invalid or unfinished run"
+                  : runtimes.length < 2
+                    ? "one runtime measured"
+                    : "validated same scripted steps",
+          }
+        }),
+      ),
+      scenarios: reports,
+    },
+    null,
+    2,
+  ) + "\n",
+)
 process.stdout.write(`\nJSON report: ${out}\n`)
+if (
+  reports.some((report) => (report.error && !report.unavailable) || (report.complete === false && !report.unavailable))
+)
+  process.exitCode = 1
 
 async function runScenario(scenario: Scenario, runtime: Runtime) {
   const task = taskById(scenario.task)
-  if (!task) return { error: `unknown task ${scenario.task}` }
+  if (!task) return { error: `unknown task ${scenario.task}`, unavailable: false }
   const root = await mkdtemp(join(tmpdir(), "vector-footprint-"))
   const dir = join(root, "repo")
   const home = join(root, "home")
@@ -296,6 +411,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
 
   const calls = stepsFor(runtime, scenario).map((step) => toolCall(runtime, step, dir))
   const requests: Recorded[] = []
+  const protocolErrors: string[] = []
   let id = 0
   const server = Bun.serve({
     port: 0,
@@ -308,9 +424,21 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
       if (!url.pathname.endsWith("/messages") && !responses) return Response.json({ data: [] })
       const tools = Array.isArray(body.tools) ? body.tools : []
       // Requests without tools are side calls such as title generation; they do not advance the script.
-      const call: Call = tools.length === 0 ? { text: "Bench task" } : (calls.shift() ?? { text: "Done." })
+      const planned: Call = tools.length === 0 ? { text: "Bench task" } : (calls[0] ?? { text: "Done." })
+      const selected = responses ? Promise.resolve().then(() => codexCall(planned, tools)) : Promise.resolve(planned)
+      const call = await selected.catch((error: Error) => {
+        protocolErrors.push(error.message)
+        return undefined
+      })
+      if (!call)
+        return Response.json(
+          { error: { message: protocolErrors.at(-1), type: "invalid_request_error" } },
+          { status: 400 },
+        )
+      if (tools.length > 0) calls.shift()
       requests.push({
         body,
+        toolCall: !("text" in call),
         output: "custom" in call ? call.custom : "input" in call ? JSON.stringify(call.input) : call.text,
       })
       if (responses)
@@ -325,18 +453,93 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
     },
   })
   const base = `http://127.0.0.1:${server.port}`
+  const start = performance.now()
   const result =
     runtime === "vector"
-      ? await exec("bun", vectorArgs(task.prompt), dir, vectorEnv(home, base))
+      ? await exec("bun", vectorArgs(task.prompt), dir, vectorEnv(home, base), true)
       : runtime === "claude-code"
         ? await exec("claude", claudeArgs(task.prompt), dir, claudeEnv(home, base), true)
-        : await exec(CODEX, codexArgs(task.prompt), dir, await codexEnv(home, base), true)
+        : await exec(CODEX, codexArgs(task.prompt, base, home), dir, codexEnv(), true)
+  const elapsedMs = Math.round(performance.now() - start)
   server.stop(true)
+  const check = await exec(task.check.command, task.check.args, dir, { PATH: process.env.PATH ?? "" }, true)
+  const status = await exec("git", ["status", "--porcelain", "--untracked-files=all"], dir)
+  const changedFiles = status.output
+    .trimEnd()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.slice(3))
+  const numstat = await exec("git", ["diff", "--numstat", "HEAD"], dir)
+  const stats = numstat.output
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.split("\t"))
+  // Compare protected bytes directly: deletion, staged edits and untracked
+  // replacement files must not escape the objective check.
+  const protectedChanged = (
+    await Promise.all(
+      task.protectedFiles.map(async (path) => ({
+        path,
+        same: await readFile(join(dir, path), "utf8").then(
+          (content) => content === task.files[path],
+          () => false,
+        ),
+      })),
+    )
+  )
+    .filter((item) => !item.same)
+    .map((item) => item.path)
+  const unexpectedChanged = changedFiles.filter((path) => !task.expectedFiles.includes(path))
+  const validation = {
+    checkExitCode: check.exitCode,
+    checkOutput: check.output.slice(-4000),
+    protectedChanged,
+    unexpectedChanged,
+  }
+  const diff = {
+    changedFiles,
+    files: changedFiles.length,
+    additions: stats.reduce((total, row) => total + (Number(row[0]) || 0), 0),
+    deletions: stats.reduce((total, row) => total + (Number(row[1]) || 0), 0),
+  }
+  const complete = completedRun({ ...result, unplayed: calls.length, protocolErrors, ...validation })
+  if (flags.keep) await writeFile(join(root, "requests.json"), JSON.stringify(requests, null, 2))
   if (!flags.keep) await rm(root, { recursive: true, force: true })
   if (requests.length === 0)
-    return { error: `the agent sent no requests (exit ${result.exitCode}): ${result.output.slice(-800)}` }
+    return {
+      unavailable: runtime === "codex" && /failed to initialize.*Read-only file system/s.test(result.output),
+      error: `the agent sent no requests (exit ${result.exitCode}): ${result.output.slice(-800)}`,
+    }
   if (calls.length > 0) process.stderr.write(`  note: ${calls.length} scripted step(s) were never requested\n`)
-  return { exitCode: result.exitCode, requests, unplayed: calls.length }
+  return {
+    exitCode: result.exitCode,
+    requests,
+    unplayed: calls.length,
+    complete,
+    elapsedMs,
+    validation,
+    diff,
+    diagnostics: result.output.slice(-4000),
+    protocolErrors,
+  }
+}
+
+async function sourceProvenance() {
+  const path = "packages/core/src/tool-output-store.ts"
+  const revision = await exec("git", ["rev-parse", "HEAD"], REPO_ROOT)
+  const status = await exec("git", ["status", "--porcelain", "--untracked-files=all"], REPO_ROOT)
+  const head = await exec("git", ["show", `HEAD:${path}`], REPO_ROOT)
+  return {
+    revision: revision.output.trim(),
+    dirty: status.output.length > 0,
+    status: status.output.trimEnd().split("\n").filter(Boolean),
+    production: {
+      path,
+      workingSha256: new Bun.CryptoHasher("sha256").update(await readFile(join(REPO_ROOT, path))).digest("hex"),
+      headSha256: head.exitCode === 0 ? new Bun.CryptoHasher("sha256").update(head.output).digest("hex") : undefined,
+    },
+  }
 }
 
 function vectorArgs(prompt: string) {
@@ -388,8 +591,9 @@ function vectorEnv(home: string, base: string) {
     },
   }
   return {
+    PATH: process.env.PATH ?? "",
+    TERM: "dumb",
     VECTOR_TEST_HOME: home,
-    HOME: home,
     XDG_CONFIG_HOME: join(home, ".config"),
     XDG_DATA_HOME: join(home, ".local/share"),
     XDG_STATE_HOME: join(home, ".local/state"),
@@ -424,7 +628,7 @@ function claudeArgs(prompt: string) {
 function claudeEnv(home: string, base: string) {
   return {
     PATH: process.env.PATH ?? "",
-    HOME: home,
+    CLAUDE_CONFIG_DIR: join(home, ".claude"),
     TERM: "dumb",
     ANTHROPIC_BASE_URL: base,
     ANTHROPIC_API_KEY: "sk-bench",
@@ -434,71 +638,56 @@ function claudeEnv(home: string, base: string) {
   }
 }
 
-function codexArgs(prompt: string) {
-  return ["exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", prompt]
-}
-
-// Like Claude Code, Codex starts with an empty environment and a config that points it at the fake server only.
-async function codexEnv(home: string, base: string) {
-  await mkdir(join(home, ".codex"), { recursive: true })
-  await writeFile(
-    join(home, ".codex", "config.toml"),
-    [
-      `model = "${CODEX_MODEL}"`,
-      `model_provider = "bench"`,
-      `[model_providers.bench]`,
-      `name = "bench"`,
-      `base_url = "${base}/v1"`,
-      `env_key = "BENCH_API_KEY"`,
-      `wire_api = "responses"`,
-      "",
-    ].join("\n"),
-  )
-  return { PATH: process.env.PATH ?? "", HOME: home, TERM: "dumb", BENCH_API_KEY: "bench" }
-}
-
-// One streamed response in the OpenAI Responses SSE format.
-function responseStream(call: Call, n: number, model: string) {
-  const event = (name: string, data: Record<string, unknown>) =>
-    `event: ${name}\ndata: ${JSON.stringify({ type: name, ...data })}\n\n`
-  const item =
-    "custom" in call
-      ? { type: "custom_tool_call", id: `ctc_${n}`, call_id: `call_${n}`, name: call.name, input: call.custom }
-      : "input" in call
-        ? {
-            type: "function_call",
-            id: `fc_${n}`,
-            call_id: `call_${n}`,
-            name: call.name,
-            arguments: JSON.stringify(call.input),
-          }
-        : {
-            type: "message",
-            id: `msg_${n}`,
-            role: "assistant",
-            content: [{ type: "output_text", text: call.text, annotations: [] }],
-          }
-  const response = {
-    id: `resp_${n}`,
-    object: "response",
-    created_at: 0,
-    model,
-    status: "completed",
-    output: [{ ...item, status: "completed" }],
-    usage: {
-      input_tokens: 1,
-      input_tokens_details: { cached_tokens: 0 },
-      output_tokens: 1,
-      output_tokens_details: { reasoning_tokens: 0 },
-      total_tokens: 2,
-    },
-  }
+function codexArgs(prompt: string, base: string, home: string) {
   return [
-    event("response.created", { response: { ...response, status: "in_progress", output: [] } }),
-    event("response.output_item.added", { output_index: 0, item: { ...item, status: "in_progress" } }),
-    event("response.output_item.done", { output_index: 0, item: { ...item, status: "completed" } }),
-    event("response.completed", { response }),
-  ].join("")
+    "exec",
+    "--json",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--skip-git-repo-check",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "-c",
+    `model="${CODEX_MODEL}"`,
+    "-c",
+    'model_provider="bench"',
+    "-c",
+    'model_providers.bench.name="bench"',
+    "-c",
+    `model_providers.bench.base_url="${base}/v1"`,
+    "-c",
+    'model_providers.bench.env_key="BENCH_API_KEY"',
+    "-c",
+    'model_providers.bench.wire_api="responses"',
+    "-c",
+    "model_providers.bench.requires_openai_auth=false",
+    "-c",
+    "model_providers.bench.request_max_retries=0",
+    "-c",
+    "model_providers.bench.stream_max_retries=0",
+    "-c",
+    'web_search="disabled"',
+    "-c",
+    "analytics.enabled=false",
+    "-c",
+    "feedback.enabled=false",
+    "-c",
+    `sqlite_home=${JSON.stringify(join(home, "codex-state"))}`,
+    "-c",
+    `log_dir=${JSON.stringify(join(home, "codex-logs"))}`,
+    prompt,
+  ]
+}
+
+// Explicit provider config and an isolated environment prevent real credentials
+// from entering this run, without repurposing HOME or CODEX_HOME.
+function codexEnv() {
+  return {
+    PATH: process.env.PATH ?? "",
+    TERM: "dumb",
+    BENCH_API_KEY: "offline-placeholder",
+    ...(process.env.CODEX_HOME ? { CODEX_HOME: process.env.CODEX_HOME } : {}),
+  }
 }
 
 function message(call: { name: string; input: Record<string, unknown> } | { text: string }, id: string, model: string) {
@@ -756,19 +945,27 @@ function render(costs: RequestCost[]) {
 
 function renderComparison(reports: Array<Record<string, unknown>>) {
   const rows = [
-    ["SCENARIO", "RUNTIME", "REQUESTS", "INPUT TOKENS", "CACHED", "FIXED/REQ", "COST", "NO CACHE"],
+    ["SCENARIO", "RUNTIME", "RUN", "STATUS", "MS", "FILES", "+/-", "REQUESTS", "EST INPUT", "EST COST"],
     ...reports.map((report) => {
       const sum = report.totals as ReturnType<typeof totals> | undefined
-      if (!sum) return [String(report.scenario), String(report.runtime), report.unavailable ? "unavailable" : "failed"]
+      if (!sum)
+        return [
+          String(report.scenario),
+          String(report.runtime),
+          String(report.attempt),
+          report.unavailable ? "unavailable" : "failed",
+        ]
       return [
         String(report.scenario),
         String(report.runtime),
+        String(report.attempt),
+        !report.complete ? "invalid" : !report.comparable ? "different workflow" : "complete",
+        String(report.elapsedMs),
+        String((report.diff as { files: number }).files),
+        `${(report.diff as { additions: number }).additions}/${(report.diff as { deletions: number }).deletions}`,
         String(sum.requests),
         String(sum.inputTokens),
-        `${Math.round(sum.cacheReadShare * 100)}%`,
-        String(sum.fixedTokensPerRequest),
         `$${sum.costUsd.toFixed(4)}`,
-        `$${sum.uncachedCostUsd.toFixed(4)}`,
       ]
     }),
   ]
@@ -789,19 +986,27 @@ function table(rows: string[][]) {
 
 // `clean` starts the process with only the given environment, nothing inherited.
 function exec(command: string, args: string[], cwd: string, env: Record<string, string> = {}, clean = false) {
-  return new Promise<{ exitCode: number; output: string }>((done) => {
+  return new Promise<{ exitCode: number; output: string; timedOut: boolean }>((done) => {
     const child = spawn(command, args, {
       cwd,
       env: clean ? env : { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     })
     const output: string[] = []
+    const state = { timedOut: false }
     child.stdout.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")))
     child.stderr.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")))
-    const timer = setTimeout(() => child.kill("SIGKILL"), 240_000)
+    child.once("error", (error) => output.push(error.message))
+    const timer = setTimeout(
+      () => {
+        state.timedOut = true
+        child.kill("SIGKILL")
+      },
+      Number(flags.timeout ?? 240) * 1000,
+    )
     child.once("close", (code) => {
       clearTimeout(timer)
-      done({ exitCode: code ?? 1, output: output.join("") })
+      done({ exitCode: code ?? 1, output: output.join(""), timedOut: state.timedOut })
     })
   })
 }
@@ -817,5 +1022,7 @@ function parseFlags(argv: string[]) {
     codex: value("codex"),
     out: value("out"),
     keep: argv.includes("--keep"),
+    repeat: value("repeat"),
+    timeout: value("timeout"),
   }
 }
