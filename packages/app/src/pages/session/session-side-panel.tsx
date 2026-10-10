@@ -4028,11 +4028,13 @@ export function PreviewPanel(props: {
   let stopProgress: (() => void) | undefined
   onCleanup(() => stopProgress?.())
 
-  const runPublish = async (place: PublishPlace) => {
+  const runPublish = async (confirmed: PublishPlace) => {
     const publisher = publishApi()
     if (!publisher) return
+    // Only the place itself: the confirm state it came from also carries a phase.
+    const place = { overview: confirmed.overview, project: confirmed.project, account: confirmed.account }
     const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`
-    setPublish({ phase: "working", message: "Preparing the build…", ...place })
+    setPublish({ ...place, phase: "working", message: "Preparing the build…" })
     stopProgress?.()
     stopProgress = publisher.subscribe((event: PublishProgressEvent) => {
       const current = publish()
@@ -4062,7 +4064,7 @@ export function PreviewPanel(props: {
         stopProgress = undefined
       })
     if (result.ok && result.url) {
-      setPublish({ phase: "done", url: result.url, deploymentId: result.deploymentId, ...place })
+      setPublish({ ...place, phase: "done", url: result.url, deploymentId: result.deploymentId })
       return
     }
     const error = result.error ?? "Publish failed."
