@@ -12,7 +12,7 @@ import { Truncate } from "@/tool/truncate"
 import { Plugin } from "@/plugin"
 import type { TaskPromptOps } from "@/tool/task"
 import { type Tool as AITool, tool, jsonSchema, type ToolExecutionOptions, asSchema } from "ai"
-import { Effect } from "effect"
+import { Effect, Result, Schema } from "effect"
 import { MessageV2 } from "./message-v2"
 import { Session } from "./session"
 import { SessionProcessor } from "./processor"
@@ -21,6 +21,7 @@ import { EffectBridge } from "@/effect/bridge"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { isRecord } from "@/util/record"
+import { NativePatch } from "./llm/native-patch"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -87,6 +88,8 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         .pipe(Effect.orDie),
   })
 
+  const builtinTask = (yield* registry.named()).task
+  const decodeTask = Schema.decodeUnknownResult(builtinTask.parameters)
   for (const item of yield* registry.tools({
     modelID: ModelV2.ID.make(input.model.api.id),
     providerID: input.model.providerID,
@@ -95,7 +98,26 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
     tools[item.id] = tool({
       description: item.description,
-      inputSchema: jsonSchema(schema),
+      // The built-in Task advertises the concise batch form, while old model
+      // calls and clients may still send a singular brief. Validate against its
+      // real runtime decoder before tool hooks; changed plugin schemas keep the
+      // existing validation path.
+      inputSchema: jsonSchema(
+        schema,
+        ToolRegistry.isBuiltinTask(item)
+          ? {
+              validate(value) {
+                const decoded = decodeTask(value)
+                return Result.isSuccess(decoded)
+                  ? { success: true, value: value as Record<string, unknown> }
+                  : {
+                      success: false,
+                      error: new Error(builtinTask.formatValidationError?.(decoded.failure) ?? String(decoded.failure)),
+                    }
+              },
+            }
+          : undefined,
+      ),
       execute(args, options) {
         return run.promise(
           Effect.gen(function* () {
@@ -128,6 +150,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         )
       },
     })
+    if (ToolRegistry.isBuiltinPatch(item)) NativePatch.mark(tools[item.id])
   }
 
   const hasMcpResourceServer = Object.values(yield* mcp.clients()).some(

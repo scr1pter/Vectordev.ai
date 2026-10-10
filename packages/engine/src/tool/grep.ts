@@ -10,7 +10,8 @@ import * as Tool from "./tool"
 export const Parameters = Schema.Struct({
   pattern: Schema.String.annotate({ description: "The regex pattern to search for in file contents" }),
   path: Schema.optional(Schema.String).annotate({
-    description: "The directory to search in. Defaults to the current working directory.",
+    description:
+      "Existing literal file or directory to search. Relative paths use the current working directory, which is also the default. No glob expansion; use include for file globs.",
   }),
   include: Schema.optional(Schema.String).annotate({
     description: 'File pattern to include in the search (e.g. "*.js", "*.{ts,tsx}")',
@@ -58,15 +59,28 @@ export const GrepTool = Tool.define(
           })
 
           const search = FSUtil.resolve(requested)
-          const info = yield* fs.stat(search).pipe(Effect.catch(() => Effect.succeed(undefined)))
-          const cwd = info?.type === "Directory" ? search : path.dirname(search)
+          const info = yield* fs
+            .stat(search)
+            .pipe(
+              Effect.catchReason("PlatformError", "NotFound", () =>
+                Effect.fail(
+                  new Error(
+                    `Search path does not exist: ${params.path ?? "."}. 'path' is a literal file or directory; use 'include' for file globs.`,
+                  ),
+                ),
+              ),
+            )
+          if (info.type !== "Directory" && info.type !== "File")
+            return yield* Effect.fail(new Error(`Search path is not a file or directory: ${params.path ?? "."}`))
+          const cwd = info.type === "Directory" ? search : path.dirname(search)
           const limit = 100
           const result = yield* ripgrep.grep({
             cwd,
             pattern: params.pattern,
             // ripgrep searches a directory, so a file target has to be named
             // explicitly or every sibling in its directory gets searched too.
-            file: info?.type === "Directory" ? undefined : path.basename(search),
+            // The prefix also keeps a literal "-" from being interpreted as stdin.
+            file: info.type === "Directory" ? undefined : `./${path.basename(search)}`,
             include: params.include,
             // One over the limit distinguishes "exactly limit matches" from
             // "more than we are showing"; only the first limit are reported.

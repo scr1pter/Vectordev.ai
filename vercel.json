@@ -15,6 +15,11 @@
   "outputDirectory": "packages/web/dist",
   "redirects": [
     {
+      "source": "/pricing",
+      "destination": "/codium",
+      "permanent": false
+    },
+    {
       "source": "/design-lab",
       "destination": "/design-lab/index.html",
       "permanent": false

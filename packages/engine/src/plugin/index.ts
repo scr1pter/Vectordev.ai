@@ -64,12 +64,15 @@ export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel
 }
 
 // Built-in plugins that are directly imported (not installed from npm)
-function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
+function internalPlugins(flags: RuntimeFlags.Info, bridge: EffectBridge.Shape): PluginInstance[] {
   return [
     // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
     (input) =>
       CodexAuthPlugin(input, {
         experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
+        onTransportDiagnostic: (event) => {
+          bridge.fork(Effect.logInfo("openai transport", event))
+        },
       }),
     CopilotAuthPlugin,
     GitlabAuthPlugin,
@@ -181,7 +184,7 @@ const layer = Layer.effect(
           $: typeof Bun === "undefined" ? undefined : Bun.$,
         }
 
-        for (const plugin of flags.disableDefaultPlugins ? [] : internalPlugins(flags)) {
+        for (const plugin of flags.disableDefaultPlugins ? [] : internalPlugins(flags, bridge)) {
           const init = yield* Effect.tryPromise({
             try: () => plugin(input),
             catch: errorMessage,

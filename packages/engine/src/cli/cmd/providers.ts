@@ -1,21 +1,16 @@
 import { PluginOAuthCommand } from "./plugin-oauth"
-import { Provider } from "@/provider/provider"
-import { ProviderAuth } from "@/provider/auth"
 import { COPILOT_SIGN_IN, providerEnabled, providerUsable } from "@vectordevai/core/provider-policy"
 import type { Argv } from "yargs"
-import { Auth } from "../../auth"
+import type { Auth } from "../../auth"
 import { cmd } from "./cmd"
 import { CliError, effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import * as Prompt from "../effect/prompt"
-import { ModelCatalog } from "@vectordevai/core/model-catalog"
 
 import { map, pipe, sortBy, values } from "remeda"
 import path from "path"
 import os from "os"
-import { Config } from "@/config/config"
 import { Global } from "@vectordevai/core/global"
-import { Plugin } from "../../plugin"
 import type { Hooks } from "@vectordevai/plugin"
 import { Process } from "@/util/process"
 import { errorMessage } from "@/util/error"
@@ -30,6 +25,7 @@ const promptValue = <Value>(value: Option.Option<Value>) => {
 }
 
 const put = Effect.fn("Cli.providers.put")(function* (key: string, info: Auth.Info) {
+  const { Auth } = yield* Effect.promise(() => import("../../auth"))
   const auth = yield* Auth.Service
   yield* Effect.orDie(auth.set(key, info))
 })
@@ -45,6 +41,7 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
   provider: string,
   methodName?: string,
 ) {
+  const { ProviderAuth } = yield* Effect.promise(() => import("@/provider/auth"))
   // Read once: the owner's ChatGPT switch can turn off while the prompt is open, and the choice indexes this list.
   const methods = ProviderAuth.visibleMethods(plugin.auth)
   if (!methods.length) return yield* fail(`${provider} sign-in is currently unavailable in Vector.`)
@@ -263,6 +260,9 @@ export const ProvidersListCommand = effectCmd({
   describe: "list providers and credentials",
   // Availability is project-specific: local configuration and plugins may define providers.
   handler: Effect.fn("Cli.providers.list")(function* (_args) {
+    const { Auth } = yield* Effect.promise(() => import("../../auth"))
+    const { ModelCatalog } = yield* Effect.promise(() => import("@vectordevai/core/model-catalog"))
+    const { Provider } = yield* Effect.promise(() => import("@/provider/provider"))
     const authSvc = yield* Auth.Service
     const modelCatalog = yield* ModelCatalog.Service
     const provider = yield* Provider.Service
@@ -332,6 +332,7 @@ export const ProvidersLoginCommand = effectCmd({
         type: "string",
       }),
   handler: Effect.fn("Cli.providers.login")(function* (args) {
+    const { Auth } = yield* Effect.promise(() => import("../../auth"))
     const authSvc = yield* Auth.Service
 
     UI.empty()
@@ -371,6 +372,9 @@ export const ProvidersLoginCommand = effectCmd({
       return
     }
 
+    const { Config } = yield* Effect.promise(() => import("@/config/config"))
+    const { Plugin } = yield* Effect.promise(() => import("../../plugin"))
+    const { ModelCatalog } = yield* Effect.promise(() => import("@vectordevai/core/model-catalog"))
     const cfgSvc = yield* Config.Service
     const pluginSvc = yield* Plugin.Service
     const modelCatalog = yield* ModelCatalog.Service
@@ -530,6 +534,8 @@ export const ProvidersLogoutCommand = effectCmd({
   // Removes a global auth credential; no project instance needed.
   instance: false,
   handler: Effect.fn("Cli.providers.logout")(function* (args) {
+    const { Auth } = yield* Effect.promise(() => import("../../auth"))
+    const { ModelCatalog } = yield* Effect.promise(() => import("@vectordevai/core/model-catalog"))
     const authSvc = yield* Auth.Service
     const modelCatalog = yield* ModelCatalog.Service
 

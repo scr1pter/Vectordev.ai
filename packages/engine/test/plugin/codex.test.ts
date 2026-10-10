@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import os from "os"
+import { OpenAITransport } from "../../src/plugin/openai/transport"
 import {
   CHATGPT_CLIENT_ID,
   CHATGPT_SIGN_IN_UNAVAILABLE,
@@ -174,7 +175,7 @@ describe("plugin.codex", () => {
     })
   })
 
-  test("installs websocket transport only when experimental websockets are enabled", async () => {
+  test("installs HTTP transport by default and websocket transport when enabled", async () => {
     const disabled = await CodexAuthPlugin({} as never)
     const enabled = await CodexAuthPlugin({} as never, { experimentalWebSockets: true })
 
@@ -187,9 +188,55 @@ describe("plugin.codex", () => {
       {} as never,
     )
 
-    expect(disabledOptions.fetch).toBeUndefined()
+    expect(disabledOptions.fetch).toBeFunction()
     expect(enabledOptions.fetch).toBeFunction()
     await enabled.dispose?.()
+  })
+
+  test("API-key HTTP requests strip internal headers and report redacted transport timing", async () => {
+    const received: { headers: Headers; body: string; method: string }[] = []
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        received.push({ headers: request.headers, body: await request.text(), method: request.method })
+        return new Response("private-response", { status: 201, headers: { "x-upstream": "kept" } })
+      },
+    })
+    const events: OpenAITransport.Diagnostic[] = []
+    const hooks = await CodexAuthPlugin({} as never, { onTransportDiagnostic: (event) => events.push(event) })
+    try {
+      const options = await hooks.auth!.loader!(
+        async () => ({ type: "api", key: "private-api-key" }) as never,
+        {} as never,
+      )
+      if (typeof options.fetch !== "function") throw new Error("Expected plugin fetch")
+      const response = await options.fetch(
+        new Request(new URL("/v1/responses", server.url), {
+          method: "POST",
+          headers: {
+            "X-Vector-Request-Id": "native-id",
+            "X-Vector-Title": "true",
+            authorization: "Bearer private-auth",
+          },
+          body: "private-prompt",
+        }),
+      )
+      expect(response.status).toBe(201)
+      expect(response.headers.get("x-upstream")).toBe("kept")
+      expect(await response.text()).toBe("private-response")
+      expect(received[0].method).toBe("POST")
+      expect(received[0].body).toBe("private-prompt")
+      expect(received[0].headers.get("authorization")).toBe("Bearer private-auth")
+      expect(received[0].headers.has("x-vector-request-id")).toBe(false)
+      expect(received[0].headers.has("x-vector-title")).toBe(false)
+      expect(events.every((event) => event.requestID === "native-id" && event.transport === "http")).toBe(true)
+      expect(events.map((event) => event.phase)).toEqual(["selected", "connected", "first_frame", "terminal"])
+      expect(JSON.stringify(events)).not.toContain("private-")
+    } finally {
+      await hooks.dispose?.()
+      await server.stop(true)
+    }
   })
 
   test("offers ChatGPT sign-in alongside API keys and uses a cached ChatGPT credential", async () => {

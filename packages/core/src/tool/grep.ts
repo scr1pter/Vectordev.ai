@@ -22,7 +22,8 @@ export const Input = Schema.Struct({
     description: "Regex pattern to search for in file contents",
   }),
   path: Schema.String.pipe(Schema.optional).annotate({
-    description: "File or directory to search. Defaults to the active Location; outside paths require approval.",
+    description:
+      "Existing literal file or directory to search. Relative paths use the active Location, which is also the default; outside paths require approval. No glob expansion; use include for file globs.",
   }),
   include: FileSystem.GrepInput.fields.include.annotate({
     description: 'File glob to include in the search (for example, "*.js" or "*.{ts,tsx}")',
@@ -64,7 +65,7 @@ const layer = Layer.effectDiscard(
       .register({
         [name]: Tool.make({
           description:
-            "Search file contents by regular expression within the active Location or an absolute managed tool-output file. Use a path to narrow the search, include to filter files by glob, and limit to bound the match count. Returns concise file resources, line numbers, and bounded line previews.",
+            "Search file contents by regular expression within the active Location or an absolute managed tool-output file. Use an existing literal file or directory path to narrow the search (no shell or glob expansion), include to filter files by glob, and limit to bound the match count. Returns concise file resources, line numbers, and bounded line previews.",
           input: Input,
           output: Output,
           toModelOutput: ({ output }) => [
@@ -107,12 +108,27 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source,
               })
-              const info = yield* fs.stat(target.canonical).pipe(Effect.catch(() => Effect.succeed(undefined)))
+              const info = yield* fs.stat(target.canonical).pipe(
+                Effect.catchReason(
+                  "PlatformError",
+                  "NotFound",
+                  () =>
+                    new ToolFailure({
+                      message: `Search path does not exist: ${input.path ?? "."}. 'path' is a literal file or directory; use 'include' for file globs.`,
+                    }),
+                ),
+              )
+              if (info.type !== "Directory" && info.type !== "File")
+                return yield* new ToolFailure({
+                  message: `Search path is not a file or directory: ${input.path ?? "."}`,
+                })
+              const cwd = info.type === "Directory" ? target.canonical : path.dirname(target.canonical)
               return yield* ripgrep
                 .grep({
-                  cwd: info?.type === "Directory" ? target.canonical : path.dirname(target.canonical),
+                  cwd,
                   pattern: input.pattern,
-                  file: info?.type === "File" ? path.basename(target.canonical) : undefined,
+                  // A bare "-" means stdin to ripgrep, even after its option delimiter.
+                  file: info.type === "File" ? `./${path.basename(target.canonical)}` : undefined,
                   include: input.include,
                   limit: input.limit ?? Number.MAX_SAFE_INTEGER,
                 })
@@ -126,10 +142,7 @@ const layer = Layer.effectDiscard(
                           path: RelativePath.make(
                             path.relative(
                               location.directory,
-                              path.resolve(
-                                info?.type === "Directory" ? target.canonical : path.dirname(target.canonical),
-                                match.entry.path,
-                              ),
+                              path.resolve(cwd, match.entry.path),
                             ),
                           ),
                         }),
@@ -137,7 +150,13 @@ const layer = Layer.effectDiscard(
                     ),
                   ),
                 )
-            }).pipe(Effect.mapError(() => new ToolFailure({ message: `Unable to grep for ${input.pattern}` }))),
+            }).pipe(
+              Effect.mapError((error) =>
+                error instanceof ToolFailure
+                  ? error
+                  : new ToolFailure({ message: `Unable to grep for ${input.pattern}` }),
+              ),
+            ),
         }),
       })
       .pipe(Effect.orDie)

@@ -16,6 +16,7 @@ import { isOverflow } from "./overflow"
 import { PartID } from "./schema"
 import type { SessionID } from "./schema"
 import { SessionRetry } from "./retry"
+import { SessionAdmission } from "./admission"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
@@ -116,6 +117,8 @@ const layer = Layer.effect(
         started: undefined,
       }
       let aborted = false
+      let attempt: SessionAdmission.Settlement | undefined
+      let observe: SessionAdmission.Lease["observe"]
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -439,6 +442,19 @@ const layer = Layer.effect(
               usage: value.usage ?? new Usage({}),
               metadata: value.providerMetadata,
             })
+            if (attempt) {
+              attempt = {
+                usage: value.usage,
+                cost: attempt.cost + usage.cost,
+                context: usage.tokens.input + usage.tokens.cache.read + usage.tokens.cache.write,
+                cached: usage.tokens.cache.read,
+                complete:
+                  Number.isFinite(value.usage?.totalTokens) &&
+                  !["other", "error", "abort"].includes(value.reason) &&
+                  !usage.unpriced,
+              }
+              observe?.(attempt.cost)
+            }
             const stepFinish: SessionV1.StepFinishPart = {
               id: PartID.ascending(),
               reason: value.reason,
@@ -554,6 +570,16 @@ const layer = Layer.effect(
         if (!started) return
         ctx.started = undefined
         const usage = Session.getUsage({ model: ctx.model, usage: started })
+        if (attempt) {
+          attempt = {
+            usage: started,
+            cost: attempt.cost + usage.cost,
+            context: usage.tokens.input + usage.tokens.cache.read + usage.tokens.cache.write,
+            cached: usage.tokens.cache.read,
+            complete: false,
+          }
+          observe?.(attempt.cost)
+        }
         ctx.assistantMessage.cost += usage.cost
         if (usage.unpriced) ctx.assistantMessage.unpriced = true
         ctx.assistantMessage.tokens = usage.tokens
@@ -666,25 +692,75 @@ const layer = Layer.effect(
         })
         ctx.needsCompaction = false
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        const current = yield* SessionAdmission.Current
+        const admission = current?.sessionID === input.sessionID ? current : undefined
+        let denied = false
 
         return yield* Effect.gen(function* () {
-          yield* Effect.gen(function* () {
-            ctx.currentText = undefined
-            ctx.reasoningMap = {}
-            yield* status.set(ctx.sessionID, { type: "busy" })
-            const stream = llm.stream({
-              ...streamInput,
-              started: (usage) => {
-                ctx.started = Usage.from(usage)
-              },
-            })
-
-            yield* stream.pipe(
-              Stream.tap((event) => handleEvent(event)),
-              Stream.takeUntil(() => ctx.needsCompaction),
-              Stream.runDrain,
-            )
-          }).pipe(
+          yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              ctx.currentText = undefined
+              ctx.reasoningMap = {}
+              yield* restore(status.set(ctx.sessionID, { type: "busy" }))
+              // This body is re-entered on every retry. Refusal is a normal stop, never a retryable provider error.
+              const lease = admission?.admit({
+                messageID: input.assistantMessage.id,
+                model: input.model,
+                tools: Object.keys(streamInput.tools),
+              })
+              if (admission && !lease) {
+                denied = true
+                return
+              }
+              if (lease) attempt = { cost: 0, context: 0, cached: 0, complete: false }
+              observe = lease?.observe
+              yield* restore(
+                Effect.suspend(() =>
+                  llm
+                    .stream({
+                      ...streamInput,
+                      // Hidden SDK retries would bypass the per-attempt admission boundary.
+                      ...(admission ? { retries: 0 } : {}),
+                      ...(lease?.tools
+                        ? {
+                            tools: Object.fromEntries(
+                              Object.entries(streamInput.tools).filter(([name]) => lease.tools?.includes(name)),
+                            ),
+                          }
+                        : {}),
+                      started: (usage) => {
+                        ctx.started = Usage.from(usage)
+                        if (attempt)
+                          observe?.(attempt.cost + Session.getUsage({ model: ctx.model, usage: ctx.started }).cost)
+                      },
+                    })
+                    .pipe(
+                      Stream.tap((event) => handleEvent(event)),
+                      Stream.takeUntil(() => ctx.needsCompaction),
+                      Stream.runDrain,
+                    ),
+                ),
+              ).pipe(
+                Effect.onExit((exit) =>
+                  !lease
+                    ? Effect.void
+                    : settleStarted(
+                        Exit.isFailure(exit) ? (Cause.hasInterruptsOnly(exit.cause) ? "abort" : "error") : "other",
+                      ).pipe(
+                        Effect.ensuring(
+                          Effect.sync(() => {
+                            if (!lease || !attempt) return
+                            const result = attempt
+                            attempt = undefined
+                            observe = undefined
+                            lease.settle(result)
+                          }),
+                        ),
+                      ),
+                ),
+              )
+            }),
+          ).pipe(
             // Settled before a retry starts the step again, since the provider billed the failed attempt too.
             Effect.onError((cause) => settleStarted(Cause.hasInterruptsOnly(cause) ? "abort" : "error")),
             Effect.onInterrupt(() =>
@@ -718,6 +794,7 @@ const layer = Layer.effect(
             Effect.ensuring(cleanup()),
           )
 
+          if (denied) return "stop"
           if (ctx.needsCompaction) return "compact"
           if (ctx.blocked || ctx.assistantMessage.error) return "stop"
           return "continue"
