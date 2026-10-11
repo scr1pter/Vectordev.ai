@@ -114,6 +114,55 @@ function timeoutController(ms: number) {
   }
 }
 
+// A provider's base URL from its options or the catalog, with variables from its loader and the environment filled in.
+function resolveBaseURL(
+  model: Model,
+  options: Record<string, any>,
+  loader: CustomVarsLoader | undefined,
+  envs: Record<string, string | undefined>,
+) {
+  const url = typeof options["baseURL"] === "string" && options["baseURL"] !== "" ? options["baseURL"] : model.api.url
+  if (!url) return
+  return Object.entries(loader ? loader(options) : {})
+    .reduce((current, [key, value]) => current.replaceAll("${" + key + "}", value), url)
+    .replace(/\$\{([^}]+)\}/g, (item, key) => envs[String(key)] ?? item)
+}
+
+// Where these SDKs send requests when neither configuration nor the catalog names a base URL.
+const SDK_ORIGINS: Record<string, string> = {
+  "@ai-sdk/openai": "https://api.openai.com",
+  "@ai-sdk/anthropic": "https://api.anthropic.com",
+  "@ai-sdk/google": "https://generativelanguage.googleapis.com",
+}
+
+// The origin a model's requests go to: a plugin that sends them elsewhere names it in the `preconnect` option.
+function requestOrigin(
+  model: Model,
+  options: Record<string, any>,
+  loader: CustomVarsLoader | undefined,
+  envs: Record<string, string | undefined>,
+) {
+  const url =
+    typeof options["preconnect"] === "string"
+      ? options["preconnect"]
+      : (resolveBaseURL(model, options, loader, envs) ?? SDK_ORIGINS[model.api.npm])
+  if (!url || !URL.canParse(url)) return
+  const parsed = new URL(url)
+  return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined
+}
+
+// Opens the connection a model's first request will use, so its DNS lookup and TCP and TLS handshakes overlap the
+// work before that request instead of following it. Nothing is sent. Behind a proxy the connection would not be the one
+// the request uses, so nothing is opened.
+function preconnectOrigin(origin: string, envs: Record<string, string | undefined>) {
+  if (typeof fetch.preconnect !== "function") return
+  if (["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"].some((name) => envs[name] || envs[name.toLowerCase()])) return
+  // Bun ignores a preconnect made before its HTTP client has started. A fetch aborted before it begins starts the
+  // client without resolving, connecting or sending anything.
+  void fetch(origin, { signal: AbortSignal.abort() }).catch(() => undefined)
+  fetch.preconnect(origin)
+}
+
 function googleVertexAnthropicBaseURL(project: string | undefined, location: string | undefined) {
   if (!project) return
   if (location !== "eu" && location !== "us") return
@@ -1111,6 +1160,8 @@ export interface Interface {
   readonly getProvider: (providerID: ProviderV2.ID) => Effect.Effect<Info>
   readonly getModel: (providerID: ProviderV2.ID, modelID: ModelV2.ID) => Effect.Effect<Model, ModelNotFoundError>
   readonly getLanguage: (model: Model) => Effect.Effect<LanguageModelV3, ModelNotFoundError>
+  /** Opens the connection the model's next request will use, so a session's first request does not wait for it. */
+  readonly preconnect: (model: Model) => Effect.Effect<void>
   readonly closest: (
     providerID: ProviderV2.ID,
     query: string[],
@@ -1894,26 +1945,7 @@ const layer = Layer.effect(
           options["includeUsage"] = true
         }
 
-        const baseURL = iife(() => {
-          let url =
-            typeof options["baseURL"] === "string" && options["baseURL"] !== "" ? options["baseURL"] : model.api.url
-          if (!url) return
-
-          const loader = s.varsLoaders[model.providerID]
-          if (loader) {
-            const vars = loader(options)
-            for (const [key, value] of Object.entries(vars)) {
-              const field = "${" + key + "}"
-              url = url.replaceAll(field, value)
-            }
-          }
-
-          url = url.replace(/\$\{([^}]+)\}/g, (item, key) => {
-            const val = envs[String(key)]
-            return val ?? item
-          })
-          return url
-        })
+        const baseURL = resolveBaseURL(model, options, s.varsLoaders[model.providerID], envs)
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
         if (consent) requirePluginDestination(consent, baseURL)
@@ -1943,6 +1975,7 @@ const layer = Layer.effect(
         const headerTimeout = options["headerTimeout"]
         delete options["chunkTimeout"]
         delete options["headerTimeout"]
+        delete options["preconnect"]
 
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
@@ -2080,6 +2113,16 @@ const layer = Layer.effect(
             ? new ModelNotFoundError({ modelID: model.id, providerID: model.providerID, cause })
             : undefined,
       )
+    })
+
+    const preconnect = Effect.fn("Provider.preconnect")(function* (model: Model) {
+      const s = yield* InstanceState.get(state)
+      const provider = s.providers[model.providerID]
+      // Free models choose their route per request, so there is no one connection to open ahead of it.
+      if (!provider || model.providerID === "vector" || model.freeModel) return
+      const envs = yield* env.all()
+      const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
+      if (origin) preconnectOrigin(origin, envs)
     })
 
     const closest = Effect.fn("Provider.closest")(function* (providerID: ProviderV2.ID, query: string[]) {
@@ -2251,6 +2294,7 @@ const layer = Layer.effect(
       getProvider,
       getModel,
       getLanguage,
+      preconnect,
       closest,
       getSmallModel,
       defaultModel,
