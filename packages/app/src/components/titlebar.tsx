@@ -21,6 +21,7 @@ import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/comp
 import { useGlobal } from "@/context/global"
 import { ServerConnection, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
+import { isInternalSession } from "@/utils/internal-sessions"
 import { NativeWindowChrome } from "./native-window-chrome"
 import "./titlebar.css"
 
@@ -306,7 +307,8 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
 
               if (route.type === "session") {
                 const s = session()
-                if (!s) return
+                // A helper session is never given a tab; its route goes on to the session that launched it.
+                if (!s || isInternalSession(s)) return
                 const sessionId = s.parentID ?? s.id
                 const next = { server: route.server ?? server.key, sessionId }
                 tabsStoreActions.addSessionTab(next)

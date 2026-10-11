@@ -97,6 +97,7 @@ import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedMatchesDirectory } from "
 import { extractPromptFromParts } from "@/utils/prompt"
 import { formatServerError, isLocalSessionNotFoundError, isSessionNotFoundError } from "@/utils/server-errors"
 import { legacySessionHref, requireServerKey, sessionHref } from "@/utils/session-route"
+import { isInternalSession } from "@/utils/internal-sessions"
 import { createSessionOwnership } from "./session/session-ownership"
 import { createSessionLineage } from "./session/session-lineage"
 import { enqueueSessionFollowup, SESSION_FOLLOWUP_LIMIT } from "./session/followup-queue"
@@ -242,10 +243,16 @@ function ResolvedTargetSessionRoute() {
   )
   const directory = createMemo(() => current()?.session.directory)
   const targetDirectory = () => directory()!
+  // Vector's helper sessions (a Vectorscope review, autocomplete) report to the surface that launched them. A link to
+  // one, from a tab or notification kept from before helpers were hidden, goes to the session that launched it.
+  const helper = createMemo(() => {
+    const session = current()?.session
+    return session && isInternalSession(session) ? session : undefined
+  })
 
   createEffect(() => {
     const session = current()
-    if (!session) return
+    if (!session || helper()) return
     tabs.addSessionTab({
       server: serverKey(),
       sessionId: session.root.id,
@@ -254,11 +261,14 @@ function ResolvedTargetSessionRoute() {
 
   return (
     <TargetServerScopedProviders directory={directory} sessionID={() => params.id}>
+      <Show when={helper()}>
+        {(session) => <Navigate href={session().parentID ? sessionHref(serverKey(), session().parentID!) : "/"} />}
+      </Show>
       {/* Non-keyed: closes only while the target's directory is unknown (uncached
           lineage mid-resolution), which tears down the workspace subtree including
           the terminal. Same-workspace tab switches keep it open because warm
           targets resolve synchronously from the sync cache. */}
-      <Show when={directory()}>
+      <Show when={directory() && !helper()}>
         <Show
           when={settings.general.newLayoutDesigns()}
           fallback={<Navigate href={legacySessionHref(directory()!, params.id)} />}
