@@ -553,7 +553,7 @@ function vectorEnv(runtime: Runtime, home: string, base: string, dir: string) {
   return {
     PATH: process.env.PATH ?? "",
     PWD: dir,
-    VECTOR_EXPERIMENTAL_WEBSOCKET: flags.ws ? "1" : "0",
+    VECTOR_EXPERIMENTAL_WEBSOCKETS: flags.ws ? "1" : "0",
     VECTOR_DISABLE_WEBSOCKETS: flags.ws ? "0" : "1",
     VECTOR_TEST_HOME: home,
     HOME: home,

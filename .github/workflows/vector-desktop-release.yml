@@ -37,6 +37,9 @@ env:
 jobs:
   prepare:
     name: Validate release metadata
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
@@ -94,6 +97,21 @@ jobs:
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "$source_commit" origin/main || {
             echo "Release source $source_commit must be part of protected main."
+            exit 1
+          }
+
+      - name: Require protected release environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          reviewers=$(gh api "repos/$GITHUB_REPOSITORY/environments/production-release" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length') || {
+            echo "Create the production-release environment with required reviewers before releasing."
+            exit 1
+          }
+          test "$reviewers" -gt 0 || {
+            echo "production-release must have at least one required reviewer before releasing."
             exit 1
           }
 
