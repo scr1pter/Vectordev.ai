@@ -311,19 +311,20 @@ describe("ProviderTransform.options - GPT textVerbosity", () => {
     expect(result.include).toEqual(["reasoning.encrypted_content"])
   })
 
-  test.each(["gpt-5.6", "gpt-5.6-sol", "gpt-5.10", "gpt-6-astra", "gpt-6.1-sol", "openai/gpt-6-luna"])(
-    "%s does not partition automatic cache accounting by session unless requested",
-    (id) => {
-      const model = createGpt5Model(id)
-      expect(ProviderTransform.options({ model, sessionID }).promptCacheKey).toBeUndefined()
-      expect(
-        ProviderTransform.options({ model, sessionID, providerOptions: { setCacheKey: true } }).promptCacheKey,
-      ).toBe(sessionID)
-    },
-  )
-
-  test.each(["gpt-4", "gpt-5", "gpt-5.5", "gpt-54-pro", "custom-gpt-6"])(
-    "%s preserves legacy routing and honors an explicit cache-key opt-out",
+  test.each([
+    "gpt-4",
+    "gpt-5",
+    "gpt-5.5",
+    "gpt-54-pro",
+    "custom-gpt-6",
+    "gpt-5.6",
+    "gpt-5.6-sol",
+    "gpt-5.10",
+    "gpt-6-astra",
+    "gpt-6.1-sol",
+    "openai/gpt-6-luna",
+  ])(
+    "%s names the session as its prompt cache key, as the Codex CLI does, and honors an explicit opt-out",
     (id) => {
       const model = createGpt5Model(id)
       expect(ProviderTransform.options({ model, sessionID }).promptCacheKey).toBe(sessionID)
@@ -339,18 +340,18 @@ describe("ProviderTransform.options - GPT textVerbosity", () => {
       const result = ProviderTransform.options({ model: createGpt5Model(id), sessionID })
       expect(result.textVerbosity).toBe("low")
       expect(result.reasoningEffort).toBe("medium")
-      expect(result.promptCacheKey).toBeUndefined()
+      expect(result.promptCacheKey).toBe(sessionID)
       expect(result.include).toEqual(["reasoning.encrypted_content"])
     },
   )
 
   test.each(["gpt-6-luna", "openai/gpt-6-luna"])(
-    "%s keeps provider-selected detail and automatic cache routing without changing reasoning",
+    "%s keeps provider-selected detail and the session cache key without changing reasoning",
     (id) => {
       const result = ProviderTransform.options({ model: createGpt5Model(id), sessionID })
       expect(result.textVerbosity).toBeUndefined()
       expect(result.reasoningEffort).toBe("medium")
-      expect(result.promptCacheKey).toBeUndefined()
+      expect(result.promptCacheKey).toBe(sessionID)
       expect(result.include).toEqual(["reasoning.encrypted_content"])
     },
   )
