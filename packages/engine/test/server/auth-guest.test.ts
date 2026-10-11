@@ -267,8 +267,8 @@ describe("HttpApi authorization middleware with a guest pair", () => {
 })
 
 test("guest session lists and replay routes stay within canonical claims", async () => {
-  await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
-  await using other = await tmpdir({ config: { formatter: false, lsp: false } })
+  await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
+  await using other = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
   const keys = [
     "VECTOR_SERVER_USERNAME",
@@ -421,6 +421,7 @@ test("guests cannot run host commands or answer permission requests", async () =
   // A skill's @file reference is not the owner's own attachment, so running it from the owner's session parks
   // that session on an external_directory request.
   await using tmp = await tmpdir({
+    trusted: true,
     config: {
       formatter: false,
       lsp: false,
@@ -571,7 +572,7 @@ test("guests cannot run host commands or answer permission requests", async () =
 }, 30_000)
 
 test("guests cannot reach owner-only routes by spelling the path another way", async () => {
-  await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+  await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
   const keys = [
     "VECTOR_SERVER_USERNAME",
@@ -684,8 +685,8 @@ test("guests cannot reach owner-only routes by spelling the path another way", a
 }, 30_000)
 
 test("guests load the app's bootstrap routes, narrowed to their workspace", async () => {
-  await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
-  await using other = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+  await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
+  await using other = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
   const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
   const keys = [
     "VECTOR_SERVER_USERNAME",
@@ -893,7 +894,7 @@ describe("event stream presence", () => {
         expect(left.properties.clientID).toBe(joined.properties.clientID)
         expect(left.properties.username).toBe("vector")
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
     20_000,
   )
 })

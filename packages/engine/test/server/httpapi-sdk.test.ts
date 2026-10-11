@@ -214,7 +214,7 @@ function httpapiInstance<A, E>(
       yield* options.setup?.(instance.directory) ?? Effect.void
       return yield* run({ sdk: yield* client(options.serverPath, instance.directory), directory: instance.directory })
     }),
-    { git: options.git ?? true, config: { formatter: false, lsp: false, ...options.config } },
+    { trusted: true, git: options.git ?? true, config: { formatter: false, lsp: false, ...options.config } },
   )
 }
 
@@ -233,6 +233,7 @@ function withProject<A, E, E2 = never>(
 ) {
   return Effect.gen(function* () {
     const directory = yield* tmpdirScoped({
+      trusted: true,
       git: options.git ?? false,
       config: { formatter: false, lsp: false, ...options.config },
     })
@@ -284,16 +285,18 @@ function writeStandardFiles(dir: string) {
 
 function writeProjectSkill(dir: string) {
   return FSUtil.Service.use((fs) =>
-    fs.writeWithDirs(
-      path.join(dir, ".vector", "skills", "project-rest-skill", "SKILL.md"),
-      `---
+    fs
+      .writeWithDirs(
+        path.join(dir, ".vector", "skills", "project-rest-skill", "SKILL.md"),
+        `---
 name: project-rest-skill
 description: A project skill visible to REST API prompts.
 ---
 
 # Project REST Skill
 `,
-    ).pipe(Effect.andThen(Effect.promise(() => trustWorkspace(dir)))),
+      )
+      .pipe(Effect.andThen(Effect.promise(() => trustWorkspace(dir)))),
   )
 }
 

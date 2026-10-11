@@ -183,6 +183,7 @@ describe("experimental HttpApi", () => {
         expect(yield* json(resources)).toEqual({})
       }),
     {
+      trusted: true,
       config: {
         formatter: false,
         lsp: false,
@@ -234,7 +235,7 @@ describe("experimental HttpApi", () => {
         expect(orgs.status).toBe(200)
         expect(yield* json(orgs)).toEqual({ enabled: false, orgs: [] })
       }),
-    { config: { formatter: false, lsp: false } },
+    { trusted: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -269,7 +270,7 @@ describe("experimental HttpApi", () => {
         expect(next.status).toBe(200)
         expect((yield* json<Session.GlobalInfo[]>(next)).map((session) => session.id)).toContain(first.id)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   testWorktreeMutations(

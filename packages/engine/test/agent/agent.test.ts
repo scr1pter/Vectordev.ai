@@ -114,6 +114,7 @@ it.instance(
       expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("allow")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         task: {
@@ -161,6 +162,7 @@ it.instance(
       expect(names).not.toContain("localdocsFull")
     }),
   {
+    trusted: true,
     config: {
       references: {
         effect: "github.com/effect/effect-smol",
@@ -230,6 +232,7 @@ it.instance(
       }
     }),
   {
+    trusted: true,
     config: {
       permission: {
         edit: "allow",
@@ -251,6 +254,7 @@ it.instance(
       }
     }),
   {
+    trusted: true,
     config: {
       agent: {
         explore: { permission: { edit: "allow", bash: "allow", task: "allow" } },
@@ -285,6 +289,7 @@ it.instance(
       }
     }),
   {
+    trusted: true,
     config: {
       permission: {
         webfetch: "deny",
@@ -323,6 +328,7 @@ it.instance(
       expect(action("grep")).toBe("allow")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         review: { permission: { "*": "allow", websearch: "deny" } },
@@ -357,6 +363,7 @@ it.instance(
       expect(custom?.mode).toBe("all")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         my_custom_agent: {
@@ -384,6 +391,7 @@ it.instance(
       expect(build?.native).toBe(true)
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -408,6 +416,7 @@ it.instance(
       expect(names).not.toContain("explore")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         explore: { disable: true },
@@ -427,7 +436,7 @@ it.instance(
       expect(names).toContain("review")
       expect(names).toContain("build")
     }),
-  { config: { agent: { general: { disable: true } } } },
+  { trusted: true, config: { agent: { general: { disable: true } } } },
 )
 
 it.instance(
@@ -442,6 +451,7 @@ it.instance(
       expect(evalPerm(build, "edit")).toBe("allow")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -465,6 +475,7 @@ it.instance(
       expect(evalPerm(build, "bash")).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         bash: "deny",
@@ -483,6 +494,7 @@ it.instance(
       expect(plan?.steps).toBe(100)
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { steps: 50 },
@@ -500,6 +512,7 @@ it.instance(
       expect(explore?.mode).toBe("primary")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         explore: { mode: "primary" },
@@ -516,6 +529,7 @@ it.instance(
       expect(build?.name).toBe("Builder")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { name: "Builder" },
@@ -532,6 +546,7 @@ it.instance(
       expect(build?.prompt).toBe("Custom system prompt")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { prompt: "Custom system prompt" },
@@ -549,6 +564,7 @@ it.instance(
       expect(build?.options.another_random).toBe(123)
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -569,6 +585,7 @@ it.instance(
       expect(build?.options.another_option).toBe("value")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -594,6 +611,7 @@ it.instance(
       expect(agentB?.mode).toBe("primary")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         agent_a: {
@@ -618,6 +636,7 @@ it.instance(
       expect(names.slice(1)).toEqual(names.slice(1).toSorted((a, b) => a.localeCompare(b)))
     }),
   {
+    trusted: true,
     config: {
       default_agent: "plan",
       agent: {
@@ -670,6 +689,7 @@ it.instance(
       expect(evalPerm(build, "read")).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -691,6 +711,7 @@ it.instance(
       expect(evalPerm(build, "edit")).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -713,6 +734,7 @@ it.instance(
       expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         external_directory: "deny",
@@ -770,6 +792,7 @@ it.instance(
       expect(action(build, "read", "src/index.ts")).toBe("allow")
     }),
   {
+    trusted: true,
     config: {
       permission: { bash: "allow", edit: "allow", webfetch: "allow", websearch: "allow" },
       agent: { build: { permission: { bash: { "curl *": "allow" }, websearch: "allow" } } },
@@ -807,7 +830,7 @@ it.instance(
       expect(Permission.evaluate("bash", "git status", build!.permission).action).toBe("allow")
       expect(Permission.evaluate("bash", "rm -rf /", build!.permission).action).toBe("deny")
     }),
-  { config: { model: "test/model" } },
+  { trusted: true, config: { model: "test/model" } },
 )
 
 it.instance("global tmp directory children are allowed for external_directory", () =>
@@ -830,6 +853,7 @@ it.instance(
       expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -851,6 +875,7 @@ it.instance(
       expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         external_directory: {
@@ -909,6 +934,7 @@ it.instance(
       expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
     }),
   {
+    trusted: true,
     git: true,
     config: {
       references: {
@@ -941,6 +967,7 @@ it.instance(
       expect(agent).toBe("plan")
     }),
   {
+    trusted: true,
     config: {
       default_agent: "plan",
     },
@@ -955,6 +982,7 @@ it.instance(
       expect(agent).toBe("my_custom")
     }),
   {
+    trusted: true,
     config: {
       default_agent: "my_custom",
       agent: {
@@ -970,6 +998,7 @@ it.instance(
   "defaultAgent throws when default_agent points to subagent",
   () => expectDefaultAgentError('default agent "explore" is a subagent'),
   {
+    trusted: true,
     config: {
       default_agent: "explore",
     },
@@ -980,6 +1009,7 @@ it.instance(
   "defaultAgent throws when default_agent points to hidden agent",
   () => expectDefaultAgentError('default agent "compaction" is hidden'),
   {
+    trusted: true,
     config: {
       default_agent: "compaction",
     },
@@ -990,6 +1020,7 @@ it.instance(
   "defaultAgent throws when default_agent points to non-existent agent",
   () => expectDefaultAgentError('default agent "does_not_exist" not found'),
   {
+    trusted: true,
     config: {
       default_agent: "does_not_exist",
     },
@@ -1005,6 +1036,7 @@ it.instance(
       expect(agent).toBe("plan")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { disable: true },
@@ -1017,6 +1049,7 @@ it.instance(
   "defaultAgent throws when all primary agents are disabled",
   () => expectDefaultAgentError("no primary visible agent found"),
   {
+    trusted: true,
     config: {
       agent: {
         build: { disable: true },

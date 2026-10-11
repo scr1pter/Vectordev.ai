@@ -391,7 +391,7 @@ describe("session.llm native recorded", () => {
         const model = yield* provider.getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5.5"))
         expect(String(model.providerID)).toBe("openai")
       }),
-    { config: { enabled_providers: [ProviderV2.ID.openai] } },
+    { trusted: true, config: { enabled_providers: [ProviderV2.ID.openai] } },
   )
 
   for (const id of ["unsupported-fixture", "unsupported-fixture-two"]) {
@@ -408,6 +408,7 @@ describe("session.llm native recorded", () => {
           })
         }),
       {
+        trusted: true,
         config: {
           enabled_providers: [ProviderV2.ID.make(id)],
           provider: {

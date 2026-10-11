@@ -169,7 +169,7 @@ async function openPtySocket(listener: Awaited<ReturnType<typeof startListener>>
 
 describe("HttpApi Server.listen", () => {
   testPty("serves HTTP routes and upgrades PTY websocket through Server.listen", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -220,7 +220,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("stop(true) is safe when called concurrently and repeatedly", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -240,7 +240,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("stop(true) can force a graceful stop already in progress", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -261,7 +261,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("graceful stop waits for an overlapping forced stop", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -382,7 +382,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("rejects unsafe PTY ticket mint and connect requests", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     try {
       const info = await createCat(listener, tmp.path)
@@ -438,7 +438,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("keeps PTY websocket tickets optional when server auth is disabled", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startNoAuthListener()
     try {
       const info = await createCat(listener, tmp.path)
@@ -455,7 +455,7 @@ describe("HttpApi Server.listen", () => {
 
 describe("Server.listen Host check", () => {
   test("a passwordless loopback listener answers only requests addressed to a loopback name", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startNoAuthListener()
     try {
       const health = new URL("/global/health", listener.url)
@@ -480,7 +480,7 @@ describe("Server.listen Host check", () => {
   })
 
   test("a passwordless listener refuses other local pages as origins", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     // A release build: running from source keeps trusting every local page for the app's dev server.
     const listener = await startNoAuthListener({ cors: ["http://localhost:3000"], loopbackOrigins: false })
     try {

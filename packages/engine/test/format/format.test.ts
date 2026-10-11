@@ -37,7 +37,7 @@ describe("Format", () => {
           expect(gofmt!.extensions).toContain(".go")
         }),
       ),
-    { config: { formatter: true } },
+    { trusted: true, config: { formatter: true } },
   )
 
   it.instance(
@@ -53,7 +53,7 @@ describe("Format", () => {
           expect(mix).toBeDefined()
         }),
       ),
-    { config: { formatter: { gofmt: {} } } },
+    { trusted: true, config: { formatter: { gofmt: {} } } },
   )
 
   it.instance(
@@ -68,7 +68,7 @@ describe("Format", () => {
           expect(mix).toBeDefined()
         }),
       ),
-    { config: { formatter: { gofmt: { disabled: true } } } },
+    { trusted: true, config: { formatter: { gofmt: { disabled: true } } } },
   )
 
   it.instance(
@@ -81,7 +81,7 @@ describe("Format", () => {
           expect(statuses.find((item) => item.name === "uv")).toBeUndefined()
         }),
       ),
-    { config: { formatter: { ruff: { disabled: true } } } },
+    { trusted: true, config: { formatter: { ruff: { disabled: true } } } },
   )
 
   it.instance(
@@ -94,7 +94,7 @@ describe("Format", () => {
           expect(statuses.find((item) => item.name === "uv")).toBeUndefined()
         }),
       ),
-    { config: { formatter: { uv: { disabled: true } } } },
+    { trusted: true, config: { formatter: { uv: { disabled: true } } } },
   )
 
   it.instance("service initializes without error", () => Format.Service.use(() => Effect.void))
@@ -110,7 +110,7 @@ describe("Format", () => {
         const formatted = yield* Format.use.file(file)
         expect(formatted).toBe(false)
       }),
-    { config: { formatter: false } },
+    { trusted: true, config: { formatter: false } },
   )
 
   testEffect(
@@ -121,10 +121,9 @@ describe("Format", () => {
     ),
   ).live("status() initializes formatter state per directory", () =>
     Effect.gen(function* () {
-      const a = yield* provideTmpdirInstance(() => Format.use.status(), {
-        config: { formatter: false },
-      })
+      const a = yield* provideTmpdirInstance(() => Format.use.status(), { trusted: true, config: { formatter: false } })
       const b = yield* provideTmpdirInstance(() => Format.use.status(), {
+        trusted: true,
         config: {
           formatter: true,
         },
@@ -192,7 +191,7 @@ describe("Format", () => {
 
         expect(max).toBe(2)
       }),
-    { config: { formatter: { gofmt: {}, mix: {} } } },
+    { trusted: true, config: { formatter: { gofmt: {}, mix: {} } } },
   )
 
   it.instance(
@@ -209,6 +208,7 @@ describe("Format", () => {
         expect(path.basename(cwd)).toBe("tools")
       }),
     {
+      trusted: true,
       config: {
         formatter: {
           cwd: {
@@ -240,6 +240,7 @@ describe("Format", () => {
         expect(yield* Effect.promise(() => Bun.file(file).text())).toBe("xAB")
       }),
     {
+      trusted: true,
       config: {
         formatter: {
           first: {

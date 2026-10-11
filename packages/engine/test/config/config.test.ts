@@ -316,7 +316,7 @@ function withProcessEnvs<A, E, R>(entries: Record<string, string | undefined>, e
 async function check(map: (dir: string) => string) {
   if (process.platform !== "win32") return
   await using globalTmp = await tmpdir()
-  await using tmp = await tmpdir({ git: true, config: { snapshot: true } })
+  await using tmp = await tmpdir({ trusted: true, git: true, config: { snapshot: true } })
   const prev = Global.Path.config
   ;(Global.Path as { config: string }).config = globalTmp.path
   await clear()
@@ -474,7 +474,7 @@ it.instance(
     expect(config.model).toBe("test/model")
     expect(config.username).toBe("testuser")
   }),
-  { config: { model: "test/model", username: "testuser" } },
+  { trusted: true, config: { model: "test/model", username: "testuser" } },
 )
 
 it.instance(
@@ -483,7 +483,7 @@ it.instance(
     const config = yield* Config.use.get()
     expect(config.shell).toBe("bash")
   }),
-  { config: { shell: "bash" } },
+  { trusted: true, config: { shell: "bash" } },
 )
 
 it.instance("updates config and preserves empty shell sentinel", () =>
@@ -534,7 +534,7 @@ it.instance(
     const config = yield* Config.use.get()
     expect(config.formatter).toBe(true)
   }),
-  { config: { formatter: true } },
+  { trusted: true, config: { formatter: true } },
 )
 
 it.instance(
@@ -543,7 +543,7 @@ it.instance(
     const config = yield* Config.use.get()
     expect(config.lsp).toBe(true)
   }),
-  { config: { lsp: true } },
+  { trusted: true, config: { lsp: true } },
 )
 
 test("loads project config from Git Bash and MSYS2 paths on Windows", async () => {
@@ -1705,7 +1705,7 @@ it.instance(
     expect(config.share).toBe("disabled")
     expect(config.username).toBe("testuser")
   }),
-  { config: { model: "user/model", share: "auto", username: "testuser" } },
+  { trusted: true, config: { model: "user/model", share: "auto", username: "testuser" } },
 )
 
 it.instance(
@@ -1721,7 +1721,7 @@ it.instance(
     expect(config.autoupdate).toBe(false)
     expect(config.disabled_providers).toEqual(["openai"])
   }),
-  { config: { autoupdate: true, disabled_providers: [] } },
+  { trusted: true, config: { autoupdate: true, disabled_providers: [] } },
 )
 
 it.instance("managed jsonc settings override managed json settings", () =>
@@ -1740,7 +1740,7 @@ it.instance(
     const config = yield* Config.use.get()
     expect(config.model).toBe("user/model")
   }),
-  { config: { model: "user/model" } },
+  { trusted: true, config: { model: "user/model" } },
 )
 
 it.instance("migrates legacy edit tool to edit permission", () =>
@@ -2006,6 +2006,7 @@ remoteProjectOverride.it.instance(
       expect(config.mcp?.jira?.enabled).toBe(true)
     }),
   {
+    trusted: true,
     git: true,
     config: { mcp: { jira: { type: "remote", url: "https://jira.example.com/mcp", enabled: true } } },
   },
@@ -2132,7 +2133,7 @@ envIsolationWellKnown.it.instance(
       expect(config.username).toBe("test-token")
       expect(process.env.TEST_TOKEN).toBe("preexisting-token")
     }),
-  { git: true, config: { username: "{env:TEST_TOKEN}" } },
+  { trusted: true, git: true, config: { username: "{env:TEST_TOKEN}" } },
 )
 
 const nullConfigWellKnown = wellKnown({
@@ -2332,7 +2333,7 @@ describe("VECTOR_DISABLE_PROJECT_CONFIG", () => {
           expect(config.username).not.toBe("project-user")
         }),
       ),
-    { config: { model: "project/model", username: "project-user" } },
+    { trusted: true, config: { model: "project/model", username: "project-user" } },
   )
 
   it.instance("skips project .vector/ directories when flag is set", () =>
@@ -2376,14 +2377,14 @@ describe("VECTOR_DISABLE_PROJECT_CONFIG", () => {
           expect(config).toBeDefined()
         }),
       ),
-    { config: { instructions: ["./CUSTOM.md"] } },
+    { trusted: true, config: { instructions: ["./CUSTOM.md"] } },
   )
 
   it.instance(
     "VECTOR_AGENT_CONFIG_DIR still works when flag is set",
     () =>
       Effect.gen(function* () {
-        const configDir = yield* tmpdirScoped({ config: { model: "configdir/model" } })
+        const configDir = yield* tmpdirScoped({ trusted: true, config: { model: "configdir/model" } })
         yield* withProcessEnvs(
           { VECTOR_DISABLE_PROJECT_CONFIG: "true", VECTOR_AGENT_CONFIG_DIR: configDir },
           Effect.gen(function* () {
@@ -2392,7 +2393,7 @@ describe("VECTOR_DISABLE_PROJECT_CONFIG", () => {
           }),
         )
       }),
-    { config: { model: "project/model" } },
+    { trusted: true, config: { model: "project/model" } },
   )
 })
 
@@ -2676,5 +2677,5 @@ configIt({
       const config = yield* Config.use.get()
       expect(config.model).toBe("fixture/model")
     }),
-  { config: { model: "fixture/model" } },
+  { trusted: true, config: { model: "fixture/model" } },
 )

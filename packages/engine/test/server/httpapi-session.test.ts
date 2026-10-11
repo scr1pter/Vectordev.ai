@@ -313,7 +313,7 @@ describe("session HttpApi", () => {
           data: { message: `Message not found: ${missingMessage}` },
         })
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -385,7 +385,7 @@ describe("session HttpApi", () => {
           })).data,
         ).toMatchObject([{ type: "assistant" }])
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.live("uses the persisted session directory for prompt requests", () =>
@@ -394,8 +394,8 @@ describe("session HttpApi", () => {
       yield* llm.text("ok", { usage: { input: 1, output: 1 } })
 
       const config = testProviderConfig(llm.url)
-      const sessionDirectory = yield* tmpdirScoped({ git: true, config })
-      const requestDirectory = yield* tmpdirScoped({ git: true, config })
+      const sessionDirectory = yield* tmpdirScoped({ trusted: true, git: true, config })
+      const requestDirectory = yield* tmpdirScoped({ trusted: true, git: true, config })
       const session = yield* createSession({ title: "directory regression" }).pipe(
         provideInstanceEffect(sessionDirectory),
       )
@@ -518,7 +518,7 @@ describe("session HttpApi", () => {
           message: "Invalid cursor",
         })
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -558,7 +558,7 @@ describe("session HttpApi", () => {
         expect(prompt.status).toBe(404)
         expect(yield* responseJson(prompt)).toEqual(expected)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -633,7 +633,7 @@ describe("session HttpApi", () => {
         )
         expect(message).toMatchObject({ id: wakeID, type: "user" })
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -660,7 +660,7 @@ describe("session HttpApi", () => {
           service: "session.wait",
         })
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -695,7 +695,7 @@ describe("session HttpApi", () => {
         expect((contextBody as { ref?: unknown }).ref).toMatch(/^err_[0-9a-f-]{8}$/)
         expect(JSON.stringify(contextBody)).not.toContain("assistant")
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -713,7 +713,7 @@ describe("session HttpApi", () => {
         expect(response.status).toBe(200)
         expect((yield* json<Session.Info>(response)).summary?.diffs).toEqual([{ additions: 1, deletions: 0 }])
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -789,7 +789,7 @@ describe("session HttpApi", () => {
           }),
         ).toBe(true)
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false, share: "disabled" } },
   )
 
   it.instance(
@@ -821,7 +821,7 @@ describe("session HttpApi", () => {
         expect(messages.status).toBe(200)
         expect(yield* getWorkspaceID(created.id)).toEqual({ workspaceID: workspace.id })
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false, share: "disabled" } },
   )
 
   it.instance(
@@ -841,7 +841,7 @@ describe("session HttpApi", () => {
         expect(response.status).toBe(200)
         expect((yield* json<Session.Info>(response)).time.archived).toBe(-1)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -877,7 +877,7 @@ describe("session HttpApi", () => {
         expect(sessions).toContain(pathSession.id)
         expect(sessions).not.toContain(pathlessSession.id)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -901,7 +901,7 @@ describe("session HttpApi", () => {
         const global = yield* requestJson<Session.Info[]>(`${ExperimentalPaths.session}?${globalQuery}`, { headers })
         expect(global.map((item) => item.id)).toContain(created.id)
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false, share: "disabled" } },
   )
 
   it.instance(
@@ -926,7 +926,7 @@ describe("session HttpApi", () => {
           expect({ spelling, ids: listed.map((item) => item.id) }).toEqual({ spelling, ids: [created.id] })
         }
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false, share: "disabled" } },
     { timeout: 15000 },
   )
 
@@ -948,7 +948,7 @@ describe("session HttpApi", () => {
         const listed = yield* requestJson<Session.Info[]>(`${SessionPaths.list}?${query}`, { headers })
         expect(listed.map((item) => item.id)).toContain(driveRootSession.id)
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false, share: "disabled" } },
     { timeout: 15000 },
   )
 
@@ -969,7 +969,7 @@ describe("session HttpApi", () => {
         expect(response.headers["link"]).toContain("limit=1")
         expect(response.headers["access-control-expose-headers"]?.toLowerCase()).toContain("x-next-cursor")
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1014,7 +1014,7 @@ describe("session HttpApi", () => {
           ),
         ).toBe(true)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1040,7 +1040,7 @@ describe("session HttpApi", () => {
 
         expect(response.status).toBe(400)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1085,6 +1085,6 @@ describe("session HttpApi", () => {
           message: `Permission request not found: ${permissionID}`,
         })
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 })

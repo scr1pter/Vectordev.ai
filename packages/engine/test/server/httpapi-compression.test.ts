@@ -31,7 +31,7 @@ function fatConfig() {
 describe("HttpApi compression", () => {
   describe("encodes responses", () => {
     test("gzips JSON when Accept-Encoding includes gzip and body exceeds threshold", async () => {
-      await using tmp = await tmpdir({ config: fatConfig() })
+      await using tmp = await tmpdir({ trusted: true, config: fatConfig() })
       const response = await app().request("/config", {
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "gzip" },
       })
@@ -45,7 +45,7 @@ describe("HttpApi compression", () => {
     })
 
     test("uses deflate when only deflate is acceptable", async () => {
-      await using tmp = await tmpdir({ config: fatConfig() })
+      await using tmp = await tmpdir({ trusted: true, config: fatConfig() })
       const response = await app().request("/config", {
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "deflate" },
       })
@@ -58,7 +58,7 @@ describe("HttpApi compression", () => {
     })
 
     test("prefers gzip when both gzip and deflate are acceptable", async () => {
-      await using tmp = await tmpdir({ config: fatConfig() })
+      await using tmp = await tmpdir({ trusted: true, config: fatConfig() })
       const response = await app().request("/config", {
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "gzip, deflate" },
       })
@@ -66,7 +66,7 @@ describe("HttpApi compression", () => {
     })
 
     test("does not include the original Content-Length when compressed", async () => {
-      await using tmp = await tmpdir({ config: fatConfig() })
+      await using tmp = await tmpdir({ trusted: true, config: fatConfig() })
       const response = await app().request("/config", {
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "gzip" },
       })
@@ -79,7 +79,7 @@ describe("HttpApi compression", () => {
 
   describe("skips", () => {
     test("when no Accept-Encoding header is present", async () => {
-      await using tmp = await tmpdir({ config: fatConfig() })
+      await using tmp = await tmpdir({ trusted: true, config: fatConfig() })
       const response = await app().request("/config", {
         headers: { "x-vector-directory": tmp.path },
       })
@@ -87,7 +87,7 @@ describe("HttpApi compression", () => {
     })
 
     test("when Accept-Encoding only allows unsupported encodings", async () => {
-      await using tmp = await tmpdir({ config: fatConfig() })
+      await using tmp = await tmpdir({ trusted: true, config: fatConfig() })
       const response = await app().request("/config", {
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "br" },
       })
@@ -96,7 +96,7 @@ describe("HttpApi compression", () => {
 
     test("when the response body is below the 1024-byte threshold", async () => {
       // A bare config produces a tiny response (~few hundred bytes).
-      await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+      await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
       const response = await app().request("/config", {
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "gzip" },
       })
@@ -107,7 +107,7 @@ describe("HttpApi compression", () => {
     })
 
     test("HEAD requests", async () => {
-      await using tmp = await tmpdir({ config: fatConfig() })
+      await using tmp = await tmpdir({ trusted: true, config: fatConfig() })
       const response = await app().request("/config", {
         method: "HEAD",
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "gzip" },
@@ -118,7 +118,7 @@ describe("HttpApi compression", () => {
 
   describe("streaming exclusions", () => {
     test("/event SSE is not compressed", async () => {
-      await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+      await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
       const controller = new AbortController()
       const response = await app().request("/event", {
         headers: { "x-vector-directory": tmp.path, "accept-encoding": "gzip" },

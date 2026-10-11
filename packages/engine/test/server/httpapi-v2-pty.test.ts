@@ -66,7 +66,7 @@ describe("v2 pty HttpApi", () => {
   testPty(
     "serves location-wrapped PTY routes and retains exited sessions",
     async () => {
-      await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+      await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
 
       const empty = await request("/api/pty", tmp.path)
       expect(empty.status).toBe(200)
@@ -109,7 +109,7 @@ describe("v2 pty HttpApi", () => {
   )
 
   testPty("rejects connect tokens without the CSRF header and connects with a valid ticket", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
     const created = await request("/api/pty", tmp.path, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -151,7 +151,7 @@ describe("v2 pty HttpApi", () => {
     "serves PTY websocket output and input through the canonical route",
     () =>
       Effect.gen(function* () {
-        const dir = yield* tmpdirScoped({ git: true, config: { formatter: false, lsp: false } })
+        const dir = yield* tmpdirScoped({ trusted: true, git: true, config: { formatter: false, lsp: false } })
         const created = yield* HttpClientRequest.post("/api/pty").pipe(
           directoryHeader(dir),
           HttpClientRequest.bodyJson({ command: "/bin/cat", title: "v2-websocket" }),
@@ -196,7 +196,7 @@ describe("v2 pty HttpApi", () => {
     "applies plugin shell environment before forced PTY values",
     () =>
       Effect.gen(function* () {
-        const dir = yield* tmpdirScoped({ git: true, config: { formatter: false, lsp: false } })
+        const dir = yield* tmpdirScoped({ trusted: true, git: true, config: { formatter: false, lsp: false } })
         const plugin = path.join(dir, "plugin.ts")
         const cwd = path.join(dir, "child")
         yield* Effect.promise(() => mkdir(cwd))

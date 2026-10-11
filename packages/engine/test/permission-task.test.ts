@@ -157,6 +157,7 @@ describe("permission.task with real config files", () => {
         expect(Permission.evaluate("task", "code-reviewer", ruleset).action).toBe("deny")
       }),
     {
+      trusted: true,
       git: true,
       config: {
         permission: {
@@ -181,6 +182,7 @@ describe("permission.task with real config files", () => {
         expect(Permission.evaluate("task", "orchestrator-fast", ruleset).action).toBe("deny")
       }),
     {
+      trusted: true,
       git: true,
       config: {
         permission: {
@@ -205,6 +207,7 @@ describe("permission.task with real config files", () => {
         expect(Permission.evaluate("task", "unknown-agent", ruleset).action).toBe("ask")
       }),
     {
+      trusted: true,
       git: true,
       config: {
         permission: {
@@ -241,6 +244,7 @@ describe("permission.task with real config files", () => {
         expect(disabled.has("task")).toBe(false)
       }),
     {
+      trusted: true,
       git: true,
       config: {
         permission: {
@@ -273,6 +277,7 @@ describe("permission.task with real config files", () => {
         expect(disabled.has("task")).toBe(true)
       }),
     {
+      trusted: true,
       git: true,
       config: {
         permission: {
@@ -305,6 +310,7 @@ describe("permission.task with real config files", () => {
         expect(disabled.has("task")).toBe(false)
       }),
     {
+      trusted: true,
       git: true,
       config: {
         permission: {

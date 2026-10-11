@@ -78,6 +78,7 @@ const config = {
 // The project config above plus a plugin tuple whose options hold a key.
 function project() {
   return tmpdir({
+    trusted: true,
     config: { ...config, plugin: [[`./${PLUGIN_FILE}`, { apiKey: pluginSecret, region: "us" }]] },
     init: (dir) => Bun.write(path.join(dir, PLUGIN_FILE), "export default async () => ({})\n"),
   })
@@ -93,6 +94,7 @@ const boundTools: ConfigMCPV1.Local = {
 }
 function boundProject(mcp: Record<string, ConfigMCPV1.Info>) {
   return tmpdir({
+    trusted: true,
     config: { formatter: false, lsp: false, mcp },
     init: (dir) => Bun.write(path.join(dir, SERVER_FILE), "export {}\n"),
   })
@@ -294,6 +296,7 @@ describe("config and provider responses", () => {
     process.env.VECTOR_TEST_CONFIG_SECRET = "env-reference-config-secret"
     try {
       await using tmp = await tmpdir({
+        trusted: true,
         config: {
           formatter: false,
           lsp: false,
@@ -359,7 +362,7 @@ describe("config and provider responses", () => {
   })
 
   test("V2 provider and model responses never carry a stored secret", async () => {
-    await using tmp = await tmpdir({ git: true, config })
+    await using tmp = await tmpdir({ trusted: true, git: true, config })
     await waitForProvider(tmp.path)
     for (const route of ["/api/provider", "/api/provider/custom", "/api/model"]) {
       const body = await text(route, tmp.path)
@@ -371,7 +374,7 @@ describe("config and provider responses", () => {
   }, 30_000)
 
   test("V2 agent responses never carry an agent's request secrets", async () => {
-    await using tmp = await tmpdir({ git: true, config })
+    await using tmp = await tmpdir({ trusted: true, git: true, config })
     await waitForProvider(tmp.path)
     const body = await text("/api/agent", tmp.path)
     for (const secret of secrets) expect(body).not.toContain(secret)
@@ -499,6 +502,7 @@ describe("permission rules whose patterns look like secret names", () => {
 
   test("reach the client unchanged from GET and PATCH /config", async () => {
     await using tmp = await tmpdir({
+      trusted: true,
       config: { ...config, permission: rules, agent: { build: { permission: rules } } },
     })
     const response = await request("/config", tmp.path)

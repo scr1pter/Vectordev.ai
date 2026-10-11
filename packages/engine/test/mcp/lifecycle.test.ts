@@ -322,7 +322,7 @@ it.instance(
         expect(result).toEqual({ roots: [{ uri: pathToFileURL(directory).href }] })
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -336,7 +336,7 @@ it.instance(
         expect(stdioOptsByName.get("rel-cwd")?.cwd).toBe(path.resolve(directory, "plugins/sub"))
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -353,7 +353,7 @@ it.instance(
         expect((yield* mcp.status())["unsafe-remote"]).toBeUndefined()
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -382,7 +382,7 @@ it.instance(
         expect(yield* mcp.status()).toEqual({})
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -416,7 +416,7 @@ it.instance(
         expect(serverState.listToolsCalls).toBe(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -440,7 +440,7 @@ it.instance(
         })
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -470,7 +470,7 @@ it.instance(
         expect(instructions.some((item) => item.name === "blank-server")).toBe(false)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -521,7 +521,7 @@ it.instance(
         expect(serverState.listResourceTemplatesCalls).toBe(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -545,7 +545,7 @@ it.instance(
         expect(yield* mcp.tools()).toEqual({})
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -572,7 +572,7 @@ it.instance(
         expect(serverState.listPromptsCalls).toBe(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -610,7 +610,7 @@ it.instance(
         expect(serverState.listToolsCalls).toBe(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -644,6 +644,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         fast: { type: "local", command: ["./fast"] },
@@ -689,6 +690,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "disc-server": {
@@ -727,6 +729,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "reconn-server": {
@@ -868,7 +871,7 @@ it.instance(
         expect(secondState.closed).toBe(false)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -912,6 +915,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "good-server": {
@@ -949,7 +953,7 @@ it.instance(
         expect(serverState.closed).toBe(true)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -983,7 +987,7 @@ it.instance(
         expect(serverState.requestCalls).toBe(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1006,7 +1010,7 @@ it.instance(
         expect(serverState.requestCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1034,6 +1038,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "disabled-server": {
@@ -1072,6 +1077,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "prompt-server": {
@@ -1108,6 +1114,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "resource-server": {
@@ -1139,7 +1146,7 @@ it.instance(
         expect(serverState.readResourceTimeout).toBe(2500)
       }),
     ),
-  { config: { mcp: {}, experimental: { mcp_timeout: 5000 } } },
+  { trusted: true, config: { mcp: {}, experimental: { mcp_timeout: 5000 } } },
 )
 
 it.instance(
@@ -1165,7 +1172,7 @@ it.instance(
         expect(serverState.listPromptsCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1191,7 +1198,7 @@ it.instance(
         expect(serverState.listResourcesCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1217,7 +1224,7 @@ it.instance(
         expect(serverState.listResourcesCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1241,6 +1248,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "prompt-disc-server": {
@@ -1270,7 +1278,7 @@ it.instance(
         expect(status["nonexistent"]).toBeUndefined()
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1289,7 +1297,7 @@ it.instance(
         }
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1305,7 +1313,7 @@ it.instance(
         expect(Object.keys(tools).length).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1339,6 +1347,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "fail-connect": {
@@ -1410,6 +1419,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "my.special-server": {
@@ -1447,7 +1457,7 @@ it.instance(
         expect(transportCloseCount).toBeGreaterThanOrEqual(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1476,7 +1486,7 @@ it.instance(
         expect(transportCloseCount).toBeGreaterThanOrEqual(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1506,5 +1516,5 @@ it.instance(
         expect(transportCloseCount).toBeGreaterThanOrEqual(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )

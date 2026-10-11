@@ -16,6 +16,7 @@ it.instance(
       expect(cfg.agent?.["plan"]?.color).toBe("primary")
     }),
   {
+    trusted: true,
     git: true,
     config: {
       agent: {
@@ -36,6 +37,7 @@ it.instance(
       expect(build?.color).toBe("accent")
     }),
   {
+    trusted: true,
     git: true,
     config: {
       agent: {

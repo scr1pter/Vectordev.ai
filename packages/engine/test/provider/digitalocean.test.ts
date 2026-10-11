@@ -57,7 +57,7 @@ it.instance(
         expect(routerEntries.length).toBe(0)
       }),
     ),
-  { config: {} },
+  { trusted: true, config: {} },
 )
 
 it.instance(
@@ -79,7 +79,7 @@ it.instance(
         expect(providers[DIGITALOCEAN]).toBeUndefined()
       }),
     ),
-  { config: {} },
+  { trusted: true, config: {} },
 )
 
 it.instance(
@@ -98,7 +98,7 @@ it.instance(
         expect(providers[DIGITALOCEAN]).toBeUndefined()
       }),
     ),
-  { config: {} },
+  { trusted: true, config: {} },
 )
 
 it.instance(
@@ -114,5 +114,5 @@ it.instance(
         expect(Object.keys(models).filter((id) => id.startsWith("router:")).length).toBe(0)
       }),
     ),
-  { config: {} },
+  { trusted: true, config: {} },
 )

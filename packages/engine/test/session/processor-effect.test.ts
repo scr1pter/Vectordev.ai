@@ -345,7 +345,7 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
         expect(calls).toBe(1)
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -431,7 +431,7 @@ it.live("session.processor effect tests preserve text start time", () =>
         if (!text?.time?.start || !text.time.end) return
         expect(text.time.start).toBeLessThan(text.time.end)
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -478,7 +478,7 @@ it.live("session.processor effect tests stop after token overflow requests compa
         expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
         expect(parts.some((part) => part.type === "step-finish")).toBe(true)
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -527,7 +527,7 @@ it.live("session.processor effect tests capture reasoning from http mock", () =>
         expect(reasoning?.text).toBe("think")
         expect(text?.text).toBe("done")
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -574,7 +574,7 @@ it.live("session.processor effect tests reset reasoning state across retries", (
         expect(reasoning.some((part) => part.text === "two")).toBe(true)
         expect(reasoning.some((part) => part.text === "onetwo")).toBe(false)
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -617,7 +617,7 @@ it.live("session.processor effect tests do not retry unknown json errors", () =>
         expect(yield* llm.calls).toBe(1)
         expect(handle.message.error?.name).toBe("APIError")
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -664,7 +664,7 @@ it.live("session.processor effect tests retry recognized structured json errors"
         expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
         expect(handle.message.error).toBeUndefined()
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -718,7 +718,7 @@ it.live("session.processor effect tests publish retry status updates", () =>
         expect(yield* llm.calls).toBe(2)
         expect(states).toStrictEqual([1])
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -761,7 +761,7 @@ it.live("session.processor effect tests compact on structured context overflow",
         expect(yield* llm.calls).toBe(1)
         expect(handle.message.error).toBeUndefined()
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -826,7 +826,7 @@ it.live("session.processor effect tests complete AI SDK tool calls when native f
         expect(call.state.time.start).toBeDefined()
         expect(call.state.time.end).toBeDefined()
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -894,7 +894,7 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
           expect(call.state.time.end).toBeDefined()
         }
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -968,7 +968,7 @@ it.live("session.processor effect tests record aborted errors and idle state", (
         expect(state).toMatchObject({ type: "idle" })
         expect(errs).toContain("MessageAbortedError")
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -1025,7 +1025,7 @@ it.live("session.processor effect tests mark interruptions aborted without manua
         }
         expect(state).toMatchObject({ type: "idle" })
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -1073,7 +1073,7 @@ itProviderError.live("session.processor effect tests fail provider-executed erro
         expect(seen).toContain(MessageV2.Event.Updated.type)
         expect(seen.filter((type) => type.startsWith("session.next."))).toEqual([])
       }),
-    { config: cfg },
+    { trusted: true, config: cfg },
   ),
 )
 
@@ -1126,7 +1126,7 @@ itFragmentFailure.live("session.processor effect tests retain partial legacy par
         expect(seen).toContain(Session.Event.Error.type)
         expect(seen.filter((type) => type.startsWith("session.next."))).toEqual([])
       }),
-    { config: cfg },
+    { trusted: true, config: cfg },
   ),
 )
 
@@ -1178,6 +1178,7 @@ itStalledSnapshot.live(
           expect((yield* session.get(chat.id)).cost).toBeCloseTo(0.315)
         }),
       {
+        trusted: true,
         config: {
           provider: {
             lmstudio: {
@@ -1280,6 +1281,7 @@ for (const guarded of [false, true]) {
               }
             }),
           {
+            trusted: true,
             config: {
               provider: {
                 lmstudio: {
@@ -1352,7 +1354,7 @@ it.live("session admission refusal stops before the provider without a retryable
         expect(yield* llm.calls).toBe(0)
         expect(turn.handle.message.error).toBeUndefined()
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -1389,7 +1391,7 @@ it.live("session admission settles a failed attempt before retry and disables hi
         expect(yield* llm.calls).toBe(1)
         expect(turn.handle.message.error).toBeUndefined()
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -1428,7 +1430,7 @@ it.live("session admission settles interrupted HTTP work exactly once and isolat
         expect(settled).toHaveLength(1)
         expect(yield* llm.calls).toBe(3)
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )
 
@@ -1453,6 +1455,6 @@ it.live("session admission settles reported complete usage once despite persiste
         expect(settled[0]).toMatchObject({ complete: true, context: 10, cost: 0, usage: { totalTokens: 11 } })
         expect(yield* llm.calls).toBe(1)
       }),
-    { config: (url) => providerCfg(url) },
+    { trusted: true, config: (url) => providerCfg(url) },
   ),
 )

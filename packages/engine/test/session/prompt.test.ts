@@ -575,7 +575,7 @@ noLLMServer.instance(
       expect(result.info.role).toBe("assistant")
       if (result.info.role === "assistant") expect(result.info.finish).toBe("stop")
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 it.instance("loop exits without an LLM request for interrupted orphan tool calls", () =>
@@ -1796,7 +1796,7 @@ raceNoLLMServer.instance(
         expect(lastAssistant.info.parentID).toBe(lastUser?.info.id)
       }
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   3_000,
 )
 
@@ -1843,7 +1843,7 @@ noLLMServer.instance(
       expect(taskMsg.info.time.completed).toBeDefined()
       expect(taskMsg.info.finish).toBeDefined()
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   30_000,
 )
 
@@ -2753,7 +2753,7 @@ noLLMServer.instance(
       const exit = yield* Fiber.await(fiber)
       expect(Exit.isFailure(exit)).toBe(true)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   30_000,
 )
 
@@ -2788,7 +2788,7 @@ noLLMServer.instance(
       const exit = yield* Fiber.await(fiber)
       expect(Exit.isFailure(exit)).toBe(true)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   30_000,
 )
 
@@ -2836,7 +2836,7 @@ noLLMServer.instance(
       yield* permission.reply({ requestID: request.id, reply: "reject" })
       expect(Exit.isSuccess(yield* Fiber.await(fiber))).toBe(true)
     }),
-  { git: true, config: cfg },
+  { trusted: true, git: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -2873,7 +2873,7 @@ noLLMServer.instance(
       yield* permission.reply({ requestID: request.id, reply: "reject" })
       expect(Exit.isSuccess(yield* Fiber.await(fiber))).toBe(true)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -2918,7 +2918,7 @@ noLLMServer.instance(
         expect.objectContaining({ id, type: "text", text: expect.stringContaining("Read tool failed to read") }),
       ])
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -2959,7 +2959,7 @@ noLLMServer.instance(
       )
       expect(JSON.stringify(msg.parts)).toContain("user-notes")
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -2989,7 +2989,7 @@ noLLMServer.instance(
         }),
       )
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -3025,7 +3025,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -3056,7 +3056,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -3098,7 +3098,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 // Special characters in filenames
@@ -3135,7 +3135,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { git: true, config: cfg },
+  { trusted: true, git: true, config: cfg },
 )
 
 // Regression: empty assistant turn loop
@@ -3250,6 +3250,7 @@ noLLMServer.instance(
       yield* sessions.remove(session.id)
     }),
   {
+    trusted: true,
     config: {
       ...cfg,
       provider: {
@@ -3323,7 +3324,7 @@ freePrompts.instance(
         }
       }
     }),
-  { config: paidCommandConfig },
+  { trusted: true, config: paidCommandConfig },
   30_000,
 )
 
@@ -3350,7 +3351,7 @@ freePrompts.instance(
           expect(message.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
       }
     }),
-  { config: paidCommandConfig },
+  { trusted: true, config: paidCommandConfig },
 )
 
 freePrompts.instance(
@@ -3381,7 +3382,7 @@ freePrompts.instance(
       })
       expect(command.info).toMatchObject({ providerID: ref.providerID, modelID: ref.modelID })
     }),
-  { config: paidCommandConfig },
+  { trusted: true, config: paidCommandConfig },
 )
 
 freePrompts.instance(
@@ -3396,7 +3397,10 @@ freePrompts.instance(
       const result = yield* prompt.command({ sessionID: chat.id, command: "paid-command", arguments: "" })
       expect(result.info).toMatchObject({ providerID: ref.providerID, modelID: ref.modelID })
     }),
-  { config: { ...paidCommandConfig, provider: { ...paidCommandConfig.provider, openrouter: { whitelist: [] } } } },
+  {
+    trusted: true,
+    config: { ...paidCommandConfig, provider: { ...paidCommandConfig.provider, openrouter: { whitelist: [] } } },
+  },
 )
 
 if (process.platform !== "win32")
@@ -3413,7 +3417,7 @@ if (process.platform !== "win32")
         const result = yield* prompt.shell({ sessionID: chat.id, agent: "paid-primary", command: ":" })
         expect(result.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
       }),
-    { config: paidCommandConfig },
+    { trusted: true, config: paidCommandConfig },
   )
 
 // Agent / command resolution errors

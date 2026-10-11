@@ -111,7 +111,7 @@ function fixture() {
         expect(loaded.reads).toEqual(["openai"])
         expect(Object.keys(yield* provider.list())).toEqual(["lmstudio"])
       }),
-    { config: { provider: { lmstudio: { models: { local: {} } } } } },
+    { trusted: true, config: { provider: { lmstudio: { models: { local: {} } } } } },
   )
 }
 
@@ -158,6 +158,7 @@ function fixture() {
         expect(loaded.reads).toEqual(["anthropic"])
       }),
     {
+      trusted: true,
       config: {
         provider: {
           anthropic: {

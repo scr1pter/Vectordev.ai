@@ -48,7 +48,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   it.instance("does not spawn builtin LSP for files inside instance when LSP is unset", () =>
@@ -91,7 +91,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   it.instance(
@@ -114,6 +114,7 @@ describe("lsp.spawn", () => {
         yield* awaitWithTimeout(Deferred.await(updated), "lsp.updated event was not published")
       }),
     {
+      trusted: true,
       config: {
         lsp: {
           fake: {
@@ -142,6 +143,7 @@ describe("lsp.spawn", () => {
         }),
       ),
     {
+      trusted: true,
       config: {
         lsp: {
           cwd: {
@@ -176,6 +178,7 @@ describe("lsp.spawn", () => {
         }),
       ),
     {
+      trusted: true,
       config: {
         lsp: {
           eslint: { disabled: true },
@@ -207,7 +210,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   experimentalTyIt.instance(
@@ -233,7 +236,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   disabledDownloadIt.instance(
@@ -257,6 +260,6 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 })

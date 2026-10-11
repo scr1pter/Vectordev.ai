@@ -69,7 +69,7 @@ describe("sync HttpApi", () => {
         expect(replayed.status).toBe(200)
         expect(yield* replayed.json).toEqual({ sessionID: session.id })
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -119,7 +119,7 @@ describe("sync HttpApi", () => {
           expect(response.status).toBe(400)
         }
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance.skip(

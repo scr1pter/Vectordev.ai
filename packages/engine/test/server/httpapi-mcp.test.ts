@@ -68,6 +68,7 @@ describe("mcp HttpApi", () => {
         expect(yield* json(response)).toEqual({ demo: { status: "disabled" } })
       }),
     {
+      trusted: true,
       config: {
         mcp: {
           demo: {
@@ -121,6 +122,7 @@ describe("mcp HttpApi", () => {
         expect(yield* json<Record<string, unknown>>(status)).not.toHaveProperty("added")
       }),
     {
+      trusted: true,
       config: {
         mcp: {
           demo: {
@@ -150,6 +152,7 @@ describe("mcp HttpApi", () => {
         expect(yield* json(removed)).toEqual({ success: true })
       }),
     {
+      trusted: true,
       config: {
         mcp: {
           demo: {
@@ -182,6 +185,7 @@ describe("mcp HttpApi", () => {
         )
       }),
     {
+      trusted: true,
       config: {
         formatter: false,
         lsp: false,
@@ -226,6 +230,6 @@ describe("mcp HttpApi", () => {
           })
         }
       }),
-    { config: { mcp: {} } },
+    { trusted: true, config: { mcp: {} } },
   )
 })

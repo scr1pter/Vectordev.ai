@@ -106,7 +106,7 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
   }
   const realpath = sanitizePath(await fs.realpath(dirpath))
   const extra = await options?.init?.(realpath)
-  if (options?.trusted === true || (options?.config && options.trusted !== false)) await trustWorkspace(realpath)
+  if (options?.trusted === true) await trustWorkspace(realpath)
   const result = {
     [Symbol.asyncDispose]: async () => {
       try {
@@ -165,8 +165,7 @@ export function tmpdirScoped<E = never, R = never>(options?: {
     }
 
     if (options?.init) yield* options.init(dir)
-    if (options?.trusted === true || (options?.config && options.trusted !== false))
-      yield* Effect.promise(() => trustWorkspace(dir))
+    if (options?.trusted === true) yield* Effect.promise(() => trustWorkspace(dir))
 
     return dir
   })
