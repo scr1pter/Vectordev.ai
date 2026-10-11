@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { knownCostUsd } from "./economics-types"
 import { createSessionOutcomeRecorder, measureReplyTime, outcomeFromSession } from "./session-outcomes"
 
 const usage = { input: 1_000, output: 300, reasoning: 0, cache: { read: 0, write: 0 } }
@@ -45,8 +46,28 @@ describe("outcomeFromSession", () => {
       spend: { cost: 0.1 },
     })
     expect(outcome).toMatchObject({ variant: { kind: "mixed" }, execution: "failed", hadChecks: false })
-    expect(outcome?.costUsd).toBeUndefined()
+    expect(outcome).toMatchObject({ costUsd: 0.1, costPriced: false })
     expect(outcome?.usage?.input).toBe(usage.input)
+  })
+
+  test("a stopped reply keeps the session's known cost unranked; a refused one leaves it fully priced", () => {
+    const info = {
+      role: "assistant",
+      providerID: "p",
+      modelID: "m",
+      tokens: usage,
+      cost: 0.1,
+      finish: "stop",
+      time: { created: 1, completed: 2 },
+    }
+    const ended = (error: { name: string; data?: { statusCode: number } }) =>
+      session({ messages: [{ info }, { info: { ...info, tokens: {}, cost: 0, error } }], spend: { cost: 0.1 } })
+    const stopped = ended({ name: "MessageAbortedError" })
+    expect(stopped).toMatchObject({ costUsd: 0.1, costPriced: false, model: "m", execution: "aborted" })
+    expect(knownCostUsd(stopped!)).toBeUndefined()
+    const refused = ended({ name: "APIError", data: { statusCode: 429 } })
+    expect(refused).toMatchObject({ costUsd: 0.1, costPriced: true, model: "m", execution: "failed" })
+    expect(knownCostUsd(refused!)).toBe(0.1)
   })
 
   test("records the provider, model, measured cost, and latency", () => {

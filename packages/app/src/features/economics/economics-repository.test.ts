@@ -259,14 +259,15 @@ describe("economics-repository", () => {
     const mixed = rows.find((row) => row.id === "session:three")
     expect(mixed).toMatchObject({ mixedModels: true, execution: "failed", latencyMs: 2, usage: { input: 100 } })
     expect(mixed?.model).toBeUndefined()
-    expect(mixed?.costUsd).toBeUndefined()
+    // The failed attempt reported nothing, so the known spend is kept but never ranked as what the run cost.
+    expect(mixed).toMatchObject({ costUsd: 0.1, costPriced: false })
     expect(recommendModel(rows, "general")).toBeUndefined()
 
     await save("earlier-failure", [message("A", false), message("B")], 20)
     const recovered = (await listOutcomes(projectId)).find((row) => row.id === "session:earlier-failure")
     expect(recovered).toMatchObject({ mixedModels: true, execution: "completed", latencyMs: 2, usage: { input: 100 } })
     expect(recovered?.model).toBeUndefined()
-    expect(recovered?.costUsd).toBeUndefined()
+    expect(recovered).toMatchObject({ costUsd: 0.1, costPriced: false })
     expect(recommendModel(await listOutcomes(projectId), "general")).toBeUndefined()
   })
 

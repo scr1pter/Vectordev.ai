@@ -740,6 +740,8 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
           cacheRead: usage?.usage.cacheRead ?? 0,
           cacheWrite: usage?.usage.cacheWrite ?? 0,
           ...(!usage ? { usageMissing: true } : {}),
+          // A stopped specialist's reply may have been billed without reporting usage: the priced part is a floor.
+          ...(usage?.partial ? { partial: true } : {}),
           kind,
           model: used,
         }

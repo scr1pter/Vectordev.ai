@@ -123,6 +123,8 @@ export function costWording(cost: ReviewCost): string {
       ? `${formatTokens(tokensIn)} in, ${formatTokens(cost.cacheRead)} of it cached / ${formatTokens(cost.output)} out`
       : `${formatTokens(tokensIn)} in / ${formatTokens(cost.output)} out`
   if (cost.kind === "free") return `${cost.model.replace(/:free$/, "")} · free through OpenRouter (${usage})`
+  if (cost.kind === "priced" && cost.partial)
+    return `${cost.model} · at least ${formatUsd(cost.costUsd)}: a reply that stopped early reported no usage (${usage})`
   if (cost.kind === "priced") return `${cost.model} · ${formatUsd(cost.costUsd)} (${usage})`
   if (cost.kind === "plan") return `${cost.model} · subscription sign-in, no per-token price (${usage})`
   return `${cost.model} · cost unknown: pricing or complete usage is unavailable (${usage})`

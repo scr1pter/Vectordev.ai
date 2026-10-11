@@ -314,6 +314,29 @@ describe("runReview", () => {
     expect(reviewFooter(outcome)).not.toContain("$0")
   })
 
+  test("prices a review whose first reply stopped before reporting usage as at least what the rest cost", async () => {
+    const { client, calls } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: (input) =>
+        calls.prompt.filter((call) => call.sessionID === input.sessionID).length === 1
+          ? {
+              info: {
+                role: "assistant",
+                providerID: "anthropic",
+                modelID: "claude-sonnet-4-5",
+                cost: 0,
+                error: { name: "MessageAbortedError" },
+              },
+              parts: [],
+            }
+          : answer(report(), 0.02),
+    })
+    const outcome = (await run(client))!
+    expect(calls.prompt).toHaveLength(2)
+    expect(outcome.cost).toMatchObject({ kind: "priced", partial: true, costUsd: 0.02, input: 1_000 })
+    expect(reviewFooter(outcome)).toContain("at least $0.02")
+  })
+
   test("keeps unpriced and invalid charges unknown while retaining measured tokens", async () => {
     for (const extra of [{ unpriced: true }, { cost: Number.NaN }, { cost: -1 }, { cost: undefined }]) {
       const { client } = fakeClient({

@@ -154,6 +154,8 @@ export interface SkippedFile {
 export interface ReviewCost {
   costUsd: number
   usageMissing?: boolean
+  // A reply stopped or failed before it reported usage, so costUsd is only what the rest of the review cost.
+  partial?: boolean
   input: number
   output: number
   reasoning: number

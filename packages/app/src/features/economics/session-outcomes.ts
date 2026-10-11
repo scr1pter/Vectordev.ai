@@ -125,7 +125,8 @@ export function outcomeFromSession(input: {
     changedFiles: changedFileCount(input.parts),
     usage: measured.usage,
     costUsd,
-    ...(costUsd !== undefined ? { costPriced: true } : {}),
+    // A partial cost is a lower bound: kept for the record, never ranked as what the run cost.
+    ...(costUsd !== undefined ? { costPriced: !measured.partial } : {}),
   }
 }
 

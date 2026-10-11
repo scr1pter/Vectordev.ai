@@ -833,6 +833,9 @@ describe("numbers and cost", () => {
     expect(costWording(unknown)).toBe(
       "provider/model · cost unknown: pricing or complete usage is unavailable (48.2k in / 3.1k out)",
     )
+    expect(costWording({ ...priced, partial: true })).toBe(
+      "anthropic/claude-sonnet-4-5 · at least $0.21: a reply that stopped early reported no usage (48.2k in, 31.0k of it cached / 3.1k out)",
+    )
   })
 
   test("formatUsd and formatDuration", () => {
