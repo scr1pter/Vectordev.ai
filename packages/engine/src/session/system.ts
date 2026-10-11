@@ -117,8 +117,9 @@ function specialistFocus(permitted?: readonly string[]) {
   if (listed.length === 0) return ""
   return `: ${listed.map(([name, focus]) => `${name} for ${focus}`).join("; ")}`
 }
-// Sizing, ownership (owned_paths, depends_on, success_criteria) and briefing rules live in the task tool's
-// description alone, so a request does not carry them twice.
+// Ownership (owned_paths, depends_on, success_criteria) and briefing rules live in the task tool's description alone,
+// and the default to do the work yourself, with its size threshold, in this policy alone, so a request does not carry
+// them twice.
 const SUBAGENT_ORCHESTRATION = [
   "The task tool's description has the rules for sizing, owned_paths, depends_on, success_criteria and writing a brief.",
   "Subagents inherit the current provider and model unless an agent is explicitly configured with another model; explore runs on the provider's small model when one is available.",

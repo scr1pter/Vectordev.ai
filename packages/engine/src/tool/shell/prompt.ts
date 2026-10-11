@@ -70,39 +70,24 @@ function chainGuidance(name: string) {
 }
 
 function bashCommandSection(chain: string, limits: Limits, defaultTimeoutMs: number) {
-  return `Before executing the command, please follow these steps:
-
-1. Directory Verification:
-   - Before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`test -d\` in the same command if it is unknown.
-
-2. Command Execution:
-   - Always quote file paths that contain spaces with double quotes (e.g., rm "path with spaces/file.txt")
-   - Examples of proper quoting:
-     - mkdir "/Users/name/My Documents" (correct)
-     - mkdir /Users/name/My Documents (incorrect - will fail)
-     - python "/path/with spaces/script.py" (correct)
-     - python /path/with spaces/script.py (incorrect - will fail)
-   - After ensuring proper quoting, execute the command.
-   - Capture the output of the command.
+  return `Before executing the command:
+1. Directory verification: before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`test -d\` in the same command if it is unknown.
+2. Quoting: always quote file paths that contain spaces with double quotes: mkdir "/Users/name/My Documents" works, mkdir /Users/name/My Documents fails.
 
 Usage notes:
-  - The command argument is required.
-  - You can specify an optional timeout in milliseconds. If not specified, commands will time out after ${defaultTimeoutMs}ms.
-  - If the output exceeds ${limits.maxLines} lines or ${limits.maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Do NOT use \`head\`, \`tail\`, or other truncation commands to limit output; the full output will already be captured to a file for more precise searching.
-
-  - Prefer Glob, Grep, and Read for individual searches and reads, and Edit or Write for manual changes. A bounded search or batch read of related files may use one shell command. Use a project runtime for repetitive edits, validating all matches before any writes. Communicate directly instead of printing progress with echo/printf.
+  - Commands time out after ${defaultTimeoutMs}ms unless you set a timeout.
+  - ${truncation(limits, "`head`, `tail`")}
+  - Communicate directly instead of printing progress with echo/printf.
   - When issuing multiple commands:
-    - If the commands are independent and can run in parallel, make multiple bash tool calls in a single message. For example, if you need to run "git status" and "git diff", send a single message with two bash tool calls in parallel.
+    - Send independent commands as separate bash calls in one message so they run in parallel, such as "git status" and "git diff".
     - ${chain}
     - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
-    - Multiline scripts are allowed; explicitly propagate failures before dependent operations.
-  - AVOID using \`cd <directory> && <command>\`. Use the \`workdir\` parameter to change directories instead.
-    <good-example>
-    Use workdir="/foo/bar" with command: pytest tests
-    </good-example>
-    <bad-example>
-    cd /foo/bar && pytest tests
-    </bad-example>`
+    - Multiline scripts are allowed; explicitly propagate failures before dependent operations.`
+}
+
+// Output limits are the same for every shell; only the commands a model might reach for to cut output differ.
+function truncation(limits: Limits, commands: string) {
+  return `If the output exceeds ${limits.maxLines} lines or ${limits.maxBytes} bytes, it is truncated and the full output is written to a file: read sections of it with Read (offset/limit) or search it with Grep. Do NOT use ${commands} or other truncation commands to limit output.`
 }
 
 function powershellCommandSection(
@@ -114,39 +99,19 @@ function powershellCommandSection(
 ) {
   return `${powershellNotes(name)}
 
-Before executing the command, please follow these steps:
-
-1. Directory Verification:
-   - Before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`Test-Path -LiteralPath <parent>\` in the same command if it is unknown.
-
-2. Command Execution:
-   - Always quote file paths that contain spaces with double quotes (e.g., Remove-Item -LiteralPath "path with spaces${pathSep}file.txt")
-   - Examples of proper quoting:
-     - New-Item -ItemType Directory -Path "My Documents" (correct)
-     - New-Item -ItemType Directory -Path My Documents (incorrect - path is split)
-     - & "path with spaces${pathSep}script.ps1" (correct)
-     - path with spaces${pathSep}script.ps1 (incorrect - path is split and not invoked)
-   - After ensuring proper quoting, execute the command.
-   - Capture the output of the command.
+Before executing the command:
+1. Directory verification: before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`Test-Path -LiteralPath <parent>\` in the same command if it is unknown.
+2. Quoting: always quote file paths that contain spaces with double quotes: New-Item -ItemType Directory -Path "My Documents" works, New-Item -ItemType Directory -Path My Documents splits the path, and a script is run as & "path with spaces${pathSep}script.ps1".
 
 Usage notes:
-  - The command argument is required.
-  - You can specify an optional timeout in milliseconds. If not specified, commands will time out after ${defaultTimeoutMs}ms.
-  - If the output exceeds ${limits.maxLines} lines or ${limits.maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Do NOT use \`Select-Object -First\`, \`Select-Object -Last\`, or other truncation commands to limit output; the full output will already be captured to a file for more precise searching.
-
-  - Prefer Glob, Grep, and Read for individual searches and reads, and Edit or Write for manual changes. A bounded search or batch read of related files may use one shell command. Use a project runtime for repetitive edits, validating all matches before any writes. Communicate directly instead of printing progress with Write-Output/Write-Host.
+  - Commands time out after ${defaultTimeoutMs}ms unless you set a timeout.
+  - ${truncation(limits, "`Select-Object -First`, `Select-Object -Last`")}
+  - Communicate directly instead of printing progress with Write-Output/Write-Host.
   - When issuing multiple commands:
-    - If the commands are independent and can run in parallel, make multiple bash tool calls in a single message. For example, if you need to run "git status" and "git diff", send a single message with two bash tool calls in parallel.
+    - Send independent commands as separate bash calls in one message so they run in parallel, such as "git status" and "git diff".
     - ${chain}
     - Use \`;\` only when you need to run commands sequentially but don't care if earlier commands fail
-    - Multiline scripts are allowed; explicitly propagate failures before dependent operations.
-  - AVOID changing directories inside the command. Use the \`workdir\` parameter to change directories instead.
-    <good-example>
-    Use workdir="project${pathSep}subdir" with command: pytest tests
-    </good-example>
-    <bad-example>
-    ${name === "powershell" ? `Set-Location -LiteralPath "project${pathSep}subdir"; if ($?) { pytest tests }` : `Set-Location -LiteralPath "project${pathSep}subdir" && pytest tests`}
-    </bad-example>`
+    - Multiline scripts are allowed; explicitly propagate failures before dependent operations.`
 }
 
 function cmdCommandSection(chain: string, limits: Limits, defaultTimeoutMs: number) {
@@ -156,39 +121,19 @@ function cmdCommandSection(chain: string, limits: Limits, defaultTimeoutMs: numb
 - Use \`if exist\` for existence checks.
 - Use \`call\` when invoking batch files from another batch-style command.
 
-Before executing the command, please follow these steps:
-
-1. Directory Verification:
-   - Before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`if exist\` in the same command if it is unknown.
-
-2. Command Execution:
-   - Always quote file paths that contain spaces with double quotes (e.g., del "path with spaces\\file.txt")
-   - Examples of proper quoting:
-     - mkdir "My Documents" (correct)
-     - mkdir My Documents (incorrect - path is split)
-     - call "path with spaces\\script.bat" (correct)
-     - path with spaces\\script.bat (incorrect - path is split and not invoked correctly)
-   - After ensuring proper quoting, execute the command.
-   - Capture the output of the command.
+Before executing the command:
+1. Directory verification: before creating files or directories, establish that the parent is the intended location. Reuse a prior listing or successful read when it already establishes this; check with \`if exist\` in the same command if it is unknown.
+2. Quoting: always quote file paths that contain spaces with double quotes: mkdir "My Documents" works, mkdir My Documents splits the path, and a batch file is run as call "path with spaces\\script.bat".
 
 Usage notes:
-  - The command argument is required.
-  - You can specify an optional timeout in milliseconds. If not specified, commands will time out after ${defaultTimeoutMs}ms.
-  - If the output exceeds ${limits.maxLines} lines or ${limits.maxBytes} bytes, it will be truncated and the full output will be written to a file. You can use Read with offset/limit to read specific sections or Grep to search the full content. Do NOT use \`more\` or other pagination commands to limit output; the full output will already be captured to a file for more precise searching.
-
-  - Prefer Glob, Grep, and Read for individual searches and reads, and Edit or Write for manual changes. A bounded search or batch read of related files may use one shell command. Use a project runtime for repetitive edits, validating all matches before any writes. Communicate directly instead of printing progress with echo.
+  - Commands time out after ${defaultTimeoutMs}ms unless you set a timeout.
+  - ${truncation(limits, "`more`")}
+  - Communicate directly instead of printing progress with echo.
   - When issuing multiple commands:
-    - If the commands are independent and can run in parallel, make multiple bash tool calls in a single message. For example, if you need to run "dir" and "where cmd", send a single message with two bash tool calls in parallel.
+    - Send independent commands as separate bash calls in one message so they run in parallel, such as "dir" and "where cmd".
     - ${chain}
     - Use \`&\` only when you need to run commands sequentially but don't care if earlier commands fail
-    - DO NOT use newlines to separate commands (newlines are ok in quoted strings)
-  - AVOID changing directories inside the command. Use the \`workdir\` parameter to change directories instead.
-    <good-example>
-    Use workdir="project\\subdir" with command: dir
-    </good-example>
-    <bad-example>
-    cd /d "project\\subdir" && dir
-    </bad-example>`
+    - DO NOT use newlines to separate commands (newlines are ok in quoted strings)`
 }
 
 function profile(name: string, platform: NodeJS.Platform, limits: Limits, defaultTimeoutMs: number) {
@@ -196,9 +141,9 @@ function profile(name: string, platform: NodeJS.Platform, limits: Limits, defaul
   const chain = chainGuidance(name)
   if (CMD.has(name)) {
     return {
-      intro: `Executes a given ${shellDisplayName(name)} command with optional timeout, ensuring proper handling and security measures.`,
+      intro: `Executes a given ${shellDisplayName(name)} command with an optional timeout.`,
       workdirSection:
-        "All commands run in the current working directory by default. Use the `workdir` parameter if you need to run a command in a different directory. AVOID changing directories inside the command - use `workdir` instead.",
+        "Commands run in the current working directory. To run one in another directory, set the `workdir` parameter; AVOID changing directories inside the command.",
       commandSection: cmdCommandSection(chain, limits, defaultTimeoutMs),
       gitCommands: "git commands",
       gitCommandRestriction: "git commands",
@@ -208,9 +153,9 @@ function profile(name: string, platform: NodeJS.Platform, limits: Limits, defaul
   }
   if (isPowerShell) {
     return {
-      intro: `Executes a given ${shellDisplayName(name)} command with optional timeout, ensuring proper handling and security measures.`,
+      intro: `Executes a given ${shellDisplayName(name)} command with an optional timeout.`,
       workdirSection:
-        "All commands run in the current working directory by default. Use the `workdir` parameter if you need to run a command in a different directory. AVOID changing directories inside the command - use `workdir` instead.",
+        "Commands run in the current working directory. To run one in another directory, set the `workdir` parameter; AVOID changing directories inside the command.",
       commandSection: powershellCommandSection(
         name,
         chain,
@@ -228,10 +173,9 @@ function profile(name: string, platform: NodeJS.Platform, limits: Limits, defaul
     }
   }
   return {
-    intro:
-      "Executes a given bash command in a persistent shell session with optional timeout, ensuring proper handling and security measures.",
+    intro: "Executes a given bash command with an optional timeout.",
     workdirSection:
-      "All commands run in the current working directory by default. Use the `workdir` parameter if you need to run a command in a different directory. AVOID using `cd <directory> && <command>` patterns - use `workdir` instead.",
+      "Commands run in the current working directory. To run one in another directory, set the `workdir` parameter; AVOID `cd <directory> && <command>`.",
     commandSection: bashCommandSection(chain, limits, defaultTimeoutMs),
     gitCommands: "bash commands",
     gitCommandRestriction: "git bash commands",
