@@ -605,6 +605,62 @@ describe("session.llm-native.request", () => {
     }),
   )
 
+  it.effect("never starts a shell call whose response was stopped while its edit ran", () =>
+    Effect.gen(function* () {
+      const ran: string[] = []
+      const editing = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const llmClient = {
+        prepare: () => Effect.die("unused"),
+        stream: () =>
+          Stream.fromIterable([
+            LLMEvent.toolCall({ id: "call-check", name: "bash", input: {} }),
+            LLMEvent.toolCall({ id: "call-edit", name: "edit", input: {} }),
+            LLMEvent.finish({ reason: "tool-calls" }),
+          ]),
+        generate: () => Effect.die("unused"),
+      } as LLMClientShape
+      const native = LLMNativeRuntime.stream({
+        model: baseModel,
+        provider: providerInfo,
+        auth: undefined,
+        llmClient,
+        messages: [],
+        tools: {
+          edit: {
+            description: "Edit a file",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute: async () => {
+              editing.resolve()
+              await release.promise
+              ran.push("edit")
+              return { output: "edited" }
+            },
+          },
+          bash: {
+            description: "Run a command",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute: async () => {
+              ran.push("bash")
+              return { output: "checked" }
+            },
+          },
+        },
+        headers: {},
+        abort: new AbortController().signal,
+      })
+      if (native.type === "unsupported") throw new Error(native.reason)
+
+      const fiber = yield* native.stream.pipe(Stream.runDrain, Effect.forkScoped)
+      yield* Effect.promise(() => editing.promise)
+      yield* Fiber.interrupt(fiber)
+      release.resolve()
+      yield* Effect.promise(() => release.promise)
+
+      expect(ran).not.toContain("bash")
+    }),
+  )
+
   it.effect("compiles through the native OpenAI Responses route", () =>
     expectOpenAIResponsesRequest({
       history: [storedSession.user("hello")],

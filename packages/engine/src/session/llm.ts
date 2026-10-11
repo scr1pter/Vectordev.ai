@@ -32,6 +32,7 @@ import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
 import { LLMTiming } from "./llm/timing"
 import { NativePatch } from "./llm/native-patch"
+import { ToolOrder } from "./llm/tool-order"
 import { REQUEST_ID_HEADER } from "@/plugin/openai/transport"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -355,7 +356,9 @@ const live: Layer.Layer<
           topK: prepared.params.topK,
           providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
           activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
-          tools: prepared.tools,
+          // A workflow model runs its tools inside its own stream, so holding a shell call back to the end would wait
+          // on itself.
+          tools: isWorkflow ? prepared.tools : ToolOrder.tools(prepared.tools, input.abort),
           toolChoice: input.toolChoice,
           maxOutputTokens: prepared.params.maxOutputTokens,
           abortSignal: input.abort,
@@ -385,6 +388,7 @@ const live: Layer.Layer<
                 options: prepared.params.options,
                 tool: prepared.tools.apply_patch,
               }),
+              ...(isWorkflow ? [] : [ToolOrder.middleware()]),
             ],
           }),
           experimental_telemetry: {

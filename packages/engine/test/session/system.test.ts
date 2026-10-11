@@ -283,6 +283,7 @@ describe("session.system", () => {
       expect(COMPLETION_POLICY).toContain("full implementation and verification loop")
       expect(COMPLETION_POLICY).toContain("three unsuccessful attempts")
       expect(COMPLETION_POLICY).toContain("Completion requires")
+      expect(COMPLETION_POLICY).toContain("An edit and the focused check that verifies it may go in the same response")
     }),
   )
 

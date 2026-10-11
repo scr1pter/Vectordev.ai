@@ -96,12 +96,13 @@ function finishLine(reason: string, usage?: Usage) {
   return chunk({ finish: reason, usage })
 }
 
-function toolStartLine(id: string, name: string) {
+// Each tool call of a response has its own index, so one reply can carry several calls.
+function toolStartLine(id: string, name: string, index: number) {
   return chunk({
     delta: {
       tool_calls: [
         {
-          index: 0,
+          index,
           id,
           type: "function",
           function: {
@@ -114,12 +115,12 @@ function toolStartLine(id: string, name: string) {
   })
 }
 
-function toolArgsLine(value: string) {
+function toolArgsLine(value: string, index: number) {
   return chunk({
     delta: {
       tool_calls: [
         {
-          index: 0,
+          index,
           function: {
             arguments: value,
           },
@@ -512,7 +513,7 @@ export class Reply {
   tool(name: string, input: unknown) {
     const id = this.#id()
     const args = JSON.stringify(input)
-    this.#tail = [...this.#tail, toolStartLine(id, name), toolArgsLine(args)]
+    this.#tail = [...this.#tail, toolStartLine(id, name, this.#seq - 1), toolArgsLine(args, this.#seq - 1)]
     return this.toolCalls()
   }
 
@@ -520,7 +521,11 @@ export class Reply {
     const id = this.#id()
     const args = JSON.stringify(input)
     const size = Math.max(1, Math.floor(args.length / 2))
-    this.#tail = [...this.#tail, toolStartLine(id, name), toolArgsLine(args.slice(0, size))]
+    this.#tail = [
+      ...this.#tail,
+      toolStartLine(id, name, this.#seq - 1),
+      toolArgsLine(args.slice(0, size), this.#seq - 1),
+    ]
     return this
   }
 

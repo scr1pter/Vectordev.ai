@@ -2305,3 +2305,141 @@ describe("session.llm.stream", () => {
     },
   )
 })
+
+describe("session.llm.stream tool order", () => {
+  // One response: an edit, a shell check, a read and a second edit written after the check. Each edit waits for the
+  // test to release it, so the order the calls actually ran in is observable.
+  const call = (index: number, id: string, name: string, args: Record<string, unknown>) => {
+    const item = { type: "function_call", id: `item-${id}`, call_id: id, name, arguments: JSON.stringify(args) }
+    return [
+      {
+        type: "response.output_item.added",
+        output_index: index,
+        item: { ...item, arguments: "", status: "in_progress" },
+      },
+      { type: "response.output_item.done", output_index: index, item: { ...item, status: "completed" } },
+    ]
+  }
+  const chunks = [
+    {
+      type: "response.created",
+      response: { id: "resp-tool-order", created_at: 1, model: "gpt-5.2", service_tier: null },
+    },
+    ...call(0, "call-edit", "edit", { filePath: "a.ts" }),
+    ...call(1, "call-check", "bash", { command: "bun test" }),
+    ...call(2, "call-read", "read", { filePath: "b.ts" }),
+    ...call(3, "call-write", "write", { filePath: "c.ts" }),
+    {
+      type: "response.completed",
+      response: {
+        incomplete_details: null,
+        service_tier: null,
+        usage: {
+          input_tokens: 1,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens: 1,
+          output_tokens_details: { reasoning_tokens: 0 },
+        },
+      },
+    },
+  ]
+
+  for (const runtime of ["ai-sdk", "native"] as const)
+    it.instance(
+      `starts a shell call only after every edit in its response has finished (${runtime})`,
+      () =>
+        Effect.gen(function* () {
+          void waitRequest("/responses", createEventResponse(chunks, true))
+          const log: string[] = []
+          const release: Record<string, ReturnType<typeof deferred<void>>> = {
+            "call-edit": deferred<void>(),
+            "call-write": deferred<void>(),
+          }
+          const ended: Record<string, ReturnType<typeof deferred<void>>> = {
+            "call-edit": deferred<void>(),
+            "call-write": deferred<void>(),
+          }
+          const started = deferred<void>()
+          const note = (entry: string) => {
+            log.push(entry)
+            if (["call-edit:start", "call-write:start", "call-read"].every((item) => log.includes(item)))
+              started.resolve()
+          }
+          const edit = tool({
+            description: "Edit a file",
+            inputSchema: z.object({ filePath: z.string() }),
+            execute: async (_args, options) => {
+              note(`${options.toolCallId}:start`)
+              await release[options.toolCallId].promise
+              note(`${options.toolCallId}:end`)
+              ended[options.toolCallId].resolve()
+              return { output: "edited" }
+            },
+          })
+          const tools = {
+            edit,
+            write: edit,
+            read: tool({
+              description: "Read a file",
+              inputSchema: z.object({ filePath: z.string() }),
+              execute: async () => {
+                note("call-read")
+                return { output: "read" }
+              },
+            }),
+            bash: tool({
+              description: "Run a command",
+              inputSchema: z.object({ command: z.string() }),
+              execute: async () => {
+                note("call-check")
+                return { output: "checked" }
+              },
+            }),
+          }
+          const resolved = yield* Provider.use.getModel(ProviderV2.ID.openai, ModelV2.ID.make("gpt-5.2"))
+          const sessionID = SessionID.make(`session-tool-order-${runtime}`)
+          const agent = {
+            name: "test",
+            mode: "primary",
+            options: {},
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          } satisfies Agent.Info
+          const input = {
+            user: {
+              id: MessageID.make(`msg_user-tool-order-${runtime}`),
+              sessionID,
+              role: "user",
+              time: { created: Date.now() },
+              agent: agent.name,
+              model: { providerID: ProviderV2.ID.openai, modelID: resolved.id },
+            } satisfies SessionV1.User,
+            sessionID,
+            model: resolved,
+            agent,
+            system: [],
+            messages: [{ role: "user", content: "Fix and check" }],
+            tools,
+          } satisfies LLM.StreamInput
+          const fiber = yield* (
+            runtime === "native"
+              ? drainWith(llmLayerWithExecutor({ flags: { experimentalNativeLlm: true } }), input)
+              : drain(input)
+          ).pipe(Effect.forkChild)
+
+          // Both edits and the read are running: the read did not wait, and the check has not started.
+          yield* Effect.promise(() => started.promise)
+          expect(log).not.toContain("call-check")
+          release["call-edit"].resolve()
+          yield* Effect.promise(() => ended["call-edit"].promise)
+          // The check also waits for the edit written after it in the same response.
+          expect(log).not.toContain("call-check")
+          release["call-write"].resolve()
+          yield* Fiber.join(fiber)
+
+          expect(log.indexOf("call-read")).toBeLessThan(log.indexOf("call-edit:end"))
+          expect(log.indexOf("call-check")).toBeGreaterThan(log.indexOf("call-edit:end"))
+          expect(log.indexOf("call-check")).toBeGreaterThan(log.indexOf("call-write:end"))
+        }),
+      { config: () => openAIConfig(loadFixture("openai", "gpt-5.2").model, `${state.server!.url.origin}/v1`) },
+    )
+})

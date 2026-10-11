@@ -1425,6 +1425,54 @@ it.instance("glob tool keeps instance context during prompt runs", () =>
   }),
 )
 
+// Vector lets the model send an edit and the check that verifies it in one response. The check must still run, and run
+// on the edited file, whichever order the model wrote the two calls in.
+for (const order of [
+  ["edit", "bash"],
+  ["bash", "edit"],
+] as const)
+  unix(
+    `an edit and its check in one response: the check runs after the edit (${order.join(", ")})`,
+    () =>
+      Effect.gen(function* () {
+        const { llm, dir } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const file = path.join(dir, "value.txt")
+        yield* writeText(file, "before\n")
+        const session = yield* sessions.create({
+          title: "Pinned",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const calls = {
+          edit: { filePath: file, oldString: "before", newString: "after" },
+          bash: { command: "cat value.txt", description: "Show the value" },
+        }
+        yield* llm.push(reply().tool(order[0], calls[order[0]]).tool(order[1], calls[order[1]]))
+        yield* llm.text("done")
+
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "Change the value to after and check it" }],
+        })
+
+        const parts = (yield* MessageV2.filterCompactedEffect(session.id)).flatMap((msg) => msg.parts)
+        const completed = (name: string) =>
+          parts.find(
+            (part): part is CompletedToolPart =>
+              part.type === "tool" && part.tool === name && part.state.status === "completed",
+          )
+        expect(completed("edit")).toBeDefined()
+        expect(completed("bash")?.state.output).toContain("after")
+        expect(completed("bash")?.state.output).not.toContain("before")
+        // One response for the edit and its check, one for the reply.
+        expect(yield* llm.hits).toHaveLength(2)
+      }),
+    30_000,
+  )
+
 it.instance("loop continues when finish is stop but assistant has tool parts", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
