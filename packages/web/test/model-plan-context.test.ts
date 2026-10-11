@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test"
+import { IncomingMessage, ServerResponse } from "node:http"
+import { Socket } from "node:net"
 import path from "node:path"
 import { ModelPlans } from "@vectordevai/core/model-plans"
 import { Token } from "@vectordevai/core/util/token"
 import { CODIUM_MODELS } from "../../../api/_lib/codium-catalog"
-import { modelPlanRequest, requireModelPlanContext } from "../../../api/_lib/model-plan-chat"
+import { ApiError } from "../../../api/_lib/http"
+import { modelPlanRequest, requireModelPlanContext, streamModelPlanResponse } from "../../../api/_lib/model-plan-chat"
 
 // A coding turn as Vector sends it: the engine's real system prompt and tool descriptions, then 50 KB file reads,
 // serialized by the Codium client and normalized by the gateway exactly as a chat request is.
@@ -84,4 +87,52 @@ test("a conversation the engine has not yet compacted is accepted, and one past 
   expect(() => requireModelPlanContext(over.body, model)).toThrow(
     expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" }),
   )
+})
+
+test("a provider refusing the context gets the gateway's own context answer, so Vector compacts instead of retrying", async () => {
+  const refusals = [
+    Response.json(
+      {
+        error: {
+          code: 400,
+          message:
+            "This endpoint's maximum context length is 131072 tokens. However, you requested about 140000 tokens.",
+        },
+      },
+      { status: 400 },
+    ),
+    Response.json({ error: { code: "context_length_exceeded", message: "Input too long" } }, { status: 400 }),
+    new Response("Request Entity Too Large", { status: 413 }),
+  ]
+  const failures = await Promise.all(
+    refusals.map((upstream) =>
+      streamModelPlanResponse(upstream, new ServerResponse(new IncomingMessage(new Socket()))).catch(
+        (error: unknown) => error,
+      ),
+    ),
+  )
+  expect(failures.every((failure) => failure instanceof ApiError)).toBe(true)
+  expect(failures).toEqual(
+    refusals.map(() => expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" })),
+  )
+  expect(failures.filter((failure) => failure instanceof ApiError && failure.message.includes("131072"))).toEqual([])
+  // The engine and the Core V2 runner read this answer as a context overflow.
+  expect(
+    failures
+      .filter((failure) => failure instanceof ApiError)
+      .map((failure) =>
+        ModelPlans.contextFailure(JSON.stringify({ error: { code: failure.code, message: failure.message } })),
+      ),
+  ).toEqual([true, true, true])
+  // Any other refusal stays a temporary failure, and the provider's wording never reaches Vector.
+  await expect(
+    streamModelPlanResponse(
+      Response.json({ error: { message: "private upstream detail" } }, { status: 400 }),
+      new ServerResponse(new IncomingMessage(new Socket())),
+    ),
+  ).rejects.toMatchObject({
+    statusCode: 503,
+    code: "MODEL_PLAN_UPSTREAM",
+    message: "This model is temporarily unavailable.",
+  })
 })

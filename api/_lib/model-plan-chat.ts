@@ -108,12 +108,7 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
 export function requireModelPlanContext(body: { max_tokens: number }, model: ModelPlanModel) {
   const text = JSON.stringify(body)
   const inputTokens = Math.ceil((Buffer.byteLength(text) - (text.match(/\\/g)?.length ?? 0)) / 4)
-  if (inputTokens + body.max_tokens > model.contextLength)
-    throw new ApiError(
-      400,
-      "MODEL_PLAN_CONTEXT",
-      "This request may exceed the model context limit. Shorten the conversation or requested response.",
-    )
+  if (inputTokens + body.max_tokens > model.contextLength) throw contextError()
   return inputTokens
 }
 
@@ -131,6 +126,11 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
     )
   if (upstream.status === 429)
     throw new ApiError(429, "MODEL_PLAN_BUSY", "This model is busy. Retry shortly or choose another included model.")
+  // The four-bytes-per-token estimate can undercount a provider's tokenizer. When the provider refuses the context,
+  // answer as the gateway's own check does, so Vector compacts the conversation instead of retrying a request that
+  // can never fit. The provider's wording is only matched, never passed on.
+  if (upstream.status === 413 || (upstream.status === 400 && contextRefused(await upstream.text().catch(() => ""))))
+    throw contextError()
   if (!upstream.ok || !upstream.body || !upstream.headers.get("content-type")?.includes("text/event-stream"))
     throw new ApiError(503, "MODEL_PLAN_UPSTREAM", "This model is temporarily unavailable.")
   response.statusCode = 200
@@ -185,6 +185,19 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
     await reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }
+}
+
+function contextError() {
+  return new ApiError(
+    400,
+    "MODEL_PLAN_CONTEXT",
+    "This request may exceed the model context limit. Shorten the conversation or requested response.",
+  )
+}
+
+// How OpenAI-compatible providers word a context-window refusal.
+function contextRefused(body: string) {
+  return /context[ _-]?(length|window)|maximum context|too many tokens|prompt is too long/i.test(body.slice(0, 8_192))
 }
 
 export async function handleModelPlanChat(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
