@@ -26,6 +26,7 @@ export function createSessionEconomics(input: {
   // snapshot instead of a second one: the check after the history read still catches any change since. A retry
   // finds it taken and reads again.
   const roots = new Map<string, Session>()
+  const active = new Map<string, Session>()
   const outcomes = createSessionOutcomeRecorder(async (sessionID, directory, current) => {
     const client = input.client(directory)
     const key = JSON.stringify([directory, sessionID])
@@ -35,7 +36,7 @@ export function createSessionEconomics(input: {
     if (!current()) return
     if (!before) throw new Error("Session metadata is unavailable")
     // Child spend is recorded through the root's family refresh; its full history is not a separate sample.
-    if (before.parentID) return
+    if (before.parentID || isInternalSession(before)) return
     const history = await client.session.messages({ sessionID })
     if (!Array.isArray(history.data)) throw new Error("Session history is unavailable")
     if (!current()) return
@@ -93,11 +94,11 @@ export function createSessionEconomics(input: {
       if (input.working(sessionID)) return undefined
       // Vector's own tool and review sessions are not the user's tasks, so they are never a sample.
       const cached = input.cached(sessionID)
-      if (isInternalSession(cached)) return undefined
+      if (isInternalSession(cached) && !cached?.parentID) return undefined
       // Parent links never change, so only the root, whose revision decides the refresh, is read fresh.
       if (cached?.parentID) return cached
       const session = (await input.client(directory).session.get({ sessionID })).data
-      if (!session || isInternalSession(session)) return undefined
+      if (!session || (isInternalSession(session) && !session.parentID)) return undefined
       if (!session.parentID) roots.set(JSON.stringify([session.directory, session.id]), session)
       return session
     },
@@ -107,12 +108,36 @@ export function createSessionEconomics(input: {
     },
   )
   return {
+    // Bootstrap reconciles statuses after reconnect without replaying idle. Capture the same busy-to-idle
+    // transition from that reactive snapshot, so runs completed while disconnected still become samples.
+    reconcile(sessions: readonly Session[]) {
+      const observed = new Map([...active, ...sessions.map((session) => [session.id, session] as const)])
+      observed.forEach((session) => {
+        if (session.internal === "codespace.autocomplete") return
+        if (input.working(session.id)) {
+          active.set(session.id, session)
+          return
+        }
+        if (!active.delete(session.id)) return
+        void family.refresh(session.id, session.directory).catch(() => undefined)
+      })
+    },
     handle(event: { name?: string; details: Event }) {
       const directory = event.name
       if (!directory) return
       // Idle reaches the root through the family refresh too, which records each settled revision once.
       const familyID = sessionFamilyEventID(event.details, input.working)
-      if (familyID) void family.refresh(familyID, directory).catch(() => undefined)
+      const cached = familyID ? input.cached(familyID) : undefined
+      // Frequent autocomplete updates are included at the task's next settlement; other helpers settle their
+      // parent after completion, including a review that was launched after the parent became idle.
+      const helper =
+        isInternalSession(cached) ||
+        (event.details.type === "session.updated" && isInternalSession(event.details.properties.info))
+      if (
+        familyID &&
+        (!helper || (event.details.type === "session.idle" && cached?.internal !== "codespace.autocomplete"))
+      )
+        void family.refresh(familyID, directory).catch(() => undefined)
       if (event.details.type === "session.updated") {
         const session = event.details.properties.info
         outcomes.changed(session.id, directory, session.time.updated)
@@ -127,6 +152,7 @@ export function createSessionEconomics(input: {
       family.dispose()
       outcomes.dispose()
       roots.clear()
+      active.clear()
     },
   }
 }

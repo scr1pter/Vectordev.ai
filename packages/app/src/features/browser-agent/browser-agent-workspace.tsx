@@ -63,6 +63,7 @@ export function BrowserAgentWorkspace(props: {
   models: BrowserAgentModelOption[]
   resolveProjectPath: () => Promise<string>
   contextId: string
+  parentSessionID?: string
   // Deep-link entry (e.g. the preview's "Check with agent" button): open this
   // URL and immediately run a task against it.
   initialUrl?: string
@@ -131,6 +132,7 @@ export function BrowserAgentWorkspace(props: {
   const planner = createBrowserPlanner({
     createClient: (directory) => serverSDK().createClient({ directory, throwOnError: true }),
     resolveDirectory: props.resolveProjectPath,
+    parentID: () => props.parentSessionID,
     model: () => {
       const model = selectedModel()
       return model ? { providerID: model.providerID, modelID: model.modelID } : undefined

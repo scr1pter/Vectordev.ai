@@ -61,7 +61,11 @@ describe("outcomeFromSession", () => {
       time: { created: 1, completed: 2 },
     }
     const ended = (error: { name: string; data?: { statusCode: number } }) =>
-      session({ messages: [{ info }, { info: { ...info, tokens: {}, cost: 0, error } }], spend: { cost: 0.1 } })
+      session({
+        messages: [{ info }, { info: { ...info, id: "refused", tokens: {}, cost: 0, error } }],
+        parts: { refused: [] },
+        spend: { cost: 0.1 },
+      })
     const stopped = ended({ name: "MessageAbortedError" })
     expect(stopped).toMatchObject({ costUsd: 0.1, costPriced: false, model: "m", execution: "aborted" })
     expect(knownCostUsd(stopped!)).toBeUndefined()
@@ -374,6 +378,21 @@ describe("session outcome refresh", () => {
     await Promise.all([first, next])
     expect(calls).toHaveLength(2)
     expect(committed).toEqual(["s1"])
+  })
+
+  test("a root update during capture retries even without another idle event", async () => {
+    const gate = Promise.withResolvers<void>()
+    const committed: boolean[] = []
+    const recorder = createSessionOutcomeRecorder(async (_id, _directory, current) => {
+      if (!committed.length) await gate.promise
+      committed.push(current())
+    })
+    recorder.changed("s1", "/repo", 10)
+    const pending = recorder.idle("s1", "/repo")
+    recorder.changed("s1", "/repo", 20)
+    gate.resolve()
+    await pending
+    expect(committed).toEqual([false, true])
   })
 
   test("isolates directories and stops pending writes after disposal", async () => {

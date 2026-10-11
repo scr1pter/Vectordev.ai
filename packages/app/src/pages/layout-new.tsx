@@ -1649,7 +1649,9 @@ export default function NewLayout(props: ParentProps) {
       session: async () => (await client.session.get({ sessionID })).data,
       messages: async () => {
         const history = await client.session.messages({ sessionID })
-        return Array.isArray(history.data) ? history.data.map((entry) => entry.info) : undefined
+        return Array.isArray(history.data)
+          ? history.data.map((entry) => ({ ...entry.info, parts: entry.parts }))
+          : undefined
       },
     })
   }
@@ -2836,6 +2838,14 @@ export default function NewLayout(props: ParentProps) {
       const recorded = await Promise.all(workspaces.map((record) => workspaceOutcomes.observe(record, true)))
       return recorded.every(Boolean)
     },
+  })
+  createEffect(() => {
+    const session = serverSync().session
+    sessionEconomics.reconcile(
+      Object.keys(session.data.session_status)
+        .map((id) => session.get(id))
+        .filter((info): info is NonNullable<typeof info> => Boolean(info)),
+    )
   })
   const stopSessionOutcomes = serverSDK().event.listen((event) => sessionEconomics.handle(event))
   onCleanup(() => {

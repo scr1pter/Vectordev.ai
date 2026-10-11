@@ -1348,7 +1348,9 @@ export function PullRequests(props: {
                 : "Reviewing…"
               : review()
                 ? `Reviewed ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · ${reviewFooter(review()!)}`
-                : "Not reviewed yet"}
+                : liveSpend()
+                  ? `Review stopped · at least ${liveSpendText(liveSpend()!)}`
+                  : "Not reviewed yet"}
           </div>
         </div>
         <Show

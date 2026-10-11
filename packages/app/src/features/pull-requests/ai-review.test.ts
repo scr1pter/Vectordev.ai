@@ -400,6 +400,20 @@ describe("runReview", () => {
     expect(reviewFooter(outcome)).toContain("at least $0.02")
   })
 
+  test("a failed review keeps its recorded spend visible without any report", async () => {
+    const progress: Parameters<NonNullable<ReviewRunInput["onProgress"]>>[0][] = []
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: () => answer(undefined, 0.02),
+    })
+    await expect(run(client, { onProgress: (event) => progress.push(event) })).rejects.toThrow("$0.04 and 2.4k tokens")
+    expect(progress.filter((event) => event.type === "spend").at(-1)).toEqual({
+      type: "spend",
+      costUsd: 0.04,
+      tokens: 2400,
+    })
+  })
+
   test("keeps unpriced and invalid charges unknown while retaining measured tokens", async () => {
     for (const extra of [{ unpriced: true }, { cost: Number.NaN }, { cost: -1 }, { cost: undefined }]) {
       const { client } = fakeClient({
@@ -662,12 +676,18 @@ describe("runReview", () => {
   test("says what the reviewers spent before the double-check, since their sessions stay out of view", async () => {
     const progress: string[] = []
     const { client } = fakeClient({ files: { "src/list.ts": HEAD } })
-    await run(client, { onProgress: (event) => progress.push(event.type === "checkout" ? event.label : event.text) })
+    await run(client, {
+      onProgress: (event) => {
+        if (event.type === "status") progress.push(event.text)
+      },
+    })
     expect(progress).toContain("Double-checking 1 finding… $0.01 and 1.2k tokens so far.")
     const unpriced: string[] = []
     await run(fakeClient({ files: { "src/list.ts": HEAD } }).client, {
       preferredModels: ["openai/gpt-5.5"],
-      onProgress: (event) => unpriced.push(event.type === "checkout" ? event.label : event.text),
+      onProgress: (event) => {
+        if (event.type === "status") unpriced.push(event.text)
+      },
     })
     expect(unpriced).toContain("Double-checking 1 finding… 1.2k tokens so far.")
   })

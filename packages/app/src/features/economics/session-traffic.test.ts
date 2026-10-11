@@ -120,7 +120,10 @@ function createApp(engine: ReturnType<typeof createEngine>) {
       store,
       setStore,
       vcsCache: { setStore() {} } as unknown as VcsCache,
-      loadSessions() {},
+      async loadSessions() {
+        const response = await client(dir).session.list({ roots: true })
+        response.data?.forEach(session.remember)
+      },
       translate: (key) => key,
       queryClient,
       session,
@@ -342,7 +345,7 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
       touch(sessionID, 0.0003)
       const session = engine.sessions.get(sessionID)!
       session.title = "Refactor the request module"
-      app.emit({ type: "session.updated", properties: { sessionID, info: touch(sessionID) } })
+      app.emit({ type: "session.updated", properties: { sessionID, info: { ...session, time: { ...session.time } } } })
       await settle(engine)
     },
     busy: (sessionID: string) => status(sessionID, "busy"),
@@ -365,6 +368,8 @@ async function runSession(providerBody: string) {
   const phase = async (name: string, run: () => Promise<void>) => {
     const start = engine.requests.length
     await run()
+    // Include the live ancestor meter's 400ms coalescing window in this phase, not the following review.
+    await Bun.sleep(425)
     await settle(engine)
     phases.push({ name, requests: engine.requests.slice(start) })
   }
@@ -463,8 +468,9 @@ test("a multi-step session with subagents fetches history only when its family s
   expect(total.bootstrap).toBe(0)
   expect(total.provider).toBe(0)
   for (const phase of result.phases.slice(0, 3)) expect(summarize(phase.requests).history).toBe(0)
-  // One read after the title spend, then a snapshot before and a check after each of the two history reads.
-  expect(task.session).toBe(5)
+  // One title read, two snapshots around each settled history, and three debounced ancestor reads keep the
+  // live parent meter current while its children run. Those metadata reads never fetch history or providers.
+  expect(task.session).toBe(8)
   // A reviewer session is Vector's own: no history read, no session read, no economics sample.
   expect(summarize(result.phases[5].requests).requests).toBe(0)
   // Fewer reads, same evidence: the root's sample is recorded when it stops and again with the late subagent's spend.
@@ -472,4 +478,4 @@ test("a multi-step session with subagents fetches history only when its family s
   expect(result.saved[0].outcome?.costUsd).toBeCloseTo(0.0163 + 0.012 + 0.004, 10)
   expect(result.saved[1].outcome?.costUsd).toBeCloseTo(0.0163 + 0.012 + 0.012, 10)
   expect(result.saved[1].outcome?.execution).toBe("completed")
-})
+}, 15_000)

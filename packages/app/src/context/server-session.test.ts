@@ -162,7 +162,7 @@ describe("server session", () => {
       ...session("root"),
       title: "Refactor the request module",
       cost: 0.0003,
-      time: { created: 1, updated: 3 },
+      time: { created: 1, updated: 2 },
     }
     store.apply({ type: "session.updated", properties: { info: titled } })
     answers[0]!({ data: { ...session("root"), cost: 0.0003, time: { created: 1, updated: 2 } } })
@@ -171,7 +171,7 @@ describe("server session", () => {
 
     expect(answers).toHaveLength(1)
     expect(store.get("root")?.title).toBe("Refactor the request module")
-    expect(store.get("root")?.time.updated).toBe(3)
+    expect(store.get("root")?.time.updated).toBe(2)
   })
 
   test("loads session content through the server client", async () => {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createVectorClient, type Event } from "@vectordevai/sdk/v2/client"
+import { createVectorClient, type Event, type Session } from "@vectordevai/sdk/v2/client"
 import { createSessionEconomics } from "./session-economics"
 
 const directory = "/repo"
@@ -7,7 +7,11 @@ const model = { providerID: "openai", modelID: "gpt-6.1" }
 
 // One idle root whose history is read through the real SDK client. `writeDuringHistory` makes the engine write the
 // session while its history is being read, as a late title or subagent spend can.
-function setup(input: { writeDuringHistory: boolean }) {
+function setup(input: {
+  writeDuringHistory: boolean
+  working?: () => boolean
+  cached?: (id: string) => Session | undefined
+}) {
   const state = { updated: 10, cost: 0.004, wrote: false }
   const requests: string[] = []
   const history = [
@@ -58,15 +62,15 @@ function setup(input: { writeDuringHistory: boolean }) {
   const saved: { costUsd?: number; updatedAt: number }[] = []
   const economics = createSessionEconomics({
     client: (dir) => createVectorClient({ baseUrl: "http://engine.test", fetch, directory: dir }),
-    working: () => false,
-    cached: () => undefined,
+    working: input.working ?? (() => false),
+    cached: input.cached ?? (() => undefined),
     save: async (sample) => {
       saved.push({ costUsd: sample.outcome?.costUsd, updatedAt: sample.updatedAt })
     },
     activated() {},
     workspaces: async () => true,
   })
-  return { requests, saved, economics }
+  return { requests, saved, economics, state }
 }
 
 async function settle(requests: string[]) {
@@ -108,4 +112,88 @@ test("a write during the history read discards that snapshot and records the new
   expect(ctx.saved).toHaveLength(1)
   expect(ctx.saved[0]?.updatedAt).toBe(11)
   expect(ctx.saved[0]?.costUsd).toBeCloseTo(0.0043, 10)
+})
+
+test("reconnect status reconciliation captures a run whose idle event was missed", async () => {
+  const state = { working: true }
+  const ctx = setup({ writeDuringHistory: false, working: () => state.working })
+  const session = {
+    id: "ses_root",
+    slug: "root",
+    projectID: "project",
+    directory,
+    title: "Task",
+    version: "1",
+    time: { created: 1, updated: 10 },
+  }
+  ctx.economics.reconcile([session])
+  state.working = false
+  // Reconnect bootstrap can remove idle sessions from the status map entirely.
+  ctx.economics.reconcile([])
+  await settle(ctx.requests)
+  ctx.economics.dispose()
+  expect(ctx.saved).toEqual([{ costUsd: 0.004, updatedAt: 10 }])
+  expect(ctx.requests.filter((path) => path.endsWith("/message"))).toHaveLength(1)
+})
+
+test("a helper that finishes after its launching task refreshes that task's spend", async () => {
+  const helper: Session = {
+    id: "ses_helper",
+    parentID: "ses_root",
+    internal: "vectorscope.review",
+    slug: "helper",
+    projectID: "project",
+    directory,
+    title: "Review",
+    version: "1",
+    time: { created: 1, updated: 11 },
+  }
+  const ctx = setup({ writeDuringHistory: false, cached: (id) => (id === helper.id ? helper : undefined) })
+  ctx.economics.handle({ name: directory, details: idle })
+  await settle(ctx.requests)
+  ctx.state.cost += 0.02
+  ctx.state.updated += 1
+  ctx.economics.handle({
+    name: directory,
+    details: { type: "session.idle", properties: { sessionID: helper.id } } as Event,
+  })
+  await settle(ctx.requests)
+  ctx.economics.dispose()
+  expect(ctx.saved.map((sample) => sample.costUsd)).toEqual([0.004, 0.024])
+  expect(ctx.requests.some((path) => path.includes(helper.id))).toBe(false)
+})
+
+test("autocomplete spend waits for the task to settle without fetching history on each pause", async () => {
+  const helper: Session = {
+    id: "ses_helper",
+    parentID: "ses_root",
+    internal: "codespace.autocomplete",
+    slug: "helper",
+    projectID: "project",
+    directory,
+    title: "Autocomplete",
+    version: "1",
+    time: { created: 1, updated: 11 },
+  }
+  const state = { working: true }
+  const ctx = setup({
+    writeDuringHistory: false,
+    cached: (id) => (id === helper.id ? helper : undefined),
+    working: () => state.working,
+  })
+  ctx.economics.reconcile([helper])
+  state.working = false
+  ctx.economics.reconcile([helper])
+  ctx.economics.handle({
+    name: directory,
+    details: { type: "session.idle", properties: { sessionID: helper.id } } as Event,
+  })
+  await settle(ctx.requests)
+  expect(ctx.requests).toEqual([])
+  ctx.state.cost += 0.02
+  ctx.state.updated += 1
+  ctx.economics.handle({ name: directory, details: idle })
+  await settle(ctx.requests)
+  ctx.economics.dispose()
+  expect(ctx.saved).toEqual([{ costUsd: 0.024, updatedAt: 11 }])
 })

@@ -25,6 +25,7 @@ type PlannerSessionClient = {
       directory: string
       title: string
       internal: string
+      parentID?: string
       agent: string
       model: { providerID: string; id: string }
       metadata: Record<string, unknown>
@@ -227,14 +228,17 @@ const PLANNER_SYSTEM = [
 export function createBrowserPlanner(deps: {
   createClient: (directory: string) => PlannerSessionClient
   resolveDirectory: () => Promise<string>
+  parentID?: () => string | undefined
   model: () => { providerID: string; modelID: string } | undefined
 }) {
   let sessionID: string | undefined
   let sessionDirectory: string | undefined
+  let sessionParentID: string | undefined
 
   const reset = () => {
     sessionID = undefined
     sessionDirectory = undefined
+    sessionParentID = undefined
   }
 
   const plan = async (prompt: string, report: BrowserAutomationRun, completed: string[]): Promise<BrowserModelPlan> => {
@@ -247,18 +251,21 @@ export function createBrowserPlanner(deps: {
     if (!model) throw new Error("Connect and select a model before running Browser Agent.")
 
     const client = deps.createClient(directory)
-    if (!sessionID || sessionDirectory !== directory) {
+    const parentID = deps.parentID?.()
+    if (!sessionID || sessionDirectory !== directory || sessionParentID !== parentID) {
       const session = await client.session.create({
         directory,
         // A helper session: out of every session list, with its spend kept in usage.
         title: "Browser Agent Planner",
         internal: "browser-agent.planner",
+        ...(parentID ? { parentID } : {}),
         agent: "build",
         model: { providerID: model.providerID, id: model.modelID },
         metadata: { source: "vector-browser-agent", engine: "vector-compatible" },
       })
       sessionID = session.data?.id
       sessionDirectory = directory
+      sessionParentID = parentID
       if (!sessionID) throw new Error("Vector could not start the Browser Agent planner.")
     }
 

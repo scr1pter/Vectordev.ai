@@ -298,9 +298,17 @@ describe("measureUsage", () => {
       { name: "ContextOverflowError" },
       { name: "FreeModelsLimitError" },
     ]) {
-      const measured = measureUsage([paid, { ...paid, cost: 0, tokens: { input: 0, output: 0 }, error }])
+      const measured = measureUsage([paid, { ...paid, cost: 0, tokens: { input: 0, output: 0 }, error, parts: [] }])
       expect(measured?.costUsd).toBe(0.04)
       expect(measured?.partial).toBeUndefined()
+    }
+  })
+
+  test("a refused retry after streamed content keeps the cost partial", () => {
+    const paid = { role: "assistant", providerID: "p", modelID: "m", cost: 0.04, tokens: { input: 1_000 } }
+    const dropped = { ...paid, cost: 0, tokens: {}, error: { name: "APIError", data: { statusCode: 429 } } }
+    for (const parts of [undefined, [{ type: "text" }], [{ type: "reasoning" }], [{ type: "tool" }]]) {
+      expect(measureUsage([paid, { ...dropped, parts }])?.partial).toBe(true)
     }
   })
 

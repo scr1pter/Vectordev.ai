@@ -19,6 +19,8 @@ export type UsageBearingMessage = {
   forked?: boolean
   // Why the reply ended early, when it did. Only a refusal before any response proves an unmeasured reply was free.
   error?: unknown
+  // Present only when the caller has the full transcript parts, so an empty array proves no content streamed.
+  parts?: readonly { type?: string }[]
   tokens?: {
     input?: number
     output?: number
@@ -89,7 +91,7 @@ export function measureUsage(messages: readonly UsageBearingMessage[]): Measured
   const reported = (message: UsageBearingMessage) =>
     totalTokens(usageOf(message)) > 0 || message.unpriced || (typeof message.cost === "number" && message.cost !== 0)
   const accounted = assistant.filter(reported)
-  const unmeasured = assistant.some((message) => !reported(message) && !refused(message.error))
+  const unmeasured = assistant.some((message) => !reported(message) && !refused(message))
   const costs = accounted.map((message) => message.cost)
   const costUsd =
     accounted.some((message) => message.unpriced) ||
@@ -137,8 +139,11 @@ export function measureUsage(messages: readonly UsageBearingMessage[]): Measured
 // The provider refused the request instead of running it: an HTTP client error, rejected credentials, a prompt over
 // the context window, or Vector's free-model limit. None is billed, so that reply's missing usage is a real zero.
 // A stop, a network failure or a server error can come after the provider started work, so those stay unknown.
-// Like every per-message figure here, this cannot see an earlier attempt that was dropped mid-stream and retried.
-function refused(error: unknown) {
+// A later rejected retry can follow billed streamed content; only a known empty transcript proves a refusal.
+function refused(message: UsageBearingMessage) {
+  if (!message.parts || message.parts.some((part) => ["text", "reasoning", "tool"].includes(part.type ?? "")))
+    return false
+  const error = message.error
   if (!error || typeof error !== "object" || !("name" in error)) return false
   if (["ProviderAuthError", "ContextOverflowError", "FreeModelsLimitError"].includes(String(error.name))) return true
   // The engine sets a status only from the HTTP response, never for a failure inside a stream that had started.

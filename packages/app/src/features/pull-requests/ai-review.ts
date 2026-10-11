@@ -674,8 +674,10 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
   const reports = runs.flatMap((run) => (run.report ? [{ source: run.name, report: run.report }] : []))
   if (!reports.length) {
     stop.dispose()
+    const usage = measureUsage(runs.flatMap((run) => run.usage.messages))
+    if (usage) input.onProgress?.({ type: "spend", costUsd: usage.costUsd ?? 0, tokens: totalTokens(usage.usage) })
     throw new Error(
-      `Vector could not finish this review: ${runs.find((run) => run.detail)?.detail ?? "no reviewer answered"}.`,
+      `Vector could not finish this review: ${runs.find((run) => run.detail)?.detail ?? "no reviewer answered"}.${spentSoFar(runs, model)}`,
     )
   }
 
@@ -1128,7 +1130,10 @@ function spentSoFar(runs: readonly { usage: Usage }[], model: ReviewModel) {
 // Every assistant step of the session, so the cost includes the finalize step.
 async function usageOf(client: ReviewClient, sessionID: string, directory: string): Promise<Usage> {
   return client.session.messages({ sessionID, directory }).then(
-    (result) => ({ messages: (result.data ?? []).map((message) => message.info), complete: result.data !== undefined }),
+    (result) => ({
+      messages: (result.data ?? []).map((message) => ({ ...message.info, parts: message.parts })),
+      complete: result.data !== undefined,
+    }),
     () => ({ messages: [], complete: false }),
   )
 }
