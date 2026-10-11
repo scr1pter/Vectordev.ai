@@ -5,7 +5,7 @@ import { ProviderTransform } from "@/provider/transform"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
 import { asSchema, type ModelMessage, type Tool } from "ai"
-import { Cause, Effect, FiberSet, Queue } from "effect"
+import { Cause, Effect, Fiber, FiberSet, Queue } from "effect"
 import * as Stream from "effect/Stream"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
@@ -19,6 +19,7 @@ import {
 } from "@vectordevai/llm"
 import type { LLMClientShape } from "@vectordevai/llm/route"
 import { LLMNative } from "./native-request"
+import { ToolOrder } from "./tool-order"
 
 export type RuntimeStatus =
   | { readonly type: "supported"; readonly apiKey: string; readonly baseURL?: string }
@@ -110,6 +111,16 @@ export function stream(input: StreamInput): StreamResult {
       Effect.gen(function* () {
         const settlements = yield* FiberSet.make<void>()
         const results = yield* Queue.unbounded<LLMEvent, Cause.Done>()
+        // As on the AI SDK path (ToolOrder), shell calls start once the response has ended and its edits have finished.
+        const edits: Fiber.Fiber<void>[] = []
+        const shells: Extract<LLMEvent, { type: "tool-call" }>[] = []
+        const dispatch = (event: Extract<LLMEvent, { type: "tool-call" }>) =>
+          ToolRuntime.dispatch(tools, event).pipe(
+            Effect.flatMap((dispatched) => Queue.offerAll(results, dispatched.events)),
+            Effect.catchCause((cause) => Queue.failCause(results, cause)),
+            Effect.asVoid,
+            FiberSet.run(settlements, { startImmediately: true }),
+          )
         const provider = input.llmClient
           .stream(
             LLMRequest.update(request, {
@@ -117,25 +128,34 @@ export function stream(input: StreamInput): StreamResult {
             }),
           )
           .pipe(
-            Stream.flatMap((event) =>
-              event.type !== "tool-call" || event.providerExecuted
-                ? Stream.make(event)
-                : Stream.make(event).pipe(
-                    Stream.concat(
-                      Stream.fromEffectDrain(
-                        ToolRuntime.dispatch(tools, event).pipe(
-                          Effect.flatMap((dispatched) => Queue.offerAll(results, dispatched.events)),
-                          Effect.catchCause((cause) => Queue.failCause(results, cause)),
-                          Effect.asVoid,
-                          FiberSet.run(settlements, { startImmediately: true }),
-                        ),
+            Stream.flatMap((event) => {
+              if (event.type !== "tool-call" || event.providerExecuted) return Stream.make(event)
+              if (ToolOrder.shell(event.name)) {
+                shells.push(event)
+                return Stream.make(event)
+              }
+              return Stream.make(event).pipe(
+                Stream.concat(
+                  Stream.fromEffectDrain(
+                    dispatch(event).pipe(
+                      Effect.tap((fiber) =>
+                        Effect.sync(() => {
+                          if (ToolOrder.mutates(event.name)) edits.push(fiber)
+                        }),
                       ),
                     ),
                   ),
-            ),
+                ),
+              )
+            }),
             Stream.concat(
               Stream.fromEffectDrain(
-                FiberSet.awaitEmpty(settlements).pipe(Effect.andThen(Queue.end(results)), Effect.asVoid),
+                Effect.suspend(() => Fiber.awaitAll(edits)).pipe(
+                  Effect.andThen(Effect.suspend(() => Effect.forEach(shells, dispatch, { discard: true }))),
+                  Effect.andThen(FiberSet.awaitEmpty(settlements)),
+                  Effect.andThen(Queue.end(results)),
+                  Effect.asVoid,
+                ),
               ),
             ),
           )

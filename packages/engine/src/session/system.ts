@@ -117,8 +117,9 @@ function specialistFocus(permitted?: readonly string[]) {
   if (listed.length === 0) return ""
   return `: ${listed.map(([name, focus]) => `${name} for ${focus}`).join("; ")}`
 }
-// Sizing, ownership (owned_paths, depends_on, success_criteria) and briefing rules live in the task tool's
-// description alone, so a request does not carry them twice.
+// Ownership (owned_paths, depends_on, success_criteria) and briefing rules live in the task tool's description alone,
+// and the default to do the work yourself, with its size threshold, in this policy alone, so a request does not carry
+// them twice.
 const SUBAGENT_ORCHESTRATION = [
   "The task tool's description has the rules for sizing, owned_paths, depends_on, success_criteria and writing a brief.",
   "Subagents inherit the current provider and model unless an agent is explicitly configured with another model; explore runs on the provider's small model when one is available.",
@@ -187,6 +188,7 @@ export const COMPLETION_POLICY = [
   "<completion_policy>",
   "When the user asks you to build, fix, test, review, or deploy something, continue through the full implementation and verification loop instead of stopping after a plan or a partial attempt.",
   "Inspect the result of every tool call. If a check fails because of your change, diagnose it, repair it, and run the focused check again.",
+  "An edit and the focused check that verifies it may go in the same response, even though the check depends on the edit: Vector starts a response's shell commands only after every edit in it has finished.",
   "Keep retries bounded and evidence-driven. After three unsuccessful attempts at the same failure, change strategy or report the concrete blocker and the evidence needed to continue.",
   "Never claim success because a command started, a prompt was admitted, or another agent said it finished. Completion requires the requested artifact plus relevant passing evidence.",
   "</completion_policy>",

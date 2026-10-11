@@ -47,7 +47,9 @@ import { FSUtil } from "@vectordevai/core/fs-util"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
-import { Cause, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+import { Process } from "@/util/process"
+import { Cause, Deferred, Effect, Exit, Fiber, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
+
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
@@ -269,6 +271,8 @@ const layer = Layer.effect(
       history: SessionV1.WithParts[]
       providerID: ProviderV2.ID
       modelID: ModelV2.ID
+      // Whether the provider answered the first main request before the run ended.
+      answering: Effect.Effect<boolean>
     }) {
       if (input.session.parentID || input.session.internal) return
       if (!Session.isDefaultTitle(input.session.title)) return
@@ -294,6 +298,24 @@ const layer = Layer.effect(
         .trim()
         .slice(0, 1500)
       if (!request) return
+
+      // The first line of what the user typed is the title at once. The model's title replaces it, but its request
+      // waits until the main request is being answered, so it never delays or competes with that request.
+      const first =
+        request
+          .split("\n")
+          .map((item) => item.trim())
+          .find((item) => item.length > 0)
+          ?.replace(/\s+/g, " ") ?? request
+      const provisional = first.length > 50 ? `${first.slice(0, 50)}...` : first
+      yield* sessions.setTitle({ sessionID: input.session.id, title: provisional })
+      if (!(yield* input.answering)) return
+      // A title someone set meanwhile stays.
+      const kept = sessions.get(input.session.id).pipe(
+        Effect.map((session) => session.title === provisional),
+        Effect.orElseSucceed(() => false),
+      )
+      if (!(yield* kept)) return
 
       const ag = yield* agents.get("title")
       if (!ag) return
@@ -335,6 +357,7 @@ const layer = Layer.effect(
         .find((line) => line.length > 0)
       if (!cleaned) return
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
+      if (!(yield* kept)) return
       yield* sessions
         .setTitle({ sessionID: input.session.id, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
@@ -1251,6 +1274,16 @@ const layer = Layer.effect(
       sessionID: SessionID,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
+      // A run that ends before the provider answers keeps its provisional title without starting another request.
+      const answering = yield* Deferred.make<boolean>()
+      return yield* runSteps(sessionID, answering, resumed).pipe(Effect.ensuring(Deferred.succeed(answering, false)))
+    })
+
+    const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
+      sessionID: SessionID,
+      answering: Deferred.Deferred<boolean>,
+      resumed?: ResumeFreeModelsInput & { parentID: MessageID },
+    ) {
       const ctx = yield* InstanceState.context
       let structured: unknown
       let step = 0
@@ -1313,6 +1346,7 @@ const layer = Layer.effect(
             modelID: lastUser.model.modelID,
             providerID: lastUser.model.providerID,
             history: msgs,
+            answering: Deferred.await(answering),
           }).pipe(Effect.ignore, Effect.forkIn(background.scope))
           background.titles.add(fiber)
           fiber.addObserver(() => background.titles.delete(fiber))
@@ -1524,6 +1558,7 @@ const layer = Layer.effect(
             model,
             toolChoice: format.type === "json_schema" ? "required" : undefined,
             retries: lastUser.executionMode === "fast" ? 1 : undefined,
+            answering: () => Deferred.doneUnsafe(answering, Effect.succeed(true)),
           })
 
           if (structured !== undefined) {

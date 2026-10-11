@@ -18,6 +18,7 @@ src/session/
     ai-sdk.ts               AI SDK fullStream -> @vectordevai/llm LLMEvent adapter
     native-request.ts       vector/AI SDK-shaped input -> @vectordevai/llm LLMRequest
     native-runtime.ts       native runtime gate, tool bridge, and LLMClient handoff
+    tool-order.ts           shell calls of a response start after its edits finish (AI SDK path; native mirrors it)
 ```
 
 Integration points:

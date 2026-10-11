@@ -32,6 +32,7 @@ import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
 import { LLMTiming } from "./llm/timing"
 import { NativePatch } from "./llm/native-patch"
+import { ToolOrder } from "./llm/tool-order"
 import { REQUEST_ID_HEADER } from "@/plugin/openai/transport"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -58,6 +59,8 @@ export type StreamInput = {
   // Called with the usage a provider reports as it starts a response, before the step finishes. A step that is
   // stopped or fails mid-stream reports nothing more, so this is what it was billed.
   started?: (usage: UsageInput) => void
+  // Called at the first event of the response, once the provider has the request and is answering it.
+  answering?: () => void
 }
 
 export type StreamRequest = StreamInput & {
@@ -355,7 +358,9 @@ const live: Layer.Layer<
           topK: prepared.params.topK,
           providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
           activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
-          tools: prepared.tools,
+          // A workflow model runs its tools inside its own stream, so holding a shell call back to the end would wait
+          // on itself.
+          tools: isWorkflow ? prepared.tools : ToolOrder.tools(prepared.tools, input.abort),
           toolChoice: input.toolChoice,
           maxOutputTokens: prepared.params.maxOutputTokens,
           abortSignal: input.abort,
@@ -385,6 +390,7 @@ const live: Layer.Layer<
                 options: prepared.params.options,
                 tool: prepared.tools.apply_patch,
               }),
+              ...(isWorkflow ? [] : [ToolOrder.middleware()]),
             ],
           }),
           experimental_telemetry: {
@@ -426,9 +432,16 @@ const live: Layer.Layer<
 
             const result = yield* run({ ...input, abort: ctrl.signal, requestID })
             timing.ready()
+            let answered = false
+            const observe = (event: LLMEvent) =>
+              Effect.sync(() => {
+                timing.observe(event)
+                if (answered || event.type === "provider-error" || event.type === "finish") return
+                answered = true
+                input.answering?.()
+              })
 
-            if (result.type === "native")
-              return result.stream.pipe(Stream.tap((event) => Effect.sync(() => timing.observe(event))))
+            if (result.type === "native") return result.stream.pipe(Stream.tap(observe))
 
             // Adapter seam: both runtimes expose the same LLMEvent stream. Native
             // already returns one; AI SDK streams are converted here.
@@ -444,7 +457,7 @@ const live: Layer.Layer<
               ),
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
-              Stream.tap((event) => Effect.sync(() => timing.observe(event))),
+              Stream.tap(observe),
             )
           }),
         ),

@@ -765,6 +765,12 @@ it.instance("title generation sends only what the user typed", () =>
     expect(usage[0]?.data.tokens).toBeUndefined()
     const history = yield* sessions.messages({ sessionID: chat.id })
     expect(history.filter((message) => message.info.role === "assistant")).toHaveLength(1)
+    // The title request goes out only after the main request, and the model's title replaces the provisional one.
+    const bodies = (yield* llm.hits).map((hit) => JSON.stringify(hit.body))
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).not.toContain("Generate a title")
+    expect(bodies[1]).toContain("Generate a title")
+    expect((yield* sessions.get(chat.id)).title).toBe("E2E Title")
   }),
 )
 
@@ -836,6 +842,82 @@ codiumPrompts.instance("a Codium turn after signing out reports why and offers S
     })
   }),
 )
+it.instance(
+  "a session is titled from the prompt at once, and a title set before the model's arrives stays",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+      // Nothing of the reply reaches Vector until the test releases it, so the provider is not yet answering.
+      const answer = defer<void>()
+      const held = reply().wait(answer.promise).text("done").stop().item()
+      if (held.type !== "sse") throw new Error("expected a streamed reply")
+      yield* llm.push({ ...held, head: [], tail: [...held.head, ...held.tail] })
+
+      const run = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "  Fix the login   redirect\nafter the session expires" }],
+        })
+        .pipe(Effect.forkChild)
+      yield* llm.wait(1)
+      yield* pollWithTimeout(
+        Effect.map(sessions.get(chat.id), (session) =>
+          session.title === "Fix the login redirect" ? (true as const) : undefined,
+        ),
+        "the session never got its provisional title",
+        "10 seconds",
+      )
+      // The title request waits for the main request to be answered.
+      expect(yield* llm.hits).toHaveLength(1)
+
+      yield* sessions.setTitle({ sessionID: chat.id, title: "Login redirect" })
+      answer.resolve()
+      yield* Fiber.join(run)
+      yield* prompt.awaitTitles()
+
+      expect((yield* sessions.get(chat.id)).title).toBe("Login redirect")
+      expect(
+        (yield* llm.hits).map((hit) => JSON.stringify(hit.body)).filter((body) => body.includes("Generate a title")),
+      ).toEqual([])
+    }),
+  30_000,
+)
+
+for (const ending of ["cancel", "reject"] as const)
+  it.instance(
+    `a first request that ends before answering keeps its provisional title (${ending})`,
+    () =>
+      Effect.gen(function* () {
+        const { llm } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({})
+        if (ending === "cancel") {
+          const held = reply().hang().item()
+          if (held.type !== "sse") throw new Error("expected a streamed reply")
+          yield* llm.push({ ...held, head: [] })
+        }
+        if (ending === "reject") yield* llm.error(400, { error: { message: "request rejected" } })
+        const run = yield* prompt
+          .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "Fix login" }] })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1)
+        if (ending === "cancel") yield* prompt.cancel(chat.id)
+        yield* Fiber.join(run)
+        yield* prompt.awaitTitles()
+        expect((yield* sessions.get(chat.id)).title).toBe("Fix login")
+        expect(yield* llm.hits).toHaveLength(1)
+        const database = yield* Database.Service
+        const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
+        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)).toEqual([])
+      }),
+    30_000,
+  )
 
 it.instance("a session reads its instruction files once, so an edit mid-session keeps the cached system prompt", () =>
   Effect.gen(function* () {
@@ -1539,6 +1621,54 @@ it.instance("glob tool keeps instance context during prompt runs", () =>
     expect(result.parts.some((part) => part.type === "text" && part.text === "done")).toBe(true)
   }),
 )
+
+// Vector lets the model send an edit and the check that verifies it in one response. The check must still run, and run
+// on the edited file, whichever order the model wrote the two calls in.
+for (const order of [
+  ["edit", "bash"],
+  ["bash", "edit"],
+] as const)
+  unix(
+    `an edit and its check in one response: the check runs after the edit (${order.join(", ")})`,
+    () =>
+      Effect.gen(function* () {
+        const { llm, dir } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const file = path.join(dir, "value.txt")
+        yield* writeText(file, "before\n")
+        const session = yield* sessions.create({
+          title: "Pinned",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const calls = {
+          edit: { filePath: file, oldString: "before", newString: "after" },
+          bash: { command: "cat value.txt", description: "Show the value" },
+        }
+        yield* llm.push(reply().tool(order[0], calls[order[0]]).tool(order[1], calls[order[1]]))
+        yield* llm.text("done")
+
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "Change the value to after and check it" }],
+        })
+
+        const parts = (yield* MessageV2.filterCompactedEffect(session.id)).flatMap((msg) => msg.parts)
+        const completed = (name: string) =>
+          parts.find(
+            (part): part is CompletedToolPart =>
+              part.type === "tool" && part.tool === name && part.state.status === "completed",
+          )
+        expect(completed("edit")).toBeDefined()
+        expect(completed("bash")?.state.output).toContain("after")
+        expect(completed("bash")?.state.output).not.toContain("before")
+        // One response for the edit and its check, one for the reply.
+        expect(yield* llm.hits).toHaveLength(2)
+      }),
+    30_000,
+  )
 
 it.instance("loop continues when finish is stop but assistant has tool parts", () =>
   Effect.gen(function* () {

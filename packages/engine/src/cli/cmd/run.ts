@@ -196,7 +196,7 @@ export const RunCommand = effectCmd({
       })
       .option("title", {
         type: "string",
-        describe: "title for the session (uses truncated prompt if no value provided)",
+        describe: "title for the session (defaults to the truncated prompt)",
       })
       .option("attach", {
         type: "string",
@@ -462,9 +462,13 @@ export const RunCommand = effectCmd({
           ]
 
       function title() {
-        if (args.title === undefined) return
-        if (args.title !== "") return args.title
-        return message.slice(0, 50) + (message.length > 50 ? "..." : "")
+        if (args.title) return args.title
+        // A headless run has no one to show a title to, so it names its session after the prompt instead of sending a
+        // model request for a title.
+        if (args.title === undefined && interactive) return undefined
+        const text = (args.command ? `/${args.command} ${message}` : message).trim()
+        if (!text) return undefined
+        return text.length > 50 ? `${text.slice(0, 50)}...` : text
       }
 
       const publications = new Map<string, VectorClient>()

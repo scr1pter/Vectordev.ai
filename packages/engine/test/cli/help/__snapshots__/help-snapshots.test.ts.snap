@@ -96,7 +96,7 @@ Options:
       --format       format: default (formatted) or json (raw JSON events)
                                           [string] [choices: "default", "json"] [default: "default"]
   -f, --file         file(s) to attach to message                                            [array]
-      --title        title for the session (uses truncated prompt if no value provided)     [string]
+      --title        title for the session (defaults to the truncated prompt)               [string]
       --attach       attach to a running vector server (e.g., http://localhost:4096)        [string]
   -p, --password     basic auth password (defaults to VECTOR_SERVER_PASSWORD)               [string]
   -u, --username     basic auth username (default: VECTOR_SERVER_USERNAME or vector)        [string]
