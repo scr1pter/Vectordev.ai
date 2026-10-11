@@ -13,9 +13,9 @@ export const upcomingRelease = {
   label: "Upcoming — unversioned",
   title: "Features waiting on Vector's own setup",
   summary:
-    "Vector's shared free allowance stays off. Other features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Personal OpenRouter access and API-key connections do not require those hosted services.",
+    "Features still waiting on separate setup include consent-based public sessions on Vector's service, Vector Teams, the Vector GitHub App, the public SDK and container images, and provider sign-ins needing registrations, such as xAI, Poe, DigitalOcean, GitLab and GitHub Copilot. Models included with Vector use Vector's shared free allowance. Personal OpenRouter access and API-key connections remain available.",
   status:
-    "No release date is announced for the services still awaiting setup. Shared service activation requires a separate decision. Version 2 is reserved for the final release.",
+    "No release date is announced for the services still awaiting setup. Version 2 is reserved for the final release.",
 }
 
 // The desktop release the download page offers today. Not every entry in release199 was published as a
@@ -664,5 +664,12 @@ export const release199: VectorRelease[] = [
     title: "Agents keep working while your computer is idle, and Sign in with ChatGPT is back",
     summary:
       "While any agent or subagent is running, Vector now keeps your computer from going to sleep, so long runs no longer freeze when you step away; the display can still turn off, and closing a laptop lid still puts it to sleep. When you come back to Vector after it was in the background, or after its connection to the agent engine drops, the open session and its subagent cards reload, so finished subagents no longer stay marked as running. Pressing Stop on a subagent that already finished now settles its card and says so, instead of appearing to do nothing. Sign in with ChatGPT is back: connect OpenAI with a ChatGPT Plus or Pro account to use GPT models. Vector now sends a daily usage count: how many sessions and subagent sessions ran, and, when you are signed in, token totals, recorded cost, the models and effort levels used, and streaks, with the app version and operating system. It never sends prompts, code, file names, model output, keys or IP addresses. Turn it off in Settings, General, Share usage counts.",
+  },
+  {
+    version: "1.99.107",
+    title: "Models included with Vector",
+    summary:
+      "The desktop app and terminal agent now group shared free models under Models included with Vector. Sign in to Vector to use the available models at no charge within the shared daily allowance; model availability can change. If you already connected OpenRouter, Vector prefers your own account and lists each free model once. Reaching the shared allowance offers a way to continue the same conversation with your connected OpenRouter account. Shared requests use eligible zero-price routes with zero data retention, and never switch to a paid model automatically. Desktop and CLI both use version 1.99.107.",
+    availability: "Release candidate — desktop installers and CLI packages are not published yet.",
   },
 ]

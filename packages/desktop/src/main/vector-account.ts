@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto"
 import type { VectorAccountStatus } from "@vectordevai/app/vector-account"
 
-type StoredAccount = { ciphertext: string; email: string; expiresAt: number }
+type StoredAccount = { ciphertext: string; email: string; name?: string; expiresAt: number }
 type Pending = { state: string; verifier: string; expiresAt: number; exchanging?: boolean }
 type Dependencies = {
   read(): unknown
@@ -36,7 +36,13 @@ export function createVectorAccount(deps: Dependencies) {
       typeof value.expiresAt !== "number"
     )
       return
-    return { ciphertext: value.ciphertext, email: value.email, expiresAt: value.expiresAt }
+    return {
+      ciphertext: value.ciphertext,
+      email: value.email,
+      // Sign-ins saved before names were stored have none; the app then shows the email.
+      ...("name" in value && typeof value.name === "string" && value.name ? { name: value.name } : {}),
+      expiresAt: value.expiresAt,
+    }
   }
   const status = (): VectorAccountStatus => {
     const account = stored()
@@ -44,7 +50,9 @@ export function createVectorAccount(deps: Dependencies) {
     return {
       authenticated,
       pending: Boolean(state.pending && state.pending.expiresAt > now()),
-      ...(authenticated && account ? { email: account.email, expiresAt: account.expiresAt } : {}),
+      ...(authenticated && account
+        ? { email: account.email, ...(account.name ? { name: account.name } : {}), expiresAt: account.expiresAt }
+        : {}),
       ...(state.error ? { error: state.error } : {}),
     }
   }
@@ -196,13 +204,20 @@ export function createVectorAccount(deps: Dependencies) {
           fail("Vector could not complete sign-in. The link may have expired; start sign-in again.")
           continue
         }
-        const account = { token: payload.token, email: payload.user.email, expiresAt: payload.expiresAt }
+        const name =
+          "name" in payload.user && typeof payload.user.name === "string" ? payload.user.name.trim().slice(0, 120) : ""
+        const account = { token: payload.token, email: payload.user.email, name, expiresAt: payload.expiresAt }
         await queue(async () => {
           if (state.pending !== pending) return
           if (!(await deps.available())) throw new Error(secureStorageError)
           const ciphertext = await deps.encrypt(account.token)
           if (state.pending !== pending) return
-          deps.write({ ciphertext, email: account.email, expiresAt: account.expiresAt })
+          deps.write({
+            ciphertext,
+            email: account.email,
+            ...(account.name ? { name: account.name } : {}),
+            expiresAt: account.expiresAt,
+          })
           // Persistence is the commit point. A newer browser flow must not be
           // cancelled when this earlier engine synchronization completes.
           state.pending = undefined

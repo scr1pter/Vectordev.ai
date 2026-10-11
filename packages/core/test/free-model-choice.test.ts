@@ -30,7 +30,7 @@ describe("free model presentation", () => {
 test("quota notices accept only typed limits and never repeat upstream text", () => {
   const data = { reason: "user_daily", resetAt: 1893542400000, message: "private upstream details" }
   const limit = freeModelsLimitNotice({ name: "FreeModelsLimitError", data })!
-  expect(freeModelsLimitTitle(limit)).toBe("You've used today's shared free models inside of Vector")
+  expect(freeModelsLimitTitle(limit)).toBe("You've used today's shared allowance for Models included with Vector")
   expect(freeModelsResetLabel(limit, "en-US")).toContain("2030")
   expect(freeModelsLimitNotice({ _tag: "FreeModelsLimitError", ...data })).toEqual(limit)
   expect(freeModelsLimitNotice({ type: "free_models_limit", code: "VECTOR_FREE_MODELS_LIMIT", ...data })).toEqual(limit)
