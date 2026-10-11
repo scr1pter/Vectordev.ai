@@ -2250,7 +2250,8 @@ const layer = Layer.effect(
       if (!provider || model.providerID === "vector" || model.freeModel) return
       const envs = yield* env.all()
       const origin = requestOrigin(model, provider.options, s.varsLoaders[model.providerID], envs)
-      if (origin) preconnectOrigin(origin, envs)
+      // A speculative connection must never prevent the SDK from making its actual request.
+      if (origin) yield* Effect.sync(() => preconnectOrigin(origin, envs)).pipe(Effect.catchDefect(() => Effect.void))
     })
 
     const closest = Effect.fn("Provider.closest")(function* (providerID: ProviderV2.ID, query: string[]) {

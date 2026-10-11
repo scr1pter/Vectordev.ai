@@ -43,7 +43,7 @@ it.live("opens the provider connection before the first request, which then uses
           expect(server.requests).toBe(1)
           expect(server.connections).toBe(1)
         }),
-      { config: testProviderConfig(server.url) },
+      { trusted: true, config: testProviderConfig(server.url) },
     )
   }),
 )
@@ -73,12 +73,49 @@ it.live("opens the connection a plugin names instead of the SDK's own endpoint",
           expect(named.requests).toBe(0)
         }),
       {
+        trusted: true,
         config: {
           ...config,
           provider: {
             lmstudio: {
               ...config.provider.lmstudio,
               options: { ...config.provider.lmstudio.options, preconnect: named.url },
+            },
+          },
+        },
+      },
+    )
+  }),
+)
+
+it.live("a rejected speculative connection does not prevent the actual provider request", () =>
+  Effect.gen(function* () {
+    const server = yield* endpoint()
+    const config = testProviderConfig(server.url)
+    yield* provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* Provider.Service
+          const model = yield* provider.getModel(ProviderV2.ID.make("lmstudio"), ModelV2.ID.make("test-model"))
+          yield* provider.preconnect(model)
+          expect(server.requests).toBe(0)
+
+          const result = streamText({
+            model: yield* provider.getLanguage(model),
+            messages: [{ role: "user", content: "hello" }],
+          })
+          expect(yield* Effect.promise(() => result.text)).toBe("ok")
+          expect(server.requests).toBe(1)
+        }),
+      {
+        trusted: true,
+        config: {
+          ...config,
+          provider: {
+            lmstudio: {
+              ...config.provider.lmstudio,
+              // URL accepts port zero, but Bun's speculative connection rejects it synchronously.
+              options: { ...config.provider.lmstudio.options, preconnect: "http://127.0.0.1:0" },
             },
           },
         },
