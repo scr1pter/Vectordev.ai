@@ -188,7 +188,11 @@ investigation, to show how the cache holds up as a loop grows).
 What it cannot show: how a real provider routes requests between cache
 machines (prompt_cache_key, request rates), how long it keeps a prefix, or
 anything about output length or the number of turns a model chooses. Those need
-a live check.
+a live check. It also cannot drive Vector's ChatGPT sign-in path, whose
+endpoint is fixed to the provider and which needs a real sign-in:
+`vector-openai` sends the same system text and tools over an API key, but as one
+developer item where a ChatGPT sign-in sends `instructions` plus a developer
+item, and the provider's order for `instructions` against `tools` is not public.
 
 ## Unavailable is not zero
 
