@@ -1525,6 +1525,8 @@ const layer = Layer.effect(
         continue
       }
 
+      // Steps finish without waiting for their closing snapshots and patches; the run is not done until they land.
+      yield* processor.settle(sessionID)
       return yield* lastAssistant(sessionID)
     })
 
