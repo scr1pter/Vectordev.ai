@@ -79,6 +79,56 @@ async function initRepo(directory: string) {
   await $`git commit --allow-empty -m root`.cwd(directory).quiet()
 }
 
+describe("Git discovery", () => {
+  it.live("finds a repository's work tree and git directories from a subdirectory", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(() => initRepo(root.path))
+      yield* Effect.promise(() => fs.mkdir(path.join(root.path, "src", "deep"), { recursive: true }))
+      const directory = yield* Effect.promise(() => fs.realpath(root.path))
+      const git = yield* Git.Service
+
+      const repo = yield* git.repo.discover(AbsolutePath.make(path.join(directory, "src", "deep")))
+      expect(repo?.worktree).toBe(AbsolutePath.make(directory))
+      expect(repo?.gitDirectory).toBe(AbsolutePath.make(path.join(directory, ".git")))
+      expect(repo?.commonDirectory).toBe(AbsolutePath.make(path.join(directory, ".git")))
+    }),
+  )
+
+  it.live("keeps a checkout whose work tree git will not report", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(() => initRepo(root.path))
+      // A bare-configured checkout fails --show-toplevel while its git directory is still found.
+      yield* Effect.promise(() => $`git config core.bare true`.cwd(root.path).quiet())
+      const directory = yield* Effect.promise(() => fs.realpath(root.path))
+      const git = yield* Git.Service
+
+      const repo = yield* git.repo.discover(AbsolutePath.make(directory))
+      expect(repo?.worktree).toBe(AbsolutePath.make(directory))
+      expect(repo?.gitDirectory).toBe(AbsolutePath.make(path.join(directory, ".git")))
+      expect(repo?.commonDirectory).toBe(AbsolutePath.make(path.join(directory, ".git")))
+    }),
+  )
+
+  it.live("finds nothing outside a repository", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      const git = yield* Git.Service
+      expect(yield* git.repo.discover(AbsolutePath.make(root.path))).toBeUndefined()
+    }),
+  )
+})
+
 describe("Git worktrees", () => {
   it.live("creates, lists, and removes linked worktrees", () =>
     Effect.gen(function* () {

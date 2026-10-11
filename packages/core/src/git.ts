@@ -189,16 +189,13 @@ const layer = Layer.effect(
       if (!dotgit) return undefined
 
       const cwd = path.dirname(dotgit)
-      const git = run(cwd, proc)
-      const topLevel = yield* git(["rev-parse", "--show-toplevel"])
-      const gitDir = yield* git(["rev-parse", "--git-dir"])
-      const commonDir = yield* git(["rev-parse", "--git-common-dir"])
-      if (gitDir.exitCode !== 0 || commonDir.exitCode !== 0) return undefined
+      const found = yield* locate(run(cwd, proc))
+      if (!found) return undefined
 
       return new Repository({
-        worktree: AbsolutePath.make(topLevel.exitCode === 0 ? resolvePath(cwd, topLevel.text) : cwd),
-        gitDirectory: AbsolutePath.make(resolvePath(cwd, gitDir.text)),
-        commonDirectory: AbsolutePath.make(resolvePath(cwd, commonDir.text)),
+        worktree: AbsolutePath.make(found.topLevel === undefined ? cwd : resolvePath(cwd, found.topLevel)),
+        gitDirectory: AbsolutePath.make(resolvePath(cwd, found.gitDir)),
+        commonDirectory: AbsolutePath.make(resolvePath(cwd, found.commonDir)),
       })
     })
 
@@ -950,6 +947,26 @@ interface Result {
   readonly text: string
   readonly stderr: string
 }
+
+// A repository's top level, git directory and common directory from one git process: discovery runs several times
+// while a session starts. A checkout without a work tree fails --show-toplevel and with it the whole call, so it falls
+// back to asking separately, where only the top level may be missing. So does any output that is not three paths.
+const locate = Effect.fnUntraced(function* (git: ReturnType<typeof run>) {
+  const combined = yield* git(["rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir"])
+  const lines = combined.text.replace(/[\r\n]+$/, "").split(/\r?\n/)
+  const [top, dir, common] = lines
+  if (combined.exitCode === 0 && lines.length === 3 && top && dir && common)
+    return { topLevel: top, gitDir: dir, commonDir: common }
+  const topLevel = yield* git(["rev-parse", "--show-toplevel"])
+  const gitDir = yield* git(["rev-parse", "--git-dir"])
+  const commonDir = yield* git(["rev-parse", "--git-common-dir"])
+  if (gitDir.exitCode !== 0 || commonDir.exitCode !== 0) return undefined
+  return {
+    topLevel: topLevel.exitCode === 0 ? topLevel.text : undefined,
+    gitDir: gitDir.text,
+    commonDir: commonDir.text,
+  }
+})
 
 function run(cwd: string, proc: AppProcess.Interface) {
   return (args: string[]) =>
