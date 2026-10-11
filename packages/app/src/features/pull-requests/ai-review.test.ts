@@ -593,6 +593,19 @@ describe("runReview", () => {
     expect(progress).toContain("Reviewing with openai/gpt-5.5…")
   })
 
+  test("says what the reviewers spent before the double-check, since their sessions stay out of view", async () => {
+    const progress: string[] = []
+    const { client } = fakeClient({ files: { "src/list.ts": HEAD } })
+    await run(client, { onProgress: (event) => progress.push(event.type === "checkout" ? event.label : event.text) })
+    expect(progress).toContain("Double-checking 1 finding… $0.01 and 1.2k tokens so far.")
+    const unpriced: string[] = []
+    await run(fakeClient({ files: { "src/list.ts": HEAD } }).client, {
+      preferredModels: ["openai/gpt-5.5"],
+      onProgress: (event) => unpriced.push(event.type === "checkout" ? event.label : event.text),
+    })
+    expect(unpriced).toContain("Double-checking 1 finding… 1.2k tokens so far.")
+  })
+
   test("explains provider setup when the connected catalog is empty", async () => {
     const { client, calls } = fakeClient()
     await expect(run(client, { preferredModels: [], catalog: [] })).rejects.toThrow("Settings → Providers")

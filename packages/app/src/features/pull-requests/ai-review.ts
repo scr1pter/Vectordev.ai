@@ -1,5 +1,6 @@
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { providerUsable } from "@vectordevai/schema/provider-policy"
+import { totalTokens } from "../economics/economics-types"
 import { measureUsage } from "../economics/token-usage"
 import { REVIEW_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 // Vector code review in the desktop Pull Requests panel (section 6, D1), of a pull request or of the uncommitted
@@ -33,6 +34,7 @@ import {
   buildSummaryBody,
   costWording,
   formatDuration,
+  formatTokens,
   formatUsd,
   noteNothingToReview,
   sanitizeModelMarkdown,
@@ -651,7 +653,9 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
             (checkout.trust === "untrusted" && finding.suggestion !== undefined),
         )
   if (candidates.length)
-    status(`Double-checking ${candidates.length} ${candidates.length === 1 ? "finding" : "findings"}…`)
+    status(
+      `Double-checking ${candidates.length} ${candidates.length === 1 ? "finding" : "findings"}…${spentSoFar(runs, model)}`,
+    )
   const verify = !candidates.length
     ? undefined
     : stop.stopped()
@@ -1045,6 +1049,16 @@ function estimateReview(input: {
     low: ranges.reduce((total, range) => total + range.low, 0),
     high: ranges.reduce((total, range) => total + range.high, 0),
   }
+}
+
+// The reviewer sessions stay out of view, so a running review shows what it has spent in its progress line. Only a
+// listed price makes a cost: a subscription or an unlisted model reports tokens alone.
+function spentSoFar(runs: readonly { usage: Usage }[], model: ReviewModel) {
+  const usage = measureUsage(runs.flatMap((run) => run.usage.messages))
+  if (!usage) return ""
+  const tokens = `${formatTokens(totalTokens(usage.usage))} tokens`
+  if (model.costKind !== "priced" || usage.costUsd === undefined || usage.mixedModels) return ` ${tokens} so far.`
+  return ` ${usage.partial ? "At least " : ""}${formatUsd(usage.costUsd)} and ${tokens} so far.`
 }
 
 // Every assistant step of the session, so the cost includes the finalize step.
