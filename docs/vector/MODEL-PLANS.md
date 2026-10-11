@@ -25,19 +25,27 @@ A 25% markup on cost is a 20% spread on revenue **before** payment fees, provide
 
 From `packages/web`, `bun scripts/codium-economics.ts` prints a contribution table for the configured allowances. Its fee assumptions are planning inputs only and never change customer balances. Override `CODIUM_PROVIDER_FEE_PERCENT`, `CODIUM_PAYMENT_FEE_PERCENT`, `CODIUM_PAYMENT_FIXED_USD` and `CODIUM_SUBSCRIPTION_FEE_PERCENT` when the actual commercial terms are known.
 
-## Initial coding catalog
+## Coding catalog
 
-The default allowlist lives in `api/_lib/codium-catalog.ts`. These routing ceilings were checked against OpenRouter's public [model catalog](https://openrouter.ai/api/v1/models) and [ZDR endpoint catalog](https://openrouter.ai/api/v1/endpoints/zdr) on October 9, 2026. They require working endpoints with function tools, no training/retention routing, and no additional request/image charges. Vector initially advertises 128,000 context tokens and caps output at 8,192 for each model.
+Codium offers low-cost coding models only, chosen for the most usage per credit without giving up quality. The default allowlist lives in `api/_lib/codium-catalog.ts`; the first entry is the default. These routing ceilings were checked against OpenRouter's public [model catalog](https://openrouter.ai/api/v1/models) and [ZDR endpoint catalog](https://openrouter.ai/api/v1/endpoints/zdr) on October 10, 2026. They require working endpoints with function tools, no training/retention routing, and no additional request/image charges.
 
-| Model                                                             | Suggested role                             | Input / output ceiling per million tokens |
-| ----------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------- |
-| [Qwen3 Coder Next](https://openrouter.ai/qwen/qwen3-coder-next)   | Economical coding default                  | $0.12 / $0.80                             |
-| [MiniMax M3](https://openrouter.ai/minimax/minimax-m3)            | Alternative for coding and tool-heavy work | $0.30 / $1.20                             |
-| [Kimi K2.7 Code](https://openrouter.ai/moonshotai/kimi-k2.7-code) | Optional higher-cost coding model          | $0.71 / $3.50                             |
+| Model                                                                     | Role                                    | Context / max output | Input / output ceiling per million tokens |
+| ------------------------------------------------------------------------- | --------------------------------------- | -------------------- | ----------------------------------------- |
+| [DeepSeek V4.1 Flash](https://openrouter.ai/deepseek/deepseek-v4.1-flash) | Default everyday model                  | 262,144 / 32,000     | $0.30 / $1.20                             |
+| [Xiaomi MiMo V2.6 Flash](https://openrouter.ai/xiaomi/mimo-v2.6-flash)    | Cheapest option for routine work        | 262,144 / 16,384     | $0.26 / $0.41                             |
+| [Claude Haiku 5.5](https://openrouter.ai/anthropic/claude-haiku-5.5)      | Strongest low-cost model for hard tasks | 100,000 / 20,000     | $0.22 / $0.55                             |
 
-These roles are product recommendations, not measured Vector benchmark results. Evaluate completion quality and latency on real Vector coding tasks before launch. Models are selected by the user; this change does not introduce automatic model routing by task difficulty. All models consume the same credit pools, and more expensive models spend them faster. Input, output and billed reasoning count toward usage. Caching can lower actual usage cost.
+Why these three, from independent boards that still separate low-cost models (Vals Terminal-Bench 4.0 and 2.1, Vibe Code Bench v1.1, Code Migration) rather than saturated vendor SWE-bench figures, and from cached-input price, which dominates Vector's agent sessions:
 
-Do not anchor permanent prices to temporary provider discounts. From `packages/web`, `bun scripts/model-plan-catalog.ts` checks whether the configured catalog still has compatible live endpoints. A model's cheapest advertised provider may have incompatible context, tool support or retention settings. Price ceilings fail closed if suitable provider prices rise; review the catalog rather than silently increasing customer cost.
+- **DeepSeek V4.1 Flash** has the best independent quality per dollar of the low-cost models (Vibe Code 84.7%, Code Migration 45.6%, Terminal-Bench 2.1 74.5%), runs at about 217 tokens/s and has the widest ZDR coverage. The $0.30 / $1.20 ceiling covers the mainstream fp8 ZDR endpoints and leaves out Fireworks US and BaseTen fast. 262K context covers real work; recall across the 1M window is unproven.
+- **Xiaomi MiMo V2.6 Flash** is the cheapest per task among credible agentic models (Terminal-Bench 2.1 76.4% at about $0.02 a task) with cached input at $0.002 to $0.004 per million on four of its five ZDR vendors. It streams at about 62 tokens/s, so output is capped at 16,384 tokens to finish inside the gateway's 600-second limit even on a slow provider. The Xiaomi first-party endpoint is not ZDR.
+- **Claude Haiku 5.5** has the highest independent quality among low-price models (Vibe Code 90.4%, Terminal-Bench 4.0 35.4%). It is ZDR on Google Vertex and Amazon Bedrock only. Every endpoint bills the whole request at 5x once a prompt reaches 100,000 tokens, so its context is set to 100,000 on purpose: the gateway rejects a prompt plus requested output above that, and the engine compacts at about 80,000. Its input ceiling is $0.22 rather than the $0.11 list price because these endpoints bill prompt-cache writes at up to twice the input price, and the gateway's pre-authorisation must cover them.
+
+Set reasoning effort explicitly when the Codium provider lands in the app so usage stays predictable: DeepSeek high, MiMo default, Haiku high (max adds about five Artificial Analysis Intelligence Index points for about 2.6x the cost per task). The gateway does not restrict quantization, and DeepSeek V4.1 Flash has fp4 ZDR endpoints inside its ceiling that price-weighted routing will favour; restrict routing to fp8 or better before launch if quality on real Vector tasks drops.
+
+These roles are product recommendations from public benchmarks, not measured Vector results. Evaluate completion quality and latency on real Vector coding tasks before launch. Models are selected by the user; this change does not introduce automatic model routing by task difficulty. All models consume the same credit pools, and more expensive models spend them faster. Input, output and billed reasoning count toward usage. Caching can lower actual usage cost.
+
+Do not anchor permanent prices to temporary provider discounts. From `packages/web`, `bun scripts/model-plan-catalog.ts` checks whether the configured catalog still has compatible live endpoints. A model's cheapest advertised provider may have incompatible context, tool support or retention settings. The audit ignores per-search web fees, because the gateway turns off OpenRouter's web plugin and accepts only function tools. Price ceilings fail closed if suitable provider prices rise; review the catalog rather than silently increasing customer cost.
 
 ## Account and credit flow
 

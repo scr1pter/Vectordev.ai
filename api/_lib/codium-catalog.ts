@@ -1,35 +1,39 @@
-// Reviewed against OpenRouter's /models and /endpoints/zdr on 2026-10-09.
+// Reviewed against OpenRouter's /models and /endpoints/zdr on 2026-10-10.
 // These are routing ceilings, not a promise that every provider has this price.
-export const CODIUM_CATALOG_UPDATED = "2026-10-09"
+export const CODIUM_CATALOG_UPDATED = "2026-10-10"
 export const CODIUM_MODELS = [
   {
-    id: "qwen/qwen3-coder-next",
-    name: "Qwen3 Coder Next",
+    id: "deepseek/deepseek-v4.1-flash",
+    name: "DeepSeek V4.1 Flash",
     category: "everyday",
-    description: "A coding-focused option for everyday edits, tests and agent tool use.",
-    contextLength: 128000,
-    maxOutputTokens: 8192,
-    inputPrice: 0.12,
-    outputPrice: 0.8,
-  },
-  {
-    id: "minimax/minimax-m3",
-    name: "MiniMax M3",
-    category: "everyday",
-    description: "An alternative for coding and tasks that use several tools.",
-    contextLength: 128000,
-    maxOutputTokens: 8192,
+    description: "The default: fast, capable coding for everyday changes, tests and agent work.",
+    contextLength: 262144,
+    maxOutputTokens: 32000,
     inputPrice: 0.3,
     outputPrice: 1.2,
   },
   {
-    id: "moonshotai/kimi-k2.7-code",
-    name: "Kimi K2.7 Code",
+    id: "xiaomi/mimo-v2.6-flash",
+    name: "Xiaomi MiMo V2.6 Flash",
+    category: "everyday",
+    description: "The most economical choice for routine edits and quick fixes. Slower to respond.",
+    contextLength: 262144,
+    // Its providers stream slowly, so a full response still finishes inside the gateway's time limit.
+    maxOutputTokens: 16384,
+    inputPrice: 0.26,
+    outputPrice: 0.41,
+  },
+  {
+    id: "anthropic/claude-haiku-5.5",
+    name: "Claude Haiku 5.5",
     category: "advanced",
-    description: "An optional coding model for difficult tasks, with a higher usage cost.",
-    contextLength: 128000,
-    maxOutputTokens: 8192,
-    inputPrice: 0.71,
-    outputPrice: 3.5,
+    description: "For harder, multi-step problems. Uses credits faster than the other models.",
+    // Every endpoint bills the whole request at 5x once a prompt reaches 100,000 tokens. The gateway rejects a prompt
+    // plus its output above this limit, so a request never reaches that price.
+    contextLength: 100000,
+    maxOutputTokens: 20000,
+    // Covers prompt-cache writes, which these endpoints bill at up to twice the 0.11 input price.
+    inputPrice: 0.22,
+    outputPrice: 0.55,
   },
 ] as const

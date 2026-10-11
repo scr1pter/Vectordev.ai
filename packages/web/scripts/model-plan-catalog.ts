@@ -128,6 +128,8 @@ function withinPricingLimits(pricing: Readonly<Record<string, unknown>>, configu
     }
     const price = rate(value)
     if (price === undefined) return false
+    // The gateway turns off OpenRouter's web plugin and accepts only function tools, so no request can buy a search.
+    if (key === "web_search") return true
     if (key === "discount") return price <= 1
     if (key === "prompt" || key.startsWith("input_cache_")) return price * 1_000_000 <= configured.inputPrice
     if (key === "completion") return price * 1_000_000 <= configured.outputPrice

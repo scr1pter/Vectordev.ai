@@ -119,6 +119,21 @@ describe("configured Codium model audit", () => {
         ],
       )[0].ok,
     ).toBe(false)
+    // Web search is billed per search, which the gateway never requests; a malformed value still fails.
+    expect(
+      auditModelPlanCatalog(
+        [configured],
+        [model],
+        [{ ...endpoint, pricing: { ...endpoint.pricing, web_search: "0.01" } }],
+      )[0].ok,
+    ).toBe(true)
+    expect(
+      auditModelPlanCatalog(
+        [configured],
+        [model],
+        [{ ...endpoint, pricing: { ...endpoint.pricing, web_search: "x" } }],
+      )[0].ok,
+    ).toBe(false)
     expect(
       auditModelPlanCatalog(
         [configured],

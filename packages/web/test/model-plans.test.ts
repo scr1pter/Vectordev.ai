@@ -93,10 +93,11 @@ describe("subscription configuration", () => {
     expect(publicModelPlans().product).toBe("Vector Codium")
     expect(publicModelPlans()).not.toHaveProperty("markupPercent")
     expect(publicModelPlans().models.map((model) => model.id)).toEqual([
-      "qwen/qwen3-coder-next",
-      "minimax/minimax-m3",
-      "moonshotai/kimi-k2.7-code",
+      "deepseek/deepseek-v4.1-flash",
+      "xiaomi/mimo-v2.6-flash",
+      "anthropic/claude-haiku-5.5",
     ])
+    expect(publicModelPlans().catalogUpdated).toBe("2026-10-10")
     expect(() => requireModelPlans()).toThrow("not available yet")
   })
   test("markup is configurable and never rounds credits above the purchased allowance", () => {
