@@ -171,14 +171,14 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
     return remote
   }
 
-  function checks(input: { health: boolean; browser: boolean }) {
+  function checks(input: { health: boolean; browser: boolean }, outputDirectory = ".") {
     setBuildSettings(project, undefined, {
       framework: "Static",
       packageManager: "static",
       installCommand: "",
       testCommand: "",
       buildCommand: "",
-      outputDirectory: ".",
+      outputDirectory,
       nodeVersion: "",
       healthPath: "/",
       requiredChecks: { test: false, secrets: true, ...input },
@@ -446,32 +446,66 @@ describe.skipIf(process.platform === "win32")("publishing a project", () => {
     expect(remote.productionId).toBe("dpl_new")
   })
 
-  test("refuses to publish a site with no build step while its .env would be served", async () => {
-    const remote = linkProject()
-    api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
-    remote.productionId = "dpl_first"
-    const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
-    checks({ health: false, browser: false })
-    await writeFile(join(project, ".env"), "API_URL=https://api.example\n")
-    const options = { command: [await fakeDeployCli(`https://${preview.url}`)] }
-    const blocked = await publishProject({ projectPath: project, target: "vercel" }, undefined, options)
-    expect(blocked).toMatchObject({ ok: false, errorCode: "checks_failed" })
-    expect(blocked.checks?.find((check) => check.type === "secrets")).toMatchObject({
-      status: "failed",
-      output: expect.stringContaining(".env:0 · public at /.env"),
-    })
-    expect(api.requests("GET").some((item) => item.path.includes("dpl_p"))).toBe(false)
-    await writeFile(join(project, ".vercelignore"), "node_modules\n.env\n")
-    expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, options)).toMatchObject({
-      ok: true,
-    })
-    // A site that builds serves its output, and its build may read .env.
-    await writeFile(join(project, ".vercelignore"), "")
-    await writeFile(join(project, "package.json"), JSON.stringify({ scripts: { build: "vite build" } }))
-    expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, options)).toMatchObject({
-      ok: true,
-    })
-  })
+  test.each([".env", ".env.production", "assets/.env.production"])(
+    "refuses to publish a static environment file %s",
+    async (envFile) => {
+      const remote = linkProject()
+      api.addDeployment({ projectId: remote.id, uid: "dpl_first", target: "production" })
+      remote.productionId = "dpl_first"
+      const preview = api.addDeployment({ projectId: remote.id, uid: "dpl_p", url: "shop-p.vercel.app" })
+      checks({ health: false, browser: false })
+      mkdirSync(join(project, "assets"), { recursive: true })
+      await writeFile(join(project, envFile), "API_URL=https://api.example\n")
+      const options = { command: [await fakeDeployCli(`https://${preview.url}`)] }
+      const blocked = await publishProject({ projectPath: project, target: "vercel" }, undefined, options)
+      expect(blocked).toMatchObject({ ok: false, errorCode: "checks_failed" })
+      expect(blocked.checks?.find((check) => check.type === "secrets")).toMatchObject({
+        status: "failed",
+        output: expect.stringContaining(`${envFile}:0 · public at /${envFile}`),
+      })
+      expect(api.requests("GET").some((item) => item.path.includes("dpl_p"))).toBe(false)
+      await writeFile(join(project, ".vercelignore"), "node_modules\n.env*\n")
+      expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, options)).toMatchObject({
+        ok: true,
+      })
+      // An explicit root output still serves .env even with a build script.
+      await writeFile(join(project, ".vercelignore"), "")
+      await writeFile(join(project, "package.json"), JSON.stringify({ scripts: { build: "vite build" } }))
+      expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, options)).toMatchObject({
+        ok: false,
+        errorCode: "checks_failed",
+      })
+      // A site that builds serves its output, and its build may read source .env.
+      checks({ health: false, browser: false }, "dist")
+      mkdirSync(join(project, "dist"), { recursive: true })
+      await writeFile(join(project, "dist", "index.html"), "<h1>Hello</h1>")
+      expect(await publishProject({ projectPath: project, target: "vercel" }, undefined, options)).toMatchObject({
+        ok: true,
+      })
+    },
+  )
+
+  test.each([".env", "assets/.env.production", ".env.local"])(
+    "refuses an environment file copied into build output: %s",
+    async (envFile) => {
+      linkProject()
+      checks({ health: false, browser: false }, "dist")
+      mkdirSync(join(project, "dist", "assets"), { recursive: true })
+      await writeFile(join(project, "dist", "index.html"), "<h1>Hello</h1>")
+      await writeFile(join(project, "dist", envFile), "PRIVATE_VALUE=fixture-sensitive-value\n")
+      await writeFile(join(project, ".vercelignore"), ".env*\ndist\n")
+      const blocked = await publishProject({ projectPath: project, target: "vercel" }, undefined, {
+        command: ["never-run"],
+      })
+      expect(blocked).toMatchObject({ ok: false, errorCode: "checks_failed" })
+      expect(blocked.checks?.find((check) => check.type === "secrets")).toMatchObject({
+        status: "failed",
+        output: expect.stringContaining(`dist/${envFile}:0 · public at /${envFile}`),
+      })
+      expect(JSON.stringify(blocked)).not.toContain("fixture-sensitive-value")
+      expect(listDeployments(project)).toEqual([])
+    },
+  )
 
   test("an Observability check reports protection as protected and never touches the release checks", async () => {
     const remote = linkProject(undefined, { name: "shop", ssoProtection: { deploymentType: "preview" } })

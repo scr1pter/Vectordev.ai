@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
-import { readFile, stat } from "node:fs/promises"
-import { basename, join } from "node:path"
+import { readdir, readFile, stat } from "node:fs/promises"
+import { basename, join, matchesGlob, relative } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import {
@@ -269,7 +269,8 @@ async function vercelCommand() {
 // these files, and a scan of the source never sees them. Returns undefined when
 // the project publishes from its own root, as a plain static site does.
 async function resolveDeployRoot(projectPath: string, configuredOutput?: string) {
-  if (configuredOutput && configuredOutput !== ".") {
+  if (configuredOutput === ".") return undefined
+  if (configuredOutput) {
     const configuredRoot = join(projectPath, configuredOutput)
     return (await stat(configuredRoot).catch(() => undefined))?.isDirectory() ? configuredRoot : undefined
   }
@@ -432,7 +433,7 @@ async function runPreflightChecks(
     await Promise.all([
       scanProjectSecrets(input.projectPath),
       deployRoot ? scanProjectSecrets(deployRoot, input.projectPath) : [],
-      servedEnvFile(input.projectPath, settings),
+      servedEnvFile(input.projectPath, settings, deployRoot),
     ])
   ).flat()
   const secretsRequired = settings?.requiredChecks.secrets ?? true
@@ -467,25 +468,52 @@ async function runPreflightChecks(
   }
 }
 
-// The secret scan skips .env files, which are expected to hold secrets. The
-// Vercel CLI still uploads .env (it leaves out only .env.local and
-// .env.*.local), and a site with no build step is served from its own root, so
-// the variables Vector writes there would be public at /.env. A site that
-// builds serves its output instead, and its build may read .env.
-async function servedEnvFile(directory: string, settings: CloudBuildSettings | null) {
-  if (settings?.buildCommand) return []
-  const [env, manifest, ignored] = await Promise.all([
-    stat(join(directory, ".env")).catch(() => undefined),
-    readFile(join(directory, "package.json"), "utf8")
-      .then(parseJson)
-      .catch(() => undefined),
-    readFile(join(directory, ".vercelignore"), "utf8").catch(() => ""),
-  ])
-  if (!env?.isFile() || stringField(objectField(manifest, "scripts"), "build")) return []
-  if (ignored.split(/\r?\n/).some((line) => [".env", "/.env", ".env*", "/.env*"].includes(line.trim()))) return []
-  return [
-    { file: ".env", line: 0, kind: "public at /.env, since this site has no build step: add .env to .vercelignore" },
-  ]
+// Environment files are deliberately omitted from credential-content scans. Check their public paths instead,
+// including build output: a build can copy a secret file verbatim without embedding a recognizable token.
+async function servedEnvFile(directory: string, settings: CloudBuildSettings | null, deployRoot?: string) {
+  const manifest = await readFile(join(directory, "package.json"), "utf8")
+    .then(parseJson)
+    .catch(() => undefined)
+  if (
+    !deployRoot &&
+    settings?.outputDirectory !== "." &&
+    (settings?.buildCommand || stringField(objectField(manifest, "scripts"), "build"))
+  )
+    return []
+  const ignored = deployRoot
+    ? []
+    : (await readFile(join(directory, ".vercelignore"), "utf8").catch(() => ""))
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#"))
+  const root = deployRoot ?? directory
+  const findings: { file: string; line: number; kind: string }[] = []
+  const walk = async (folder: string): Promise<void> => {
+    const entries = await readdir(folder, { withFileTypes: true })
+    for (const entry of entries) {
+      if ([".git", ".vercel", "node_modules"].includes(entry.name)) continue
+      const path = join(folder, entry.name)
+      const local = relative(root, path).split("\\").join("/")
+      const rule = ignored.findLast((value) => {
+        const pattern = value.replace(/^!/, "").replace(/^\//, "").replace(/\/$/, "")
+        return matchesGlob(pattern.includes("/") ? local : entry.name, pattern)
+      })
+      if (rule && !rule.startsWith("!")) continue
+      if (entry.isDirectory()) {
+        await walk(path)
+        continue
+      }
+      if (!/^\.env(?:\.|$)/.test(entry.name)) continue
+      if (!deployRoot && !rule && (entry.name === ".env.local" || /^\.env\..*\.local$/.test(entry.name))) continue
+      findings.push({
+        file: relative(directory, path).split("\\").join("/"),
+        line: 0,
+        kind: `public at /${local}: remove it from the published output or exclude it with .vercelignore`,
+      })
+    }
+  }
+  await walk(root)
+  return findings
 }
 
 function requiredChecksPassed(checks: CloudDeploymentCheck[]): boolean {
