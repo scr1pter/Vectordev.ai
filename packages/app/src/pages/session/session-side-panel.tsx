@@ -92,6 +92,7 @@ import type { DragEvent } from "@thisbeyond/solid-dnd"
 import type { Message, Part, SnapshotFileDiff, VcsFileDiff } from "@vectordevai/sdk/v2"
 import { Message as SessionMessage } from "@vectordevai/session-ui/message-part"
 import { ConstrainDragYAxis, getDraggableId } from "@/utils/solid-dnd"
+import { sameWorkspaceRevisions } from "@/utils/workspace-revisions"
 
 import FileTree, { CODESPACE_EXCLUDED_DIRECTORIES, type FileTreeMarker, type Kind } from "@/components/file-tree"
 import { PromptInput } from "@/components/prompt-input"
@@ -150,6 +151,7 @@ type CodespaceView = "editor" | "problems"
 
 type CodespaceLiveWorkspace = {
   id: string
+  revision?: number
   name: string
   taskPrompt: string
   runtime: "vector" | "claude-code" | "codex" | "cursor"
@@ -1885,7 +1887,9 @@ export function CodespaceWorkbench(props: {
   const [explorerOpen, setExplorerOpen] = createSignal(true)
   const [explorerWidth, setExplorerWidth] = createSignal(260)
   const [ignoredProblems, setIgnoredProblems] = createSignal<Set<string>>(new Set())
-  const [liveWorkspaces, setLiveWorkspaces] = createSignal<CodespaceLiveWorkspace[]>([])
+  const [liveWorkspaces, setLiveWorkspaces] = createSignal<CodespaceLiveWorkspace[]>([], {
+    equals: sameWorkspaceRevisions,
+  })
   const [liveWorkspaceError, setLiveWorkspaceError] = createSignal("")
   // Parallel workspaces that run in another directory: the files their writes
   // named (marked before the next poll), the watched copy's text as read from

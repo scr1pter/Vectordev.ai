@@ -20,6 +20,7 @@ import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
+import { sameWorkspaceRevisions } from "@/utils/workspace-revisions"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { bestOwnFreeModel } from "@/utils/free-model"
 import { freeModelName } from "@vectordevai/core/free-model-choice"
@@ -595,7 +596,9 @@ export default function NewLayout(props: ParentProps) {
   const [workspaceTreeOpen, setWorkspaceTreeOpen] = createSignal(true)
   const [browserAgentOpen, setBrowserAgentOpen] = createSignal(false)
   const [parallelOpen, setParallelOpen] = createSignal(false)
-  const [parallelRecords, setParallelRecords] = createSignal<ParallelWorkspaceRecord[]>([])
+  const [parallelRecords, setParallelRecords] = createSignal<ParallelWorkspaceRecord[]>([], {
+    equals: sameWorkspaceRevisions,
+  })
   const [parallelSelectedID, setParallelSelectedID] = createSignal<string>()
   const [swarmRuns, setSwarmRuns] = createSignal<SwarmRunRecord[]>([])
   const [swarmSelectedID, setSwarmSelectedID] = createSignal<string>()
