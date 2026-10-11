@@ -48,8 +48,8 @@ beforeEach(() => {
 afterAll(() => {
   server.close()
   for (const [key, value] of previous) {
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
+    delete process.env[key]
+    if (value !== undefined) process.env[key] = value
   }
 })
 
