@@ -11,6 +11,7 @@ import { BackgroundJob } from "@/background/job"
 import { Decimal } from "decimal.js"
 import type { ProviderMetadata, Usage } from "@vectordevai/llm"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 import { Database } from "@vectordevai/core/database/database"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@vectordevai/core/event"
@@ -496,10 +497,17 @@ export const getUsage = (input: { model: Provider.Model; usage: Usage; metadata?
   // added by hand often is, takes that amount instead of reading as unpriced.
   // @ts-expect-error provider metadata is untyped JSON
   const reported: unknown = input.metadata?.["openrouter"]?.["usage"]?.["cost"]
+  // Vector Codium debits what the gateway reports it billed; the listed prices are only ceilings.
+  const codium = input.model.providerID === ModelPlans.PROVIDER_ID ? input.metadata?.["codium"]?.["cost"] : undefined
   const reportedCost =
-    input.model.cost?.unpriced === true && typeof reported === "number" && Number.isFinite(reported) && reported >= 0
-      ? reported
-      : undefined
+    typeof codium === "number" && Number.isFinite(codium) && codium >= 0
+      ? codium
+      : input.model.cost?.unpriced === true &&
+          typeof reported === "number" &&
+          Number.isFinite(reported) &&
+          reported >= 0
+        ? reported
+        : undefined
   const billed =
     (typeof totalNanoAiu === "number" && Number.isFinite(totalNanoAiu) && totalNanoAiu >= 0) ||
     reportedCost !== undefined

@@ -32,6 +32,7 @@ import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
+import { codiumError } from "./model-plan-route"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { toLLMMessages } from "./to-llm-message"
 import { MAX_STEPS_PROMPT } from "./max-steps"
@@ -298,7 +299,9 @@ const layer = Layer.effect(
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
             yield* withPublication(
               publisher.failAssistant(
-                llmFailure.reason._tag === "FreeModelsLimit" ? llmFailure.reason.limit : llmFailure.reason.message,
+                llmFailure.reason._tag === "FreeModelsLimit"
+                  ? llmFailure.reason.limit
+                  : (codiumError(llmFailure) ?? llmFailure.reason.message),
               ),
             )
           }

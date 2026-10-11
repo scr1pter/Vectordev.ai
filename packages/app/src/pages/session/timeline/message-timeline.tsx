@@ -1,4 +1,5 @@
 import { FreeModelsLimit } from "@/components/free-models-limit"
+import { CodiumError } from "@/components/codium-error"
 import { publicShareError } from "@vectordevai/schema/public-share"
 import {
   createEffect,
@@ -1333,9 +1334,16 @@ export function MessageTimeline(props: {
               <Show
                 when={errorRow().freeLimit && sessionID()}
                 fallback={
-                  <Card variant="error" class="error-card">
-                    {errorRow().text}
-                  </Card>
+                  <Show
+                    when={errorRow().codium}
+                    fallback={
+                      <Card variant="error" class="error-card">
+                        {errorRow().text}
+                      </Card>
+                    }
+                  >
+                    {(action) => <CodiumError text={errorRow().text} action={action()} />}
+                  </Show>
                 }
               >
                 <FreeModelsLimit sessionID={sessionID()!} limit={errorRow().freeLimit!} />

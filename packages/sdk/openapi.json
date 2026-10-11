@@ -32193,6 +32193,24 @@
         "required": ["type", "id", "name", "state", "time"],
         "additionalProperties": false
       },
+      "SessionErrorCodium": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["codium"]
+          },
+          "action": {
+            "type": "string",
+            "enum": ["credits", "sign-in", "unavailable"]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "action", "message"],
+        "additionalProperties": false
+      },
       "SessionErrorAssistant": {
         "anyOf": [
           {
@@ -32200,6 +32218,9 @@
           },
           {
             "$ref": "#/components/schemas/FreeModelLimit"
+          },
+          {
+            "$ref": "#/components/schemas/SessionErrorCodium"
           }
         ]
       },

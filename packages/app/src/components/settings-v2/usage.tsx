@@ -6,6 +6,7 @@ import { useLanguage } from "@/context/language"
 import { formatSessionCost } from "@/utils/session-cost"
 import { formatServerError } from "@/utils/server-errors"
 import { helperUsage, normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
+import { SettingsVectorCodium } from "../settings-vector-codium"
 import "./settings-v2.css"
 
 type UsageView = "daily" | "weekly" | "cumulative"
@@ -154,6 +155,8 @@ export const SettingsUsageV2: Component = () => {
           Refresh
         </ButtonV2>
       </div>
+
+      <SettingsVectorCodium />
 
       <Switch>
         <Match when={summary.loading}>

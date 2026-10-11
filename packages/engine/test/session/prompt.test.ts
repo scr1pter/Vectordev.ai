@@ -5,12 +5,14 @@ import { EventTable } from "@vectordevai/core/event/sql"
 import { SessionEvent } from "@vectordevai/schema/session-event"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FreeModels } from "@vectordevai/core/free-models"
+import { ModelPlans } from "@vectordevai/core/model-plans"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { FREE_MODEL_FALLBACKS } from "@vectordevai/schema/free-model"
 import { LLMEvent } from "@vectordevai/llm"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { expect, test } from "bun:test"
+import { afterAll, expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
@@ -65,6 +67,7 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
 import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { Global } from "@vectordevai/core/global"
+import { codiumGateway, codiumModel, textStream } from "../../../core/test/fixture/codium-gateway"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -285,6 +288,44 @@ const freePrompts = testEffect(
     ],
   ]),
 )
+// Vector Codium through the real provider path, against a local stand-in for the vectordev.ai gateway.
+const codiumToken = "vct_synthetic-private-account.token"
+const codiumAccount = { token: codiumToken as string | undefined }
+const gateway = codiumGateway(codiumToken)
+afterAll(() => gateway.stop())
+const codiumPrompts = testEffect(
+  LayerNode.compile(promptRoot, [
+    [SessionSummary.node, summary],
+    [LSP.node, lsp],
+    [MCP.node, makeMcp()],
+    [RuntimeFlags.node, runtimeFlags],
+    [
+      FreeModels.node,
+      Layer.succeed(FreeModels.Service, {
+        catalog: () => Effect.succeed({ enabled: false, updatedAt: 0, models: [] }),
+        forKey: () => Effect.succeed([]),
+      }),
+    ],
+    [
+      FreeModels.credentialsNode,
+      Layer.succeed(FreeModels.CredentialsService, {
+        get: (provider) => Effect.succeed(provider === "vector" ? codiumAccount.token : undefined),
+      }),
+    ],
+    [
+      ModelPlans.node,
+      Layer.succeed(ModelPlans.Service, {
+        catalog: (token) =>
+          Effect.succeed(
+            token === codiumToken ? { enabled: true, models: [codiumModel] } : { enabled: false, models: [] },
+          ),
+        request: gateway.forward,
+      }),
+    ],
+  ]),
+)
+const codiumRef = { providerID: ProviderV2.ID.make(ModelPlans.PROVIDER_ID), modelID: ModelV2.ID.make(codiumModel.id) }
+
 const withMcpInstructions = testEffect(
   makeHttp({
     mcpInstructions: [
@@ -724,6 +765,75 @@ it.instance("title generation sends only what the user typed", () =>
     expect(usage[0]?.data.tokens).toBeUndefined()
     const history = yield* sessions.messages({ sessionID: chat.id })
     expect(history.filter((message) => message.info.role === "assistant")).toHaveLength(1)
+  }),
+)
+
+codiumPrompts.instance("a Codium session's title goes through the gateway and is charged what it billed", () =>
+  Effect.gen(function* () {
+    gateway.state.mode = "text"
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+    const before = gateway.seen.length
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: codiumRef,
+      parts: [{ type: "text", text: "Fix the login redirect" }],
+    })
+    yield* prompt.awaitTitles()
+    gateway.state.mode = "ok"
+    const sent = gateway.seen.slice(before)
+    const title = sent.find((item) => JSON.stringify(item.body).includes("Generate a title"))
+    expect(title).toMatchObject({ path: "/api/model-plans/chat", authorization: `Bearer ${codiumToken}` })
+    expect(title?.body).toMatchObject({ model: codiumModel.id })
+    expect(sent.every((item) => item.path === "/api/model-plans/chat")).toBe(true)
+    expect((yield* sessions.get(chat.id)).title).toBe("Fix the login redirect")
+    const database = yield* Database.Service
+    const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
+    const usage = recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)
+    expect(usage).toHaveLength(1)
+    // Title spend counts toward the session, at the cost the gateway billed the credits, not the ceiling price.
+    expect(usage[0]?.data).toMatchObject({
+      purpose: "title",
+      model: { providerID: ModelPlans.PROVIDER_ID, id: codiumModel.id },
+      cost: textStream[2]?.usage?.cost,
+    })
+    expect(usage[0]?.data.unpriced).toBeUndefined()
+  }),
+)
+
+codiumPrompts.instance("a Codium turn after signing out reports why and offers Sign in to Vector", () =>
+  Effect.gen(function* () {
+    const events = yield* EventV2Bridge.Service
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({ title: "Pinned" })
+    const errors: NonNullable<SessionV1.Assistant["error"]>[] = []
+    const off = yield* events.listen((event) => {
+      if (event.type !== Session.Event.Error.type) return Effect.void
+      const data = event.data as typeof Session.Event.Error.data.Type
+      if (data.sessionID === chat.id && data.error) errors.push(data.error)
+      return Effect.void
+    })
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: codiumRef,
+      noReply: true,
+      parts: [{ type: "text", text: "hello" }],
+    })
+    const before = gateway.seen.length
+    codiumAccount.token = undefined
+    const result = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.exit)
+    codiumAccount.token = codiumToken
+    yield* off
+    expect(Exit.isFailure(result)).toBe(true)
+    expect(gateway.seen.length).toBe(before)
+    expect(errors.map((error) => ModelPlanStatus.failureAction(error))).toEqual(["sign-in"])
+    expect(errors[0]?.data).toMatchObject({
+      message: expect.stringContaining("Sign in to Vector to use Vector Codium"),
+    })
   }),
 )
 

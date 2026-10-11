@@ -1,0 +1,21 @@
+import { requireModelPlanUser } from "./model-plan-chat.js"
+import { configuredPlanModels, modelPlansEnabled, requireModelPlans } from "./model-plan-config.js"
+import { handleApiError, json, requireMethod, type ApiRequest, type ApiResponse } from "./http.js"
+
+export async function handleModelPlanModels(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
+  try {
+    requireMethod(request, "GET")
+    if (!modelPlansEnabled()) {
+      json(response, 200, { enabled: false, models: [] })
+      return
+    }
+    requireModelPlans()
+    await requireModelPlanUser(request, fetcher)
+    // Every signed-in account sees the catalog, so choosing a Codium model without credits leads to buying them.
+    // The public /config lists the same models, and each chat request checks the balance itself, so this
+    // frequently polled read never calls Stripe or OpenRouter.
+    json(response, 200, { enabled: true, models: configuredPlanModels() })
+  } catch (error) {
+    handleApiError(response, error)
+  }
+}

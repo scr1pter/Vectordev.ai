@@ -5,6 +5,7 @@ import { useLanguage } from "./language"
 import { showToast } from "@/utils/toast"
 import { takeProviderNotice } from "@/utils/provider-notices"
 import { bestOwnFreeModel } from "@/utils/free-model"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createSimpleContext } from "@vectordevai/ui/context"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { useParams } from "@solidjs/router"
@@ -195,10 +196,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const free = bestOwnFreeModel(connected.flatMap((provider) => Object.values(provider.models)))
       if (free) return { providerID: "openrouter", modelID: free.id }
       if (connected.some((provider) => provider.id === "openrouter")) return
-      const own = connected.filter((provider) =>
-        Object.values(provider.models).some((model) => model.freeModel?.source !== "shared"),
-      )
-      for (const provider of own.length ? own : connected) {
+      // Codium spends the account's credits, so it is never chosen automatically, even as the only provider.
+      for (const provider of ModelPlanStatus.automaticProviders(connected)) {
         const configured = defaults[provider.id]
         if (configured) {
           const model = { providerID: provider.id, modelID: configured }
