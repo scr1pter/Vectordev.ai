@@ -248,6 +248,36 @@ function makeHttpNoLLMServer(input?: { mcpInstructions?: MCP.ServerInstructions[
 }
 
 const it = testEffect(makeHttp())
+const closingSnapshot = { entered: defer<void>(), release: defer<void>(), tracks: 0 }
+const finishingSnapshots = testEffect(
+  LayerNode.compile(LayerNode.group([promptRoot, testLLMServerNode]), [
+    [SessionSummary.node, summary],
+    [LSP.node, lsp],
+    [MCP.node, makeMcp()],
+    [RuntimeFlags.node, runtimeFlags],
+    [
+      Snapshot.node,
+      Layer.succeed(
+        Snapshot.Service,
+        Snapshot.Service.of({
+          init: () => Effect.void,
+          cleanup: () => Effect.void,
+          track: () =>
+            Effect.suspend(() => {
+              if (++closingSnapshot.tracks === 1) return Effect.succeed("opening")
+              closingSnapshot.entered.resolve()
+              return Effect.promise(() => closingSnapshot.release.promise).pipe(Effect.as("closing"))
+            }),
+          patch: () => Effect.succeed({ hash: "opening", files: ["/changed.txt"] }),
+          restore: () => Effect.void,
+          revert: () => Effect.void,
+          diff: () => Effect.succeed(""),
+          diffFull: () => Effect.succeed([]),
+        }),
+      ),
+    ],
+  ]),
+)
 const noLLMServer = testEffect(makeHttpNoLLMServer())
 const raceNoLLMServer = testEffect(makeHttpNoLLMServer({ processor: "blocking" }))
 const freePrompts = testEffect(
@@ -1658,6 +1688,33 @@ it.instance(
 )
 
 // Cancel semantics
+
+finishingSnapshots.instance(
+  "cancel waits for a completed step's closing snapshot and patch",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Pinned" })
+      yield* llm.text("done")
+      const run = yield* prompt
+        .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "hello" }] })
+        .pipe(Effect.forkChild)
+      yield* Effect.promise(() => closingSnapshot.entered.promise)
+      const stopping = yield* prompt.cancel(chat.id).pipe(Effect.forkChild)
+      // Let cancellation reach the run while its closing snapshot is held.
+      yield* Effect.sleep("20 millis")
+      expect(stopping.pollUnsafe()).toBeUndefined()
+      closingSnapshot.release.resolve()
+      yield* Fiber.join(stopping)
+      yield* Fiber.join(run)
+      const parts = (yield* sessions.messages({ sessionID: chat.id })).flatMap((message) => message.parts)
+      expect(parts.find((part) => part.type === "step-finish")).toMatchObject({ snapshot: "closing" })
+      expect(parts.find((part) => part.type === "patch")).toMatchObject({ hash: "opening", files: ["/changed.txt"] })
+    }).pipe(Effect.ensuring(Effect.sync(() => closingSnapshot.release.resolve()))),
+  30_000,
+)
 
 it.instance("cancel interrupts loop and resolves with an assistant message", () =>
   Effect.gen(function* () {

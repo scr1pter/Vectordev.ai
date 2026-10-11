@@ -1206,6 +1206,14 @@ const layer = Layer.effect(
       sessionID: SessionID,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
+      // Stop must wait for snapshots already queued by a completed step, so immediate undo sees all its changes.
+      return yield* runSteps(sessionID, resumed).pipe(Effect.ensuring(processor.settle(sessionID)))
+    })
+
+    const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
+      sessionID: SessionID,
+      resumed?: ResumeFreeModelsInput & { parentID: MessageID },
+    ) {
       const ctx = yield* InstanceState.context
       let structured: unknown
       let step = 0
@@ -1529,7 +1537,7 @@ const layer = Layer.effect(
         continue
       }
 
-      // Steps finish without waiting for their closing snapshots and patches; the run is not done until they land.
+      // Read after queued patches land so a successful response includes the step's final parts too.
       yield* processor.settle(sessionID)
       return yield* lastAssistant(sessionID)
     })
