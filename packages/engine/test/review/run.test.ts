@@ -1146,6 +1146,16 @@ describe("Review.run", () => {
         expect(saved).toHaveLength(3)
         expect(saved.every((spent) => spent.kind === "priced" && spent.model === "lmstudio/test-model")).toBe(true)
         expect(saved.every((spent) => spent.costUsd > 0)).toBe(true)
+        // The review's sessions are helpers: marked, kept with their spend, and out of the session list.
+        const sessions = yield* Session.Service
+        const reviewed = yield* Effect.forEach(outcome.sessions, (id) => sessions.get(SessionID.make(id)))
+        expect(reviewed.map((session) => session.internal)).toEqual([
+          "vectorscope.review",
+          "vectorscope.security",
+          "vectorscope.verify",
+        ])
+        const listed = (yield* sessions.list({ limit: 50 })).map((session) => session.id)
+        expect(outcome.sessions.some((id) => listed.includes(SessionID.make(id)))).toBe(false)
       }),
     TIMEOUT,
   )

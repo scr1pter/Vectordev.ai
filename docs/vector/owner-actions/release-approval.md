@@ -1,5 +1,24 @@
 # Release approval and external prerequisites
 
+## Current candidate: 1.99.107 (11 October 2026)
+
+The owner explicitly requested fixing the remaining CI failures, merging PR #13,
+and releasing the desktop app and CLI with **Models included with Vector**.
+Desktop and CLI version **1.99.107** are prepared together. This release continues
+the established interim unsigned installer and in-app update-feed policy;
+`1.99.107` is added to the existing version-specific unsigned allowlist. Publish it
+through the manual desktop workflow with `allow_unsigned=true` and
+`prerelease=false`, after the matching CLI and plugin packages and standalone CLI
+archives have been published and verified.
+
+This is preparation, not a publication record. Final source CI, npm
+authentication, the pinned catalog, all native release checks, installer
+verification and update-feed verification remain required. Keep the website's
+published desktop version at **1.99.106** until those publication checks succeed.
+The older checkpoints below are retained as historical evidence.
+
+## Historical 1.99.99 release record
+
 **Published, October 4, 2026 UTC.** Desktop and CLI 1.99.99 are published.
 Desktop release run [37179230286](https://github.com/scr1pter/Vectordev.ai/actions/runs/37179230286)
 built `0575c41f370cbc828940e27d6857bf2c27f0e33f` and published GitHub release

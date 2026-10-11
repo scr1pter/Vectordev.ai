@@ -28,7 +28,13 @@ import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteVa
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
-import { reviewCatalog, runReview, workflowModel, workingTreeChanges } from "@/features/pull-requests/ai-review"
+import {
+  reviewCatalog,
+  runReview,
+  trackReviewSpend,
+  workflowModel,
+  workingTreeChanges,
+} from "@/features/pull-requests/ai-review"
 import { setNavigate } from "@/utils/notification-click"
 import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
 import { useProviders } from "@/hooks/use-providers"
@@ -6455,15 +6461,25 @@ export default function NewLayout(props: ParentProps) {
           // rules; another person's code is never opened as an instance.
           const directory = activeWorkspaceScope().sourcePath
           if (!directory) throw new Error("Open a project before running a review.")
+          // The reviewers run as hidden helper sessions. Their spend counts towards the open task when there is one,
+          // and the panel shows it live either way.
+          const parentID = activeWorkspaceScope().parentSessionId
+          const spend = trackReviewSpend((value) => input.onProgress?.({ type: "spend", ...value }))
+          const stop = serverSDK().event.listen((event) => spend.observe(event.details))
           return runReview(
             {
               ...input,
               directory,
+              ...(parentID?.startsWith("ses") ? { parentID } : {}),
+              onProgress: (progress) => {
+                if (progress.type === "session") spend.add(progress.sessionID)
+                input.onProgress?.(progress)
+              },
               catalog: reviewCatalog(byokProviders.connected()),
               preferredModels: reviewModels(),
             },
             serverSDK().createClient({ directory, throwOnError: true }),
-          )
+          ).finally(stop)
         }}
         onChanges={() => {
           const directory = activeWorkspaceScope().sourcePath

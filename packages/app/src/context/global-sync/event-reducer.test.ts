@@ -207,6 +207,39 @@ describe("applyDirectoryEvent", () => {
     expect(store.sessionTotal).toBe(2)
   })
 
+  test("keeps Vector's helper sessions out of the session list and the total", () => {
+    const [store, setStore] = createStore(
+      baseState({
+        session: [{ ...rootSession({ id: "ses_old_tool" }), title: "Autocomplete" }, rootSession({ id: "ses_task" })],
+        sessionTotal: 2,
+      }),
+    )
+    const apply = (type: string, info: Session) =>
+      applyDirectoryEvent({
+        event: { type, properties: { info } },
+        store,
+        setStore,
+        push() {},
+        directory: "/tmp",
+        loadLsp() {},
+      })
+    const helper = { ...rootSession({ id: "ses_review" }), internal: "vectorscope.review" } as Session
+    const standalone = { ...rootSession({ id: "ses_verify" }), internal: "vectorscope.verify" } as Session
+
+    apply("session.created", { ...helper, parentID: "ses_task" })
+    apply("session.created", standalone)
+    apply("session.updated", standalone)
+    expect(store.session.map((x) => x.id)).toEqual(["ses_old_tool", "ses_task"])
+    expect(store.sessionTotal).toBe(2)
+
+    // A helper already listed from before it was marked leaves the list when its marked record arrives.
+    apply("session.updated", { ...rootSession({ id: "ses_old_tool" }), internal: "codespace.autocomplete" } as Session)
+    expect(store.session.map((x) => x.id)).toEqual(["ses_task"])
+
+    apply("session.deleted", standalone)
+    expect(store.sessionTotal).toBe(2)
+  })
+
   test("cleans session caches when archived", () => {
     const message = userMessage("msg_1", "ses_1")
     const [store, setStore] = createStore(

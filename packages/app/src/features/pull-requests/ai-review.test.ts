@@ -20,6 +20,7 @@ import {
   reviewEvents,
   reviewFooter,
   runReview,
+  trackReviewSpend,
   workflowModel,
   workingTreeChanges,
   type ReviewClient,
@@ -230,13 +231,56 @@ describe("chooseCheckout", () => {
   })
 })
 
+describe("trackReviewSpend", () => {
+  test("adds up what the review's own sessions spent so far, counting each message once", () => {
+    const seen: { costUsd: number; tokens: number }[] = []
+    const spend = trackReviewSpend((value) => seen.push(value))
+    const assistant = (id: string, sessionID: string, cost: number, input: number) => ({
+      type: "message.updated",
+      properties: {
+        info: {
+          id,
+          sessionID,
+          role: "assistant",
+          cost,
+          tokens: { input, output: 10, reasoning: 0, cache: { read: 5, write: 0 } },
+        },
+      },
+    })
+    spend.add("ses_review")
+    spend.observe(assistant("msg_1", "ses_review", 0.01, 100))
+    spend.observe(assistant("msg_1", "ses_review", 0.02, 200))
+    spend.observe(assistant("msg_2", "ses_other", 5, 10_000))
+    spend.add("ses_verify")
+    spend.observe(assistant("msg_3", "ses_verify", 0.005, 50))
+    spend.observe({
+      type: "message.updated",
+      properties: { info: { id: "msg_4", sessionID: "ses_verify", role: "user" } },
+    })
+    expect(seen.at(-1)?.costUsd).toBeCloseTo(0.025)
+    expect(seen.at(-1)?.tokens).toBe(215 + 65)
+    expect(seen).toHaveLength(3)
+  })
+})
+
 describe("runReview", () => {
   test("creates the session with the review rules and prompts the review agent with the schema", async () => {
     const { client, calls } = fakeClient({ files: { "src/list.ts": HEAD } })
     const outcome = await run(client)
+    // Helper sessions: out of every session list. Started outside any session, they stand alone.
     expect(calls.create).toEqual([
-      { directory: "/w/project", title: "Vectorscope review · #7 · review", permission: reviewPermissionRules({}) },
-      { directory: "/w/project", title: "Vectorscope review · #7 · verify", permission: reviewPermissionRules({}) },
+      {
+        directory: "/w/project",
+        title: "Vectorscope review · #7 · review",
+        permission: reviewPermissionRules({}),
+        internal: "vectorscope.review",
+      },
+      {
+        directory: "/w/project",
+        title: "Vectorscope review · #7 · verify",
+        permission: reviewPermissionRules({}),
+        internal: "vectorscope.verify",
+      },
     ])
     // The reviewer can only read: nothing that edits, runs commands or starts other agents is allowed back.
     const allowed = calls.create[0]!.permission!.filter((rule) => rule.action === "allow").map(
@@ -268,11 +312,30 @@ describe("runReview", () => {
     expect(outcome?.cost?.costUsd).toBeCloseTo(0.02)
   })
 
+  test("counts a review started from a session towards that session and reports its sessions as they start", async () => {
+    const started: string[] = []
+    const { client, calls } = fakeClient({ files: { "src/list.ts": HEAD } })
+    await run(client, {
+      parentID: "ses_task",
+      onProgress: (event) => {
+        if (event.type === "session") started.push(event.sessionID)
+      },
+    })
+    expect(calls.create.map((call) => [call.internal, call.parentID])).toEqual([
+      ["vectorscope.review", "ses_task"],
+      ["vectorscope.verify", "ses_task"],
+    ])
+    expect(started).toEqual(["ses_1", "ses_2"])
+  })
+
   test("places the rebuilt pull request files in the prompt when the checkout is elsewhere", async () => {
     const progress: string[] = []
     const { client, calls } = fakeClient({ files: { "src/list.ts": BASE }, branch: "main" })
     const outcome = await run(client, {
-      onProgress: (event) => progress.push(event.type === "checkout" ? event.label : event.text),
+      onProgress: (event) => {
+        if (event.type === "checkout") progress.push(event.label)
+        if (event.type === "status") progress.push(event.text)
+      },
     })
     expect(outcome?.checkout.trust).toBe("untrusted")
     const text = calls.prompt[0]!.parts![0]!.text
@@ -584,7 +647,10 @@ describe("runReview", () => {
     const { client, calls } = fakeClient({ files: { "src/list.ts": HEAD } })
     await run(client, {
       preferredModels: [undefined, "openai/gpt-5.5", "anthropic/claude-sonnet-4-5"],
-      onProgress: (event) => progress.push(event.type === "checkout" ? event.label : event.text),
+      onProgress: (event) => {
+        if (event.type === "checkout") progress.push(event.label)
+        if (event.type === "status") progress.push(event.text)
+      },
     })
     expect(calls.prompt.length).toBeGreaterThan(1)
     expect(calls.prompt.map((call) => call.model)).toEqual(

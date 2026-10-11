@@ -40,6 +40,8 @@ export const ListQuery = Schema.Struct({
   scope: Schema.optional(Schema.Literals(["project"])),
   path: Schema.optional(Schema.String),
   roots: Schema.optional(QueryBoolean),
+  // Also list Vector's helper sessions (Vectorscope reviews, autocomplete), which are left out by default.
+  internal: Schema.optional(QueryBoolean),
   start: Schema.optional(Schema.NumberFromString),
   search: Schema.optional(Schema.String),
   limit: Schema.optional(Schema.NumberFromString),

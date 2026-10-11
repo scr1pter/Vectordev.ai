@@ -145,6 +145,8 @@ test("sends the root and subagent sessions updated since UTC midnight, across ev
   expect(app.lists.map((list) => list.query.get("start"))).toEqual(Array(3).fill(String(at(0))))
   expect(app.lists.map((list) => list.query.get("cursor"))).toEqual([null, String(at(12)), String(at(10))])
   expect(app.lists[0].query.get("archived")).toBe("true")
+  // Vector's helper sessions are out of session lists but still part of the day's usage.
+  expect(app.lists.every((list) => list.query.get("internal") === "true")).toBe(true)
   expect(app.lists[0].authorization).toBe(`Basic ${Buffer.from("vector:placeholder-password").toString("base64")}`)
   expect(app.checkins).toHaveLength(1)
   expect(app.checkins[0].authorization).toBe(`Bearer ${TOKEN}`)

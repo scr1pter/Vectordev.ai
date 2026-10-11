@@ -18,6 +18,7 @@ import {
   homeProjectDirectories,
   homeSessionServerStatus,
   latestRootSession,
+  roots,
   toggleHomeProjectSelection,
 } from "./helpers"
 import { pathKey } from "@/utils/path-key"
@@ -233,6 +234,40 @@ describe("layout workspace helpers", () => {
     )
 
     expect(result?.id).toBe("task")
+  })
+
+  test("lists the user's sessions, parallel agents and teams but none of Vector's helpers", () => {
+    const store = {
+      path: { directory: "/workspace" },
+      session: [
+        session({ id: "own", directory: "/workspace", title: "Fix the login flow" }),
+        session({
+          id: "parallel",
+          directory: "/workspace",
+          title: "Agent 2",
+          metadata: { vector: { kind: "parallel-agent", workspaceId: "w1" } },
+        }),
+        // A team member is a parallel agent the team runs.
+        session({
+          id: "team",
+          directory: "/workspace",
+          title: "Payments team · reviewer",
+          metadata: { vector: { kind: "parallel-agent", workspaceId: "w2" } },
+        }),
+        session({ id: "review", directory: "/workspace", title: "#7 review", internal: "vectorscope.review" }),
+        session({
+          id: "autocomplete",
+          directory: "/workspace",
+          title: "Autocomplete",
+          internal: "codespace.autocomplete",
+        }),
+        // Helpers an engine created before it could mark them.
+        session({ id: "legacy-tool", directory: "/workspace", title: "Vector Tool · Inline file edit" }),
+        session({ id: "legacy-review", directory: "/workspace", title: "Vectorscope review · #7 · security" }),
+      ],
+    }
+    expect(roots(store).map((item) => item.id)).toEqual(["own", "parallel", "team"])
+    expect(latestRootSession([store], 120_000)?.id).not.toBe("review")
   })
 
   test("finds the direct child on the active session path", () => {

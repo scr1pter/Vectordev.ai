@@ -272,8 +272,10 @@ export const run: (
       const firstCost = nextCost({ context, cached: 0 })
       if (!reserve(spec.name, firstCost, firstCost))
         return { name: spec.name, status: "stopped", stop: "budget", detail: "budget", steps: 0 } satisfies Asked<T>
+      // A helper session: it stays out of session lists, and the review reports what it spent.
       const session = yield* sessions.create({
         title: `Vectorscope review · ${input.head.slice(0, 7)} · ${spec.name}`,
+        internal: `vectorscope.${spec.name}`,
         permission: rules,
       })
       const track: Track = {

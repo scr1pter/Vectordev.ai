@@ -14,6 +14,7 @@ import { useLanguage } from "@/context/language"
 import { useCommand } from "@/context/command"
 import { useTabs } from "@/context/tabs"
 import { createTabPromptState } from "@/context/prompt"
+import { isInternalSession } from "@/utils/internal-sessions"
 import { base64Encode } from "@vectordevai/core/util/encode"
 import { canStartTabDrag, isTabCloseTarget } from "./titlebar-tab-gesture"
 
@@ -52,6 +53,14 @@ function SessionTabSlot(props: {
   const session = createMemo(() => cachedSession() ?? loadedSession())
   const missingSession = createMemo(() => !!props.serverCtx() && !loadedSession.loading && !session())
   let prefetched = false
+
+  // A tab kept from before Vector's helper sessions were hidden (a Vectorscope review opened from a notification)
+  // closes once its session is known to be a helper.
+  createEffect(() => {
+    const value = session()
+    if (!value || !isInternalSession(value)) return
+    tabs.removeSessions({ server: props.tab.server, directory: value.directory, sessionIDs: [props.tab.sessionId] })
+  })
 
   createEffect(() => {
     const ctx = props.serverCtx()

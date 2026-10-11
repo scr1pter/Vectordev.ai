@@ -1,8 +1,8 @@
-# Free models inside of Vector
+# Models included with Vector
 
 This describes the guarded personal-account setup prepared for the upcoming **1.99.99** release. It is not a feature announcement for the currently downloadable desktop **1.99.8**. The shared Vector service remains disabled.
 
-Connect your own free OpenRouter account, then choose an eligible model under **Free models inside of Vector**. The upcoming personal section works independently of the shared service flag. Its initial selection is limited to explicit `:free` models with online, tool-capable, zero-price endpoints in OpenRouter's zero data retention (ZDR) endpoint list. Discovery matches each model ID and endpoint tag; it does not include every model advertised as free. Names omit the `:free` suffix; routing IDs retain it. A failed catalog check does not authorize an unlisted endpoint or a paid fallback.
+Connect your own free OpenRouter account, then choose an eligible model under **Models included with Vector**. The upcoming personal section works independently of the shared service flag. Its initial selection is limited to explicit `:free` models with online, tool-capable, zero-price endpoints in OpenRouter's zero data retention (ZDR) endpoint list. Discovery matches each model ID and endpoint tag; it does not include every model advertised as free. Names omit the `:free` suffix; routing IDs retain it. A failed catalog check does not authorize an unlisted endpoint or a paid fallback.
 
 The selected setup uses the **Your OpenRouter account** caption. Requests go directly to OpenRouter using your stored key and do not consume a shared Vector allowance. No shared OpenRouter key, KV service, or hosted allowance needs to be activated.
 
@@ -31,8 +31,14 @@ Browser authorization receives its callback on the engine's localhost. With a re
 
 `vector models` keeps canonical `provider/model` selectors on stdout. Its free-model heading, display names, and source captions go to stderr so shell consumers retain the plain selector format.
 
-## Optional future shared allowance
+## Shared allowance for Vector accounts
 
-`FREE_MODELS_ENABLED=false` keeps the shared allowance off without disabling personal OpenRouter access. A shared allowance would require a separate owner decision, service configuration, and review; it is not required for this release's personal setup. Its older policy-catalog refresh still depends on an obsolete metadata endpoint and must be repaired before any future activation. If enabled in a future rollout, its source caption is **Shared Vector allowance**, and a duplicate available through your own account uses your account's copy. Exhausting an allowance must never trigger a paid fallback.
+`FREE_MODELS_ENABLED=false` keeps the shared allowance off without disabling personal OpenRouter access. Once the hosted service is configured and enabled, any signed-in Vector account can use **Shared Vector allowance** without an OpenRouter account or a paid Vector subscription. A duplicate available through your own connected OpenRouter account uses your account's copy.
+
+The shared catalog now uses OpenRouter's supported `/api/v1/endpoints/zdr` feed, checked against live zero prices, tools, account availability and the reviewed provider list. The retired policy-metadata endpoint is no longer used. Shared requests enforce ZDR, no-training routing and zero-price limits; exhaustion never triggers a paid fallback. The cache uses a new version so a legacy catalog cannot bypass the new checks.
+
+For hosted activation, set the existing Vector account/token and persistent Redis configuration, `OPENROUTER_FREE_API_KEY`, `CRON_SECRET`, and `FREE_MODELS_ENABLED=true` on the server. The older server `OPENROUTER_API_KEY` name remains a fallback. Run the authenticated `/api/free-models/refresh` job before exposing access; the existing daily cron refreshes the catalog. Missing, expired or malformed catalogs fail closed. Set `FREE_MODELS_DAILY_PER_USER` and `FREE_MODELS_MINUTE_PER_USER` for the intended shared capacity. These limits do not increase OpenRouter's account-wide quota. API keys are kept server-side and all users share the upstream account's capacity.
+
+Activation still requires the owner's provider authentication, capacity and applicable commercial/provider permissions. A source change does not turn on the deployed service. Managed paid plans have separate keys, entitlements and allowances; see [model subscriptions](MODEL-PLANS.md).
 
 Prompts pass through OpenRouter and the selected downstream provider. The ZDR restriction applies to downstream routing for these guarded requests. It does not promise that Vector's local conversation history, OpenRouter account logging, or other connected services retain no data. Review those settings and policies before sending confidential code. Legal page changes remain separately subject to owner review.

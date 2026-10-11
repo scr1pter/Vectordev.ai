@@ -196,6 +196,43 @@ describe("internal notifications TUI plugin", () => {
     ])
   })
 
+  test("stays silent for Vector's helper sessions while still notifying for the user's own", async () => {
+    const harness = await setup()
+    const helper: Session = {
+      id: "review",
+      title: "Vectorscope review · #7 · review",
+      slug: "review",
+      projectID: "project",
+      directory: "/workspace",
+      internal: "vectorscope.review",
+      version: "0.0.0-test",
+      time: { created: 0, updated: 0 },
+    }
+
+    harness.emit({ id: "event-1", type: "session.created", properties: { sessionID: "review", info: helper } })
+    harness.emit({ id: "event-2", type: "permission.asked", properties: permission("permission-1", "review") })
+    harness.emit({ id: "event-3", type: "question.asked", properties: question("question-1", "review") })
+    harness.emit({
+      id: "event-4",
+      type: "session.status",
+      properties: { sessionID: "review", status: { type: "busy" } },
+    })
+    harness.emit({
+      id: "event-5",
+      type: "session.error",
+      properties: { sessionID: "review", error: { name: "UnknownError", data: { message: "boom" } } },
+    })
+    harness.emit({
+      id: "event-6",
+      type: "session.status",
+      properties: { sessionID: "review", status: { type: "idle" } },
+    })
+    expect(harness.notifications).toEqual([])
+
+    harness.emit({ id: "event-7", type: "question.asked", properties: question("question-2") })
+    expect(harness.notifications).toEqual([questionNotification])
+  })
+
   test("notifies session errors once and suppresses the following idle done notification", async () => {
     const harness = await setup()
 

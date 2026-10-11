@@ -86,6 +86,7 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
       const all = yield* sessions.listGlobal({
         directory,
         roots: ctx.query.roots,
+        internal: ctx.query.internal,
         start: ctx.query.start,
         cursor: ctx.query.cursor,
         search: ctx.query.search,

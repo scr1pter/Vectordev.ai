@@ -188,6 +188,8 @@ async function countSessions(
   url.search = new URLSearchParams({
     start: String(start),
     archived: "true",
+    // Vector's helper sessions are out of session lists but still part of the day's usage.
+    internal: "true",
     limit: "500",
     ...(cursor ? { cursor } : {}),
   }).toString()

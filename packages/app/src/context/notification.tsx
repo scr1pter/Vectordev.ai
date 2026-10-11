@@ -336,9 +336,8 @@ function createServerNotificationState(input: {
     void lookup(directory, sessionID).then((session) => {
       if (meta.disposed) return
       if (!session) return
-      if (session.parentID) return
-      // Vector's own tool and review sessions report through their own panels; a notification would open them.
-      if (isInternalSession(session)) return
+      // A subagent reports to its parent, and Vector's helpers to the surface that launched them.
+      if (session.parentID || isInternalSession(session)) return
 
       if (settings.sounds.agentEnabled()) {
         void playSoundById(settings.sounds.agent())

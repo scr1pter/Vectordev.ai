@@ -60,6 +60,27 @@ describe("SessionV2.create", () => {
     }),
   )
 
+  it.effect("creates a helper session under the session that launched it and leaves it out of the list", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const task = yield* session.create({ location })
+      const planner = yield* session.create({
+        location,
+        title: "Swarm planner · Split the billing module",
+        parentID: task.id,
+        internal: "swarm.planner",
+      })
+
+      expect(planner).toMatchObject({
+        title: "Swarm planner · Split the billing module",
+        parentID: task.id,
+        internal: "swarm.planner",
+      })
+      expect((yield* session.list()).map((item) => item.id)).toEqual([task.id])
+      expect((yield* session.get(planner.id)).internal).toBe("swarm.planner")
+    }),
+  )
+
   it.effect("returns the original session when the ID is retried", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service

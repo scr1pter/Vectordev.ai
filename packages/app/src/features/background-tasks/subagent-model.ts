@@ -1,6 +1,7 @@
 import type { Message, Part, Session, SessionStatus, ToolPart } from "@vectordevai/sdk/v2"
 import { GENERAL_SUBAGENT_ID, subagentIdentity } from "@vectordevai/session-ui/subagent-identity"
 import { taskBatchEntries, taskItemState } from "@vectordevai/ui/task-batch"
+import { isInternalSession } from "@/utils/internal-sessions"
 
 /*
  * Pure derivation behind the Background tasks panel and the inline task chips.
@@ -772,7 +773,11 @@ function extendsRun(source: TaskSource, owner: TaskAgent, agent: TaskAgent, part
  * finished ones follow, most recently finished first.
  */
 export function buildTaskCards(source: TaskSource): TaskCard[] {
-  const children = (source.children ?? []).filter((session) => session.parentID === source.rootID)
+  // Vector's helper sessions (a Vectorscope review, autocomplete) are children of the task too, but not its subagents;
+  // their spend shows in the session's cost instead.
+  const children = (source.children ?? []).filter(
+    (session) => session.parentID === source.rootID && !isInternalSession(session),
+  )
   const byCall = new Map<string, Session>()
   for (const session of children) {
     const record = childRecord(session)

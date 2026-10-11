@@ -130,7 +130,6 @@ import {
   type EngineeringEventType,
   type EngineeringTimelineEvent,
 } from "@/utils/engineering-timeline"
-import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 import { showToast } from "@/utils/toast"
 import { resolveBrowserAddress, selectUnambiguousPreviewUrl } from "@/utils/browser-address"
 import { boundInlineCompletionContext, sanitizeInlineCompletion } from "@/utils/codespace-ai"
@@ -2041,50 +2040,43 @@ export function CodespaceWorkbench(props: {
       throw new Error("Select a model in Vector before using Codespace AI.")
     }
 
+    // A helper session (see utils/internal-sessions.ts): out of every session list, kept so what it spent stays in
+    // usage, and counted towards the open session's cost.
+    const parentID = editorSessionID()
     const session = await sdk().client.session.create({
       directory: sdk().directory,
-      // Internal tool session: the shared prefix keeps it out of every
-      // user-visible session list (see utils/internal-sessions.ts).
-      title: `${INTERNAL_SESSION_TITLE_PREFIX}${input.title}`,
+      title: input.title,
+      internal: "codespace.edit",
+      ...(parentID ? { parentID } : {}),
       agent: activeAgentName(),
       model: {
         providerID: model.providerID,
         id: model.modelID,
         variant: activeVariant(),
       },
-      metadata: {
-        source: "vector-codespace",
-        engine: "vector-compatible",
-        hidden: true,
-      },
+      metadata: { source: "vector-codespace", engine: "vector-compatible" },
     })
     const sessionID = session.data?.id
     if (!sessionID) throw new Error("Vector could not create a Codespace AI session.")
-    const result = await sdk()
-      .client.session.prompt({
-        sessionID,
-        directory: sdk().directory,
-        agent: activeAgentName(),
-        model,
-        variant: activeVariant(),
-        executionMode: "normal",
-        system: input.system,
-        tools: {
-          shell: false,
-          edit: false,
-          patch: false,
-          write: false,
-          read: false,
-          glob: false,
-          grep: false,
-        },
-        parts: [{ type: "text", text: input.prompt }],
-      })
-      .finally(() => {
-        void sdk()
-          .client.session.delete({ sessionID })
-          .catch(() => undefined)
-      })
+    const result = await sdk().client.session.prompt({
+      sessionID,
+      directory: sdk().directory,
+      agent: activeAgentName(),
+      model,
+      variant: activeVariant(),
+      executionMode: "normal",
+      system: input.system,
+      tools: {
+        shell: false,
+        edit: false,
+        patch: false,
+        write: false,
+        read: false,
+        glob: false,
+        grep: false,
+      },
+      parts: [{ type: "text", text: input.prompt }],
+    })
     const text = extractModelTextRaw(result.data)
     if (!text) throw new Error("The selected model returned an empty response.")
     return text
@@ -2447,11 +2439,12 @@ export function CodespaceWorkbench(props: {
     return match ? match[1] : normalized
   }
 
-  // Cursor-style ghost-text autocomplete. Completions reuse ONE hidden session
+  // Cursor-style ghost-text autocomplete. Completions reuse ONE helper session
   // (recycled every few requests / on model change) instead of creating a fresh
-  // session per keystroke — that would add a round-trip, leak a session each time,
-  // and inflate the local usage stats. Recycling also bounds the history the model
-  // sees so suggestions stay relevant to the current cursor context.
+  // session per keystroke, which would add a round-trip each time. Recycling
+  // bounds the history the model sees so suggestions stay relevant to the
+  // current cursor context. A recycled session is kept, not deleted: what its
+  // completions spent stays in the open session's cost and in usage.
   let completionSessionId: string | undefined
   let completionSessionKey = ""
   let completionTurns = 0
@@ -2459,18 +2452,14 @@ export function CodespaceWorkbench(props: {
   const AUTOCOMPLETE_SESSION_TURNS = 6
 
   const recycleCompletionSession = () => {
-    const stale = completionSessionId
     completionSessionId = undefined
     completionTurns = 0
-    if (stale)
-      void sdk()
-        .client.session.delete({ sessionID: stale })
-        .catch(() => undefined)
   }
   onCleanup(recycleCompletionSession)
 
   const completionSessionFor = async (model: { providerID: string; modelID: string }) => {
-    const key = `${sdk().directory}:${model.providerID}:${model.modelID}`
+    const parentID = editorSessionID()
+    const key = `${sdk().directory}:${parentID ?? ""}:${model.providerID}:${model.modelID}`
     if (completionSessionId && completionSessionKey === key && completionTurns < AUTOCOMPLETE_SESSION_TURNS) {
       return completionSessionId
     }
@@ -2479,10 +2468,12 @@ export function CodespaceWorkbench(props: {
     const created = await sdk()
       .client.session.create({
         directory: sdk().directory,
-        title: `${INTERNAL_SESSION_TITLE_PREFIX}Autocomplete`,
+        title: "Autocomplete",
+        internal: "codespace.autocomplete",
+        ...(parentID ? { parentID } : {}),
         agent: "autocomplete",
         model: { providerID: model.providerID, id: model.modelID },
-        metadata: { source: "vector-codespace", engine: "vector-compatible", hidden: true },
+        metadata: { source: "vector-codespace", engine: "vector-compatible" },
       })
       .catch(() => undefined)
     completionSessionId = created?.data?.id

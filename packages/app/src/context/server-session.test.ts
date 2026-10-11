@@ -104,6 +104,25 @@ function setup(sessions: Record<string, Session>) {
 }
 
 describe("server session", () => {
+  test("re-reads every held session above a helper or subagent when its spend settles", async () => {
+    const ctx = setup({})
+    ctx.store.remember(session("root"))
+    ctx.store.remember(session("child", "root"))
+    ctx.store.remember({ ...session("review", "child"), internal: "vectorscope.review" })
+    const step = { id: "part", sessionID: "review", messageID: "message", type: "step-finish", cost: 0.1 }
+    ctx.store.apply({ type: "message.part.updated", properties: { part: step } })
+    ctx.store.apply({ type: "message.part.updated", properties: { part: { ...step, id: "part-2" } } })
+    // A text part is not spend, and a session with no parent has nothing above it to refresh.
+    ctx.store.apply({ type: "message.part.updated", properties: { part: { ...step, type: "text" } } })
+    ctx.store.apply({ type: "session.next.step.ended", properties: { sessionID: "root" } })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    // One read per ancestor for the burst of steps.
+    expect(ctx.get.toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))).toEqual([
+      { sessionID: "child" },
+      { sessionID: "root" },
+    ])
+  })
+
   test("resolves lineage by session ID without directory", async () => {
     const ctx = setup({ child: session("child", "root"), root: session("root") })
 

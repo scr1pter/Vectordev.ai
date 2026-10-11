@@ -15,7 +15,7 @@ import { SessionMessage } from "../session/message"
 import { SessionEvent } from "../session/event"
 import { SessionProjector } from "../session/projector"
 import { SessionTable, SessionMessageTable, MessageTable, PartTable } from "../session/sql"
-import { fromRow } from "../session/info"
+import { fromRow, subagentTokens } from "../session/info"
 import { Location } from "../location"
 import { ProjectV2 } from "../project"
 import { ProjectTable } from "../project/sql"
@@ -245,6 +245,7 @@ const layer = Layer.effect(
             directory: row.directory,
             path: row.path ?? undefined,
             parentID: row.parent_id ?? undefined,
+            internal: row.internal ?? undefined,
             title: row.title,
             agent: row.agent ?? undefined,
             model: row.model ?? undefined,
@@ -253,6 +254,7 @@ const layer = Layer.effect(
             unpricedSteps: row.unpriced_steps || undefined,
             subagentCost: row.subagent_cost || undefined,
             subagentUnpricedSteps: row.subagent_unpriced_steps || undefined,
+            subagentTokens: subagentTokens(row),
             tokens: {
               input: row.tokens_input,
               output: row.tokens_output,

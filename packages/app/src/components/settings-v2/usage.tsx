@@ -5,7 +5,7 @@ import { useServerSDK } from "@/context/server-sdk"
 import { useLanguage } from "@/context/language"
 import { formatSessionCost } from "@/utils/session-cost"
 import { formatServerError } from "@/utils/server-errors"
-import { normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
+import { helperUsage, normalizeUsageSummary, usageStreakCalendar } from "@/utils/usage-summary"
 import "./settings-v2.css"
 
 type UsageView = "daily" | "weekly" | "cumulative"
@@ -18,6 +18,8 @@ type CalendarDay = {
 }
 const number = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
 const money = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 })
+// Helpers such as autocomplete often cost less than a cent, which two decimals would show as free.
+const smallMoney = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 })
 
 const modelLabel = (modelID: string) =>
   modelID
@@ -347,6 +349,43 @@ export const SettingsUsageV2: Component = () => {
                   </Show>
                 </div>
               </div>
+
+              <Show when={helperUsage(usage.helpers).length > 0}>
+                <div class="settings-usage-card settings-usage-ranking" data-component="settings-usage-helpers">
+                  <div class="settings-usage-card-header">
+                    <div>
+                      <h3>Vector helpers</h3>
+                      <p>
+                        Work Vector ran under the hood, already counted in the totals above. A helper started from a
+                        session also counts in that session's cost.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="settings-usage-ranking-list">
+                    <For each={helperUsage(usage.helpers)}>
+                      {(helper) => (
+                        <div class="settings-usage-ranking-row settings-usage-ranking-row--effort">
+                          <span class="settings-usage-effort-dot" />
+                          <div class="settings-usage-ranking-copy">
+                            <div>
+                              <strong>{helper.label}</strong>
+                              <span>
+                                {helper.sessions} run{helper.sessions === 1 ? "" : "s"} · {number.format(helper.tokens)}{" "}
+                                tokens
+                              </span>
+                            </div>
+                          </div>
+                          <div class="settings-usage-ranking-value">
+                            <strong>
+                              {(helper.cost > 0 && helper.cost < 0.01 ? smallMoney : money).format(helper.cost)}
+                            </strong>
+                          </div>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </div>
+              </Show>
 
               <div class="settings-usage-card">
                 <div class="settings-usage-card-header">
