@@ -59,9 +59,69 @@ const keep = new Set([
   "vector-space-backdrop.png",
 ])
 
-for (const entry of await readdir(dist)) {
-  if (keep.has(entry)) continue
-  await rm(path.join(dist, entry), { recursive: true, force: true })
+const publicExtensions = new Set([
+  ".aac",
+  ".avif",
+  ".css",
+  ".gif",
+  ".html",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".js",
+  ".json",
+  ".mjs",
+  ".mp3",
+  ".ogg",
+  ".otf",
+  ".pdf",
+  ".png",
+  ".svg",
+  ".ttf",
+  ".txt",
+  ".wasm",
+  ".wav",
+  ".webmanifest",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".xml",
+])
+
+export async function pruneVectorSite(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name)
+    if (!keep.has(entry.name) || entry.isSymbolicLink()) {
+      await rm(target, { recursive: true, force: true })
+      continue
+    }
+    if (entry.isDirectory()) await prunePublicDirectory(target)
+  }
+
+  await copyFile(path.join(directory, "index.html"), path.join(directory, "404.html"))
 }
 
-await copyFile(path.join(dist, "index.html"), path.join(dist, "404.html"))
+async function prunePublicDirectory(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name)
+    if (entry.isSymbolicLink() || entry.name.startsWith(".")) {
+      await rm(target, { recursive: true, force: true })
+      continue
+    }
+    if (entry.isDirectory()) {
+      await prunePublicDirectory(target)
+      continue
+    }
+    if (
+      !entry.isFile() ||
+      entry.name.endsWith(".map") ||
+      !publicExtensions.has(path.extname(entry.name).toLowerCase())
+    ) {
+      await rm(target, { recursive: true, force: true })
+    }
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await pruneVectorSite(dist)
+}

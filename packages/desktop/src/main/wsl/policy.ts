@@ -17,17 +17,28 @@ export function clearWslDistroState(
 }
 
 export function wslTerminalArgs(distro?: string | null) {
-  return ["/c", "start", "", "wsl", ...(distro ? ["-d", distro] : [])]
+  return distro ? ["-d", distro] : []
 }
 
-export function requireWslIpcString(name: string, value: unknown) {
-  if (typeof value === "string" && value.length > 0) return value
-  throw new Error(`Invalid ${name}`)
+const WSL_DISTRO = /^[A-Za-z0-9](?:[A-Za-z0-9._ -]{0,62}[A-Za-z0-9._-])?$/
+
+export function isWslDistroName(value: unknown): value is string {
+  return typeof value === "string" && WSL_DISTRO.test(value)
 }
 
-export function requireWslIpcStrings(name: string, value: unknown) {
-  if (!Array.isArray(value)) throw new Error(`Invalid ${name}`)
-  const values = value.map((item) => requireWslIpcString(name, item))
+export function requireWslDistro(value: unknown, allowed: readonly string[]) {
+  if (isWslDistroName(value) && allowed.includes(value)) return value
+  throw new Error("Invalid or unavailable WSL distro")
+}
+
+export function requireWslDistros(value: unknown, allowed: readonly string[]) {
+  if (!Array.isArray(value)) throw new Error("Invalid WSL distro")
+  const values = value.map((item) => requireWslDistro(item, allowed))
   if (values.length > 0) return values
-  throw new Error(`Invalid ${name}`)
+  throw new Error("Invalid WSL distro")
+}
+
+export function requireWslServerId(value: unknown, allowed: readonly string[]) {
+  if (typeof value === "string" && allowed.includes(value)) return value
+  throw new Error("Invalid or unavailable WSL server")
 }

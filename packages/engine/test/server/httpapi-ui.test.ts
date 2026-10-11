@@ -276,7 +276,7 @@ describe("HttpApi UI fallback", () => {
     }),
   )
 
-  it.live("accepts auth token for the web UI", () =>
+  it.live("rejects auth tokens in the web UI query string", () =>
     Effect.gen(function* () {
       const response = yield* uiApp({
         password: "secret",
@@ -285,8 +285,8 @@ describe("HttpApi UI fallback", () => {
         client: httpClient(new Response("<html>vector</html>", { headers: { "content-type": "text/html" } })),
       }).request(`/?auth_token=${btoa("vector:secret")}`)
 
-      expect(response.status).toBe(404)
-      expect(yield* responseText(response)).toContain("Not Found")
+      expect(response.status).toBe(401)
+      expect(response.headers.get("www-authenticate")).toBe('Basic realm="Secure Area"')
     }),
   )
 

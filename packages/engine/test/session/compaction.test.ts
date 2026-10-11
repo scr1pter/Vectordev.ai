@@ -543,6 +543,7 @@ describe("session.compaction.isOverflow", () => {
           expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
         }),
       {
+        trusted: true,
         config: {
           compaction: { auto: false },
         },
@@ -560,7 +561,7 @@ describe("session.compaction.isOverflow", () => {
           const tokens = { input: 110_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
           expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
         }),
-      { config: { compaction: { reserved: 100_000 } } },
+      { trusted: true, config: { compaction: { reserved: 100_000 } } },
     ),
   )
 
@@ -647,7 +648,7 @@ describe("session.compaction.isOverflow", () => {
             false,
           )
         }),
-      { config: { compaction: { max_context: 10_000 } } },
+      { trusted: true, config: { compaction: { max_context: 10_000 } } },
     ),
   )
 
@@ -661,7 +662,7 @@ describe("session.compaction.isOverflow", () => {
           const model = createModel({ context: 1_000_000, output: 32_000 })
           expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
         }),
-      { config: { compaction: { max_context: 0 } } },
+      { trusted: true, config: { compaction: { max_context: 0 } } },
     ),
   )
 
@@ -675,7 +676,7 @@ describe("session.compaction.isOverflow", () => {
           const model = createModel({ context: 200_000, output: 32_000 })
           expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
         }),
-      { config: { compaction: { max_context: 100_000 } } },
+      { trusted: true, config: { compaction: { max_context: 100_000 } } },
     ),
   )
 })
@@ -873,7 +874,7 @@ describe("session.compaction.prune", () => {
           const cleared = prunedAfter(dir, 0, (compact, sessionID) => compact.clear({ sessionID, tokens: long }))
           expect(yield* cleared).toBeNumber()
         }),
-      { config: { compaction: { clear: true } } },
+      { trusted: true, config: { compaction: { clear: true } } },
     ),
   )
 
@@ -928,7 +929,7 @@ describe("session.compaction.prune", () => {
 
           expect(yield* compact.clear({ sessionID: info.id, tokens: long })).toBe(false)
         }),
-      { config: { compaction: { clear: true } } },
+      { trusted: true, config: { compaction: { clear: true } } },
     ),
   )
 
@@ -949,7 +950,7 @@ describe("session.compaction.prune", () => {
         Effect.gen(function* () {
           expect(yield* prunedAfter(dir, 2 * 60 * 60_000)).toBeUndefined()
         }),
-      { config: { compaction: { prune: false } } },
+      { trusted: true, config: { compaction: { prune: false } } },
     ),
   )
 

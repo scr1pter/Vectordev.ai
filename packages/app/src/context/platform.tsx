@@ -2,7 +2,7 @@ import { createSimpleContext } from "@vectordevai/ui/context"
 import type { AsyncStorage, SyncStorage } from "@solid-primitives/storage"
 import type { Accessor } from "solid-js"
 import type { DesktopMenuAction } from "../desktop-menu"
-import { ServerConnection } from "./server"
+import type { ServerConnection } from "./server"
 import type { WslServersPlatform } from "../wsl/types"
 import type { UpdaterPlatform } from "../updater"
 import type { VectorAccountPlatform } from "../vector-account"
@@ -73,6 +73,13 @@ type PlatformBase = {
 
   /** Desktop account status and sign-in; credentials stay in the main process. */
   vectorAccount?: VectorAccountPlatform
+
+  /** Saved remote-server passwords in the OS keychain (desktop only); set resolves false when none is available. */
+  serverCredentials?: {
+    get: (url: string) => Promise<{ username?: string; password: string } | null>
+    set: (url: string, credential: { username?: string; password: string }) => Promise<boolean>
+    delete: (url: string) => Promise<void>
+  }
 
   /** Fetch override */
   fetch?: typeof fetch

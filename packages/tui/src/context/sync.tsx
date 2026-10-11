@@ -31,6 +31,7 @@ import { batch, onMount } from "solid-js"
 import path from "path"
 import { useKV } from "./kv"
 import { usePermission } from "./permission"
+import { canAutoApprovePermission } from "../util/permission"
 
 function search<T>(items: T[], target: string, key: (item: T) => string) {
   let left = 0
@@ -181,7 +182,7 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto") {
+          if (permission.mode === "auto" && canAutoApprovePermission(request.permission)) {
             void sdk.client.permission.reply({
               requestID: request.id,
               reply: "once",

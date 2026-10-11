@@ -1,4 +1,5 @@
 import { describe, expect, spyOn } from "bun:test"
+import fs from "node:fs/promises"
 import path from "path"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Deferred, Effect, Layer } from "effect"
@@ -47,7 +48,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   it.instance("does not spawn builtin LSP for files inside instance when LSP is unset", () =>
@@ -90,7 +91,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   it.instance(
@@ -113,14 +114,46 @@ describe("lsp.spawn", () => {
         yield* awaitWithTimeout(Deferred.await(updated), "lsp.updated event was not published")
       }),
     {
+      trusted: true,
       config: {
         lsp: {
           fake: {
-            command: [process.execPath, fakeServerPath],
+            command: ["bun", fakeServerPath],
             extensions: [".repro"],
           },
         },
       },
+    },
+  )
+
+  it.instance(
+    "runs a trusted custom LSP from its materialized working directory",
+    () =>
+      LSP.Service.use((lsp) =>
+        Effect.gen(function* () {
+          const dir = (yield* TestInstance).directory
+          const file = path.join(dir, "sample.cwd")
+          yield* Effect.promise(() => Bun.write(file, "sample\n"))
+
+          const results = yield* lsp.hover({ file, line: 0, character: 0 })
+          const cwd = (results[0] as { contents?: string } | undefined)?.contents
+          expect(cwd).toBeDefined()
+          expect(cwd).not.toBe(path.join(dir, "tools"))
+          expect(path.basename(cwd!)).toBe("tools")
+        }),
+      ),
+    {
+      trusted: true,
+      config: {
+        lsp: {
+          cwd: {
+            command: ["bun", fakeServerPath],
+            cwd: "tools",
+            extensions: [".cwd"],
+          },
+        },
+      },
+      init: (directory) => Effect.promise(() => fs.mkdir(path.join(directory, "tools"))),
     },
   )
 
@@ -145,6 +178,7 @@ describe("lsp.spawn", () => {
         }),
       ),
     {
+      trusted: true,
       config: {
         lsp: {
           eslint: { disabled: true },
@@ -176,7 +210,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   experimentalTyIt.instance(
@@ -202,7 +236,7 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   disabledDownloadIt.instance(
@@ -226,6 +260,6 @@ describe("lsp.spawn", () => {
           }
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 })

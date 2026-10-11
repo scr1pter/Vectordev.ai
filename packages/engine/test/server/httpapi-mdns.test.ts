@@ -29,6 +29,7 @@ const original = {
   VECTOR_SERVER_PASSWORD: Flag.VECTOR_SERVER_PASSWORD,
   VECTOR_SERVER_USERNAME: Flag.VECTOR_SERVER_USERNAME,
   envPassword: process.env.VECTOR_SERVER_PASSWORD,
+  envGuestPassword: process.env.VECTOR_SERVER_GUEST_PASSWORD,
   envUsername: process.env.VECTOR_SERVER_USERNAME,
 }
 
@@ -43,6 +44,7 @@ afterEach(async () => {
   Flag.VECTOR_SERVER_USERNAME = original.VECTOR_SERVER_USERNAME
   for (const [key, value] of [
     ["VECTOR_SERVER_PASSWORD", original.envPassword],
+    ["VECTOR_SERVER_GUEST_PASSWORD", original.envGuestPassword],
     ["VECTOR_SERVER_USERNAME", original.envUsername],
   ] as const) {
     if (value === undefined) delete process.env[key]
@@ -51,6 +53,14 @@ afterEach(async () => {
   await disposeAllInstances()
   await resetDatabase()
 })
+
+function disableAuth() {
+  Flag.VECTOR_SERVER_PASSWORD = undefined
+  Flag.VECTOR_SERVER_USERNAME = undefined
+  delete process.env.VECTOR_SERVER_PASSWORD
+  delete process.env.VECTOR_SERVER_GUEST_PASSWORD
+  delete process.env.VECTOR_SERVER_USERNAME
+}
 
 describe("HttpApi Server.listen mDNS", () => {
   test("skips publish for loopback hostnames", async () => {
@@ -66,9 +76,8 @@ describe("HttpApi Server.listen mDNS", () => {
   })
 
   test("publishes for non-loopback hostnames and unpublishes on stop", async () => {
-    Flag.VECTOR_SERVER_PASSWORD = "mdns-secret"
-    Flag.VECTOR_SERVER_USERNAME = "vector"
-    const listener = await Server.listen({ hostname: "0.0.0.0", port: 0, mdns: true })
+    disableAuth()
+    const listener = await Server.listen({ hostname: "0.0.0.0", port: 0, mdns: true, unsecured: true })
     try {
       const published = events.filter((e) => e.kind === "publish")
       expect(published.length).toBe(1)
@@ -82,9 +91,8 @@ describe("HttpApi Server.listen mDNS", () => {
   })
 
   test("scope finalizer unpublishes even if stop() is not called for force-close", async () => {
-    Flag.VECTOR_SERVER_PASSWORD = "mdns-secret"
-    Flag.VECTOR_SERVER_USERNAME = "vector"
-    const listener = await Server.listen({ hostname: "0.0.0.0", port: 0, mdns: true })
+    disableAuth()
+    const listener = await Server.listen({ hostname: "0.0.0.0", port: 0, mdns: true, unsecured: true })
     expect(events.filter((e) => e.kind === "publish").length).toBe(1)
     // Plain (graceful) stop without close=true should still unpublish.
     await withTimeout(listener.stop(), 10_000, "timed out stopping graceful mdns listener")

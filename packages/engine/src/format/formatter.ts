@@ -10,6 +10,7 @@ export interface Context extends Pick<InstanceContext, "directory" | "worktree">
 
 export interface Info {
   name: string
+  cwd?: string
   environment?: Record<string, string>
   extensions: string[]
   enabled(context: Context): Promise<string[] | false>

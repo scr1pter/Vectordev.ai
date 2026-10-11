@@ -98,7 +98,7 @@ export type EditorMention = Schema.Schema.Type<typeof EditorMentionSchema>
 export type EditorLabelState = "pending" | "sent" | "none"
 type EditorServerInfo = Schema.Schema.Type<typeof EditorServerInfoSchema>
 
-type EditorConnection = {
+export type EditorConnection = {
   url: string
   authToken?: string
   source: string
@@ -116,6 +116,7 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
     const editor = props.integration ?? editorIntegration
     const value = process.env.CLAUDE_CODE_SSE_PORT || process.env.VECTOR_EDITOR_SSE_PORT
     const parsedPort = value ? Number.parseInt(value, 10) : undefined
+    const environmentAuthToken = process.env.CLAUDE_CODE_IDE_AUTH_TOKEN || process.env.VECTOR_EDITOR_AUTH_TOKEN
     const port =
       parsedPort && Number.isInteger(parsedPort) && parsedPort > 0 && parsedPort <= 65535 ? parsedPort : undefined
     const zedTerminal = process.env.ZED_TERM === "true" || process.env.TERM_PROGRAM?.toLowerCase() === "zed"
@@ -173,7 +174,7 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
     const connect = () => {
       if (closed) return
 
-      const connection = resolveEditorConnection(directory, port, editor.connection)
+      const connection = resolveEditorConnection(directory, port, environmentAuthToken, editor.connection)
       if (!connection) {
         if (!zedTerminal) {
           setStore("status", "disabled")
@@ -320,7 +321,10 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
 
     return {
       enabled() {
-        return Boolean(resolveEditorConnection(directory, port, editor.connection) || (zedTerminal && editor.selection))
+        return Boolean(
+          resolveEditorConnection(directory, port, environmentAuthToken, editor.connection) ||
+            (zedTerminal && editor.selection),
+        )
       },
       connected() {
         return store.status === "connected"
@@ -358,14 +362,16 @@ export const { use: useEditorContext, provider: EditorContextProvider } = create
   },
 })
 
-function resolveEditorConnection(
+export function resolveEditorConnection(
   directory: string,
   port: number | undefined,
+  authToken: string | undefined,
   discover: ((directory: string) => EditorConnection | undefined) | undefined,
 ): EditorConnection | undefined {
-  if (port) {
+  if (port && authToken?.trim()) {
     return {
       url: `ws://127.0.0.1:${port}`,
+      authToken: authToken.trim(),
       source: `env:${port}`,
     }
   }

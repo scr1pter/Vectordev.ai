@@ -75,4 +75,21 @@ describe("Reference", () => {
       ])
     }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
   )
+
+  it.effect("keeps the intranet and SSH references the user configured", () =>
+    Effect.gen(function* () {
+      const references = yield* Reference.Service
+      const configured = {
+        intranet: "https://git.corp.internal/owner/repo.git",
+        lan: "http://192.168.1.20/owner/repo.git",
+        ssh: "ssh://git@github.com/owner/private.git",
+        scp: "git@github.com:owner/other.git",
+      }
+      for (const [name, repository] of Object.entries(configured)) {
+        yield* references.transform((editor) => editor.add(name, Reference.GitSource.make({ type: "git", repository })))
+      }
+
+      expect((yield* references.list()).map((item) => item.name).toSorted()).toEqual(Object.keys(configured).toSorted())
+    }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
+  )
 })

@@ -43,17 +43,6 @@ export const WebFetchTool = Tool.define(
             throw new Error("URL must start with http:// or https://")
           }
 
-          yield* ctx.ask({
-            permission: "webfetch",
-            patterns: [params.url],
-            always: ["*"],
-            metadata: {
-              url: params.url,
-              format: params.format,
-              timeout: params.timeout,
-            },
-          })
-
           const timeout = Math.min((params.timeout ?? DEFAULT_TIMEOUT / 1000) * 1000, MAX_TIMEOUT)
 
           // Build Accept header based on requested format with q parameters for fallbacks
@@ -81,7 +70,28 @@ export const WebFetchTool = Tool.define(
           const request = HttpClientRequest.get(params.url).pipe(HttpClientRequest.setHeaders(headers))
 
           const { response, body } = yield* Effect.gen(function* () {
-            const response = yield* WebFetchRequest.execute(http, request)
+            const response = yield* WebFetchRequest.execute(http, request, {
+              authorize: (url) =>
+                ctx.ask({
+                  permission: "webfetch",
+                  patterns: [url],
+                  always: ["*"],
+                  metadata: {
+                    url,
+                    format: params.format,
+                    timeout: params.timeout,
+                  },
+                }),
+              // A dev server, an intranet page or a cloud metadata address is reached only with its own approval,
+              // since a model reading a hostile page could otherwise be steered into the user's network.
+              authorizePrivate: (url) =>
+                ctx.ask({
+                  permission: "private_network",
+                  patterns: [new URL(url).origin],
+                  always: [new URL(url).origin],
+                  metadata: { url },
+                }),
+            })
             const body = yield* collectBoundedResponseBody(
               response,
               MAX_RESPONSE_SIZE,

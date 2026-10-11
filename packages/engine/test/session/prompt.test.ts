@@ -10,7 +10,7 @@ import { LLMEvent } from "@vectordevai/llm"
 import { SessionProjector } from "@vectordevai/core/session/projector"
 import { eq } from "drizzle-orm"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { expect } from "bun:test"
+import { expect, test } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
@@ -56,13 +56,15 @@ import { Truncate } from "@/tool/truncate"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { Format } from "../../src/format"
-import { TestInstance } from "../fixture/fixture"
+import { TestInstance, tmpdirScoped, trustWorkspace } from "../fixture/fixture"
 import { awaitWithTimeout, pollWithTimeout, testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { LocationServiceMap, locationServiceMapLayer } from "@vectordevai/core/location-services"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { Global } from "@vectordevai/core/global"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -359,7 +361,10 @@ const writeConfig = Effect.fn("test.writeConfig")(function* (dir: string, config
 const useServerConfig = Effect.fn("test.useServerConfig")(function* (config: (url: string) => Partial<ConfigV1.Info>) {
   const { directory: dir } = yield* TestInstance
   const llm = yield* TestLLMServer
+  const file = path.join(dir, "vector.json")
   yield* writeConfig(dir, config(llm.url))
+  const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(dir, [file]))
+  yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
   return { dir, llm }
 })
 
@@ -570,7 +575,7 @@ noLLMServer.instance(
       expect(result.info.role).toBe("assistant")
       if (result.info.role === "assistant") expect(result.info.finish).toBe("stop")
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 it.instance("loop exits without an LLM request for interrupted orphan tool calls", () =>
@@ -1791,7 +1796,7 @@ raceNoLLMServer.instance(
         expect(lastAssistant.info.parentID).toBe(lastUser?.info.id)
       }
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   3_000,
 )
 
@@ -1838,7 +1843,7 @@ noLLMServer.instance(
       expect(taskMsg.info.time.completed).toBeDefined()
       expect(taskMsg.info.finish).toBeDefined()
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   30_000,
 )
 
@@ -2411,6 +2416,99 @@ unix(
 )
 
 unixNoLLMServer(
+  "command ! expansion respects shell permission denial",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const { prompt, chat } = yield* boot()
+
+        const exit = yield* prompt.command({ sessionID: chat.id, command: "blocked", arguments: "" }).pipe(Effect.exit)
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(yield* Effect.promise(() => Bun.file(path.join(dir, "slash-shell-bypass")).exists())).toBe(false)
+      }),
+    ),
+  {
+    git: true,
+    config: {
+      ...cfg,
+      permission: { bash: "deny" },
+      command: {
+        blocked: {
+          template: "Blocked: !`touch slash-shell-bypass`",
+        },
+      },
+    },
+  },
+  30_000,
+)
+
+test("command arguments cannot inject shell interpolation", () => {
+  const injected = "!`touch slash-argument-injection`"
+  const prepared = SessionPrompt.prepareCommandTemplate("Inspect: $ARGUMENTS", injected, "/bin/sh")
+
+  expect(prepared.shellCommands).toEqual([])
+  expect(prepared.render([])).toContain(injected)
+})
+
+test("command snippets receive each argument as a quoted literal word", () => {
+  const prepared = SessionPrompt.prepareCommandTemplate(
+    "Diff: !`gh pr diff $1` all: !`echo $ARGUMENTS`\nAbout $1 and $2",
+    `42 "it's; touch pwned"`,
+    "/bin/sh",
+  )
+
+  expect(prepared.shellCommands).toEqual([`gh pr diff '42'`, `echo '42' 'it'\\''s; touch pwned'`])
+  // Output is inserted as is: a placeholder printed by a snippet is not the template's.
+  expect(prepared.render(["diff says $1", "echo says $ARGUMENTS"])).toBe(
+    "Diff: diff says $1 all: echo says $ARGUMENTS\nAbout 42 and it's; touch pwned",
+  )
+})
+
+test("command snippets quote arguments for PowerShell and refuse what cmd.exe cannot keep literal", () => {
+  expect(SessionPrompt.prepareCommandTemplate("!`echo $1`", `"it's"`, "pwsh").shellCommands).toEqual([`echo 'it''s'`])
+  expect(SessionPrompt.prepareCommandTemplate("!`echo $1`", "plain", "cmd").shellCommands).toEqual([`echo "plain"`])
+  expect(() => SessionPrompt.prepareCommandTemplate("!`echo $1`", "%PATH%", "cmd")).toThrow("cmd")
+  // A snippet that never uses the arguments is unaffected by one cmd.exe cannot quote.
+  expect(SessionPrompt.prepareCommandTemplate("!`echo hi` $1", "%PATH%", "cmd").shellCommands).toEqual(["echo hi"])
+})
+
+unix(
+  "command ! snippets from the user's config keep their arguments and run without asking",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const { llm } = yield* useServerConfig((url) => ({
+          ...providerCfg(url),
+          permission: { bash: "ask" },
+          command: {
+            greet: {
+              template: "Said: !`printf '%s|' $1 $2`",
+            },
+          },
+        }))
+
+        const { prompt, chat } = yield* boot()
+        yield* llm.text("done")
+
+        const result = yield* prompt.command({
+          sessionID: chat.id,
+          command: "greet",
+          arguments: `"a b" '$(touch slash-argument-injection)'`,
+        })
+
+        expect(result.info.role).toBe("assistant")
+        const inputs = yield* llm.inputs
+        expect(JSON.stringify(inputs.at(-1)?.messages)).toContain("a b|$(touch slash-argument-injection)|")
+        expect(yield* Effect.promise(() => Bun.file(path.join(dir, "slash-argument-injection")).exists())).toBe(false)
+      }),
+    ),
+  30_000,
+)
+
+unixNoLLMServer(
   "cancel interrupts shell and resolves cleanly",
   () =>
     withSh(() =>
@@ -2655,7 +2753,7 @@ noLLMServer.instance(
       const exit = yield* Fiber.await(fiber)
       expect(Exit.isFailure(exit)).toBe(true)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   30_000,
 )
 
@@ -2690,11 +2788,209 @@ noLLMServer.instance(
       const exit = yield* Fiber.await(fiber)
       expect(Exit.isFailure(exit)).toBe(true)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
   30_000,
 )
 
 // Missing file handling
+
+noLLMServer.instance(
+  "task-generated sensitive text attachments require read approval",
+  () =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({
+        title: "Child",
+        parentID: parent.id,
+        agent: "general",
+        permission: [{ permission: "read", pattern: "task-secret.pem", action: "ask" }],
+      })
+      yield* writeText(path.join(directory, "task-secret.pem"), "TASK_ATTACHMENT_SECRET=hidden")
+      const parts = yield* prompt.resolvePromptParts("Inspect @task-secret.pem")
+      expect(parts.some((part) => part.type === "file")).toBe(true)
+
+      const fiber = yield* prompt
+        .prompt({ sessionID: child.id, agent: "general", model: ref, noReply: true, parts })
+        .pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        Effect.gen(function* () {
+          const request = (yield* permission.list()).find((item) => item.permission === "read")
+          if (request) return request
+          const exit = fiber.pollUnsafe()
+          if (!exit) return
+          return yield* Effect.fail(
+            new Error(
+              `attachment prompt completed before approval: ${Exit.isFailure(exit) ? Cause.pretty(exit.cause) : JSON.stringify(exit.value.parts)}`,
+            ),
+          )
+        }),
+        "task attachment did not request sensitive read permission",
+        "15 seconds",
+      )
+
+      expect(request.patterns).toContain("task-secret.pem")
+      yield* permission.reply({ requestID: request.id, reply: "reject" })
+      expect(Exit.isSuccess(yield* Fiber.await(fiber))).toBe(true)
+    }),
+  { trusted: true, git: true, config: cfg },
+)
+
+noLLMServer.instance(
+  "task-generated external binary attachments require external-directory approval",
+  () =>
+    Effect.gen(function* () {
+      const external = yield* tmpdirScoped()
+      const image = path.join(external, "outside.png")
+      const fsys = yield* FSUtil.Service
+      yield* fsys.writeWithDirs(
+        image,
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      )
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const parent = yield* sessions.create({ title: "Parent" })
+      const child = yield* sessions.create({ title: "Child", parentID: parent.id, agent: "general" })
+      const parts = yield* prompt.resolvePromptParts(`Inspect @${image}`)
+
+      const fiber = yield* prompt
+        .prompt({ sessionID: child.id, agent: "general", model: ref, noReply: true, parts })
+        .pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        permission.list().pipe(Effect.map((items) => items.find((item) => item.permission === "external_directory"))),
+        "task attachment did not request external-directory permission",
+        "15 seconds",
+      )
+
+      expect(request.patterns.some((pattern) => pattern.includes(path.basename(external)))).toBe(true)
+      yield* permission.reply({ requestID: request.id, reply: "reject" })
+      expect(Exit.isSuccess(yield* Fiber.await(fiber))).toBe(true)
+    }),
+  { trusted: true, config: cfg },
+)
+
+noLLMServer.instance(
+  "client binary file parts outside the project require external-directory approval",
+  () =>
+    Effect.gen(function* () {
+      const external = yield* tmpdirScoped()
+      const secret = path.join(external, "outside.bin")
+      const fsys = yield* FSUtil.Service
+      yield* fsys.writeWithDirs(secret, "outside-binary-secret")
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+      const id = PartID.ascending()
+
+      const fiber = yield* prompt
+        .prompt({
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [
+            { id, type: "file", mime: "application/octet-stream", filename: "outside.bin", url: `file://${secret}` },
+          ],
+        })
+        .pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        permission.list().pipe(Effect.map((items) => items.find((item) => item.permission === "external_directory"))),
+        "binary file part did not request external-directory permission",
+        "15 seconds",
+      )
+      expect(request.patterns.some((pattern) => pattern.includes(path.basename(external)))).toBe(true)
+      yield* permission.reply({ requestID: request.id, reply: "reject" })
+
+      const exit = yield* Fiber.await(fiber)
+      if (Exit.isFailure(exit)) throw new Error(Cause.pretty(exit.cause))
+      const stored = JSON.stringify(exit.value.parts)
+      expect(stored).not.toContain(Buffer.from("outside-binary-secret").toString("base64"))
+      expect(stored).not.toContain("file://")
+      expect(exit.value.parts).toEqual([
+        expect.objectContaining({ id, type: "text", text: expect.stringContaining("Read tool failed to read") }),
+      ])
+    }),
+  { trusted: true, config: cfg },
+)
+
+noLLMServer.instance(
+  "the user's own attachments outside the project attach without asking",
+  () =>
+    Effect.gen(function* () {
+      const external = yield* tmpdirScoped()
+      const binary = path.join(external, "photo.bin")
+      const text = path.join(external, "notes.txt")
+      const afs = yield* FSUtil.Service
+      yield* afs.writeWithDirs(binary, "user-binary")
+      yield* afs.writeWithDirs(text, "user-notes")
+      const prompt = yield* SessionPrompt.Service
+      const permission = yield* Permission.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+
+      const msg = yield* prompt.prompt(
+        {
+          sessionID: session.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [
+            { type: "file", mime: "application/octet-stream", filename: "photo.bin", url: pathToFileURL(binary).href },
+            { type: "file", mime: "text/plain", filename: "notes.txt", url: pathToFileURL(text).href },
+          ],
+        },
+        { userFile: () => true },
+      )
+
+      expect(yield* permission.list()).toEqual([])
+      expect(msg.parts).toContainEqual(
+        expect.objectContaining({
+          type: "file",
+          url: `data:application/octet-stream;base64,${Buffer.from("user-binary").toString("base64")}`,
+        }),
+      )
+      expect(JSON.stringify(msg.parts)).toContain("user-notes")
+    }),
+  { trusted: true, config: cfg },
+)
+
+noLLMServer.instance(
+  "client binary file parts inside the project are still attached",
+  () =>
+    Effect.gen(function* () {
+      const { directory: dir } = yield* TestInstance
+      const inside = path.join(dir, "inside.bin")
+      const fsys = yield* FSUtil.Service
+      yield* fsys.writeWithDirs(inside, "inside-binary")
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({})
+
+      const msg = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: ref,
+        noReply: true,
+        parts: [{ type: "file", mime: "application/octet-stream", filename: "inside.bin", url: `file://${inside}` }],
+      })
+
+      expect(msg.parts).toContainEqual(
+        expect.objectContaining({
+          type: "file",
+          url: `data:application/octet-stream;base64,${Buffer.from("inside-binary").toString("base64")}`,
+        }),
+      )
+    }),
+  { trusted: true, config: cfg },
+)
 
 noLLMServer.instance(
   "does not fail the prompt when a file part is missing",
@@ -2729,7 +3025,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -2760,7 +3056,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 noLLMServer.instance(
@@ -2802,7 +3098,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 // Special characters in filenames
@@ -2839,7 +3135,7 @@ noLLMServer.instance(
 
       yield* sessions.remove(session.id)
     }),
-  { git: true, config: cfg },
+  { trusted: true, git: true, config: cfg },
 )
 
 // Regression: empty assistant turn loop
@@ -2954,6 +3250,7 @@ noLLMServer.instance(
       yield* sessions.remove(session.id)
     }),
   {
+    trusted: true,
     config: {
       ...cfg,
       provider: {
@@ -3027,7 +3324,7 @@ freePrompts.instance(
         }
       }
     }),
-  { config: paidCommandConfig },
+  { trusted: true, config: paidCommandConfig },
   30_000,
 )
 
@@ -3054,7 +3351,7 @@ freePrompts.instance(
           expect(message.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
       }
     }),
-  { config: paidCommandConfig },
+  { trusted: true, config: paidCommandConfig },
 )
 
 freePrompts.instance(
@@ -3085,7 +3382,7 @@ freePrompts.instance(
       })
       expect(command.info).toMatchObject({ providerID: ref.providerID, modelID: ref.modelID })
     }),
-  { config: paidCommandConfig },
+  { trusted: true, config: paidCommandConfig },
 )
 
 freePrompts.instance(
@@ -3100,7 +3397,10 @@ freePrompts.instance(
       const result = yield* prompt.command({ sessionID: chat.id, command: "paid-command", arguments: "" })
       expect(result.info).toMatchObject({ providerID: ref.providerID, modelID: ref.modelID })
     }),
-  { config: { ...paidCommandConfig, provider: { ...paidCommandConfig.provider, openrouter: { whitelist: [] } } } },
+  {
+    trusted: true,
+    config: { ...paidCommandConfig, provider: { ...paidCommandConfig.provider, openrouter: { whitelist: [] } } },
+  },
 )
 
 if (process.platform !== "win32")
@@ -3117,7 +3417,7 @@ if (process.platform !== "win32")
         const result = yield* prompt.shell({ sessionID: chat.id, agent: "paid-primary", command: ":" })
         expect(result.info).toMatchObject({ providerID: freeRef.providerID, modelID: freeRef.modelID })
       }),
-    { config: paidCommandConfig },
+    { trusted: true, config: paidCommandConfig },
   )
 
 // Agent / command resolution errors
@@ -3493,6 +3793,8 @@ for (const mode of ["allow", "reject", "cancel", "definition", "override"] as co
             },
           },
         })
+        // The project's provider, model and plugin load only once the workspace is trusted.
+        yield* Effect.promise(() => trustWorkspace(fixture.directory))
         const sessions = yield* Session.Service
         const prompt = yield* SessionPrompt.Service
         const permission = yield* Permission.Service

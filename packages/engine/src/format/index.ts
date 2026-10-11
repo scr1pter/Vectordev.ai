@@ -3,6 +3,7 @@ import { Effect, Layer, Context, Schema } from "effect"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import { ChildProcess } from "effect/unstable/process"
 import { AppProcess } from "@vectordevai/core/process"
+import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 import { InstanceState } from "@/effect/instance-state"
 import path from "path"
 import { mergeDeep } from "remeda"
@@ -84,9 +85,9 @@ const layer = Layer.effect(
               const result = yield* appProcess
                 .run(
                   ChildProcess.make(replaced[0]!, replaced.slice(1), {
-                    cwd: dir,
-                    env: item.environment,
-                    extendEnv: true,
+                    cwd: item.cwd ? path.resolve(dir, item.cwd) : dir,
+                    env: untrustedChildEnvironment(process.env, item.environment),
+                    extendEnv: false,
                     stdin: "ignore",
                     stdout: "ignore",
                     stderr: "ignore",
@@ -97,7 +98,7 @@ const layer = Layer.effect(
                     Effect.logError("failed to format file", {
                       error: "spawn failed",
                       command: cmd,
-                      ...item.environment,
+                      environment: Object.keys(item.environment ?? {}),
                       file: filepath,
                       cause: errorMessage(error.cause ?? error),
                     }).pipe(Effect.as(undefined)),
@@ -106,7 +107,7 @@ const layer = Layer.effect(
               if (result && result.exitCode !== 0) {
                 yield* Effect.logError("failed", {
                   command: cmd,
-                  ...item.environment,
+                  environment: Object.keys(item.environment ?? {}),
                 })
               }
             }

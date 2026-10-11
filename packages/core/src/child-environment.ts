@@ -11,6 +11,11 @@ const PRIVATE_RUNTIME_ENVIRONMENT = new Set([
  * Builds an environment for project-controlled or otherwise untrusted child
  * processes without exposing Vector's in-process vault and bridge secrets.
  * Filtering is case-insensitive because Windows environment keys are too.
+ *
+ * Only Vector's own secrets are removed. The user's variables, including
+ * NODE_OPTIONS, PYTHONPATH and LD_LIBRARY_PATH, reach their commands unchanged;
+ * preload variables a project config tries to set are refused when that
+ * config is loaded (WorkspaceTrust.unsafeProjectEnvironment).
  */
 export function untrustedChildEnvironment(...sources: Array<NodeJS.ProcessEnv | undefined>) {
   const environment: NodeJS.ProcessEnv = Object.assign(

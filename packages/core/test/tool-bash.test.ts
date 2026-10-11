@@ -43,6 +43,8 @@ let result: AppProcess.RunResult = {
 }
 let runFailure: AppProcess.AppProcessError | undefined
 let afterPermission = (_input: PermissionV2.AssertInput): Effect.Effect<void> => Effect.void
+let configEntries: Config.Entry[] = []
+let configExecutable = true
 
 const permission = Layer.succeed(
   PermissionV2.Service,
@@ -75,7 +77,8 @@ const appProcess = Layer.succeed(
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
-    entries: () => Effect.succeed([]),
+    entries: () => Effect.succeed(configEntries),
+    executable: () => configExecutable,
   }),
 )
 
@@ -85,6 +88,8 @@ const reset = () => {
   denyAction = undefined
   runFailure = undefined
   afterPermission = () => Effect.void
+  configEntries = []
+  configExecutable = true
   result = {
     command: "mock",
     exitCode: 0,
@@ -311,6 +316,104 @@ describe("BashTool", () => {
         ),
     ),
   )
+
+  if (process.platform !== "win32") {
+    it.live("authorizes and pins the configured shell identity before bash execution", () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          const first = path.join(tmp.path, "shell-first")
+          const second = path.join(tmp.path, "shell-second")
+          const selected = path.join(tmp.path, "selected-shell")
+          configEntries = [
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({ shell: "./selected-shell" }),
+            }),
+          ]
+          afterPermission = (input) =>
+            input.action === "shell"
+              ? Effect.promise(async () => {
+                  await fs.unlink(selected)
+                  await fs.symlink(second, selected)
+                }).pipe(Effect.orDie)
+              : Effect.void
+          return Effect.promise(async () => {
+            await fs.writeFile(first, "first")
+            await fs.writeFile(second, "second")
+            await fs.symlink(first, selected)
+          }).pipe(
+            Effect.andThen(withTool(tmp.path, (registry) => executeTool(registry, call({ command: "pwd" })))),
+            Effect.andThen(
+              Effect.sync(() => {
+                expect(assertions.map((input) => input.action)).toEqual(["shell", "bash"])
+                expect(assertions[0]).toMatchObject({
+                  resources: [realpathSync(first)],
+                  save: [realpathSync(first)],
+                  metadata: { configured: "./selected-shell" },
+                })
+                expect(runs).toMatchObject([{ shell: realpathSync(first) }])
+              }),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+
+    it.live("does not execute when the configured shell identity is denied", () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          const shell = path.join(tmp.path, "project-shell")
+          configEntries = [
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({ shell }),
+            }),
+          ]
+          denyAction = "shell"
+          return Effect.promise(() => fs.writeFile(shell, "shell")).pipe(
+            Effect.andThen(withTool(tmp.path, (registry) => executeTool(registry, call({ command: "pwd" })))),
+            Effect.andThen(
+              Effect.sync(() => {
+                expect(assertions.map((input) => input.action)).toEqual(["shell"])
+                expect(runs).toEqual([])
+              }),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+
+    it.live("ignores an untrusted project-selected shell", () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          configExecutable = false
+          configEntries = [
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({ shell: path.join(tmp.path, "project-shell") }),
+            }),
+          ]
+          return withTool(tmp.path, (registry) => executeTool(registry, call({ command: "pwd" }))).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                expect(assertions.map((input) => input.action)).toEqual(["bash"])
+                expect(runs).toMatchObject([{ shell: "/bin/sh" }])
+              }),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+  }
 
   it.live("reports external command arguments as advisory warnings without enforcing approval", () =>
     Effect.acquireUseRelease(

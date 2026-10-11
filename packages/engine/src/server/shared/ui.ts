@@ -5,17 +5,36 @@ import { createHash } from "node:crypto"
 
 let embeddedUIPromise: Promise<Record<string, string> | null> | undefined
 
-export const csp = (hash = "") =>
-  `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' data:; connect-src * data:`
+export const csp = (hashes: Iterable<string> | string = []) => {
+  const uniqueHashes = new Set(typeof hashes === "string" ? (hashes ? [hashes] : []) : hashes)
+  return [
+    "default-src 'self'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    `script-src 'self' 'wasm-unsafe-eval'${[...uniqueHashes].map((hash) => ` 'sha256-${hash}'`).join("")}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    "media-src 'self' data:",
+    "connect-src * data:",
+    "worker-src 'self' blob:",
+  ].join("; ")
+}
 export const DEFAULT_CSP = csp()
 
-export function themePreloadHash(body: string) {
-  return body.match(/<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(['"])vector-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i)
+export function inlineScriptHashes(body: string) {
+  return body.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi).reduce((hashes, match) => {
+    if (/(?:^|[\t\n\f\r /])src(?=[\t\n\f\r />=]|$)/i.test(match[1])) return hashes
+    hashes.add(createHash("sha256").update(match[2]).digest("base64"))
+    return hashes
+  }, new Set<string>())
 }
 
 export function cspForHtml(body: string) {
-  const match = themePreloadHash(body)
-  return csp(match ? createHash("sha256").update(match[2]).digest("base64") : "")
+  return csp(inlineScriptHashes(body))
 }
 
 export function embeddedUI(disableEmbeddedWebUi: boolean) {

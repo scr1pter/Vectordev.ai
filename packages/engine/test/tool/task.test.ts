@@ -88,6 +88,7 @@ for (const id of ["acme/coder:free", "acme/coder:FREE"])
         expect(result.metadata.model).toEqual({ ...model, variant: "xhigh" })
       }),
     {
+      trusted: true,
       config: {
         agent: {
           "paid-specialist": { mode: "subagent", model: "openrouter/acme/paid", variant: "high" },
@@ -144,6 +145,7 @@ it.instance(
       expect(result.metadata.model).toEqual({ providerID: parent.providerID, modelID: ModelV2.ID.make("tiny") })
     }),
   {
+    trusted: true,
     config: {
       small_model: "lmstudio/tiny",
       provider: pricedProvider({ big: {}, tiny: { cost: { input: 0.1, output: 0.4 } } }),
@@ -170,6 +172,7 @@ it.instance(
       expect(prompts[0].model).toEqual(parent)
     }),
   {
+    trusted: true,
     config: {
       small_model: "lmstudio/tiny",
       provider: pricedProvider({
@@ -210,6 +213,7 @@ it.instance(
       ])
     }),
   {
+    trusted: true,
     config: {
       provider: pricedProvider({ big: { variants: { medium: {}, xhigh: {} } } }),
     },
@@ -237,6 +241,7 @@ it.instance(
       expect(prompts.map((input) => input.variant)).toEqual([undefined, "low"])
     }),
   {
+    trusted: true,
     config: {
       provider: pricedProvider({
         // Budget-style thinking models offer only high and max.
@@ -267,6 +272,7 @@ it.instance(
       expect(prompts[0].variant).toBe("low")
     }),
   {
+    trusted: true,
     config: {
       agent: { explore: { variant: "low" } },
       provider: pricedProvider({ big: { variants: { low: {}, medium: {}, xhigh: {} } } }),
@@ -466,6 +472,7 @@ describe("tool.task", () => {
         expect(zebra).toBeGreaterThan(test)
       }),
     {
+      trusted: true,
       config: {
         agent: {
           zebra: {
@@ -495,6 +502,7 @@ describe("tool.task", () => {
         expect(description).not.toContain("- zebra: Zebra agent")
       }),
     {
+      trusted: true,
       config: {
         permission: {
           task: {
@@ -754,6 +762,7 @@ describe("tool.task", () => {
         expect(yield* sessions.children(chat.id)).toHaveLength(0)
       }),
     {
+      trusted: true,
       config: {
         permission: {
           task: {
@@ -809,7 +818,7 @@ describe("tool.task", () => {
         expect(asked).toBe(0)
         expect(yield* sessions.children(chat.id)).toHaveLength(0)
       }),
-    { config: { agent: { general: { disable: true } } } },
+    { trusted: true, config: { agent: { general: { disable: true } } } },
   )
 
   it.instance(
@@ -825,7 +834,7 @@ describe("tool.task", () => {
         expect(description).not.toContain("- general:")
         expect(description).toContain("When general is not in the list")
       }),
-    { config: { agent: { general: { disable: true } } } },
+    { trusted: true, config: { agent: { general: { disable: true } } } },
   )
 
   it.instance("inherits the parent BYOK model and variant in a child session", () =>
@@ -1770,6 +1779,7 @@ describe("tool.task", () => {
         expect(seen?.tools).toBeUndefined()
       }),
     {
+      trusted: true,
       config: {
         agent: {
           reviewer: {
@@ -2924,7 +2934,7 @@ describe("tool.task", () => {
             .action,
         ).toBe("deny")
       }),
-    { config: { agent: { helper: { mode: "subagent", description: "Tidies code." } } } },
+    { trusted: true, config: { agent: { helper: { mode: "subagent", description: "Tidies code." } } } },
   )
 
   it.instance("an omitted subagent_type launches the general Subagent with its prompt", () =>
@@ -3025,6 +3035,7 @@ describe("tool.task", () => {
         expect(result.metadata).toMatchObject({ agent: "general-purpose", kind: "specialist", custom: true })
       }),
     {
+      trusted: true,
       config: {
         agent: {
           "general-purpose": {
@@ -3720,7 +3731,7 @@ describe("task batches", () => {
         )
         expect(snapshots.at(-1)).toMatchObject({ tasks: [{ status: "completed" }, { status: "completed" }] })
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   for (const invalid of [
@@ -3778,7 +3789,7 @@ describe("task batches", () => {
           )
           expect(after.metadata).toMatchObject({ taskBatch: 1, status: "completed" })
         }),
-      { config: { provider: pricedProvider({ "test-model": {} }) } },
+      { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
     )
   }
 
@@ -3851,7 +3862,7 @@ describe("task batches", () => {
         expect(asked).toBe(2)
         expect(yield* sessions.children(chat.id)).toHaveLength(0)
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   it.instance(
@@ -3899,7 +3910,7 @@ describe("task batches", () => {
           ]),
         )
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   it.instance(
@@ -3954,7 +3965,7 @@ describe("task batches", () => {
         )
         expect(after.metadata).toMatchObject({ taskBatch: 1, status: "completed" })
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
   it.instance(
     "foreign child refusal prevents another valid entry from starting",
@@ -3974,7 +3985,7 @@ describe("task batches", () => {
         if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("not a subagent")
         expect(yield* sessions.children(chat.id)).toHaveLength(0)
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   it.instance(
@@ -4010,7 +4021,7 @@ describe("task batches", () => {
         expect(result.metadata.tasks[1].sessionId).toBeUndefined()
         expect(yield* sessions.children(chat.id)).toHaveLength(1)
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   background.instance(
@@ -4065,7 +4076,7 @@ describe("task batches", () => {
         expect(prompts).toHaveLength(2)
         expect(new Set(prompts.map((input) => input.sessionID))).toEqual(new Set([id]))
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   it.instance(
@@ -4106,7 +4117,7 @@ describe("task batches", () => {
         yield* Deferred.succeed(gate, undefined)
         expect((yield* Fiber.join(owner)).output).toContain("owner done")
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   it.instance(
@@ -4133,6 +4144,7 @@ describe("task batches", () => {
         expect(yield* sessions.children(chat.id)).toHaveLength(0)
       }),
     {
+      trusted: true,
       config: {
         provider: pricedProvider({ "test-model": {} }),
         agent: { "missing-model": { mode: "subagent", model: "lmstudio/not-a-model" } },
@@ -4203,7 +4215,7 @@ describe("task batches", () => {
         yield* jobs.wait({ id: child })
         expect(prompts).toBe(1)
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   it.instance(
@@ -4259,6 +4271,6 @@ describe("task batches", () => {
         })
         yield* jobs.cancel(initial.metadata.sessionId)
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 })

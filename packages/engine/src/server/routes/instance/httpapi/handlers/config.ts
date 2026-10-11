@@ -1,9 +1,10 @@
 import { Config } from "@/config/config"
+import { Flag } from "@vectordevai/core/flag/flag"
 import { Provider } from "@/provider/provider"
 import * as InstanceState from "@/effect/instance-state"
 import { Redaction } from "@vectordevai/core/redaction"
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { markInstanceForDisposal } from "../lifecycle"
 
@@ -25,6 +26,19 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
       return Redaction.redactConfig(ctx.payload)
     })
 
+    const trust = Effect.fn("ConfigHttpApi.trust")(function* () {
+      const status = yield* configSvc.trust()
+      return { workspace: status.workspace, trusted: status.trusted, ignored: status.ignored }
+    })
+
+    // Approves what the config was loaded from, then reloads the instance so the trusted config takes effect.
+    const approveTrust = Effect.fn("ConfigHttpApi.approveTrust")(function* () {
+      if (Flag.VECTOR_PURE) return yield* new HttpApiError.BadRequest({})
+      yield* configSvc.approve().pipe(Effect.catchDefect(() => Effect.fail(new HttpApiError.BadRequest({}))))
+      yield* markInstanceForDisposal(yield* InstanceState.context)
+      return yield* trust()
+    })
+
     const providers = Effect.fn("ConfigHttpApi.providers")(function* () {
       const providers = yield* providerSvc.list()
       return {
@@ -34,6 +48,11 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
       }
     })
 
-    return handlers.handle("get", get).handle("update", update).handle("providers", providers)
+    return handlers
+      .handle("get", get)
+      .handle("update", update)
+      .handle("trust", trust)
+      .handle("approveTrust", approveTrust)
+      .handle("providers", providers)
   }),
 )

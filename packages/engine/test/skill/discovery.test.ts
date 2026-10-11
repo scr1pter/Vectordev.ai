@@ -1,7 +1,9 @@
 import { describe, expect, beforeAll, afterAll } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { FSUtil } from "@vectordevai/core/fs-util"
-import { Effect } from "effect"
+import { AbsolutePath } from "@vectordevai/core/schema"
+import { SkillDiscovery } from "@vectordevai/core/skill/discovery"
+import { Effect, Layer } from "effect"
 import { Discovery } from "../../src/skill/discovery"
 import { Global } from "@vectordevai/core/global"
 import { Filesystem } from "@/util/filesystem"
@@ -181,6 +183,29 @@ describe("Discovery.pull", () => {
 
       yield* discovery.pull(url)
       expect(mutableDownloadCount).toBe(3)
+    }),
+  )
+})
+
+describe("Discovery delegation", () => {
+  const requested: string[] = []
+  const directory = AbsolutePath.make("/tmp/vector-safe-skill")
+  const core = Layer.succeed(
+    SkillDiscovery.Service,
+    SkillDiscovery.Service.of({
+      pull: (url) => Effect.sync(() => (requested.push(url), [directory])),
+    }),
+  )
+  const delegated = testEffect(LayerNode.compile(Discovery.node, [[SkillDiscovery.node, core]]))
+
+  delegated.effect("delegates remote skill discovery to the hardened Core implementation", () =>
+    Effect.gen(function* () {
+      requested.length = 0
+      const discovery = yield* Discovery.Service
+      const result = yield* discovery.pull("https://skills.example.test/catalog")
+
+      expect(requested).toEqual(["https://skills.example.test/catalog"])
+      expect(result).toEqual([directory])
     }),
   )
 })

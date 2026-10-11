@@ -31,7 +31,7 @@ it.instance(
       message: "Session sharing is disabled in your Vector settings. Set share to manual to enable it.",
     })
   }),
-  { config: { formatter: false, lsp: false, share: "disabled" } },
+  { trusted: true, config: { formatter: false, lsp: false, share: "disabled" } },
 )
 
 it.instance(
@@ -45,5 +45,5 @@ it.instance(
     expect(yield* response.json).toMatchObject({ name: "BadRequest", data: { kind: "Payload" } })
     expect((yield* session.get(info.id)).share).toBeUndefined()
   }),
-  { config: { formatter: false, lsp: false, share: "manual" } },
+  { trusted: true, config: { formatter: false, lsp: false, share: "manual" } },
 )

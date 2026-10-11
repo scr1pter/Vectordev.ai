@@ -108,6 +108,41 @@ describe("ConfigAgentPlugin.Plugin", () => {
     }),
   )
 
+  it.effect("does not let a project agent allow override a global deny", () =>
+    Effect.gen(function* () {
+      const agents = yield* AgentV2.Service
+      const build = AgentV2.ID.make("build")
+      yield* agents.transform((editor) => editor.update(build, () => {}))
+      const global = new Config.Document({
+        type: "document",
+        info: decode({ permissions: [{ action: "bash", resource: "*", effect: "deny" }] }),
+      })
+      const project = new Config.Document({
+        type: "document",
+        info: decode({
+          agents: { build: { permissions: [{ action: "bash", resource: "git *", effect: "allow" }] } },
+        }),
+      })
+      const config = Config.Service.of({
+        entries: () => Effect.succeed([global, project]),
+        scope: (entry) => (entry === project ? "project" : "global"),
+      })
+
+      yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agents) })).pipe(
+        Effect.provideService(Config.Service, config),
+      )
+
+      const agent = yield* agents.get(build)
+      if (!agent) throw new Error("expected configured build agent")
+      expect(agent.permissions).toEqual([
+        { action: "bash", resource: "*", effect: "deny" },
+        { action: "bash", resource: "git *", effect: "allow" },
+        { action: "bash", resource: "*", effect: "deny" },
+      ])
+      expect(PermissionV2.evaluate("bash", "git status", agent.permissions).effect).toBe("deny")
+    }),
+  )
+
   it.effect("maps configured agent fields and preserves an unspecified model variant", () =>
     Effect.gen(function* () {
       const agents = yield* AgentV2.Service

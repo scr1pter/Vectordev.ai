@@ -28,7 +28,7 @@ import { withTimeout } from "@/util/timeout"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Redaction } from "@vectordevai/core/redaction"
 import { isRecord } from "@/util/record"
-import { mergeDeep } from "remeda"
+import { isDeepEqual, mergeDeep } from "remeda"
 import { McpOAuthPendingProvider, McpOAuthProvider, OAUTH_CALLBACK_PATH } from "./oauth-provider"
 import { McpOAuthCallback } from "./oauth-callback"
 import { McpAuth } from "./auth"
@@ -42,6 +42,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@vectordevai/schema/mcp-event"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 
 const DEFAULT_TIMEOUT = 30_000
 // Longest single stderr chunk that is written to the log.
@@ -220,11 +221,20 @@ export function resolveMcpHeaders(
   )
 }
 
+// A trusted project's local server runs the command its trust approval bound: an absolute
+// executable or a copy in the approved snapshot. A client that sends that command back
+// unchanged keeps the command and cwd its config file declares, instead of writing the
+// bound paths into the file.
+function declaredMcp(mcp: ConfigMCPV1.Info, configured: unknown, onDisk: Record<string, unknown>): ConfigMCPV1.Info {
+  if (mcp.type !== "local" || !isRecord(configured) || !Array.isArray(onDisk.command)) return mcp
+  if (!isDeepEqual(mcp.command, configured.command) || mcp.cwd !== configured.cwd) return mcp
+  if (!onDisk.command.every((item): item is string => typeof item === "string")) return mcp
+  return { ...mcp, command: onDisk.command, cwd: typeof onDisk.cwd === "string" ? onDisk.cwd : undefined }
+}
+
 function remoteURL(value: string) {
-  if (!URL.canParse(value)) return
+  if (!WorkspaceTrust.userRemoteUrlAllowed(value)) return
   const url = new URL(value)
-  if (url.protocol !== "http:" && url.protocol !== "https:") return
-  if (url.username || url.password) return
   return url
 }
 
@@ -800,7 +810,7 @@ const layer = Layer.effect(
     })
 
     // add/connect/disconnect mutate instance state only; mirror the intent into the
-    // project-local config layer so it survives a backend restart. Persistence failure
+    // project's integration store so it survives a backend restart. Persistence failure
     // must not undo the runtime change, so surface it instead of failing the request.
     const persistConfig = Effect.fnUntraced(function* (name: string, entry: ConfigMCPV1.Info | { enabled: boolean }) {
       yield* cfgSvc.updateMcpLocal(name, entry).pipe(
@@ -813,7 +823,7 @@ const layer = Layer.effect(
               events
                 .publish(TuiEvent.ToastShow, {
                   title: "MCP config not saved",
-                  message: `Could not write "${name}" to .vector/vector.local.json; the change may not survive a restart.`,
+                  message: `Could not save "${name}"; the change may not survive a restart.`,
                   variant: "warning",
                   duration: 8000,
                 })
@@ -854,7 +864,8 @@ const layer = Layer.effect(
         return {
           status: {
             status: "failed",
-            error: "MCP remote URLs must use HTTP or HTTPS and cannot contain embedded credentials.",
+            error:
+              "MCP remote URLs must use HTTPS (HTTP only on your own machine or network) and cannot contain embedded credentials.",
           } satisfies Status,
         }
       }
@@ -895,7 +906,7 @@ const layer = Layer.effect(
       const s = yield* InstanceState.get(state)
       s.removed.delete(name)
       s.config[name] = mcp
-      yield* persistConfig(name, mcp)
+      yield* persistConfig(name, declaredMcp(mcp, configured, onDisk))
       yield* createAndStore(name, mcp)
       yield* events.publish(ToolsChanged, { server: name }).pipe(Effect.ignore)
       return { status: s.status }

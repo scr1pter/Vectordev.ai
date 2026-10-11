@@ -4,7 +4,13 @@ import { Dialog } from "@vectordevai/ui/dialog"
 import { Switch } from "@vectordevai/ui/switch"
 import { useSync } from "@/context/sync"
 import { useMcpAdd, useMcpRemove, useMcpToggle } from "@/context/mcp"
-import { PLUGIN_CATALOG, PLUGIN_CATEGORIES, PluginLogo, type PluginDef } from "./plugins/catalog"
+import {
+  assertPluginInstallable,
+  PLUGIN_CATALOG,
+  PLUGIN_CATEGORIES,
+  PluginLogo,
+  type PluginDef,
+} from "./plugins/catalog"
 import { pluginAuthValues, securePluginConfig } from "./plugins/secure-config"
 
 type RuntimeApi = {
@@ -79,6 +85,7 @@ export const DialogSelectPlugins: Component = () => {
     try {
       const prepared = securePluginConfig(plugin, values)
       if (!prepared) return
+      assertPluginInstallable(prepared.config)
       await add.mutateAsync({
         name: serverName(plugin),
         config: await withResolvedRuntime(prepared.config),
@@ -288,7 +295,7 @@ export const DialogSelectPlugins: Component = () => {
                                   <a
                                     href={auth().docsUrl}
                                     target="_blank"
-                                    rel="noreferrer"
+                                    rel="noopener noreferrer"
                                     class="external-link text-11-regular text-text-weaker underline decoration-[rgba(178,140,255,0.4)] underline-offset-2 hover:text-text-muted"
                                   >
                                     {auth().docsLabel} ↗

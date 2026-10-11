@@ -1,7 +1,7 @@
 import { initializeVectorAccount, vectorAccount } from "./vector-account-runtime"
 import { execFile } from "node:child_process"
-import { stat } from "node:fs/promises"
-import { basename } from "node:path"
+import { realpath, stat } from "node:fs/promises"
+import { basename, join } from "node:path"
 import { app, BrowserWindow, Notification, clipboard, dialog, ipcMain, shell, systemPreferences } from "electron"
 import type { IpcMainEvent, IpcMainInvokeEvent } from "electron"
 import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
@@ -46,14 +46,16 @@ import {
   submitPullRequestReview,
   viewPullRequest,
 } from "./github-pr"
+import { getPinchZoomEnabled, getWindowID, setPinchZoomEnabled, setTitlebar, updateTitlebar } from "./windows"
+import { assertTrustedRenderer } from "./ipc-security"
 import {
-  getPinchZoomEnabled,
-  getWindowID,
-  isTrustedRendererUrl,
-  setPinchZoomEnabled,
-  setTitlebar,
-  updateTitlebar,
-} from "./windows"
+  openPathApplicationCommand,
+  openPathArguments,
+  openPathCommand,
+  isLaunchableBundle,
+  requireOpenPathApplication,
+  requireOpenPathDirectory,
+} from "./open-path"
 import type { UpdaterController } from "./updater-controller"
 import { createUpdaterSubscriptions } from "./updater-subscriptions"
 import { runBrowserAgent } from "./browser-agent"
@@ -191,6 +193,12 @@ import {
 import { ciStatus, listCiRuns, prepareCiRepair, viewCiFailure } from "./ci-watch"
 import { spendLedger, type SpendPolicy } from "./spend-limits"
 import { clearFailureMemory, readFailureMemory } from "./failure-memory"
+import {
+  deleteServerCredential,
+  readServerCredential,
+  saveServerCredential,
+  type ServerCredential,
+} from "./server-credentials"
 
 const pickerFilters = (ext?: string[]) => {
   if (!ext || ext.length === 0) return undefined
@@ -218,13 +226,6 @@ type Deps = {
   recordFatalRendererError: (error: FatalRendererError) => Promise<void> | void
   getUsageSharing: () => boolean
   setUsageSharing: (enabled: boolean) => void
-}
-
-function assertTrustedRenderer(event: IpcMainEvent | IpcMainInvokeEvent) {
-  if (event.sender.isDestroyed()) throw new Error("The requesting Vector window is closed.")
-  if (!BrowserWindow.fromWebContents(event.sender) || !isTrustedRendererUrl(event.sender.getURL())) {
-    throw new Error("Vector rejected a desktop command from an untrusted page.")
-  }
 }
 
 function handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: T) => R) {
@@ -260,8 +261,12 @@ export function registerIpcHandlers(deps: Deps) {
   handle("get-display-backend", () => deps.getDisplayBackend())
   handle("set-display-backend", (_event: IpcMainInvokeEvent, backend: string | null) => deps.setDisplayBackend(backend))
   handle("parse-markdown", (_event: IpcMainInvokeEvent, markdown: string) => deps.parseMarkdown(markdown))
-  handle("check-app-exists", (_event: IpcMainInvokeEvent, appName: string) => deps.checkAppExists(appName))
-  handle("resolve-app-path", (_event: IpcMainInvokeEvent, appName: string) => deps.resolveAppPath(appName))
+  handle("check-app-exists", (_event: IpcMainInvokeEvent, value: unknown) => {
+    const application = requireOpenPathApplication(value)
+    if (!application) return false
+    const command = openPathApplicationCommand(application, process.platform)
+    return command ? deps.checkAppExists(command) : false
+  })
   handle("path-exists", async (_event: IpcMainInvokeEvent, targetPath: string) => {
     if (!targetPath?.trim()) return false
     return Boolean(await stat(targetPath).catch(() => undefined))
@@ -728,6 +733,17 @@ export function registerIpcHandlers(deps: Deps) {
   )
   // The renderer reaches only its own .dat stores. vector.settings (which holds the remembered clone folder) and the
   // encrypted sign-in stores belong to the main process.
+  handle("server-credential-get", (_event: IpcMainInvokeEvent, url: string) => {
+    try {
+      return readServerCredential(url) ?? null
+    } catch {
+      return null
+    }
+  })
+  handle("server-credential-set", (_event: IpcMainInvokeEvent, url: string, credential: ServerCredential) =>
+    saveServerCredential(url, credential),
+  )
+  handle("server-credential-delete", (_event: IpcMainInvokeEvent, url: string) => deleteServerCredential(url))
   handle("store-get", (_event: IpcMainInvokeEvent, name: string, key: string) => {
     if (!isRendererStoreName(name)) return null
     try {
@@ -833,11 +849,32 @@ export function registerIpcHandlers(deps: Deps) {
     void shell.openExternal(external)
   })
 
-  handle("open-path", async (_event: IpcMainInvokeEvent, path: string, app?: string) => {
-    if (!app) return shell.openPath(path)
+  handle("open-path", async (_event: IpcMainInvokeEvent, path: string, value?: unknown) => {
+    // Checked and opened by its real path, so a link named like a folder cannot point at an application.
+    const real = typeof path === "string" ? await realpath(path).catch(() => undefined) : undefined
+    const target = requireOpenPathDirectory(real, {
+      directory: Boolean(real && (await stat(real).catch(() => undefined))?.isDirectory()),
+      bundle:
+        real !== undefined &&
+        isLaunchableBundle(
+          real,
+          await stat(join(real, "Contents", "Info.plist")).then(
+            () => true,
+            () => false,
+          ),
+        ),
+    })
+    const application = requireOpenPathApplication(value)
+    if (!application) return shell.openPath(target)
+    const configured = openPathApplicationCommand(application, process.platform)
+    if (!configured) throw new Error(`Vector cannot open paths in ${application} on this platform.`)
+    const resolved = process.platform === "win32" ? await deps.resolveAppPath(configured) : undefined
+    const executable = openPathCommand(application, process.platform, resolved)
     await new Promise<void>((resolve, reject) => {
       const [cmd, args] =
-        process.platform === "darwin" ? (["open", ["-a", app, path]] as const) : ([app, [path]] as const)
+        process.platform === "darwin"
+          ? (["open", ["-a", executable, target]] as const)
+          : ([executable, openPathArguments(application, process.platform, target)] as const)
       execFile(cmd, args, { env: untrustedChildEnvironment() }, (err) => (err ? reject(err) : resolve()))
     })
   })

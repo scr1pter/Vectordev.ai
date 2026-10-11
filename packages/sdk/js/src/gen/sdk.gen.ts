@@ -30,10 +30,17 @@ import type {
   ConfigProvidersData,
   ConfigProvidersErrors,
   ConfigProvidersResponses,
+  ConfigTrustApproveData,
+  ConfigTrustApproveErrors,
+  ConfigTrustApproveResponses,
+  ConfigTrustGetData,
+  ConfigTrustGetErrors,
+  ConfigTrustGetResponses,
   ConfigUpdateData,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
   EventSubscribeData,
+  EventSubscribeErrors,
   EventSubscribeResponses,
   ExperimentalCapabilitiesGetData,
   ExperimentalCapabilitiesGetErrors,
@@ -1192,8 +1199,34 @@ export class Event extends HeyApiClient {
    * Get events
    */
   public subscribe<ThrowOnError extends boolean = false>(options?: Options<EventSubscribeData, ThrowOnError>) {
-    return (options?.client ?? this.client).sse.get<EventSubscribeResponses, unknown, ThrowOnError>({
+    return (options?.client ?? this.client).sse.get<EventSubscribeResponses, EventSubscribeErrors, ThrowOnError>({
       url: "/event",
+      ...options,
+    })
+  }
+}
+
+export class Trust extends HeyApiClient {
+  /**
+   * Get project trust
+   *
+   * Whether the project's own config and .vector content are trusted, and whether they are being ignored until they are.
+   */
+  public get<ThrowOnError extends boolean = false>(options?: Options<ConfigTrustGetData, ThrowOnError>) {
+    return (options?.client ?? this.client).get<ConfigTrustGetResponses, ConfigTrustGetErrors, ThrowOnError>({
+      url: "/config/trust",
+      ...options,
+    })
+  }
+
+  /**
+   * Trust project
+   *
+   * Approve the project's config and .vector content as they are now, so Vector loads them. Any later change to anything that can run needs approval again.
+   */
+  public approve<ThrowOnError extends boolean = false>(options?: Options<ConfigTrustApproveData, ThrowOnError>) {
+    return (options?.client ?? this.client).post<ConfigTrustApproveResponses, ConfigTrustApproveErrors, ThrowOnError>({
+      url: "/config/trust",
       ...options,
     })
   }
@@ -1238,6 +1271,11 @@ export class Config2 extends HeyApiClient {
       url: "/config/providers",
       ...options,
     })
+  }
+
+  private _trust?: Trust
+  get trust(): Trust {
+    return (this._trust ??= new Trust({ client: this.client }))
   }
 }
 

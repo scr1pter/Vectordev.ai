@@ -10,6 +10,19 @@ export const MAX_FILES = 200
 /** Maximum total decoded payload size in bytes (10 MB). */
 export const MAX_TOTAL_BYTES = 10 * 1024 * 1024
 
+export const SITE_CONTENT_SECURITY_POLICY = [
+  "sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads",
+  "default-src 'self' data: blob: https:",
+  "script-src 'self' 'unsafe-inline' https:",
+  "style-src 'self' 'unsafe-inline' https:",
+  "connect-src https:",
+  "worker-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ")
+
 /** Marker string used to detect an already-injected badge. */
 export const BADGE_MARKER = "vector-badge"
 
@@ -71,16 +84,30 @@ export function isValidSlug(slug: string): boolean {
 }
 
 /** The blob-storage prefix under which every published site lives. */
-export const SITES_PREFIX = "sites/"
-export const PROMOTIONS_PREFIX = "promotions/"
+const SITES_PREFIX = "sites/"
+const PROMOTIONS_PREFIX = "promotions/"
 
-export function promotionPrefix(project: string): string {
-  return `${PROMOTIONS_PREFIX}${slugify(project)}/`
+export function tenantProjectPrefix(tenant: string, project: string) {
+  if (!isValidSlug(tenant) || !isValidSlug(project)) throw new Error("Valid tenant and project claims are required.")
+  return `tenants/${tenant}/projects/${project}/`
 }
 
-export function promotionPath(project: string, slug: string, timestamp = Date.now()): string {
+export function tenantSitesPrefix(tenant: string, project: string) {
+  return `${tenantProjectPrefix(tenant, project)}${SITES_PREFIX}`
+}
+
+export function tenantSitePath(tenant: string, project: string, slug: string, path: string) {
+  if (!isValidSlug(slug) || !isValidFilePath(path)) throw new Error("A valid site slug and path are required.")
+  return `${tenantSitesPrefix(tenant, project)}${slug}/${path}`
+}
+
+export function tenantPromotionPrefix(tenant: string, project: string) {
+  return `${tenantProjectPrefix(tenant, project)}${PROMOTIONS_PREFIX}`
+}
+
+export function tenantPromotionPath(tenant: string, project: string, slug: string, timestamp = Date.now()) {
   if (!isValidSlug(slug)) throw new Error("A valid deployment slug is required.")
-  return `${promotionPrefix(project)}${timestamp}-${slug}.json`
+  return `${tenantPromotionPrefix(tenant, project)}${timestamp}-${slug}.json`
 }
 
 /**
@@ -91,9 +118,9 @@ export function promotionPath(project: string, slug: string, timestamp = Date.no
  * is one this service could have issued (see {@link isValidSlug}). Returns
  * undefined for keys outside `sites/` or with an unexpected/invalid slug.
  */
-export function slugFromSitesKey(key: string): string | undefined {
-  if (!key.startsWith(SITES_PREFIX)) return undefined
-  const slug = key.slice(SITES_PREFIX.length).split("/")[0] ?? ""
+export function slugFromSitesKey(key: string, prefix: string): string | undefined {
+  if (!key.startsWith(prefix)) return undefined
+  const slug = key.slice(prefix.length).split("/")[0] ?? ""
   return isValidSlug(slug) ? slug : undefined
 }
 
@@ -102,10 +129,10 @@ export function slugFromSitesKey(key: string): string | undefined {
  * (folded folders or full pathnames). Keys that don't resolve to a valid slug
  * are skipped, so partial/garbage entries can't produce phantom deployments.
  */
-export function uniqueSlugsFromKeys(keys: readonly string[]): string[] {
+export function uniqueSlugsFromKeys(keys: readonly string[], prefix: string): string[] {
   const slugs = new Set<string>()
   for (const key of keys) {
-    const slug = slugFromSitesKey(key)
+    const slug = slugFromSitesKey(key, prefix)
     if (slug) slugs.add(slug)
   }
   return [...slugs].sort()
@@ -129,6 +156,41 @@ export function isValidFilePath(path: string): boolean {
     if (segment === "" || segment === "." || segment === "..") return false
   }
   return true
+}
+
+const SOURCE_EXTENSIONS = new Set(["astro", "coffee", "less", "scss", "svelte", "ts", "tsx", "vue"])
+
+export function publicationPathError(path: string, allowSourceFiles = false): string | undefined {
+  if (!isValidFilePath(path)) return "paths must be relative, forward-slash, without empty, '.' or '..' segments"
+  const segments = path.toLowerCase().split("/")
+  if (segments.some((segment) => segment === ".env" || segment.startsWith(".env."))) {
+    return "environment files are private and cannot be published"
+  }
+  if (segments.some((segment) => segment.startsWith(".git"))) {
+    return "Git metadata is private and cannot be published"
+  }
+  if (segments.some((segment) => [".npmrc", ".pnpmfile", ".yarnrc", ".yarnrc.yml"].includes(segment))) {
+    return "package-manager credentials and configuration cannot be published"
+  }
+  const filename = segments.at(-1) ?? ""
+  const extension = filename.includes(".") ? filename.split(".").at(-1) ?? "" : ""
+  if (!allowSourceFiles && (filename.endsWith(".map") || SOURCE_EXTENSIONS.has(extension))) {
+    return "source files and source maps require allowSourceFiles: true"
+  }
+  return undefined
+}
+
+export function siteResponseHeaders(contentType: string) {
+  return {
+    "content-type": contentType,
+    "cache-control": "public, max-age=60",
+    "content-security-policy": SITE_CONTENT_SECURITY_POLICY,
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-resource-policy": "cross-origin",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+    "access-control-allow-origin": "*",
+  }
 }
 
 const MIME_MAP: Record<string, string> = {

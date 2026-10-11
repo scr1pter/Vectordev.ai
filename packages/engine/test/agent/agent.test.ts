@@ -1,8 +1,10 @@
 import { afterEach, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Cause, Effect, Exit, Layer } from "effect"
+import fs from "fs/promises"
+import os from "os"
 import path from "path"
-import { disposeAllInstances, TestInstance } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Agent } from "../../src/agent/agent"
 import { Auth } from "../../src/auth"
@@ -112,6 +114,7 @@ it.instance(
       expect(Permission.evaluate("task", "general", plan!.permission).action).toBe("allow")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         task: {
@@ -159,6 +162,7 @@ it.instance(
       expect(names).not.toContain("localdocsFull")
     }),
   {
+    trusted: true,
     config: {
       references: {
         effect: "github.com/effect/effect-smol",
@@ -228,6 +232,7 @@ it.instance(
       }
     }),
   {
+    trusted: true,
     config: {
       permission: {
         edit: "allow",
@@ -249,6 +254,7 @@ it.instance(
       }
     }),
   {
+    trusted: true,
     config: {
       agent: {
         explore: { permission: { edit: "allow", bash: "allow", task: "allow" } },
@@ -274,7 +280,7 @@ it.instance(
         expect(action("read", ".env")).toBe("ask")
         expect(action("read", "keys/server.pem")).toBe("ask")
         expect(action("bash", "git status --short")).toBe("ask")
-        expect(action("bash", "bun test")).toBe("allow")
+        expect(action("bash", "bun test")).toBe("ask")
         // An ask narrows a command the specialist may run; it never reopens one it may not.
         expect(action("bash", "git push origin main")).toBe("deny")
         expect(action("bash", "git difftool -y --extcmd=sh")).toBe("deny")
@@ -283,6 +289,7 @@ it.instance(
       }
     }),
   {
+    trusted: true,
     config: {
       permission: {
         webfetch: "deny",
@@ -291,6 +298,20 @@ it.instance(
       },
     },
   },
+)
+
+it.instance("read-only specialists require approval before repository-controlled test and build scripts", () =>
+  Effect.gen(function* () {
+    for (const name of ["explore", "review", "judge", "security"] as const) {
+      const agent = yield* load((svc) => svc.get(name))
+      const action = (command: string) => Permission.evaluate("bash", command, agent!.permission).action
+      expect(action("bun test --preload ./malicious.ts")).toBe("ask")
+      expect(action("bun run build -- --config ./malicious.ts")).toBe("ask")
+      expect(action("npm test -- --require ./malicious.cjs")).toBe("ask")
+      expect(action("pnpm run build --config ./malicious.js")).toBe("ask")
+      expect(action("pytest -p malicious_plugin")).toBe("ask")
+    }
+  }),
 )
 
 it.instance(
@@ -307,6 +328,7 @@ it.instance(
       expect(action("grep")).toBe("allow")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         review: { permission: { "*": "allow", websearch: "deny" } },
@@ -341,6 +363,7 @@ it.instance(
       expect(custom?.mode).toBe("all")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         my_custom_agent: {
@@ -368,6 +391,7 @@ it.instance(
       expect(build?.native).toBe(true)
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -392,6 +416,7 @@ it.instance(
       expect(names).not.toContain("explore")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         explore: { disable: true },
@@ -411,7 +436,7 @@ it.instance(
       expect(names).toContain("review")
       expect(names).toContain("build")
     }),
-  { config: { agent: { general: { disable: true } } } },
+  { trusted: true, config: { agent: { general: { disable: true } } } },
 )
 
 it.instance(
@@ -426,6 +451,7 @@ it.instance(
       expect(evalPerm(build, "edit")).toBe("allow")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -449,6 +475,7 @@ it.instance(
       expect(evalPerm(build, "bash")).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         bash: "deny",
@@ -467,6 +494,7 @@ it.instance(
       expect(plan?.steps).toBe(100)
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { steps: 50 },
@@ -484,6 +512,7 @@ it.instance(
       expect(explore?.mode).toBe("primary")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         explore: { mode: "primary" },
@@ -500,6 +529,7 @@ it.instance(
       expect(build?.name).toBe("Builder")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { name: "Builder" },
@@ -516,6 +546,7 @@ it.instance(
       expect(build?.prompt).toBe("Custom system prompt")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { prompt: "Custom system prompt" },
@@ -533,6 +564,7 @@ it.instance(
       expect(build?.options.another_random).toBe(123)
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -553,6 +585,7 @@ it.instance(
       expect(build?.options.another_option).toBe("value")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -578,6 +611,7 @@ it.instance(
       expect(agentB?.mode).toBe("primary")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         agent_a: {
@@ -602,6 +636,7 @@ it.instance(
       expect(names.slice(1)).toEqual(names.slice(1).toSorted((a, b) => a.localeCompare(b)))
     }),
   {
+    trusted: true,
     config: {
       default_agent: "plan",
       agent: {
@@ -654,6 +689,7 @@ it.instance(
       expect(evalPerm(build, "read")).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -675,6 +711,7 @@ it.instance(
       expect(evalPerm(build, "edit")).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -697,12 +734,103 @@ it.instance(
       expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         external_directory: "deny",
       },
     },
   },
+)
+
+it.instance(
+  "a trusted project's allow cannot lift a user-global deny",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* Config.Service
+      const dir = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "vector-global-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+      )
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(dir, "vector.json"),
+          JSON.stringify({
+            permission: { bash: { "*": "deny", "git status*": "allow" }, edit: { "*.lock": "deny" } },
+            tools: { webfetch: false },
+            agent: { build: { permission: { websearch: "deny" } } },
+          }),
+        ),
+      )
+      const previous = Global.Path.config
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          ;(Global.Path as { config: string }).config = dir
+        }).pipe(Effect.andThen(config.invalidate())),
+        () =>
+          Effect.sync(() => {
+            ;(Global.Path as { config: string }).config = previous
+          }).pipe(Effect.andThen(config.invalidate())),
+      )
+
+      const build = yield* load((svc) => svc.get("build"))
+      const plan = yield* load((svc) => svc.get("plan"))
+      const action = (agent: Agent.Info | undefined, permission: string, pattern: string) =>
+        Permission.evaluate(permission, pattern, agent!.permission).action
+      const explore = yield* load((svc) => svc.get("explore"))
+      expect(action(build, "bash", "curl https://example.com")).toBe("deny")
+      expect(action(plan, "bash", "curl https://example.com")).toBe("deny")
+      expect(action(explore, "bash", "git diff")).toBe("deny")
+      expect(action(explore, "edit", "src/index.ts")).toBe("deny")
+      // The user's own exception to the deny still holds.
+      expect(action(build, "bash", "git status")).toBe("allow")
+      expect(action(build, "edit", "bun.lock")).toBe("deny")
+      expect(action(build, "webfetch", "https://example.com")).toBe("deny")
+      expect(action(build, "websearch", "query")).toBe("deny")
+      // The project still decides wherever the user's global config denies nothing.
+      expect(action(build, "edit", "src/index.ts")).toBe("allow")
+      expect(action(build, "read", "src/index.ts")).toBe("allow")
+    }),
+  {
+    trusted: true,
+    config: {
+      permission: { bash: "allow", edit: "allow", webfetch: "allow", websearch: "allow" },
+      agent: { build: { permission: { bash: { "curl *": "allow" }, websearch: "allow" } } },
+    },
+  },
+)
+
+it.instance(
+  "a user-global deny keeps its own exceptions when the project adds no permissions",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* Config.Service
+      const dir = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "vector-global-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })),
+      )
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(dir, "vector.json"),
+          JSON.stringify({ permission: { bash: { "*": "deny", "git status*": "allow" } } }),
+        ),
+      )
+      const previous = Global.Path.config
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          ;(Global.Path as { config: string }).config = dir
+        }).pipe(Effect.andThen(config.invalidate())),
+        () =>
+          Effect.sync(() => {
+            ;(Global.Path as { config: string }).config = previous
+          }).pipe(Effect.andThen(config.invalidate())),
+      )
+
+      const build = yield* load((svc) => svc.get("build"))
+      expect(Permission.evaluate("bash", "git status", build!.permission).action).toBe("allow")
+      expect(Permission.evaluate("bash", "rm -rf /", build!.permission).action).toBe("deny")
+    }),
+  { trusted: true, config: { model: "test/model" } },
 )
 
 it.instance("global tmp directory children are allowed for external_directory", () =>
@@ -725,6 +853,7 @@ it.instance(
       expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: {
@@ -746,6 +875,7 @@ it.instance(
       expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
     }),
   {
+    trusted: true,
     config: {
       permission: {
         external_directory: {
@@ -775,6 +905,7 @@ description: Permission skill.
 `,
         ),
       )
+      yield* Effect.promise(() => trustWorkspace(test.directory))
 
       const home = process.env.VECTOR_TEST_HOME
       process.env.VECTOR_TEST_HOME = test.directory
@@ -785,7 +916,9 @@ description: Permission skill.
       )
 
       const build = yield* load((svc) => svc.get("build"))
-      const target = path.join(skillDir, "reference", "notes.md")
+      // A trusted project's skills load from the approved snapshot, so that copy is the directory the agent reads.
+      const skill = yield* Skill.Service.use((svc) => svc.get("perm-skill"))
+      const target = path.join(path.dirname(skill!.location), "reference", "notes.md")
       expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
     }),
   { git: true },
@@ -801,6 +934,7 @@ it.instance(
       expect(Permission.evaluate("external_directory", target, build!.permission).action).toBe("allow")
     }),
   {
+    trusted: true,
     git: true,
     config: {
       references: {
@@ -833,6 +967,7 @@ it.instance(
       expect(agent).toBe("plan")
     }),
   {
+    trusted: true,
     config: {
       default_agent: "plan",
     },
@@ -847,6 +982,7 @@ it.instance(
       expect(agent).toBe("my_custom")
     }),
   {
+    trusted: true,
     config: {
       default_agent: "my_custom",
       agent: {
@@ -862,6 +998,7 @@ it.instance(
   "defaultAgent throws when default_agent points to subagent",
   () => expectDefaultAgentError('default agent "explore" is a subagent'),
   {
+    trusted: true,
     config: {
       default_agent: "explore",
     },
@@ -872,6 +1009,7 @@ it.instance(
   "defaultAgent throws when default_agent points to hidden agent",
   () => expectDefaultAgentError('default agent "compaction" is hidden'),
   {
+    trusted: true,
     config: {
       default_agent: "compaction",
     },
@@ -882,6 +1020,7 @@ it.instance(
   "defaultAgent throws when default_agent points to non-existent agent",
   () => expectDefaultAgentError('default agent "does_not_exist" not found'),
   {
+    trusted: true,
     config: {
       default_agent: "does_not_exist",
     },
@@ -897,6 +1036,7 @@ it.instance(
       expect(agent).toBe("plan")
     }),
   {
+    trusted: true,
     config: {
       agent: {
         build: { disable: true },
@@ -909,6 +1049,7 @@ it.instance(
   "defaultAgent throws when all primary agents are disabled",
   () => expectDefaultAgentError("no primary visible agent found"),
   {
+    trusted: true,
     config: {
       agent: {
         build: { disable: true },

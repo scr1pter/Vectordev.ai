@@ -52,7 +52,21 @@ export async function readRawBody(request: ApiRequest, limit = 1_000_000) {
 }
 
 export async function readJson<T>(request: ApiRequest, limit = 64_000): Promise<T> {
-  if (request.body && typeof request.body === "object") return request.body as T
+  if (request.body !== undefined) {
+    const serialized = typeof request.body === "string" ? request.body : JSON.stringify(request.body)
+    if (typeof serialized !== "string") {
+      throw new ApiError(400, "INVALID_JSON", "The request body must be valid JSON.")
+    }
+    if (Buffer.byteLength(serialized, "utf8") > limit) {
+      throw new ApiError(413, "BODY_TOO_LARGE", "The request body is too large.")
+    }
+    if (typeof request.body !== "string") return request.body as T
+    try {
+      return JSON.parse(request.body) as T
+    } catch {
+      throw new ApiError(400, "INVALID_JSON", "The request body must be valid JSON.")
+    }
+  }
   const raw = await readRawBody(request, limit)
   if (!raw.length) return {} as T
   try {

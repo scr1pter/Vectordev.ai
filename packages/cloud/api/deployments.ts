@@ -1,5 +1,6 @@
 import { del, list } from "@vercel/blob"
-import { SITES_PREFIX, isValidSlug, uniqueSlugsFromKeys } from "../src/shared"
+import { CloudAuthorizationError, authorizeCloudRequest } from "../src/authorization"
+import { isValidSlug, tenantSitesPrefix, uniqueSlugsFromKeys } from "../src/shared"
 
 function json(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -8,29 +9,14 @@ function json(status: number, body: Record<string, unknown>): Response {
   })
 }
 
-/** Same token gate as the publish function: 500 if unset, 401 on mismatch. */
-function authError(request: Request): Response | undefined {
-  const expected = process.env["VECTOR_CLOUD_TOKEN"]
-  if (!expected) {
-    return json(500, {
-      ok: false,
-      error: "Server misconfigured: VECTOR_CLOUD_TOKEN is not set on this deployment.",
-    })
-  }
-  const auth = request.headers.get("authorization") ?? ""
-  if (auth !== `Bearer ${expected}`) {
-    return json(401, { ok: false, error: "Unauthorized. Pass 'authorization: Bearer <token>'." })
-  }
-  return undefined
-}
-
 /** GET /api/deployments — list every published site as { slug, url }. */
-async function listDeployments(request: Request): Promise<Response> {
+async function listDeployments(request: Request, claims: { tenant: string; project: string }): Promise<Response> {
+  const prefix = tenantSitesPrefix(claims.tenant, claims.project)
   const folders: string[] = []
   let cursor: string | undefined
   try {
     do {
-      const page = await list({ prefix: SITES_PREFIX, mode: "folded", cursor })
+      const page = await list({ prefix, mode: "folded", cursor })
       folders.push(...page.folders)
       cursor = page.hasMore ? page.cursor : undefined
     } while (cursor)
@@ -42,15 +28,15 @@ async function listDeployments(request: Request): Promise<Response> {
   }
 
   const origin = new URL(request.url).origin
-  const deployments = uniqueSlugsFromKeys(folders).map((slug) => ({
+  const deployments = uniqueSlugsFromKeys(folders, prefix).map((slug) => ({
     slug,
-    url: `${origin}/s/${slug}/`,
+    url: `${origin}/s/${claims.tenant}/${claims.project}/${slug}/`,
   }))
   return json(200, { ok: true, deployments })
 }
 
 /** DELETE /api/deployments?slug=<slug> — remove every blob under a site. */
-async function deleteDeployment(request: Request): Promise<Response> {
+async function deleteDeployment(request: Request, claims: { tenant: string; project: string }): Promise<Response> {
   const url = new URL(request.url)
   let slug = url.searchParams.get("slug") ?? ""
   if (!slug) {
@@ -67,7 +53,7 @@ async function deleteDeployment(request: Request): Promise<Response> {
   let cursor: string | undefined
   try {
     do {
-      const page = await list({ prefix: `${SITES_PREFIX}${slug}/`, cursor })
+      const page = await list({ prefix: `${tenantSitesPrefix(claims.tenant, claims.project)}${slug}/`, cursor })
       urls.push(...page.blobs.map((blob) => blob.url))
       cursor = page.hasMore ? page.cursor : undefined
     } while (cursor)
@@ -94,10 +80,17 @@ async function deleteDeployment(request: Request): Promise<Response> {
 }
 
 export default async function handler(request: Request): Promise<Response> {
-  const denied = authError(request)
-  if (denied) return denied
+  const claims = (() => {
+    try {
+      return authorizeCloudRequest(request)
+    } catch (error) {
+      if (error instanceof CloudAuthorizationError) return json(error.status, { ok: false, error: error.message })
+      throw error
+    }
+  })()
+  if (claims instanceof Response) return claims
 
-  if (request.method === "GET") return listDeployments(request)
-  if (request.method === "DELETE") return deleteDeployment(request)
+  if (request.method === "GET") return listDeployments(request, claims)
+  if (request.method === "DELETE") return deleteDeployment(request, claims)
   return json(405, { ok: false, error: "Method not allowed. Use GET or DELETE." })
 }

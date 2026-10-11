@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/p/:project/:path*", "destination": "/api/site?project=:project&path=:path*" },
-    { "source": "/p/:project", "destination": "/api/site?project=:project&path=" },
-    { "source": "/s/:slug/:path*", "destination": "/api/site?slug=:slug&path=:path*" },
-    { "source": "/s/:slug", "destination": "/api/site?slug=:slug&path=" }
+    { "source": "/p/:tenant/:project/:path*", "destination": "/api/site?tenant=:tenant&project=:project&path=:path*" },
+    { "source": "/p/:tenant/:project", "destination": "/api/site?tenant=:tenant&project=:project&path=" },
+    { "source": "/s/:tenant/:project/:slug/:path*", "destination": "/api/site?tenant=:tenant&project=:project&slug=:slug&path=:path*" },
+    { "source": "/s/:tenant/:project/:slug", "destination": "/api/site?tenant=:tenant&project=:project&slug=:slug&path=" }
   ]
 }

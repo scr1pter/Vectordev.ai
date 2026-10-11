@@ -128,6 +128,11 @@ function handle(raw) {
     return
   }
 
+  if (data.method === "textDocument/hover") {
+    sendResponse(data.id, { contents: process.cwd() })
+    return
+  }
+
   if (data.method === "test/request-configuration") {
     const id = sendRequest("workspace/configuration", data.params)
     pendingClientRequests.set(id, data.id)

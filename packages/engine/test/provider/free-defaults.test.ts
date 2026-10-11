@@ -56,7 +56,7 @@ empty.instance(
       expect(Provider.defaultModelIDs(yield* provider.list()).openrouter).toBeUndefined()
       expect(yield* provider.defaultModel().pipe(Effect.result)).toMatchObject({ _tag: "Failure" })
     }),
-  { config },
+  { trusted: true, config },
 )
 
 empty.instance(
@@ -70,6 +70,7 @@ empty.instance(
       expect(yield* provider.defaultModel().pipe(Effect.result)).toMatchObject({ _tag: "Failure" })
     }),
   {
+    trusted: true,
     config: {
       provider: {
         openrouter: { ...config.provider.openrouter, whitelist: ["acme/missing:free"] },
@@ -98,7 +99,7 @@ it.instance(
         freeModel: { source: "openrouter" },
       })
     }),
-  { config },
+  { trusted: true, config },
 )
 
 it.instance(
@@ -111,7 +112,7 @@ it.instance(
         modelID: ModelV2.ID.make("acme/paid"),
       })
     }),
-  { config: { ...config, model: "openrouter/acme/paid" } },
+  { trusted: true, config: { ...config, model: "openrouter/acme/paid" } },
 )
 
 for (const id of ["acme/missing:free", "acme/unreviewed:FREE"])
@@ -128,5 +129,5 @@ for (const id of ["acme/missing:free", "acme/unreviewed:FREE"])
           yield* provider.getModel(ProviderV2.ID.openrouter, ModelV2.ID.make(id)).pipe(Effect.result),
         ).toMatchObject({ _tag: "Failure" })
       }),
-    { config: { ...config, model: `openrouter/${id}` } },
+    { trusted: true, config: { ...config, model: `openrouter/${id}` } },
   )

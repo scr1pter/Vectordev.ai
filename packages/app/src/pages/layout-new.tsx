@@ -3647,7 +3647,7 @@ export default function NewLayout(props: ParentProps) {
               <a
                 href={record().pullRequestUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 class="inline-flex h-9 items-center rounded-[9px] border border-[color:var(--vx-line)] px-3 text-[11.5px] text-white/65 transition hover:bg-white/[0.05] hover:text-white"
               >
                 View PR
@@ -4904,7 +4904,7 @@ export default function NewLayout(props: ParentProps) {
                     <a
                       href={record().pullRequestUrl}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       class="inline-flex h-9 items-center rounded-[10px] border border-[color:var(--vx-line)] px-3 text-[12px] text-white/65 transition hover:bg-white/[0.05] hover:text-white"
                     >
                       View PR

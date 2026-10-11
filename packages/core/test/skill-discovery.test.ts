@@ -10,7 +10,7 @@ import { Global } from "@vectordevai/core/global"
 import { SkillDiscovery } from "@vectordevai/core/skill/discovery"
 import { tmpdir } from "./fixture/tmpdir"
 
-const base = "https://skills.example.test/catalog/"
+const base = "https://1.1.1.1/catalog/"
 
 async function pull(skills: unknown[], files: Record<string, string> = {}, cache?: Awaited<ReturnType<typeof tmpdir>>) {
   const tmp = cache ?? (await tmpdir())

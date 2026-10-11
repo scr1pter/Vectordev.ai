@@ -2,11 +2,28 @@
 import { Effect, Stream, Schema } from "effect"
 import { Sse } from "effect/unstable/encoding"
 import { HttpClientError } from "effect/unstable/http"
-import { HttpApiClient } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiClient } from "effect/unstable/httpapi"
 import { ClientApi } from "../contract"
 import { ClientError } from "./client-error"
 
-type RawClient = HttpApiClient.ForApi<typeof ClientApi>
+const sameOriginApi = <A>(api: A): A => {
+  HttpApi.reflect(api as HttpApi.AnyWithProps, {
+    onGroup() {},
+    onEndpoint({ endpoint }) {
+      if (
+        endpoint.path !== "*" &&
+        (!endpoint.path.startsWith("/") || endpoint.path.startsWith("//") || endpoint.path.includes("\\"))
+      ) {
+        throw new Error(`Refusing cross-origin endpoint path: ${endpoint.path}`)
+      }
+    },
+  })
+  return api
+}
+
+const SafeApi = sameOriginApi(ClientApi)
+
+type RawClient = HttpApiClient.ForApi<typeof SafeApi>
 
 const mapClientError = <E>(error: E) =>
   HttpClientError.isHttpClientError(error) || Schema.isSchemaError(error) || Sse.Retry.is(error)
@@ -775,4 +792,4 @@ const adaptClient = (raw: RawClient) => ({
 })
 
 export const make = (options?: { readonly baseUrl?: URL | string }) =>
-  HttpApiClient.make(ClientApi, options).pipe(Effect.map(adaptClient))
+  HttpApiClient.make(SafeApi, options).pipe(Effect.map(adaptClient))

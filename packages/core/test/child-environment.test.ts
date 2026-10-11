@@ -23,6 +23,20 @@ describe("untrustedChildEnvironment", () => {
     expect(environment).toEqual({ OPENAI_API_KEY: "provider-secret", PATH: "/usr/bin:/bin" })
   })
 
+  test("keeps the user's own runtime variables for their commands", () => {
+    const user = {
+      NODE_OPTIONS: "--max-old-space-size=8192",
+      PYTHONPATH: "/work/src",
+      LD_LIBRARY_PATH: "/usr/local/cuda/lib64",
+      DYLD_FALLBACK_LIBRARY_PATH: "/opt/homebrew/lib",
+      PERL5LIB: "/home/user/perl5/lib/perl5",
+      CLASSPATH: "/work/lib/app.jar",
+      BUN_OPTIONS: "--smol",
+    }
+
+    expect(untrustedChildEnvironment(user)).toEqual(user)
+  })
+
   test("does not expose scrubbed values to a real child process", () => {
     const environment = untrustedChildEnvironment(process.env, {
       VECTOR_CONSOLE_TOKEN: "console-secret",
@@ -53,14 +67,15 @@ describe("untrustedChildEnvironment", () => {
   })
 })
 
-
 test("foreign runtime secret suffixes are stripped without dropping provider keys", () => {
-  expect(untrustedChildEnvironment({
-    LEGACY_FIXTURE_SERVER_PASSWORD: "synthetic",
-    legacy_fixture_server_guest_password: "synthetic",
-    LEGACY_FIXTURE_AUTH_CONTENT: "synthetic",
-    LEGACY_FIXTURE_CONSOLE_TOKEN: "synthetic",
-    OPENAI_API_KEY: "fixture-key",
-    GITHUB_TOKEN: "fixture-git-token",
-  })).toEqual({ OPENAI_API_KEY: "fixture-key", GITHUB_TOKEN: "fixture-git-token" })
+  expect(
+    untrustedChildEnvironment({
+      LEGACY_FIXTURE_SERVER_PASSWORD: "synthetic",
+      legacy_fixture_server_guest_password: "synthetic",
+      LEGACY_FIXTURE_AUTH_CONTENT: "synthetic",
+      LEGACY_FIXTURE_CONSOLE_TOKEN: "synthetic",
+      OPENAI_API_KEY: "fixture-key",
+      GITHUB_TOKEN: "fixture-git-token",
+    }),
+  ).toEqual({ OPENAI_API_KEY: "fixture-key", GITHUB_TOKEN: "fixture-git-token" })
 })

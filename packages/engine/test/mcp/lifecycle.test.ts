@@ -110,7 +110,7 @@ class MockStdioTransport {
   pid = 12345
   command: string
   constructor(opts: any) {
-    this.command = opts.command
+    this.command = path.basename(opts.command)
     if (lastCreatedClientName) stdioOptsByName.set(lastCreatedClientName, opts)
   }
   async start() {
@@ -293,6 +293,7 @@ beforeEach(() => {
 
 // Import after mocks
 const { MCP } = await import("../../src/mcp/index")
+const { Config } = await import("../../src/config/config")
 const { McpOAuthCallback } = await import("../../src/mcp/oauth-callback")
 
 const it = testEffect(LayerNode.compile(MCP.node))
@@ -321,7 +322,7 @@ it.instance(
         expect(result).toEqual({ roots: [{ uri: pathToFileURL(directory).href }] })
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -335,7 +336,7 @@ it.instance(
         expect(stdioOptsByName.get("rel-cwd")?.cwd).toBe(path.resolve(directory, "plugins/sub"))
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -352,7 +353,7 @@ it.instance(
         expect((yield* mcp.status())["unsafe-remote"]).toBeUndefined()
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -381,7 +382,7 @@ it.instance(
         expect(yield* mcp.status()).toEqual({})
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -415,7 +416,7 @@ it.instance(
         expect(serverState.listToolsCalls).toBe(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -439,7 +440,7 @@ it.instance(
         })
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -469,7 +470,7 @@ it.instance(
         expect(instructions.some((item) => item.name === "blank-server")).toBe(false)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -520,7 +521,7 @@ it.instance(
         expect(serverState.listResourceTemplatesCalls).toBe(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -544,7 +545,7 @@ it.instance(
         expect(yield* mcp.tools()).toEqual({})
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -571,7 +572,7 @@ it.instance(
         expect(serverState.listPromptsCalls).toBe(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -609,7 +610,7 @@ it.instance(
         expect(serverState.listToolsCalls).toBe(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -643,13 +644,18 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
-        fast: { type: "local", command: ["fast"] },
-        listing: { type: "local", command: ["listing"] },
-        slow: { type: "local", command: ["slow"] },
+        fast: { type: "local", command: ["./fast"] },
+        listing: { type: "local", command: ["./listing"] },
+        slow: { type: "local", command: ["./slow"] },
       },
     },
+    init: (directory) =>
+      Effect.promise(() =>
+        Promise.all(["fast", "listing", "slow"].map((command) => Bun.write(path.join(directory, command), "fixture"))),
+      ).pipe(Effect.asVoid),
   },
 )
 
@@ -684,6 +690,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "disc-server": {
@@ -722,6 +729,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "reconn-server": {
@@ -737,7 +745,7 @@ it.instance(
 // Test: add()/connect()/disconnect() persist to the project-local config
 // ========================================================================
 
-it.instance("add persists the server to .vector/vector.local.json and toggles persist enabled", () =>
+it.instance("add persists the server outside the workspace and toggles persist enabled", () =>
   MCP.Service.use((mcp: MCPNS.Interface) =>
     Effect.gen(function* () {
       const { directory } = yield* TestInstance
@@ -750,7 +758,11 @@ it.instance("add persists the server to .vector/vector.local.json and toggles pe
         environment: { TOKEN: "secret" },
       })
 
-      const file = path.join(directory, ".vector", "vector.local.json")
+      // The integration is the user's, not the repository's, so nothing is written into the workspace.
+      expect(yield* Effect.promise(() => Bun.file(path.join(directory, ".vector", "vector.local.json")).exists())).toBe(
+        false,
+      )
+      const file = Config.integrationStore(directory)
       const written = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
       expect(written.mcp["persist-server"]).toEqual({
         type: "local",
@@ -765,9 +777,6 @@ it.instance("add persists the server to .vector/vector.local.json and toggles pe
       yield* mcp.connect("persist-server")
       const afterConnect = JSON.parse(yield* Effect.promise(() => Bun.file(file).text()))
       expect(afterConnect.mcp["persist-server"].enabled).toBe(true)
-
-      const gitignore = yield* Effect.promise(() => Bun.file(path.join(directory, ".vector", ".gitignore")).text())
-      expect(gitignore).toContain("vector.local.json")
     }),
   ),
 )
@@ -793,7 +802,7 @@ it.instance("vault placeholders resolve only in the child process and removal cl
       expect(options?.args).toEqual(["resolved-argument"])
       expect(options?.env?.TOKEN).toBe("resolved-token")
 
-      const file = path.join(directory, ".vector", "vector.local.json")
+      const file = Config.integrationStore(directory)
       const written = yield* Effect.promise(() => Bun.file(file).text())
       expect(written).toContain("{vault:argument}")
       expect(written).toContain("{vault:token}")
@@ -862,7 +871,7 @@ it.instance(
         expect(secondState.closed).toBe(false)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -906,6 +915,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "good-server": {
@@ -943,7 +953,7 @@ it.instance(
         expect(serverState.closed).toBe(true)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -977,7 +987,7 @@ it.instance(
         expect(serverState.requestCalls).toBe(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1000,7 +1010,7 @@ it.instance(
         expect(serverState.requestCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1028,6 +1038,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "disabled-server": {
@@ -1066,6 +1077,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "prompt-server": {
@@ -1102,6 +1114,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "resource-server": {
@@ -1133,7 +1146,7 @@ it.instance(
         expect(serverState.readResourceTimeout).toBe(2500)
       }),
     ),
-  { config: { mcp: {}, experimental: { mcp_timeout: 5000 } } },
+  { trusted: true, config: { mcp: {}, experimental: { mcp_timeout: 5000 } } },
 )
 
 it.instance(
@@ -1159,7 +1172,7 @@ it.instance(
         expect(serverState.listPromptsCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1185,7 +1198,7 @@ it.instance(
         expect(serverState.listResourcesCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1211,7 +1224,7 @@ it.instance(
         expect(serverState.listResourcesCalls).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 it.instance(
@@ -1235,6 +1248,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "prompt-disc-server": {
@@ -1264,7 +1278,7 @@ it.instance(
         expect(status["nonexistent"]).toBeUndefined()
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1283,7 +1297,7 @@ it.instance(
         }
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1299,7 +1313,7 @@ it.instance(
         expect(Object.keys(tools).length).toBe(0)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1333,6 +1347,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "fail-connect": {
@@ -1404,6 +1419,7 @@ it.instance(
       }),
     ),
   {
+    trusted: true,
     config: {
       mcp: {
         "my.special-server": {
@@ -1441,7 +1457,7 @@ it.instance(
         expect(transportCloseCount).toBeGreaterThanOrEqual(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1470,7 +1486,7 @@ it.instance(
         expect(transportCloseCount).toBeGreaterThanOrEqual(1)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )
 
 // ========================================================================
@@ -1500,5 +1516,5 @@ it.instance(
         expect(transportCloseCount).toBeGreaterThanOrEqual(2)
       }),
     ),
-  { config: { mcp: {} } },
+  { trusted: true, config: { mcp: {} } },
 )

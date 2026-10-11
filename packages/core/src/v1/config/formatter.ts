@@ -5,6 +5,7 @@ import { Schema } from "effect"
 export const Entry = Schema.Struct({
   disabled: Schema.optional(Schema.Boolean),
   command: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  cwd: Schema.optional(Schema.String),
   environment: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   extensions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 })

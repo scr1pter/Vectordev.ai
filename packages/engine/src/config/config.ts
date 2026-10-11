@@ -3,7 +3,8 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import { serviceUse } from "@vectordevai/core/effect/service-use"
 import path from "path"
-import { pathToFileURL } from "url"
+import { createHash } from "node:crypto"
+import { fileURLToPath, pathToFileURL } from "url"
 import os from "os"
 import { mergeDeep } from "remeda"
 import { Global } from "@vectordevai/core/global"
@@ -35,10 +36,13 @@ import { ConfigParse } from "./parse"
 import { ConfigSchema } from "./schema"
 import { ConfigPaths } from "./paths"
 import { ConfigImport } from "./import-settings"
+import { GlobalBus } from "@/bus/global"
+import { TuiEvent } from "@/server/tui-event"
 import { ConfigPlugin } from "./plugin"
 import { ConfigDependencies } from "./dependencies"
 import { ConfigVariable } from "./variable"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 
 // Custom merge function that concatenates array fields instead of replacing them
 // Keep remeda's deep conditional merge type out of hot config-loading paths; TS profiling showed it dominates here.
@@ -63,6 +67,218 @@ function normalizeLoadedConfig(data: unknown) {
   delete copy.keybinds
   delete copy.tui
   return copy
+}
+
+function projectExecutableConfig(config: Info, trusted: boolean, base: Info): Info {
+  const next = { ...config }
+  if (!trusted) {
+    const permission = authorityNarrowingPermission(next.permission)
+    if (permission) next.permission = permission
+    else delete next.permission
+    if (next.tools) {
+      next.tools = Object.fromEntries(Object.entries(next.tools).filter(([, enabled]) => !enabled))
+      if (!Object.keys(next.tools).length) delete next.tools
+    }
+    delete next.plugin
+    delete next.mcp
+    delete next.lsp
+    delete next.formatter
+    delete next.command
+    delete next.provider
+    delete next.agent
+    delete next.mode
+    delete next.shell
+    delete next.instructions
+    delete next.model
+    delete next.small_model
+    delete next.default_agent
+    delete next.skills
+    if (next.enabled_providers && base.enabled_providers) {
+      const enabled = new Set(base.enabled_providers)
+      next.enabled_providers = next.enabled_providers.filter((provider) => enabled.has(provider))
+    }
+    if (next.disabled_providers) {
+      next.disabled_providers = Array.from(new Set([...(base.disabled_providers ?? []), ...next.disabled_providers]))
+    }
+    // Sharing and undo snapshots may only get safer: an untrusted project can turn sharing down or off, never on,
+    // and cannot turn snapshots off.
+    if (next.share && (base.share === "disabled" || next.share === "auto")) delete next.share
+    if (next.autoshare) delete next.autoshare
+    if (next.snapshot === false) delete next.snapshot
+    return next
+  }
+  if (next.provider) {
+    next.provider = Object.fromEntries(
+      Object.entries(next.provider).filter(([, provider]) => projectProviderEndpointsAllowed(provider)),
+    )
+  }
+  return next
+}
+
+function bindTrustedProjectExecutables(
+  config: Info,
+  trusted: WorkspaceTrust.TrustedSnapshot,
+  workspace: string,
+  source: string,
+): Info {
+  const next = { ...config }
+  if (next.shell) {
+    const shell = trustedExecutableValue(next.shell, path.dirname(source), trusted)
+    if (shell) next.shell = shell
+    else delete next.shell
+  }
+  if (next.plugin) {
+    next.plugin = next.plugin.flatMap((item) => {
+      const mapped = trustedExecutableValue(ConfigPlugin.pluginSpecifier(item), path.dirname(source), trusted, true)
+      if (!mapped) return []
+      return [Array.isArray(item) ? ([mapped, item[1]] as ConfigPluginV1.Spec) : mapped]
+    })
+  }
+  if (isRecord(next.formatter)) {
+    next.formatter = rewriteCommandEntries(next.formatter, workspace, trusted) as Info["formatter"]
+  }
+  if (isRecord(next.lsp)) next.lsp = rewriteCommandEntries(next.lsp, workspace, trusted) as Info["lsp"]
+  if (isRecord(next.mcp)) {
+    next.mcp = Object.fromEntries(
+      Object.entries(next.mcp)
+        .map(([name, entry]) => {
+          // A project's remote server gets HTTPS or loopback HTTP only; plain HTTP to the user's network is for
+          // servers the user adds themselves.
+          if ("url" in entry && typeof entry.url === "string")
+            return [name, WorkspaceTrust.remoteUrlAllowed(entry.url) ? entry : undefined]
+          if (!("command" in entry) || !Array.isArray(entry.command)) return [name, entry]
+          const cwd = "cwd" in entry && typeof entry.cwd === "string" ? path.resolve(workspace, entry.cwd) : workspace
+          const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, entry.environment)
+          if (!command) return [name, undefined]
+          return [
+            name,
+            {
+              ...entry,
+              command: command.command,
+              cwd: command.cwd,
+            },
+          ]
+        })
+        .filter((entry) => entry[1] !== undefined),
+    ) as Info["mcp"]
+  }
+  return next
+}
+
+function rewriteCommandEntries(value: Record<string, unknown>, base: string, trusted: WorkspaceTrust.TrustedSnapshot) {
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([name, entry]) => {
+      if (!isRecord(entry)) return [[name, entry]]
+      // An entry without a command overrides a built-in formatter, which still launches with this environment, so a
+      // PATH or preload variable would run live, unapproved programs just as a project command would.
+      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
+      const projectEnvironment = stringEnvironment(environment)
+      if (
+        environment !== undefined &&
+        (!projectEnvironment || WorkspaceTrust.unsafeProjectEnvironment(projectEnvironment))
+      )
+        return []
+      if (!Array.isArray(entry.command)) {
+        if (typeof entry.cwd !== "string") return [[name, entry]]
+        const cwd = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, entry.cwd))
+        if (!cwd) return []
+        return [[name, { ...entry, cwd }]]
+      }
+      if (!entry.command.every((item): item is string => typeof item === "string")) return []
+      const cwd = typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
+      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, projectEnvironment)
+      if (!command) return []
+      return [[name, { ...entry, command: command.command, cwd: command.cwd }]]
+    }),
+  )
+}
+
+function stringEnvironment(value: unknown) {
+  if (!isRecord(value)) return
+  const entries = Object.entries(value)
+  if (entries.some(([, item]) => typeof item !== "string")) return
+  return Object.fromEntries(entries) as Record<string, string>
+}
+
+function trustedExecutableValue(
+  value: unknown,
+  base: string,
+  trusted: WorkspaceTrust.TrustedSnapshot,
+  preserveFileUrl = false,
+) {
+  if (typeof value !== "string") return
+  if (value.startsWith("file:")) {
+    const target = WorkspaceTrust.materializedPathOption(trusted, fileURLToPath(value))
+    if (!target) return
+    return preserveFileUrl ? pathToFileURL(target).href : target
+  }
+  if (/^[A-Za-z]:/.test(value) || value.startsWith("\\\\")) {
+    const target = WorkspaceTrust.materializedPathOption(trusted, value)
+    if (!target) return
+    return preserveFileUrl ? pathToFileURL(target).href : target
+  }
+  if (URL.canParse(value)) return value
+  if (preserveFileUrl && !path.isAbsolute(value) && !value.startsWith(".") && !/^[A-Za-z]:[\\/]/.test(value)) {
+    return value
+  }
+  if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\")) return value
+  const target = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, value))
+  if (!target) return
+  return preserveFileUrl ? pathToFileURL(target).href : target
+}
+
+function authorityNarrowingPermission(permission: ConfigPermissionV1.Info | undefined) {
+  if (!permission) return
+  const entries = Object.entries(permission)
+    .map(([name, rule]) => {
+      if (rule === "deny") return [name, rule] as const
+      if (typeof rule === "string") return
+      const patterns = Object.fromEntries(Object.entries(rule).filter(([, action]) => action === "deny"))
+      if (Object.keys(patterns).length) return [name, patterns] as const
+    })
+    .filter((entry) => entry !== undefined)
+  if (entries.length) return Object.fromEntries(entries)
+}
+
+function toolPermissions(tools: Record<string, boolean>) {
+  return Object.fromEntries(
+    Object.entries(tools).map(([tool, enabled]) => [
+      tool === "write" || tool === "patch" ? "edit" : tool,
+      enabled ? "allow" : "deny",
+    ]),
+  ) as Record<string, ConfigPermissionV1.Action>
+}
+
+// Whether a project source allows or asks for anything, which could replace a user deny once merged.
+function grantsPermission(config: Pick<Info, "permission" | "tools" | "agent" | "mode">) {
+  const permissions = [
+    config.permission,
+    ...Object.values(config.agent ?? {}).map((agent) => agent?.permission),
+    ...Object.values(config.mode ?? {}).map((mode) => mode?.permission),
+  ]
+  return (
+    Object.values(config.tools ?? {}).some(Boolean) ||
+    permissions.some((permission) =>
+      Object.values(permission ?? {}).some((rule) =>
+        typeof rule === "string" ? rule !== "deny" : Object.values(rule).some((action) => action !== "deny"),
+      ),
+    )
+  )
+}
+
+function projectProviderEndpointsAllowed(provider: unknown) {
+  if (!isRecord(provider)) return true
+  const options = isRecord(provider.options) ? provider.options : undefined
+  for (const value of [options?.baseURL, options?.baseUrl]) {
+    if (typeof value === "string" && !WorkspaceTrust.remoteUrlAllowed(value)) return false
+  }
+  if (!isRecord(provider.models)) return true
+  return Object.values(provider.models).every((model) => {
+    if (!isRecord(model) || !isRecord(model.options)) return true
+    return [model.options.baseURL, model.options.baseUrl].every(
+      (value) => typeof value !== "string" || WorkspaceTrust.remoteUrlAllowed(value),
+    )
+  })
 }
 
 async function substituteWellKnownRemoteConfig(input: {
@@ -122,6 +338,22 @@ type State = {
   config: Info
   directories: string[]
   deps: Fiber.Fiber<void>[]
+  trust: WorkspaceTrust.Snapshot
+  trusted: boolean
+  trustedSnapshot: WorkspaceTrust.TrustedSnapshot | undefined
+  ceiling: PermissionCeiling | undefined
+}
+
+export type TrustStatus = WorkspaceTrust.Status & {
+  /** The project has config or .vector content that is being ignored because it is not trusted. */
+  ignored: boolean
+}
+
+// The permissions the user's own config sources declare, merged without any project file. Set only when a
+// trusted project grants something, because the merged config then lets a project allow replace a user deny.
+export type PermissionCeiling = {
+  permission: ConfigPermissionV1.Info
+  agent: Record<string, ConfigPermissionV1.Info>
 }
 
 export interface Interface {
@@ -134,7 +366,11 @@ export interface Interface {
   readonly storedMcp: (name: string) => Effect.Effect<Record<string, unknown>>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
+  readonly trustedPath: (path: string) => Effect.Effect<string | undefined>
   readonly waitForDependencies: () => Effect.Effect<void>
+  readonly trust: () => Effect.Effect<TrustStatus>
+  readonly approve: () => Effect.Effect<void>
+  readonly permissionCeiling: () => Effect.Effect<PermissionCeiling | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Config") {}
@@ -145,6 +381,19 @@ export const use = serviceUse(Service)
 // tokens/headers) are written here instead of the committable vector.json, so the files
 // must stay gitignored.
 const LOCAL_CONFIG_FILES = ["vector.local.json", "vector.local.jsonc"]
+
+/**
+ * Where the integrations a user adds from the app are kept for one project. They are the user's choice, not the
+ * repository's, so they live outside the workspace: trust neither drops them nor is revoked when they change, and a
+ * cloned repository cannot plant one.
+ */
+export function integrationStore(root: string) {
+  return path.join(
+    Global.Path.state,
+    "integrations",
+    `${createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 32)}.json`,
+  )
+}
 
 function globalConfigFile() {
   const candidates = ["vector.jsonc", "vector.json", "config.json"].map((file) => path.join(Global.Path.config, file))
@@ -239,16 +488,19 @@ const layer = Layer.effect(
       options: { path: string } | { dir: string; source: string },
       env?: Record<string, string>,
       preserveSource = false,
+      opaqueCredentials = false,
     ) {
       const source = "path" in options ? options.path : options.source
-      const expanded = yield* Effect.promise(() =>
-        ConfigVariable.substitute(
-          "path" in options
-            ? { text, type: "path", path: options.path, env }
-            : { text, type: "virtual", ...options, env },
-        ),
-      )
-      const parsed = ConfigParse.jsonc(expanded, source)
+      const parseSource =
+        "path" in options ? ({ type: "path", path: options.path } as const) : ({ type: "virtual", ...options } as const)
+      // An untrusted project's {env:...} and {file:...} stay as written: reading them is the project's choice, not the
+      // user's, and a device or FIFO path could hang the load.
+      const parsed = opaqueCredentials
+        ? ConfigParse.jsonc(text, source)
+        : ConfigParse.jsonc(
+            yield* Effect.promise(() => ConfigVariable.substitute({ ...parseSource, text, env })),
+            source,
+          )
       const data = ConfigParse.schema(ConfigV1.Info, normalizeLoadedConfig(parsed), source)
       if (!("path" in options)) return data
 
@@ -265,12 +517,13 @@ const layer = Layer.effect(
       filepath: string,
       env?: Record<string, string>,
       preserveSource = false,
+      opaqueCredentials = false,
     ) {
       yield* Effect.logInfo("loading", { path: filepath })
       const text = yield* readConfigFile(filepath)
       if (!text) return {} as Info
       const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
-      return yield* loadConfig(normalized, { path: filepath }, env, preserveSource)
+      return yield* loadConfig(normalized, { path: filepath }, env, preserveSource, opaqueCredentials)
     })
 
     const loadGlobal = Effect.fnUntraced(function* (env?: Record<string, string>) {
@@ -332,6 +585,115 @@ const layer = Layer.effect(
     const loadInstanceState = Effect.fn("Config.loadInstanceState")(
       function* (ctx: InstanceContext) {
         const auth = yield* authSvc.all().pipe(Effect.orDie)
+        const projectFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+          ? []
+          : yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)
+        const projectTuiFiles = Flag.VECTOR_DISABLE_PROJECT_CONFIG
+          ? []
+          : yield* ConfigPaths.files("tui", ctx.directory, ctx.worktree).pipe(Effect.orDie)
+        const allDirectories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
+        const projectDirectories = allDirectories.filter((directory) => containsPath(directory, ctx))
+        const localAgentConfig =
+          Flag.VECTOR_AGENT_CONFIG && containsPath(Flag.VECTOR_AGENT_CONFIG, ctx) ? [Flag.VECTOR_AGENT_CONFIG] : []
+        const prepareProjectFile = Effect.fnUntraced(function* (filepath: string) {
+          const text = yield* readConfigFile(filepath)
+          if (!text) return
+          const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
+          const updated = ConfigSchema.rewrite(normalized)
+          if (updated === normalized) return
+          yield* fs.writeFileString(filepath, updated).pipe(Effect.catch(() => Effect.void))
+        })
+        const trustWorkspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
+        const captureTrustSnapshot = () =>
+          WorkspaceTrust.snapshot(trustWorkspace, [
+            ...projectFiles,
+            ...projectTuiFiles,
+            ...projectDirectories,
+            ...localAgentConfig,
+          ]).catch((cause) => WorkspaceTrust.unavailableSnapshot(trustWorkspace, cause))
+        const existingTrustSnapshot = yield* Effect.promise(captureTrustSnapshot)
+        const snapshotFailure = WorkspaceTrust.unavailableReason(existingTrustSnapshot)
+        if (snapshotFailure) {
+          yield* Effect.logWarning("disabling project config because workspace trust capture failed", {
+            workspace: trustWorkspace,
+            reason: snapshotFailure,
+          })
+        }
+        const existingStoredTrust = yield* Effect.promise(() =>
+          WorkspaceTrust.status(Global.Path.state, existingTrustSnapshot),
+        )
+        if (!snapshotFailure && !existingStoredTrust.trusted) {
+          yield* Effect.forEach(
+            new Set([
+              ...projectFiles,
+              ...localAgentConfig,
+              ...projectDirectories.flatMap((directory) =>
+                ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES].map((file) => path.join(directory, file)),
+              ),
+            ]),
+            prepareProjectFile,
+            { discard: true },
+          )
+        }
+        const trustSnapshot =
+          existingStoredTrust.trusted || snapshotFailure
+            ? existingTrustSnapshot
+            : yield* Effect.promise(captureTrustSnapshot)
+        const storedTrust = yield* Effect.promise(() => WorkspaceTrust.status(Global.Path.state, trustSnapshot))
+        const trusted = !Flag.VECTOR_PURE && storedTrust.trusted
+        if (!trusted && !Flag.VECTOR_PURE && WorkspaceTrust.hasInputs(trustSnapshot)) {
+          yield* Effect.logWarning("ignoring project config until the workspace is trusted", {
+            workspace: trustWorkspace,
+          })
+          // Without this the project's agents, commands and default model would vanish with no explanation.
+          GlobalBus.emit("event", {
+            directory: "global",
+            payload: {
+              type: TuiEvent.ToastShow.type,
+              properties: {
+                title: "Project settings ignored",
+                message:
+                  "Vector is not loading this project's vector.json or .vector settings until you trust it. Use /trust in the TUI, Trust project in the app, or run `vector trust approve` in the project.",
+                variant: "warning",
+                duration: 15_000,
+              },
+            },
+          })
+        }
+        const trustedSnapshot = trusted
+          ? yield* Effect.promise(() => WorkspaceTrust.materialize(Global.Path.state, trustSnapshot))
+          : undefined
+        const workspace = ctx.worktree === "/" ? ctx.directory : ctx.worktree
+
+        const loadProjectFile = Effect.fnUntraced(function* (
+          filepath: string,
+          env?: Record<string, string>,
+          opaqueCredentials = false,
+        ) {
+          yield* Effect.logInfo("loading captured project config", { path: filepath })
+          const text = WorkspaceTrust.readFileString(trustSnapshot, filepath)
+          if (!text) return {} as Info
+          const source = trustedSnapshot ? WorkspaceTrust.materializedPath(trustedSnapshot, filepath) : filepath
+          const normalized = /^\s*[{/]/.test(text) ? text : JSON.stringify(ConfigMigration.parseConfig(text, filepath))
+          const loaded = yield* loadConfig(normalized, { path: source }, env, true, opaqueCredentials)
+          if (!trustedSnapshot) return loaded
+          const bound = bindTrustedProjectExecutables(loaded, trustedSnapshot, workspace, filepath)
+          // Trust drops what it cannot bind to approved bytes; say which, so a missing integration is explicable.
+          const dropped = (["formatter", "lsp", "mcp"] as const).flatMap((key) => {
+            const before = loaded[key]
+            const after = bound[key]
+            if (!isRecord(before) || !isRecord(after)) return []
+            return Object.keys(before)
+              .filter((name) => !(name in after))
+              .map((name) => `${key}.${name}`)
+          })
+          if (dropped.length)
+            yield* Effect.logWarning("trust left out project commands it cannot bind to approved bytes", {
+              path: filepath,
+              dropped,
+            })
+          return bound
+        })
 
         let result: Info = {}
         const authEnv: Record<string, string> = {}
@@ -364,9 +726,25 @@ const layer = Layer.effect(
           result.plugin_origins = plugins
         })
 
+        // The user's own sources merged alone, and whether a trusted project granted any permission over them.
+        let userPermissions: Pick<Info, "permission" | "tools" | "agent"> = {}
+        let projectGrants = false
+
         const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
-          result = mergeConfigConcatArrays(result, next)
-          return mergePluginOrigins(source, next.plugin, kind)
+          const scope = kind ?? (containsPath(source, ctx) ? "local" : "global")
+          const projectSource = scope === "local" && source !== "VECTOR_CONFIG_CONTENT"
+          const safe = projectSource ? projectExecutableConfig(next, trusted, result) : next
+          if (projectSource) projectGrants ||= grantsPermission(safe)
+          // Only the keys a source sets: merging an undefined key would erase what an earlier user source declared,
+          // as an empty integration store loaded after the project would.
+          else
+            userPermissions = mergeConfigConcatArrays(userPermissions, {
+              ...(safe.permission && { permission: safe.permission }),
+              ...(safe.tools && { tools: safe.tools }),
+              ...(safe.agent && { agent: safe.agent }),
+            })
+          result = mergeConfigConcatArrays(result, safe)
+          return mergePluginOrigins(source, safe.plugin, scope)
         }
 
         for (const [key, value] of Object.entries(auth)) {
@@ -427,13 +805,16 @@ const layer = Layer.effect(
         yield* merge(Global.Path.config, global, "global")
 
         if (Flag.VECTOR_AGENT_CONFIG) {
-          yield* merge(Flag.VECTOR_AGENT_CONFIG, yield* loadFile(Flag.VECTOR_AGENT_CONFIG, authEnv, true))
+          const next = containsPath(Flag.VECTOR_AGENT_CONFIG, ctx)
+            ? yield* loadProjectFile(Flag.VECTOR_AGENT_CONFIG, authEnv, !trusted)
+            : yield* loadFile(Flag.VECTOR_AGENT_CONFIG, authEnv, true)
+          yield* merge(Flag.VECTOR_AGENT_CONFIG, next)
           yield* Effect.logDebug("loaded custom config", { path: Flag.VECTOR_AGENT_CONFIG })
         }
 
         if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
-          for (const file of yield* ConfigPaths.files("vector", ctx.directory, ctx.worktree).pipe(Effect.orDie)) {
-            yield* merge(file, yield* loadFile(file, authEnv), "local")
+          for (const file of projectFiles) {
+            yield* merge(file, yield* loadProjectFile(file, authEnv, !trusted), "local")
           }
         }
 
@@ -441,7 +822,13 @@ const layer = Layer.effect(
         result.mode = result.mode || {}
         result.plugin = result.plugin || []
 
-        const directories = yield* ConfigPaths.directories(ctx.directory, ctx.worktree)
+        const directories = allDirectories
+          .filter((directory) => !containsPath(directory, ctx) || trusted)
+          .map((directory) =>
+            containsPath(directory, ctx) && trustedSnapshot
+              ? WorkspaceTrust.materializedPath(trustedSnapshot, directory)
+              : directory,
+          )
 
         if (Flag.VECTOR_AGENT_CONFIG_DIR) {
           yield* Effect.logDebug("loading config from VECTOR_AGENT_CONFIG_DIR", { path: Flag.VECTOR_AGENT_CONFIG_DIR })
@@ -449,46 +836,67 @@ const layer = Layer.effect(
 
         const deps: Fiber.Fiber<void>[] = []
 
-        for (const dir of directories) {
+        for (const dir of allDirectories) {
+          const local = containsPath(dir, ctx)
+          const runtimeDir = local && trustedSnapshot ? WorkspaceTrust.materializedPath(trustedSnapshot, dir) : dir
           if (dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR) {
             if (dir === Flag.VECTOR_AGENT_CONFIG_DIR) yield* importSettings(dir)
-            yield* importSettings(dir, true)
+            if (!local || trusted) yield* importSettings(dir, true)
             // Local files merge after the shared ones so machine-local settings win.
             for (const file of ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
-              yield* merge(source, yield* loadFile(source, authEnv))
+              const next = local ? yield* loadProjectFile(source, authEnv, !trusted) : yield* loadFile(source, authEnv)
+              yield* merge(source, next)
               result.agent ??= {}
               result.mode ??= {}
               result.plugin ??= []
             }
           }
 
+          if (local && !trusted) continue
+
           // The desktop also owns .vector directories containing repository state and rules.
           const runtimeFiles =
             dir === Global.Path.config ||
             dir === Flag.VECTOR_AGENT_CONFIG_DIR ||
-            (yield* fs.isFile(path.join(dir, "package.json"))) ||
+            (yield* fs.isFile(path.join(runtimeDir, "package.json"))) ||
             (yield* Effect.forEach(["plugin", "plugins", "tool", "tools"], (name) =>
-              fs.isDir(path.join(dir, name)),
+              fs.isDir(path.join(runtimeDir, name)),
             )).some(Boolean)
           if (runtimeFiles) yield* ensureGitignore(dir).pipe(Effect.orDie)
 
-          result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.load(dir)))
-          result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
+          result.command = mergeDeep(result.command ?? {}, yield* Effect.promise(() => ConfigCommand.load(runtimeDir)))
+          const agents = mergeDeep(
+            yield* Effect.promise(() => ConfigAgent.load(runtimeDir)),
+            yield* Effect.promise(() => ConfigAgent.loadMode(runtimeDir)),
+          )
+          if (local) projectGrants ||= grantsPermission({ agent: agents })
+          else userPermissions = mergeConfigConcatArrays(userPermissions, { agent: agents })
+          result.agent = mergeDeep(result.agent ?? {}, agents)
           // Auto-discovered plugins under `.vector/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
-          const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
+          const list = yield* Effect.promise(() => ConfigPlugin.load(runtimeDir))
           yield* mergePluginOrigins(dir, list)
+        }
+
+        if (!Flag.VECTOR_DISABLE_PROJECT_CONFIG) {
+          const store = integrationStore(workspace)
+          yield* merge(store, yield* loadFile(store, authEnv), "global")
         }
 
         if (Flag.VECTOR_CONFIG_CONTENT) {
           const source = "VECTOR_CONFIG_CONTENT"
-          const next = yield* loadConfig(Flag.VECTOR_CONFIG_CONTENT, {
-            dir: ctx.directory,
-            source,
-          })
+          const next = yield* loadConfig(
+            Flag.VECTOR_CONFIG_CONTENT,
+            {
+              dir: ctx.directory,
+              source,
+            },
+            undefined,
+            false,
+            false,
+          )
           yield* merge(source, next, "local")
           yield* Effect.logDebug("loaded custom config from VECTOR_CONFIG_CONTENT")
         }
@@ -504,13 +912,16 @@ const layer = Layer.effect(
         // macOS managed preferences (.mobileconfig deployed via MDM) override everything
         const managed = yield* Effect.promise(() => ConfigManaged.readManagedPreferences())
         if (managed) {
-          result = mergeConfigConcatArrays(
-            result,
-            yield* loadConfig(managed.text, {
-              dir: path.dirname(managed.source),
-              source: managed.source,
-            }),
-          )
+          const next = yield* loadConfig(managed.text, {
+            dir: path.dirname(managed.source),
+            source: managed.source,
+          })
+          userPermissions = mergeConfigConcatArrays(userPermissions, {
+            ...(next.permission && { permission: next.permission }),
+            ...(next.tools && { tools: next.tools }),
+            ...(next.agent && { agent: next.agent }),
+          })
+          result = mergeConfigConcatArrays(result, next)
         }
 
         for (const [name, mode] of Object.entries(result.mode ?? {})) {
@@ -524,24 +935,15 @@ const layer = Layer.effect(
 
         if (Flag.VECTOR_PERMISSION) {
           try {
-            result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.VECTOR_PERMISSION))
+            const permission = JSON.parse(Flag.VECTOR_PERMISSION)
+            result.permission = mergeDeep(result.permission ?? {}, permission)
+            userPermissions.permission = mergeDeep(userPermissions.permission ?? {}, permission)
           } catch (err) {
             yield* Effect.logWarning("VECTOR_PERMISSION contains invalid JSON, skipping", { err })
           }
         }
 
-        if (result.tools) {
-          const perms: Record<string, ConfigPermissionV1.Action> = {}
-          for (const [tool, enabled] of Object.entries(result.tools)) {
-            const action: ConfigPermissionV1.Action = enabled ? "allow" : "deny"
-            if (tool === "write" || tool === "edit" || tool === "patch") {
-              perms.edit = action
-              continue
-            }
-            perms[tool] = action
-          }
-          result.permission = mergeDeep(perms, result.permission ?? {})
-        }
+        if (result.tools) result.permission = mergeDeep(toolPermissions(result.tools), result.permission ?? {})
 
         if (!result.username) {
           try {
@@ -571,6 +973,20 @@ const layer = Layer.effect(
           config: result,
           directories,
           deps,
+          trust: trustSnapshot,
+          trusted,
+          trustedSnapshot,
+          ceiling:
+            trusted && projectGrants
+              ? {
+                  permission: mergeDeep(toolPermissions(userPermissions.tools ?? {}), userPermissions.permission ?? {}),
+                  agent: Object.fromEntries(
+                    Object.entries(userPermissions.agent ?? {}).flatMap(([name, agent]) =>
+                      agent?.permission ? [[name, agent.permission]] : [],
+                    ),
+                  ),
+                }
+              : undefined,
         }
       },
       Effect.provideService(FSUtil.Service, fs),
@@ -594,6 +1010,34 @@ const layer = Layer.effect(
     const waitForDependencies = Effect.fn("Config.waitForDependencies")(function* () {
       yield* InstanceState.useEffect(state, (s) =>
         Effect.forEach(s.deps, Fiber.join, { concurrency: "unbounded" }).pipe(Effect.asVoid),
+      )
+    })
+
+    const permissionCeiling = Effect.fn("Config.permissionCeiling")(function* () {
+      return yield* InstanceState.use(state, (s) => s.ceiling)
+    })
+
+    const trustedPath = Effect.fn("Config.trustedPath")(function* (path: string) {
+      return yield* InstanceState.use(state, (s) =>
+        s.trustedSnapshot ? WorkspaceTrust.materializedPathOption(s.trustedSnapshot, path) : undefined,
+      )
+    })
+
+    const trust = Effect.fn("Config.trust")(function* () {
+      return yield* InstanceState.useEffect(state, (s) =>
+        Effect.promise(async () => {
+          const status = await WorkspaceTrust.status(Global.Path.state, s.trust)
+          return {
+            ...status,
+            ignored: !status.trusted && !Flag.VECTOR_PURE && WorkspaceTrust.hasInputs(s.trust),
+          }
+        }),
+      )
+    })
+
+    const approve = Effect.fn("Config.approve")(function* () {
+      yield* InstanceState.useEffect(state, (s) =>
+        Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, s.trust)),
       )
     })
 
@@ -623,7 +1067,7 @@ const layer = Layer.effect(
       yield* invalidateGlobal
     })
 
-    // Persists a runtime MCP mutation into the project's machine-local config layer so it
+    // Persists a runtime MCP mutation into the project's integration store so it
     // survives a backend restart. A full entry replaces the server's config wholesale (a
     // deep patch could leave e.g. a stale `command` behind a type switch to "remote");
     // an { enabled } entry only flips the flag, layering over configs defined elsewhere.
@@ -633,10 +1077,7 @@ const layer = Layer.effect(
     ) {
       const ctx = yield* InstanceState.context
       // Non-git projects have worktree "/", which is not a usable project root.
-      const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
-      const dir = path.join(root, ".vector")
-      const jsonc = path.join(dir, "vector.local.jsonc")
-      const file = (yield* fs.existsSafe(jsonc)) ? jsonc : path.join(dir, "vector.local.json")
+      const file = integrationStore(ctx.worktree === "/" ? ctx.directory : ctx.worktree)
       const before =
         (yield* readConfigFile(file)) ?? JSON.stringify({ $schema: "https://vectordev.ai/config.json" }, null, 2)
       const edits = modify(
@@ -646,18 +1087,6 @@ const layer = Layer.effect(
         { formattingOptions: { insertSpaces: true, tabSize: 2 } },
       )
       yield* fs.writeWithDirs(file, applyEdits(before, edits)).pipe(Effect.orDie)
-      yield* ensureGitignore(dir).pipe(Effect.orDie)
-      // The generated .gitignore covers the local files, but a .gitignore that predates
-      // this layer may not; the file can hold tokens, so append the entries when missing.
-      const gitignore = path.join(dir, ".gitignore")
-      const existing = (yield* fs.readFileStringSafe(gitignore).pipe(Effect.orDie)) ?? ""
-      const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()))
-      const missing = LOCAL_CONFIG_FILES.filter((item) => !present.has(item))
-      if (missing.length) {
-        yield* fs
-          .writeFileString(gitignore, [existing.replace(/\n$/, ""), ...missing].filter(Boolean).join("\n") + "\n")
-          .pipe(Effect.orDie)
-      }
     })
 
     // The MCP entry as the config files hold it, merged in load order. get() has
@@ -680,6 +1109,9 @@ const layer = Layer.effect(
         ...dirs
           .filter((dir) => dir.endsWith(".vector") || dir === Flag.VECTOR_AGENT_CONFIG_DIR)
           .flatMap((dir) => ["vector.json", "vector.jsonc", ...LOCAL_CONFIG_FILES].map((file) => path.join(dir, file))),
+        ...(Flag.VECTOR_DISABLE_PROJECT_CONFIG
+          ? []
+          : [integrationStore(ctx.worktree === "/" ? ctx.directory : ctx.worktree)]),
         ...["vector.json", "vector.jsonc"].map((file) => path.join(ConfigManaged.managedConfigDir(), file)),
       ]
       const entries = yield* Effect.forEach(files, (file) =>
@@ -696,17 +1128,18 @@ const layer = Layer.effect(
     const removeMcpLocal = Effect.fn("Config.removeMcpLocal")(function* (name: string) {
       const ctx = yield* InstanceState.context
       const root = ctx.worktree === "/" ? ctx.directory : ctx.worktree
-      for (const dir of [path.join(root, ".vector")]) {
-        for (const nameOfFile of LOCAL_CONFIG_FILES) {
-          const file = path.join(dir, nameOfFile)
-          const before = yield* readConfigFile(file)
-          if (!before) continue
-          const edits = modify(before, ["mcp", name], undefined, {
-            formattingOptions: { insertSpaces: true, tabSize: 2 },
-          })
-          if (!edits.length) continue
-          yield* fs.writeFileString(file, applyEdits(before, edits)).pipe(Effect.orDie)
-        }
+      // Integrations added before the store existed were written into the project's .vector directory.
+      for (const file of [
+        integrationStore(root),
+        ...LOCAL_CONFIG_FILES.map((item) => path.join(root, ".vector", item)),
+      ]) {
+        const before = yield* readConfigFile(file)
+        if (!before) continue
+        const edits = modify(before, ["mcp", name], undefined, {
+          formattingOptions: { insertSpaces: true, tabSize: 2 },
+        })
+        if (!edits.length) continue
+        yield* fs.writeFileString(file, applyEdits(before, edits)).pipe(Effect.orDie)
       }
     })
 
@@ -748,6 +1181,10 @@ const layer = Layer.effect(
       invalidate,
       directories,
       waitForDependencies,
+      trust,
+      trustedPath,
+      approve,
+      permissionCeiling,
     })
   }),
 )

@@ -1,10 +1,10 @@
 import Store from "electron-store"
 import electron from "electron"
 import { rmSync } from "node:fs"
-import { join } from "node:path"
 
 import { SETTINGS_STORE } from "./store-keys"
 import { deleteStoreFileIfEmpty } from "./store-cleanup"
+import { requireStoreName, resolveStorePath } from "./store-path"
 
 const cache = new Map<string, Store>()
 
@@ -13,23 +13,26 @@ const cache = new Map<string, Store>()
 // in index.ts has executed, which would result in files being written to the default directory
 // (e.g. bad: a package-scoped default folder vs good: the configured Vector user data folder).
 export function getStore(name = SETTINGS_STORE) {
-  const cached = cache.get(name)
+  const safeName = requireStoreName(name)
+  const cached = cache.get(safeName)
   if (cached) return cached
   const next = new Store({
-    name,
+    name: safeName,
     cwd: electron.app.getPath("userData"),
     fileExtension: "",
     accessPropertiesByDotNotation: false,
   })
-  cache.set(name, next)
+  cache.set(safeName, next)
   return next
 }
 
 export async function removeStoreFileIfEmpty(name: string) {
-  if (await deleteStoreFileIfEmpty(electron.app.getPath("userData"), name)) cache.delete(name)
+  const safeName = requireStoreName(name)
+  if (await deleteStoreFileIfEmpty(electron.app.getPath("userData"), safeName)) cache.delete(safeName)
 }
 
 export function removeStoreFile(name: string) {
-  rmSync(join(electron.app.getPath("userData"), name), { force: true })
-  cache.delete(name)
+  const safeName = requireStoreName(name)
+  rmSync(resolveStorePath(electron.app.getPath("userData"), safeName), { force: true })
+  cache.delete(safeName)
 }

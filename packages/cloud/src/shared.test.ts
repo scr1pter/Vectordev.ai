@@ -7,10 +7,11 @@ import {
   isValidSlug,
   makeSlug,
   mimeFor,
-  promotionPath,
-  promotionPrefix,
   slugFromSitesKey,
   slugify,
+  tenantPromotionPath,
+  tenantPromotionPrefix,
+  tenantSitesPrefix,
   uniqueSlugsFromKeys,
 } from "./shared"
 
@@ -57,57 +58,63 @@ describe("makeSlug", () => {
 })
 
 describe("slugFromSitesKey", () => {
+  const prefix = tenantSitesPrefix("tenant-a", "project-a")
+
   test("extracts the slug from a folded folder", () => {
-    expect(slugFromSitesKey("sites/my-app-x7k2qd/")).toBe("my-app-x7k2qd")
+    expect(slugFromSitesKey(`${prefix}my-app-x7k2qd/`, prefix)).toBe("my-app-x7k2qd")
   })
 
   test("extracts the slug from a full blob pathname", () => {
-    expect(slugFromSitesKey("sites/my-app-x7k2qd/assets/app.js")).toBe("my-app-x7k2qd")
+    expect(slugFromSitesKey(`${prefix}my-app-x7k2qd/assets/app.js`, prefix)).toBe("my-app-x7k2qd")
   })
 
   test("returns undefined for keys outside the sites/ prefix", () => {
-    expect(slugFromSitesKey("other/my-app-x7k2qd/")).toBeUndefined()
-    expect(slugFromSitesKey("my-app-x7k2qd/")).toBeUndefined()
+    expect(slugFromSitesKey("other/my-app-x7k2qd/", prefix)).toBeUndefined()
+    expect(slugFromSitesKey("my-app-x7k2qd/", prefix)).toBeUndefined()
   })
 
   test("returns undefined when the slug is not a valid DNS label", () => {
-    expect(slugFromSitesKey("sites//index.html")).toBeUndefined()
-    expect(slugFromSitesKey("sites/-bad-/index.html")).toBeUndefined()
-    expect(slugFromSitesKey("sites/UPPER/index.html")).toBeUndefined()
+    expect(slugFromSitesKey(`${prefix}/index.html`, prefix)).toBeUndefined()
+    expect(slugFromSitesKey(`${prefix}-bad-/index.html`, prefix)).toBeUndefined()
+    expect(slugFromSitesKey(`${prefix}UPPER/index.html`, prefix)).toBeUndefined()
   })
 })
 
 describe("promotion paths", () => {
   test("uses a stable project prefix and immutable promotion record", () => {
-    expect(promotionPrefix("My Product")).toBe("promotions/my-product/")
-    expect(promotionPath("My Product", "my-product-abc123", 42)).toBe(
-      "promotions/my-product/42-my-product-abc123.json",
+    expect(tenantPromotionPrefix("tenant-a", "my-product")).toBe(
+      "tenants/tenant-a/projects/my-product/promotions/",
+    )
+    expect(tenantPromotionPath("tenant-a", "my-product", "my-product-abc123", 42)).toBe(
+      "tenants/tenant-a/projects/my-product/promotions/42-my-product-abc123.json",
     )
   })
 
   test("rejects an invalid deployment slug", () => {
-    expect(() => promotionPath("My Product", "../bad", 42)).toThrow()
+    expect(() => tenantPromotionPath("tenant-a", "my-product", "../bad", 42)).toThrow()
   })
 })
 
 describe("uniqueSlugsFromKeys", () => {
+  const prefix = tenantSitesPrefix("tenant-a", "project-a")
+
   test("dedupes and sorts slugs across many blob keys", () => {
     const keys = [
-      "sites/beta-222222/index.html",
-      "sites/alpha-111111/index.html",
-      "sites/alpha-111111/assets/app.js",
-      "sites/beta-222222/",
+      `${prefix}beta-222222/index.html`,
+      `${prefix}alpha-111111/index.html`,
+      `${prefix}alpha-111111/assets/app.js`,
+      `${prefix}beta-222222/`,
     ]
-    expect(uniqueSlugsFromKeys(keys)).toEqual(["alpha-111111", "beta-222222"])
+    expect(uniqueSlugsFromKeys(keys, prefix)).toEqual(["alpha-111111", "beta-222222"])
   })
 
   test("skips keys that don't resolve to a valid slug", () => {
-    const keys = ["sites/good-abcdef/index.html", "other/x/y", "sites//nope"]
-    expect(uniqueSlugsFromKeys(keys)).toEqual(["good-abcdef"])
+    const keys = [`${prefix}good-abcdef/index.html`, "other/x/y", `${prefix}/nope`]
+    expect(uniqueSlugsFromKeys(keys, prefix)).toEqual(["good-abcdef"])
   })
 
   test("returns an empty array for no keys", () => {
-    expect(uniqueSlugsFromKeys([])).toEqual([])
+    expect(uniqueSlugsFromKeys([], prefix)).toEqual([])
   })
 })
 

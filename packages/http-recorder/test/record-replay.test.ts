@@ -72,6 +72,16 @@ describe("http-recorder", () => {
     )
   })
 
+  test("redacts OAuth and password query parameters", () => {
+    expect(
+      HttpRecorderInternal.redactUrl(
+        "https://example.test/token?client_secret=opaque-client&refresh-token=opaque-refresh&password=opaque-password&safe=value",
+      ),
+    ).toBe(
+      "https://example.test/token?client_secret=%5BREDACTED%5D&refresh-token=%5BREDACTED%5D&password=%5BREDACTED%5D&safe=value",
+    )
+  })
+
   test("redacts URL credentials", () => {
     expect(HttpRecorderInternal.redactUrl("https://user:password@example.test/path?safe=value")).toBe(
       "https://%5BREDACTED%5D:%5BREDACTED%5D@example.test/path?safe=value",
@@ -133,7 +143,7 @@ describe("http-recorder", () => {
             transport: "http",
             request: {
               method: "POST",
-              url: "https://example.test/path?key=sk-123456789012345678901234",
+              url: "https://example.test/path?safe=sk-123456789012345678901234",
               headers: {},
               body: JSON.stringify({ nested: "AIzaSyDHibiBRvJZLsFnPYPoiTwxY4ztQ55yqCE" }),
             },
@@ -147,7 +157,7 @@ describe("http-recorder", () => {
       }),
     ).toEqual([
       { path: "interactions[0].request.url", reason: "API key" },
-      { path: "interactions[0].request.body", reason: "Google API key" },
+      { path: "interactions[0].request.body.nested", reason: "Google API key" },
       { path: "interactions[0].response.body", reason: "bearer token" },
     ])
   })
@@ -159,7 +169,15 @@ describe("http-recorder", () => {
         metadata: { token: "sk-123456789012345678901234" },
         interactions: [],
       }),
-    ).toEqual([{ path: "metadata.token", reason: "API key" }])
+    ).toEqual([{ path: "metadata.token", reason: "credential field token" }])
+  })
+
+  test("detects opaque values stored under credential field names", () => {
+    expect(
+      HttpRecorderInternal.secretFindings({
+        request: { body: '{"oauthToken":"opaque-value","safe":"visible"}' },
+      }),
+    ).toEqual([{ path: "request.body.oauthToken", reason: "credential field oauthToken" }])
   })
 
   test("redacts configured and common sensitive JSON fields", () => {
@@ -180,6 +198,26 @@ describe("http-recorder", () => {
       accessToken: "[REDACTED]",
       nested: { account_id: "[REDACTED]", safe: "visible" },
     })
+  })
+
+  test("redacts OAuth form fields and structured authentication text", () => {
+    const redactor = HttpRecorderInternal.Redactor.make()
+    const form = redactor.request({
+      method: "POST",
+      url: "https://example.test/token",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "grant_type=authorization_code&code=opaque-code&username=user&password=opaque-password&client_secret=opaque-client",
+    })
+    const text = redactor.response({
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      body: "authorization: Bearer opaque-token\npassword=opaque-password\nsafe=visible",
+    })
+
+    expect(form.body).toBe(
+      "grant_type=authorization_code&code=%5BREDACTED%5D&username=user&password=%5BREDACTED%5D&client_secret=%5BREDACTED%5D",
+    )
+    expect(text.body).toBe("authorization: [REDACTED]\npassword=[REDACTED]\nsafe=visible")
   })
 
   test("extends default header redaction and allow lists", () => {
@@ -257,6 +295,37 @@ describe("http-recorder", () => {
         },
       ],
     })
+  })
+
+  test("does not persist recordings that observe binary WebSocket frames", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "http-recorder-websocket-"))
+    const upstream = Socket.make({
+      runRaw: (handler, options) =>
+        Effect.gen(function* () {
+          if (options?.onOpen) yield* options.onOpen
+          const handled = handler(new Uint8Array([1, 2, 3]))
+          if (Effect.isEffect(handled)) yield* handled
+        }),
+      writer: Effect.succeed(() => Effect.void),
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const socket = yield* Socket.Socket
+        yield* socket.runRaw(() => {})
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          HttpRecorderInternal.socketLayer(
+            "websocket/binary-recording",
+            { url: "wss://example.test/realtime" },
+            { directory, mode: "record" },
+          ).pipe(Layer.provide(Layer.succeed(Socket.Socket, upstream))),
+        ),
+      ),
+    )
+
+    expect(fs.existsSync(path.join(directory, "websocket/binary-recording.json"))).toBe(false)
   })
 
   test("WebSocket replay preserves causal frame ordering", async () => {
@@ -491,7 +560,11 @@ describe("http-recorder", () => {
         },
       ],
     }
-    await seedCassetteDirectory(directory, "websocket/binary", [interaction, interaction])
+    fs.mkdirSync(path.join(directory, "websocket"), { recursive: true })
+    fs.writeFileSync(
+      path.join(directory, "websocket/binary.json"),
+      JSON.stringify({ version: 1, interactions: [interaction, interaction] }),
+    )
 
     const received: number[][] = []
     await Effect.runPromise(
@@ -778,7 +851,7 @@ describe("http-recorder", () => {
   })
 
   test("UnsafeCassetteError fails the request when a recording would write a known secret", async () => {
-    using server = Bun.serve({ port: 0, fetch: () => new Response("Bearer abcdefghijklmnopqrstuvwxyz1234") })
+    using server = Bun.serve({ port: 0, fetch: () => new Response("sk-123456789012345678901234") })
     const url = `http://127.0.0.1:${server.port}/leaky`
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "http-recorder-unsafe-"))
 
@@ -816,6 +889,30 @@ describe("http-recorder", () => {
     )
   })
 
+  test("rejects unreviewed binary WebSocket frames at the cassette boundary", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const cassette = yield* HttpRecorderInternal.Cassette.Service
+        const error = yield* cassette
+          .append("binary", {
+            transport: "websocket",
+            open: { url: "wss://example.test/realtime", headers: {} },
+            events: [
+              {
+                direction: "server",
+                kind: "binary",
+                body: Buffer.from([1, 2, 3]).toString("base64"),
+                bodyEncoding: "base64",
+              },
+            ],
+          })
+          .pipe(Effect.flip)
+
+        expect(error.message).toContain("unreviewed binary WebSocket frame")
+      }).pipe(Effect.provide(HttpRecorderInternal.Cassette.memory())),
+    )
+  })
+
   test("concurrent file appends preserve every interaction", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "http-recorder-concurrent-"))
     await Effect.runPromise(
@@ -846,6 +943,31 @@ describe("http-recorder", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "http-recorder-path-"))
     expect(() => HttpRecorderInternal.hasCassetteSync("../outside", { directory })).toThrow("Invalid cassette name")
     expect(() => HttpRecorderInternal.hasCassetteSync("C:\\outside", { directory })).toThrow("Invalid cassette name")
+  })
+
+  test("rejects cassette writes through symlinked parent directories", async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "http-recorder-symlink-"))
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "http-recorder-outside-"))
+    fs.symlinkSync(outside, path.join(directory, "linked"), "dir")
+
+    const exit = await Effect.runPromise(
+      Effect.gen(function* () {
+        const cassette = yield* HttpRecorderInternal.Cassette.Service
+        yield* cassette.append("linked/escape", {
+          transport: "http",
+          request: { method: "GET", url: "https://example.test", headers: {}, body: "" },
+          response: { status: 200, headers: {}, body: "safe" },
+        })
+      }).pipe(
+        Effect.provide(HttpRecorderInternal.Cassette.fileSystem({ directory })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.exit,
+      ),
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(failureText(exit)).toContain("symbolic link")
+    expect(fs.existsSync(path.join(outside, "escape.json"))).toBe(false)
   })
 
   test("Cassette.list enumerates recorded cassette names", async () => {

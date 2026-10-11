@@ -86,10 +86,13 @@ export interface Interface {
     readonly rootCommits: (repository: Repository) => Effect.Effect<readonly string[]>
   }
   readonly sync: {
-    readonly fetchRemotes: (repository: Repository, input?: { prune?: boolean }) => Effect.Effect<void, OperationError>
+    readonly fetchRemotes: (
+      repository: Repository,
+      input?: { prune?: boolean; remoteUrl?: string },
+    ) => Effect.Effect<void, OperationError>
     readonly fetchBranch: (
       repository: Repository,
-      input: { remote?: string; branch: string; force?: boolean },
+      input: { remote?: string; remoteUrl?: string; branch: string; force?: boolean },
     ) => Effect.Effect<void, OperationError>
     readonly checkoutRemoteBranch: (
       repository: Repository,
@@ -203,7 +206,8 @@ const layer = Layer.effect(
     })
 
     const remote = Effect.fn("Git.remote.get")(function* (repository: Repository, name = "origin") {
-      const result = yield* run(repository.worktree, proc)(["remote", "get-url", name])
+      // The configured URL, not one rewritten by a url.insteadOf rule, so a cache is reused only for the exact remote.
+      const result = yield* run(repository.worktree, proc)(["config", "--get", `remote.${name}.url`])
       if (result.exitCode !== 0) return undefined
       return result.text.trim() || undefined
     })
@@ -284,18 +288,26 @@ const layer = Layer.effect(
 
     const fetch = Effect.fn("Git.sync.fetchRemotes")(function* (
       repository: Repository,
-      input: { prune?: boolean } = {},
+      input: { prune?: boolean; remoteUrl?: string } = {},
     ) {
-      yield* operation("fetch", repository.worktree, ["fetch", "--all", ...(input.prune === false ? [] : ["--prune"])])
+      yield* operation("fetch", repository.worktree, [
+        "fetch",
+        ...(input.prune === false ? [] : ["--prune"]),
+        ...(input.remoteUrl ? [input.remoteUrl, "+refs/heads/*:refs/remotes/origin/*"] : ["--all"]),
+      ])
     })
 
     const fetchBranch = Effect.fn("Git.sync.fetchBranch")(function* (
       repository: Repository,
-      input: { remote?: string; branch: string; force?: boolean },
+      input: { remote?: string; remoteUrl?: string; branch: string; force?: boolean },
     ) {
       const remoteName = input.remote ?? "origin"
       const spec = `refs/heads/${input.branch}:refs/remotes/${remoteName}/${input.branch}`
-      yield* operation("fetch", repository.worktree, ["fetch", remoteName, input.force === false ? spec : `+${spec}`])
+      yield* operation("fetch", repository.worktree, [
+        "fetch",
+        input.remoteUrl ?? remoteName,
+        input.force === false ? spec : `+${spec}`,
+      ])
     })
 
     const checkout = Effect.fn("Git.sync.checkoutRemoteBranch")(function* (

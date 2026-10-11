@@ -69,6 +69,47 @@ const parseCassette = Schema.decodeUnknownSync(Schema.fromJsonString(CassetteSch
 const failIfUnsafe = (name: string, findings: ReadonlyArray<SecretFinding>) =>
   findings.length === 0 ? Effect.void : Effect.fail(new UnsafeCassetteError({ cassetteName: name, findings }))
 
+const interactionFindings = (interaction: Interaction) => [
+  ...secretFindings(interaction),
+  ...(interaction.transport === "websocket"
+    ? interaction.events.flatMap((event, index) =>
+        event.kind === "binary" ? [{ path: `events[${index}].body`, reason: "unreviewed binary WebSocket frame" }] : [],
+      )
+    : []),
+]
+
+const isSymbolicLink = (fs: FileSystem.FileSystem, candidate: string) =>
+  fs.readLink(candidate).pipe(
+    Effect.as(true),
+    Effect.catch(() =>
+      fs.stat(candidate).pipe(
+        Effect.map((info) => info.type === "SymbolicLink"),
+        Effect.catch(() => Effect.succeed(false)),
+      ),
+    ),
+  )
+
+const rejectSymbolicLinks = (fs: FileSystem.FileSystem, directory: string, target: string) => {
+  const root = path.resolve(directory)
+  const relative = path.relative(root, path.dirname(target))
+  const parents = relative
+    .split(path.sep)
+    .filter(Boolean)
+    .reduce<ReadonlyArray<string>>((paths, part) => [...paths, path.join(paths.at(-1) ?? root, part)], [root])
+  return Effect.forEach(
+    [...parents, target],
+    (candidate) =>
+      isSymbolicLink(fs, candidate).pipe(
+        Effect.flatMap((symbolic) =>
+          symbolic
+            ? Effect.die(new Error(`Refusing to write cassette through symbolic link: ${candidate}`))
+            : Effect.void,
+        ),
+      ),
+    { discard: true },
+  )
+}
+
 export const fileSystem = (
   options: { readonly directory?: string } = {},
 ): Layer.Layer<Service, never, FileSystem.FileSystem> =>
@@ -106,19 +147,22 @@ export const fileSystem = (
             Effect.gen(function* () {
               const entry = recorded.get(name) ?? { interactions: [], findings: [] }
               const interactions = [...entry.interactions, interaction]
-              const interactionFindings = [...entry.findings, ...secretFindings(interaction)]
+              const currentFindings = [...entry.findings, ...interactionFindings(interaction)]
               const cassette = buildCassette(name, interactions, metadata)
-              const findings = [...interactionFindings, ...secretFindings(cassette.metadata ?? {})]
+              const findings = [...currentFindings, ...secretFindings(cassette.metadata ?? {})]
               yield* failIfUnsafe(name, findings)
               const target = pathFor(name)
+              yield* rejectSymbolicLinks(fs, directory, target)
               yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(Effect.orDie)
+              yield* rejectSymbolicLinks(fs, directory, target)
               const temporary = `${target}.${crypto.randomUUID()}.tmp`
-              yield* fs.writeFileString(temporary, formatCassette(cassette)).pipe(
+              yield* fs.writeFileString(temporary, formatCassette(cassette), { flag: "wx" }).pipe(
+                Effect.flatMap(() => rejectSymbolicLinks(fs, directory, target)),
                 Effect.flatMap(() => fs.rename(temporary, target)),
                 Effect.ensuring(fs.remove(temporary, { force: true }).pipe(Effect.catch(() => Effect.void))),
                 Effect.orDie,
               )
-              recorded.set(name, { interactions, findings: interactionFindings })
+              recorded.set(name, { interactions, findings: currentFindings })
             }),
           ),
         exists: (name) =>
@@ -161,7 +205,7 @@ export const memory = (initial: Record<string, ReadonlyArray<Interaction>> = {})
         appendLock.withPermit(
           Effect.suspend(() => {
             const interactions = [...(stored.get(name) ?? []), interaction]
-            const findings = [...(accumulatedFindings.get(name) ?? []), ...secretFindings(interaction)]
+            const findings = [...(accumulatedFindings.get(name) ?? []), ...interactionFindings(interaction)]
             const allFindings = metadata ? [...findings, ...secretFindings({ name, ...metadata })] : findings
             return failIfUnsafe(name, allFindings).pipe(
               Effect.tap(() =>

@@ -15,8 +15,8 @@ export const prerender = true
           <h2 id="invite">The invite link</h2>
           <dl class="doc-rows">
             <div><dt>How the link works</dt><dd>The invite carries a guest password that is generated fresh each time you run <code>vector invite</code>. Guests are a separate credential from you, so revoking access is as simple as ending the session with Ctrl+C.</dd></div>
-            <div><dt>Where it works</dt><dd>Anywhere on your network out of the box. From elsewhere, expose the port through a tunnel you already trust — <code>tailscale serve &lt;port&gt;</code> or <code>cloudflared tunnel --url http://localhost:&lt;port&gt;</code> — and share that host instead.</dd></div>
-            <div><dt>What guests can do</dt><dd>Everything you can in that workspace: read and steer sessions, open files, run the agent. Share the link only with people you would hand your keyboard to.</dd></div>
+            <div><dt>Where it works</dt><dd>On a network you trust, run <code>vector invite --hostname 0.0.0.0 --trusted-network</code> and share the link it prints for your network address; the link carries the guest password over plain HTTP, which is why the network has to be one you trust. From elsewhere, keep the server local, expose its port through a TLS tunnel — <code>tailscale serve &lt;port&gt;</code> or <code>cloudflared tunnel --url http://localhost:&lt;port&gt;</code> — and pass that address with <code>--public-url https://your-host</code>.</dd></div>
+            <div><dt>What guests can do</dt><dd>Read and steer sessions in that workspace, open its files, and run the agent. Terminals, direct shell commands, slash commands, and answers to permission requests stay with you: when a guest's session asks to reach outside the workspace, you approve or reject it. Share the link only with people you trust in your workspace.</dd></div>
           </dl>
 
           <h2 id="follow">Follow mode</h2>

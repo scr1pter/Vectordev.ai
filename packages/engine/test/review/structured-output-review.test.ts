@@ -45,7 +45,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { Format } from "../../src/format"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { TestInstance } from "../fixture/fixture"
+import { TestInstance, trustWorkspace } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
 import { testProviderConfig } from "../lib/test-provider"
@@ -189,6 +189,7 @@ const useServer = Effect.gen(function* () {
     path.join(test.directory, "vector.json"),
     JSON.stringify({ $schema: "https://vectordev.ai/config.json", ...testProviderConfig(llm.url) }),
   )
+  yield* Effect.promise(() => trustWorkspace(test.directory))
   return llm
 })
 

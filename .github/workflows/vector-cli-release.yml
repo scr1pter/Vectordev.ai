@@ -62,7 +62,8 @@ jobs:
   catalog:
     name: Publish only the reviewed immutable catalog
     if: inputs.phase == 'catalog'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    environment: production-release
     timeout-minutes: 15
     env:
       VECTOR_CATALOG_FORK_PATH: ${{ github.workspace }}/tmp/model-catalog-fork
@@ -74,6 +75,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ inputs.source_revision }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up pinned Bun and dependencies
@@ -86,6 +88,11 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$VECTOR_SOURCE_REVISION"
           test "$GITHUB_SHA" = "$VECTOR_SOURCE_REVISION"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$VECTOR_SOURCE_REVISION" origin/main || {
+            echo "Release source must be part of protected main."
+            exit 1
+          }
           bun packages/cloud/src/prepare-cli-release-catalog.ts --validate
           bun -e '
             import { releaseCatalogURL } from "./packages/engine/script/release-catalog"
@@ -138,13 +145,15 @@ jobs:
   release:
     name: Prepare or publish all twelve native targets
     if: inputs.phase == 'prepare' || inputs.phase == 'stage' || inputs.phase == 'commit'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    environment: production-release
     timeout-minutes: 90
     steps:
       - name: Check out the exact reviewed source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ inputs.source_revision }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up pinned Bun and dependencies
@@ -156,6 +165,12 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$VECTOR_SOURCE_REVISION"
+          test "$GITHUB_SHA" = "$VECTOR_SOURCE_REVISION"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$VECTOR_SOURCE_REVISION" origin/main || {
+            echo "Release source must be part of protected main."
+            exit 1
+          }
           bun packages/cloud/src/prepare-cli-release-catalog.ts --validate
 
       - name: Check release packaging

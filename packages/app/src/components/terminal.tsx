@@ -168,7 +168,6 @@ export const Terminal = (props: TerminalProps) => {
   const auth = connection.http
   const username = auth?.username ?? "vector"
   const password = auth?.password ?? ""
-  const authToken = connection.type === "http" ? connection.authToken : false
   const sameOrigin = new URL(url, location.href).origin === location.origin
   let container!: HTMLDivElement
   const [local, others] = splitProps(props, ["pty", "class", "classList", "autoFocus", "onConnect", "onConnectError"])
@@ -576,7 +575,6 @@ export const Terminal = (props: TerminalProps) => {
             sameOrigin,
             username,
             password,
-            authToken,
           }),
         )
         socket.binaryType = "arraybuffer"

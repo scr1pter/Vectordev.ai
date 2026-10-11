@@ -19,7 +19,8 @@ test("example", async () => {
 ### Options
 
 - `git?: boolean` - Initialize a git repo with a root commit
-- `config?: Partial<Config.Info>` - Write an `vector.json` config file
+- `config?: Partial<Config.Info>` - Write an `vector.json` config file (untrusted by default)
+- `trusted?: boolean` - Explicitly approve project configuration after setup; use only when the test exercises trusted configuration
 - `init?: (dir: string) => Promise<T>` - Custom setup function, returns value accessible as `tmp.extra`
 - `dispose?: (dir: string) => Promise<T>` - Custom cleanup function
 
@@ -35,6 +36,7 @@ await using tmp = await tmpdir({ git: true })
 
 ```typescript
 await using tmp = await tmpdir({
+  trusted: true,
   config: { model: "test/model", username: "testuser" },
 })
 ```

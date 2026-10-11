@@ -1,8 +1,8 @@
 import { execFile, spawn } from "node:child_process"
-import { readFile, rm } from "node:fs/promises"
-import { platform, release, tmpdir } from "node:os"
-import path from "node:path"
+import { readFile } from "node:fs/promises"
+import { platform, release } from "node:os"
 import { promisify } from "node:util"
+import { createPrivateTempFile } from "./util/private-temp"
 
 const exec = promisify(execFile)
 
@@ -28,25 +28,28 @@ function writeOsc52(text: string) {
 
 export async function read() {
   if (platform() === "darwin") {
-    const file = path.join(tmpdir(), "vector-clipboard.png")
-    try {
-      await exec("osascript", [
-        "-e",
-        'set imageData to the clipboard as "PNGf"',
-        "-e",
-        `set fileRef to open for access POSIX file "${file}" with write permission`,
-        "-e",
-        "set eof fileRef to 0",
-        "-e",
-        "write imageData to fileRef",
-        "-e",
-        "close access fileRef",
-      ])
-      return { data: (await readFile(file)).toString("base64"), mime: "image/png" }
-    } catch {
-      // Fall through to text clipboard.
-    } finally {
-      await rm(file, { force: true }).catch(() => {})
+    const temporary = await createPrivateTempFile("vector-clipboard-", "clipboard.png").catch(() => undefined)
+    if (temporary) {
+      try {
+        const file = temporary.file.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+        await exec("osascript", [
+          "-e",
+          'set imageData to the clipboard as "PNGf"',
+          "-e",
+          `set fileRef to open for access POSIX file "${file}" with write permission`,
+          "-e",
+          "set eof fileRef to 0",
+          "-e",
+          "write imageData to fileRef",
+          "-e",
+          "close access fileRef",
+        ])
+        return { data: (await readFile(temporary.file)).toString("base64"), mime: "image/png" }
+      } catch {
+        // Fall through to text clipboard.
+      } finally {
+        await temporary.cleanup().catch(() => {})
+      }
     }
   }
 

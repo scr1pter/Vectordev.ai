@@ -4,6 +4,8 @@ import path from "path"
 import { pathToFileURL } from "url"
 import { Global } from "@vectordevai/core/global"
 import { Redaction } from "@vectordevai/core/redaction"
+import { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
+import { Config } from "../../src/config/config"
 import { Server } from "../../src/server/server"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
@@ -76,8 +78,25 @@ const config = {
 // The project config above plus a plugin tuple whose options hold a key.
 function project() {
   return tmpdir({
+    trusted: true,
     config: { ...config, plugin: [[`./${PLUGIN_FILE}`, { apiKey: pluginSecret, region: "us" }]] },
     init: (dir) => Bun.write(path.join(dir, PLUGIN_FILE), "export default async () => ({})\n"),
+  })
+}
+
+// A trusted project's local server that trust can bind: a captured script run by a host interpreter.
+const SERVER_FILE = "tools-server.ts"
+const boundTools: ConfigMCPV1.Local = {
+  type: "local",
+  command: ["bun", `./${SERVER_FILE}`, "--api-key", "mcp-arg-secret", "--x-token=mcp-flag-secret", "--verbose"],
+  enabled: false,
+  environment: { GITHUB_TOKEN: "env-secret", DEBUG: "1" },
+}
+function boundProject(mcp: Record<string, ConfigMCPV1.Info>) {
+  return tmpdir({
+    trusted: true,
+    config: { formatter: false, lsp: false, mcp },
+    init: (dir) => Bun.write(path.join(dir, SERVER_FILE), "export {}\n"),
   })
 }
 
@@ -228,14 +247,9 @@ describe("config and provider responses", () => {
       apiKey: Redaction.MARKER,
       reasoningEffort: "high",
     })
-    expect(body.mcp.tools.environment).toEqual({ GITHUB_TOKEN: Redaction.MARKER, DEBUG: "1" })
-    expect(body.mcp.tools.command).toEqual([
-      "tools-server",
-      "--api-key",
-      Redaction.MARKER,
-      `--x-token=${Redaction.MARKER}`,
-      "--verbose",
-    ])
+    // The project is trusted, and trust leaves out a local server whose program it cannot pin down, as with
+    // `tools-server` here. The global config tests below cover how a local server's secrets are marked.
+    expect(body.mcp.tools).toBeUndefined()
     expect(body.mcp.remote.url).toBe(`https://mcp.example.com/sse?token=${Redaction.MARKER}&mode=full`)
     expect(body.mcp.remote.headers.Authorization).toBe(Redaction.MARKER)
     expect(body.agent.build.apiKey).toBe(Redaction.MARKER)
@@ -282,6 +296,7 @@ describe("config and provider responses", () => {
     process.env.VECTOR_TEST_CONFIG_SECRET = "env-reference-config-secret"
     try {
       await using tmp = await tmpdir({
+        trusted: true,
         config: {
           formatter: false,
           lsp: false,
@@ -321,10 +336,18 @@ describe("config and provider responses", () => {
     }
   })
 
-  test("re-adding an MCP server from the redacted config keeps its stored secret", async () => {
-    await using tmp = await tmpdir({ config })
+  test("re-adding an MCP server from the redacted config keeps its stored secret and declared command", async () => {
+    await using tmp = await boundProject({ tools: boundTools })
     const body = JSON.parse(await text("/config", tmp.path))
     expect(body.mcp.tools.environment.GITHUB_TOKEN).toBe(Redaction.MARKER)
+    // The running command is bound to the approved snapshot; the file keeps the command it declares.
+    expect(body.mcp.tools.command).not.toEqual(boundTools.command)
+    expect(body.mcp.tools.command.slice(-4)).toEqual([
+      "--api-key",
+      Redaction.MARKER,
+      `--x-token=${Redaction.MARKER}`,
+      "--verbose",
+    ])
     const response = await request("/mcp", tmp.path, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -332,13 +355,14 @@ describe("config and provider responses", () => {
     })
     expect(response.status).toBe(200)
 
-    const saved = await Bun.file(path.join(tmp.path, ".vector", "vector.local.json")).json()
+    const saved = await Bun.file(Config.integrationStore(tmp.path)).json()
     expect(saved.mcp.tools.environment).toEqual({ GITHUB_TOKEN: "env-secret", DEBUG: "1" })
-    expect(saved.mcp.tools.command).toEqual(expectedSecrets.command)
+    expect(saved.mcp.tools.command).toEqual(boundTools.command)
+    expect(saved.mcp.tools.cwd).toBeUndefined()
   })
 
   test("V2 provider and model responses never carry a stored secret", async () => {
-    await using tmp = await tmpdir({ git: true, config })
+    await using tmp = await tmpdir({ trusted: true, git: true, config })
     await waitForProvider(tmp.path)
     for (const route of ["/api/provider", "/api/provider/custom", "/api/model"]) {
       const body = await text(route, tmp.path)
@@ -350,7 +374,7 @@ describe("config and provider responses", () => {
   }, 30_000)
 
   test("V2 agent responses never carry an agent's request secrets", async () => {
-    await using tmp = await tmpdir({ git: true, config })
+    await using tmp = await tmpdir({ trusted: true, git: true, config })
     await waitForProvider(tmp.path)
     const body = await text("/api/agent", tmp.path)
     for (const secret of secrets) expect(body).not.toContain(secret)
@@ -361,24 +385,18 @@ describe("config and provider responses", () => {
   test("re-adding an MCP server keeps the {env:...} reference its config file holds", async () => {
     process.env.VECTOR_TEST_MCP_SECRET = "env-reference-secret"
     try {
-      await using tmp = await tmpdir({
-        config: {
-          formatter: false,
-          lsp: false,
-          mcp: {
-            tools: {
-              type: "local",
-              command: ["tools-server"],
-              enabled: false,
-              environment: { GITHUB_TOKEN: "{env:VECTOR_TEST_MCP_SECRET}" },
-            },
-            remote: {
-              type: "remote",
-              url: "https://mcp.example.com",
-              enabled: false,
-              headers: { Authorization: "Bearer {env:VECTOR_TEST_MCP_SECRET}" },
-            },
-          },
+      await using tmp = await boundProject({
+        tools: {
+          type: "local",
+          command: ["bun", `./${SERVER_FILE}`],
+          enabled: false,
+          environment: { GITHUB_TOKEN: "{env:VECTOR_TEST_MCP_SECRET}" },
+        },
+        remote: {
+          type: "remote",
+          url: "https://mcp.example.com",
+          enabled: false,
+          headers: { Authorization: "Bearer {env:VECTOR_TEST_MCP_SECRET}" },
         },
       })
       const body = JSON.parse(await text("/config", tmp.path))
@@ -393,7 +411,7 @@ describe("config and provider responses", () => {
         expect(response.status).toBe(200)
       }
 
-      const saved = await Bun.file(path.join(tmp.path, ".vector", "vector.local.json")).text()
+      const saved = await Bun.file(Config.integrationStore(tmp.path)).text()
       expect(saved).not.toContain("env-reference-secret")
       expect(saved).not.toContain(Redaction.MARKER)
       expect(JSON.parse(saved).mcp.tools.environment.GITHUB_TOKEN).toBe("{env:VECTOR_TEST_MCP_SECRET}")
@@ -484,6 +502,7 @@ describe("permission rules whose patterns look like secret names", () => {
 
   test("reach the client unchanged from GET and PATCH /config", async () => {
     await using tmp = await tmpdir({
+      trusted: true,
       config: { ...config, permission: rules, agent: { build: { permission: rules } } },
     })
     const response = await request("/config", tmp.path)

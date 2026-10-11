@@ -319,11 +319,11 @@ export async function readWslCommandVersion(command: string, distro: string, opt
 
 export function openWslTerminal(distro?: string | null) {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn("cmd.exe", wslTerminalArgs(distro), {
+    const child = spawn(resolveSystem32Command("wsl.exe"), wslTerminalArgs(distro), {
       detached: true,
       env: untrustedChildEnvironment(),
       stdio: "ignore",
-      windowsHide: true,
+      windowsHide: false,
     })
     child.once("error", reject)
     child.once("spawn", () => {

@@ -1,16 +1,23 @@
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Permission } from "@/permission"
+import { Session } from "@/session/session"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { PermissionNotFoundError } from "../errors"
+import { allowsSessionID } from "./session-access"
 
 export const permissionHandlers = HttpApiBuilder.group(InstanceHttpApi, "permission", (handlers) =>
   Effect.gen(function* () {
     const svc = yield* Permission.Service
+    const session = yield* Session.Service
 
+    // Replying is owner-only for guests (ServerAuth.isOwnerOnlyRoute). A guest still sees the requests
+    // its own sessions are waiting on, but never the owner's.
     const list = Effect.fn("PermissionHttpApi.list")(function* () {
-      return yield* svc.list()
+      const principal = yield* RequestPrincipal
+      return yield* Effect.filter(yield* svc.list(), (item) => allowsSessionID(session, principal, item.sessionID))
     })
 
     const reply = Effect.fn("PermissionHttpApi.reply")(function* (ctx: {

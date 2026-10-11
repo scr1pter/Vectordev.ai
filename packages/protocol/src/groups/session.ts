@@ -9,6 +9,7 @@ import { Context, Effect, Encoding, Result, Schema, Struct } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import {
   ConflictError,
+  ForbiddenError,
   InvalidCursorError,
   InvalidRequestError,
   MessageNotFoundError,
@@ -163,6 +164,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           location: Location.Ref.pipe(Schema.optional),
         }),
         success: Schema.Struct({ data: Session.Info }),
+        error: ForbiddenError,
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.create",

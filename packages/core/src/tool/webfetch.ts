@@ -64,13 +64,6 @@ const headers = (format: Format) => ({
 const request = (url: string, format: Format) =>
   HttpClientRequest.get(url).pipe(HttpClientRequest.setHeaders(headers(format)))
 
-const assertHttpUrl = (url: URL) => {
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("URL must use http:// or https://")
-}
-
-const execute = (http: HttpClient.HttpClient, url: string, format: Format) =>
-  WebFetchRequest.execute(http, request(url, format))
-
 const collectBody = (response: HttpClientResponse.HttpClientResponse) =>
   collectBoundedResponseBody(
     response,
@@ -112,26 +105,31 @@ const layer = Layer.effectDiscard(
           toModelOutput: ({ output }) => [{ type: "text", text: output.output }],
           execute: (input, context) =>
             Effect.gen(function* () {
-              yield* Effect.try({
-                try: () => {
-                  const url = new URL(input.url)
-                  assertHttpUrl(url)
-                },
-                catch: (error) => error,
-              })
-
-              yield* permission.assert({
-                action: name,
-                resources: [input.url],
-                save: ["*"],
-                metadata: input,
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
-              })
-
               const { body, contentType } = yield* Effect.gen(function* () {
-                const response = yield* execute(http, input.url, input.format)
+                const response = yield* WebFetchRequest.execute(http, request(input.url, input.format), {
+                  authorize: (url) =>
+                    permission.assert({
+                      action: name,
+                      resources: [url],
+                      save: ["*"],
+                      metadata: { ...input, url },
+                      sessionID: context.sessionID,
+                      agent: context.agent,
+                      source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                    }),
+                  // A dev server, an intranet page or a cloud metadata address is reached only with its own
+                  // approval, since a model reading a hostile page could otherwise be steered into the user's network.
+                  authorizePrivate: (url) =>
+                    permission.assert({
+                      action: "private_network",
+                      resources: [new URL(url).origin],
+                      save: [new URL(url).origin],
+                      metadata: { url },
+                      sessionID: context.sessionID,
+                      agent: context.agent,
+                      source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
+                    }),
+                })
                 const contentType = response.headers["content-type"] || ""
                 const mime = mimeFrom(contentType)
                 if (isImageAttachment(mime))
