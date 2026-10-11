@@ -322,6 +322,7 @@ await writeFile(
       websocket: flags.ws,
       engineRoot: resolve(flags.engineRoot ?? REPO_ROOT),
       memorySamplingMs: 100,
+      payloadEncoding: "utf8",
       scenarios: reports,
     },
     null,
@@ -409,7 +410,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
         const frame = JSON.parse(text) as Record<string, unknown>
         if (frame.type !== "response.create") return
         const body = Object.fromEntries(Object.entries(frame).filter(([key]) => key !== "type"))
-        const played = respond(body, text.length, socket.data.headers, true)
+        const played = respond(body, Buffer.byteLength(text), socket.data.headers, true)
         responseEvents(played.items, played.n, String(body.model ?? "")).forEach((event) =>
           socket.send(JSON.stringify(event)),
         )
@@ -430,7 +431,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
       const responses = url.pathname.endsWith("/responses")
       if (!url.pathname.endsWith("/messages") && !responses) return Response.json({ data: [] })
       if (responses) {
-        const played = respond(body, text.length, headers, false)
+        const played = respond(body, Buffer.byteLength(text), headers, false)
         return new Response(
           responseEvents(played.items, played.n, String(body.model ?? ""))
             .map((event) => `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`)
@@ -438,7 +439,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
           { headers: { "content-type": "text/event-stream" } },
         )
       }
-      const played = respond(body, text.length, headers, false)
+      const played = respond(body, Buffer.byteLength(text), headers, false)
       const call = played.call
       if ("custom" in call) return Response.json({ error: "custom tools are a Responses API feature" }, { status: 400 })
       if (body.stream !== true) return Response.json(message(call, `toolu_${played.n}`, String(body.model ?? MODEL)))
