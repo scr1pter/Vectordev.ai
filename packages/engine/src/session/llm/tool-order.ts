@@ -76,7 +76,9 @@ export function tools(input: Record<string, Tool>, abort: AbortSignal): Record<s
               await item.onInputAvailable?.(options)
             },
             execute: (args, options) =>
-              Promise.resolve(execute(args, options)).finally(() => edits.get(options.toolCallId)?.resolve()),
+              Promise.resolve()
+                .then(() => execute(args, options))
+                .finally(() => edits.get(options.toolCallId)?.resolve()),
           } satisfies Tool,
         ]
       if (shell(name))
