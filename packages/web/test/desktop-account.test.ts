@@ -14,6 +14,7 @@ const user = {
   id: "11111111-1111-4111-8111-111111111111",
   email: "fixture@example.test",
   email_confirmed_at: "2026-01-01T00:00:00Z",
+  user_metadata: { full_name: "  Fixture Person  " },
 }
 const upstream = Bun.serve({
   hostname: "127.0.0.1",
@@ -125,6 +126,8 @@ test("PKCE and state bind one code to one desktop and concurrent replay has only
   const success = responses.find((item) => item.status === 200)!
   const exchanged = await success.json()
   expect(verifyCliToken(exchanged.token)).toEqual({ id: user.id, email: user.email })
+  // The desktop shows this name in its sidebar; it never enters the token.
+  expect(exchanged.user).toEqual({ id: user.id, email: user.email, name: "Fixture Person" })
   const callback = desktopSignInCallback(code, input.state)
   expect(callback).toStartWith("vector://auth/callback?")
   expect(callback).not.toContain(exchanged.token)

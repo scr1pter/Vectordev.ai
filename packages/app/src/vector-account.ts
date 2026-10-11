@@ -2,6 +2,7 @@ export type VectorAccountStatus = {
   authenticated: boolean
   pending: boolean
   email?: string
+  name?: string
   expiresAt?: number
   error?: string
 }
