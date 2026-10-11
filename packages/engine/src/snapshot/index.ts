@@ -37,6 +37,22 @@ const limit = 2 * 1024 * 1024
 const core = ["-c", "core.longpaths=true", "-c", "core.symlinks=true"]
 const cfg = ["-c", "core.autocrlf=false", ...core]
 const quote = [...cfg, "-c", "core.quotepath=false"]
+// The shadow repo's own settings. untrackedCache, manyFiles and the index settings tune very large worktrees so the
+// first add stays bounded.
+const SHADOW_CONFIG = [
+  "[core]",
+  "\tautocrlf = false",
+  "\tlongpaths = true",
+  "\tsymlinks = true",
+  "\tfsmonitor = false",
+  "\tuntrackedCache = true",
+  "[feature]",
+  "\tmanyFiles = true",
+  "[index]",
+  "\tversion = 4",
+  "\tthreads = true",
+  "",
+].join("\n")
 interface GitResult {
   readonly code: ChildProcessSpawner.ExitCode
   readonly text: string
@@ -181,14 +197,20 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
           return (yield* config.get()).snapshot !== false
         })
 
+        const cache = { exclude: undefined as string | undefined, anchored: new Set<string>() }
+
+        // Where the source repository keeps its exclude file does not change while the instance lives, so git is asked
+        // once; the file itself is still checked and read on every sync, since its content can change.
         const excludes = Effect.fnUntraced(function* () {
-          const result = yield* git(["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"], {
-            cwd: state.worktree,
-          })
-          const file = result.text.trim()
-          if (!file) return
-          if (!(yield* exists(file))) return
-          return file
+          if (!cache.exclude) {
+            const result = yield* git(["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"], {
+              cwd: state.worktree,
+            })
+            cache.exclude = result.text.trim() || undefined
+          }
+          if (!cache.exclude) return
+          if (!(yield* exists(cache.exclude))) return
+          return cache.exclude
         })
 
         const sync = Effect.fnUntraced(function* (list: string[] = []) {
@@ -330,9 +352,11 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
         // write-tree leaves the tree unreferenced, so the periodic `git gc
         // --prune` below is free to collect it and the snapshot silently stops
         // existing. Wrapping it in a commit under refs/vector keeps it
-        // reachable for as long as the shadow repo lives.
+        // reachable for as long as the shadow repo lives. A tree this process already anchored keeps its ref, so an
+        // unchanged worktree, the usual case between one step's closing snapshot and the next step's opening one,
+        // spawns no further git processes here.
         const anchor = Effect.fnUntraced(function* (hash: string) {
-          if (!hash) return
+          if (!hash || cache.anchored.has(hash)) return
           const commit = yield* git([...core, ...args(["commit-tree", hash, "-m", "vector snapshot"])], {
             cwd: state.directory,
             env: {
@@ -353,7 +377,11 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
             `refs/vector/snapshot/${hash}`,
             commit.text.trim(),
           ])
-          if (ref.code !== 0) yield* Effect.logWarning("failed to write snapshot ref", { hash, stderr: ref.stderr })
+          if (ref.code !== 0) {
+            yield* Effect.logWarning("failed to write snapshot ref", { hash, stderr: ref.stderr })
+            return
+          }
+          cache.anchored.add(hash)
         })
 
         // Whether the snapshot's tree can still be read. This is the difference
@@ -371,18 +399,18 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Service | C
               const existed = yield* exists(state.gitdir)
               yield* fs.ensureDir(state.gitdir).pipe(Effect.orDie)
               if (!existed) {
+                // A fresh repo has none of this process's anchors.
+                cache.anchored.clear()
                 yield* git(["init"], {
                   env: { GIT_DIR: state.gitdir, GIT_WORK_TREE: state.worktree },
                 })
-                yield* git(["--git-dir", state.gitdir, "config", "core.autocrlf", "false"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.longpaths", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.symlinks", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.fsmonitor", "false"])
-                // Tuning for very large worktrees so the first add stays bounded.
-                yield* git(["--git-dir", state.gitdir, "config", "feature.manyFiles", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "index.version", "4"])
-                yield* git(["--git-dir", state.gitdir, "config", "index.threads", "true"])
-                yield* git(["--git-dir", state.gitdir, "config", "core.untrackedCache", "true"])
+                // One write instead of a `git config` process per setting. Git reads a repeated section as one, the
+                // last value of a key winning, so this is the configuration those commands would leave.
+                const file = path.join(state.gitdir, "config")
+                if (yield* exists(file))
+                  yield* fs
+                    .writeFileString(file, `${(yield* read(file)).trimEnd()}\n${SHADOW_CONFIG}`)
+                    .pipe(Effect.catch((error) => Effect.logWarning("failed to configure snapshot repo", { error })))
                 yield* seed()
                 yield* Effect.logInfo("initialized")
               }
