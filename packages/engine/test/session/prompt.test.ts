@@ -719,7 +719,59 @@ it.instance("title generation sends only what the user typed", () =>
     expect(usage[0]?.data.tokens).toBeUndefined()
     const history = yield* sessions.messages({ sessionID: chat.id })
     expect(history.filter((message) => message.info.role === "assistant")).toHaveLength(1)
+    // The title request goes out only after the main request, and the model's title replaces the provisional one.
+    const bodies = (yield* llm.hits).map((hit) => JSON.stringify(hit.body))
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0]).not.toContain("Generate a title")
+    expect(bodies[1]).toContain("Generate a title")
+    expect((yield* sessions.get(chat.id)).title).toBe("E2E Title")
   }),
+)
+
+it.instance(
+  "a session is titled from the prompt at once, and a title set before the model's arrives stays",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ permission: [{ permission: "*", pattern: "*", action: "allow" }] })
+      // Nothing of the reply reaches Vector until the test releases it, so the provider is not yet answering.
+      const answer = defer<void>()
+      const held = reply().wait(answer.promise).text("done").stop().item()
+      if (held.type !== "sse") throw new Error("expected a streamed reply")
+      yield* llm.push({ ...held, head: [], tail: [...held.head, ...held.tail] })
+
+      const run = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          parts: [{ type: "text", text: "  Fix the login   redirect\nafter the session expires" }],
+        })
+        .pipe(Effect.forkChild)
+      yield* llm.wait(1)
+      yield* pollWithTimeout(
+        Effect.map(sessions.get(chat.id), (session) =>
+          session.title === "Fix the login redirect" ? (true as const) : undefined,
+        ),
+        "the session never got its provisional title",
+        "10 seconds",
+      )
+      // The title request waits for the main request to be answered.
+      expect(yield* llm.hits).toHaveLength(1)
+
+      yield* sessions.setTitle({ sessionID: chat.id, title: "Login redirect" })
+      answer.resolve()
+      yield* Fiber.join(run)
+      yield* prompt.awaitTitles()
+
+      expect((yield* sessions.get(chat.id)).title).toBe("Login redirect")
+      expect(
+        (yield* llm.hits).map((hit) => JSON.stringify(hit.body)).filter((body) => body.includes("Generate a title")),
+      ).toEqual([])
+    }),
+  30_000,
 )
 
 it.instance("a session reads its instruction files once, so an edit mid-session keeps the cached system prompt", () =>

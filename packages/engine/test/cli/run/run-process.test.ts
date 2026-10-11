@@ -42,6 +42,20 @@ describe("vector run (non-interactive subprocess)", () => {
   )
 
   cliIt.concurrent(
+    "names its session after the prompt instead of sending a title request",
+    ({ llm, vector }) =>
+      Effect.gen(function* () {
+        yield* llm.text("hello from the test llm")
+        const result = yield* vector.run("say hi")
+        vector.expectExit(result, 0)
+        const bodies = (yield* llm.hits).map((hit) => JSON.stringify(hit.body))
+        expect(bodies).toHaveLength(1)
+        expect(bodies[0]).not.toContain("Generate a title")
+      }),
+    60_000,
+  )
+
+  cliIt.concurrent(
     "prints each completed text part in order around a tool continuation",
     ({ llm, vector }) =>
       Effect.gen(function* () {

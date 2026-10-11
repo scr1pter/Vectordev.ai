@@ -59,6 +59,8 @@ export type StreamInput = {
   // Called with the usage a provider reports as it starts a response, before the step finishes. A step that is
   // stopped or fails mid-stream reports nothing more, so this is what it was billed.
   started?: (usage: UsageInput) => void
+  // Called at the first event of the response, once the provider has the request and is answering it.
+  answering?: () => void
 }
 
 export type StreamRequest = StreamInput & {
@@ -430,9 +432,16 @@ const live: Layer.Layer<
 
             const result = yield* run({ ...input, abort: ctrl.signal, requestID })
             timing.ready()
+            let answered = false
+            const observe = (event: LLMEvent) =>
+              Effect.sync(() => {
+                timing.observe(event)
+                if (answered) return
+                answered = true
+                input.answering?.()
+              })
 
-            if (result.type === "native")
-              return result.stream.pipe(Stream.tap((event) => Effect.sync(() => timing.observe(event))))
+            if (result.type === "native") return result.stream.pipe(Stream.tap(observe))
 
             // Adapter seam: both runtimes expose the same LLMEvent stream. Native
             // already returns one; AI SDK streams are converted here.
@@ -448,7 +457,7 @@ const live: Layer.Layer<
               ),
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
-              Stream.tap((event) => Effect.sync(() => timing.observe(event))),
+              Stream.tap(observe),
             )
           }),
         ),
