@@ -108,14 +108,20 @@ const upstream = Bun.serve({
       expect(request.headers.get("authorization")).toBe("Bearer fixture-openrouter-key")
       return Response.json({ data: state.userModels.map((id) => ({ id })) })
     }
-    if (url.pathname === "/api/frontend/all-providers")
+    if (url.pathname === "/api/v1/endpoints/zdr")
       return Response.json({
-        data: ["Cohere", "Poolside", "ModelRun"].map((name) => ({
-          name,
-          slug: name.toLowerCase(),
-          displayName: name,
-          dataPolicy: { training: state.training, trainingOpenRouter: false, retainsPrompts: false, canPublish: false },
-        })),
+        data: state.training
+          ? []
+          : state.models.map((model) => ({
+              model_id: model.id,
+              provider_name: model.provider,
+              tag: model.provider.toLowerCase(),
+              context_length: model.context_length,
+              max_completion_tokens: model.top_provider.max_completion_tokens,
+              pricing: model.pricing,
+              supported_parameters: model.supported_parameters,
+              status: 0,
+            })),
       })
     if (url.pathname.endsWith("/endpoints")) {
       const id = decodeURIComponent(url.pathname.slice("/api/v1/models/".length, -"/endpoints".length))
@@ -222,6 +228,7 @@ beforeEach(async () => {
     KV_REST_API_URL: new URL("/redis", upstream.url).href,
     KV_REST_API_TOKEN: "fixture-kv-token",
     OPENROUTER_API_KEY: "fixture-openrouter-key",
+    OPENROUTER_FREE_API_KEY: "fixture-openrouter-key",
   })
   delete process.env.VERCEL_ENV
   delete process.env.UPSTASH_REDIS_REST_URL
@@ -266,6 +273,7 @@ afterAll(async () => {
     "KV_REST_API_URL",
     "KV_REST_API_TOKEN",
     "OPENROUTER_API_KEY",
+    "OPENROUTER_FREE_API_KEY",
   ])
     delete process.env[key]
 })
@@ -394,6 +402,7 @@ describe("shared free inference", () => {
     expect(chats[0].body.models).toEqual(candidates.map((item) => item.id))
     expect(chats[0].body.provider).toEqual({
       data_collection: "deny",
+      zdr: true,
       require_parameters: true,
       only: ["cohere", "poolside", "modelrun"],
       max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
