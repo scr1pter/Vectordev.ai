@@ -1048,6 +1048,47 @@ describe("Config", () => {
     ),
   )
 
+  it.live("rejects uncaptured workspace programs selected by bare shell names", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const configFile = path.join(tmp.path, "vector.json")
+          const shell = `vector-fixture-shell${process.platform === "win32" ? ".cmd" : ""}`
+          const directory = path.join(tmp.path, "bin")
+          yield* Effect.promise(() => fs.mkdir(directory))
+          yield* Effect.promise(() => fs.writeFile(path.join(directory, shell), "approved\n", { mode: 0o700 }))
+          yield* Effect.promise(() => fs.writeFile(configFile, JSON.stringify({ shell })))
+          const approved = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
+          yield* Effect.promise(() => WorkspaceTrust.approve(path.join(tmp.path, "state"), approved))
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              const previous = process.env.PATH
+              process.env.PATH = [directory, previous].filter(Boolean).join(path.delimiter)
+              return previous
+            }),
+            (previous) =>
+              Effect.sync(() => {
+                if (previous === undefined) delete process.env.PATH
+                else process.env.PATH = previous
+              }),
+          )
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const project = (yield* config.entries()).find(
+              (entry): entry is Config.Document => entry.type === "document" && entry.path === configFile,
+            )!
+            expect(config.executable?.(project)).toBe(true)
+            expect(project.info.shell).toBeUndefined()
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
+    ),
+  )
+
   it.live("materializes trusted project MCP scripts and cwd while rejecting package runners", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),

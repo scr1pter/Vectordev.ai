@@ -455,6 +455,7 @@ function trustedExecutableValue(value: unknown, base: string, trusted: Workspace
     return WorkspaceTrust.materializedPathOption(trusted, value)
   }
   if (URL.canParse(value)) return value
-  if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\")) return value
+  if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\"))
+    return WorkspaceTrust.hostExecutable(trusted, value)
   return WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, value))
 }

@@ -221,7 +221,8 @@ function trustedExecutableValue(
   if (preserveFileUrl && !path.isAbsolute(value) && !value.startsWith(".") && !/^[A-Za-z]:[\\/]/.test(value)) {
     return value
   }
-  if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\")) return value
+  if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\"))
+    return WorkspaceTrust.hostExecutable(trusted, value)
   const target = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, value))
   if (!target) return
   return preserveFileUrl ? pathToFileURL(target).href : target

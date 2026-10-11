@@ -348,7 +348,7 @@ export function materializedCommand(
   return { command: bound, cwd: directory }
 }
 
-function hostExecutable(current: TrustedSnapshot, command: string) {
+export function hostExecutable(current: TrustedSnapshot, command: string) {
   const found = whichPkg.sync(command, {
     nothrow: true,
     path: process.env.PATH ?? process.env.Path,

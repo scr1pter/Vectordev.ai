@@ -478,10 +478,11 @@ it.instance(
 )
 
 it.instance(
-  "loads shell config field",
+  "binds trusted bare host shell names to absolute programs",
   Effect.gen(function* () {
     const config = yield* Config.use.get()
-    expect(config.shell).toBe("bash")
+    expect(path.isAbsolute(config.shell ?? "")).toBe(true)
+    expect(path.basename(config.shell ?? "").toLowerCase()).toMatch(/^bash(?:\.exe)?$/)
   }),
   { trusted: true, config: { shell: "bash" } },
 )
@@ -817,6 +818,27 @@ it.instance("binds trusted project executable inputs to the approved private cop
     yield* FSUtil.use.writeFileString(shell, "#!/bin/sh\necho changed\n")
     expect(yield* FSUtil.use.readFileString(target)).toBe("export default 'approved'\n")
     expect(yield* FSUtil.use.readFileString(config.shell!)).toBe("#!/bin/sh\necho approved\n")
+  }),
+)
+
+it.instance("rejects uncaptured workspace programs selected by bare shell names", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    const shell = `vector-fixture-shell${process.platform === "win32" ? ".cmd" : ""}`
+    const directory = path.join(test.directory, "bin")
+    yield* FSUtil.use.writeWithDirs(path.join(directory, shell), "approved\n")
+    yield* Effect.promise(() => fs.chmod(path.join(directory, shell), 0o700))
+    yield* writeTrustedConfigEffect(test.directory, { shell })
+
+    yield* withProcessEnv(
+      "PATH",
+      [directory, process.env.PATH].filter(Boolean).join(path.delimiter),
+      Effect.gen(function* () {
+        const config = yield* Config.use.get()
+        expect(config.shell).toBeUndefined()
+        expect((yield* Config.Service.use((service) => service.trust!())).trusted).toBe(true)
+      }),
+    )
   }),
 )
 
