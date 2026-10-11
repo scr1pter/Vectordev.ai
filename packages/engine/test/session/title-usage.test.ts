@@ -266,3 +266,24 @@ it.effect("retains an unpriced OpenRouter metadata-only charge when title genera
     expect(yield* test.session).toMatchObject({ cost: 0.05, unpriced_steps: 1, tokens_input: 0, tokens_output: 0 })
   }),
 )
+
+it.effect("Codium title charges persist once using the gateway cost instead of catalog ceilings", () =>
+  Effect.gen(function* () {
+    const test = yield* setup({ ...model, providerID: ProviderV2.ID.make("vector-plan") })
+    yield* test.usage.record(
+      LLMEvent.stepFinish({
+        index: 0,
+        reason: "stop",
+        usage: { inputTokens: 200, outputTokens: 6 },
+        providerMetadata: { codium: { cost: 0.000031 } },
+      }),
+    )
+    yield* test.usage.finish()
+    expect(yield* test.records).toHaveLength(1)
+    expect((yield* test.records)[0]?.data).toMatchObject({ purpose: "title", cost: 0.000031 })
+    expect((yield* test.session)?.cost).toBe(0.000031)
+    expect((yield* test.session)?.tokens_input).toBe(200)
+    expect((yield* test.session)?.tokens_output).toBe(6)
+    expect(yield* test.messages).toHaveLength(0)
+  }),
+)

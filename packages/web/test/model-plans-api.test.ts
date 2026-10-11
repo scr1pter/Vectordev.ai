@@ -128,6 +128,7 @@ const state = {
   priceMismatch: false,
   upstreamStatus: 200,
   streamMode: "normal",
+  charge: 0,
   keyReadDelay: 0,
   subscriptions: [] as ReturnType<typeof subscription>[],
 }
@@ -255,6 +256,8 @@ const upstream = Bun.serve({
       expect(request.headers.get("authorization")).toBe(`Bearer ${keys.values().next().value?.secret}`)
       if (state.upstreamStatus !== 200)
         return Response.json({ error: { message: "PRIVATE fixture-paid-secret-1" } }, { status: state.upstreamStatus })
+      const charged = keys.values().next().value
+      if (charged && state.charge) charged.data.usage = Number(charged.data.usage ?? 0) + state.charge
       const mode = state.streamMode
       return new Response(
         new ReadableStream({
@@ -267,6 +270,12 @@ const upstream = Bun.serve({
                 encoder.encode('data: {"error":{"code":402,"message":"PRIVATE fixture-paid-secret-1"}}\n\n'),
               )
             if (mode === "invalid") controller.enqueue(encoder.encode("data: not-json\n\n"))
+            if (state.charge)
+              controller.enqueue(
+                encoder.encode(
+                  `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 200, completion_tokens: 6, total_tokens: 206, cost: state.charge } })}\n\n`,
+                ),
+              )
             if (mode !== "truncated") controller.enqueue(encoder.encode("data: [DONE]\n\n"))
             controller.close()
           },
@@ -334,6 +343,7 @@ beforeEach(async () => {
     priceMismatch: false,
     upstreamStatus: 200,
     streamMode: "normal",
+    charge: 0,
     keyReadDelay: 0,
     subscriptions: [],
   })
@@ -703,6 +713,21 @@ describe("paid credential lifecycle", () => {
 })
 
 describe("model plan HTTP inference", () => {
+  test("a title request debits its account key and the authenticated balance reflects the charge", async () => {
+    await paid()
+    state.charge = 0.000031
+    const response = await chat({
+      model: model.id,
+      max_tokens: 64,
+      messages: [{ role: "user", content: "Generate a concise title" }],
+    })
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('"cost":0.000031')
+    expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ used: 0.000031, remaining: 4.999969 })
+    expect(chats()).toHaveLength(1)
+    state.charge = 0
+  })
+
   test("requires a current nonrevoked CLI identity and authoritative persistent storage", async () => {
     await paid()
     expect((await chat(undefined, "invalid")).status).toBe(401)

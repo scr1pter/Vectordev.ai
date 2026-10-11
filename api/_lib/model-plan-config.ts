@@ -13,6 +13,9 @@ export const ModelPlanModel = Schema.Struct({
   outputPrice: Schema.Number,
   category: Schema.optional(Schema.Literals(["everyday", "advanced"])),
   description: Schema.optional(Schema.String),
+  quantizations: Schema.optional(Schema.Array(Schema.Literals(["fp8", "bf16"]))),
+  reasoningEffort: Schema.optional(Schema.Literals(["high"])),
+  explicitCache: Schema.optional(Schema.Boolean),
 })
 export type ModelPlanModel = typeof ModelPlanModel.Type
 
@@ -44,13 +47,20 @@ export function modelTopups() {
 }
 
 export function modelCreditMarkup() {
-  const value = Number(process.env.MODEL_CREDIT_MARKUP_PERCENT?.trim() || "25")
+  const configured = process.env.MODEL_CREDIT_MARKUP_PERCENT?.trim()
+  if (!configured) return undefined
+  const value = Number(configured)
   if (!Number.isFinite(value) || value < 0 || value > 300) throw configurationError()
   return value
 }
 
 function creditAllowance(price: number, override: string | undefined) {
-  const credits = override?.trim() ? Number(override) : Math.floor((price * 10_000) / (100 + modelCreditMarkup())) / 100
+  const markup = override?.trim() ? undefined : modelCreditMarkup()
+  const credits = override?.trim()
+    ? Number(override)
+    : markup === undefined
+      ? 0
+      : Math.floor((price * 10_000) / (100 + markup)) / 100
   return Number.isFinite(credits) && credits > 0 && credits <= price && Math.round(credits * 100) / 100 === credits
     ? credits
     : 0
@@ -131,18 +141,28 @@ export function publicModelPlans() {
     topups.every((pack) => !!pack.credits && !!pack.priceID) &&
     new Set(topups.map((pack) => pack.priceID)).size === topups.length
   const models = configuredPlanModels()
-  const usage = codiumTaskUsage()
+
   const offers = (items: { id: string; name: string; price: number; credits: number }[], available: boolean) =>
     items.map((item) => ({
       id: item.id,
       name: item.name,
       price: item.price,
       available: available && item.credits > 0,
-      ...(items[0]!.credits > 0 && item.credits > items[0]!.credits
-        ? { multiple: Math.round((item.credits / items[0]!.credits) * 10) / 10 }
+      ...(item.price > items[0]!.price
+        ? {
+            multiple:
+              Math.round(
+                (item.credits > 0 && items[0]!.credits > 0
+                  ? item.credits / items[0]!.credits
+                  : item.price / items[0]!.price) * 10,
+              ) / 10,
+          }
         : {}),
       // Typical tasks for each model, in catalog order; null where a model has no reviewed assumptions.
-      tasks: models.map((model) => taskRange(item.credits, usage[model.id])),
+      tasks: models.map((model) => {
+        const range = CODIUM_TASK_RANGES[model.id]
+        return range ? ([(range[0] * item.price) / 10, (range[1] * item.price) / 10] as const) : null
+      }),
     }))
   return {
     product: "Vector Codium",
@@ -161,56 +181,12 @@ export function publicModelPlans() {
   }
 }
 
-// The assumptions behind the public usage ranges, per model: the share of input tokens read from the prompt cache,
-// the expected input, cached-input and output prices per million tokens, and a smaller and a larger typical task.
-// They live only in CODIUM_TASK_USAGE_JSON in the hosting environment: published next to the ranges, they would give
-// away each purchase's credits and so the markup.
-const TaskTokens = Schema.Struct({ input: Schema.Number, output: Schema.Number })
-const ModelTaskUsage = Schema.Struct({
-  cached: Schema.Number,
-  price: Schema.Struct({ input: Schema.Number, cached: Schema.Number, output: Schema.Number }),
-  tasks: Schema.Tuple([TaskTokens, TaskTokens]),
-})
-
-function codiumTaskUsage(): Record<string, typeof ModelTaskUsage.Type | undefined> {
-  const value = process.env.CODIUM_TASK_USAGE_JSON?.trim()
-  if (!value) return {}
-  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, ModelTaskUsage)))(value)
-  if (
-    Option.isNone(decoded) ||
-    Object.values(decoded.value).some(
-      (usage) =>
-        !(usage.cached >= 0 && usage.cached <= 1) ||
-        !(usage.price.input > 0 && usage.price.output > 0 && usage.price.cached >= 0) ||
-        [usage.price.input, usage.price.cached, usage.price.output].some((price) => !Number.isFinite(price)) ||
-        usage.tasks.some(
-          (task) => !(task.input > 0 && task.output > 0) || !Number.isSafeInteger(task.input + task.output),
-        ),
-    )
-  )
-    throw configurationError()
-  return decoded.value
-}
-
-/** How many typical tasks a purchase covers, from the larger task to the smaller, rounded down to two digits. */
-function taskRange(credits: number, usage: typeof ModelTaskUsage.Type | undefined) {
-  if (!usage || !(credits > 0)) return null
-  const [low, high] = usage.tasks
-    .map(
-      (task) =>
-        credits /
-        ((task.input * (1 - usage.cached) * usage.price.input +
-          task.input * usage.cached * usage.price.cached +
-          task.output * usage.price.output) /
-          1_000_000),
-    )
-    .toSorted((a, b) => a - b)
-    .map((tasks) => {
-      const step = 10 ** Math.max(0, Math.floor(Math.log10(tasks)) - 1)
-      return Math.floor(tasks / step) * step
-    })
-  if (!(low! >= 1)) return null
-  return [low!, high!] as const
+// Coarse illustrative ranges reviewed for the launch catalog. They are deliberately independent of private credit
+// allowances and provider prices. Actual task size, cache warmth and reasoning vary; these are not guarantees.
+const CODIUM_TASK_RANGES: Record<string, readonly [number, number] | undefined> = {
+  "deepseek/deepseek-v4.1-flash": [50, 500],
+  "xiaomi/mimo-v2.6-flash": [80, 800],
+  "anthropic/claude-haiku-5.5": [30, 300],
 }
 
 export function modelPlanOrigin() {

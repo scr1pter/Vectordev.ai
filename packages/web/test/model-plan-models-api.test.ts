@@ -13,13 +13,14 @@ const environment: Record<string, string> = {
   KV_REST_API_URL: "https://kv.fixture.invalid",
   KV_REST_API_TOKEN: "fixture-kv-token",
   MODEL_PLANS_ENABLED: "true",
+  MODEL_CREDIT_MARKUP_PERCENT: "100",
   STRIPE_SECRET_KEY: "sk_test_fixture_placeholder",
   STRIPE_MODEL_PLAN_WEBHOOK_SECRET: "whsec_fixture_placeholder",
   STRIPE_MODEL_PLAN_PORTAL_CONFIG_ID: "bpc_fixture_placeholder",
   OPENROUTER_MANAGEMENT_KEY: "fixture-management-placeholder",
   MODEL_PLAN_KEY_ENCRYPTION_SECRET: "cd".repeat(32),
   ...Object.fromEntries(
-    [10, 20, 50, 100, 200].map((price) => [`STRIPE_MODEL_PLAN_${price}_PRICE_ID`, `price_fixture${price}`]),
+    [10, 50, 100, 200].map((price) => [`STRIPE_MODEL_PLAN_${price}_PRICE_ID`, `price_fixture${price}`]),
   ),
 }
 const previous = new Map(Object.keys(environment).map((key) => [key, process.env[key]]))

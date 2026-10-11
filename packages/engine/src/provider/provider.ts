@@ -2230,6 +2230,11 @@ const layer = Layer.effect(
       // Background calls must not turn a free conversation into paid inference, even with a small-model override.
       if (primary && isFreeModel(primary)) return primary
       if (providerID === "vector") return Object.values(provider.models).find(isFreeModel)
+      // An explicitly selected Codium conversation keeps helper calls on its credit route at the lowest ceiling.
+      if (providerID === ModelPlans.PROVIDER_ID)
+        return Object.values(provider.models).toSorted(
+          (a, b) => a.cost.input + a.cost.output - b.cost.input - b.cost.output,
+        )[0]
       const cfg = yield* config.get()
 
       if (cfg.small_model) {

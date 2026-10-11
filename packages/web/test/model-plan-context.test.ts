@@ -82,7 +82,7 @@ test("a conversation the engine has not yet compacted is accepted, and one past 
   expect(long.estimate).toBeGreaterThan(100_000)
   expect(long.estimate).toBeLessThan(model.contextLength - model.maxOutputTokens)
   expect(() => requireModelPlanContext(long.body, model)).not.toThrow()
-  const over = turn(10)
+  const over = turn(24)
   expect(over.estimate).toBeGreaterThan(model.contextLength)
   expect(() => requireModelPlanContext(over.body, model)).toThrow(
     expect.objectContaining({ statusCode: 400, code: "MODEL_PLAN_CONTEXT" }),

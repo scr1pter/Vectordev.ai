@@ -26,6 +26,19 @@ const endpoint = {
 }
 
 describe("configured Codium model audit", () => {
+  test("only reviewed precision endpoints qualify when a quantization allowlist is configured", () => {
+    const result = auditModelPlanCatalog(
+      [{ ...configured, quantizations: ["fp8", "bf16"] }],
+      [model],
+      [
+        { ...endpoint, tag: "fp4", quantization: "fp4" },
+        { ...endpoint, tag: "bf16", quantization: "bf16" },
+        { ...endpoint, tag: "unknown" },
+      ],
+    )
+    expect(result[0]!.ok).toBe(true)
+    expect(result[0]!.providers.map((provider) => provider.id)).toEqual(["bf16"])
+  })
   test("keeps the configured model and finds a capable endpoint rather than the cheapest incompatible one", () => {
     const result = auditModelPlanCatalog(
       [configured],

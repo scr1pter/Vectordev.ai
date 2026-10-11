@@ -11,6 +11,8 @@ export const CODIUM_MODELS = [
     maxOutputTokens: 32000,
     inputPrice: 0.3,
     outputPrice: 1.2,
+    quantizations: ["fp8", "bf16"],
+    reasoningEffort: "high",
   },
   {
     id: "xiaomi/mimo-v2.6-flash",
@@ -22,19 +24,20 @@ export const CODIUM_MODELS = [
     maxOutputTokens: 16384,
     inputPrice: 0.26,
     outputPrice: 0.41,
+    quantizations: ["fp8", "bf16"],
   },
   {
     id: "anthropic/claude-haiku-5.5",
     name: "Claude Haiku 5.5",
     category: "advanced",
     description: "For harder, multi-step problems. Uses credits faster than the other models.",
-    // Every endpoint bills the whole request at 5x once a prompt reaches 100,000 tokens. The gateway rejects a request
-    // whose prompt bound plus output exceeds this limit; the bound overcounts code, prose and tool output, so only
-    // text averaging under about three bytes a token could reach that price.
-    contextLength: 100000,
-    maxOutputTokens: 20000,
+    // Keep both the estimated context and a conservative UTF-8 prompt bound below the long-prompt threshold.
+    contextLength: 32768,
+    maxOutputTokens: 8192,
     // Covers prompt-cache writes, which these endpoints bill at up to twice the 0.11 input price.
     inputPrice: 0.22,
     outputPrice: 0.55,
+    reasoningEffort: "high",
+    explicitCache: true,
   },
 ] as const

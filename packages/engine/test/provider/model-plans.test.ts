@@ -289,3 +289,37 @@ it.instance(
     }),
   { config: { enabled_providers: [ModelPlans.PROVIDER_ID] } },
 )
+
+it.instance("a Codium title stays on credits and records the gateway charge exactly once", () =>
+  Effect.gen(function* () {
+    const provider = yield* Provider.Service
+    const selected = yield* provider.getSmallModel(id, ModelV2.ID.make(codiumModel.id))
+    if (!selected) throw new Error("Missing Codium title model")
+    expect(selected.providerID).toBe(id)
+    const language = yield* provider.getLanguage(selected)
+    gateway.state.mode = "text"
+    const before = gateway.seen.length
+    const response = yield* Effect.promise(() =>
+      language.doStream({
+        prompt: [{ role: "user", content: [{ type: "text", text: "Generate a concise session title" }] }],
+      }),
+    )
+    const parts = Array.from(
+      yield* Stream.runCollect(
+        Stream.fromReadableStream({ evaluate: () => response.stream, onError: (cause) => cause }),
+      ),
+    )
+    gateway.state.mode = "ok"
+    const finish = parts.find((part) => part.type === "finish")
+    if (finish?.type !== "finish") throw new Error("Missing title usage")
+    expect(finish.providerMetadata?.codium).toEqual({ cost: 0.000031 })
+    expect(
+      Session.getUsage({
+        model: selected,
+        usage: new Usage({ inputTokens: 200, outputTokens: 6 }),
+        metadata: finish.providerMetadata,
+      }).cost,
+    ).toBe(0.000031)
+    expect(gateway.seen.slice(before).map((request) => request.path)).toEqual(["/api/model-plans/chat"])
+  }),
+)
