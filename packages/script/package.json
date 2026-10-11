@@ -2,6 +2,9 @@
   "$schema": "https://json.schemastore.org/package",
   "name": "@vectordevai/script",
   "license": "MIT",
+  "scripts": {
+    "typecheck": "tsgo --noEmit"
+  },
   "dependencies": {
     "semver": "^7.6.3"
   },
