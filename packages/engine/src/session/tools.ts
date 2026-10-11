@@ -77,6 +77,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           },
         }
       }),
+    deniedResources: (req) =>
+      Effect.succeed(
+        req.patterns.filter(
+          (pattern) =>
+            Permission.evaluate(
+              req.permission,
+              pattern,
+              Permission.merge(input.agent.permission, input.session.permission ?? []),
+            ).action === "deny",
+        ),
+      ),
     ask: (req) =>
       permission
         .ask({

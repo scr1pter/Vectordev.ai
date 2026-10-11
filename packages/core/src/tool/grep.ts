@@ -123,12 +123,43 @@ const layer = Layer.effectDiscard(
                   message: `Search path is not a file or directory: ${input.path ?? "."}`,
                 })
               const cwd = info.type === "Directory" ? target.canonical : path.dirname(target.canonical)
+              const candidates =
+                info.type === "File"
+                  ? [{ file: `./${path.basename(target.canonical)}`, resource: target.resource }]
+                  : (yield* ripgrep.find({
+                      cwd,
+                      pattern: input.include ?? "*",
+                      hidden: true,
+                      limit: Number.MAX_SAFE_INTEGER,
+                    })).map((entry) => ({
+                      file: `./${entry.path}`,
+                      resource: (target.externalDirectory
+                        ? path.resolve(cwd, entry.path)
+                        : path.relative(location.directory, path.resolve(cwd, entry.path))
+                      ).replaceAll("\\", "/"),
+                    }))
+              const read = {
+                action: "read",
+                resources: candidates.map((entry) => entry.resource),
+                save: ["*"],
+                sessionID: context.sessionID,
+                agent: context.agent,
+                source,
+              }
+              // Listing filenames reads no file contents. Filter denials before one
+              // batched approval, then bind the content search to that admitted set.
+              const denied =
+                info.type === "Directory" ? new Set(yield* permission.deniedResources(read)) : new Set<string>()
+              const admitted = candidates.filter((entry) => !denied.has(entry.resource))
+              if (!admitted.length) return []
+              yield* permission.assert({ ...read, resources: admitted.map((entry) => entry.resource) })
               return yield* ripgrep
                 .grep({
                   cwd,
                   pattern: input.pattern,
                   // A bare "-" means stdin to ripgrep, even after its option delimiter.
-                  file: info.type === "File" ? `./${path.basename(target.canonical)}` : undefined,
+                  file: info.type === "File" ? admitted[0].file : undefined,
+                  files: info.type === "Directory" ? admitted.map((entry) => entry.file) : undefined,
                   include: input.include,
                   limit: input.limit ?? Number.MAX_SAFE_INTEGER,
                 })
@@ -140,10 +171,7 @@ const layer = Layer.effectDiscard(
                         entry: FileSystem.Entry.make({
                           ...match.entry,
                           path: RelativePath.make(
-                            path.relative(
-                              location.directory,
-                              path.resolve(cwd, match.entry.path),
-                            ),
+                            path.relative(location.directory, path.resolve(cwd, match.entry.path)),
                           ),
                         }),
                       }),

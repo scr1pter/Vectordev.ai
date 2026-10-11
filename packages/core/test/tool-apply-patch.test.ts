@@ -33,6 +33,7 @@ let afterEditApproval = (): Effect.Effect<void> => Effect.void
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
+    deniedResources: () => Effect.succeed([]),
     assert: (input) =>
       Effect.sync(() => {
         assertions.push(input)

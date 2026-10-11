@@ -14,6 +14,29 @@ const it = testEffect(LayerNode.compile(Ripgrep.node))
 describe("Ripgrep", () => {
   beforeAll(prepareRipgrep, 65_000)
 
+  it.live("searches only admitted files across argv batches with one overall result limit", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          const files = Array.from(
+            { length: 200 },
+            (_, index) => `./${String(index).padStart(3, "0")}-${"a".repeat(180)}.txt`,
+          )
+          yield* Effect.promise(() =>
+            Promise.all(files.map((file) => fs.writeFile(path.join(tmp.path, file), "needle\n"))),
+          )
+          yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "unapproved.txt"), "needle\n"))
+          const ripgrep = yield* Ripgrep.Service
+          const matches = yield* ripgrep.grep({ cwd: tmp.path, pattern: "needle", files, limit: 180 })
+          expect(matches).toHaveLength(180)
+          expect(matches.every((match) => files.includes(`./${match.entry.path}`))).toBe(true)
+          expect(yield* ripgrep.grep({ cwd: tmp.path, pattern: "needle", files: [], limit: 10 })).toEqual([])
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("keeps ignored files out of catch-all find results", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

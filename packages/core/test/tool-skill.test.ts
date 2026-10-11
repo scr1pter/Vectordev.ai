@@ -45,6 +45,7 @@ describe("SkillTool", () => {
           const permission = Layer.succeed(
             PermissionV2.Service,
             PermissionV2.Service.of({
+              deniedResources: () => Effect.succeed([]),
               assert: (input) =>
                 Effect.sync(() => assertions.push(input)).pipe(
                   Effect.andThen(deny ? Effect.fail(new PermissionV2.DeniedError({ rules: [] })) : Effect.void),

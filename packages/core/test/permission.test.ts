@@ -160,10 +160,16 @@ describe("PermissionV2", () => {
       for (const resources of [[".env"], ["config/private.key"], ["mcp:server:resource"]]) {
         expect(yield* service.ask(assertion({ resources }))).toMatchObject({ effect: "deny" })
       }
+      expect(
+        yield* service.deniedResources(assertion({ resources: [".env", "config/private.key", "src/index.ts"] })),
+      ).toEqual([".env", "config/private.key"])
       for (const action of ["read", "grep", "glob", "list", "StructuredOutput"]) {
         expect(yield* service.ask(assertion({ action }))).toMatchObject({ effect: "allow" })
       }
       yield* setRules([{ action: "read", resource: "src/*", effect: "deny" }])
+      expect(yield* service.deniedResources(assertion({ resources: ["src/index.ts", "README.md"] }))).toEqual([
+        "src/index.ts",
+      ])
       expect(yield* service.ask(assertion())).toMatchObject({ effect: "deny" })
       expect(yield* service.list()).toEqual([])
     }),

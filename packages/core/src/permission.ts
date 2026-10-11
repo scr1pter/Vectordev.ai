@@ -100,6 +100,7 @@ export function merge(...rulesets: Permission.Ruleset[]): Permission.Ruleset {
 }
 
 export interface Interface {
+  readonly deniedResources: (input: AssertInput) => EffectRuntime.Effect<ReadonlyArray<string>, SessionV2.NotFoundError>
   readonly ask: (input: AssertInput) => EffectRuntime.Effect<AskResult, SessionV2.NotFoundError>
   readonly assert: (input: AssertInput) => EffectRuntime.Effect<void, Error | SessionV2.NotFoundError>
   readonly reply: (input: ReplyInput) => EffectRuntime.Effect<void, NotFoundError>
@@ -155,6 +156,11 @@ const layer = Layer.effect(
       if (!session) return yield* new SessionV2.NotFoundError({ sessionID })
       const agent = yield* agents.resolve(agentID ?? session.agent)
       return [agent?.permissions ?? missingAgentPermissions, internalSessionPermissions(session.internal)]
+    })
+
+    const deniedResources = EffectRuntime.fn("PermissionV2.deniedResources")(function* (input: AssertInput) {
+      const rules = yield* configured(input.sessionID, input.agent)
+      return input.resources.filter((resource) => evaluate(input.action, resource, ...rules).effect === "deny")
     })
 
     function denied(input: AssertInput, rules: Permission.Ruleset[]) {
@@ -326,7 +332,7 @@ const layer = Layer.effect(
       return Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID)
     })
 
-    return Service.of({ ask, assert, reply, get, forSession, list })
+    return Service.of({ deniedResources, ask, assert, reply, get, forSession, list })
   }),
 )
 

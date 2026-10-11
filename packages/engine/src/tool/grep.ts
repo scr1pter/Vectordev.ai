@@ -73,6 +73,38 @@ export const GrepTool = Tool.define(
           if (info.type !== "Directory" && info.type !== "File")
             return yield* Effect.fail(new Error(`Search path is not a file or directory: ${params.path ?? "."}`))
           const cwd = info.type === "Directory" ? search : path.dirname(search)
+          const candidates =
+            info.type === "File"
+              ? [
+                  {
+                    file: `./${path.basename(search)}`,
+                    resource: path.relative(ins.worktree, search).replaceAll("\\", "/"),
+                  },
+                ]
+              : (yield* ripgrep.find({
+                  cwd,
+                  pattern: params.include ?? "*",
+                  hidden: true,
+                  limit: Number.MAX_SAFE_INTEGER,
+                })).map((entry) => ({
+                  file: `./${entry.path}`,
+                  resource: path.relative(ins.worktree, path.resolve(cwd, entry.path)).replaceAll("\\", "/"),
+                }))
+          const read = { permission: "read", patterns: candidates.map((entry) => entry.resource) }
+          // The runtime supplies its actual agent/session deny ceiling. Embedders
+          // without inspection still authorize the whole batch before any content is read.
+          const denied =
+            info.type === "Directory" && ctx.deniedResources
+              ? new Set(yield* ctx.deniedResources(read))
+              : new Set<string>()
+          const admitted = candidates.filter((entry) => !denied.has(entry.resource))
+          if (!admitted.length) return empty
+          yield* ctx.ask({
+            ...read,
+            patterns: admitted.map((entry) => entry.resource),
+            always: ["*"],
+            metadata: { path: params.path, include: params.include },
+          })
           const limit = 100
           const result = yield* ripgrep.grep({
             cwd,
@@ -80,7 +112,8 @@ export const GrepTool = Tool.define(
             // ripgrep searches a directory, so a file target has to be named
             // explicitly or every sibling in its directory gets searched too.
             // The prefix also keeps a literal "-" from being interpreted as stdin.
-            file: info.type === "Directory" ? undefined : `./${path.basename(search)}`,
+            file: info.type === "File" ? admitted[0].file : undefined,
+            files: info.type === "Directory" ? admitted.map((entry) => entry.file) : undefined,
             include: params.include,
             // One over the limit distinguishes "exactly limit matches" from
             // "more than we are showing"; only the first limit are reported.

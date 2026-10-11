@@ -42,6 +42,7 @@ export type Context<M extends Metadata = Metadata> = {
   extra?: { [key: string]: unknown }
   messages: SessionV1.WithParts[]
   metadata(input: { title?: string; metadata?: M }): Effect.Effect<void>
+  deniedResources?(input: Pick<PermissionV1.Request, "permission" | "patterns">): Effect.Effect<ReadonlyArray<string>>
   ask(input: Omit<PermissionV1.Request, "id" | "sessionID" | "tool">): Effect.Effect<void>
 }
 

@@ -1,4 +1,5 @@
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
+import { reviewPermissionRules } from "@vectordevai/core/review/permission"
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
@@ -381,3 +382,85 @@ describe("tool.grep", () => {
     }),
   )
 })
+
+const helperRules = [
+  ...reviewPermissionRules({}),
+  { permission: "read", pattern: "*blocked.txt", action: "deny" as const },
+]
+
+it.instance(
+  "helper grep filters denied paths before content reads and binds its admitted file set",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      yield* Effect.promise(() => fs.mkdir(path.join(test.directory, "nested")))
+      for (const [file, contents] of [
+        [".env", "needle FAKE_SECRET_ONLY"],
+        ["nested/private.key", "needle FAKE_KEY_ONLY"],
+        ["blocked.txt", "needle arbitrary-denied"],
+        ["source.ts", "needle permitted-source"],
+      ])
+        yield* Effect.promise(() => Bun.write(path.join(test.directory, file), contents))
+      const reads: string[][] = []
+      const context: Tool.Context = {
+        ...ctx,
+        deniedResources: (request) =>
+          Effect.succeed(
+            request.patterns.filter(
+              (pattern) => Permission.evaluate(request.permission, pattern, helperRules).action === "deny",
+            ),
+          ),
+        ask: (request) =>
+          Effect.gen(function* () {
+            const denied = request.patterns.find(
+              (pattern) => Permission.evaluate(request.permission, pattern, helperRules).action === "deny",
+            )
+            if (denied)
+              return yield* Effect.die(
+                new PermissionV1.DeniedError({
+                  ruleset: helperRules,
+                  permission: request.permission,
+                  pattern: denied,
+                }),
+              )
+            if (request.permission !== "read") return
+            reads.push([...request.patterns])
+            yield* Effect.promise(() => Bun.write(path.join(test.directory, "late.txt"), "needle late-unapproved"))
+          }),
+      }
+      const info = yield* GrepTool
+      const grep = yield* info.init()
+      const directory = yield* grep.execute({ pattern: "needle" }, context)
+      expect(directory.output).toContain("permitted-source")
+      expect(directory.output).not.toContain("FAKE_")
+      expect(directory.output).not.toContain("arbitrary-denied")
+      expect(directory.output).not.toContain("late-unapproved")
+      expect(reads).toHaveLength(1)
+      expect(reads[0]).toEqual(["source.ts"])
+      for (const file of [".env", "blocked.txt", "nested/private.key"])
+        expect(Exit.isFailure(yield* grep.execute({ pattern: "needle", path: file }, context).pipe(Effect.exit))).toBe(
+          true,
+        )
+      expect((yield* grep.execute({ pattern: "needle", include: "*.env" }, context)).output).toBe("No files found")
+      expect((yield* grep.execute({ pattern: "needle", path: "nested" }, context)).output).toBe("No files found")
+      if (process.platform !== "win32") {
+        yield* Effect.promise(() => fs.symlink(".env", path.join(test.directory, "innocent.txt")))
+        expect(
+          Exit.isFailure(yield* grep.execute({ pattern: "needle", path: "innocent.txt" }, context).pipe(Effect.exit)),
+        ).toBe(true)
+        yield* Effect.promise(() => fs.symlink("nested", path.join(test.directory, "alias")))
+        expect((yield* grep.execute({ pattern: "needle", path: "alias" }, context)).output).toBe("No files found")
+      }
+    }),
+  { git: true },
+)
+
+it.instance("directory grep keeps explicitly authorized environment files searchable", () =>
+  Effect.gen(function* () {
+    const test = yield* TestInstance
+    yield* Effect.promise(() => Bun.write(path.join(test.directory, ".env"), "needle authorized-fixture"))
+    const info = yield* GrepTool
+    const grep = yield* info.init()
+    expect((yield* grep.execute({ pattern: "needle", include: "*.env" }, ctx)).output).toContain("authorized-fixture")
+  }),
+)

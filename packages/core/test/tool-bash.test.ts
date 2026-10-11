@@ -49,6 +49,7 @@ let configExecutable = true
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
+    deniedResources: () => Effect.succeed([]),
     assert: (input) =>
       Effect.sync(() => assertions.push(input)).pipe(
         Effect.andThen(Effect.suspend(() => afterPermission(input))),

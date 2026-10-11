@@ -12,6 +12,7 @@ import { PermissionV2 } from "@vectordevai/core/permission"
 import { Ripgrep } from "@vectordevai/core/ripgrep"
 import { AbsolutePath, RelativePath } from "@vectordevai/core/schema"
 import { SessionV2 } from "@vectordevai/core/session"
+import { internalSessionPermissions } from "@vectordevai/core/session/permission"
 import { GrepTool } from "@vectordevai/core/tool/grep"
 import { ToolRegistry } from "@vectordevai/core/tool/registry"
 import { ToolOutputStore } from "@vectordevai/core/tool-output-store"
@@ -48,6 +49,7 @@ const ripgrep = Layer.succeed(
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
+    deniedResources: () => Effect.succeed([]),
     assert: (input) => Effect.sync(() => assertions.push(input)),
     ask: () => Effect.die("unused"),
     reply: () => Effect.die("unused"),
@@ -95,7 +97,7 @@ describe("GrepTool path boundary", () => {
         return Effect.gen(function* () {
           yield* Effect.promise(() => fs.writeFile(file, "needle"))
           yield* withTool(active.path, (registry) => executeTool(registry, call(file)))
-          expect(assertions.map((assertion) => assertion.action)).toEqual(["external_directory", "grep"])
+          expect(assertions.map((assertion) => assertion.action)).toEqual(["external_directory", "grep", "read"])
           expect(searches).toMatchObject([
             { cwd: yield* Effect.promise(() => fs.realpath(outside.path)), file: "./outside.txt" },
           ])
@@ -132,9 +134,11 @@ describe("GrepTool path boundary", () => {
   )
 })
 
-
 const layer = (
-  permission = Layer.mock(PermissionV2.Service, { assert: () => Effect.void }),
+  permission = Layer.mock(PermissionV2.Service, {
+    assert: () => Effect.void,
+    deniedResources: () => Effect.succeed([]),
+  }),
   filesystem = LayerNode.compile(FSUtil.node),
 ) =>
   AppNodeBuilder.build(
@@ -274,7 +278,9 @@ const denied = testEffect(
           // Resolving the workspace boundary inspects the existing parent directory first; the target itself is only
           // inspected once grep is allowed.
           stat: (target) =>
-            path.basename(target) === "missing.txt" ? Effect.die("stat must not run before permission") : fs.stat(target),
+            path.basename(target) === "missing.txt"
+              ? Effect.die("stat must not run before permission")
+              : fs.stat(target),
         }),
       ),
     ).pipe(Layer.provide(LayerNode.compile(FSUtil.node))),
@@ -326,5 +332,92 @@ inaccessible.live("a non-NotFound stat error stays a failure instead of searchin
       type: "error",
       value: "Unable to grep for needle",
     })
+  }),
+)
+
+const helperRules = [
+  ...internalSessionPermissions("swarm.planner"),
+  { action: "read", resource: "*blocked.txt", effect: "deny" as const },
+]
+const helperReads: PermissionV2.AssertInput[] = []
+const helperDirectory = { path: "" }
+const helper = testEffect(
+  layer(
+    Layer.mock(PermissionV2.Service, {
+      deniedResources: (input) =>
+        Effect.succeed(
+          input.resources.filter(
+            (resource) => PermissionV2.evaluate(input.action, resource, helperRules).effect === "deny",
+          ),
+        ),
+      assert: (input) =>
+        Effect.gen(function* () {
+          if (
+            input.resources.some(
+              (resource) => PermissionV2.evaluate(input.action, resource, helperRules).effect === "deny",
+            )
+          )
+            return yield* new PermissionV2.DeniedError({ rules: helperRules })
+          if (input.action !== "read") return
+          helperReads.push(input)
+          // A newly created file must not enter a search whose file set was already admitted.
+          yield* Effect.promise(() => Bun.write(path.join(helperDirectory.path, "late.txt"), "needle late-unapproved"))
+        }),
+    }),
+  ),
+)
+
+helper.live(
+  "helper grep admits filenames before reading and excludes denied content across literal and directory searches",
+  () =>
+    Effect.gen(function* () {
+      const filesystem = yield* FSUtil.Service
+      const location = yield* Location.Service
+      const registry = yield* ToolRegistry.Service
+      yield* filesystem.makeDirectory(path.join(location.directory, "nested"))
+      for (const [file, contents] of [
+        [".env", "needle FAKE_SECRET_ONLY"],
+        ["nested/private.key", "needle FAKE_KEY_ONLY"],
+        ["blocked.txt", "needle arbitrary-denied"],
+        ["source.ts", "needle permitted-source"],
+      ])
+        yield* filesystem.writeFileString(path.join(location.directory, file), contents)
+      helperReads.length = 0
+      helperDirectory.path = location.directory
+      const directory = yield* executeTool(registry, literal({ pattern: "needle" }))
+      expect(directory.value).toContain("permitted-source")
+      expect(directory.value).not.toContain("FAKE_")
+      expect(directory.value).not.toContain("arbitrary-denied")
+      expect(directory.value).not.toContain("late-unapproved")
+      expect(helperReads).toHaveLength(1)
+      expect(helperReads[0].resources).toEqual(["source.ts"])
+      for (const file of [".env", "blocked.txt", "nested/private.key"])
+        expect((yield* executeTool(registry, literal({ pattern: "needle", path: file }))).type).toBe("error")
+      expect((yield* executeTool(registry, literal({ pattern: "needle", include: "*.env" }))).value).toBe(
+        "No files found",
+      )
+      expect((yield* executeTool(registry, literal({ pattern: "needle", path: "nested" }))).value).toBe(
+        "No files found",
+      )
+      if (process.platform !== "win32") {
+        yield* Effect.promise(() => fs.symlink(".env", path.join(location.directory, "innocent.txt")))
+        expect((yield* executeTool(registry, literal({ pattern: "needle", path: "innocent.txt" }))).type).toBe("error")
+        yield* Effect.promise(() => fs.symlink("nested", path.join(location.directory, "alias")))
+        expect((yield* executeTool(registry, literal({ pattern: "needle", path: "alias" }))).value).toBe(
+          "No files found",
+        )
+      }
+    }),
+)
+
+real.live("directory grep preserves explicitly authorized environment-file reads", () =>
+  Effect.gen(function* () {
+    const filesystem = yield* FSUtil.Service
+    const location = yield* Location.Service
+    const registry = yield* ToolRegistry.Service
+    yield* filesystem.writeFileString(path.join(location.directory, ".env"), "needle authorized-fixture")
+    expect((yield* executeTool(registry, literal({ pattern: "needle", include: "*.env" }))).value).toContain(
+      "authorized-fixture",
+    )
   }),
 )

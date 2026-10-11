@@ -71,6 +71,8 @@ export interface GrepInput {
   readonly cwd: string
   readonly pattern: string
   readonly file?: string
+  /** An exact admitted file set; an empty set searches nothing. */
+  readonly files?: readonly string[]
   readonly include?: string
   readonly limit: number
   readonly signal?: AbortSignal
@@ -151,6 +153,66 @@ const layer = Layer.effect(
       )
     }
 
+    const grep = (input: GrepInput) =>
+      run<RawMatchData>({
+        ...input,
+        args: [
+          "--no-config",
+          "--json",
+          "--hidden",
+          "--no-messages",
+          ...(input.include ? [`--glob=${input.include}`] : []),
+          "--glob=!**/.git/**",
+          "--",
+          input.pattern,
+          ...(input.files ?? [input.file ?? "."]),
+        ],
+        parse: (line) =>
+          (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES
+            ? Effect.fail(failure(`Ripgrep JSON record exceeded ${MAX_RECORD_BYTES} bytes`))
+            : Effect.try({
+                try: () => JSON.parse(line) as unknown,
+                catch: (cause) => failure("Invalid ripgrep JSON output", cause),
+              })
+          ).pipe(
+            Effect.flatMap((json) => {
+              if (!json || typeof json !== "object" || !("type" in json) || json.type !== "match")
+                return Effect.succeed(undefined)
+              return Schema.decodeUnknownEffect(RawMatch)(json).pipe(
+                Effect.map((match) => ({
+                  ...match.data,
+                  path: { text: match.data.path.text.replace(/^\.[\\/]/, "") },
+                  submatches: match.data.submatches.slice(0, MAX_SUBMATCHES),
+                })),
+                Effect.mapError((cause) => failure("Invalid ripgrep match output", cause)),
+              )
+            }),
+          ),
+      }).pipe(
+        Effect.map((result) =>
+          result.items.map((match) => {
+            const relative = match.path.text
+              .replace(/^(?:\.[\\/])+/u, "")
+              .replace(/^[\\/]+/u, "")
+              .replaceAll("\\", "/")
+            return Match.make({
+              entry: Entry.make({
+                path: RelativePath.make(relative),
+                type: "file",
+              }),
+              line: match.line_number,
+              offset: match.absolute_offset,
+              text: match.lines.text.length > 2_000 ? match.lines.text.slice(0, 2_000) + "..." : match.lines.text,
+              submatches: match.submatches.map((submatch) => ({
+                text: submatch.match.text,
+                start: submatch.start,
+                end: submatch.end,
+              })),
+            })
+          }),
+        ),
+      )
+
     return Service.of({
       glob: (input) =>
         run<string>({
@@ -215,65 +277,29 @@ const layer = Layer.effect(
           Effect.map((result) => result.items),
           Effect.catchTag("Ripgrep.InvalidPatternError", (cause) => Effect.fail(failure(cause.message, cause))),
         ),
-      grep: (input) =>
-        run<RawMatchData>({
-          ...input,
-          args: [
-            "--no-config",
-            "--json",
-            "--hidden",
-            "--no-messages",
-            ...(input.include ? [`--glob=${input.include}`] : []),
-            "--glob=!**/.git/**",
-            "--",
-            input.pattern,
-            input.file ?? ".",
-          ],
-          parse: (line) =>
-            (Buffer.byteLength(line, "utf8") > MAX_RECORD_BYTES
-              ? Effect.fail(failure(`Ripgrep JSON record exceeded ${MAX_RECORD_BYTES} bytes`))
-              : Effect.try({
-                  try: () => JSON.parse(line) as unknown,
-                  catch: (cause) => failure("Invalid ripgrep JSON output", cause),
-                })
-            ).pipe(
-              Effect.flatMap((json) => {
-                if (!json || typeof json !== "object" || !("type" in json) || json.type !== "match")
-                  return Effect.succeed(undefined)
-                return Schema.decodeUnknownEffect(RawMatch)(json).pipe(
-                  Effect.map((match) => ({
-                    ...match.data,
-                    path: { text: match.data.path.text.replace(/^\.[\\/]/, "") },
-                    submatches: match.data.submatches.slice(0, MAX_SUBMATCHES),
-                  })),
-                  Effect.mapError((cause) => failure("Invalid ripgrep match output", cause)),
-                )
-              }),
-            ),
-        }).pipe(
-          Effect.map((result) =>
-            result.items.map((match) => {
-              const relative = match.path.text
-                .replace(/^(?:\.[\\/])+/u, "")
-                .replace(/^[\\/]+/u, "")
-                .replaceAll("\\", "/")
-              return Match.make({
-                entry: Entry.make({
-                  path: RelativePath.make(relative),
-                  type: "file",
-                }),
-                line: match.line_number,
-                offset: match.absolute_offset,
-                text: match.lines.text.length > 2_000 ? match.lines.text.slice(0, 2_000) + "..." : match.lines.text,
-                submatches: match.submatches.map((submatch) => ({
-                  text: submatch.match.text,
-                  start: submatch.start,
-                  end: submatch.end,
-                })),
-              })
-            }),
-          ),
-        ),
+      grep: (input) => {
+        const admitted = input.files
+        if (!admitted) return grep(input)
+        return Effect.gen(function* () {
+          const batches: string[][] = []
+          let bytes = 0
+          for (const file of admitted) {
+            // Keep each exact-file argv comfortably below platform argument limits.
+            if (!batches.length || bytes + Buffer.byteLength(file) > 32_000) {
+              batches.push([])
+              bytes = 0
+            }
+            batches[batches.length - 1].push(file)
+            bytes += Buffer.byteLength(file) + 1
+          }
+          const matches: Match[] = []
+          for (const files of batches) {
+            matches.push(...(yield* grep({ ...input, files, limit: input.limit - matches.length })))
+            if (matches.length >= input.limit) break
+          }
+          return matches
+        })
+      },
     })
   }),
 )

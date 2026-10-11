@@ -31,6 +31,7 @@ const http = Layer.succeed(HttpClient.HttpClient, client)
 const permission = Layer.succeed(
   PermissionV2.Service,
   PermissionV2.Service.of({
+    deniedResources: () => Effect.succeed([]),
     assert: (input) =>
       Effect.sync(() => assertions.push(input)).pipe(
         Effect.andThen(denied.has(input.action) ? Effect.fail(new PermissionV2.RejectedError()) : Effect.void),
