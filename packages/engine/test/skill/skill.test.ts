@@ -407,6 +407,49 @@ description: A skill in the .agents/skills directory.
     ),
   )
 
+  it.live("keeps external project skill support files inside the approved snapshot", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Promise.all(
+              [".agents", ".claude"].map((scope) => {
+                const source = path.join(dir, scope, "skills", `${scope.slice(1)}-fixture`)
+                return Promise.all([
+                  Bun.write(
+                    path.join(source, "SKILL.md"),
+                    `---\nname: ${scope.slice(1)}-fixture\ndescription: Snapshot support files.\n---\nRead references/guide.md.`,
+                  ),
+                  Bun.write(path.join(source, "references", "guide.md"), `approved ${scope}`),
+                ])
+              }),
+            ),
+          )
+          yield* Effect.promise(() => trustWorkspace(dir))
+          const skill = yield* Skill.Service
+          const list = yield* skill.all()
+          for (const scope of [".agents", ".claude"]) {
+            const source = path.join(dir, scope, "skills", `${scope.slice(1)}-fixture`)
+            const item = list.find((entry) => entry.name === `${scope.slice(1)}-fixture`)!
+            expect(item).toBeDefined()
+            expect(item.location).not.toBe(path.join(source, "SKILL.md"))
+            expect(item.location.endsWith(path.relative(path.parse(source).root, path.join(source, "SKILL.md")))).toBe(
+              true,
+            )
+            yield* Effect.promise(() =>
+              Bun.write(path.join(source, "references", "guide.md"), "unapproved replacement"),
+            )
+            expect(
+              yield* Effect.promise(() =>
+                Bun.file(path.join(path.dirname(item.location), "references", "guide.md")).text(),
+              ),
+            ).toBe(`approved ${scope}`)
+          }
+        }),
+      { git: true },
+    ),
+  )
+
   it.live("discovers global skills from ~/.agents/skills/ directory", () =>
     Effect.gen(function* () {
       const tmp = yield* Effect.acquireRelease(
