@@ -43,7 +43,6 @@ function validateCredential<A, E, R>(
   effect: Effect.Effect<A, E, R>,
   credential: ServerAuth.DecodedCredentials,
   config: ServerAuth.Info,
-  request: HttpServerRequest.HttpServerRequest,
 ) {
   return Effect.gen(function* () {
     const identity = ServerAuth.identity(credential, config)
@@ -53,10 +52,7 @@ function validateCredential<A, E, R>(
       )
       return yield* new UnauthorizedError({ message: ServerAuth.unauthorizedMessage(credential, config) })
     }
-    if (
-      identity === "guest" &&
-      ServerAuth.isOwnerOnlyRequest(request.method, new URL(request.url, "http://localhost").pathname)
-    )
+    if (identity === "guest" && (yield* ServerAuth.ownerOnlyRequest))
       return yield* new ForbiddenError({ message: "This operation requires the server owner" })
     return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
   })
@@ -92,30 +88,24 @@ function validateRawCredential<A, E, R>(
   effect: Effect.Effect<A, E, R>,
   credential: ServerAuth.DecodedCredentials,
   config: ServerAuth.Info,
-  request: HttpServerRequest.HttpServerRequest,
 ) {
-  const identity = ServerAuth.identity(credential, config)
-  if (!identity)
-    return Effect.succeed(
-      HttpServerResponse.jsonUnsafe(
+  return Effect.gen(function* () {
+    const identity = ServerAuth.identity(credential, config)
+    if (!identity)
+      return HttpServerResponse.jsonUnsafe(
         { _tag: "UnauthorizedError", message: ServerAuth.unauthorizedMessage(credential, config) },
         {
           status: UNAUTHORIZED,
           headers: { "www-authenticate": WWW_AUTHENTICATE },
         },
-      ),
-    )
-  if (
-    identity === "guest" &&
-    ServerAuth.isOwnerOnlyRequest(request.method, new URL(request.url, "http://localhost").pathname)
-  )
-    return Effect.succeed(
-      HttpServerResponse.jsonUnsafe(
+      )
+    if (identity === "guest" && (yield* ServerAuth.ownerOnlyRequest))
+      return HttpServerResponse.jsonUnsafe(
         { _tag: "ForbiddenError", message: "This operation requires the server owner" },
         { status: FORBIDDEN },
-      ),
-    )
-  return effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
+      )
+    return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
+  })
 }
 
 export const authorizationRouterMiddleware = HttpRouter.middleware()(
@@ -126,12 +116,11 @@ export const authorizationRouterMiddleware = HttpRouter.middleware()(
         const request = yield* HttpServerRequest.HttpServerRequest
         const url = new URL(request.url, "http://localhost")
         if (isPublicUIPath(request.method, url.pathname)) return yield* effect
-        if (url.searchParams.has("auth_token"))
-          return yield* validateRawCredential(effect, emptyCredential(), config, request)
+        if (url.searchParams.has("auth_token")) return yield* validateRawCredential(effect, emptyCredential(), config)
         if (!ServerAuth.required(config))
           return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
         return yield* credentialFromHeaders(request).pipe(
-          Effect.flatMap((credential) => validateRawCredential(effect, credential, config, request)),
+          Effect.flatMap((credential) => validateRawCredential(effect, credential, config)),
         )
       })
   }),
@@ -145,11 +134,11 @@ export const authorizationLayer = Layer.effect(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         if (new URL(request.url, "http://localhost").searchParams.has("auth_token"))
-          return yield* validateCredential(effect, emptyCredential(), config, request)
+          return yield* validateCredential(effect, emptyCredential(), config)
         if (!ServerAuth.required(config))
           return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
         return yield* credentialFromRequest(request).pipe(
-          Effect.flatMap((credential) => validateCredential(effect, credential, config, request)),
+          Effect.flatMap((credential) => validateCredential(effect, credential, config)),
         )
       }),
     )
@@ -164,8 +153,7 @@ export const ptyConnectAuthorizationLayer = Layer.effect(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         const url = new URL(request.url, "http://localhost")
-        if (url.searchParams.has("auth_token"))
-          return yield* validateCredential(effect, emptyCredential(), config, request)
+        if (url.searchParams.has("auth_token")) return yield* validateCredential(effect, emptyCredential(), config)
         const connection = ptyConnectTicket(url)
         if (connection)
           return yield* effect.pipe(
@@ -178,7 +166,7 @@ export const ptyConnectAuthorizationLayer = Layer.effect(
         if (!ServerAuth.required(config))
           return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
         return yield* credentialFromHeaders(request).pipe(
-          Effect.flatMap((credential) => validateCredential(effect, credential, config, request)),
+          Effect.flatMap((credential) => validateCredential(effect, credential, config)),
         )
       }),
     )

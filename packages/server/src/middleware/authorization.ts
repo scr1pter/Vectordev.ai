@@ -65,7 +65,7 @@ export const authorizationLayer = Layer.effect(
         const credential = yield* credentialFromRequest(request)
         const identity = ServerAuth.identity(credential, config)
         if (!identity) return yield* unauthorized(credential, config)
-        if (identity === "guest" && ServerAuth.isOwnerOnlyRequest(request.method, url.pathname))
+        if (identity === "guest" && (yield* ServerAuth.ownerOnlyRequest))
           return yield* new ForbiddenError({ message: "This operation requires the server owner" })
         return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.principal(identity, config)))
       }),

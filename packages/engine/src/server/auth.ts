@@ -1,7 +1,8 @@
 export * as ServerAuth from "./auth"
 export {
   assertSecurePasswordTransport,
-  isOwnerOnlyRequest,
+  isOwnerOnlyRoute,
+  ownerOnlyRequest,
   ownerPrincipal,
   principal,
   unauthorizedMessage,

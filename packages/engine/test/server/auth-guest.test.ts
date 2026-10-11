@@ -1,5 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import fs from "fs/promises"
+import { connect } from "node:net"
 import path from "path"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer, Option, Queue, Redacted, Schema, Stream } from "effect"
@@ -204,6 +205,29 @@ describe("HttpApi authorization middleware with a guest pair", () => {
 
       expect(encoded.status).toBe(403)
       expect(doubleEncoded.status).not.toBe(200)
+    }),
+  )
+
+  // The router ignores case, repeated and trailing slashes, and anything after ';', and a leading '//' reads
+  // as a host to the URL parser, so the gate has to judge the route the router matched, not a re-parsed path.
+  itGuest.live("rejects owner-only routes under every spelling the router accepts", () =>
+    Effect.gen(function* () {
+      const spellings = ["//api/pty", "/API/PTY", "/Api/Pty", "/api/pty/", "/api/pty;x", "/api//pty", "///api/pty"]
+      const responses = yield* Effect.all(
+        spellings.map((route) =>
+          HttpClientRequest.get(route).pipe(
+            HttpClientRequest.setHeader("authorization", basic("guest", "guest-secret")),
+            HttpClient.execute,
+            Effect.map((response) => ({ route, status: response.status })),
+          ),
+        ),
+      )
+      expect(responses).toEqual(spellings.map((route) => ({ route, status: 403 })))
+      const owner = yield* HttpClientRequest.get("/API/PTY").pipe(
+        HttpClientRequest.setHeader("authorization", basic("vector", "owner-secret")),
+        HttpClient.execute,
+      )
+      expect(owner.status).toBe(200)
     }),
   )
 
@@ -535,6 +559,119 @@ test("guests cannot run host commands or answer permission requests", async () =
     const messages = await (await call(at(`/session/${guestSession.id}/message`), { headers: guest })).text()
     expect(messages).not.toContain(Buffer.from("HOST-ONLY-SECRET-VALUE").toString("base64"))
     void ownerCommand
+  } finally {
+    Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
+    await listener.stop(true)
+    for (const key of keys) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}, 30_000)
+
+test("guests cannot reach owner-only routes by spelling the path another way", async () => {
+  await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+  const previousWorkspaceID = Flag.VECTOR_WORKSPACE_ID
+  const keys = [
+    "VECTOR_SERVER_USERNAME",
+    "VECTOR_SERVER_PASSWORD",
+    "VECTOR_SERVER_GUEST_USERNAME",
+    "VECTOR_SERVER_GUEST_PASSWORD",
+    "VECTOR_SERVER_GUEST_WORKSPACES",
+    "VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES",
+    "VECTOR_DISABLE_DEFAULT_PLUGINS",
+  ] as const
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
+  Object.assign(process.env, {
+    VECTOR_SERVER_USERNAME: "vector",
+    VECTOR_SERVER_PASSWORD: "owner-secret",
+    VECTOR_SERVER_GUEST_USERNAME: "guest",
+    VECTOR_SERVER_GUEST_PASSWORD: "guest-secret",
+    VECTOR_SERVER_GUEST_WORKSPACES: "wrk_allowed",
+    VECTOR_SERVER_GUEST_WORKSPACE_DIRECTORIES: JSON.stringify({ wrk_allowed: tmp.path }),
+    VECTOR_DISABLE_DEFAULT_PLUGINS: "1",
+  })
+  const listener = await Server.listen({ hostname: "127.0.0.1", port: 0 })
+  const origin = new URL(listener.url)
+  const guest = { authorization: basic("guest", "guest-secret"), "content-type": "application/json" }
+  const directory = `directory=${encodeURIComponent(tmp.path)}`
+  // A URL object would read a leading '//' as a host, so each path is sent exactly as written.
+  const send = (method: string, route: string, body?: unknown) =>
+    fetch(`${origin.origin}${route}?${directory}`, {
+      method,
+      headers: guest,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      keepalive: false,
+    })
+  // fetch resolves '..' before sending, so these go over a raw socket the way a client could send them.
+  const sendRaw = (method: string, target: string, body: unknown) =>
+    new Promise<number>((resolve, reject) => {
+      const payload = JSON.stringify(body)
+      const socket = connect(Number(origin.port), origin.hostname)
+      let head = ""
+      // Only the status line matters, so stop reading once it has arrived.
+      socket.on("data", (chunk) => {
+        head += chunk.toString()
+        if (!head.includes("\r\n")) return
+        socket.destroy()
+        resolve(Number(head.split(" ")[1]))
+      })
+      socket.on("error", reject)
+      // write, not end: a half-closed socket makes the server drop the connection before it answers.
+      socket.write(
+        [
+          `${method} ${target}?${directory} HTTP/1.1`,
+          `Host: ${origin.host}`,
+          `Authorization: ${guest.authorization}`,
+          "Content-Type: application/json",
+          `Content-Length: ${Buffer.byteLength(payload)}`,
+          "Connection: close",
+          "",
+          payload,
+        ].join("\r\n"),
+      )
+    })
+  try {
+    Flag.VECTOR_WORKSPACE_ID = "wrk_allowed"
+    const created = await send("POST", "/session", {})
+    expect(created.status).toBe(200)
+    const sessionID = ((await created.json()) as { id: string }).id
+    const model = { providerID: "probe", modelID: "probe" }
+    const routes = [
+      { method: "POST", route: "/pty", body: { command: "/bin/echo", args: ["SPELLING-PROBE"] } },
+      { method: "POST", route: "/api/pty", body: { command: "/bin/echo", args: ["SPELLING-PROBE"] } },
+      { method: "POST", route: `/session/${sessionID}/shell`, body: { agent: "build", model, command: "echo PROBE" } },
+      { method: "POST", route: `/session/${sessionID}/command`, body: { command: "init", arguments: "" } },
+      { method: "POST", route: "/permission/per_probe/reply", body: { reply: "reject" } },
+      { method: "PATCH", route: "/config", body: {} },
+      { method: "PATCH", route: "/global/config", body: {} },
+      { method: "PUT", route: "/auth/probe-provider", body: { type: "api", key: "placeholder-key" } },
+    ]
+    const spellings = (route: string) => [
+      route,
+      `/${route}`,
+      route
+        .split("/")
+        .map((segment) => (/^[a-z]+$/.test(segment) ? segment.toUpperCase() : segment))
+        .join("/"),
+      `${route}/`,
+      `${route};x`,
+      route.replace(/\/(?=[^/]*$)/, "//"),
+    ]
+    const attempts = routes.flatMap((item) => spellings(item.route).map((route) => ({ ...item, route })))
+    const results = await Promise.all(
+      attempts.map(async (item) => ({
+        method: item.method,
+        route: item.route,
+        status: (await send(item.method, item.route, item.body)).status,
+      })),
+    )
+    expect(results).toEqual(attempts.map((item) => ({ method: item.method, route: item.route, status: 403 })))
+    expect(await sendRaw("PUT", "/auth/..", { type: "api", key: "placeholder-key" })).toBe(403)
+    expect(await sendRaw("PUT", "/pty/..", { title: "probe" })).toBe(403)
+    // The guest's own routes still answer under the router's spellings.
+    expect((await send("GET", `/Session/${sessionID}/Message/`)).status).toBe(200)
   } finally {
     Flag.VECTOR_WORKSPACE_ID = previousWorkspaceID
     await listener.stop(true)

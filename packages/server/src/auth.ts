@@ -5,6 +5,7 @@ import { SessionV2 } from "@vectordevai/core/session"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
 import type { Principal } from "@vectordevai/protocol/middleware/authorization"
 import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { realpathSync, statSync } from "node:fs"
 import { isIP } from "node:net"
 
@@ -155,56 +156,52 @@ const guestBootstrapRoutes = new Set([
   "/project/current",
 ])
 
-export function isOwnerOnlyRequest(method: string, pathname: string) {
-  const canonical = canonicalAuthorizationPath(pathname)
-  if (!canonical) return true
-  if (canonical === "/api/session/import" || /\/session\/[^/]+\/share(?:\/|$)/.test(canonical)) return true
-  if (canonical.startsWith("/api/pty") || canonical.startsWith("/pty")) return true
+// The guest gate judges the route the router matched, never the request path: the router ignores case, repeated
+// and trailing slashes and anything after ';' or '?', and a URL parser reads a leading '//' as a host and resolves
+// '..', so any re-parsed spelling of an owner-only route can differ from the route that actually runs.
+export const ownerOnlyRequest = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest
+  const route = yield* HttpRouter.RouteContext
+  return isOwnerOnlyRoute(request.method, route.route.path)
+})
+
+/** Whether a guest is refused `route`, the matched route's declared path pattern (e.g. `/session/:sessionID/shell`). */
+export function isOwnerOnlyRoute(method: string, route: string) {
+  if (route === "/api/session/import" || /\/session\/[^/]+\/share(?:\/|$)/.test(route)) return true
+  if (route.startsWith("/api/pty") || route.startsWith("/pty")) return true
   // The session shell route runs its command on the host with no permission prompt, and a slash
   // command can run its template's shell snippets, so both are as powerful as a terminal.
-  if (/\/session\/[^/]+\/(?:shell|command)(?:\/|$)/.test(canonical)) return true
+  if (/\/session\/[^/]+\/(?:shell|command)(?:\/|$)/.test(route)) return true
   // Approving a permission request is how a session crosses the workspace boundary (an outside
   // directory, a guarded file), so only the owner may answer one, even for a guest's own session.
-  if (/\/permission\/[^/]+\/reply(?:\/|$)/.test(canonical) || /\/session\/[^/]+\/permissions\//.test(canonical))
-    return true
+  if (/\/permission\/[^/]+\/reply(?:\/|$)/.test(route) || /\/session\/[^/]+\/permissions\//.test(route)) return true
   // The v2 request lists span every session on the server. A guest reads its own through the
   // session-scoped routes instead.
-  if (canonical.startsWith("/api/permission/request") || canonical.startsWith("/api/question/request")) return true
-  if (canonical.startsWith("/api/credential") || canonical.startsWith("/api/permission/saved")) return true
-  if (canonical.startsWith("/experimental/project/") && canonical.includes("/copy")) return true
+  if (route.startsWith("/api/permission/request") || route.startsWith("/api/question/request")) return true
+  if (route.startsWith("/api/credential") || route.startsWith("/api/permission/saved")) return true
+  if (route.startsWith("/experimental/project/") && route.includes("/copy")) return true
   if (
-    canonical.startsWith("/global/") ||
-    canonical === "/experimental/console" ||
-    canonical.startsWith("/experimental/console/") ||
-    canonical.startsWith("/experimental/control-plane") ||
-    canonical.startsWith("/experimental/workspace") ||
-    canonical.startsWith("/project") ||
-    canonical.startsWith("/sync") ||
-    canonical.startsWith("/tui")
+    route.startsWith("/global/") ||
+    route === "/experimental/console" ||
+    route.startsWith("/experimental/console/") ||
+    route.startsWith("/experimental/control-plane") ||
+    route.startsWith("/experimental/workspace") ||
+    route.startsWith("/project") ||
+    route.startsWith("/sync") ||
+    route.startsWith("/tui")
   )
     // The app loads from these, so a guest may read them; their handlers narrow what a guest sees to its workspace.
-    return !((method === "GET" || method === "HEAD") && guestBootstrapRoutes.has(canonical))
+    return !((method === "GET" || method === "HEAD") && guestBootstrapRoutes.has(route))
   if (method === "GET" || method === "HEAD") return false
   return (
-    canonical.startsWith("/api/integration") ||
-    canonical.startsWith("/auth/") ||
-    canonical.startsWith("/provider/") ||
-    canonical.startsWith("/mcp") ||
-    canonical === "/config" ||
-    canonical.startsWith("/config/") ||
-    canonical === "/instance/dispose"
+    route.startsWith("/api/integration") ||
+    route.startsWith("/auth/") ||
+    route.startsWith("/provider/") ||
+    route.startsWith("/mcp") ||
+    route === "/config" ||
+    route.startsWith("/config/") ||
+    route === "/instance/dispose"
   )
-}
-
-function canonicalAuthorizationPath(pathname: string, remaining = 4): string | undefined {
-  if (!pathname.includes("%")) return pathname
-  if (!remaining) return undefined
-  try {
-    const decoded = decodeURIComponent(pathname)
-    return decoded === pathname ? decoded : canonicalAuthorizationPath(decoded, remaining - 1)
-  } catch {
-    return undefined
-  }
 }
 
 export function assertSecurePasswordTransport(target: string | URL, password: string | undefined) {

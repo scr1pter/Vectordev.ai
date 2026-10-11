@@ -13,7 +13,7 @@ export const permissionHandlers = HttpApiBuilder.group(InstanceHttpApi, "permiss
     const svc = yield* Permission.Service
     const session = yield* Session.Service
 
-    // Replying is owner-only for guests (ServerAuth.isOwnerOnlyRequest). A guest still sees the requests
+    // Replying is owner-only for guests (ServerAuth.isOwnerOnlyRoute). A guest still sees the requests
     // its own sessions are waiting on, but never the owner's.
     const list = Effect.fn("PermissionHttpApi.list")(function* () {
       const principal = yield* RequestPrincipal
