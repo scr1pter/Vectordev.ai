@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
-import type { MigrationState, SqlResult, SupabaseProgress, SupabaseProjects } from "./supabase-api"
+import { createStore } from "solid-js/store"
+import type { MigrationReview, MigrationState, SqlResult, SupabaseProgress, SupabaseProjects } from "./supabase-api"
 import { createConfirm, failed, PanelHead, type SupabasePanelProps } from "./supabase-ui"
 import "./supabase.css"
 
@@ -15,6 +16,7 @@ export function SupabaseDatabase(
   },
 ) {
   const confirm = createConfirm()
+  const [migrationReview, setMigrationReview] = createStore<{ plan?: MigrationReview }>({})
   const [projects, setProjects] = createSignal<SupabaseProjects>()
   const [mode, setMode] = createSignal<"link" | "create">("link")
   const [selection, setSelection] = createSignal("")
@@ -51,6 +53,7 @@ export function SupabaseDatabase(
   }
 
   const loadMigrations = async () => {
+    setMigrationReview("plan", undefined)
     if (!props.linked) return
     const report = await props.client.migrationStatus()
     if (!report.ok) {
@@ -146,9 +149,27 @@ export function SupabaseDatabase(
       props.notice({ tone: report.problems?.length ? "error" : "success", text: report.detail ?? "Password rotated." })
     })
 
+  const reviewMigrations = () =>
+    act("review-migrations", async () => {
+      const report = await props.client.planMigrations()
+      if (failed(props.notice, report)) return
+      if (report.migrations?.failed) {
+        props.notice({ tone: "error", text: report.migrations.failed.error })
+        return
+      }
+      if (!report.approvalID || !report.statements?.length) {
+        props.notice({ tone: "info", text: "There are no pending migrations." })
+        return
+      }
+      setMigrationReview("plan", { approvalID: report.approvalID, statements: report.statements })
+    })
+
   const apply = () =>
     act("apply", async () => {
-      const report = await props.client.applyMigrations()
+      const plan = migrationReview.plan
+      if (!plan) return
+      setMigrationReview("plan", undefined)
+      const report = await props.client.applyMigrations(plan.approvalID)
       if (failed(props.notice, report)) return
       const outcome = report.migrations
       props.notice(
@@ -457,13 +478,9 @@ export function SupabaseDatabase(
                   data-variant="primary"
                   type="button"
                   disabled={Boolean(busy()) || Boolean(migrations()?.migrations?.changed.length)}
-                  onClick={() => confirm.ask("apply", () => void apply())}
+                  onClick={() => void reviewMigrations()}
                 >
-                  {busy() === "apply"
-                    ? "Applying…"
-                    : confirm.armed() === "apply"
-                      ? `Apply ${migrations()?.migrations?.pending.length} to ${props.projectName ?? "production"}?`
-                      : "Apply pending"}
+                  {busy() === "review-migrations" ? "Reading SQL…" : "Review pending SQL"}
                 </button>
               </Show>
               <Show when={migrations()?.rollback?.available ? migrations()?.rollback : undefined}>
@@ -480,6 +497,35 @@ export function SupabaseDatabase(
                 )}
               </Show>
             </PanelHead>
+            <Show when={migrationReview.plan}>
+              {(plan) => (
+                <div class="sb-section">
+                  <p>Review this SQL before applying it to {props.projectName ?? "production"}.</p>
+                  <For each={plan().statements}>
+                    {(statement) => (
+                      <div class="mt-3">
+                        <strong>{statement.label}</strong>
+                        <pre class="whitespace-pre-wrap break-all text-[12px]">{statement.sql}</pre>
+                      </div>
+                    )}
+                  </For>
+                  <div class="sb-actions mt-3">
+                    <button
+                      class="cloud-button"
+                      data-variant="danger"
+                      type="button"
+                      disabled={Boolean(busy())}
+                      onClick={() => void apply()}
+                    >
+                      Apply reviewed SQL
+                    </button>
+                    <button class="cloud-button" type="button" onClick={() => setMigrationReview("plan", undefined)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </Show>
             <For each={migrations()?.warnings ?? []}>
               {(warning) => <p class="cloud-muted mt-3 text-[12px]">{warning}</p>}
             </For>

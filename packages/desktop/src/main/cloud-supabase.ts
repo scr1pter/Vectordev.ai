@@ -64,6 +64,7 @@ const READS = [
   "supabase_projects",
   "regions",
   "migration_status",
+  "plan_migrations",
   "auth_config",
   "auth_users",
   "vercel_redirect_urls",
@@ -186,8 +187,16 @@ async function run(
       version: text(input, "version"),
     })
   }
-  if (command === "apply_migrations") {
-    return applyCloudMigrations({ ...project, dryRun: bool(input, "dryRun") === true }, options.request ?? fetch)
+  if (command === "plan_migrations" || command === "apply_migrations") {
+    return applyCloudMigrations(
+      {
+        ...project,
+        prepare: command === "plan_migrations",
+        dryRun: bool(input, "dryRun") === true,
+        approvalID: text(input, "approvalID"),
+      },
+      options.request ?? fetch,
+    )
   }
   if (command === "vercel_redirect_urls") return vercelRedirectSuggestions(project.projectPath, options.request)
   // Reports "skipped" by itself when Supabase is not linked or connected.
@@ -655,7 +664,6 @@ export async function describeSupabaseCommand(
 // Supabase keeps sign-in data and secrets in these schemas.
 const SENSITIVE_SCHEMA = /\b(auth|vault|pgsodium|storage)\s*\.\s*[a-z_"]/gi
 // Enough to read in a prompt; the character count says when there is more.
-const STATEMENT_CHARS = 4_000
 
 type Statement = { label: string; sql: string; length: number; truncated: boolean }
 
@@ -663,9 +671,9 @@ function statement(label: string, sql: string): Statement {
   const trimmed = sql.trim()
   return {
     label,
-    sql: trimmed.length > STATEMENT_CHARS ? trimmed.slice(0, STATEMENT_CHARS) : trimmed,
+    sql: trimmed,
     length: trimmed.length,
-    truncated: trimmed.length > STATEMENT_CHARS,
+    truncated: false,
   }
 }
 

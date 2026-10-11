@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -487,7 +487,10 @@ describe("migrations", () => {
       migrations: { dryRun: true, pending: [name], projectRef: "fixtureref" },
       rollback: undefined,
     })
-    expect(await run("apply_migrations")).toMatchObject({ ok: true, migrations: { applied: [name] } })
+    expect(await run("apply_migrations", { approvalID: (await run("plan_migrations")).approvalID })).toMatchObject({
+      ok: true,
+      migrations: { applied: [name] },
+    })
     expect(await run("migration_status")).toMatchObject({
       migrations: { alreadyApplied: [name], pending: [] },
       rollback: { name, available: true, source: "file" },
@@ -589,7 +592,7 @@ describe("migrations", () => {
     )
     await writeFile(join(project, "supabase", "migrations", "1_a.down.sql"), "drop table a;")
     const database = trackingDatabase()
-    expect(await run("apply_migrations")).toMatchObject({
+    expect(await run("apply_migrations", { approvalID: (await run("plan_migrations")).approvalID })).toMatchObject({
       ok: true,
       migrations: { discovered: ["1_a.sql"], applied: ["1_a.sql"] },
     })
@@ -915,6 +918,19 @@ describe("edge functions", () => {
     await writeFile(join(project, "supabase", "functions", "hello", "index.ts"), 'import "../_shared/cors.ts"')
     await writeFile(join(project, "supabase", "functions", "hello", "deno.json"), "{}")
     await writeFile(join(project, "supabase", "functions", "_shared", "cors.ts"), "export {}")
+    await writeFile(join(project, "supabase", "functions", "hello", ".env"), "SECRET=fixture-private-env")
+    await writeFile(
+      join(project, "supabase", "functions", "hello", ".npmrc"),
+      "//registry.npmjs.org/:_authToken=fixture-private-npm",
+    )
+    await writeFile(
+      join(project, "supabase", "functions", "_shared", ".env.production"),
+      "SECRET=fixture-private-shared",
+    )
+    await writeFile(
+      join(project, "supabase", "functions", "_shared", "service-account.json"),
+      '{"private_key":"fixture"}',
+    )
     await writeFile(join(project, "supabase", "config.toml"), "[functions.hello]\nverify_jwt = false\n")
     const deployed = await run("deploy_function", { functionName: "hello" })
     expect(deployed).toMatchObject({
@@ -940,6 +956,40 @@ describe("edge functions", () => {
     expect(await run("functions")).toMatchObject({ ok: true, deployed: [{ slug: "hello" }], local: ["hello"] })
     expect(await run("delete_function", { functionName: "hello" })).toMatchObject({ ok: true, deleted: "hello" })
     expect(await run("deploy_function", { functionName: "missing" })).toMatchObject({ ok: false })
+  })
+
+  test.each(["hello", "_shared"])("refuses a symlinked %s source directory before upload", async (name) => {
+    connect()
+    linkDatabase()
+    const outside = await mkdtemp(join(tmpdir(), "vector-function-outside-"))
+    try {
+      await mkdir(join(project, "supabase", "functions"), { recursive: true })
+      await writeFile(join(outside, "index.ts"), "export {}")
+      if (name === "_shared") {
+        await mkdir(join(project, "supabase", "functions", "hello"))
+        await writeFile(join(project, "supabase", "functions", "hello", "index.ts"), "export {}")
+      }
+      await symlink(outside, join(project, "supabase", "functions", name), "dir")
+      expect(await run("deploy_function", { functionName: "hello" })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("symbolic links"),
+      })
+      expect(fake.calls.some((call) => call.path.endsWith("/functions/deploy"))).toBe(false)
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  test("refuses embedded credentials without returning their values", async () => {
+    connect()
+    linkDatabase()
+    await mkdir(join(project, "supabase", "functions", "hello"), { recursive: true })
+    const secret = "sb_secret_fixture_private_key_123456"
+    await writeFile(join(project, "supabase", "functions", "hello", "index.ts"), `const key = "${secret}"`)
+    const report = await run("deploy_function", { functionName: "hello" })
+    expect(report).toMatchObject({ ok: false, error: expect.stringContaining("contains a credential") })
+    expect(JSON.stringify(report)).not.toContain(secret)
+    expect(fake.calls.some((call) => call.path.endsWith("/functions/deploy"))).toBe(false)
   })
 
   test("manages function secrets by name; the agent's values come only from the stored environment", async () => {
@@ -1141,7 +1191,7 @@ describe("agent bridge", () => {
     const long = `update profiles set bio = '${"x".repeat(5_000)}'`
     expect(
       (await bridgeCommand({ command: "describe", action: "run_sql", sql: long, write: true })).statements,
-    ).toEqual([{ label: "SQL that can change data", sql: long.slice(0, 4_000), length: long.length, truncated: true }])
+    ).toEqual([{ label: "SQL that can change data", sql: long, length: long.length, truncated: false }])
 
     setEnv(project, undefined, "STRIPE_SECRET_KEY", "fixture-stripe-value")
     await mkdir(join(project, "supabase", "functions", "open"), { recursive: true })

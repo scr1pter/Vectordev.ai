@@ -37,6 +37,7 @@ const { applyCloudMigrations, applyMigrationFiles, discoverMigrations, planMigra
   await import("./cloud-migrations")
 const { cloudProjectScopeKey } = await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
+const { startCloudBridge, stopCloudBridge } = await import("./cloud-bridge")
 
 let project = ""
 
@@ -125,6 +126,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await stopCloudBridge()
   await rm(project, { recursive: true, force: true })
 })
 
@@ -342,12 +344,14 @@ describe("applyCloudMigrations", () => {
 
     const queries: string[] = []
     const urls: string[] = []
-    const report = await applyCloudMigrations({ projectPath: project }, async (input, init) => {
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (input, init) => {
       urls.push(String(input))
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sbp_management_token")
       queries.push(String(JSON.parse(String(init?.body)).query))
       return Response.json([])
-    })
+    }
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    const report = await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)
 
     expect(new Set(urls)).toEqual(new Set(["https://api.supabase.com/v1/projects/abcdefghijkl/database/query"]))
     expect(report.ok).toBe(true)
@@ -363,15 +367,96 @@ describe("applyCloudMigrations", () => {
     expect(JSON.stringify(report)).not.toContain("sbp_management_token")
   })
 
+  test.each(["edit", "add", "history"])("refuses %s after approval before any database mutation", async (change) => {
+    const sql = "create table posts (id uuid primary key);\n-- down\ndrop table posts;"
+    await writeMigrations("supabase/migrations", { "0001_init.sql": sql })
+    seedSupabase()
+    const database = fakeDatabase()
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (_input, init) =>
+      Response.json(await database.runner(JSON.parse(String(init?.body)).query))
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    expect(plan.statements).toEqual([
+      {
+        label: "Migration supabase/migrations/0001_init.sql",
+        sql: "create table posts (id uuid primary key);\n",
+        length: "create table posts (id uuid primary key);\n".length,
+        truncated: false,
+      },
+    ])
+    expect(writes(database.statements)).toEqual([])
+    if (change === "edit") await writeMigrations("supabase/migrations", { "0001_init.sql": "drop table customers;" })
+    if (change === "add") await writeMigrations("supabase/migrations", { "0002_new.sql": "drop table customers;" })
+    if (change === "history") database.state.tracked = [{ name: "0001_init.sql", checksum: sha(sql) }]
+    await expect(applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)).rejects.toThrow(
+      "changed after approval",
+    )
+    expect(writes(database.statements)).toEqual([])
+  })
+
+  test("the agent bridge describes forward SQL and refuses changed files after approval", async () => {
+    await writeMigrations("supabase/migrations", { "0001_init.sql": "create table posts ();" })
+    seedSupabase()
+    const database = fakeDatabase()
+    const bridge = await startCloudBridge({
+      request: async (_input, init) => Response.json(await database.runner(JSON.parse(String(init?.body)).query)),
+    })
+    const command = async (input: Record<string, unknown>) =>
+      (
+        await fetch(`${bridge.url}/command`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ projectPath: project, ...input }),
+        })
+      ).json()
+    const plan = await command({ command: "describe", action: "apply_migrations" })
+    const approvalID = plan.approved.approvalID
+    expect(typeof approvalID).toBe("string")
+    expect(plan).toMatchObject({
+      ok: true,
+      repeatable: false,
+      statements: [{ sql: "create table posts ();", truncated: false }],
+      approved: { approvalID: expect.any(String) },
+    })
+    await writeMigrations("supabase/migrations", { "0002_new.sql": "drop table customers;" })
+    expect(await command({ command: "apply_migrations", approvalID })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("changed after approval"),
+    })
+    expect(writes(database.statements)).toEqual([])
+  })
+
+  test("binds approvals to their scope and consumes them only once", async () => {
+    await writeMigrations("supabase/migrations", { "0001_init.sql": "create table posts ();" })
+    seedSupabase()
+    const database = fakeDatabase()
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (_input, init) =>
+      Response.json(await database.runner(JSON.parse(String(init?.body)).query))
+    expect((await applyCloudMigrations({ projectPath: project }, request)).ok).toBe(false)
+    const wrong = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    expect(
+      (await applyCloudMigrations({ projectPath: project, taskId: "other", approvalID: wrong.approvalID }, request)).ok,
+    ).toBe(false)
+    expect(writes(database.statements)).toEqual([])
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    expect(
+      (await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)).migrations?.applied,
+    ).toEqual(["0001_init.sql"])
+    const count = database.statements.length
+    expect((await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)).ok).toBe(false)
+    expect(database.statements).toHaveLength(count)
+  })
+
   test("keeps the partial result when Postgres rejects a migration", async () => {
     await writeMigrations("supabase/migrations", { "0001_broken.sql": "alter tabel posts;" })
     seedSupabase()
 
-    const report = await applyCloudMigrations({ projectPath: project }, async (_input, init) => {
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (_input, init) => {
       const query = String(JSON.parse(String(init?.body)).query)
       if (query.includes("tabel")) return Response.json({ message: 'syntax error at or near "tabel"' }, { status: 400 })
       return Response.json([])
-    })
+    }
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    const report = await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)
 
     expect(report.ok).toBe(true)
     expect(report.migrations?.applied).toEqual([])

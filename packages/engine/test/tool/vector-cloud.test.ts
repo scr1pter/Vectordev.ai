@@ -530,6 +530,36 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
+  it.instance("shows forward SQL and passes its exact approval to the runner", () =>
+    Effect.gen(function* () {
+      const statements = [{ label: "Migration 1.sql", sql: "create table posts ();", length: 22, truncated: false }]
+      const requests = yield* bridge({ ok: true }, 200, {
+        report: {
+          ok: true,
+          repeatable: false,
+          scope: {
+            provider: "Supabase",
+            project: "shop-db",
+            environment: "production",
+            summary: "Apply reviewed SQL.",
+          },
+          statements,
+          approved: { approvalID: "approved-forward-plan" },
+        },
+      })
+      const asks = recordAsks()
+      yield* execute({ action: "apply_migrations" }, asks.ask)
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "vector_cloud_database",
+          always: [],
+          metadata: expect.objectContaining({ statements }),
+        }),
+      ])
+      expect(requests[1]).toMatchObject({ command: "apply_migrations", approvalID: "approved-forward-plan" })
+    }),
+  )
+
   it.instance("shows the SQL a database change runs, and runs only what was shown", () =>
     Effect.gen(function* () {
       const statements = [

@@ -79,6 +79,7 @@ type CloudCommandInput = VercelCommandFields & {
   organizationId?: string
   region?: string
   force?: boolean
+  approvalID?: string
 }
 
 let bridgeServer: Server | undefined
@@ -189,6 +190,7 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   const region = Reflect.get(value, "region")
   const force = Reflect.get(value, "force")
   const source = Reflect.get(value, "source")
+  const approvalID = Reflect.get(value, "approvalID")
   const known = COMMANDS.find((item) => item === command)
   if (!known) throw new Error("Unsupported Vector Cloud command.")
   const describable = DESCRIBABLE.find((item) => item === action)
@@ -212,9 +214,12 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
     throw new Error("Invalid database region.")
   }
   if (force !== undefined && typeof force !== "boolean") throw new Error("Invalid database creation mode.")
+  if (approvalID !== undefined && (typeof approvalID !== "string" || approvalID.length > 100))
+    throw new Error("Invalid migration approval.")
   if (source !== undefined && source !== "build" && source !== "runtime") throw new Error("Invalid log source.")
   return {
     ...parseVercelFields(value),
+    approvalID,
     source,
     command: known,
     action: describable,
@@ -335,19 +340,26 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
     }
   }
   if (input.action === "apply_migrations") {
-    return input.dryRun
-      ? scope(
-          "Supabase",
-          name,
-          "production",
-          `Read which migrations the Supabase project ${name} has applied. Nothing changes.`,
-        )
-      : scope(
-          "Supabase",
-          name,
-          "production",
-          `Apply this project's pending migrations to the Supabase project ${name}. This changes its live database.`,
-        )
+    if (input.dryRun)
+      return scope(
+        "Supabase",
+        name,
+        "production",
+        `Read which migrations the Supabase project ${name} has applied. Nothing changes.`,
+      )
+    const plan = await applyCloudMigrations({ ...input, directory: workspace.directory, prepare: true }, request)
+    if (!plan.ok || plan.migrations?.failed) return { ...plan, ok: false }
+    return {
+      ...scope(
+        "Supabase",
+        name,
+        "production",
+        `Apply the reviewed SQL to the Supabase project ${name}. This changes its live database.`,
+      ),
+      noop: !plan.migrations?.pending.length,
+      statements: plan.statements,
+      approved: { approvalID: plan.approvalID },
+    }
   }
   return scope(
     "Supabase",
@@ -376,7 +388,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     const described =
       input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)
         ? await describeVercelAction(input, scope, options.vercel)
-        : await describeCloudAction(input, scope, options.vercel?.request)
+        : await describeCloudAction(input, scope, options.request ?? options.vercel?.request)
     return askEveryTime(input, described)
   }
   if (
@@ -479,12 +491,16 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
     })
   }
   if (input.command === "apply_migrations") {
-    return applyCloudMigrations({
-      projectPath: input.projectPath,
-      taskId: input.taskId,
-      directory: scope.directory,
-      dryRun: input.dryRun === true,
-    })
+    return applyCloudMigrations(
+      {
+        projectPath: input.projectPath,
+        taskId: input.taskId,
+        directory: scope.directory,
+        dryRun: input.dryRun === true,
+        approvalID: input.approvalID,
+      },
+      options.request,
+    )
   }
   if (!configuredPublishTargets(input).length) return publishSetup()
   // An agent workspace publishes a preview from its worktree, at its branch's

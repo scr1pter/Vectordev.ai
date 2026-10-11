@@ -16,7 +16,7 @@ const PATTERNS = [
   { kind: "provider API key", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
   { kind: "npm token", pattern: /\bnpm_[A-Za-z0-9]{30,}\b/g },
   { kind: "Netlify token", pattern: /\bnfp_[A-Za-z0-9]{20,}\b/g },
-  { kind: "Supabase token", pattern: /\bsbp_[A-Za-z0-9]{20,}\b/g },
+  { kind: "Supabase token", pattern: /\b(?:sbp_[A-Za-z0-9]{20,}|sb_secret_[A-Za-z0-9_-]{8,})\b/g },
   { kind: "JWT", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
 ] as const
 
@@ -24,6 +24,11 @@ export type SecretFinding = {
   file: string
   line: number
   kind: string
+}
+
+// Scan the exact text about to be uploaded, so a later filesystem read cannot replace checked bytes.
+export function scanSecretContent(content: string, file: string): SecretFinding[] {
+  return matches(content).map((item) => ({ file, line: item.line, kind: item.kind }))
 }
 
 export async function scanChangedSecrets(sourcePath: string, isolatedPath: string, files: string[]) {
@@ -85,13 +90,7 @@ export async function scanProjectSecrets(projectPath: string, reportRoot = proje
         const reported = relative(reportRoot, file).split("\\").join("/")
         if (scanned.incomplete) return [{ file: reported, line: 0, kind: scanned.incomplete }]
         if (!scanned.content) return []
-        return matches(scanned.content).map(
-          (item): SecretFinding => ({
-            file: reported,
-            line: item.line,
-            kind: item.kind,
-          }),
-        )
+        return scanSecretContent(scanned.content, reported)
       }),
     )
   ).flat()

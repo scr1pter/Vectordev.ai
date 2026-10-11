@@ -1,7 +1,8 @@
-import { readFile, readdir, stat } from "node:fs/promises"
-import { join, relative, sep } from "node:path"
+import { lstat, readFile, readdir, realpath, stat } from "node:fs/promises"
+import { isAbsolute, join, relative, sep } from "node:path"
 
 import { listEnv } from "./cloud-console"
+import { scanSecretContent } from "./secret-scanner"
 import {
   booleanField,
   management,
@@ -22,6 +23,8 @@ const FUNCTION_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,62}$/
 const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 const ENTRYPOINTS = ["index.ts", "index.tsx", "index.js", "index.jsx", "index.mjs"]
 const IMPORT_MAPS = ["deno.json", "deno.jsonc", "import_map.json"]
+const PRIVATE_FILE =
+  /^(?:\.env(?:\.|$)|\.(?:npmrc|pypirc|netrc)$|credentials(?:\.json)?$|service[-_]account.*\.json$|id_(?:rsa|ed25519|ecdsa)(?:\.|$))|\.(?:pem|key|p12|pfx)$/i
 const SKIP = new Set(["node_modules", ".git", ".DS_Store", "dist", ".turbo"])
 const MAX_FILES = 500
 const MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -89,14 +92,16 @@ export async function deployFunction(context: SupabaseContext, input: { director
     throw new Error(`"${input.name}" is not a function name. Use letters, numbers, hyphens and underscores.`)
   }
   const folder = join(input.directory, FUNCTIONS_DIR, name)
+  const root = await realpath(input.directory)
+  await requireFunctionDirectory(folder, root)
   const entry = await entrypoint(folder)
   if (!entry) {
     throw new Error(`${join(FUNCTIONS_DIR, name)} has no ${ENTRYPOINTS.join(", ")} to deploy.`)
   }
   const shared = join(input.directory, FUNCTIONS_DIR, "_shared")
   const files = [
-    ...(await collect(folder)),
-    ...((await stat(shared).catch(() => undefined))?.isDirectory() ? await collect(shared) : []),
+    ...(await collect(folder, root)),
+    ...((await lstat(shared).catch(() => undefined)) ? await collect(shared, root) : []),
   ]
   if (files.length > MAX_FILES) throw new Error(`${name} has more than ${MAX_FILES} files to upload.`)
   const sizes = await Promise.all(files.map(async (file) => (await stat(file)).size))
@@ -113,7 +118,32 @@ export async function deployFunction(context: SupabaseContext, input: { director
   }
   const form = new FormData()
   form.set("metadata", JSON.stringify(metadata))
-  for (const file of files) form.append("file", new Blob([await readFile(file)]), path(file))
+  const secrets = [
+    ...context.secrets,
+    ...listEnv(context.projectPath, context.taskId)
+      .filter((item) => item.visibility === "server")
+      .map((item) => item.value),
+  ].filter((value) => value.length >= 4)
+  for (const file of files) {
+    const canonical = await realpath(file)
+    const relativePath = relative(root, canonical)
+    if (
+      relativePath.startsWith(`..${sep}`) ||
+      relativePath === ".." ||
+      isAbsolute(relativePath) ||
+      (await lstat(file)).isSymbolicLink()
+    ) {
+      throw new Error(`Function source ${path(file)} must stay inside the project and cannot be a symbolic link.`)
+    }
+    const content = await readFile(file)
+    const text = content.toString("utf8")
+    if (scanSecretContent(text, path(file)).length || secrets.some((secret) => text.includes(secret))) {
+      throw new Error(
+        `Function source ${path(file)} contains a credential. Move it to Function secrets before deploying.`,
+      )
+    }
+    form.append("file", new Blob([content]), path(file))
+  }
   const deployed = summarize(
     await management(context, refPath(context, `/functions/deploy?slug=${encodeURIComponent(name)}`), {
       method: "POST",
@@ -131,13 +161,32 @@ export async function deployFunction(context: SupabaseContext, input: { director
   }
 }
 
-async function collect(folder: string): Promise<string[]> {
+async function requireFunctionDirectory(folder: string, root: string) {
+  const info = await lstat(folder)
+  const local = relative(root, await realpath(folder))
+  if (
+    !info.isDirectory() ||
+    info.isSymbolicLink() ||
+    local.startsWith(`..${sep}`) ||
+    local === ".." ||
+    isAbsolute(local)
+  ) {
+    throw new Error("Function source directories must stay inside the project and cannot be symbolic links.")
+  }
+}
+
+async function collect(folder: string, root: string): Promise<string[]> {
+  await requireFunctionDirectory(folder, root)
   const entries = await readdir(folder, { withFileTypes: true })
   const nested = await Promise.all(
     entries
-      .filter((entry) => !SKIP.has(entry.name))
+      .filter((entry) => !SKIP.has(entry.name) && !PRIVATE_FILE.test(entry.name))
       .map((entry) =>
-        entry.isDirectory() ? collect(join(folder, entry.name)) : entry.isFile() ? [join(folder, entry.name)] : [],
+        entry.isDirectory()
+          ? collect(join(folder, entry.name), root)
+          : entry.isFile()
+            ? [join(folder, entry.name)]
+            : [],
       ),
   )
   return nested.flat()

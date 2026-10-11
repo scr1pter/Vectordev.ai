@@ -21,6 +21,20 @@ function recordingBridge(reply: (command: string) => Record<string, unknown> | E
 }
 
 describe("Supabase console client", () => {
+  test("applies only the migration plan the console reviewed", async () => {
+    const recorded = recordingBridge(() => ({ approvalID: "reviewed-plan", statements: [] }))
+    const client = supabaseClient(
+      () => ({ projectPath: "/work/shop" }),
+      () => recorded.bridge,
+    )
+    const plan = await client.planMigrations()
+    await client.applyMigrations(plan.approvalID!)
+    expect(recorded.sent).toEqual([
+      { command: "plan_migrations", input: { projectPath: "/work/shop" } },
+      { command: "apply_migrations", input: { projectPath: "/work/shop", approvalID: "reviewed-plan" } },
+    ])
+  })
+
   test("sends each control as the shared command, in the open project's scope", async () => {
     const { bridge, sent } = recordingBridge()
     const client = supabaseClient(

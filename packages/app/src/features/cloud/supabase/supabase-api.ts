@@ -42,6 +42,11 @@ export type MigrationState = {
   warnings?: string[]
 }
 
+export type MigrationReview = {
+  approvalID: string
+  statements: { label: string; sql: string; length: number; truncated: false }[]
+}
+
 export type SqlResult = {
   columns: string[]
   rows: (string | number | boolean | null)[][]
@@ -162,7 +167,8 @@ export function supabaseClient(
         input,
       ),
     migrationStatus: () => run<MigrationState>("migration_status"),
-    applyMigrations: () => run<MigrationState>("apply_migrations"),
+    planMigrations: () => run<MigrationState & MigrationReview>("plan_migrations"),
+    applyMigrations: (approvalID: string) => run<MigrationState>("apply_migrations", { approvalID }),
     rollback: (name: string) => run<{ rolledBack: string; nextStep: string }>("rollback_migration", { name }),
     runSql: (sql: string, write = false) =>
       run<{ result: SqlResult; needsConfirmation: boolean }>("run_sql", { sql, write }),

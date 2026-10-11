@@ -407,11 +407,8 @@ describe("cloud bridge publish destination", () => {
       projectName: "shop-db",
     })
     // A schema change on the production database asks every time; reading the plan does not.
-    expect(await describe({ action: "apply_migrations" })).toMatchObject({
-      ok: true,
-      repeatable: false,
-      scope: { provider: "Supabase", project: "shop-db", environment: "production" },
-    })
+    // An approval requires actual pending SQL for review.
+    expect(await describe({ action: "apply_migrations" })).toMatchObject({ ok: false, needsSetup: true })
     const dryRun = await describe({ action: "apply_migrations", dryRun: true })
     expect(dryRun.scope.summary).toContain("Nothing changes")
     expect(dryRun).not.toHaveProperty("repeatable")

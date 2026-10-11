@@ -1,5 +1,5 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -31,6 +31,27 @@ export type AppliedMigrations = {
   versions: string[]
 }
 
+type MigrationApproval = {
+  directory?: string
+  files: { name: string; checksum: string }[]
+  pending: string[]
+}
+
+export type MigrationStatement = { label: string; sql: string; length: number; truncated: false }
+
+const approvals = new Map<
+  string,
+  {
+    projectPath: string
+    taskId?: string
+    directory: string
+    projectRef: string
+    createdAt: number
+    snapshot: MigrationApproval
+  }
+>()
+const APPROVAL_TTL = 10 * 60_000
+
 export type MigrationOutcome = {
   dryRun: boolean
   directory?: string
@@ -51,6 +72,9 @@ export type CloudMigrationsInput = {
   /** Where the migration files are read from; defaults to projectPath. */
   directory?: string
   dryRun?: boolean
+  approvalID?: string
+  /** Prepare exact statements for confirmation without changing the database. */
+  prepare?: boolean
 }
 
 export type CloudMigrationReport = {
@@ -59,6 +83,8 @@ export type CloudMigrationReport = {
   error?: string
   nextStep?: string
   migrations?: MigrationOutcome
+  approvalID?: string
+  statements?: MigrationStatement[]
 }
 
 // Ordered by how strong a signal each location is: a Supabase project says what
@@ -223,7 +249,9 @@ export async function applyMigrationFiles(input: {
   runner: SupabaseSqlRunner
   dryRun: boolean
   redact?: (value: string) => string
-}): Promise<MigrationOutcome> {
+  approved?: MigrationApproval
+  prepare?: boolean
+}): Promise<MigrationOutcome & { snapshot?: MigrationApproval; statements?: MigrationStatement[] }> {
   const redact = input.redact ?? ((value: string) => value)
   const files = await Promise.all(
     input.discovery.files.map(async (file) => {
@@ -231,7 +259,21 @@ export async function applyMigrationFiles(input: {
       return { ...file, sql, checksum: createHash("sha256").update(sql).digest("hex") }
     }),
   )
-  const plan = planMigrations(files, await readApplied(input.runner, input.dryRun))
+  const snapshotFiles = files.map((file) => ({ name: file.name, checksum: file.checksum }))
+  if (
+    input.approved &&
+    (input.approved.directory !== input.discovery.directory ||
+      JSON.stringify(input.approved.files) !== JSON.stringify(snapshotFiles))
+  )
+    throw new Error("Migration files changed after approval. Review the SQL again; nothing was applied.")
+  // Validate both local files and remote history before even creating the tracking table.
+  const plan = planMigrations(files, await readApplied(input.runner, input.dryRun || Boolean(input.approved)))
+  if (
+    input.approved &&
+    JSON.stringify(input.approved.pending) !== JSON.stringify(plan.pending.map((file) => file.name))
+  ) {
+    throw new Error("Applied migration history changed after approval. Review the SQL again; nothing was applied.")
+  }
   const outcome: MigrationOutcome = {
     dryRun: input.dryRun,
     directory: input.discovery.directory,
@@ -250,7 +292,26 @@ export async function applyMigrationFiles(input: {
     }
     return outcome
   }
+  if (input.prepare) {
+    const statements = plan.pending.map(
+      (file): MigrationStatement => ({
+        label: `Migration ${input.discovery.directory}/${file.name}`,
+        sql: upSection(file.sql),
+        length: upSection(file.sql).length,
+        truncated: false,
+      }),
+    )
+    if (statements.reduce((length, statement) => length + statement.length, 0) > 100_000) {
+      throw new Error("Pending SQL exceeds the 100,000-character approval limit. Apply a smaller migration batch.")
+    }
+    return {
+      ...outcome,
+      statements,
+      snapshot: { directory: input.discovery.directory, files: snapshotFiles, pending: outcome.pending },
+    }
+  }
   if (input.dryRun) return outcome
+  if (input.approved) await input.runner(SETUP_TRACKING)
 
   // Trust on first use for rows moved from an older release, which had none.
   if (plan.unverified.length) {
@@ -331,7 +392,7 @@ export async function applyCloudMigrations(
   input: CloudMigrationsInput,
   request: CloudFetch = fetch,
 ): Promise<CloudMigrationReport> {
-  const dryRun = input.dryRun === true
+  const dryRun = input.dryRun === true || input.prepare === true
   const discovery = await discoverMigrations(input.directory ?? input.projectPath)
   if (!discovery.directory) {
     return {
@@ -348,6 +409,26 @@ export async function applyCloudMigrations(
       needsSetup: true,
       error: "No Supabase project is connected to this project.",
       nextStep: "Ask the user to open Vector Cloud > Database and connect a Supabase project.",
+    }
+  }
+  for (const [id, approval] of approvals) {
+    if (Date.now() - approval.createdAt > APPROVAL_TTL) approvals.delete(id)
+  }
+  const approval = input.approvalID ? approvals.get(input.approvalID) : undefined
+  if (!dryRun) {
+    if (input.approvalID) approvals.delete(input.approvalID)
+    if (
+      !approval ||
+      approval.projectPath !== input.projectPath ||
+      approval.taskId !== input.taskId ||
+      approval.directory !== (input.directory ?? input.projectPath) ||
+      approval.projectRef !== database.projectRef
+    ) {
+      return {
+        ok: false,
+        error:
+          "Review the pending migration SQL again before applying it. Its approval is missing, expired, or belongs to another database.",
+      }
     }
   }
   const token = await getSupabaseManagementToken(request).catch(() => undefined)
@@ -381,15 +462,32 @@ export async function applyCloudMigrations(
   const outcome = await applyMigrationFiles({
     discovery,
     dryRun,
-    runner: supabaseSqlRunner(database.projectRef, token, request),
-    redact: (value) => redactCloudLog(input.projectPath, input.taskId, value),
+    runner: supabaseSqlRunner(database.projectRef, token, request, { readOnly: dryRun }),
+    approved: approval?.snapshot,
+    prepare: input.prepare,
+    redact: (value) => redactCloudLog(input.projectPath, input.taskId, value, [token]),
   })
+  const approvalID = input.prepare && outcome.snapshot && !outcome.failed ? randomUUID() : undefined
+  if (approvalID && outcome.snapshot) {
+    if (approvals.size >= 100) approvals.delete(approvals.keys().next().value!)
+    approvals.set(approvalID, {
+      projectPath: input.projectPath,
+      taskId: input.taskId,
+      directory: input.directory ?? input.projectPath,
+      projectRef: database.projectRef,
+      createdAt: Date.now(),
+      snapshot: outcome.snapshot,
+    })
+  }
+  const { snapshot, statements, ...migrations } = outcome
   return {
+    approvalID,
+    statements,
     // A migration that Postgres rejected is a result, not a transport failure:
     // the agent has to see which files did apply before it rewrites the one that
     // did not, and the bridge turns a non-ok report into a thrown error.
     ok: true,
     error: outcome.failed ? `${outcome.failed.name} failed: ${outcome.failed.error}` : undefined,
-    migrations: { ...outcome, projectRef: database.projectRef },
+    migrations: { ...migrations, projectRef: database.projectRef },
   }
 }
