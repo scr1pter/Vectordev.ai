@@ -1,23 +1,7 @@
-// Account writes and sensitive interactive actions always stay under explicit user control.
-const ALWAYS_ASK = new Set([
-  "doom_loop",
-  "browser_sensitive",
-  "vector_cloud_publish",
-  "vector_cloud_database",
-  "vector_cloud_environment",
-  "vector_cloud_hosting",
-])
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 
-export function canAutoAcceptPermission(permission?: string, always?: readonly string[]) {
-  if (permission && ALWAYS_ASK.has(permission)) return false
-  if (permission?.startsWith("vector_cloud_") && always?.length === 0) return false
-  return !permission?.startsWith("computer_")
-}
-
-export function canAlwaysAllowPermission(permission?: string, always?: readonly string[]) {
-  if (!canAutoAcceptPermission(permission, always)) return false
-  return Boolean(always?.length)
-}
+export const canAutoAcceptPermission = PermissionPolicy.canAutoApprove
+export const canAlwaysAllowPermission = PermissionPolicy.canAlwaysApprove
 
 export function computerPermissionDetails(input: {
   permission: string

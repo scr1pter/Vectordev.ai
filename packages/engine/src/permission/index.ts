@@ -6,6 +6,7 @@ import { Deferred, Effect, Layer, Context } from "effect"
 import os from "os"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { PermissionV2 } from "@vectordevai/core/permission"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { EventV2Bridge } from "@/event-v2-bridge"
 
 export const Event = PermissionV1.Event
@@ -68,7 +69,7 @@ const layer = Layer.effect(
     const ask = Effect.fn("Permission.ask")(function* (input: PermissionV1.AskInput) {
       const { approved, pending } = yield* InstanceState.get(state)
       const { ruleset, ...request } = input
-      let needsAsk = false
+      let needsAsk = PermissionPolicy.requiresCloudApproval(request.permission, request.always)
 
       for (const pattern of request.patterns) {
         // Approvals are shared by every session in the instance and come last, so on their own they would override a
@@ -170,6 +171,7 @@ const layer = Layer.effect(
 
       for (const [id, item] of pending.entries()) {
         if (item.info.sessionID !== existing.info.sessionID) continue
+        if (PermissionPolicy.requiresCloudApproval(item.info.permission, item.info.always)) continue
         const ok = item.info.patterns.every(
           (pattern) => evaluate(item.info.permission, pattern, approved).action === "allow",
         )
