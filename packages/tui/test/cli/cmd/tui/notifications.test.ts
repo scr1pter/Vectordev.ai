@@ -12,6 +12,7 @@ import { createTuiPluginApi } from "../../../fixture/tui-plugin"
 
 async function setup() {
   const notifications: TuiAttentionNotifyInput[] = []
+  const lookups: string[] = []
   const handlers = new Map<Event["type"], ((event: Event) => void)[]>()
   const session = (id: string, title: string, parentID?: string): Session => ({
     id,
@@ -54,7 +55,10 @@ async function setup() {
       },
       client: createVectorClient({
         baseUrl: "http://engine.test",
-        fetch: async () => Response.json({ ...session("hidden", "Review"), internal: "vectorscope.review" }),
+        fetch: async (request) => {
+          lookups.push(new URL(request.url).pathname)
+          return Response.json({ ...session("hidden", "Review"), internal: "vectorscope.review" })
+        },
       }),
       state: {
         session: {
@@ -68,6 +72,7 @@ async function setup() {
 
   return {
     notifications,
+    lookups,
     emit(event: Event) {
       for (const handler of handlers.get(event.type) ?? []) handler(event)
     },
@@ -124,8 +129,8 @@ describe("internal notifications TUI plugin", () => {
       type: "permission.asked",
       properties: permission("permission-hidden", "hidden"),
     })
-    await Promise.resolve()
-    await Promise.resolve()
+    await Bun.sleep(0)
+    expect(harness.lookups).toEqual(["/session/hidden"])
     expect(harness.notifications).toEqual([])
   })
 
