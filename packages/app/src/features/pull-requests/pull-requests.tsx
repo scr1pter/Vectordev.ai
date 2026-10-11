@@ -1,5 +1,6 @@
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
+import { compactTokens } from "@/utils/session-cost"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
   buildDesktopReview,
@@ -618,6 +619,12 @@ function SecretList(props: { secrets: readonly AutoReviewSecret[] }) {
   )
 }
 
+// A running review's cost, to the fraction of a cent cheap models spend, and its tokens.
+function liveSpendText(spend: { costUsd: number; tokens: number }) {
+  const cost = spend.costUsd > 0 && spend.costUsd < 0.01 ? spend.costUsd.toFixed(4) : spend.costUsd.toFixed(2)
+  return `$${cost} · ${compactTokens(spend.tokens)} tokens`
+}
+
 function capital(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
@@ -668,6 +675,8 @@ export function PullRequests(props: {
   const [checkout, setCheckout] = createSignal<{ mode: ReviewCheckout["mode"]; label: string }>()
   const [estimate, setEstimate] = createSignal<{ value: ReviewEstimate; answer: (go: boolean) => void }>()
   const [busy, setBusy] = createSignal<string>()
+  // What the running review's hidden sessions have spent so far.
+  const [liveSpend, setLiveSpend] = createSignal<{ costUsd: number; tokens: number }>()
   // Set by "Sign in again" for automatic reviews: the next GitHub sign-in also asks for the workflow permission.
   const [workflowSignIn, setWorkflowSignIn] = createSignal(false)
   const [error, setError] = createSignal<string>()
@@ -914,6 +923,7 @@ export function PullRequests(props: {
   const resetReview = () => {
     setReview(undefined)
     setCheckout(undefined)
+    setLiveSpend(undefined)
     setSeverityFilter("all")
     setDismissed({})
     setMenuFor(undefined)
@@ -1036,6 +1046,7 @@ export function PullRequests(props: {
     setError(undefined)
     setReview(undefined)
     setCheckout(undefined)
+    setLiveSpend(undefined)
     setPosted(false)
     setConfirmingMerge(false)
     // Commits pushed since the pull request was opened are reviewed too, and the review is pinned to the newest one.
@@ -1133,9 +1144,12 @@ export function PullRequests(props: {
             })
           }),
         onProgress: (progress) => {
-          if (!current() || controller.signal.aborted) return
+          if (!current()) return
+          // Spend keeps coming in while a stopped review finishes; everything else is the run's own progress.
+          if (progress.type === "spend") setLiveSpend({ costUsd: progress.costUsd, tokens: progress.tokens })
+          if (controller.signal.aborted) return
           if (progress.type === "status") setBusy(progress.text)
-          else setCheckout({ mode: progress.checkout.mode, label: progress.label })
+          if (progress.type === "checkout") setCheckout({ mode: progress.checkout.mode, label: progress.label })
         },
       })
       .catch((cause: unknown) => {
@@ -1329,7 +1343,9 @@ export function PullRequests(props: {
           <div class="text-[13px] font-semibold">AI review</div>
           <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
             {reviewing()
-              ? "Reviewing…"
+              ? liveSpend()
+                ? `Reviewing… · ${liveSpendText(liveSpend()!)} so far`
+                : "Reviewing…"
               : review()
                 ? `Reviewed ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · ${reviewFooter(review()!)}`
                 : "Not reviewed yet"}

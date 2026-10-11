@@ -1,16 +1,18 @@
-import { Show, createMemo } from "solid-js"
+import { For, Show, createMemo } from "solid-js"
 import { TooltipV2 } from "@vectordevai/ui/v2/tooltip-v2"
 import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
 import { useSessionLayout } from "@/pages/session/session-layout"
-import { getSessionTokenTotal } from "@/components/session/session-context-metrics"
-import { formatSessionCost, sessionSpend } from "@/utils/session-cost"
+import { createDelegatedSpend } from "@/components/session-delegated-spend"
+import { compactTokens, formatSessionCost, sessionSpend, sessionTokens } from "@/utils/session-cost"
 
 /**
  * Live BYOK cost readout for the active session. This is real spend — it reads
  * the aggregated `cost` and `tokens` the backend records on every assistant
  * message — surfaced always-visible instead of hidden in a hover tooltip.
  * Transparency about spend is the point of a bring-your-own-key workspace.
+ * Work Vector ran for the session under the hood (a Vectorscope review,
+ * autocomplete) and its subagents are part of the total, each named below it.
  */
 export function SessionCostReadout() {
   const sync = useSync()
@@ -21,7 +23,8 @@ export function SessionCostReadout() {
   // The task's spend, so a session that delegated most of its work does not read as cheap.
   const cost = createMemo(() => sessionSpend(info()).cost)
   const unpriced = createMemo(() => sessionSpend(info()).unpricedSteps)
-  const tokens = createMemo(() => getSessionTokenTotal(info()?.tokens) ?? 0)
+  const tokens = createMemo(() => sessionTokens(info()))
+  const delegated = createDelegatedSpend(info)
 
   const usd = createMemo(
     () =>
@@ -42,23 +45,18 @@ export function SessionCostReadout() {
     }),
   )
 
-  const subagents = createMemo(() =>
-    info()?.subagentCost || info()?.subagentUnpricedSteps
-      ? formatSessionCost({
-          cost: info()?.subagentCost,
-          unpricedSteps: info()?.subagentUnpricedSteps,
-          format: (value) => usd().format(value),
-          t: language.t,
-        })
-      : undefined,
-  )
-
-  const compactTokens = createMemo(() => {
-    const value = tokens()
-    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
-    return String(value)
-  })
+  // Each helper by name, then whatever the subagents spent.
+  const parts = createMemo(() => [
+    ...delegated().helpers,
+    ...(delegated().subagents ? [{ label: "Subagents", ...delegated().subagents! }] : []),
+  ])
+  const partText = (part: { cost: number; unpricedSteps: number; tokens: number }) =>
+    `${formatSessionCost({
+      cost: part.cost,
+      unpricedSteps: part.unpricedSteps,
+      format: (value) => usd().format(value),
+      t: language.t,
+    })} · ${compactTokens(part.tokens)}`
 
   // Only appears once the session has actually spent something.
   return (
@@ -66,23 +64,26 @@ export function SessionCostReadout() {
       <TooltipV2
         placement="bottom"
         value={
-          <div class="flex w-[150px] flex-col gap-1.5">
+          <div class="flex w-[230px] flex-col gap-1.5">
             <div class="flex items-center justify-between gap-4">
               <span class="text-v2-text-text-muted">Session cost</span>
               <span class="text-v2-text-text-base">{spend()}</span>
             </div>
-            <Show when={subagents()}>
-              {(value) => (
-                <div class="flex items-center justify-between gap-4">
-                  <span class="text-v2-text-text-muted">Of which subagents</span>
-                  <span class="text-v2-text-text-base">{value()}</span>
-                </div>
-              )}
-            </Show>
             <div class="flex items-center justify-between gap-4">
               <span class="text-v2-text-text-muted">Tokens</span>
               <span class="text-v2-text-text-base">{tokens().toLocaleString(language.intl())}</span>
             </div>
+            <Show when={parts().length > 0}>
+              <div class="pt-1 text-[11px] leading-4 text-v2-text-text-faint">Of which</div>
+              <For each={parts()}>
+                {(part) => (
+                  <div data-slot="session-cost-part" class="flex items-center justify-between gap-4">
+                    <span class="truncate text-v2-text-text-muted">{part.label}</span>
+                    <span class="shrink-0 text-v2-text-text-base">{partText(part)}</span>
+                  </div>
+                )}
+              </For>
+            </Show>
             <Show when={unpriced() > 0}>
               <div class="pt-1 text-[11px] leading-4 text-v2-text-text-faint">
                 {language.t("session.cost.unpricedNote")}
@@ -98,7 +99,7 @@ export function SessionCostReadout() {
         >
           <span class="text-[#a78bfa]">{spend()}</span>
           <span class="text-white/25">·</span>
-          <span>{compactTokens()}</span>
+          <span>{compactTokens(tokens())}</span>
         </div>
       </TooltipV2>
     </Show>

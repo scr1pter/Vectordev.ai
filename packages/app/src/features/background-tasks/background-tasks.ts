@@ -5,6 +5,7 @@ import type { VectorClient } from "@vectordevai/sdk/v2/client"
 import type { DirectorySync } from "@/context/sync"
 import { showToast } from "@/utils/toast"
 import { modelDisplayName } from "@/utils/provider-brand"
+import { isInternalSession } from "@/utils/internal-sessions"
 import { loadDismissed, saveDismissed } from "./background-tasks-state"
 import {
   buildTaskCards,
@@ -114,8 +115,12 @@ export function createBackgroundTasks(input: BackgroundTasksInput): BackgroundTa
     const root = rootID()
     if (!root) return [] as Session[]
     const found = new Map<string, Session>()
-    for (const session of fetched()) if (session.parentID === root) found.set(session.id, session)
-    for (const session of input.sync().data.session) if (session.parentID === root) found.set(session.id, session)
+    // Vector's helpers (a Vectorscope review, autocomplete) are children too, but they are not the user's background
+    // work; their spend is in the session's cost instead.
+    for (const session of fetched())
+      if (session.parentID === root && !isInternalSession(session)) found.set(session.id, session)
+    for (const session of input.sync().data.session)
+      if (session.parentID === root && !isInternalSession(session)) found.set(session.id, session)
     // The store follows live events and the fetch is a snapshot: whichever the engine updated last is current.
     return [...found.values()].map(
       (session) => freshestSession(input.sync().session.get(session.id), fetchedByID().get(session.id)) ?? session,

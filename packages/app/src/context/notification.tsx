@@ -20,6 +20,7 @@ import { requireServerKey } from "@/utils/session-route"
 import type { ServerScope } from "@/utils/server-scope"
 import { formatServerError } from "@/utils/server-errors"
 import { showToast } from "@/utils/toast"
+import { isInternalSession } from "@/utils/internal-sessions"
 import { createNotificationEventGate } from "./notification-event-gate"
 
 type NotificationBase = {
@@ -335,7 +336,8 @@ function createServerNotificationState(input: {
     void lookup(directory, sessionID).then((session) => {
       if (meta.disposed) return
       if (!session) return
-      if (session.parentID) return
+      // A subagent reports to its parent, and Vector's helpers to the surface that launched them.
+      if (session.parentID || isInternalSession(session)) return
 
       if (settings.sounds.agentEnabled()) {
         void playSoundById(settings.sounds.agent())
@@ -366,7 +368,7 @@ function createServerNotificationState(input: {
     const sessionID = event.properties.sessionID
     void lookup(directory, sessionID).then((session) => {
       if (meta.disposed) return
-      if (session?.parentID) return
+      if (session?.parentID || isInternalSession(session)) return
 
       if (settings.sounds.errorsEnabled()) {
         void playSoundById(settings.sounds.errors())

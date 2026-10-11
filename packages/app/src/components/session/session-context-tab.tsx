@@ -13,6 +13,7 @@ import { getSessionContext, getSessionTokenTotal } from "./session-context-metri
 import { rankModelsForCategory } from "./session-model-economics"
 import { createSessionContextFormatter } from "./session-context-format"
 import { formatSessionCost, sessionSpend } from "@/utils/session-cost"
+import { createDelegatedSpend } from "@/components/session-delegated-spend"
 
 const emptyMessages: Message[] = []
 
@@ -55,6 +56,7 @@ export function SessionContextTab() {
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
   const usage = createMemo(() => Math.max(0, Math.min(100, ctx()?.usage ?? 0)))
   const totalTokens = createMemo(() => getSessionTokenTotal(tokens()) ?? 0)
+  const delegated = createDelegatedSpend(info)
 
   const counts = createMemo(() => {
     const all = messages()
@@ -135,19 +137,19 @@ export function SessionContextTab() {
         t: language.t,
       }),
     },
-    ...(info()?.subagentCost || info()?.subagentUnpricedSteps
-      ? [
-          {
-            label: "Of which subagents",
-            value: formatSessionCost({
-              cost: info()?.subagentCost,
-              unpricedSteps: info()?.subagentUnpricedSteps,
-              format: (value) => usd().format(value),
-              t: language.t,
-            }),
-          },
-        ]
-      : []),
+    // Work Vector ran for this session under the hood, by helper, then its subagents; both are in the total above.
+    ...[
+      ...delegated().helpers,
+      ...(delegated().subagents ? [{ label: "subagents", ...delegated().subagents! }] : []),
+    ].map((part) => ({
+      label: `Of which ${part.label}`,
+      value: `${formatSessionCost({
+        cost: part.cost,
+        unpricedSteps: part.unpricedSteps,
+        format: (value) => usd().format(value),
+        t: language.t,
+      })} · ${formatter().number(part.tokens)} tokens`,
+    })),
     {
       label: "Session created",
       value: formatter().time(info()?.time.created),

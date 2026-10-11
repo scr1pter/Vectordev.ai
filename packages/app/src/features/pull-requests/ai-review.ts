@@ -175,6 +175,10 @@ export type ReviewEstimate = {
 export type ReviewProgress =
   | { type: "status"; text: string }
   | { type: "checkout"; checkout: ReviewCheckout; label: string }
+  // A reviewer's session started. Its spend is reported live through trackReviewSpend.
+  | { type: "session"; sessionID: string }
+  // What the review's sessions have spent so far.
+  | { type: "spend"; costUsd: number; tokens: number }
 
 export type SpecialistRun = {
   name: Specialist
@@ -225,6 +229,9 @@ export type ReviewRequest = ReviewTarget & {
 
 export type ReviewRunInput = ReviewRequest & {
   directory: string
+  // The session the review was started from: the reviewers' spend counts towards it. Reviews started outside any
+  // session stand alone, and the panel and the usage view show what they spent.
+  parentID?: string
   catalog?: readonly ReviewModel[]
   preferredModels?: readonly (string | undefined)[] // the agent's model first, then the configured defaults
   timeoutMs?: number
@@ -253,7 +260,13 @@ type Result<T> = Promise<{ data?: T }>
 // The part of the SDK client a review uses.
 export interface ReviewClient {
   session: {
-    create(input: { directory?: string; title?: string; permission?: PermissionRule[] }): Result<{ id: string }>
+    create(input: {
+      directory?: string
+      title?: string
+      permission?: PermissionRule[]
+      parentID?: string
+      internal?: string
+    }): Result<{ id: string }>
     prompt(input: {
       sessionID: string
       directory?: string
@@ -447,6 +460,34 @@ function promptHeadFiles(files: readonly HeadFile[], inlined: ReadonlySet<string
 // ---------------------------------------------------------------------------------------------------------------
 // The review
 
+// Adds up what a review's sessions have spent so far from the engine's message events, so the panel shows the cost
+// and tokens while the review runs. The finished review's figure still comes from the sessions' recorded messages.
+export function trackReviewSpend(onSpend: (spend: { costUsd: number; tokens: number }) => void) {
+  const sessions = new Set<string>()
+  const messages = new Map<string, { cost: number; tokens: number }>()
+  return {
+    add(sessionID: string) {
+      sessions.add(sessionID)
+    },
+    observe(event: { type: string; properties?: unknown }) {
+      if (event.type !== "message.updated") return
+      const info = (event.properties as { info?: ReviewMessage["info"] & { id?: string; sessionID?: string } })?.info
+      if (!info?.id || info.role !== "assistant" || !info.sessionID || !sessions.has(info.sessionID)) return
+      const tokens = info.tokens
+      messages.set(info.id, {
+        cost: Math.max(0, info.cost ?? 0),
+        tokens: tokens ? tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write : 0,
+      })
+      onSpend(
+        [...messages.values()].reduce(
+          (total, message) => ({ costUsd: total.costUsd + message.cost, tokens: total.tokens + message.tokens }),
+          { costUsd: 0, tokens: 0 },
+        ),
+      )
+    },
+  }
+}
+
 type StopReason = "user" | "timeout"
 
 type Usage = {
@@ -612,6 +653,8 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
       runSpecialist({
         client,
         directory,
+        parentID: input.parentID,
+        onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID }),
         name,
         title: `Vectorscope review · ${subject} · ${name}`,
         text: texts[name],
@@ -658,6 +701,8 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
       : await runVerify({
           client,
           directory,
+          parentID: input.parentID,
+          onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID }),
           title: `Vectorscope review · ${subject} · verify`,
           text: buildVerifyPrompt({
             trust: checkout.trust,
@@ -859,6 +904,8 @@ async function relatedCode(
 async function runSpecialist(input: {
   client: ReviewClient
   directory: string
+  parentID?: string
+  onSession: (sessionID: string) => void
   name: Specialist
   title: string
   text: string
@@ -868,8 +915,15 @@ async function runSpecialist(input: {
 }): Promise<SpecialistResult> {
   const { client, directory, name } = input
   let failure: string | undefined
+  // A helper session: out of every session list, its spend counted towards the session the review started from.
   const created = await client.session
-    .create({ directory, title: input.title, permission: input.rules })
+    .create({
+      directory,
+      title: input.title,
+      permission: input.rules,
+      internal: `vectorscope.${name}`,
+      ...(input.parentID ? { parentID: input.parentID } : {}),
+    })
     .catch((cause: unknown) => {
       failure = errorText(cause)
       return undefined
@@ -877,6 +931,7 @@ async function runSpecialist(input: {
   const sessionID = created?.data?.id
   if (!sessionID)
     return { name, status: "failed", detail: failure ?? "Vector could not create a review session.", usage: NO_USAGE }
+  input.onSession(sessionID)
 
   const ask = (text: string) =>
     client.session
@@ -944,6 +999,8 @@ type VerifyRun = { status: "ok" | "skipped" | "failed"; sessionID?: string; verd
 async function runVerify(input: {
   client: ReviewClient
   directory: string
+  parentID?: string
+  onSession: (sessionID: string) => void
   title: string
   text: string
   model?: ReviewModel
@@ -952,10 +1009,17 @@ async function runVerify(input: {
 }): Promise<VerifyRun> {
   const { client, directory } = input
   const created = await client.session
-    .create({ directory, title: input.title, permission: input.rules })
+    .create({
+      directory,
+      title: input.title,
+      permission: input.rules,
+      internal: "vectorscope.verify",
+      ...(input.parentID ? { parentID: input.parentID } : {}),
+    })
     .catch(() => undefined)
   const sessionID = created?.data?.id
   if (!sessionID) return { status: "failed", verdicts: [], usage: NO_USAGE }
+  input.onSession(sessionID)
   const asked = client.session
     .prompt({
       sessionID,

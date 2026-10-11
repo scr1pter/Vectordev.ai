@@ -45,6 +45,7 @@ import { usePermission } from "@/context/permission"
 import { Binary } from "@vectordevai/core/util/binary"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
+import { isInternalSession } from "@/utils/internal-sessions"
 import { setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
@@ -426,6 +427,8 @@ export default function LegacyLayout(props: ParentProps) {
         const props = e.details.properties
         if (e.details.type === "permission.asked" && permission.autoResponds(e.details.properties, directory)) return
 
+        // A helper's request belongs to the surface that launched it; never point the user at the helper session.
+        if (isInternalSession(serverSync().session.get(props.sessionID))) return
         const [store] = serverSync().child(directory, { bootstrap: false })
         const session = store.session.find((s) => s.id === props.sessionID)
         const sessionKey = `${directory}:${props.sessionID}`
