@@ -422,11 +422,24 @@ describe("DatabaseMigration", () => {
         ]
         for (const [id, title] of rows)
           yield* db.run(sql`INSERT INTO session (id, title, cost) VALUES (${id}, ${title}, 1.5)`)
+        // The swarm planner was untitled; only the prompt the desktop sent it says what it was.
+        yield* db.run(sql`CREATE TABLE session_input (id text PRIMARY KEY, session_id text NOT NULL, prompt text NOT NULL)`)
+        const inputs = [
+          ["swarm", "You are Vector's read-only swarm coordinator. Inspect the current project and decompose it."],
+          ["automation", "Run the nightly dependency audit for this repository."],
+        ]
+        for (const [id, text] of inputs) {
+          yield* db.run(sql`INSERT INTO session (id, title, cost) VALUES (${id}, ${"New session - 2026-10-01"}, 1.5)`)
+          yield* db.run(
+            sql`INSERT INTO session_input (id, session_id, prompt) VALUES (${`in_${id}`}, ${id}, ${JSON.stringify({ text })})`,
+          )
+        }
 
         yield* DatabaseMigration.applyOnly(db, [sessionInternalHelpersMigration])
 
         expect(yield* db.all(sql`SELECT id, internal, cost FROM session ORDER BY id`)).toEqual([
           { id: "autocomplete", internal: "codespace.autocomplete", cost: 1.5 },
+          { id: "automation", internal: null, cost: 1.5 },
           { id: "cli", internal: "vectorscope.review", cost: 1.5 },
           { id: "inline", internal: "codespace.edit", cost: 1.5 },
           { id: "lookalike", internal: null, cost: 1.5 },
@@ -434,6 +447,7 @@ describe("DatabaseMigration", () => {
           { id: "planner", internal: "browser-agent.planner", cost: 1.5 },
           { id: "review", internal: "vectorscope.review", cost: 1.5 },
           { id: "security", internal: "vectorscope.security", cost: 1.5 },
+          { id: "swarm", internal: "swarm.planner", cost: 1.5 },
           { id: "verify", internal: "vectorscope.verify", cost: 1.5 },
         ])
       }),

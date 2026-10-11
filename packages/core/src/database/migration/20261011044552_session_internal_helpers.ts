@@ -24,6 +24,14 @@ export default {
         END
         WHERE \`internal\` IS NULL AND (\`title\` GLOB 'Vector Tool · *' OR \`title\` GLOB 'Vectorscope review · *');
       `)
+      // The desktop's swarm planner gave its sessions no title of their own; they are known by the prompt it sent.
+      yield* tx.run(`
+        UPDATE \`session\` SET \`internal\` = 'swarm.planner'
+        WHERE \`internal\` IS NULL AND \`id\` IN (
+          SELECT \`session_id\` FROM \`session_input\`
+          WHERE json_extract(\`prompt\`, '$.text') GLOB 'You are Vector''s read-only swarm coordinator.*'
+        );
+      `)
     })
   },
 } satisfies DatabaseMigration.Migration
