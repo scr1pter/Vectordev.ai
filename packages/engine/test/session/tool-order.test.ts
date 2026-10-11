@@ -15,7 +15,7 @@ describe("session.llm.tool-order", () => {
           execute: () => {
             ran.push("edit")
             if (synchronous) throw new Error("edit failed")
-            return Promise.reject(new Error("edit failed"))
+            return Promise.reject<string>(new Error("edit failed"))
           },
         }),
         bash: tool({

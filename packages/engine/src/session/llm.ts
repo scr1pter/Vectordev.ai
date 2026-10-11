@@ -436,7 +436,7 @@ const live: Layer.Layer<
             const observe = (event: LLMEvent) =>
               Effect.sync(() => {
                 timing.observe(event)
-                if (answered) return
+                if (answered || event.type === "provider-error" || event.type === "finish") return
                 answered = true
                 input.answering?.()
               })

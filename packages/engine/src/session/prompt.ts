@@ -269,8 +269,8 @@ const layer = Layer.effect(
       history: SessionV1.WithParts[]
       providerID: ProviderV2.ID
       modelID: ModelV2.ID
-      // Completes once the provider is answering the run's first main request, or when the run ends without one.
-      answering: Effect.Effect<void>
+      // Whether the provider answered the first main request before the run ended.
+      answering: Effect.Effect<boolean>
     }) {
       if (input.session.parentID) return
       if (!Session.isDefaultTitle(input.session.title)) return
@@ -307,7 +307,7 @@ const layer = Layer.effect(
           ?.replace(/\s+/g, " ") ?? request
       const provisional = first.length > 50 ? `${first.slice(0, 50)}...` : first
       yield* sessions.setTitle({ sessionID: input.session.id, title: provisional })
-      yield* input.answering
+      if (!(yield* input.answering)) return
       // A title someone set meanwhile stays.
       const kept = sessions.get(input.session.id).pipe(
         Effect.map((session) => session.title === provisional),
@@ -1225,16 +1225,14 @@ const layer = Layer.effect(
       sessionID: SessionID,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
-      // Opens once the provider is answering the run's first main request, and in any case when the run ends.
-      const answering = yield* Deferred.make<void>()
-      return yield* runSteps(sessionID, answering, resumed).pipe(
-        Effect.ensuring(Deferred.succeed(answering, undefined)),
-      )
+      // A run that ends before the provider answers keeps its provisional title without starting another request.
+      const answering = yield* Deferred.make<boolean>()
+      return yield* runSteps(sessionID, answering, resumed).pipe(Effect.ensuring(Deferred.succeed(answering, false)))
     })
 
     const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
       sessionID: SessionID,
-      answering: Deferred.Deferred<void>,
+      answering: Deferred.Deferred<boolean>,
       resumed?: ResumeFreeModelsInput & { parentID: MessageID },
     ) {
       const ctx = yield* InstanceState.context
@@ -1507,7 +1505,7 @@ const layer = Layer.effect(
             model,
             toolChoice: format.type === "json_schema" ? "required" : undefined,
             retries: lastUser.executionMode === "fast" ? 1 : undefined,
-            answering: () => Deferred.doneUnsafe(answering, Effect.void),
+            answering: () => Deferred.doneUnsafe(answering, Effect.succeed(true)),
           })
 
           if (structured !== undefined) {

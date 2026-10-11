@@ -774,6 +774,37 @@ it.instance(
   30_000,
 )
 
+for (const ending of ["cancel", "reject"] as const)
+  it.instance(
+    `a first request that ends before answering keeps its provisional title (${ending})`,
+    () =>
+      Effect.gen(function* () {
+        const { llm } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({})
+        if (ending === "cancel") {
+          const held = reply().hang().item()
+          if (held.type !== "sse") throw new Error("expected a streamed reply")
+          yield* llm.push({ ...held, head: [] })
+        }
+        if (ending === "reject") yield* llm.error(400, { error: { message: "request rejected" } })
+        const run = yield* prompt
+          .prompt({ sessionID: chat.id, agent: "build", model: ref, parts: [{ type: "text", text: "Fix login" }] })
+          .pipe(Effect.forkChild)
+        yield* llm.wait(1)
+        if (ending === "cancel") yield* prompt.cancel(chat.id)
+        yield* Fiber.join(run)
+        yield* prompt.awaitTitles()
+        expect((yield* sessions.get(chat.id)).title).toBe("Fix login")
+        expect(yield* llm.hits).toHaveLength(1)
+        const database = yield* Database.Service
+        const recorded = yield* database.db.select().from(EventTable).where(eq(EventTable.aggregate_id, chat.id)).all()
+        expect(recorded.filter((event) => event.type === `${SessionEvent.AncillaryUsage.type}.1`)).toEqual([])
+      }),
+    30_000,
+  )
+
 it.instance("a session reads its instruction files once, so an edit mid-session keeps the cached system prompt", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
