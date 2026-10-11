@@ -22,16 +22,28 @@ export interface StreamResponsesWebSocketOptions {
   body: Record<string, unknown>
   idleTimeout?: number
   signal?: AbortSignal
-  onRequestSent?: () => void
+  // Holds response.created, queued and in_progress back until the response produces something, so a request the
+  // server rejects right after accepting it can still be retried without the consumer seeing two responses.
+  holdLifecycle?: boolean
+  onRequestSent?: (bytes: number) => void
   onFirstFrame?: () => void
   onFirstProgress?: () => void
   onFirstEvent?: (error?: WrappedError) => void
+  // Every event delivered to the consumer, in order.
+  onEvent?: (event: Record<string, unknown>) => void
   onComplete?: (event: Record<string, unknown>) => void
   onTerminal?: (event: Record<string, unknown>) => void
-  onRetryableTerminal?: (event: Record<string, unknown>) => Promise<WebSocket | undefined>
+  onRetryableTerminal?: (event: Record<string, unknown>) => Promise<Retry | undefined>
   onConnectionInvalid?: (error: ProviderError.ResponseStreamError) => void
   onAbort?: (error: Error) => void
 }
+
+export interface Retry {
+  socket: WebSocket
+  body: Record<string, unknown>
+}
+
+const LIFECYCLE = new Set(["response.created", "response.queued", "response.in_progress"])
 
 export interface WrappedError {
   status: number
@@ -146,9 +158,11 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
   let cleanupSocket = () => {}
   let completed = false
   let emitted = false
+  let announced = false
   let received = false
   let progressed = false
   let idleTimer: ReturnType<typeof setTimeout> | undefined
+  const held: Array<{ event: Record<string, unknown>; text: string }> = []
 
   function cleanup() {
     if (idleTimer) clearTimeout(idleTimer)
@@ -211,18 +225,19 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
     }
 
     // A retry is only safe for an explicit rejection before any provider event was delivered.
-    if (event.type === "error" && !emitted && options.onRetryableTerminal) {
+    if ((event.type === "error" || event.type === "response.failed") && !emitted && options.onRetryableTerminal) {
       cleanupSocket()
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = undefined
       try {
         const next = await options.onRetryableTerminal(event)
         if (completed) {
-          if (next) terminateSocket(next)
+          if (next) terminateSocket(next.socket)
           return
         }
         if (next) {
-          attach(next)
+          held.length = 0
+          attach(next.socket, next.body)
           return
         }
       } catch (error) {
@@ -240,9 +255,17 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
       options.onFirstProgress?.()
     }
 
+    if (options.holdLifecycle && !emitted && LIFECYCLE.has(event.type)) {
+      announce()
+      held.push({ event, text })
+      resetIdleTimeout("idle timeout waiting for websocket")
+      return
+    }
+    held.splice(0).forEach((item) => deliver(item.event, item.text))
+
     const wrappedError = parseWrappedError(event, text)
     if (wrappedError && event) {
-      if (!emitted) options.onFirstEvent?.(wrappedError)
+      announce(wrappedError)
       completed = true
       cleanup()
       options.onTerminal?.(event)
@@ -259,16 +282,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
       return
     }
 
-    if (!emitted) options.onFirstEvent?.()
-    controller?.enqueue(
-      encoder.encode(
-        `${text
-          .split(/\r?\n/)
-          .map((line) => `data: ${line}`)
-          .join("\n")}\n\n`,
-      ),
-    )
-    emitted = true
+    deliver(event, text)
     resetIdleTimeout("idle timeout waiting for websocket")
 
     if (event.type === "response.completed" || event.type === "response.done") {
@@ -284,6 +298,26 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
       options.onTerminal?.(event)
       closeCompleted()
     }
+  }
+
+  function announce(error?: WrappedError) {
+    if (announced) return
+    announced = true
+    options.onFirstEvent?.(error)
+  }
+
+  function deliver(event: Record<string, unknown>, text: string) {
+    announce()
+    options.onEvent?.(event)
+    controller?.enqueue(
+      encoder.encode(
+        `${text
+          .split(/\r?\n/)
+          .map((line) => `data: ${line}`)
+          .join("\n")}\n\n`,
+      ),
+    )
+    emitted = true
   }
 
   function onError(error: Error) {
@@ -315,7 +349,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
     options.onAbort?.(cancelError(reason))
   }
 
-  function attach(next: WebSocket) {
+  function attach(next: WebSocket, body: Record<string, unknown>) {
     cleanupSocket()
     socket = next
     socket.on("message", onMessage)
@@ -326,15 +360,16 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
       socket.off("error", onError)
       socket.off("close", onClose)
     }
-    const { stream: _stream, background: _background, ...payload } = options.body
+    const { stream: _stream, background: _background, ...payload } = body
+    const frame = JSON.stringify({ type: "response.create", ...payload })
     resetIdleTimeout("idle timeout sending websocket request")
-    socket.send(JSON.stringify({ type: "response.create", ...payload }), (error) => {
+    socket.send(frame, (error) => {
       if (completed) return
       if (error) {
         invalidate(new ProviderError.ResponseStreamError(error.message, { cause: error }))
         return
       }
-      options.onRequestSent?.()
+      options.onRequestSent?.(Buffer.byteLength(frame))
       resetIdleTimeout("idle timeout waiting for websocket")
     })
   }
@@ -350,7 +385,7 @@ export function streamResponsesWebSocket(options: StreamResponsesWebSocketOption
           return
         }
 
-        attach(socket)
+        attach(socket, options.body)
       },
       cancel(reason) {
         onCancel(reason)

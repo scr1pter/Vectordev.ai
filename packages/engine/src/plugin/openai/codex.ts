@@ -119,7 +119,8 @@ interface TokenResponse {
 interface CodexAuthPluginOptions {
   issuer?: string
   codexApiEndpoint?: string
-  experimentalWebSockets?: boolean
+  // Which credentials send Responses requests over the WebSocket transport.
+  webSockets?: { signIn: boolean; apiKey: boolean }
   onTransportDiagnostic?: (event: OpenAITransport.Diagnostic) => void
   /** How long a browser sign-in waits for its callback before failing and closing the server. */
   callbackTimeout?: number
@@ -511,7 +512,7 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
       async loader(getAuth) {
         const auth = await getAuth()
         if (auth.type === "oauth" && !chatgptCredentialMatches(auth)) return {}
-        const websocketFetch = options.experimentalWebSockets
+        const websocketFetch = (auth.type === "oauth" ? options.webSockets?.signIn : options.webSockets?.apiKey)
           ? OpenAIWebSocketPool.createWebSocketFetch({ httpFetch: fetch, onDiagnostic: options.onTransportDiagnostic })
           : undefined
         if (websocketFetch) {
@@ -562,7 +563,9 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
 
             const currentAuth = await getAuth()
             if (currentAuth.type !== "oauth")
-              return websocketFetch ? websocketFetch(requestInput, init) : httpFetch(requestInput, init)
+              return websocketFetch && options.webSockets?.apiKey
+                ? websocketFetch(requestInput, init)
+                : httpFetch(requestInput, init)
             const app = chatgptOAuthConfiguration()
             if (!app || !chatgptCredentialMatches(currentAuth, app)) throw new Error(CHATGPT_SIGN_IN_UNAVAILABLE)
 

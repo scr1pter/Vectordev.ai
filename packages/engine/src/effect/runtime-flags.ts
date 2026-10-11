@@ -57,6 +57,7 @@ export class Service extends ConfigService.Service<Service>()("@vector/RuntimeFl
   runBackgroundWaitMs: positiveInteger("VECTOR_RUN_BACKGROUND_WAIT_MS"),
   experimentalNativeLlm: bool("VECTOR_EXPERIMENTAL_NATIVE_LLM"),
   experimentalWebSockets: bool("VECTOR_EXPERIMENTAL_WEBSOCKETS"),
+  disableWebSockets: bool("VECTOR_DISABLE_WEBSOCKETS"),
   client: Config.string("VECTOR_CLIENT").pipe(Config.withDefault("cli")),
 }) {}
 

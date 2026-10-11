@@ -1,17 +1,24 @@
 import { describe, expect, test } from "bun:test"
-import { experimentalWebSocketsEnabled } from "../../src/plugin"
+import { webSocketTransport } from "../../src/plugin"
 
 describe("plugin.openai.websocket rollout", () => {
-  test("enables websockets by default only on pre-release channels", () => {
-    expect(experimentalWebSocketsEnabled({ enabled: false, channel: "local" })).toBe(true)
-    expect(experimentalWebSocketsEnabled({ enabled: false, channel: "dev" })).toBe(true)
-    expect(experimentalWebSocketsEnabled({ enabled: false, channel: "beta" })).toBe(true)
-    expect(experimentalWebSocketsEnabled({ enabled: false, channel: "latest" })).toBe(false)
-    expect(experimentalWebSocketsEnabled({ enabled: false, channel: "prod" })).toBe(false)
+  test("uses websockets for ChatGPT sign-in on every channel", () => {
+    for (const channel of ["local", "dev", "beta", "latest", "prod"])
+      expect(webSocketTransport({ enabled: false, disabled: false, channel }).signIn).toBe(true)
   })
 
-  test("allows releases to opt in through the experimental flag", () => {
-    expect(experimentalWebSocketsEnabled({ enabled: true, channel: "latest" })).toBe(true)
-    expect(experimentalWebSocketsEnabled({ enabled: true, channel: "prod" })).toBe(true)
+  test("uses websockets for API keys only on pre-release channels unless opted in", () => {
+    expect(webSocketTransport({ enabled: false, disabled: false, channel: "local" }).apiKey).toBe(true)
+    expect(webSocketTransport({ enabled: false, disabled: false, channel: "dev" }).apiKey).toBe(true)
+    expect(webSocketTransport({ enabled: false, disabled: false, channel: "beta" }).apiKey).toBe(true)
+    expect(webSocketTransport({ enabled: false, disabled: false, channel: "latest" }).apiKey).toBe(false)
+    expect(webSocketTransport({ enabled: false, disabled: false, channel: "prod" }).apiKey).toBe(false)
+    expect(webSocketTransport({ enabled: true, disabled: false, channel: "latest" }).apiKey).toBe(true)
+    expect(webSocketTransport({ enabled: true, disabled: false, channel: "prod" }).apiKey).toBe(true)
+  })
+
+  test("the opt-out keeps every credential on HTTP", () => {
+    for (const channel of ["local", "latest"])
+      expect(webSocketTransport({ enabled: true, disabled: true, channel })).toEqual({ signIn: false, apiKey: false })
   })
 })

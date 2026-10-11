@@ -4,6 +4,7 @@ import { ProviderError } from "@/provider/error"
 import { isRecord } from "@/util/record"
 import { OpenAIWebSocket } from "./ws"
 import { OpenAITransport } from "./transport"
+import { OpenAIContinuation } from "./continuation"
 
 export const TITLE_HEADER = "x-vector-title"
 
@@ -14,6 +15,8 @@ export interface CreateWebSocketFetchOptions {
   idleTimeout?: number
   maxConnectionAge?: number
   streamRetries?: number
+  // After a handshake fails, calls that need a new connection use HTTP for this long before trying again.
+  connectCooldown?: number
   onDiagnostic?: (event: OpenAITransport.Diagnostic) => void
 }
 
@@ -26,11 +29,14 @@ interface PoolEntry {
   streamFailures: number
   lifecycle: AbortController
   identity?: string
+  // The last response completed on this entry's socket, which the server still holds for continuation.
+  continuation?: OpenAIContinuation.State
 }
 
 const DEFAULT_CONNECT_TIMEOUT = 15_000
 const DEFAULT_IDLE_TIMEOUT = 5 * 60 * 1000
 const DEFAULT_MAX_CONNECTION_AGE = 55 * 60 * 1000
+const DEFAULT_CONNECT_COOLDOWN = 5 * 60 * 1000
 const CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached"
 
 export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
@@ -40,7 +46,9 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
   const idleTimeout = options?.idleTimeout ?? DEFAULT_IDLE_TIMEOUT
   const maxConnectionAge = options?.maxConnectionAge ?? DEFAULT_MAX_CONNECTION_AGE
   const streamRetries = options?.streamRetries ?? 5
+  const connectCooldown = options?.connectCooldown ?? DEFAULT_CONNECT_COOLDOWN
   let closed = false
+  let unreachableUntil = 0
   const pruneTimer = setInterval(() => prune(), Math.min(idleTimeout, 60_000))
   if (typeof pruneTimer === "object" && "unref" in pruneTimer && typeof pruneTimer.unref === "function") {
     pruneTimer.unref()
@@ -113,6 +121,9 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     if (entry.busy) {
       return http("busy")
     }
+    if (entry.socket?.readyState !== WebSocket.OPEN && Date.now() < unreachableUntil) {
+      return http("unreachable")
+    }
 
     entry.busy = true
     entry.lastUsedAt = Date.now()
@@ -128,7 +139,7 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
     let streaming = false
     let rejected = false
     try {
-      entry.socket = await socket(
+      const connection = await socket(
         entry,
         options?.url ?? url,
         OpenAIWebSocket.normalizeHeaders(httpInit?.headers),
@@ -137,6 +148,13 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         signal,
         trace,
       )
+      entry.socket = connection
+      unreachableUntil = 0
+      // The socket holds at most the last response: this request either continues it or replaces it.
+      const sent = OpenAIContinuation.request(entry.continuation, body)
+      entry.continuation = undefined
+      const tracker = OpenAIContinuation.tracker()
+      let continued = sent.continued
       let resolveFirstEvent: (event: boolean | OpenAIWebSocket.WrappedError) => void = () => {}
       let rejectFirstEvent: (error: Error) => void = () => {}
       const firstEvent = new Promise<boolean | OpenAIWebSocket.WrappedError>((resolve, reject) => {
@@ -145,31 +163,39 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
       })
       streaming = true
       const response = OpenAIWebSocket.streamResponsesWebSocket({
-        socket: entry.socket,
-        body,
+        socket: connection,
+        body: sent.body,
+        holdLifecycle: sent.continued,
         idleTimeout,
         signal,
-        onRequestSent: () => trace("request_sent"),
+        onRequestSent: (bytes) => trace("request_sent", { continuation: continued ? "incremental" : "full", bytes }),
         onFirstFrame: () => trace("first_frame"),
         onFirstProgress: () => trace("first_progress"),
         onFirstEvent: (error) => resolveFirstEvent(error ?? true),
+        onEvent: tracker.observe,
         onTerminal: (event) => {
+          const completed = event.type === "response.completed" || event.type === "response.done"
           trace("terminal", {
-            terminal:
-              event.type === "response.completed" || event.type === "response.done"
-                ? "completed"
-                : event.type === "response.incomplete"
-                  ? "incomplete"
-                  : event.type === "response.failed"
-                    ? "failed"
-                    : "error",
+            terminal: completed
+              ? "completed"
+              : event.type === "response.incomplete"
+                ? "incomplete"
+                : event.type === "response.failed"
+                  ? "failed"
+                  : "error",
           })
           entry.busy = false
           entry.lastUsedAt = Date.now()
-          entry.streamFailures = 0
-          if (event.type !== "response.completed" && event.type !== "response.done") {
+          if (!completed) {
+            // Protocol error frames can arrive after a successful handshake. Count them towards the same retry
+            // budget as a broken stream, without replaying an uncertain request or losing its reported error.
+            if (event.type === "response.incomplete") entry.streamFailures = 0
+            else recordStreamFailure(entry)
             invalidate(entry)
+            return
           }
+          entry.streamFailures = 0
+          entry.continuation = tracker.state(body)
         },
         onConnectionInvalid: (error) => {
           trace("failure", { reason: "stream" })
@@ -188,6 +214,13 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           rejectFirstEvent(error)
         },
         onRetryableTerminal: async (event) => {
+          // The server no longer holds the response this request continued, and nothing reached the caller yet:
+          // send the whole conversation instead, on the same connection.
+          if (continued && OpenAIContinuation.lost(event)) {
+            continued = false
+            trace("failure", { reason: "continuation_lost" })
+            return { socket: connection, body }
+          }
           const error = connectionLimitError(event)
           if (!error) return undefined
           rejected = true
@@ -216,10 +249,15 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
         throw error
       }
 
-      recordStreamFailure(entry)
       trace("failure", { reason: streaming ? "stream" : "connect" })
       invalidate(entry)
-      if (entry.fallback && !streaming) return http("setup_failure")
+      if (!streaming) {
+        // Nothing was sent, so HTTP serves this call. Until the cooldown ends, calls that need a new connection skip
+        // the handshake too, so a network that blocks WebSockets costs one attempt per cooldown, not one per call.
+        unreachableUntil = Date.now() + connectCooldown
+        return http("setup_failure")
+      }
+      recordStreamFailure(entry)
       return failedResponse(
         new ProviderError.ResponseStreamError(error instanceof Error ? error.message : String(error), {
           cause: error,
@@ -340,6 +378,7 @@ function invalidate(entry: PoolEntry) {
   }
   entry.connectedAt = undefined
   entry.identity = undefined
+  entry.continuation = undefined
 }
 
 export function withoutInternalHeaders(

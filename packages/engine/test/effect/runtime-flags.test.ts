@@ -52,6 +52,7 @@ describe("RuntimeFlags", () => {
       expect(flags.experimentalIconDiscovery).toBe(true)
       expect(flags.experimentalNativeLlm).toBe(false)
       expect(flags.experimentalWebSockets).toBe(false)
+      expect(flags.disableWebSockets).toBe(false)
       expect(flags.client).toBe("desktop")
     }),
   )
@@ -106,6 +107,14 @@ describe("RuntimeFlags", () => {
 
       expect(explicit.experimentalWebSockets).toBe(true)
       expect(umbrella.experimentalWebSockets).toBe(false)
+    }),
+  )
+
+  it.effect("turns WebSockets off via a dedicated variable", () =>
+    Effect.gen(function* () {
+      const disabled = yield* readFlags.pipe(Effect.provide(fromConfig({ VECTOR_DISABLE_WEBSOCKETS: "true" })))
+
+      expect(disabled.disableWebSockets).toBe(true)
     }),
   )
 

@@ -59,17 +59,23 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@vector/Plugin") {}
 
-export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel?: string }) {
-  return input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel)
+// ChatGPT sign-in talks to OpenAI over the Responses WebSocket by default, as Codex does, with HTTP as its fallback.
+// An API key uses it on pre-release builds or when VECTOR_EXPERIMENTAL_WEBSOCKETS opts in. VECTOR_DISABLE_WEBSOCKETS
+// keeps every request on HTTP.
+export function webSocketTransport(input: { enabled: boolean; disabled: boolean; channel?: string }) {
+  if (input.disabled) return { signIn: false, apiKey: false }
+  return {
+    signIn: true,
+    apiKey: input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel),
+  }
 }
 
 // Built-in plugins that are directly imported (not installed from npm)
 function internalPlugins(flags: RuntimeFlags.Info, bridge: EffectBridge.Shape): PluginInstance[] {
   return [
-    // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
     (input) =>
       CodexAuthPlugin(input, {
-        experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
+        webSockets: webSocketTransport({ enabled: flags.experimentalWebSockets, disabled: flags.disableWebSockets }),
         onTransportDiagnostic: (event) => {
           bridge.fork(Effect.logInfo("openai transport", event))
         },
