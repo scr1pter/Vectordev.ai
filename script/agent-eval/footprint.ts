@@ -362,7 +362,10 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
   // Plays the next scripted call for one Responses or Messages request and records it.
   const respond = (body: Record<string, unknown>, sentBytes: number, headers: Record<string, string>, ws: boolean) => {
     requestTimesMs.push(performance.now() - started)
-    const tools = toolsOf({ body, output: "", sentBytes })
+    // Code mode can advertise tools only in an earlier Responses input item.
+    // Classify the reconstructed context while retaining the actual wire payload below.
+    const priced = "input" in body ? continued(body, history) : body
+    const tools = toolsOf({ body: priced, output: "", sentBytes })
     // Requests without tools are side calls such as title generation, and a generate:false request only warms the
     // cache; neither advances the script.
     const planned: Call =
@@ -385,7 +388,6 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
           }
         : planned
     const n = ++id
-    const priced = "input" in body ? continued(body, history) : body
     const items = body.generate === false ? [] : responseItems(call, n, body)
     if (Array.isArray(priced.input)) history.set(`resp_${n}`, { input: priced.input, output: items })
     requests.push({

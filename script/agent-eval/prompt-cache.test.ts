@@ -144,3 +144,29 @@ test("namespaced additional tools identify Codex code mode without losing the tr
   expect(costs[0]?.inputTokens).toBeGreaterThan(Math.floor(stable.length / 4))
   expect(request.body.input).toHaveLength(1)
 })
+
+test("a WebSocket continuation inherits code-mode tools from its complete provider context", () => {
+  const input = [
+    {
+      type: "additional_tools",
+      tools: [{ type: "namespace", name: "functions", tools: [{ type: "custom", name: "exec" }] }],
+    },
+    { role: "user", content: "Read the file, then fix it." },
+  ]
+  const output = [{ type: "custom_tool_call", namespace: "functions", name: "exec", call_id: "call_1" }]
+  const sentBody = {
+    previous_response_id: "resp_1",
+    input: [{ type: "custom_tool_call_output", call_id: "call_1", output: "file contents" }],
+  }
+  const request = {
+    body: continued(sentBody, new Map([["resp_1", { input, output }]])),
+    sentBody,
+    output: "next tool call",
+    sentBytes: JSON.stringify(sentBody).length,
+  }
+  expect(toolsOf({ ...request, body: sentBody })).toEqual([])
+  expect(toolsOf(request).map((tool) => tool.name)).toEqual(["functions.exec"])
+  expect(request.body.input).toEqual([...input, ...output, ...sentBody.input])
+  expect(request.sentBody.input).toHaveLength(1)
+  expect(price([request], createPromptCache(), rates)[0]?.who).toBe("agent")
+})
