@@ -207,11 +207,13 @@ function trace(options: Options, scenario: ActiveScenario, phase: string) {
 function projectOptions(
   project: ProjectOptions,
   llmUrl: string | undefined,
-): { git?: boolean; config?: Partial<ConfigV1.Info> } {
+): { git?: boolean; config?: Partial<ConfigV1.Info>; trusted?: boolean } {
   if (!project.llm || !llmUrl) return { git: project.git, config: project.config }
   const fake = fakeLlmConfig(llmUrl)
   return {
     git: project.git,
+    // These scenarios intentionally execute the local fake provider declared by this fixture.
+    trusted: true,
     config: {
       ...fake,
       ...project.config,
