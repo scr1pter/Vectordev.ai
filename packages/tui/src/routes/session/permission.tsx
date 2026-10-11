@@ -5,7 +5,7 @@ import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/s
 import type { TextareaRenderable } from "@opentui/core"
 import { useTheme, selectedForeground } from "../../context/theme"
 import type { PermissionRequest } from "@vectordevai/sdk/v2"
-import { canAlwaysAllowPermission } from "../../util/permission"
+import { canAlwaysAllowPermission, cloudPermissionDetails } from "../../util/permission"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useSync } from "../../context/sync"
@@ -109,6 +109,47 @@ function TextBody(props: { title: string; description?: string; icon?: string })
   )
 }
 
+function CloudBody(props: { request: PermissionRequest }) {
+  const themeState = useTheme()
+  const config = useTuiConfig()
+  const details = createMemo(() => cloudPermissionDetails(props.request))
+  return (
+    <scrollbox flexGrow={1} height="100%" scrollAcceleration={getScrollAcceleration(config)}>
+      <box flexDirection="column" paddingLeft={1} gap={1}>
+        <Show when={details()?.summary}>
+          {(summary) => (
+            <text fg={themeState.theme.text} wrapMode="word">
+              {summary()}
+            </text>
+          )}
+        </Show>
+        <For each={details()?.rows}>
+          {(row) => (
+            <text fg={themeState.theme.textMuted} wrapMode="word">
+              {row.label + ": " + row.value}
+            </text>
+          )}
+        </For>
+        <For each={details()?.statements}>
+          {(statement) => (
+            <box flexDirection="column" gap={1}>
+              <text fg={themeState.theme.textMuted}>{statement.label}</text>
+              <Show when={statement.incomplete}>
+                <text fg={themeState.theme.warning}>
+                  This older request omitted part of the SQL. Reject it and request a complete preview.
+                </text>
+              </Show>
+              <text fg={themeState.theme.text} wrapMode="word">
+                {statement.sql}
+              </text>
+            </box>
+          )}
+        </For>
+      </box>
+    </scrollbox>
+  )
+}
+
 export function PermissionPrompt(props: { request: PermissionRequest; directory?: string }) {
   const sdk = useSDK()
   const project = useProject()
@@ -196,6 +237,10 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           const info = () => {
             const permission = props.request.permission
             const data = input()
+
+            if (permission.startsWith("vector_cloud_")) {
+              return { icon: "☁", title: "Review Cloud action", body: <CloudBody request={props.request} /> }
+            }
 
             if (permission === "edit") {
               const raw = props.request.metadata?.filepath
