@@ -520,7 +520,7 @@ const SETUP_CODES = ["not_connected", "not_linked", "no_node", "token_rejected"]
 // for, changing the production database's schema, and handing over a
 // credential or variable values ask every time, as Supabase's own risky
 // commands do: an earlier "always" for the same kind of action never covers
-// them. (The app's auto-accept answers no Vector Cloud prompt at all.)
+// them. (The app's auto-accept answers none of these either.)
 const EACH_TIME = [
   "create_database",
   "promote",

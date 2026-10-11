@@ -169,13 +169,18 @@ project listing remain available. See [Vercel's integration scopes](https://verc
 
 ## Agent permissions
 
-The agent's `vector_cloud` tool asks before it publishes (`vector_cloud_publish`),
-creates, prepares or migrates a database (`vector_cloud_database`) or writes a
-host's environment variables (`vector_cloud_environment`). Each prompt names the
-provider, the provider-side project and the environment the action touches. All
-three default to ask for every agent; a wildcard `"*": "allow"` does not approve
-them, only a rule that names them. A migration dry run only reads, so it uses
-`vector_cloud_inspect`, which is allowed by default.
+The agent's `vector_cloud` tool asks before it publishes or moves production
+(`vector_cloud_publish`), creates, prepares, changes or migrates a database
+(`vector_cloud_database`), writes a host's environment variables
+(`vector_cloud_environment`) or changes a Vercel project, its protection or its
+domains (`vector_cloud_hosting`). Each prompt names the provider, the
+provider-side project and the environment the action touches. All four default
+to ask for every agent; a wildcard `"*": "allow"` does not approve them, only a
+rule that names them. The app's auto-accept never answers them either, nor any
+other Vector Cloud request that asks every time (one with no "always" pattern);
+the list is `ALWAYS_ASK` in `packages/app/src/context/permission-auto-respond.ts`.
+A migration dry run only reads, so it uses `vector_cloud_inspect`, which is
+allowed by default and which auto-accept may answer.
 
 ## Repository migrations
 
