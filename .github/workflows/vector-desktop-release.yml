@@ -388,7 +388,7 @@ jobs:
             command: bun test --timeout 30000 --only-failures
           - name: desktop
             directory: packages/desktop
-            command: bun test --only-failures
+            command: bun run test
           - name: vector
             directory: packages/engine
             command: bun test --timeout 30000 --only-failures --max-concurrency 4

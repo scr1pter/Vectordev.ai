@@ -12,6 +12,7 @@
     "email": "contact.astr0gpt@gmail.com"
   },
   "scripts": {
+    "test": "bun --no-env-file ./scripts/test.ts",
     "typecheck": "tsgo -b",
     "predev": "bun ./scripts/predev.ts",
     "dev": "electron-vite dev",
