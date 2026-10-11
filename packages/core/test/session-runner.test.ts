@@ -763,6 +763,48 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("only advertises read-only tools in hidden swarm planning sessions", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ internal: "swarm.planner", agent: "explore" })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      const agents = yield* AgentV2.Service
+      yield* agents.transform((editor) =>
+        editor.update(AgentV2.ID.make("explore"), (agent) => {
+          agent.permissions = [
+            { action: "*", resource: "*", effect: "allow" },
+            { action: "grep", resource: "*", effect: "deny" },
+          ]
+        }),
+      )
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register(
+        Object.fromEntries(
+          ["read", "grep", "glob", "list", "question", "edit", "bash", "mcp_remote"].map((name) => [
+            name,
+            Tool.make({
+              description: name,
+              input: Schema.Struct({}),
+              output: Schema.String,
+              execute: () => Effect.succeed(name),
+            }),
+          ]),
+        ),
+      )
+      const session = yield* SessionV2.Service
+      yield* session.prompt({ sessionID, prompt: Prompt.make({ text: "Plan this work" }), resume: false })
+      requests.length = 0
+      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(1)
+      expect(requests[0].tools.map((tool) => tool.name)).toEqual(["read", "glob", "list"])
+    }),
+  )
+
   it.effect("retries the first provider turn after system context becomes available", () =>
     Effect.gen(function* () {
       yield* setup

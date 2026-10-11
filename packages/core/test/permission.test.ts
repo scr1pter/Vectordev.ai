@@ -141,6 +141,34 @@ describe("PermissionV2", () => {
     }),
   )
 
+  it.effect("keeps hidden swarm planning read-only even under broad configured and saved approvals", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "*", resource: "*", effect: "allow" }])
+      const database = yield* Database.Service
+      yield* database.db
+        .update(SessionTable)
+        .set({ internal: "swarm.planner" })
+        .where(eq(SessionTable.id, SessionV2.ID.make("ses_test")))
+        .run()
+        .pipe(Effect.orDie)
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({ projectID: Project.ID.global, action: "*", resources: ["*"] })
+      const service = yield* PermissionV2.Service
+      for (const action of ["question", "bash", "edit", "write", "task", "external_directory", "mcp_remote"]) {
+        expect(yield* service.assert(assertion({ action })).pipe(Effect.flip)).toBeInstanceOf(PermissionV2.DeniedError)
+      }
+      for (const resources of [[".env"], ["config/private.key"], ["mcp:server:resource"]]) {
+        expect(yield* service.ask(assertion({ resources }))).toMatchObject({ effect: "deny" })
+      }
+      for (const action of ["read", "grep", "glob", "list", "StructuredOutput"]) {
+        expect(yield* service.ask(assertion({ action }))).toMatchObject({ effect: "allow" })
+      }
+      yield* setRules([{ action: "read", resource: "src/*", effect: "deny" }])
+      expect(yield* service.ask(assertion())).toMatchObject({ effect: "deny" })
+      expect(yield* service.list()).toEqual([])
+    }),
+  )
+
   it.effect("returns the evaluated effect and only queues prompts", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])

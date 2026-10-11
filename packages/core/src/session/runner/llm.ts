@@ -30,6 +30,7 @@ import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
+import { internalSessionPermissions } from "../permission"
 import { type RunError, Service } from "./index"
 import { SessionRunnerModel } from "./model"
 import { codiumError } from "./model-plan-route"
@@ -199,7 +200,9 @@ const layer = Layer.effect(
       const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const isLastStep = agent.info?.steps !== undefined && currentStep >= agent.info.steps
-      const toolMaterialization = isLastStep ? undefined : yield* tools.materialize(agent.info?.permissions)
+      const toolMaterialization = isLastStep
+        ? undefined
+        : yield* tools.materialize(agent.info?.permissions ?? [], internalSessionPermissions(session.internal))
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
       const output = model.route.defaults.limits?.output
       const request = LLM.request({

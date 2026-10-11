@@ -246,7 +246,7 @@ describe("plugin.codex", () => {
     const http = await CodexAuthPlugin({} as never, { codexApiEndpoint: "https://codex.example/backend/responses" })
     const websocket = await CodexAuthPlugin({} as never, {
       codexApiEndpoint: "https://codex.example/backend/responses",
-      experimentalWebSockets: true,
+      webSockets: { signIn: true, apiKey: false },
     })
 
     expect((await http.auth!.loader!(oauth, { models: {} } as never)).preconnect).toBe("https://codex.example")

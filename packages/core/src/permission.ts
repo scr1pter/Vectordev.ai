@@ -9,6 +9,7 @@ import { Location } from "./location"
 import { AgentV2 } from "./agent"
 import { SessionV2 } from "./session"
 import { SessionStore } from "./session/store"
+import { internalSessionPermissions } from "./session/permission"
 import { Wildcard } from "./util/wildcard"
 import { PermissionSaved } from "./permission/saved"
 
@@ -153,23 +154,23 @@ const layer = Layer.effect(
       const session = yield* sessions.get(sessionID)
       if (!session) return yield* new SessionV2.NotFoundError({ sessionID })
       const agent = yield* agents.resolve(agentID ?? session.agent)
-      return agent?.permissions ?? missingAgentPermissions
+      return [agent?.permissions ?? missingAgentPermissions, internalSessionPermissions(session.internal)]
     })
 
-    function denied(input: AssertInput, rules: Permission.Ruleset) {
-      return input.resources.some((resource) => evaluate(input.action, resource, rules).effect === "deny")
+    function denied(input: AssertInput, rules: Permission.Ruleset[]) {
+      return input.resources.some((resource) => evaluate(input.action, resource, ...rules).effect === "deny")
     }
 
-    function relevant(input: AssertInput, rules: Permission.Ruleset) {
-      return rules.filter((rule) => Wildcard.match(input.action, rule.action))
+    function relevant(input: AssertInput, rules: Permission.Ruleset[]) {
+      return rules.flat().filter((rule) => Wildcard.match(input.action, rule.action))
     }
 
     const evaluateInput = EffectRuntime.fnUntraced(function* (input: AssertInput) {
       const rules = yield* configured(input.sessionID, input.agent)
       if (denied(input, rules)) return { effect: "deny" as const, rules }
       const remembered = yield* savedRules()
-      const all = [...rules, ...remembered]
-      const effects = input.resources.map((resource) => evaluate(input.action, resource, rules, remembered).effect)
+      const all = [...rules, remembered]
+      const effects = input.resources.map((resource) => evaluate(input.action, resource, ...rules, remembered).effect)
       const effect: Permission.Effect = effects.includes("deny")
         ? "deny"
         : PermissionPolicy.requiresCloudApproval(input.action, input.save) || effects.includes("ask")
@@ -268,7 +269,7 @@ const layer = Layer.effect(
           }
 
           const rules = yield* configured(existing.request.sessionID, existing.agent).pipe(
-            EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(missingAgentPermissions)),
+            EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed([missingAgentPermissions])),
           )
           if (denied(existing.request, rules)) {
             yield* Deferred.fail(existing.deferred, new DeniedError({ rules: relevant(existing.request, rules) }))
@@ -297,7 +298,7 @@ const layer = Layer.effect(
             if (denied(input, rules) || PermissionPolicy.requiresCloudApproval(input.action, input.save)) continue
             if (
               !item.request.resources.every(
-                (resource) => evaluate(item.request.action, resource, rules, rememberedRules).effect === "allow",
+                (resource) => evaluate(item.request.action, resource, ...rules, rememberedRules).effect === "allow",
               )
             )
               continue
