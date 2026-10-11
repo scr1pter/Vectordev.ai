@@ -66,7 +66,8 @@ export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
 // Permissions whose Vector Cloud actions publish, change a database, write a
 // host's environment or change hosting settings (projects, protection and
-// domains). Only a rule that names one of them can allow it.
+// domains). Keep agent defaults explicit; the runtime permission boundary also
+// requires a fresh decision when a configured rule allows one of these actions.
 const CLOUD_MUTATIONS = [
   "vector_cloud_publish",
   "vector_cloud_database",
@@ -544,7 +545,8 @@ const layer = Layer.effect(
         }
 
         // A wildcard allow (an agent's or the user's "*": "allow") must not silently
-        // approve cloud actions: they still ask unless a rule names them.
+        // approve cloud actions in the agent defaults. The runtime also requires
+        // confirmation when a rule names a Cloud mutation explicitly.
         for (const name in agents) {
           const permission = agents[name].permission
           const unnamed = CLOUD_MUTATIONS.filter((key) => {
