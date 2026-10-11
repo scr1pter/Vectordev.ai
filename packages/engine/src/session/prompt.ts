@@ -270,7 +270,7 @@ const layer = Layer.effect(
       providerID: ProviderV2.ID
       modelID: ModelV2.ID
     }) {
-      if (input.session.parentID) return
+      if (input.session.parentID || input.session.internal) return
       if (!Session.isDefaultTitle(input.session.title)) return
 
       const real = (m: SessionV1.WithParts) =>

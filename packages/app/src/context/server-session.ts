@@ -25,6 +25,21 @@ const initialMessagePageSize = 2
 const historyMessagePageSize = 200
 const sessionInfoLimit = 2_048
 const emptyIDs: ReadonlySet<string> = new Set()
+const ANCESTOR_REFRESH_MS = 400
+
+// Events that settle model spend on their session: a finished step (v1 part or V2 event), ancillary model work, or a
+// compaction summary.
+function spendEvent(event: { type: string; properties?: unknown }) {
+  if (
+    event.type === "session.next.step.ended" ||
+    event.type === "session.next.ancillary.usage" ||
+    event.type === "session.next.compaction.ended"
+  )
+    return true
+  if (event.type !== "message.part.updated") return false
+  const part = (event.properties as { part?: { type?: string } } | undefined)?.part
+  return part?.type === "step-finish"
+}
 
 type OptimisticItem = {
   message: Message
@@ -657,8 +672,30 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
       return properties.part.sessionID
   }
 
+  // A subagent's or Vector helper's spend is added to every session above it, but only the session that spent publishes
+  // events. Re-read the ancestors this client holds, once per burst of steps, so their meters include it.
+  const ancestorRefresh = new Map<string, ReturnType<typeof setTimeout>>()
+  const refreshAncestors = (sessionID: string) => {
+    const seen = new Set<string>()
+    const walk = (parentID: string | undefined): void => {
+      if (!parentID || seen.has(parentID)) return
+      seen.add(parentID)
+      if (!ancestorRefresh.has(parentID))
+        ancestorRefresh.set(
+          parentID,
+          setTimeout(() => {
+            ancestorRefresh.delete(parentID)
+            if (data.info[parentID]) void resolve(parentID, { force: true }).catch(() => {})
+          }, ANCESTOR_REFRESH_MS),
+        )
+      walk(data.info[parentID]?.parentID)
+    }
+    walk(data.info[sessionID]?.parentID)
+  }
+
   const apply = (event: { type: string; properties?: unknown }) => {
     const eventID = eventSessionID(event)
+    if (eventID && spendEvent(event)) refreshAncestors(eventID)
     if (eventID) {
       touch(eventID)
       if (

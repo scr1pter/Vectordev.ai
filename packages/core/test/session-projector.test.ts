@@ -711,6 +711,69 @@ describe("SessionProjector", () => {
       })
       expect(yield* sessions.get(sessionID)).toMatchObject({ cost: 0.5, subagentCost: 2, subagentUnpricedSteps: 1 })
       expect(yield* sessions.get(childID)).toMatchObject({ subagentCost: 2 })
+      // Tokens roll up beside cost, so the root's meter can count what its subagents used.
+      expect((yield* sessions.get(sessionID)).subagentTokens).toEqual({
+        input: 20,
+        output: 40,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      })
+      expect((yield* sessions.get(childID)).subagentTokens).toEqual(tokens)
+      expect(grandchild.subagentTokens).toBeUndefined()
+    }).pipe(Effect.provide(sessionsLayer)),
+  )
+
+  it.effect("counts a helper session's spend towards the session that launched it and lists only that session", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      const helperID = SessionV2.ID.make("ses_projector_helper")
+      const standaloneID = SessionV2.ID.make("ses_projector_standalone_helper")
+      yield* db
+        .insert(SessionTable)
+        .values(
+          [
+            { id: sessionID, parent_id: undefined, internal: undefined },
+            { id: helperID, parent_id: sessionID, internal: "vectorscope.review" },
+            { id: standaloneID, parent_id: undefined, internal: "vectorscope.verify" },
+          ].map((row) => ({
+            ...row,
+            project_id: Project.ID.global,
+            slug: row.id,
+            directory: "/project",
+            title: row.id,
+            version: "test",
+          })),
+        )
+        .run()
+        .pipe(Effect.orDie)
+      const events = yield* EventV2.Service
+      const sessions = yield* SessionV2.Service
+      const tokens = { input: 100, output: 30, reasoning: 5, cache: { read: 7, write: 1 } }
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID: helperID,
+        timestamp: created,
+        assistantMessageID: SessionMessage.ID.make("msg_helper_step"),
+        agent: "review",
+        model,
+      })
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID: helperID,
+        timestamp: DateTime.makeUnsafe(1),
+        assistantMessageID: SessionMessage.ID.make("msg_helper_step"),
+        finish: "stop",
+        cost: 0.75,
+        tokens,
+      })
+
+      const helper = yield* sessions.get(helperID)
+      expect(helper).toMatchObject({ internal: "vectorscope.review", parentID: sessionID, cost: 0.75 })
+      expect(yield* sessions.get(sessionID)).toMatchObject({ cost: 0, subagentCost: 0.75, subagentTokens: tokens })
+      expect((yield* sessions.list({})).map((session) => session.id)).toEqual([sessionID])
     }).pipe(Effect.provide(sessionsLayer)),
   )
 

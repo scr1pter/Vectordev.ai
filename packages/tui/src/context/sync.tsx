@@ -271,6 +271,18 @@ export const {
         }
         case "session.updated": {
           const result = search(store.session, event.properties.info.id, (s) => s.id)
+          // Vector's helper sessions (a Vectorscope review, autocomplete) report to the surface that launched them and
+          // never enter the session list; their spend shows in the launching session's totals.
+          if (event.properties.info.internal) {
+            if (result.found)
+              setStore(
+                "session",
+                produce((draft) => {
+                  draft.splice(result.index, 1)
+                }),
+              )
+            break
+          }
           if (result.found) {
             setStore("session", result.index, reconcile(event.properties.info))
             break

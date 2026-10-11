@@ -740,12 +740,17 @@ async function generateSwarmPlan(
   engine: ParallelWorkspaceEngine,
   signal: AbortSignal,
 ) {
+  // The planner is a helper session: out of every session list, and its spend counts towards the task the swarm was
+  // started from.
   const created = await engineRequest<{ data?: { id?: string } }>(engine, "/api/session", {
     method: "POST",
     body: {
       location: { directory: coordinator.isolatedPath },
       model: { providerID: run.plannerProvider, id: run.plannerModel },
       agent: "explore",
+      title: `Swarm planner · ${run.objective.slice(0, 60)}`,
+      internal: "swarm.planner",
+      ...(run.parentSessionId?.startsWith("ses") ? { parentID: run.parentSessionId } : {}),
     },
     signal,
   })

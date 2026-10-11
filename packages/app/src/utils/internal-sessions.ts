@@ -1,8 +1,26 @@
-// Sessions Vector creates for its own tools (browser agent planner, codespace
-// architect). They must stay OUT of every
-// user-visible session list while remaining real engine sessions.
-export const INTERNAL_SESSION_TITLE_PREFIX = "Vector Tool · "
+// Sessions Vector runs for its own helpers: Vectorscope reviews and their double-check, inline edit, autocomplete,
+// the browser agent and swarm planners. The engine marks them with `internal` (the helper's name) and leaves them out
+// of session lists. They must stay out of everything the user navigates — lists, search, tabs, notifications — while
+// their spend still counts, towards the session that launched them when there is one.
+const LEGACY_TITLE_PREFIXES = ["Vector Tool · ", "Vectorscope review · "]
 
-export function isInternalSession(session: { title?: string | null } | undefined | null): boolean {
-  return Boolean(session?.title?.startsWith(INTERNAL_SESSION_TITLE_PREFIX))
+export function isInternalSession(session: { internal?: string; title?: string | null } | undefined | null) {
+  if (!session) return false
+  if (session.internal) return true
+  // An engine that predates the marker only knows these sessions by the titles Vector gave them.
+  return LEGACY_TITLE_PREFIXES.some((prefix) => session.title?.startsWith(prefix) ?? false)
+}
+
+const HELPER_LABELS: Record<string, string> = {
+  vectorscope: "Vectorscope review",
+  "codespace.edit": "Inline edit",
+  "codespace.autocomplete": "Autocomplete",
+  "browser-agent": "Browser Agent planner",
+  swarm: "Swarm planner",
+}
+
+// What the user calls the helper behind a session's `internal` name, e.g. "vectorscope.verify" is part of a
+// Vectorscope review.
+export function helperLabel(internal: string) {
+  return HELPER_LABELS[internal] ?? HELPER_LABELS[internal.split(".")[0] ?? ""] ?? "Vector helper"
 }

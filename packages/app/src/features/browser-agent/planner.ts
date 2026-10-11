@@ -1,5 +1,4 @@
 import type { BrowserAutomationRun } from "./types"
-import { INTERNAL_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 
 export type BrowserModelAction =
   | { type: "click"; selector: string }
@@ -25,6 +24,7 @@ type PlannerSessionClient = {
     create: (input: {
       directory: string
       title: string
+      internal: string
       agent: string
       model: { providerID: string; id: string }
       metadata: Record<string, unknown>
@@ -250,14 +250,12 @@ export function createBrowserPlanner(deps: {
     if (!sessionID || sessionDirectory !== directory) {
       const session = await client.session.create({
         directory,
-        title: `${INTERNAL_SESSION_TITLE_PREFIX}Browser Agent Planner`,
+        // A helper session: out of every session list, with its spend kept in usage.
+        title: "Browser Agent Planner",
+        internal: "browser-agent.planner",
         agent: "build",
         model: { providerID: model.providerID, id: model.modelID },
-        metadata: {
-          source: "vector-browser-agent",
-          engine: "vector-compatible",
-          hidden: true,
-        },
+        metadata: { source: "vector-browser-agent", engine: "vector-compatible" },
       })
       sessionID = session.data?.id
       sessionDirectory = directory

@@ -631,6 +631,22 @@ describe("buildTaskCards", () => {
     expect(card.status).toBe("failed")
   })
 
+  test("subagents the user can open stay as cards while Vector's helper sessions under the same task do not", () => {
+    const data = fixture()
+    data.sessions.ses_sub = child("ses_sub", { title: "Find the flaky test (@explore subagent)", agent: "explore" })
+    // A helper that even looks like a subagent is still not the user's background work.
+    data.sessions.ses_review = child("ses_review", {
+      title: "Vectorscope review (@review subagent)",
+      internal: "vectorscope.review",
+    })
+    data.sessions.ses_autocomplete = child("ses_autocomplete", {
+      title: "Autocomplete",
+      internal: "codespace.autocomplete",
+    })
+    const cards = buildTaskCards(source(data))
+    expect(cards.flatMap((card) => card.agents.map((agent) => agent.sessionID))).toEqual(["ses_sub"])
+  })
+
   test("children with no part in the loaded history still appear, grouped by their launching message", () => {
     const data = fixture()
     data.sessions.ses_c1 = child("ses_c1", {

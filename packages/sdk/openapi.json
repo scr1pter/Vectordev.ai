@@ -2033,6 +2033,22 @@
             "required": false
           },
           {
+            "name": "internal",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                }
+              ]
+            },
+            "required": false
+          },
+          {
             "name": "start",
             "in": "query",
             "schema": {
@@ -7397,6 +7413,22 @@
             "required": false
           },
           {
+            "name": "internal",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": ["true", "false"]
+                }
+              ]
+            },
+            "required": false
+          },
+          {
             "name": "start",
             "in": "query",
             "schema": {
@@ -7537,6 +7569,9 @@
                   "parentID": {
                     "type": "string",
                     "pattern": "^ses"
+                  },
+                  "internal": {
+                    "type": "string"
                   },
                   "title": {
                     "type": "string"
@@ -13619,6 +13654,16 @@
                   },
                   "location": {
                     "$ref": "#/components/schemas/LocationRef"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "parentID": {
+                    "type": "string",
+                    "pattern": "^ses"
+                  },
+                  "internal": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -19975,6 +20020,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -20010,6 +20058,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -26719,6 +26796,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -26754,6 +26834,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -26951,6 +27060,31 @@
         "required": ["date", "tokens", "cost", "tasks"],
         "additionalProperties": false
       },
+      "SessionUsageHelper": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sessions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "responses": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cost": {
+            "type": "number"
+          }
+        },
+        "required": ["id", "sessions", "responses", "tokens", "cost"],
+        "additionalProperties": false
+      },
       "SessionUsageSummary": {
         "type": "object",
         "properties": {
@@ -27041,6 +27175,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SessionUsageDay"
+            }
+          },
+          "helpers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionUsageHelper"
             }
           }
         },
@@ -28284,6 +28424,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -28319,6 +28462,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -28464,6 +28636,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -28499,6 +28674,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -28680,6 +28884,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -28715,6 +28922,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -28906,6 +29142,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -28941,6 +29180,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -29086,6 +29354,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -29121,6 +29392,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -29277,6 +29577,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -29312,6 +29615,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -29602,6 +29934,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -29637,6 +29972,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -29782,6 +30146,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "summary": {
             "type": "object",
             "properties": {
@@ -29817,6 +30184,35 @@
           "subagentUnpricedSteps": {
             "type": "integer",
             "minimum": 0
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",
@@ -35176,6 +35572,9 @@
             "type": "string",
             "pattern": "^ses"
           },
+          "internal": {
+            "type": "string"
+          },
           "projectID": {
             "type": "string"
           },
@@ -35196,6 +35595,35 @@
           },
           "subagentUnpricedSteps": {
             "type": "number"
+          },
+          "subagentTokens": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number"
+              },
+              "output": {
+                "type": "number"
+              },
+              "reasoning": {
+                "type": "number"
+              },
+              "cache": {
+                "type": "object",
+                "properties": {
+                  "read": {
+                    "type": "number"
+                  },
+                  "write": {
+                    "type": "number"
+                  }
+                },
+                "required": ["read", "write"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["input", "output", "reasoning", "cache"],
+            "additionalProperties": false
           },
           "tokens": {
             "type": "object",

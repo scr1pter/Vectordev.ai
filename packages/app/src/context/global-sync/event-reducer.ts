@@ -15,6 +15,7 @@ import type { State, VcsCache } from "./types"
 import { trimSessions } from "./session-trim"
 import { dropSessionCaches } from "./session-cache"
 import { diffs as list, message as clean } from "@/utils/diffs"
+import { isInternalSession } from "@/utils/internal-sessions"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const SESSION_CONTENT_EVENTS = new Set([
@@ -133,6 +134,8 @@ export function applyDirectoryEvent(input: {
     }
     case "session.created": {
       const info = (event.properties as { info: Session }).info
+      // Vector's helper sessions report to the surface that launched them, never into a session list.
+      if (isInternalSession(info)) break
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
       if (result.found) {
         input.setStore("session", result.index, reconcile(info))
@@ -149,6 +152,16 @@ export function applyDirectoryEvent(input: {
     case "session.updated": {
       const info = (event.properties as { info: Session }).info
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
+      if (isInternalSession(info)) {
+        if (result.found)
+          input.setStore(
+            "session",
+            produce((draft) => {
+              draft.splice(result.index, 1)
+            }),
+          )
+        break
+      }
       if (info.time.archived) {
         if (input.store.session[result.index]!.time.archived === info.time.archived) break
         if (result.found) {
@@ -177,6 +190,10 @@ export function applyDirectoryEvent(input: {
     }
     case "session.deleted": {
       const info = (event.properties as { info: Session }).info
+      if (isInternalSession(info)) {
+        cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
+        break
+      }
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
       if (result.found) {
         input.setStore(

@@ -55,6 +55,8 @@ export class WorktreeApiError extends Schema.ErrorClass<WorktreeApiError>("Workt
 export const SessionListQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   roots: Schema.optional(QueryBoolean),
+  // Also list Vector's helper sessions (Vectorscope reviews, autocomplete), which are left out by default.
+  internal: Schema.optional(QueryBoolean),
   start: Schema.optional(Schema.NumberFromString),
   cursor: Schema.optional(Schema.NumberFromString),
   search: Schema.optional(Schema.String),

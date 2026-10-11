@@ -1023,8 +1023,16 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     }
   })
 
+  // Vector's helper sessions (a Vectorscope review another client runs on this engine) report to the surface that
+  // launched them, so their errors are not shown here.
+  const helperSessions = new Set<string>()
+  event.on("session.created", (evt) => {
+    if (evt.properties.info.internal) helperSessions.add(evt.properties.info.id)
+  })
+
   event.on("session.error", (evt, { workspace }) => {
     if (workspace !== project.workspace.current()) return
+    if (evt.properties.sessionID && helperSessions.has(evt.properties.sessionID)) return
     const error = evt.properties.error
     if (error && typeof error === "object" && error.name === "MessageAbortedError") return
     const limit = freeModelsLimitNotice(error)

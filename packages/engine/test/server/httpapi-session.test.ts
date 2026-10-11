@@ -905,6 +905,40 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "creates helper sessions over HTTP and lists them only when asked",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-vector-directory": test.directory, "content-type": "application/json" }
+        const launcher = yield* requestJson<Session.Info>(SessionPaths.create, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ title: "launcher" }),
+        })
+        const helper = yield* requestJson<Session.Info>(SessionPaths.create, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            title: "Vectorscope review · uncommitted changes · review",
+            parentID: launcher.id,
+            internal: "vectorscope.review",
+          }),
+        })
+        expect(helper).toMatchObject({ internal: "vectorscope.review", parentID: launcher.id })
+
+        const ids = (query: Record<string, string>, route: string = SessionPaths.list) =>
+          requestJson<Session.Info[]>(`${route}?${new URLSearchParams({ directory: test.directory, ...query })}`, {
+            headers,
+          }).pipe(Effect.map((list) => list.map((item) => item.id)))
+        expect(yield* ids({})).not.toContain(helper.id)
+        expect(yield* ids({ internal: "true" })).toContain(helper.id)
+        expect(yield* ids({}, ExperimentalPaths.session)).not.toContain(helper.id)
+        expect(yield* ids({ internal: "true" }, ExperimentalPaths.session)).toContain(helper.id)
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
     "lists Windows sessions for equivalent directory spellings",
     () =>
       Effect.gen(function* () {

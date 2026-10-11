@@ -162,6 +162,14 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           agent: Agent.ID.pipe(Schema.optional),
           model: Model.Ref.pipe(Schema.optional),
           location: Location.Ref.pipe(Schema.optional),
+          title: Schema.String.pipe(Schema.optional),
+          parentID: Session.ID.pipe(Schema.optional).annotate({
+            description: "The session this one works for. Its spend counts towards that session's totals.",
+          }),
+          internal: Schema.String.pipe(Schema.optional).annotate({
+            description:
+              "Names the Vector helper running this session. Helper sessions are left out of session lists and never shared automatically.",
+          }),
         }),
         success: Schema.Struct({ data: Session.Info }),
         error: ForbiddenError,

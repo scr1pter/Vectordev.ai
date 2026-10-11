@@ -226,6 +226,7 @@ export type SessionsImportArchiveOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly internal?: string
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -233,6 +234,12 @@ export type SessionsImportArchiveOutput = {
     readonly unpricedSteps?: number
     readonly subagentCost?: number
     readonly subagentUnpricedSteps?: number
+    readonly subagentTokens?: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -438,6 +445,7 @@ export type SessionsListOutput = {
   readonly data: ReadonlyArray<{
     readonly id: string
     readonly parentID?: string
+    readonly internal?: string
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -445,6 +453,12 @@ export type SessionsListOutput = {
     readonly unpricedSteps?: number
     readonly subagentCost?: number
     readonly subagentUnpricedSteps?: number
+    readonly subagentTokens?: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -486,31 +500,71 @@ export type SessionsCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly title?: string | null
+    readonly parentID?: string | null
+    readonly internal?: string | null
   }["id"]
   readonly agent?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly title?: string | null
+    readonly parentID?: string | null
+    readonly internal?: string | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly title?: string | null
+    readonly parentID?: string | null
+    readonly internal?: string | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly title?: string | null
+    readonly parentID?: string | null
+    readonly internal?: string | null
   }["location"]
+  readonly title?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly title?: string | null
+    readonly parentID?: string | null
+    readonly internal?: string | null
+  }["title"]
+  readonly parentID?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly title?: string | null
+    readonly parentID?: string | null
+    readonly internal?: string | null
+  }["parentID"]
+  readonly internal?: {
+    readonly id?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly title?: string | null
+    readonly parentID?: string | null
+    readonly internal?: string | null
+  }["internal"]
 }
 
 export type SessionsCreateOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly internal?: string
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -518,6 +572,12 @@ export type SessionsCreateOutput = {
     readonly unpricedSteps?: number
     readonly subagentCost?: number
     readonly subagentUnpricedSteps?: number
+    readonly subagentTokens?: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
     readonly tokens: {
       readonly input: number
       readonly output: number
@@ -560,6 +620,7 @@ export type SessionsGetOutput = {
   readonly data: {
     readonly id: string
     readonly parentID?: string
+    readonly internal?: string
     readonly projectID: string
     readonly agent?: string
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string }
@@ -567,6 +628,12 @@ export type SessionsGetOutput = {
     readonly unpricedSteps?: number
     readonly subagentCost?: number
     readonly subagentUnpricedSteps?: number
+    readonly subagentTokens?: {
+      readonly input: number
+      readonly output: number
+      readonly reasoning: number
+      readonly cache: { readonly read: number; readonly write: number }
+    }
     readonly tokens: {
       readonly input: number
       readonly output: number

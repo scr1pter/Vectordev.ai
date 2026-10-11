@@ -1,4 +1,5 @@
 import type { SessionUsageSummary } from "@vectordevai/sdk/v2"
+import { helperLabel } from "./internal-sessions"
 
 export type UsageStreakDay = {
   date: string
@@ -75,4 +76,24 @@ export function normalizeUsageSummary(value: Partial<SessionUsageSummary> | unde
     effortLevels: Array.isArray(value?.effortLevels) ? value.effortLevels : fallback.effortLevels,
     days: Array.isArray(value?.days) ? value.days : fallback.days,
   }
+}
+
+// What Vector's helpers spent, by the name the user knows them by. Their spend is already in every total; this says how
+// much of it they account for, including reviews started outside any session.
+export function helperUsage(helpers: SessionUsageSummary["helpers"]) {
+  return [
+    ...(helpers ?? [])
+      .reduce((groups, helper) => {
+        const label = helperLabel(helper.id)
+        const current = groups.get(label) ?? { label, sessions: 0, responses: 0, tokens: 0, cost: 0 }
+        return groups.set(label, {
+          label,
+          sessions: current.sessions + helper.sessions,
+          responses: current.responses + helper.responses,
+          tokens: current.tokens + helper.tokens,
+          cost: current.cost + helper.cost,
+        })
+      }, new Map<string, { label: string; sessions: number; responses: number; tokens: number; cost: number }>())
+      .values(),
+  ].sort((a, b) => b.cost - a.cost || b.tokens - a.tokens || a.label.localeCompare(b.label))
 }

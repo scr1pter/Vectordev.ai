@@ -24,6 +24,7 @@ import { eq } from "drizzle-orm"
 import { and } from "drizzle-orm"
 import { gte } from "drizzle-orm"
 import { isNull } from "drizzle-orm"
+import { isNotNull } from "drizzle-orm"
 import { desc } from "drizzle-orm"
 import { like } from "drizzle-orm"
 import { sql } from "drizzle-orm"
@@ -31,7 +32,8 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { MessageTable, PartTable, SessionTable } from "@vectordevai/core/session/sql"
+import { MessageTable, PartTable, SessionMessageTable, SessionTable } from "@vectordevai/core/session/sql"
+import { subagentTokens } from "@vectordevai/core/session/info"
 import { ProjectTable } from "@vectordevai/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
@@ -89,6 +91,7 @@ export function fromRow(row: SessionRow): Info {
     directory: row.directory,
     path: row.path ?? undefined,
     parentID: row.parent_id ?? undefined,
+    internal: row.internal ?? undefined,
     title: row.title,
     agent: row.agent ?? undefined,
     model: row.model
@@ -104,6 +107,7 @@ export function fromRow(row: SessionRow): Info {
     unpricedSteps: row.unpriced_steps || undefined,
     subagentCost: row.subagent_cost || undefined,
     subagentUnpricedSteps: row.subagent_unpriced_steps || undefined,
+    subagentTokens: subagentTokens(row),
     tokens: {
       input: row.tokens_input,
       output: row.tokens_output,
@@ -132,6 +136,7 @@ export function toRow(info: Info) {
     project_id: info.projectID,
     workspace_id: info.workspaceID,
     parent_id: info.parentID,
+    internal: info.internal,
     slug: info.slug,
     directory: info.directory,
     path: info.path,
@@ -150,6 +155,11 @@ export function toRow(info: Info) {
     unpriced_steps: info.unpricedSteps ?? 0,
     subagent_cost: info.subagentCost ?? 0,
     subagent_unpriced_steps: info.subagentUnpricedSteps ?? 0,
+    subagent_tokens_input: info.subagentTokens?.input ?? 0,
+    subagent_tokens_output: info.subagentTokens?.output ?? 0,
+    subagent_tokens_reasoning: info.subagentTokens?.reasoning ?? 0,
+    subagent_tokens_cache_read: info.subagentTokens?.cache.read ?? 0,
+    subagent_tokens_cache_write: info.subagentTokens?.cache.write ?? 0,
     tokens_input: (info.tokens ?? EmptyTokens).input,
     tokens_output: (info.tokens ?? EmptyTokens).output,
     tokens_reasoning: (info.tokens ?? EmptyTokens).reasoning,
@@ -242,6 +252,9 @@ export const Info = Schema.Struct({
   directory: Schema.String,
   path: optional(Schema.String),
   parentID: optional(SessionID),
+  // Names the Vector helper that ran this session, such as a Vectorscope review or autocomplete. Helper sessions stay
+  // out of session lists; their spend counts towards parentID, the session that launched them, when there is one.
+  internal: optional(Schema.String),
   summary: optional(Summary),
   cost: optional(Schema.Finite),
   // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
@@ -249,6 +262,8 @@ export const Info = Schema.Struct({
   // What the subagent sessions below this one spent, which cost leaves out, and how many of their steps were unpriced.
   subagentCost: optional(Schema.Finite),
   subagentUnpricedSteps: optional(NonNegativeInt),
+  // The tokens those sessions used, which tokens leaves out.
+  subagentTokens: optional(Tokens),
   tokens: optional(Tokens),
   share: optional(Share),
   title: Schema.String,
@@ -302,6 +317,17 @@ export const UsageEffort = Schema.Struct({
 }).annotate({ identifier: "SessionUsageEffort" })
 export type UsageEffort = Types.DeepMutable<Schema.Schema.Type<typeof UsageEffort>>
 
+// What one kind of Vector helper (a Vectorscope review, autocomplete) spent across its sessions. Helper spend is part of
+// every total above; this only says how much of it the helpers account for.
+export const UsageHelper = Schema.Struct({
+  id: Schema.String,
+  sessions: NonNegativeInt,
+  responses: NonNegativeInt,
+  tokens: NonNegativeInt,
+  cost: Schema.Finite,
+}).annotate({ identifier: "SessionUsageHelper" })
+export type UsageHelper = Types.DeepMutable<Schema.Schema.Type<typeof UsageHelper>>
+
 export const UsageSummary = Schema.Struct({
   lifetimeTokens: NonNegativeInt,
   lifetimeCost: Schema.Finite,
@@ -326,12 +352,14 @@ export const UsageSummary = Schema.Struct({
   favoriteModels: Schema.Array(UsageModel),
   effortLevels: Schema.Array(UsageEffort),
   days: Schema.Array(UsageDay),
+  helpers: optional(Schema.Array(UsageHelper)),
 }).annotate({ identifier: "SessionUsageSummary" })
 export type UsageSummary = Types.DeepMutable<Schema.Schema.Type<typeof UsageSummary>>
 
 export const CreateInput = Schema.optional(
   Schema.Struct({
     parentID: Schema.optional(SessionID),
+    internal: Schema.optional(Schema.String),
     title: Schema.optional(Schema.String),
     agent: Schema.optional(Schema.String),
     model: Schema.optional(Model),
@@ -377,6 +405,8 @@ export type ListInput = {
   path?: string
   workspaceID?: WorkspaceV2.ID
   roots?: boolean
+  // Also list Vector's helper sessions, which are left out by default.
+  internal?: boolean
   start?: number
   search?: string
   limit?: number
@@ -385,6 +415,8 @@ export type ListInput = {
 export type GlobalListInput = {
   directory?: string
   roots?: boolean
+  // Also list Vector's helper sessions, which are left out by default.
+  internal?: boolean
   start?: number
   cursor?: number
   search?: string
@@ -511,6 +543,7 @@ export interface Interface {
   readonly usage: () => Effect.Effect<UsageSummary>
   readonly create: (input?: {
     parentID?: SessionID
+    internal?: string
     title?: string
     agent?: string
     model?: Schema.Schema.Type<typeof Model>
@@ -602,6 +635,7 @@ const layer: Layer.Layer<
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
       parentID?: SessionID
+      internal?: string
       workspaceID?: WorkspaceV2.ID
       directory: string
       path?: string
@@ -618,6 +652,7 @@ const layer: Layer.Layer<
         path: input.path,
         workspaceID: input.workspaceID,
         parentID: input.parentID,
+        internal: input.internal,
         title: input.title ?? (input.parentID ? childTitlePrefix : parentTitlePrefix) + new Date().toISOString(),
         agent: input.agent,
         model: input.model,
@@ -656,6 +691,7 @@ const layer: Layer.Layer<
       const conditions: SQL[] = []
       if (input?.directory) conditions.push(eq(SessionTable.directory, input.directory))
       if (input?.roots) conditions.push(isNull(SessionTable.parent_id))
+      if (!input?.internal) conditions.push(isNull(SessionTable.internal))
       if (input?.start) conditions.push(gte(SessionTable.time_updated, input.start))
       if (input?.cursor) conditions.push(lt(SessionTable.time_updated, input.cursor))
       if (input?.search) conditions.push(like(SessionTable.title, `%${input.search}%`))
@@ -708,17 +744,49 @@ const layer: Layer.Layer<
         .where(eq(EventTable.type, EventV2.versionedType(SessionEvent.AncillaryUsage.type, 1)))
         .all()
         .pipe(Effect.orDie)
+      const helpers = yield* db
+        .select({ id: SessionTable.id, internal: SessionTable.internal })
+        .from(SessionTable)
+        .where(isNotNull(SessionTable.internal))
+        .all()
+        .pipe(Effect.orDie)
+      // Sessions prompted through the V2 path (parallel agents, automations, the swarm planner) keep their steps as
+      // session messages. Only the fields usage needs are read, not each step's content.
+      const steps = yield* db
+        .select({
+          id: SessionMessageTable.id,
+          sessionID: SessionMessageTable.session_id,
+          type: SessionMessageTable.type,
+          created: SessionMessageTable.time_created,
+          completed: sql<number | null>`json_extract(${SessionMessageTable.data}, '$.time.completed')`,
+          agent: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.agent')`,
+          model: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.model')`,
+          cost: sql<number | null>`json_extract(${SessionMessageTable.data}, '$.cost')`,
+          unpriced: sql<number | null>`json_extract(${SessionMessageTable.data}, '$.unpriced')`,
+          tokens: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.tokens')`,
+          finish: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.finish')`,
+          error: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.error')`,
+        })
+        .from(SessionMessageTable)
+        .where(inArray(SessionMessageTable.type, ["user", "assistant", "compaction"]))
+        .orderBy(SessionMessageTable.session_id, SessionMessageTable.seq)
+        .all()
+        .pipe(Effect.orDie)
       return summarizeUsage(
-        rows.flatMap((row) =>
-          // `data` holds only the message body; `id`/`sessionID` live in columns but are
-          // required by the schema, so merge them back before decoding — otherwise every
-          // row fails to decode and usage collapses to zero. Mirrors MessageV2's `info(row)`.
-          Option.match(decode({ ...row.data, id: row.id, sessionID: row.sessionID }), {
-            onNone: () => [],
-            onSome: (message) => [message],
-          }),
-        ),
+        [
+          ...rows.flatMap((row) =>
+            // `data` holds only the message body; `id`/`sessionID` live in columns but are
+            // required by the schema, so merge them back before decoding — otherwise every
+            // row fails to decode and usage collapses to zero. Mirrors MessageV2's `info(row)`.
+            Option.match(decode({ ...row.data, id: row.id, sessionID: row.sessionID }), {
+              onNone: () => [],
+              onSome: (message) => [message],
+            }),
+          ),
+          ...stepUsage(steps),
+        ],
         ancillary.map((event) => Schema.decodeUnknownSync(SessionEvent.AncillaryUsage.data)(event.data)),
+        new Map(helpers.flatMap((row) => (row.internal ? [[row.id, row.internal] as const] : []))),
       )
     })
 
@@ -800,6 +868,7 @@ const layer: Layer.Layer<
 
     const create = Effect.fn("Session.create")(function* (input?: {
       parentID?: SessionID
+      internal?: string
       title?: string
       agent?: string
       model?: Schema.Schema.Type<typeof Model>
@@ -811,6 +880,7 @@ const layer: Layer.Layer<
       const workspace = yield* InstanceState.workspaceID
       return yield* createNext({
         parentID: input?.parentID,
+        internal: input?.internal,
         directory: ctx.directory,
         path: sessionPath(ctx.worktree, ctx.directory),
         title: input?.title,
@@ -1097,16 +1167,78 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
   )
 })
 
+const decodeStepTokens = Schema.decodeUnknownOption(Schema.fromJsonString(Tokens))
+const decodeStepModel = Schema.decodeUnknownOption(Schema.fromJsonString(Model))
+
+// V2 steps in the shape usage summarizes, rows ordered by session and sequence. A step is attributed to the prompt
+// before it, as a v1 response is to its user message; a compaction summary, which names no model, to the model of the
+// step before it, and is marked as a summary as v1 marks its compactions.
+export function stepUsage(
+  rows: ReadonlyArray<{
+    id: string
+    sessionID: SessionID
+    type: string
+    created: number
+    completed: number | null
+    agent: string | null
+    model: string | null
+    cost: number | null
+    unpriced: number | null
+    tokens: string | null
+    finish: string | null
+    error: string | null
+  }>,
+) {
+  const prompt = new Map<string, MessageID>()
+  const model = new Map<string, typeof Model.Type>()
+  return rows.flatMap((row): (typeof SessionV1.Assistant.Type)[] => {
+    if (row.type === "user") {
+      prompt.set(row.sessionID, MessageID.make(row.id))
+      return []
+    }
+    const stepModel = Option.getOrUndefined(decodeStepModel(row.model)) ?? model.get(row.sessionID)
+    if (stepModel) model.set(row.sessionID, stepModel)
+    const tokens = Option.getOrUndefined(decodeStepTokens(row.tokens))
+    if (!stepModel || !tokens || row.cost === null) return []
+    return [
+      {
+        id: MessageID.make(row.id),
+        sessionID: row.sessionID,
+        role: "assistant",
+        parentID: prompt.get(row.sessionID) ?? MessageID.make(row.id),
+        time: { created: row.created, ...(row.completed === null ? {} : { completed: row.completed }) },
+        modelID: stepModel.id,
+        providerID: stepModel.providerID,
+        ...(stepModel.variant ? { variant: stepModel.variant } : {}),
+        mode: row.agent ?? "",
+        agent: row.agent ?? "",
+        path: { cwd: "", root: "" },
+        cost: row.cost,
+        tokens,
+        ...(row.unpriced ? { unpriced: true } : {}),
+        ...(row.type === "compaction" ? { summary: true } : {}),
+        ...(row.finish ? { finish: row.finish } : {}),
+        // Only whether the step failed matters to usage; the error itself stays in the session.
+        ...(row.error ? { error: { name: "UnknownError", data: { message: "The step failed." } } } : {}),
+      },
+    ]
+  })
+}
+
+// helpers maps each helper session to the helper that ran it. Their tokens and cost count like any other; they are not
+// conversations or tasks of the user's, so they are left out of those counts and reported per helper instead.
 export function summarizeUsage(
   messages: ReadonlyArray<typeof SessionV1.Info.Type>,
   ancillary: ReadonlyArray<typeof SessionEvent.AncillaryUsage.data.Type> = [],
+  helpers: ReadonlyMap<string, string> = new Map(),
 ): UsageSummary {
   const assistant = messages.filter((message) => message.role === "assistant").filter((message) => !message.forked)
+  const own = assistant.filter((message) => !helpers.has(message.sessionID))
   const days = assistant.reduce((result, message) => {
     const tokens = usageTokens(message)
     const date = localDateKey(message.time.created)
     const current = result.get(date) ?? { date, tokens: 0, cost: 0, tasks: new Set<string>() }
-    current.tasks.add(`${message.sessionID}:${message.parentID}`)
+    if (!helpers.has(message.sessionID)) current.tasks.add(`${message.sessionID}:${message.parentID}`)
     result.set(date, {
       date,
       tokens: current.tokens + tokens,
@@ -1153,7 +1285,7 @@ export function summarizeUsage(
 
   const lifetimeTokens = activity.reduce((total, day) => total + day.tokens, 0)
   const completed = new Set(
-    assistant
+    own
       .filter(
         (message) => !message.summary && !message.error && (message.time.completed !== undefined || message.finish),
       )
@@ -1197,6 +1329,32 @@ export function summarizeUsage(
     [...attempts.values()].filter(
       (usage) => !usage || usage.unpriced || usage.incomplete || usage.cost === undefined || usage.tokens === undefined,
     ).length
+  const helperGroups = [
+    ...assistant.map((message) => ({
+      sessionID: message.sessionID,
+      responses: 1,
+      tokens: usageTokens(message),
+      cost: Math.max(0, message.cost),
+    })),
+    ...[...attempts.values()].flatMap((usage) =>
+      usage ? [{ sessionID: usage.sessionID, responses: 0, tokens: 0, cost: Math.max(0, usage.cost ?? 0) }] : [],
+    ),
+  ].reduce((result, item) => {
+    const id = helpers.get(item.sessionID)
+    if (!id) return result
+    const current = result.get(id) ?? { id, sessions: new Set<string>(), responses: 0, tokens: 0, cost: 0 }
+    current.sessions.add(item.sessionID)
+    result.set(id, {
+      ...current,
+      responses: current.responses + item.responses,
+      tokens: current.tokens + item.tokens,
+      cost: current.cost + item.cost,
+    })
+    return result
+  }, new Map<string, Omit<UsageHelper, "sessions"> & { sessions: Set<string> }>())
+  const helperUsage = [...helperGroups.values()]
+    .map((helper): UsageHelper => ({ ...helper, sessions: helper.sessions.size }))
+    .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens || a.id.localeCompare(b.id))
 
   return {
     lifetimeTokens,
@@ -1218,7 +1376,7 @@ export function summarizeUsage(
     currentStreak,
     longestStreak,
     completedChats: completed.size,
-    conversations: new Set(assistant.map((message) => message.sessionID)).size,
+    conversations: new Set(own.map((message) => message.sessionID)).size,
     activeDays: active.size,
     averageTokensPerChat: completed.size > 0 ? Math.round(lifetimeTokens / completed.size) : 0,
     modelResponses: assistant.length,
@@ -1230,6 +1388,7 @@ export function summarizeUsage(
       .map((effort): UsageEffort => ({ ...effort, percentage: percentage(effort.tokens, effort.responses) }))
       .sort((a, b) => b.tokens - a.tokens || b.responses - a.responses || a.label.localeCompare(b.label)),
     days: activity,
+    ...(helperUsage.length ? { helpers: helperUsage } : {}),
   }
 }
 
@@ -1324,6 +1483,10 @@ function listByProject(
   }
   if (input.roots) {
     conditions.push(isNull(SessionTable.parent_id))
+  }
+  // Vector's helper sessions are reached through the session or surface that launched them, never listed.
+  if (!input.internal) {
+    conditions.push(isNull(SessionTable.internal))
   }
   if (input.start) {
     conditions.push(gte(SessionTable.time_updated, input.start))

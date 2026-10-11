@@ -18,6 +18,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     title: row.title,
     share: row.share_info ?? undefined,
     parentID: row.parent_id ? SessionSchema.ID.make(row.parent_id) : undefined,
+    internal: row.internal ?? undefined,
     agent: row.agent ? AgentV2.ID.make(row.agent) : undefined,
     model: row.model
       ? {
@@ -30,6 +31,7 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
     unpricedSteps: row.unpriced_steps || undefined,
     subagentCost: row.subagent_cost || undefined,
     subagentUnpricedSteps: row.subagent_unpriced_steps || undefined,
+    subagentTokens: subagentTokens(row),
     tokens: {
       input: row.tokens_input,
       output: row.tokens_output,
@@ -51,4 +53,22 @@ export function fromRow(row: typeof SessionTable.$inferSelect): SessionSchema.In
       archived: row.time_archived ? DateTime.makeUnsafe(row.time_archived) : undefined,
     },
   })
+}
+
+// What the sessions below this one used, or nothing when they used no tokens, matching how subagentCost is reported.
+export function subagentTokens(row: typeof SessionTable.$inferSelect) {
+  if (
+    !row.subagent_tokens_input &&
+    !row.subagent_tokens_output &&
+    !row.subagent_tokens_reasoning &&
+    !row.subagent_tokens_cache_read &&
+    !row.subagent_tokens_cache_write
+  )
+    return undefined
+  return {
+    input: row.subagent_tokens_input,
+    output: row.subagent_tokens_output,
+    reasoning: row.subagent_tokens_reasoning,
+    cache: { read: row.subagent_tokens_cache_read, write: row.subagent_tokens_cache_write },
+  }
 }
