@@ -667,9 +667,9 @@ export const release199: VectorRelease[] = [
   },
   {
     version: "1.99.107",
-    title: "Models included with Vector",
+    title: "Safer Cloud controls and quieter, more efficient sessions",
     summary:
-      "The desktop app and terminal agent now group shared free models under Models included with Vector. Sign in to Vector to use the available models at no charge within the shared daily allowance; model availability can change. If you already connected OpenRouter, Vector prefers your own account and lists each free model once. Reaching the shared allowance offers a way to continue the same conversation with your connected OpenRouter account. Shared requests use eligible zero-price routes with zero data retention, and never switch to a paid model automatically. Desktop and CLI both use version 1.99.107.",
-    availability: "Release candidate — desktop installers and CLI packages are not published yet.",
+      "Vector Cloud brings Vercel deployments, domains, environment settings and Supabase database, storage and function controls into the workspace. Account changes always ask for approval, including in automatic mode, and database approvals show the exact SQL. Project commands and skills require project trust, with stronger server access and terminal ticket checks. Reviews and other helper sessions stay under the hood while their tokens and recorded costs remain visible, including stopped and failed work. Sessions reuse stable prompt prefixes and eligible WebSocket connections, reduce repeated history downloads, and start titles without delaying the first answer. Background subagents remain available, and Stop waits for completed edits and snapshots to settle. Models included with Vector use the shared free allowance and can continue through your connected OpenRouter account. Vector Codium adds explicit credit-model selection and $10, $50, $100 and $200 plans and top-ups; sales remain Coming soon until Stripe is connected. Sign in with ChatGPT remains available. The standalone CLI dependency remains 1.99.99. This release is not yet code-signed.",
+    availability: "Release candidate — desktop installers are not published yet.",
   },
 ]
