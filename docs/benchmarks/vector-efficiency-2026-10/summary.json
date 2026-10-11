@@ -1,0 +1,3246 @@
+{
+  "kind": "offline-scripted-replay",
+  "decisiveLiveClaimPermitted": false,
+  "cells": [
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 51466,
+      "cacheRead": 40338,
+      "cacheWrite": 10462,
+      "uncached": 666,
+      "outputTokens": 155,
+      "costUsd": 0.055658,
+      "sentBytes": 207361,
+      "rawSentUnits": 207361,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 7527.327042,
+      "firstPrimaryRequestMs": 3668.0188749999998,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 9710,
+      "postTerminalMs": 765.042042,
+      "peakRssMiB": 623.359375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 558.359375,
+          "observedTrials": 3,
+          "sampleCount": 89
+        },
+        "active": {
+          "medianMiB": 562.765625,
+          "observedTrials": 3,
+          "sampleCount": 81
+        },
+        "tail": {
+          "medianMiB": 623.359375,
+          "observedTrials": 3,
+          "sampleCount": 23
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 51466,
+      "cacheRead": 49671,
+      "cacheWrite": 1129,
+      "uncached": 666,
+      "outputTokens": 155,
+      "costUsd": 0.023459,
+      "sentBytes": 207361,
+      "rawSentUnits": 207361,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 8346.290417,
+      "firstPrimaryRequestMs": 3871.2758329999997,
+      "firstPrimaryCacheRead": 9333,
+      "firstPrimaryInputTokens": 9710,
+      "postTerminalMs": 951.0103750000017,
+      "peakRssMiB": 573.3125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 552.703125,
+          "observedTrials": 3,
+          "sampleCount": 83
+        },
+        "active": {
+          "medianMiB": 541.734375,
+          "observedTrials": 3,
+          "sampleCount": 99
+        },
+        "tail": {
+          "medianMiB": 458.359375,
+          "observedTrials": 3,
+          "sampleCount": 34
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 50739,
+      "cacheRead": 38784,
+      "cacheWrite": 0,
+      "uncached": 11955,
+      "outputTokens": 143,
+      "costUsd": 0.029218,
+      "sentBytes": 204151,
+      "rawSentUnits": 204151,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 7915.4724160000005,
+      "firstPrimaryRequestMs": 3381.972750000001,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 8914,
+      "postTerminalMs": 687.8555410000008,
+      "peakRssMiB": 626.015625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 515.0,
+          "observedTrials": 3,
+          "sampleCount": 102
+        },
+        "active": {
+          "medianMiB": 547.59375,
+          "observedTrials": 3,
+          "sampleCount": 126
+        },
+        "tail": {
+          "medianMiB": 626.015625,
+          "observedTrials": 3,
+          "sampleCount": 41
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 50739,
+      "cacheRead": 47360,
+      "cacheWrite": 0,
+      "uncached": 3379,
+      "outputTokens": 143,
+      "costUsd": 0.012924,
+      "sentBytes": 204151,
+      "rawSentUnits": 204151,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 7444.352041999999,
+      "firstPrimaryRequestMs": 4003.0334169999987,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8914,
+      "postTerminalMs": 622.2458750000078,
+      "peakRssMiB": 576.15625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 474.125,
+          "observedTrials": 3,
+          "sampleCount": 138
+        },
+        "active": {
+          "medianMiB": 494.171875,
+          "observedTrials": 3,
+          "sampleCount": 85
+        },
+        "tail": {
+          "medianMiB": 576.15625,
+          "observedTrials": 3,
+          "sampleCount": 18
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 151464,
+      "cacheRead": 120857,
+      "cacheWrite": 30607,
+      "uncached": 0,
+      "outputTokens": 153,
+      "costUsd": 0.153329,
+      "sentBytes": 610652,
+      "rawSentUnits": 610652,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1259.7993750000023,
+      "firstPrimaryRequestMs": 981.1131249999962,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 12.30829299999823,
+      "peakRssMiB": 338.546875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 295.84375,
+          "observedTrials": 3,
+          "sampleCount": 27
+        },
+        "active": {
+          "medianMiB": 325.046875,
+          "observedTrials": 3,
+          "sampleCount": 5
+        },
+        "tail": {
+          "medianMiB": 338.546875,
+          "observedTrials": 3,
+          "sampleCount": 3
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 151464,
+      "cacheRead": 141695,
+      "cacheWrite": 9769,
+      "uncached": 0,
+      "outputTokens": 153,
+      "costUsd": 0.081438,
+      "sentBytes": 610652,
+      "rawSentUnits": 610652,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1062.8547919999983,
+      "firstPrimaryRequestMs": 656.2547090000007,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 21.17245799999364,
+      "peakRssMiB": 325.734375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 293.390625,
+          "observedTrials": 3,
+          "sampleCount": 13
+        },
+        "active": {
+          "medianMiB": 325.734375,
+          "observedTrials": 3,
+          "sampleCount": 9
+        },
+        "tail": {
+          "medianMiB": 293.578125,
+          "observedTrials": 2,
+          "sampleCount": 2
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 73889,
+      "cacheRead": 57856,
+      "cacheWrite": 0,
+      "uncached": 16033,
+      "outputTokens": 133,
+      "costUsd": 0.039182,
+      "sentBytes": 306436,
+      "rawSentUnits": 306436,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1794.0179579999967,
+      "firstPrimaryRequestMs": 555.109083000003,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 500.36133299999346,
+      "peakRssMiB": 152.09375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 102.359375,
+          "observedTrials": 3,
+          "sampleCount": 13
+        },
+        "active": {
+          "medianMiB": 143.421875,
+          "observedTrials": 3,
+          "sampleCount": 20
+        },
+        "tail": {
+          "medianMiB": 152.09375,
+          "observedTrials": 3,
+          "sampleCount": 15
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 73890,
+      "cacheRead": 69632,
+      "cacheWrite": 0,
+      "uncached": 4258,
+      "outputTokens": 133,
+      "costUsd": 0.01681,
+      "sentBytes": 306439,
+      "rawSentUnits": 306439,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1354.516334,
+      "firstPrimaryRequestMs": 360.8174579999977,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 531.7499590000007,
+      "peakRssMiB": 157.234375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 100.984375,
+          "observedTrials": 3,
+          "sampleCount": 9
+        },
+        "active": {
+          "medianMiB": 143.3125,
+          "observedTrials": 3,
+          "sampleCount": 13
+        },
+        "tail": {
+          "medianMiB": 149.046875,
+          "observedTrials": 3,
+          "sampleCount": 17
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 3,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 61020,
+      "cacheRead": 55761,
+      "cacheWrite": 4593,
+      "uncached": 666,
+      "outputTokens": 251,
+      "costUsd": 0.039715,
+      "sentBytes": 246340,
+      "rawSentUnits": 246340,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 9268.297124999997,
+      "firstPrimaryRequestMs": 3563.8253750000003,
+      "firstPrimaryCacheRead": 9333,
+      "firstPrimaryInputTokens": 9710,
+      "postTerminalMs": 642.4337919999962,
+      "peakRssMiB": 656.421875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 541.875,
+          "observedTrials": 3,
+          "sampleCount": 110
+        },
+        "active": {
+          "medianMiB": 534.28125,
+          "observedTrials": 3,
+          "sampleCount": 142
+        },
+        "tail": {
+          "medianMiB": 656.421875,
+          "observedTrials": 3,
+          "sampleCount": 19
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 3,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 61020,
+      "cacheRead": 58809,
+      "cacheWrite": 1545,
+      "uncached": 666,
+      "outputTokens": 251,
+      "costUsd": 0.029199,
+      "sentBytes": 246340,
+      "rawSentUnits": 246340,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 8390.013333000003,
+      "firstPrimaryRequestMs": 2867.1668750000026,
+      "firstPrimaryCacheRead": 9333,
+      "firstPrimaryInputTokens": 9710,
+      "postTerminalMs": 670.921875,
+      "peakRssMiB": 598.46875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 598.46875,
+          "observedTrials": 3,
+          "sampleCount": 71
+        },
+        "active": {
+          "medianMiB": 518.5,
+          "observedTrials": 3,
+          "sampleCount": 175
+        },
+        "tail": {
+          "medianMiB": 562.640625,
+          "observedTrials": 3,
+          "sampleCount": 19
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 3,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 60916,
+      "cacheRead": 53376,
+      "cacheWrite": 0,
+      "uncached": 7540,
+      "outputTokens": 239,
+      "costUsd": 0.022808,
+      "sentBytes": 245462,
+      "rawSentUnits": 245462,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 8469.312708000005,
+      "firstPrimaryRequestMs": 3444.040083,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8914,
+      "postTerminalMs": 573.8188750000118,
+      "peakRssMiB": 586.625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 499.6875,
+          "observedTrials": 3,
+          "sampleCount": 79
+        },
+        "active": {
+          "medianMiB": 532.6875,
+          "observedTrials": 3,
+          "sampleCount": 132
+        },
+        "tail": {
+          "medianMiB": 586.625,
+          "observedTrials": 3,
+          "sampleCount": 17
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 3,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 60916,
+      "cacheRead": 56320,
+      "cacheWrite": 0,
+      "uncached": 4596,
+      "outputTokens": 239,
+      "costUsd": 0.017214,
+      "sentBytes": 245462,
+      "rawSentUnits": 245462,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 10111.072999999997,
+      "firstPrimaryRequestMs": 3357.887208,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8914,
+      "postTerminalMs": 667.3345830000035,
+      "peakRssMiB": 497.25,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 497.25,
+          "observedTrials": 3,
+          "sampleCount": 82
+        },
+        "active": {
+          "medianMiB": 481.9375,
+          "observedTrials": 3,
+          "sampleCount": 169
+        },
+        "tail": {
+          "medianMiB": 495.34375,
+          "observedTrials": 3,
+          "sampleCount": 19
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 191572,
+      "cacheRead": 168184,
+      "cacheWrite": 23388,
+      "uncached": 0,
+      "outputTokens": 245,
+      "costUsd": 0.141836,
+      "sentBytes": 773052,
+      "rawSentUnits": 773052,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1262.755582999991,
+      "firstPrimaryRequestMs": 1038.2750419999938,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 12.977875000011409,
+      "peakRssMiB": 331.5,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 305.9375,
+          "observedTrials": 3,
+          "sampleCount": 27
+        },
+        "active": {
+          "medianMiB": 317.03125,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "tail": {
+          "medianMiB": 349.796875,
+          "observedTrials": 1,
+          "sampleCount": 1
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 191572,
+      "cacheRead": 179233,
+      "cacheWrite": 12339,
+      "uncached": 0,
+      "outputTokens": 245,
+      "costUsd": 0.103717,
+      "sentBytes": 773052,
+      "rawSentUnits": 773052,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 775.2804999999935,
+      "firstPrimaryRequestMs": 510.3923749999958,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 13.188208999999915,
+      "peakRssMiB": 335.1875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 301.109375,
+          "observedTrials": 3,
+          "sampleCount": 11
+        },
+        "active": {
+          "medianMiB": 328.125,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "tail": {
+          "medianMiB": 340.421875,
+          "observedTrials": 2,
+          "sampleCount": 2
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 89783,
+      "cacheRead": 85120,
+      "cacheWrite": 0,
+      "uncached": 4663,
+      "outputTokens": 147,
+      "costUsd": 0.019308,
+      "sentBytes": 372405,
+      "rawSentUnits": 372405,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1275.5445420000033,
+      "firstPrimaryRequestMs": 378.78800000000047,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 468.46566699999676,
+      "peakRssMiB": 156.34375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 93.640625,
+          "observedTrials": 3,
+          "sampleCount": 10
+        },
+        "active": {
+          "medianMiB": 144.765625,
+          "observedTrials": 3,
+          "sampleCount": 15
+        },
+        "tail": {
+          "medianMiB": 156.34375,
+          "observedTrials": 3,
+          "sampleCount": 15
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 89787,
+      "cacheRead": 85120,
+      "cacheWrite": 0,
+      "uncached": 4667,
+      "outputTokens": 147,
+      "costUsd": 0.019316,
+      "sentBytes": 372413,
+      "rawSentUnits": 372413,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1168.1313340000052,
+      "firstPrimaryRequestMs": 410.6254590000026,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 426.68387500000244,
+      "peakRssMiB": 151.34375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 100.234375,
+          "observedTrials": 3,
+          "sampleCount": 8
+        },
+        "active": {
+          "medianMiB": 145.296875,
+          "observedTrials": 3,
+          "sampleCount": 11
+        },
+        "tail": {
+          "medianMiB": 151.34375,
+          "observedTrials": 3,
+          "sampleCount": 14
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 5,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 56095,
+      "cacheRead": 49341,
+      "cacheWrite": 6088,
+      "uncached": 666,
+      "outputTokens": 227,
+      "costUsd": 0.043036,
+      "sentBytes": 226644,
+      "rawSentUnits": 226644,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 9275.503165999995,
+      "firstPrimaryRequestMs": 3778.3671250000043,
+      "firstPrimaryCacheRead": 9333,
+      "firstPrimaryInputTokens": 9710,
+      "postTerminalMs": 715.8670829999901,
+      "peakRssMiB": 619.296875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 527.21875,
+          "observedTrials": 3,
+          "sampleCount": 115
+        },
+        "active": {
+          "medianMiB": 511.375,
+          "observedTrials": 3,
+          "sampleCount": 140
+        },
+        "tail": {
+          "medianMiB": 565.6875,
+          "observedTrials": 3,
+          "sampleCount": 19
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 5,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 56095,
+      "cacheRead": 53763,
+      "cacheWrite": 1666,
+      "uncached": 666,
+      "outputTokens": 227,
+      "costUsd": 0.02778,
+      "sentBytes": 226644,
+      "rawSentUnits": 226644,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 8767.906416999991,
+      "firstPrimaryRequestMs": 3185.0834579999937,
+      "firstPrimaryCacheRead": 9333,
+      "firstPrimaryInputTokens": 9710,
+      "postTerminalMs": 666.9386669999949,
+      "peakRssMiB": 618.765625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 595.359375,
+          "observedTrials": 3,
+          "sampleCount": 74
+        },
+        "active": {
+          "medianMiB": 602.09375,
+          "observedTrials": 3,
+          "sampleCount": 156
+        },
+        "tail": {
+          "medianMiB": 618.765625,
+          "observedTrials": 3,
+          "sampleCount": 28
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 5,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 55469,
+      "cacheRead": 49664,
+      "cacheWrite": 0,
+      "uncached": 5805,
+      "outputTokens": 215,
+      "costUsd": 0.018727,
+      "sentBytes": 223692,
+      "rawSentUnits": 223692,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 7810.1967920000025,
+      "firstPrimaryRequestMs": 3315.9986669999926,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8914,
+      "postTerminalMs": 506.77112600002147,
+      "peakRssMiB": 684.40625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 601.265625,
+          "observedTrials": 3,
+          "sampleCount": 111
+        },
+        "active": {
+          "medianMiB": 684.40625,
+          "observedTrials": 3,
+          "sampleCount": 152
+        },
+        "tail": {
+          "medianMiB": 513.234375,
+          "observedTrials": 3,
+          "sampleCount": 24
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 9,
+      "subagentRequests": 5,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 55469,
+      "cacheRead": 50816,
+      "cacheWrite": 0,
+      "uncached": 4653,
+      "outputTokens": 215,
+      "costUsd": 0.016538,
+      "sentBytes": 223692,
+      "rawSentUnits": 223692,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 7613.54183300001,
+      "firstPrimaryRequestMs": 2660.566083999991,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8914,
+      "postTerminalMs": 687.8094580000179,
+      "peakRssMiB": 602.75,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 601.609375,
+          "observedTrials": 3,
+          "sampleCount": 88
+        },
+        "active": {
+          "medianMiB": 602.75,
+          "observedTrials": 3,
+          "sampleCount": 153
+        },
+        "tail": {
+          "medianMiB": 575.1875,
+          "observedTrials": 3,
+          "sampleCount": 23
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 176323,
+      "cacheRead": 149371,
+      "cacheWrite": 26952,
+      "uncached": 0,
+      "outputTokens": 233,
+      "costUsd": 0.149377,
+      "sentBytes": 711621,
+      "rawSentUnits": 711621,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1266.824083000014,
+      "firstPrimaryRequestMs": 983.5392920000013,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 12.55845800001407,
+      "peakRssMiB": 332.25,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 296.6875,
+          "observedTrials": 3,
+          "sampleCount": 29
+        },
+        "active": {
+          "medianMiB": 332.25,
+          "observedTrials": 3,
+          "sampleCount": 9
+        },
+        "tail": {
+          "medianMiB": null,
+          "observedTrials": 0,
+          "sampleCount": 0
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 176323,
+      "cacheRead": 163550,
+      "cacheWrite": 12773,
+      "uncached": 0,
+      "outputTokens": 233,
+      "costUsd": 0.100459,
+      "sentBytes": 711621,
+      "rawSentUnits": 711621,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 866.2546670000011,
+      "firstPrimaryRequestMs": 586.8082080000022,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 10.77187500000582,
+      "peakRssMiB": 331.140625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 302.3125,
+          "observedTrials": 3,
+          "sampleCount": 13
+        },
+        "active": {
+          "medianMiB": 328.1875,
+          "observedTrials": 3,
+          "sampleCount": 8
+        },
+        "tail": {
+          "medianMiB": 331.4375,
+          "observedTrials": 1,
+          "sampleCount": 1
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 90240,
+      "cacheRead": 85376,
+      "cacheWrite": 0,
+      "uncached": 4864,
+      "outputTokens": 139,
+      "costUsd": 0.019656,
+      "sentBytes": 374239,
+      "rawSentUnits": 374239,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1251.793583999999,
+      "firstPrimaryRequestMs": 330.8598750000092,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 478.27120899999863,
+      "peakRssMiB": 154.859375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 100.453125,
+          "observedTrials": 3,
+          "sampleCount": 9
+        },
+        "active": {
+          "medianMiB": 152.375,
+          "observedTrials": 3,
+          "sampleCount": 17
+        },
+        "tail": {
+          "medianMiB": 154.859375,
+          "observedTrials": 3,
+          "sampleCount": 15
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 90235,
+      "cacheRead": 85376,
+      "cacheWrite": 0,
+      "uncached": 4859,
+      "outputTokens": 139,
+      "costUsd": 0.019646,
+      "sentBytes": 374224,
+      "rawSentUnits": 374224,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1211.0399160000088,
+      "firstPrimaryRequestMs": 274.62904099999287,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 537.5546669999894,
+      "peakRssMiB": 152.546875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 98.953125,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "active": {
+          "medianMiB": 145.609375,
+          "observedTrials": 3,
+          "sampleCount": 11
+        },
+        "tail": {
+          "medianMiB": 152.203125,
+          "observedTrials": 3,
+          "sampleCount": 15
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 128583,
+      "cacheRead": 125765,
+      "cacheWrite": 2140,
+      "uncached": 678,
+      "outputTokens": 241,
+      "costUsd": 0.051404,
+      "sentBytes": 517698,
+      "rawSentUnits": 517698,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 10962.930124999999,
+      "firstPrimaryRequestMs": 3540.5760840000003,
+      "firstPrimaryCacheRead": 9333,
+      "firstPrimaryInputTokens": 9721,
+      "postTerminalMs": 530.1082909999968,
+      "peakRssMiB": 643.359375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 560.515625,
+          "observedTrials": 3,
+          "sampleCount": 86
+        },
+        "active": {
+          "medianMiB": 597.03125,
+          "observedTrials": 3,
+          "sampleCount": 180
+        },
+        "tail": {
+          "medianMiB": 617.265625,
+          "observedTrials": 3,
+          "sampleCount": 20
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 128583,
+      "cacheRead": 125765,
+      "cacheWrite": 2140,
+      "uncached": 678,
+      "outputTokens": 241,
+      "costUsd": 0.051404,
+      "sentBytes": 517698,
+      "rawSentUnits": 517698,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 11480.290959000005,
+      "firstPrimaryRequestMs": 3483.4292080000014,
+      "firstPrimaryCacheRead": 9333,
+      "firstPrimaryInputTokens": 9721,
+      "postTerminalMs": 592.6298760000063,
+      "peakRssMiB": 645.59375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 602.28125,
+          "observedTrials": 3,
+          "sampleCount": 77
+        },
+        "active": {
+          "medianMiB": 645.59375,
+          "observedTrials": 3,
+          "sampleCount": 190
+        },
+        "tail": {
+          "medianMiB": 594.5625,
+          "observedTrials": 3,
+          "sampleCount": 17
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 140463,
+      "cacheRead": 133376,
+      "cacheWrite": 0,
+      "uncached": 7087,
+      "outputTokens": 241,
+      "costUsd": 0.029921,
+      "sentBytes": 564391,
+      "rawSentUnits": 564391,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 11482.131666000001,
+      "firstPrimaryRequestMs": 3446.014292000007,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8925,
+      "postTerminalMs": 698.2139169999864,
+      "peakRssMiB": 613.859375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 575.234375,
+          "observedTrials": 3,
+          "sampleCount": 77
+        },
+        "active": {
+          "medianMiB": 534.171875,
+          "observedTrials": 3,
+          "sampleCount": 197
+        },
+        "tail": {
+          "medianMiB": 599.296875,
+          "observedTrials": 3,
+          "sampleCount": 18
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 140463,
+      "cacheRead": 133376,
+      "cacheWrite": 0,
+      "uncached": 7087,
+      "outputTokens": 241,
+      "costUsd": 0.029921,
+      "sentBytes": 564391,
+      "rawSentUnits": 564391,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 13498.099167000008,
+      "firstPrimaryRequestMs": 5516.461083000002,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8925,
+      "postTerminalMs": 647.8542090000119,
+      "peakRssMiB": 547.984375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 492.46875,
+          "observedTrials": 3,
+          "sampleCount": 111
+        },
+        "active": {
+          "medianMiB": 508.515625,
+          "observedTrials": 3,
+          "sampleCount": 200
+        },
+        "tail": {
+          "medianMiB": 525.15625,
+          "observedTrials": 3,
+          "sampleCount": 18
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 368755,
+      "cacheRead": 337183,
+      "cacheWrite": 31572,
+      "uncached": 0,
+      "outputTokens": 240,
+      "costUsd": 0.22315,
+      "sentBytes": 1486485,
+      "rawSentUnits": 1486485,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 2053.6401250000054,
+      "firstPrimaryRequestMs": 1336.1525829999882,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 29869,
+      "postTerminalMs": 27.583167000004323,
+      "peakRssMiB": 339.84375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 300.5,
+          "observedTrials": 3,
+          "sampleCount": 33
+        },
+        "active": {
+          "medianMiB": 339.625,
+          "observedTrials": 3,
+          "sampleCount": 15
+        },
+        "tail": {
+          "medianMiB": 347.921875,
+          "observedTrials": 2,
+          "sampleCount": 2
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 368755,
+      "cacheRead": 358021,
+      "cacheWrite": 10734,
+      "uncached": 0,
+      "outputTokens": 240,
+      "costUsd": 0.151259,
+      "sentBytes": 1486485,
+      "rawSentUnits": 1486485,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1496.2104579999868,
+      "firstPrimaryRequestMs": 593.3569999999891,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29869,
+      "postTerminalMs": 12.833332999958657,
+      "peakRssMiB": 345.21875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 279.828125,
+          "observedTrials": 3,
+          "sampleCount": 13
+        },
+        "active": {
+          "medianMiB": 345.21875,
+          "observedTrials": 3,
+          "sampleCount": 19
+        },
+        "tail": {
+          "medianMiB": 346.84375,
+          "observedTrials": 1,
+          "sampleCount": 1
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 198470,
+      "cacheRead": 190208,
+      "cacheWrite": 0,
+      "uncached": 8262,
+      "outputTokens": 196,
+      "costUsd": 0.037506,
+      "sentBytes": 823125,
+      "rawSentUnits": 823125,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1738.2664589999767,
+      "firstPrimaryRequestMs": 356.4246249999851,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 538.8965419999731,
+      "peakRssMiB": 160.6875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 96.765625,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "active": {
+          "medianMiB": 152.609375,
+          "observedTrials": 3,
+          "sampleCount": 25
+        },
+        "tail": {
+          "medianMiB": 160.6875,
+          "observedTrials": 3,
+          "sampleCount": 16
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 198466,
+      "cacheRead": 190208,
+      "cacheWrite": 0,
+      "uncached": 8258,
+      "outputTokens": 196,
+      "costUsd": 0.037498,
+      "sentBytes": 823131,
+      "rawSentUnits": 823131,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1961.5510420000064,
+      "firstPrimaryRequestMs": 369.6015409999818,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 548.1721250000119,
+      "peakRssMiB": 147.578125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 115.421875,
+          "observedTrials": 3,
+          "sampleCount": 8
+        },
+        "active": {
+          "medianMiB": 147.40625,
+          "observedTrials": 3,
+          "sampleCount": 28
+        },
+        "tail": {
+          "medianMiB": 143.421875,
+          "observedTrials": 3,
+          "sampleCount": 17
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 48165,
+      "cacheRead": 38230,
+      "cacheWrite": 9935,
+      "uncached": 0,
+      "outputTokens": 152,
+      "costUsd": 0.051005,
+      "sentBytes": 193909,
+      "rawSentUnits": 193909,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3260.0187499999997,
+      "firstPrimaryRequestMs": 1682.565833,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 9183,
+      "postTerminalMs": 535.5519169999998,
+      "peakRssMiB": 655.578125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 599.765625,
+          "observedTrials": 3,
+          "sampleCount": 46
+        },
+        "active": {
+          "medianMiB": 557.796875,
+          "observedTrials": 3,
+          "sampleCount": 25
+        },
+        "tail": {
+          "medianMiB": 655.578125,
+          "observedTrials": 3,
+          "sampleCount": 16
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 48165,
+      "cacheRead": 47036,
+      "cacheWrite": 1129,
+      "uncached": 0,
+      "outputTokens": 152,
+      "costUsd": 0.020625,
+      "sentBytes": 193909,
+      "rawSentUnits": 193909,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3207.1201660000006,
+      "firstPrimaryRequestMs": 1683.0924580000005,
+      "firstPrimaryCacheRead": 8806,
+      "firstPrimaryInputTokens": 9183,
+      "postTerminalMs": 578.0656680000006,
+      "peakRssMiB": 719.90625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 625.78125,
+          "observedTrials": 3,
+          "sampleCount": 46
+        },
+        "active": {
+          "medianMiB": 666.328125,
+          "observedTrials": 3,
+          "sampleCount": 27
+        },
+        "tail": {
+          "medianMiB": 719.90625,
+          "observedTrials": 3,
+          "sampleCount": 16
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 47231,
+      "cacheRead": 36736,
+      "cacheWrite": 0,
+      "uncached": 10495,
+      "outputTokens": 140,
+      "costUsd": 0.026063,
+      "sentBytes": 190197,
+      "rawSentUnits": 190197,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3086.9143749999994,
+      "firstPrimaryRequestMs": 1631.5412919999999,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 8348,
+      "postTerminalMs": 453.3807079999997,
+      "peakRssMiB": 779.3125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 621.421875,
+          "observedTrials": 3,
+          "sampleCount": 44
+        },
+        "active": {
+          "medianMiB": 671.359375,
+          "observedTrials": 3,
+          "sampleCount": 26
+        },
+        "tail": {
+          "medianMiB": 779.3125,
+          "observedTrials": 3,
+          "sampleCount": 14
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 47231,
+      "cacheRead": 44672,
+      "cacheWrite": 0,
+      "uncached": 2559,
+      "outputTokens": 140,
+      "costUsd": 0.010985,
+      "sentBytes": 190197,
+      "rawSentUnits": 190197,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3019.2208329999994,
+      "firstPrimaryRequestMs": 1584.1753750000007,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8348,
+      "postTerminalMs": 539.2090410000001,
+      "peakRssMiB": 717.8125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 628.4375,
+          "observedTrials": 3,
+          "sampleCount": 43
+        },
+        "active": {
+          "medianMiB": 684.234375,
+          "observedTrials": 3,
+          "sampleCount": 29
+        },
+        "tail": {
+          "medianMiB": 717.8125,
+          "observedTrials": 3,
+          "sampleCount": 14
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 151464,
+      "cacheRead": 120857,
+      "cacheWrite": 30607,
+      "uncached": 0,
+      "outputTokens": 153,
+      "costUsd": 0.153329,
+      "sentBytes": 610652,
+      "rawSentUnits": 610652,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 912.6796249999989,
+      "firstPrimaryRequestMs": 762.983166,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 9.209708999998838,
+      "peakRssMiB": 325.53125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 294.625,
+          "observedTrials": 3,
+          "sampleCount": 17
+        },
+        "active": {
+          "medianMiB": 322.984375,
+          "observedTrials": 3,
+          "sampleCount": 3
+        },
+        "tail": {
+          "medianMiB": 325.8125,
+          "observedTrials": 1,
+          "sampleCount": 1
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 151464,
+      "cacheRead": 141695,
+      "cacheWrite": 9769,
+      "uncached": 0,
+      "outputTokens": 153,
+      "costUsd": 0.081438,
+      "sentBytes": 610652,
+      "rawSentUnits": 610652,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 500.0954590000001,
+      "firstPrimaryRequestMs": 369.81316700000025,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 9.68383300000096,
+      "peakRssMiB": 335.765625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 296.6875,
+          "observedTrials": 3,
+          "sampleCount": 8
+        },
+        "active": {
+          "medianMiB": 335.765625,
+          "observedTrials": 3,
+          "sampleCount": 4
+        },
+        "tail": {
+          "medianMiB": null,
+          "observedTrials": 0,
+          "sampleCount": 0
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "solo-fix",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 73890,
+      "cacheRead": 57856,
+      "cacheWrite": 0,
+      "uncached": 16034,
+      "outputTokens": 133,
+      "costUsd": 0.039184,
+      "sentBytes": 306438,
+      "rawSentUnits": 306438,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 776.4067500000001,
+      "firstPrimaryRequestMs": 190.1342080000013,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 388.0200840000016,
+      "peakRssMiB": 151.46875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 101.46875,
+          "observedTrials": 3,
+          "sampleCount": 4
+        },
+        "active": {
+          "medianMiB": 144.203125,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "tail": {
+          "medianMiB": 151.46875,
+          "observedTrials": 3,
+          "sampleCount": 12
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "solo-fix",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 5,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 73890,
+      "cacheRead": 69632,
+      "cacheWrite": 0,
+      "uncached": 4258,
+      "outputTokens": 133,
+      "costUsd": 0.01681,
+      "sentBytes": 306439,
+      "rawSentUnits": 306439,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 749.452792,
+      "firstPrimaryRequestMs": 182.40929200000028,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 361.70537400000103,
+      "peakRssMiB": 151.515625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 92.078125,
+          "observedTrials": 3,
+          "sampleCount": 3
+        },
+        "active": {
+          "medianMiB": 144.5625,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "tail": {
+          "medianMiB": 151.515625,
+          "observedTrials": 3,
+          "sampleCount": 12
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 56675,
+      "cacheRead": 52430,
+      "cacheWrite": 4245,
+      "uncached": 0,
+      "outputTokens": 248,
+      "costUsd": 0.035368,
+      "sentBytes": 228706,
+      "rawSentUnits": 228706,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3793.256708000001,
+      "firstPrimaryRequestMs": 1623.9121659999983,
+      "firstPrimaryCacheRead": 8806,
+      "firstPrimaryInputTokens": 9183,
+      "postTerminalMs": 541.658707999999,
+      "peakRssMiB": 791.703125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 610.3125,
+          "observedTrials": 3,
+          "sampleCount": 45
+        },
+        "active": {
+          "medianMiB": 676.625,
+          "observedTrials": 3,
+          "sampleCount": 44
+        },
+        "tail": {
+          "medianMiB": 791.703125,
+          "observedTrials": 3,
+          "sampleCount": 16
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 56675,
+      "cacheRead": 55130,
+      "cacheWrite": 1545,
+      "uncached": 0,
+      "outputTokens": 248,
+      "costUsd": 0.026053,
+      "sentBytes": 228706,
+      "rawSentUnits": 228706,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3583.9981249999983,
+      "firstPrimaryRequestMs": 1525.8867920000012,
+      "firstPrimaryCacheRead": 8806,
+      "firstPrimaryInputTokens": 9183,
+      "postTerminalMs": 485.1387909999976,
+      "peakRssMiB": 754.96875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 625.921875,
+          "observedTrials": 3,
+          "sampleCount": 46
+        },
+        "active": {
+          "medianMiB": 665.421875,
+          "observedTrials": 3,
+          "sampleCount": 43
+        },
+        "tail": {
+          "medianMiB": 754.96875,
+          "observedTrials": 3,
+          "sampleCount": 14
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 56364,
+      "cacheRead": 49920,
+      "cacheWrite": 0,
+      "uncached": 6444,
+      "outputTokens": 236,
+      "costUsd": 0.02024,
+      "sentBytes": 227482,
+      "rawSentUnits": 227482,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3631.285500000002,
+      "firstPrimaryRequestMs": 1620.348958999999,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8348,
+      "postTerminalMs": 545.3251240000027,
+      "peakRssMiB": 774.890625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 615.875,
+          "observedTrials": 3,
+          "sampleCount": 43
+        },
+        "active": {
+          "medianMiB": 657.40625,
+          "observedTrials": 3,
+          "sampleCount": 45
+        },
+        "tail": {
+          "medianMiB": 774.890625,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 56364,
+      "cacheRead": 52480,
+      "cacheWrite": 0,
+      "uncached": 3884,
+      "outputTokens": 236,
+      "costUsd": 0.015376,
+      "sentBytes": 227482,
+      "rawSentUnits": 227482,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3516.473541000003,
+      "firstPrimaryRequestMs": 1643.2490409999991,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8348,
+      "postTerminalMs": 488.61312499999985,
+      "peakRssMiB": 795.546875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 612.84375,
+          "observedTrials": 3,
+          "sampleCount": 44
+        },
+        "active": {
+          "medianMiB": 668.984375,
+          "observedTrials": 3,
+          "sampleCount": 40
+        },
+        "tail": {
+          "medianMiB": 795.546875,
+          "observedTrials": 3,
+          "sampleCount": 14
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 191572,
+      "cacheRead": 168184,
+      "cacheWrite": 23388,
+      "uncached": 0,
+      "outputTokens": 245,
+      "costUsd": 0.141836,
+      "sentBytes": 773052,
+      "rawSentUnits": 773052,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 921.9053330000024,
+      "firstPrimaryRequestMs": 791.7981659999969,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 8.355416000002151,
+      "peakRssMiB": 328.390625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 291.875,
+          "observedTrials": 3,
+          "sampleCount": 18
+        },
+        "active": {
+          "medianMiB": 328.390625,
+          "observedTrials": 3,
+          "sampleCount": 4
+        },
+        "tail": {
+          "medianMiB": null,
+          "observedTrials": 0,
+          "sampleCount": 0
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 3,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 191572,
+      "cacheRead": 179233,
+      "cacheWrite": 12339,
+      "uncached": 0,
+      "outputTokens": 245,
+      "costUsd": 0.103717,
+      "sentBytes": 773052,
+      "rawSentUnits": 773052,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 422.565042000002,
+      "firstPrimaryRequestMs": 279.5148330000011,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 8.617291000002297,
+      "peakRssMiB": 330.71875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 288.25,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "active": {
+          "medianMiB": 328.390625,
+          "observedTrials": 3,
+          "sampleCount": 3
+        },
+        "tail": {
+          "medianMiB": 335.953125,
+          "observedTrials": 2,
+          "sampleCount": 2
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-explore",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 89784,
+      "cacheRead": 85120,
+      "cacheWrite": 0,
+      "uncached": 4664,
+      "outputTokens": 147,
+      "costUsd": 0.01931,
+      "sentBytes": 372413,
+      "rawSentUnits": 372413,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 828.8592910000007,
+      "firstPrimaryRequestMs": 168.27237500000047,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 353.77583200000663,
+      "peakRssMiB": 151.859375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 93.609375,
+          "observedTrials": 3,
+          "sampleCount": 3
+        },
+        "active": {
+          "medianMiB": 145.5625,
+          "observedTrials": 3,
+          "sampleCount": 8
+        },
+        "tail": {
+          "medianMiB": 151.859375,
+          "observedTrials": 3,
+          "sampleCount": 12
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-explore",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 89787,
+      "cacheRead": 85120,
+      "cacheWrite": 0,
+      "uncached": 4667,
+      "outputTokens": 147,
+      "costUsd": 0.019316,
+      "sentBytes": 372418,
+      "rawSentUnits": 372418,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 819.4292499999974,
+      "firstPrimaryRequestMs": 171.05541599999924,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 381.71437600000354,
+      "peakRssMiB": 151.578125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 85.5,
+          "observedTrials": 3,
+          "sampleCount": 3
+        },
+        "active": {
+          "medianMiB": 145.375,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "tail": {
+          "medianMiB": 151.578125,
+          "observedTrials": 3,
+          "sampleCount": 13
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 52363,
+      "cacheRead": 46572,
+      "cacheWrite": 5791,
+      "uncached": 0,
+      "outputTokens": 224,
+      "costUsd": 0.039049,
+      "sentBytes": 211462,
+      "rawSentUnits": 211462,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3313.007749999997,
+      "firstPrimaryRequestMs": 1447.4162499999984,
+      "firstPrimaryCacheRead": 8806,
+      "firstPrimaryInputTokens": 9183,
+      "postTerminalMs": 457.97287500000675,
+      "peakRssMiB": 774.96875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 617.0625,
+          "observedTrials": 3,
+          "sampleCount": 40
+        },
+        "active": {
+          "medianMiB": 683.640625,
+          "observedTrials": 3,
+          "sampleCount": 44
+        },
+        "tail": {
+          "medianMiB": 774.96875,
+          "observedTrials": 3,
+          "sampleCount": 16
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 52363,
+      "cacheRead": 50697,
+      "cacheWrite": 1666,
+      "uncached": 0,
+      "outputTokens": 224,
+      "costUsd": 0.024817,
+      "sentBytes": 211462,
+      "rawSentUnits": 211462,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3206.186416999997,
+      "firstPrimaryRequestMs": 1452.296000000002,
+      "firstPrimaryCacheRead": 8806,
+      "firstPrimaryInputTokens": 9183,
+      "postTerminalMs": 467.9380839999976,
+      "peakRssMiB": 784.546875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 615.96875,
+          "observedTrials": 3,
+          "sampleCount": 42
+        },
+        "active": {
+          "medianMiB": 685.234375,
+          "observedTrials": 3,
+          "sampleCount": 42
+        },
+        "tail": {
+          "medianMiB": 784.546875,
+          "observedTrials": 3,
+          "sampleCount": 15
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 51608,
+      "cacheRead": 46336,
+      "cacheWrite": 0,
+      "uncached": 5272,
+      "outputTokens": 212,
+      "costUsd": 0.017297,
+      "sentBytes": 208476,
+      "rawSentUnits": 208476,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3268.4480840000033,
+      "firstPrimaryRequestMs": 1423.4262079999971,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8348,
+      "postTerminalMs": 462.3507510000054,
+      "peakRssMiB": 736.734375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 614.5,
+          "observedTrials": 3,
+          "sampleCount": 42
+        },
+        "active": {
+          "medianMiB": 686.8125,
+          "observedTrials": 3,
+          "sampleCount": 45
+        },
+        "tail": {
+          "medianMiB": 736.734375,
+          "observedTrials": 3,
+          "sampleCount": 13
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 51608,
+      "cacheRead": 47488,
+      "cacheWrite": 0,
+      "uncached": 4120,
+      "outputTokens": 212,
+      "costUsd": 0.015108,
+      "sentBytes": 208476,
+      "rawSentUnits": 208476,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3406.021249999998,
+      "firstPrimaryRequestMs": 1469.3062909999935,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8348,
+      "postTerminalMs": 499.2255839999998,
+      "peakRssMiB": 785.5625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 610.8125,
+          "observedTrials": 3,
+          "sampleCount": 43
+        },
+        "active": {
+          "medianMiB": 679.390625,
+          "observedTrials": 3,
+          "sampleCount": 44
+        },
+        "tail": {
+          "medianMiB": 785.5625,
+          "observedTrials": 3,
+          "sampleCount": 16
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 176323,
+      "cacheRead": 149371,
+      "cacheWrite": 26952,
+      "uncached": 0,
+      "outputTokens": 233,
+      "costUsd": 0.149377,
+      "sentBytes": 711621,
+      "rawSentUnits": 711621,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 595.4484999999986,
+      "firstPrimaryRequestMs": 426.42462499999965,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 7.214833000005456,
+      "peakRssMiB": 339.75,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 278.65625,
+          "observedTrials": 3,
+          "sampleCount": 12
+        },
+        "active": {
+          "medianMiB": 339.75,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "tail": {
+          "medianMiB": null,
+          "observedTrials": 0,
+          "sampleCount": 0
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 8,
+      "subagentRequests": 5,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 176323,
+      "cacheRead": 163550,
+      "cacheWrite": 12773,
+      "uncached": 0,
+      "outputTokens": 233,
+      "costUsd": 0.100459,
+      "sentBytes": 711621,
+      "rawSentUnits": 711621,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 470.8662499999991,
+      "firstPrimaryRequestMs": 286.0856669999994,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29857,
+      "postTerminalMs": 7.541832999995677,
+      "peakRssMiB": 330.40625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 283.203125,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "active": {
+          "medianMiB": 330.40625,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "tail": {
+          "medianMiB": null,
+          "observedTrials": 0,
+          "sampleCount": 0
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-general",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 90240,
+      "cacheRead": 85376,
+      "cacheWrite": 0,
+      "uncached": 4864,
+      "outputTokens": 139,
+      "costUsd": 0.019656,
+      "sentBytes": 374239,
+      "rawSentUnits": 374239,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 789.5933329999971,
+      "firstPrimaryRequestMs": 158.2403340000019,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 348.5325009999942,
+      "peakRssMiB": 151.90625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 100.671875,
+          "observedTrials": 3,
+          "sampleCount": 4
+        },
+        "active": {
+          "medianMiB": 145.890625,
+          "observedTrials": 3,
+          "sampleCount": 8
+        },
+        "tail": {
+          "medianMiB": 151.859375,
+          "observedTrials": 3,
+          "sampleCount": 10
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "delegate-general",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 6,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 90240,
+      "cacheRead": 85376,
+      "cacheWrite": 0,
+      "uncached": 4864,
+      "outputTokens": 139,
+      "costUsd": 0.019656,
+      "sentBytes": 374237,
+      "rawSentUnits": 374237,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 910.5292079999999,
+      "firstPrimaryRequestMs": 221.04591600000276,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13591,
+      "postTerminalMs": 365.6478760000027,
+      "peakRssMiB": 151.9375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 87.015625,
+          "observedTrials": 3,
+          "sampleCount": 4
+        },
+        "active": {
+          "medianMiB": 143.859375,
+          "observedTrials": 3,
+          "sampleCount": 8
+        },
+        "tail": {
+          "medianMiB": 151.640625,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 3
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 121581,
+      "cacheRead": 119441,
+      "cacheWrite": 2140,
+      "uncached": 0,
+      "outputTokens": 238,
+      "costUsd": 0.047429,
+      "sentBytes": 489425,
+      "rawSentUnits": 489425,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3531.390499999994,
+      "firstPrimaryRequestMs": 1370.007000000005,
+      "firstPrimaryCacheRead": 8806,
+      "firstPrimaryInputTokens": 9194,
+      "postTerminalMs": 395.05229199999303,
+      "peakRssMiB": 725.1875,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 623.515625,
+          "observedTrials": 3,
+          "sampleCount": 43
+        },
+        "active": {
+          "medianMiB": 700.9375,
+          "observedTrials": 3,
+          "sampleCount": 54
+        },
+        "tail": {
+          "medianMiB": 725.1875,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 121581,
+      "cacheRead": 119441,
+      "cacheWrite": 2140,
+      "uncached": 0,
+      "outputTokens": 238,
+      "costUsd": 0.047429,
+      "sentBytes": 489425,
+      "rawSentUnits": 489425,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3657.9669579999972,
+      "firstPrimaryRequestMs": 1456.231292000004,
+      "firstPrimaryCacheRead": 8806,
+      "firstPrimaryInputTokens": 9194,
+      "postTerminalMs": 430.41374899999937,
+      "peakRssMiB": 804.03125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 632.125,
+          "observedTrials": 3,
+          "sampleCount": 40
+        },
+        "active": {
+          "medianMiB": 707.125,
+          "observedTrials": 3,
+          "sampleCount": 53
+        },
+        "tail": {
+          "medianMiB": 804.03125,
+          "observedTrials": 3,
+          "sampleCount": 12
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 132982,
+      "cacheRead": 126464,
+      "cacheWrite": 0,
+      "uncached": 6518,
+      "outputTokens": 238,
+      "costUsd": 0.028062,
+      "sentBytes": 534885,
+      "rawSentUnits": 534885,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3631.905915999996,
+      "firstPrimaryRequestMs": 1442.360916000005,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8359,
+      "postTerminalMs": 405.2929159999985,
+      "peakRssMiB": 798.328125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 607.921875,
+          "observedTrials": 3,
+          "sampleCount": 40
+        },
+        "active": {
+          "medianMiB": 703.078125,
+          "observedTrials": 3,
+          "sampleCount": 55
+        },
+        "tail": {
+          "medianMiB": 798.328125,
+          "observedTrials": 3,
+          "sampleCount": 12
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 132982,
+      "cacheRead": 126464,
+      "cacheWrite": 0,
+      "uncached": 6518,
+      "outputTokens": 238,
+      "costUsd": 0.028062,
+      "sentBytes": 534885,
+      "rawSentUnits": 534885,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3791.2477079999953,
+      "firstPrimaryRequestMs": 1383.6523329999982,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8359,
+      "postTerminalMs": 388.52449999999226,
+      "peakRssMiB": 759.375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 612.203125,
+          "observedTrials": 3,
+          "sampleCount": 39
+        },
+        "active": {
+          "medianMiB": 698.03125,
+          "observedTrials": 3,
+          "sampleCount": 54
+        },
+        "tail": {
+          "medianMiB": 759.375,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 368755,
+      "cacheRead": 337183,
+      "cacheWrite": 31572,
+      "uncached": 0,
+      "outputTokens": 240,
+      "costUsd": 0.22315,
+      "sentBytes": 1486485,
+      "rawSentUnits": 1486485,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 996.549791999998,
+      "firstPrimaryRequestMs": 718.4858749999985,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 29869,
+      "postTerminalMs": 8.82091699999728,
+      "peakRssMiB": 350.40625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 297.0625,
+          "observedTrials": 3,
+          "sampleCount": 18
+        },
+        "active": {
+          "medianMiB": 350.40625,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "tail": {
+          "medianMiB": 355.09375,
+          "observedTrials": 1,
+          "sampleCount": 1
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "claude-code",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 368755,
+      "cacheRead": 358021,
+      "cacheWrite": 10734,
+      "uncached": 0,
+      "outputTokens": 240,
+      "costUsd": 0.151259,
+      "sentBytes": 1486485,
+      "rawSentUnits": 1486485,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 503.38674999999785,
+      "firstPrimaryRequestMs": 270.4759580000027,
+      "firstPrimaryCacheRead": 20838,
+      "firstPrimaryInputTokens": 29869,
+      "postTerminalMs": 6.997457999998005,
+      "peakRssMiB": 346.015625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 286.953125,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "active": {
+          "medianMiB": 346.015625,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "tail": {
+          "medianMiB": null,
+          "observedTrials": 0,
+          "sampleCount": 0
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 198442,
+      "cacheRead": 190208,
+      "cacheWrite": 0,
+      "uncached": 8234,
+      "outputTokens": 196,
+      "costUsd": 0.03745,
+      "sentBytes": 823007,
+      "rawSentUnits": 823007,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1050.4937920000011,
+      "firstPrimaryRequestMs": 159.47279200000048,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 344.49570799998764,
+      "peakRssMiB": 156.359375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 96.046875,
+          "observedTrials": 3,
+          "sampleCount": 3
+        },
+        "active": {
+          "medianMiB": 145.78125,
+          "observedTrials": 3,
+          "sampleCount": 16
+        },
+        "tail": {
+          "medianMiB": 156.359375,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "http",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 198464,
+      "cacheRead": 190208,
+      "cacheWrite": 0,
+      "uncached": 8256,
+      "outputTokens": 196,
+      "costUsd": 0.037494,
+      "sentBytes": 823108,
+      "rawSentUnits": 823108,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1243.9951250000013,
+      "firstPrimaryRequestMs": 189.02991699999984,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 481.4133340000117,
+      "peakRssMiB": 156.8125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 92.328125,
+          "observedTrials": 3,
+          "sampleCount": 3
+        },
+        "active": {
+          "medianMiB": 145.984375,
+          "observedTrials": 3,
+          "sampleCount": 18
+        },
+        "tail": {
+          "medianMiB": 156.8125,
+          "observedTrials": 3,
+          "sampleCount": 13
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "ws",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 140463,
+      "cacheRead": 124800,
+      "cacheWrite": 0,
+      "uncached": 15663,
+      "outputTokens": 241,
+      "costUsd": 0.046215,
+      "sentBytes": 564523,
+      "rawSentUnits": 564523,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 5836.6227499999995,
+      "firstPrimaryRequestMs": 1933.043833,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 8925,
+      "postTerminalMs": 349.0532490000005,
+      "peakRssMiB": 721.0625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 615.046875,
+          "observedTrials": 3,
+          "sampleCount": 48
+        },
+        "active": {
+          "medianMiB": 699.328125,
+          "observedTrials": 3,
+          "sampleCount": 117
+        },
+        "tail": {
+          "medianMiB": 721.0625,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "ws",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 1,
+      "warmupRequests": 0,
+      "inputTokens": 140463,
+      "cacheRead": 133376,
+      "cacheWrite": 0,
+      "uncached": 7087,
+      "outputTokens": 241,
+      "costUsd": 0.029921,
+      "sentBytes": 564523,
+      "rawSentUnits": 564523,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 5746.288166,
+      "firstPrimaryRequestMs": 1819.0271249999996,
+      "firstPrimaryCacheRead": 8576,
+      "firstPrimaryInputTokens": 8925,
+      "postTerminalMs": 314.17920700000104,
+      "peakRssMiB": 828.0,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 622.265625,
+          "observedTrials": 3,
+          "sampleCount": 46
+        },
+        "active": {
+          "medianMiB": 715.609375,
+          "observedTrials": 3,
+          "sampleCount": 112
+        },
+        "tail": {
+          "medianMiB": 828.0,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "ws",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 1,
+      "inputTokens": 210023,
+      "cacheRead": 189952,
+      "cacheWrite": 0,
+      "uncached": 20071,
+      "outputTokens": 196,
+      "costUsd": 0.061098,
+      "sentBytes": 85918,
+      "rawSentUnits": 85918,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1327.9000830000004,
+      "firstPrimaryRequestMs": 320.2664999999997,
+      "firstPrimaryCacheRead": 11648,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 392.8560839999991,
+      "peakRssMiB": 162.3125,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 107.703125,
+          "observedTrials": 3,
+          "sampleCount": 7
+        },
+        "active": {
+          "medianMiB": 157.828125,
+          "observedTrials": 3,
+          "sampleCount": 18
+        },
+        "tail": {
+          "medianMiB": 161.21875,
+          "observedTrials": 3,
+          "sampleCount": 12
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "baseline",
+      "transport": "ws",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 1,
+      "inputTokens": 210028,
+      "cacheRead": 201728,
+      "cacheWrite": 0,
+      "uncached": 8304,
+      "outputTokens": 196,
+      "costUsd": 0.038742,
+      "sentBytes": 85918,
+      "rawSentUnits": 85918,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1317.2194579999996,
+      "firstPrimaryRequestMs": 262.90479199999936,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 452.5792500000007,
+      "peakRssMiB": 160.75,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 107.03125,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "active": {
+          "medianMiB": 149.078125,
+          "observedTrials": 3,
+          "sampleCount": 18
+        },
+        "tail": {
+          "medianMiB": 160.75,
+          "observedTrials": 3,
+          "sampleCount": 11
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "ws",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 133327,
+      "cacheRead": 118912,
+      "cacheWrite": 0,
+      "uncached": 14415,
+      "outputTokens": 238,
+      "costUsd": 0.043101,
+      "sentBytes": 265248,
+      "rawSentUnits": 265248,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 4343.931041,
+      "firstPrimaryRequestMs": 1719.417042,
+      "firstPrimaryCacheRead": 0,
+      "firstPrimaryInputTokens": 8359,
+      "postTerminalMs": 393.9280829999998,
+      "peakRssMiB": 782.484375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 597.296875,
+          "observedTrials": 3,
+          "sampleCount": 48
+        },
+        "active": {
+          "medianMiB": 692.671875,
+          "observedTrials": 3,
+          "sampleCount": 62
+        },
+        "tail": {
+          "medianMiB": 782.484375,
+          "observedTrials": 3,
+          "sampleCount": 13
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "ws",
+      "runtime": "vector-openai",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 12,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 0,
+      "inputTokens": 133327,
+      "cacheRead": 126848,
+      "cacheWrite": 0,
+      "uncached": 6479,
+      "outputTokens": 238,
+      "costUsd": 0.028023,
+      "sentBytes": 265248,
+      "rawSentUnits": 265248,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 3898.912416,
+      "firstPrimaryRequestMs": 1475.3030000000003,
+      "firstPrimaryCacheRead": 7936,
+      "firstPrimaryInputTokens": 8359,
+      "postTerminalMs": 394.7350830000005,
+      "peakRssMiB": 781.375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 630.375,
+          "observedTrials": 3,
+          "sampleCount": 45
+        },
+        "active": {
+          "medianMiB": 707.234375,
+          "observedTrials": 3,
+          "sampleCount": 63
+        },
+        "tail": {
+          "medianMiB": 781.375,
+          "observedTrials": 3,
+          "sampleCount": 15
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "ws",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 1,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 1,
+      "inputTokens": 210013,
+      "cacheRead": 189824,
+      "cacheWrite": 0,
+      "uncached": 20182,
+      "outputTokens": 196,
+      "costUsd": 0.061307,
+      "sentBytes": 85918,
+      "rawSentUnits": 85918,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1183.7053749999995,
+      "firstPrimaryRequestMs": 227.61566700000003,
+      "firstPrimaryCacheRead": 11648,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 400.11641599999894,
+      "peakRssMiB": 160.9375,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 105.15625,
+          "observedTrials": 3,
+          "sampleCount": 4
+        },
+        "active": {
+          "medianMiB": 150.796875,
+          "observedTrials": 3,
+          "sampleCount": 19
+        },
+        "tail": {
+          "medianMiB": 160.9375,
+          "observedTrials": 3,
+          "sampleCount": 13
+        }
+      },
+      "finalFixtureChecks": 0
+    },
+    {
+      "state": "integrated",
+      "transport": "ws",
+      "runtime": "codex",
+      "scenario": "long-loop",
+      "session": 2,
+      "repetitions": 3,
+      "requests": 13,
+      "subagentRequests": 0,
+      "sideRequests": 0,
+      "warmupRequests": 1,
+      "inputTokens": 210021,
+      "cacheRead": 201728,
+      "cacheWrite": 0,
+      "uncached": 8293,
+      "outputTokens": 196,
+      "costUsd": 0.03872,
+      "sentBytes": 85922,
+      "rawSentUnits": 85922,
+      "rawSentUnitsEncoding": "utf8",
+      "wallMs": 1226.2311250000002,
+      "firstPrimaryRequestMs": 251.3045000000002,
+      "firstPrimaryCacheRead": 11776,
+      "firstPrimaryInputTokens": 13603,
+      "postTerminalMs": 429.6312089999992,
+      "peakRssMiB": 161.890625,
+      "phasePeakRss": {
+        "startup": {
+          "medianMiB": 107.515625,
+          "observedTrials": 3,
+          "sampleCount": 6
+        },
+        "active": {
+          "medianMiB": 156.234375,
+          "observedTrials": 3,
+          "sampleCount": 17
+        },
+        "tail": {
+          "medianMiB": 160.75,
+          "observedTrials": 3,
+          "sampleCount": 15
+        }
+      },
+      "finalFixtureChecks": 0
+    }
+  ]
+}

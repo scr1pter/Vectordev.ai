@@ -1,0 +1,1407 @@
+{
+  "reports": [
+    {
+      "file": "raw/baseline-http-1.json",
+      "sha256": "939d8b6878421fe33c5185b10600ee0f79ba2c0b3ad83a3319dff5cae41b14c9",
+      "provenance": {
+        "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+        "harnessRevision": "2bc9c6224cb8b78d8905c26fd97ebf85dfdea1d6",
+        "loadAverageStart": [
+          29.7802734375,
+          21.36474609375,
+          17.326171875
+        ],
+        "startedAt": "2026-10-11T23:01:30Z",
+        "finishedAt": "2026-10-11T23:04:24Z",
+        "loadAverageFinish": [
+          19.88232421875,
+          20.2333984375,
+          17.57421875
+        ]
+      },
+      "transportAudit": {
+        "vector-solo-fix-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-solo-fix-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-1": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-2": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-1": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        }
+      }
+    },
+    {
+      "file": "raw/baseline-http-2.json",
+      "sha256": "06831926949af1f74c98d6c110a180d7aad5ba7be26a3093f73f5e4701da369c",
+      "provenance": {
+        "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+        "harnessRevision": "7aeb3860dfc0ebdea6c6f526607fd3c8b64c88bc",
+        "loadAverageStart": [
+          21.98291015625,
+          24.29296875,
+          19.900390625
+        ],
+        "startedAt": "2026-10-11T23:06:54Z",
+        "finishedAt": "2026-10-11T23:10:37Z",
+        "loadAverageFinish": [
+          16.33349609375,
+          21.0244140625,
+          19.5478515625
+        ]
+      },
+      "transportAudit": {
+        "vector-solo-fix-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-solo-fix-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-1": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-2": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-1": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        }
+      }
+    },
+    {
+      "file": "raw/baseline-http-3.json",
+      "sha256": "411d012c2e94d6826765efcec9d2216a3129e003185b574f3558b4b76ec154a2",
+      "provenance": {
+        "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          15.39794921875,
+          19.35107421875,
+          19.13232421875
+        ],
+        "startedAt": "2026-10-11T23:13:08Z",
+        "finishedAt": "2026-10-11T23:16:03Z",
+        "loadAverageFinish": [
+          23.41796875,
+          24.59716796875,
+          21.62109375
+        ]
+      },
+      "transportAudit": {
+        "vector-solo-fix-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-solo-fix-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-1": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-2": {
+          "http": 9,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-1": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-2": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-1": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 13,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        }
+      }
+    },
+    {
+      "file": "raw/integrated-http-1.json",
+      "sha256": "a58e20daabc10a7354feb20efab7f8f71f101f2a5949ba251caab28b4d3b61d3",
+      "provenance": {
+        "revision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          8.00146484375,
+          16.24169921875,
+          18.65478515625
+        ],
+        "startedAt": "2026-10-11T23:19:23Z",
+        "note": "Repeated after the final NUL-delimited filename admission fix; earlier successful report preserved separately and excluded from canonical medians.",
+        "finishedAt": "2026-10-11T23:20:39Z",
+        "loadAverageFinish": [
+          12.94091796875,
+          16.318359375,
+          18.4990234375
+        ]
+      },
+      "transportAudit": {
+        "vector-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        }
+      }
+    },
+    {
+      "file": "raw/integrated-http-2.json",
+      "sha256": "c72278b3fd695a8593d25e783a6ad7d31737014ddbd3bc6ab07c7c2c1c0c8901",
+      "provenance": {
+        "revision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          12.94091796875,
+          16.318359375,
+          18.4990234375
+        ],
+        "startedAt": "2026-10-11T23:20:39Z",
+        "note": "Repeated after the final NUL-delimited filename admission fix; earlier successful report preserved separately and excluded from canonical medians.",
+        "finishedAt": "2026-10-11T23:21:44Z",
+        "loadAverageFinish": [
+          8.705078125,
+          14.40283203125,
+          17.6162109375
+        ]
+      },
+      "transportAudit": {
+        "vector-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        }
+      }
+    },
+    {
+      "file": "raw/integrated-http-3.json",
+      "sha256": "fbc37eab485b8cd5f6af6742b27530d16f0bf689a9a93a1aeee6ebdacfdf795f",
+      "provenance": {
+        "revision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          23.41796875,
+          24.59716796875,
+          21.62109375
+        ],
+        "startedAt": "2026-10-11T23:16:03Z",
+        "finishedAt": "2026-10-11T23:17:14Z",
+        "loadAverageFinish": [
+          12.09716796875,
+          21.01123046875,
+          20.50390625
+        ]
+      },
+      "transportAudit": {
+        "vector-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-1": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-solo-fix-2": {
+          "http": 5,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-explore-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-explore-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-1": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-delegate-general-2": {
+          "http": 8,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-1": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-delegate-general-2": {
+          "http": 6,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "claude-code-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        },
+        "codex-long-loop-2": {
+          "http": 12,
+          "websocket": 0,
+          "continuations": 0
+        }
+      }
+    },
+    {
+      "file": "raw/baseline-ws-1.json",
+      "sha256": "3a9ef41ba8b58995bf301f67e895167969999f14c77b86a6fa6b1049a6a27bfc",
+      "provenance": {
+        "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          12.09716796875,
+          21.01123046875,
+          20.50390625
+        ],
+        "startedAt": "2026-10-11T23:17:14Z",
+        "finishedAt": "2026-10-11T23:17:29Z",
+        "loadAverageFinish": [
+          11.04150390625,
+          20.34033203125,
+          20.2724609375
+        ]
+      },
+      "transportAudit": {
+        "vector-openai-long-loop-1": {
+          "http": 1,
+          "websocket": 12,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 1,
+          "websocket": 12,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        },
+        "codex-long-loop-2": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        }
+      }
+    },
+    {
+      "file": "raw/baseline-ws-2.json",
+      "sha256": "deb4684a0c0998a5f3b16cead5e2ab6d44bd30b61bcf61a77c3ebbc3b1a51c54",
+      "provenance": {
+        "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          10.1123046875,
+          19.8349609375,
+          20.09326171875
+        ],
+        "startedAt": "2026-10-11T23:17:40Z",
+        "finishedAt": "2026-10-11T23:17:54Z",
+        "loadAverageFinish": [
+          9.43505859375,
+          19.21875,
+          19.869140625
+        ]
+      },
+      "transportAudit": {
+        "vector-openai-long-loop-1": {
+          "http": 1,
+          "websocket": 12,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 1,
+          "websocket": 12,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        },
+        "codex-long-loop-2": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        }
+      }
+    },
+    {
+      "file": "raw/baseline-ws-3.json",
+      "sha256": "f8462975b46ef51cecb6a4d02b4f575de2f25727941ee1bcc2caabfafde1c6da",
+      "provenance": {
+        "revision": "c46b66efabb67ee5cb00d18391fb7a401fd8154b",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          9.146484375,
+          18.8330078125,
+          19.72412109375
+        ],
+        "startedAt": "2026-10-11T23:18:04Z",
+        "finishedAt": "2026-10-11T23:18:20Z",
+        "loadAverageFinish": [
+          8.8427734375,
+          18.2861328125,
+          19.51318359375
+        ]
+      },
+      "transportAudit": {
+        "vector-openai-long-loop-1": {
+          "http": 1,
+          "websocket": 12,
+          "continuations": 0
+        },
+        "vector-openai-long-loop-2": {
+          "http": 1,
+          "websocket": 12,
+          "continuations": 0
+        },
+        "codex-long-loop-1": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        },
+        "codex-long-loop-2": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        }
+      }
+    },
+    {
+      "file": "raw/integrated-ws-1.json",
+      "sha256": "21b60a5fc9e897d07d9f43b2c0f1307b3e1b73f68066a7ed296ec9ffe18a6050",
+      "provenance": {
+        "revision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          11.04150390625,
+          20.34033203125,
+          20.2724609375
+        ],
+        "startedAt": "2026-10-11T23:17:29Z",
+        "finishedAt": "2026-10-11T23:17:40Z",
+        "loadAverageFinish": [
+          10.1123046875,
+          19.8349609375,
+          20.09326171875
+        ]
+      },
+      "transportAudit": {
+        "vector-openai-long-loop-1": {
+          "http": 0,
+          "websocket": 12,
+          "continuations": 11
+        },
+        "vector-openai-long-loop-2": {
+          "http": 0,
+          "websocket": 12,
+          "continuations": 11
+        },
+        "codex-long-loop-1": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        },
+        "codex-long-loop-2": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        }
+      }
+    },
+    {
+      "file": "raw/integrated-ws-2.json",
+      "sha256": "094c4617ad3162b236cd86cc91233167d46c00f5a488b4f839df29b37fe8b065",
+      "provenance": {
+        "revision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          9.43505859375,
+          19.21875,
+          19.869140625
+        ],
+        "startedAt": "2026-10-11T23:17:54Z",
+        "finishedAt": "2026-10-11T23:18:04Z",
+        "loadAverageFinish": [
+          9.146484375,
+          18.8330078125,
+          19.72412109375
+        ]
+      },
+      "transportAudit": {
+        "vector-openai-long-loop-1": {
+          "http": 0,
+          "websocket": 12,
+          "continuations": 11
+        },
+        "vector-openai-long-loop-2": {
+          "http": 0,
+          "websocket": 12,
+          "continuations": 11
+        },
+        "codex-long-loop-1": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        },
+        "codex-long-loop-2": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        }
+      }
+    },
+    {
+      "file": "raw/integrated-ws-3.json",
+      "sha256": "c770f61476eef1027bcb829d528a409564ddd6084378cc584b660a1f3e8bc428",
+      "provenance": {
+        "revision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "harnessRevision": "c1a48d18ceaf0fdfc2bf98e84cb50a01ed8f6cd7",
+        "loadAverageStart": [
+          8.8427734375,
+          18.2861328125,
+          19.51318359375
+        ],
+        "startedAt": "2026-10-11T23:18:20Z",
+        "finishedAt": "2026-10-11T23:18:33Z",
+        "loadAverageFinish": [
+          8.8212890625,
+          17.828125,
+          19.328125
+        ]
+      },
+      "transportAudit": {
+        "vector-openai-long-loop-1": {
+          "http": 0,
+          "websocket": 12,
+          "continuations": 11
+        },
+        "vector-openai-long-loop-2": {
+          "http": 0,
+          "websocket": 12,
+          "continuations": 11
+        },
+        "codex-long-loop-1": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        },
+        "codex-long-loop-2": {
+          "http": 0,
+          "websocket": 13,
+          "continuations": 12
+        }
+      }
+    }
+  ],
+  "excludedReports": [
+    {
+      "file": "invalid/invalid-ws-pilot-baseline-ws-1.json",
+      "sha256": "6132a4a42402ababa2b7fabe2739f61c821909b3f93590846eac72663ae0b75b",
+      "reason": "Codex continuation tool definitions were not reconstructed; script incomplete.",
+      "payloadEncoding": "utf16-code-units"
+    },
+    {
+      "file": "invalid/invalid-ws-http-control-integrated-ws-1.json",
+      "sha256": "ffeabc830a0ed96bd93822673a2b83535a6c707e09535ef4534e678973418122",
+      "reason": "Vector primary traffic stayed on HTTP because synthetic stored auth was missing; not a Vector WebSocket measurement.",
+      "payloadEncoding": "utf16-code-units"
+    },
+    {
+      "file": "invalid/invalid-ws-http-control-baseline-ws-1.json",
+      "sha256": "ef43062d871fba7b5999aef2c783b7fe9ffe2a158645394cca64602da5fc7c7c",
+      "reason": "Vector primary traffic stayed on HTTP because synthetic stored auth was missing; not a Vector WebSocket measurement.",
+      "payloadEncoding": "utf16-code-units"
+    },
+    {
+      "file": "invalid/invalid-ws-http-control-baseline-ws-3.json",
+      "sha256": "0e914afc716831a169bcf429eac2d794867549232d98b367a57a9dd14b5fcfb3",
+      "reason": "Vector primary traffic stayed on HTTP because synthetic stored auth was missing; not a Vector WebSocket measurement.",
+      "payloadEncoding": "utf16-code-units"
+    },
+    {
+      "file": "invalid/invalid-ws-http-control-baseline-ws-2.json",
+      "sha256": "0f9cf794762cd422c518b188f4f4b9afb25b362afa9d227335d86efe2e6f14c5",
+      "reason": "Vector primary traffic stayed on HTTP because synthetic stored auth was missing; not a Vector WebSocket measurement.",
+      "payloadEncoding": "utf16-code-units"
+    },
+    {
+      "file": "invalid/invalid-ws-http-control-integrated-ws-3.json",
+      "sha256": "97f541584dc148a4ae34230f26a91d14b6c1e901bc8948fe8b11e9e789337410",
+      "reason": "Vector primary traffic stayed on HTTP because synthetic stored auth was missing; not a Vector WebSocket measurement.",
+      "payloadEncoding": "utf16-code-units"
+    },
+    {
+      "file": "invalid/invalid-ws-http-control-integrated-ws-2.json",
+      "sha256": "0bcd3b6ef0fb9a38531add58a492967871439fc1c306d5cf01ef7294c4d25a27",
+      "reason": "Vector primary traffic stayed on HTTP because synthetic stored auth was missing; not a Vector WebSocket measurement.",
+      "payloadEncoding": "utf16-code-units"
+    }
+  ],
+  "rawReportBytesField": "All canonical reports use native UTF-8 JSON payload bytes. WebSocket bytes include the response.create envelope. HTTP headers, framing, and compression are excluded.",
+  "auditCounts": {
+    "requests": 1890,
+    "http": 1590,
+    "websocket": 300,
+    "cells": 216,
+    "finalFixtureChecks": 144
+  },
+  "harnessFiles": {
+    "script/agent-eval/footprint.ts": "ba067fe92c497f63e527895454deeadb1f2cc67fea5b2e6a3f99ba8c933a8a6f",
+    "script/agent-eval/prompt-cache.ts": "c9d828d5a361c381fbbcbae5a1a6b970b3bcc72877473a579272d2fe2de3bc94",
+    "script/agent-eval/tasks.ts": "d2d4cefc701933bff39a0a40bf82dad5b937577afcf3499bdcd066473bbd0e22"
+  }
+}
