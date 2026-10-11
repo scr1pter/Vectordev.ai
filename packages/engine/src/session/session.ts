@@ -32,7 +32,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { MessageTable, PartTable, SessionTable } from "@vectordevai/core/session/sql"
+import { MessageTable, PartTable, SessionMessageTable, SessionTable } from "@vectordevai/core/session/sql"
 import { subagentTokens } from "@vectordevai/core/session/info"
 import { ProjectTable } from "@vectordevai/core/project/sql"
 import { MessageV2 } from "./message-v2"
@@ -750,16 +750,41 @@ const layer: Layer.Layer<
         .where(isNotNull(SessionTable.internal))
         .all()
         .pipe(Effect.orDie)
+      // Sessions prompted through the V2 path (parallel agents, automations, the swarm planner) keep their steps as
+      // session messages. Only the fields usage needs are read, not each step's content.
+      const steps = yield* db
+        .select({
+          id: SessionMessageTable.id,
+          sessionID: SessionMessageTable.session_id,
+          type: SessionMessageTable.type,
+          created: SessionMessageTable.time_created,
+          completed: sql<number | null>`json_extract(${SessionMessageTable.data}, '$.time.completed')`,
+          agent: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.agent')`,
+          model: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.model')`,
+          cost: sql<number | null>`json_extract(${SessionMessageTable.data}, '$.cost')`,
+          unpriced: sql<number | null>`json_extract(${SessionMessageTable.data}, '$.unpriced')`,
+          tokens: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.tokens')`,
+          finish: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.finish')`,
+          error: sql<string | null>`json_extract(${SessionMessageTable.data}, '$.error')`,
+        })
+        .from(SessionMessageTable)
+        .where(inArray(SessionMessageTable.type, ["user", "assistant", "compaction"]))
+        .orderBy(SessionMessageTable.session_id, SessionMessageTable.seq)
+        .all()
+        .pipe(Effect.orDie)
       return summarizeUsage(
-        rows.flatMap((row) =>
-          // `data` holds only the message body; `id`/`sessionID` live in columns but are
-          // required by the schema, so merge them back before decoding — otherwise every
-          // row fails to decode and usage collapses to zero. Mirrors MessageV2's `info(row)`.
-          Option.match(decode({ ...row.data, id: row.id, sessionID: row.sessionID }), {
-            onNone: () => [],
-            onSome: (message) => [message],
-          }),
-        ),
+        [
+          ...rows.flatMap((row) =>
+            // `data` holds only the message body; `id`/`sessionID` live in columns but are
+            // required by the schema, so merge them back before decoding — otherwise every
+            // row fails to decode and usage collapses to zero. Mirrors MessageV2's `info(row)`.
+            Option.match(decode({ ...row.data, id: row.id, sessionID: row.sessionID }), {
+              onNone: () => [],
+              onSome: (message) => [message],
+            }),
+          ),
+          ...stepUsage(steps),
+        ],
         ancillary.map((event) => Schema.decodeUnknownSync(SessionEvent.AncillaryUsage.data)(event.data)),
         new Map(helpers.flatMap((row) => (row.internal ? [[row.id, row.internal] as const] : []))),
       )
@@ -1141,6 +1166,64 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
     { concurrency: "unbounded", discard: true },
   )
 })
+
+const decodeStepTokens = Schema.decodeUnknownOption(Schema.fromJsonString(Tokens))
+const decodeStepModel = Schema.decodeUnknownOption(Schema.fromJsonString(Model))
+
+// V2 steps in the shape usage summarizes, rows ordered by session and sequence. A step is attributed to the prompt
+// before it, as a v1 response is to its user message; a compaction summary, which names no model, to the model of the
+// step before it, and is marked as a summary as v1 marks its compactions.
+export function stepUsage(
+  rows: ReadonlyArray<{
+    id: string
+    sessionID: SessionID
+    type: string
+    created: number
+    completed: number | null
+    agent: string | null
+    model: string | null
+    cost: number | null
+    unpriced: number | null
+    tokens: string | null
+    finish: string | null
+    error: string | null
+  }>,
+) {
+  const prompt = new Map<string, MessageID>()
+  const model = new Map<string, typeof Model.Type>()
+  return rows.flatMap((row): (typeof SessionV1.Assistant.Type)[] => {
+    if (row.type === "user") {
+      prompt.set(row.sessionID, MessageID.make(row.id))
+      return []
+    }
+    const stepModel = Option.getOrUndefined(decodeStepModel(row.model)) ?? model.get(row.sessionID)
+    if (stepModel) model.set(row.sessionID, stepModel)
+    const tokens = Option.getOrUndefined(decodeStepTokens(row.tokens))
+    if (!stepModel || !tokens || row.cost === null) return []
+    return [
+      {
+        id: MessageID.make(row.id),
+        sessionID: row.sessionID,
+        role: "assistant",
+        parentID: prompt.get(row.sessionID) ?? MessageID.make(row.id),
+        time: { created: row.created, ...(row.completed === null ? {} : { completed: row.completed }) },
+        modelID: stepModel.id,
+        providerID: stepModel.providerID,
+        ...(stepModel.variant ? { variant: stepModel.variant } : {}),
+        mode: row.agent ?? "",
+        agent: row.agent ?? "",
+        path: { cwd: "", root: "" },
+        cost: row.cost,
+        tokens,
+        ...(row.unpriced ? { unpriced: true } : {}),
+        ...(row.type === "compaction" ? { summary: true } : {}),
+        ...(row.finish ? { finish: row.finish } : {}),
+        // Only whether the step failed matters to usage; the error itself stays in the session.
+        ...(row.error ? { error: { name: "UnknownError", data: { message: "The step failed." } } } : {}),
+      },
+    ]
+  })
+}
 
 // helpers maps each helper session to the helper that ran it. Their tokens and cost count like any other; they are not
 // conversations or tasks of the user's, so they are left out of those counts and reported per helper instead.

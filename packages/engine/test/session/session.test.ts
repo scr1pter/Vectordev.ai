@@ -2,6 +2,7 @@ import { describe, expect } from "bun:test"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { EventV2 } from "@vectordevai/core/event"
 import { SessionEvent } from "@vectordevai/schema/session-event"
+import { SessionMessage } from "@vectordevai/schema/session-message"
 import { ModelV2 } from "@vectordevai/core/model"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { SessionProjector } from "@vectordevai/core/session/projector"
@@ -570,6 +571,52 @@ describe("helper sessions", () => {
 
       yield* sessions.remove(standalone.id)
       yield* sessions.remove(launcher.id)
+    }),
+  )
+})
+
+describe("usage of V2 sessions", () => {
+  it.instance("counts the steps of sessions run through the V2 prompt path, helpers included", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionNs.Service
+      const events = yield* EventV2.Service
+      const task = yield* sessions.create({ title: "Split the billing module" })
+      const planner = yield* sessions.create({ parentID: task.id, internal: "swarm.planner", title: "Swarm planner" })
+      const model = { id: ModelV2.ID.make("planner-model"), providerID: ProviderV2.ID.make("anthropic") }
+      const assistantMessageID = SessionMessage.ID.make("msg_planner_step")
+      yield* events.publish(SessionEvent.Prompted, {
+        sessionID: planner.id,
+        timestamp: DateTime.makeUnsafe(Date.now()),
+        messageID: SessionMessage.ID.make("msg_planner_prompt"),
+        prompt: { text: "Plan the work" },
+        delivery: "steer",
+      })
+      yield* events.publish(SessionEvent.Step.Started, {
+        sessionID: planner.id,
+        timestamp: DateTime.makeUnsafe(Date.now()),
+        assistantMessageID,
+        agent: "explore",
+        model,
+      })
+      yield* events.publish(SessionEvent.Step.Ended, {
+        sessionID: planner.id,
+        timestamp: DateTime.makeUnsafe(Date.now() + 5),
+        assistantMessageID,
+        finish: "stop",
+        cost: 0.4,
+        tokens: { input: 3_000, output: 500, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+
+      expect(yield* sessions.get(task.id)).toMatchObject({ subagentCost: 0.4 })
+      const usage = yield* sessions.usage()
+      expect(usage.lifetimeCost).toBeCloseTo(0.4)
+      expect(usage.lifetimeTokens).toBe(3_500)
+      expect(usage.favoriteModels).toEqual([
+        { providerID: "anthropic", modelID: "planner-model", tokens: 3_500, responses: 1, percentage: 100 },
+      ])
+      expect(usage.conversations).toBe(0)
+      expect(usage.helpers).toEqual([{ id: "swarm.planner", sessions: 1, responses: 1, tokens: 3_500, cost: 0.4 }])
+      yield* sessions.remove(task.id)
     }),
   )
 })
