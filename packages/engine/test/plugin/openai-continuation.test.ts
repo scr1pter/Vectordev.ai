@@ -39,6 +39,25 @@ function completed(body: Record<string, unknown>, output: unknown[] = [reasoning
 }
 
 describe("plugin.openai.continuation", () => {
+  test("retains a bounded prefix digest and compares reordered object keys structurally", () => {
+    const text = "large history ".repeat(100_000)
+    const first = { ...settings, input: [{ role: "user", content: text }] }
+    const state = completed(first)
+    expect(JSON.stringify(state).length).toBeLessThan(2_000)
+    const next = OpenAIContinuation.request(state, {
+      ...settings,
+      input: [{ content: text, role: "user" }, resentReasoning, resentCall, result],
+    })
+    expect(next.continued).toBe(true)
+    expect(next.body.input).toEqual([result])
+    expect(
+      OpenAIContinuation.request(state, {
+        ...settings,
+        input: [{ content: `${text}!`, role: "user" }, resentReasoning, resentCall, result],
+      }).continued,
+    ).toBe(false)
+  })
+
   test("continues with only the items after the previous response", () => {
     const first = { ...settings, stream: true, input: [user] }
     const state = completed(first)

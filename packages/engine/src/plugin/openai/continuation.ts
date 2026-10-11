@@ -4,6 +4,7 @@
 // that cannot be proven equal is sent in full.
 
 import { isDeepStrictEqual } from "node:util"
+import { createHash } from "node:crypto"
 import { Option, Schema } from "effect"
 import { isRecord } from "@/util/record"
 
@@ -11,8 +12,8 @@ const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 
 export type State = {
   responseID: string
-  settings: Record<string, unknown>
-  input: unknown[]
+  settings: string
+  input: { length: number; hash: string }
   output: unknown[]
 }
 
@@ -53,7 +54,7 @@ export function tracker() {
     observe(event: Record<string, unknown>) {
       if (event.type === "response.output_item.added" || event.type === "response.output_item.done") {
         const index = event.output_index
-        if (typeof index !== "number") {
+        if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0) {
           uncertain = true
           return
         }
@@ -79,7 +80,12 @@ export function tracker() {
       const output =
         items.size > 0 ? Array.from({ length: items.size }, (_, index) => items.get(index)) : (listed ?? [])
       if (output.length === 0) return
-      return { responseID, settings: settings(body), input: body.input, output }
+      return {
+        responseID,
+        settings: fingerprint(settings(body)),
+        input: { length: body.input.length, hash: fingerprint(body.input) },
+        output,
+      }
     },
   }
 }
@@ -93,14 +99,47 @@ function delta(state: State | undefined, body: Record<string, unknown>) {
   const input = body.input
   const known = state.input.length + state.output.length
   if (input.length <= known) return
-  if (!isDeepStrictEqual(settings(body), state.settings)) return
-  if (!state.input.every((item, index) => isDeepStrictEqual(item, input[index]))) return
+  if (fingerprint(settings(body)) !== state.settings) return
+  if (fingerprint(input.slice(0, state.input.length)) !== state.input.hash) return
   if (!state.output.every((item, index) => resent(item, input[state.input.length + index]))) return
   return input.slice(known)
 }
 
 function settings(body: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(body).filter(([key]) => !DELIVERY.has(key)))
+}
+
+// Retain a bounded digest instead of each session's full conversation and tool definitions. Sorting object keys
+// preserves the structural comparison even when a caller changes JSON property order; array order stays significant.
+function fingerprint(value: unknown) {
+  const hash = createHash("sha256")
+  const visit = (item: unknown) => {
+    if (Array.isArray(item)) {
+      hash.update("[")
+      item.forEach((entry) => {
+        visit(entry)
+        hash.update(",")
+      })
+      hash.update("]")
+      return
+    }
+    if (isRecord(item)) {
+      hash.update("{")
+      Object.keys(item)
+        .sort()
+        .forEach((key) => {
+          hash.update(JSON.stringify(key))
+          hash.update(":")
+          visit(item[key])
+          hash.update(",")
+        })
+      hash.update("}")
+      return
+    }
+    hash.update(JSON.stringify(item) ?? "undefined")
+  }
+  visit(value)
+  return hash.digest("hex")
 }
 
 // Whether `item`, as the client sends it back, is the output item the server produced. Item IDs, status and empty

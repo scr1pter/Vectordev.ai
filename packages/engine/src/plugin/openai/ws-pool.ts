@@ -186,11 +186,15 @@ export function createWebSocketFetch(options?: CreateWebSocketFetchOptions) {
           })
           entry.busy = false
           entry.lastUsedAt = Date.now()
-          entry.streamFailures = 0
           if (!completed) {
+            // Protocol error frames can arrive after a successful handshake. Count them towards the same retry
+            // budget as a broken stream, without replaying an uncertain request or losing its reported error.
+            if (event.type === "response.incomplete") entry.streamFailures = 0
+            else recordStreamFailure(entry)
             invalidate(entry)
             return
           }
+          entry.streamFailures = 0
           entry.continuation = tracker.state(body)
         },
         onConnectionInvalid: (error) => {

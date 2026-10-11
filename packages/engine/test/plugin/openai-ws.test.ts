@@ -505,6 +505,34 @@ describe("plugin.openai.ws-pool", () => {
     fetch.close()
   })
 
+  test("counts protocol error frames towards fallback without replaying the failed request", async () => {
+    let connections = 0
+    await using server = await createWebSocketServer((socket) => {
+      connections++
+      socket.once("message", () =>
+        socket.send(
+          JSON.stringify({
+            type: "error",
+            status: 503,
+            error: { type: "server_error", message: "WebSocket unavailable" },
+          }),
+        ),
+      )
+    })
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ url: server.url, streamRetries: 1 })
+    const first = await fetch(server.url, streamRequest())
+    expect(first.status).toBe(503)
+    await first.text()
+    const second = await fetch(server.url, streamRequest())
+    expect(second.status).toBe(503)
+    await second.text()
+    expect(server.httpRequests).toHaveLength(0)
+    expect(await (await fetch(server.url, streamRequest())).text()).toBe("http")
+    expect(connections).toBe(2)
+    expect(server.httpRequests).toHaveLength(1)
+    fetch.close()
+  })
+
   test("fails mid-stream wrapped websocket errors as HTTP-style API errors", async () => {
     const event = {
       type: "error",
