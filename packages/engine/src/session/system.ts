@@ -210,6 +210,12 @@ export type EnvironmentOptions = {
   tools?: readonly string[]
   /** This is a subagent's own session: it reports to its parent, never to the user. */
   nested?: boolean
+  /**
+   * When the history the model is shown starts (its first user message), in epoch milliseconds. Its day is the date
+   * the environment states, so the prompt does not change from step to step or at midnight; a later day reaches the
+   * model as a note on the user message that starts it (SessionReminders.dates). Defaults to now.
+   */
+  date?: number
 }
 
 export interface Interface {
@@ -251,7 +257,7 @@ const layer = Layer.effect(
             `  Workspace root folder: ${ctx.worktree}`,
             `  Is directory a git repo: ${ctx.project.vcs === "git" ? "yes" : "no"}`,
             `  Platform: ${process.platform}`,
-            `  Today's date: ${new Date().toDateString()}`,
+            `  Today's date: ${new Date(options?.date ?? Date.now()).toDateString()}`,
             `</env>`,
           ].join("\n"),
           references.length === 0

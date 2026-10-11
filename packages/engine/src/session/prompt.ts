@@ -1326,11 +1326,14 @@ const layer = Layer.effect(
         }
         const maxSteps = agent.steps ?? Infinity
         const isLastStep = step >= maxSteps
+        const quick = agent.name === "quick" || agent.name === "autocomplete"
         msgs = yield* SessionReminders.apply({ messages: msgs, agent, session }).pipe(
           Effect.provideService(RuntimeFlags.Service, flags),
           Effect.provideService(FSUtil.Service, fsys),
           Effect.provideService(Session.Service, sessions),
         )
+        // A quick agent is given no environment, so it is given no date either.
+        if (!quick) msgs = SessionReminders.dates(msgs)
 
         const msg: SessionV1.Assistant = {
           id: MessageID.ascending(),
@@ -1406,7 +1409,6 @@ const layer = Layer.effect(
 
           yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-          const quick = agent.name === "quick" || agent.name === "autocomplete"
           // Policies for a tool go only with a request that offers it, after this agent's permissions remove what it
           // may not use, as the request itself is built.
           const offered = Object.keys(
@@ -1434,6 +1436,8 @@ const layer = Layer.effect(
                       },
                       tools: offered,
                       nested: session.parentID !== undefined,
+                      // The day the history starts on; a later day is noted on the user message that starts it.
+                      date: msgs.find((message) => message.info.role === "user")?.info.time.created,
                     }),
                   ),
                 ),

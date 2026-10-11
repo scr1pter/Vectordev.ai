@@ -17,6 +17,30 @@ import PLAN_MODE from "./prompt/plan-mode.txt"
 export const PLAN_STILL_ACTIVE =
   "<system-reminder>Plan mode is still active: the read-only rules of the plan mode reminder above still apply.</system-reminder>"
 
+/**
+ * The environment states the day the history starts on (SystemPrompt.environment), so the system prompt, and the cached
+ * prefix it starts, stay the same from step to step and across midnight. A user message sent on a later day than the
+ * user message before it carries a note with the new date instead. The notes are worked out from the history alone, so
+ * every earlier message renders the same on every request.
+ */
+export function dates(messages: SessionV1.WithParts[]) {
+  messages.reduce<string | undefined>((day, message) => {
+    if (message.info.role !== "user") return day
+    const today = new Date(message.info.time.created).toDateString()
+    if (day === undefined || today === day) return today
+    message.parts.push({
+      id: PartID.ascending(),
+      messageID: message.info.id,
+      sessionID: message.info.sessionID,
+      type: "text",
+      text: `<system-reminder>The date is now ${today}.</system-reminder>`,
+      synthetic: true,
+    })
+    return today
+  }, undefined)
+  return messages
+}
+
 export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   messages: SessionV1.WithParts[]
   agent: Agent.Info
