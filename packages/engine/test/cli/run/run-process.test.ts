@@ -5,6 +5,7 @@
 // `VECTOR_CONFIG_CONTENT` providing the test provider config inline.
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
+import { realpath } from "node:fs/promises"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
 
@@ -31,12 +32,17 @@ describe("vector run (non-interactive subprocess)", () => {
   // If this fails, all the others likely will too — debug here first.
   cliIt.concurrent(
     "exits 0 and writes the response to stdout on a successful prompt",
-    ({ llm, vector }) =>
+    ({ home, llm, vector }) =>
       Effect.gen(function* () {
         yield* llm.text("hello from the test llm")
-        const result = yield* vector.run("say hi")
+        // A parent process can retain its own PWD when it spawns the CLI in another directory.
+        const result = yield* vector.run("say hi", { env: { PWD: process.cwd() } })
         vector.expectExit(result, 0)
         expect(result.stdout).toBe("hello from the test llm\n")
+        const directory = yield* Effect.promise(() => realpath(home))
+        expect(JSON.stringify(yield* llm.inputs)).toContain(
+          JSON.stringify(`Working directory: ${directory}`).slice(1, -1),
+        )
       }),
     60_000,
   )

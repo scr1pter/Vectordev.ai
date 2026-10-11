@@ -1,7 +1,7 @@
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { Cause, Deferred, Effect, Exit, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Layer, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import type * as Scope from "effect/Scope"
 import os from "os"
@@ -1474,12 +1474,46 @@ describe("tool.shell truncation", () => {
         // 12,000 numbered lines is about 64KB: past the 30KB shell budget, under the generic line cap.
         const result = yield* run({ command: fill("lines", 12_000) })
         mustTruncate(result)
-        const lines = result.output.split("\n")
+        const lines = result.output.split(/\r?\n/)
         // A build prints the failing step early and the summary late, so both ends survive.
         expect(lines).toContain("1")
         expect(lines).toContain("12000")
         expect(result.output).toMatch(/\.\.\.\d+ bytes omitted\.\.\./)
         expect(Buffer.byteLength(result.output, "utf-8")).toBeLessThan(31_000 + 500)
+      }),
+    ),
+  )
+
+  it.live("preserves the output tail when a large pipe chunk is followed by only a newline", () =>
+    runIn(
+      projectRoot,
+      Effect.gen(function* () {
+        const result = yield* run({ command: fill("lines", 12_000) }).pipe(
+          Effect.updateService(ChildProcessSpawner.ChildProcessSpawner, (real) =>
+            ChildProcessSpawner.make((command) =>
+              real.spawn(command).pipe(
+                Effect.map((handle) =>
+                  ChildProcessSpawner.makeHandle({
+                    ...handle,
+                    // Windows can deliver console.log's content and final newline separately.
+                    all: Stream.unwrap(
+                      Stream.runCollect(handle.all).pipe(
+                        Effect.map((chunks) => {
+                          const bytes = Buffer.concat(chunks)
+                          return Stream.make(bytes.subarray(0, -1), bytes.subarray(-1))
+                        }),
+                      ),
+                    ),
+                  }),
+                ),
+              ),
+            ),
+          ),
+        )
+        mustTruncate(result)
+        expect(result.output.split(/\r?\n/)).toContain("12000")
+        expect(result.output.split(/\r?\n/)).toContain("1")
+        expect(Buffer.byteLength(result.output, "utf-8")).toBeLessThan(31_500)
       }),
     ),
   )
