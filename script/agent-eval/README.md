@@ -131,29 +131,64 @@ more efficient agent.
 
 ## Request cost without a model
 
-`footprint.ts` measures what Vector sends, with no API key, no network and no
-model variance. It runs the real `vector run` against a local fake model server
-that plays a fixed script of tool calls on one of the fixtures, records every
-request, and prices each one under Anthropic's prompt-caching rules (Claude
-Sonnet 4.5 list prices, 5-minute cache writes, breakpoints as the request
-places them, nothing under 1,024 tokens cached).
+`footprint.ts` measures what an agent sends, with no API key, no network and no
+model variance. It runs the real `vector run` (or the Claude Code or Codex CLI)
+against a local fake model server that plays a fixed script of tool calls on one
+of the fixtures, records every request, and prices each one under the
+provider's prompt-caching rules (`prompt-cache.ts`):
+
+- **Anthropic Messages** (`vector`, `claude-code`): Claude Sonnet 4.5 list
+  prices, 5-minute cache writes, breakpoints as the request places them,
+  nothing under 1,024 tokens cached.
+- **OpenAI Responses** (`vector-openai`, Vector with an OpenAI API key, and
+  `codex`): the longest prefix seen before is read, to the token, in 128-token
+  steps from 1,024 tokens, and writing is free. Priced at the October 2026 live
+  archive's gpt-6.1-sol rates ($2 input, $0.10 cached input, $10 output per
+  million tokens). An input item's own id is not prompt text and is not part of
+  the prefix. A request that names `previous_response_id` is priced on the whole
+  context the provider rebuilds, and a `generate:false` warmup is a request of
+  its own (`warmup`), so nothing is hidden.
+
+The cache lasts for the whole harness run, one per runtime, as a provider keeps
+an account's prefixes between sessions. `--sessions 2` runs every scenario twice
+in fresh directories, so the second session's first request shows how much of
+its prefix the first one already warmed (`1ST READ`).
 
 ```
 bun script/agent-eval/footprint.ts
 bun script/agent-eval/footprint.ts --scenario delegate-explore --out report.json
+bun script/agent-eval/footprint.ts --runtime vector,claude-code --sessions 2
+bun script/agent-eval/footprint.ts --runtime vector-openai,codex --codex /path/to/codex --sessions 2
+bun script/agent-eval/footprint.ts --runtime vector-openai --openai-model gpt-6.1-sol --dump requests/
 ```
 
+`--openai-model` picks the model Vector (and Codex) ask for, `--codex-model`
+Codex's alone; `--dump <dir>` writes every request body and its headers;
+`--ws` lets Codex use the Responses API over a WebSocket, as it does with a
+ChatGPT sign-in (warmup plus `previous_response_id` continuations). The Claude
+Code and Codex CLIs, version check included, start from an empty environment
+and a throwaway HOME whose config points only at the fake server, so they never
+read real settings or credentials.
+
 Per request it reports the system prompt, tool definitions and messages, the
-input read from and written to the cache, and the cost; per scenario the share
-of input read from the cache, the fixed tokens every request pays, the cost with
-and without caching, and the size of each tool definition for the main agent and
-for a subagent. The same build always gives the same numbers, so run it before
-and after a change to see exactly what the change saved. Tokens are estimated as
-characters / 4, the same way everywhere.
+input read from and written to the cache, the bytes sent and the cost; per
+scenario the share of input read from the cache, the first request's cached and
+uncached input, the fixed tokens every request pays, the cost with and without
+caching, and the size of each tool definition for the main agent and for a
+subagent. The same build always gives the same numbers, so run it before and
+after a change to see exactly what the change saved. Tokens are estimated as
+characters / 4, the same way everywhere. Compare costs only between runtimes on
+the same API.
 
 Scenarios: `solo-fix` (run the tests, read, edit, re-run), `delegate-explore`
-(an explore subagent finds the bug, the parent fixes it) and `long-loop` (a
-12-step investigation, to show how the cache holds up as a loop grows).
+(an explore subagent finds the bug, the parent fixes it), `delegate-general` (a
+general subagent does the fix, the parent checks it) and `long-loop` (a 12-step
+investigation, to show how the cache holds up as a loop grows).
+
+What it cannot show: how a real provider routes requests between cache
+machines (prompt_cache_key, request rates), how long it keeps a prefix, or
+anything about output length or the number of turns a model chooses. Those need
+a live check.
 
 ## Unavailable is not zero
 
