@@ -704,6 +704,12 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
         setData("session_status", props.sessionID, reconcile(props.status))
         return
       }
+      // Ancillary spend, such as the title request, changes this session's cost without a session.updated event
+      // when no title follows. Re-read that one session; a directory re-bootstrap reloads the whole model catalog.
+      case "session.next.ancillary.usage": {
+        if (eventID && data.info[eventID]) void resolve(eventID, { force: true }).catch(() => {})
+        return
+      }
       case "message.updated": {
         const info = cleanMessage((event.properties as { info: Message }).info)
         const load = messageLoads.get(info.sessionID)
