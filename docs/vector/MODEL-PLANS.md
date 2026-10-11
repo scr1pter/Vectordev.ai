@@ -6,7 +6,7 @@ The public `/codium` pricing page (`/pricing` redirects to it) shows the offerin
 
 The page tells buyers that Codium works in the Vector desktop app and CLI, so keep `MODEL_PLANS_ENABLED=false` until a published desktop and CLI release includes the Vector Codium provider. Its balance answer names only the account page; when that release shows Codium balances in the app, name the app there as well.
 
-Customer-facing amounts use **100 Codium credits per internal USD credit**: the five default purchases include 800, 1,600, 4,000, 8,000 and 16,000 credits. This is a display conversion only; the backend continues accounting in provider-cost USD. Pricing cards show purchase price, credits and estimated tokens, without an internal markup or supplier-cost table. The estimates are computed from public model prices, so a reader who knows those prices can approximate the markup from them; only dropping the estimates would prevent that. Estimates assume 80% input and 20% output and span the configured models' price ceilings. They are not guaranteed token allotments. Renewal, expiration, carry-forward and cancellation terms remain visible before purchase; `/legal/terms#codium` describes variable consumption and preserves billing-error remedies and mandatory consumer rights.
+Customer-facing amounts use **100 Codium credits per internal USD credit**: the four default purchases include 800, 4,000, 8,000 and 16,000 credits. This is a display conversion only; the backend continues accounting in provider-cost USD. Pricing cards show purchase price, credits and estimated tokens, without an internal markup or supplier-cost table. The estimates are computed from public model prices, so a reader who knows those prices can approximate the markup from them; only dropping the estimates would prevent that. Estimates assume 80% input and 20% output and span the configured models' price ceilings. They are not guaranteed token allotments. Renewal, expiration, carry-forward and cancellation terms remain visible before purchase; `/legal/terms#codium` describes variable consumption and preserves billing-error remedies and mandatory consumer rights.
 
 ## Pricing and margin
 
@@ -15,7 +15,6 @@ The starting markup is 25% on model cost, configurable through `MODEL_CREDIT_MAR
 | Purchase | Included model credits | Difference before fees and expenses |
 | -------- | ---------------------- | ----------------------------------- |
 | $10      | $8                     | $2                                  |
-| $20      | $16                    | $4                                  |
 | $50      | $40                    | $10                                 |
 | $100     | $80                    | $20                                 |
 | $200     | $160                   | $40                                 |
@@ -62,7 +61,7 @@ Server secrets belong in the hosting environment, never in client builds or the 
 - `MODEL_CREDIT_MARKUP_PERCENT=25` sets default purchase-to-credit conversion.
 - `MODEL_PLAN_<price>_CREDITS_USD` and `MODEL_TOPUP_<price>_CREDITS_USD` optionally override the default allowance; valid values are greater than zero and no greater than the purchase price.
 - `MODEL_PLAN_MODELS_JSON` optionally overrides the catalog. Blank uses the reviewed defaults; `[]` intentionally offers no models.
-- `STRIPE_MODEL_PLAN_<price>_PRICE_ID` and `STRIPE_MODEL_TOPUP_<price>_PRICE_ID` map each of the five prices to recurring and one-time prices respectively.
+- `STRIPE_MODEL_PLAN_<price>_PRICE_ID` and `STRIPE_MODEL_TOPUP_<price>_PRICE_ID` map each of the four prices ($10, $50, $100 and $200) to recurring and one-time prices respectively.
 - Stripe secret, webhook secret and portal configuration; OpenRouter management key; a stable 32-byte AES encryption secret encoded as 64 hex characters; existing Vector/Supabase authentication and persistent Redis/Valkey REST configuration.
 
 `bun scripts/setup-model-plans.ts` is a **dry run by default** and shows prices/allowances without connecting to Stripe. Its explicit `--apply` adapter can later create/reuse products and the cancellation portal in the intended test account. Do not run `--apply` until the owner resumes Stripe setup. Register `/api/model-plans/webhook` using API version `2025-02-24.acacia`, with checkout, payment, subscription, invoice, charge/refund and dispute events. Keep sales disabled until the full test flow is verified.

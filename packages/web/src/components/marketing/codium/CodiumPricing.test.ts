@@ -107,7 +107,7 @@ describe("Codium pricing page", () => {
       const text = html.replace(/<[^>]+>/g, "\n")
       // Whatever follows "Everything in <tier>" up to the end of that card never names an amount of credits or tokens.
       const carried = [...html.matchAll(/<p class="codium-everything">(.*?)<\/article>/g)].map((match) => match[1]!)
-      expect(carried).toHaveLength(4)
+      expect(carried).toHaveLength(3)
       for (const part of carried) {
         expect(part).not.toMatch(/\d[\d,]* Codium credits/)
         expect(part).not.toMatch(/tokens/)
@@ -116,7 +116,7 @@ describe("Codium pricing page", () => {
       // Each card states its own amount once, in its allowance, and later tiers say how many times the first they are.
       expect(html).toContain(`<p>16,000 Codium credits${mode === "monthly" ? " every month" : ""}</p>`)
       expect(html).toContain("20× the credits</li>")
-      expect(html.match(/Codium credits( every month)?<\/p>/g)).toHaveLength(5)
+      expect(html.match(/Codium credits( every month)?<\/p>/g)).toHaveLength(4)
     }
   })
 

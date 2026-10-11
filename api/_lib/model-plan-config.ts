@@ -2,7 +2,7 @@ import { Option, Schema } from "effect"
 import { ApiError } from "./http.js"
 import { CODIUM_CATALOG_UPDATED, CODIUM_MODELS } from "./codium-catalog.js"
 
-export const MODEL_PLAN_PRICES = [10, 20, 50, 100, 200] as const
+export const MODEL_PLAN_PRICES = [10, 50, 100, 200] as const
 export const MODEL_PLAN_ROOT = "https://openrouter.ai/api/v1"
 export const ModelPlanModel = Schema.Struct({
   id: Schema.String,

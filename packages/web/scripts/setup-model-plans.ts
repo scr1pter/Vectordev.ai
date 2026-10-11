@@ -3,7 +3,9 @@ import { MODEL_PLAN_PRICES, modelPlans, modelTopups } from "../../../api/_lib/mo
 
 // Dry-run by default. Execute with --apply only in the intended Stripe account.
 if (!Bun.argv.includes("--apply")) {
-  console.log("Vector Codium: monthly subscriptions and one-time top-ups at $10, $20, $50, $100, $200.")
+  console.log(
+    `Vector Codium: monthly subscriptions and one-time top-ups at ${MODEL_PLAN_PRICES.map((price) => `$${price}`).join(", ")}.`,
+  )
   console.table(
     modelPlans().map((plan) => ({
       price: plan.price,

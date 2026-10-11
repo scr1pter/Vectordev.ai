@@ -65,7 +65,7 @@ const environment = [
   "KV_REST_API_TOKEN",
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
-  ...[10, 20, 50, 100, 200].flatMap((price) => [
+  ...[10, 50, 100, 200].flatMap((price) => [
     `STRIPE_MODEL_TOPUP_${price}_PRICE_ID`,
     `MODEL_TOPUP_${price}_CREDITS_USD`,
     `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
@@ -212,7 +212,7 @@ beforeEach(async () => {
   delete process.env.VERCEL_ENV
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
-  for (const price of [10, 20, 50, 100, 200]) {
+  for (const price of [10, 50, 100, 200]) {
     process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`] = `price_topup${price}`
     process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`] = `price_monthly${price}`
     delete process.env[`MODEL_TOPUP_${price}_CREDITS_USD`]
@@ -283,7 +283,7 @@ function monthly() {
 test("top-up checkout works without a subscription and reuses or replaces only pending pack checkout", async () => {
   const first = await modelTopupCheckout(user, "codium-topup-10", fetcher)
   expect(await modelTopupCheckout(user, "codium-topup-10", fetcher)).toEqual(first)
-  expect(await modelTopupCheckout(user, "codium-topup-20", fetcher)).not.toEqual(first)
+  expect(await modelTopupCheckout(user, "codium-topup-50", fetcher)).not.toEqual(first)
   expect(sessions.get("cs_wallet1")?.status).toBe("expired")
   expect(sessions.size).toBe(2)
 })
@@ -416,7 +416,7 @@ test("failure saving a grant does not expose credits and retry grants exactly on
 test("account deletion disables both funding keys, closes pending top-ups, and prevents reuse", async () => {
   await purchase()
   await modelPlanCredential(user.id, fetcher)
-  await modelTopupCheckout(user, "codium-topup-20", fetcher)
+  await modelTopupCheckout(user, "codium-topup-50", fetcher)
   await cancelModelPlanAccount(user.id, fetcher)
   expect(keys.get("wallet_key_1")?.data.disabled).toBe(true)
   expect(sessions.get("cs_wallet2")?.status).toBe("expired")

@@ -20,7 +20,7 @@ const names = [
   "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
   "MODEL_CREDIT_MARKUP_PERCENT",
   "STRIPE_MODEL_PLAN_WEBHOOK_SECRET",
-  ...[10, 20, 50, 100, 200].flatMap((price) => [
+  ...[10, 50, 100, 200].flatMap((price) => [
     `MODEL_PLAN_${price}_CREDITS_USD`,
     `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
     `MODEL_TOPUP_${price}_CREDITS_USD`,
@@ -85,9 +85,9 @@ describe("subscription configuration", () => {
     names.forEach((name) => {
       delete process.env[name]
     })
-    expect(modelPlans().map((plan) => plan.price)).toEqual([10, 20, 50, 100, 200])
-    expect(modelPlans().map((plan) => plan.credits)).toEqual([8, 16, 40, 80, 160])
-    expect(modelTopups().map((pack) => pack.credits)).toEqual([8, 16, 40, 80, 160])
+    expect(modelPlans().map((plan) => plan.price)).toEqual([10, 50, 100, 200])
+    expect(modelPlans().map((plan) => plan.credits)).toEqual([8, 40, 80, 160])
+    expect(modelTopups().map((pack) => pack.credits)).toEqual([8, 40, 80, 160])
     expect(publicModelPlans().plans.every((plan) => !plan.available)).toBe(true)
     expect(publicModelPlans().topups.every((pack) => !pack.available)).toBe(true)
     expect(publicModelPlans().product).toBe("Vector Codium")
@@ -104,7 +104,7 @@ describe("subscription configuration", () => {
     process.env.MODEL_CREDIT_MARKUP_PERCENT = "30"
     expect(modelCreditMarkup()).toBe(30)
     expect(modelPlans()[0].credits).toBe(7.69)
-    expect(modelTopups()[4].credits).toBe(153.84)
+    expect(modelTopups()[3].credits).toBe(153.84)
     process.env.MODEL_PLAN_10_CREDITS_USD = "7"
     expect(modelPlans()[0].credits).toBe(7)
     process.env.MODEL_CREDIT_MARKUP_PERCENT = "NaN"
@@ -124,7 +124,7 @@ describe("subscription configuration", () => {
     expect(modelPlans()[0].credits).toBe(0)
     expect(modelTopups()[0].credits).toBe(0)
     process.env.MODEL_TOPUP_200_CREDITS_USD = "133.33"
-    expect(modelTopups()[4].credits).toBe(133.33)
+    expect(modelTopups()[3].credits).toBe(133.33)
   })
   test("configured paid models require bounded positive pricing and valid context", () => {
     process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify([model])

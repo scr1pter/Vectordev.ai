@@ -80,7 +80,7 @@ const environment = [
   "KV_REST_API_TOKEN",
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
-  ...[10, 20, 50, 100, 200].flatMap((price) => [
+  ...[10, 50, 100, 200].flatMap((price) => [
     `MODEL_PLAN_${price}_CREDITS_USD`,
     `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
   ]),
@@ -323,7 +323,7 @@ beforeEach(async () => {
   delete process.env.VERCEL_ENV
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
-  for (const price of [10, 20, 50, 100, 200]) {
+  for (const price of [10, 50, 100, 200]) {
     process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = String(price / 2)
     process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`] = `price_fixture${price}`
   }
@@ -405,7 +405,7 @@ describe("subscription checkout with real billing leases", () => {
     const first = await modelPlanCheckout(user, "vector-10", fetcher)
     expect(await modelPlanCheckout(user, "vector-10", fetcher)).toEqual(first)
     expect(sessions.size).toBe(1)
-    const next = await modelPlanCheckout(user, "vector-20", fetcher)
+    const next = await modelPlanCheckout(user, "vector-50", fetcher)
     expect(next.url).not.toBe(first.url)
     expect(sessions.get("cs_fixture1")?.status).toBe("expired")
     expect(sessions.size).toBe(2)
@@ -413,7 +413,7 @@ describe("subscription checkout with real billing leases", () => {
     expect(calls.findLastIndex((call) => call.path === "/v1/checkout/sessions")).toBeGreaterThan(expire)
     expect(await readModelPlanAccount(user.id, fetcher)).toMatchObject({
       customer: "cus_fixture",
-      checkout: { id: "cs_fixture2", plan: "vector-20", url: next.url },
+      checkout: { id: "cs_fixture2", plan: "vector-50", url: next.url },
     })
     expect(calls.filter((call) => call.path === "/v1/customers")).toHaveLength(1)
     expect(calls.find((call) => call.path === "/v1/checkout/sessions")?.body["payment_method_types[0]"]).toBe("card")
@@ -436,7 +436,7 @@ describe("subscription checkout with real billing leases", () => {
 
   test("blocks duplicate subscriptions and mismatched prices before creating checkout", async () => {
     await paid()
-    await expect(modelPlanCheckout(user, "vector-20", fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_EXISTS" })
+    await expect(modelPlanCheckout(user, "vector-50", fetcher)).rejects.toMatchObject({ code: "MODEL_PLAN_EXISTS" })
     state.subscriptions = []
     state.priceMismatch = true
     await expect(modelPlanCheckout(user, "vector-10", fetcher)).rejects.toMatchObject({
@@ -452,7 +452,7 @@ describe("subscription checkout with real billing leases", () => {
       code: "MODEL_PLAN_EXISTS",
       statusCode: 409,
     })
-    await expect(modelPlanCheckout(user, "vector-20", fetcher)).rejects.toMatchObject({
+    await expect(modelPlanCheckout(user, "vector-50", fetcher)).rejects.toMatchObject({
       code: "MODEL_PLAN_EXISTS",
       statusCode: 409,
     })
@@ -497,7 +497,7 @@ describe("model plan account deletion", () => {
       access: false,
       wallet: { credits: 0, used: 0, remaining: 0 },
     })
-    await expect(modelPlanCheckout(user, "vector-20", fetcher)).rejects.toMatchObject({
+    await expect(modelPlanCheckout(user, "vector-50", fetcher)).rejects.toMatchObject({
       code: "MODEL_PLAN_ACCOUNT_CLOSING",
       statusCode: 409,
     })
