@@ -170,7 +170,7 @@ describe("tool.registry", () => {
     }),
   )
 
-  it.instance("offers the task background parameter by default", () =>
+  it.instance("offers foreground task batches while accepting legacy background input by default", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const agent = yield* Agent.Service
@@ -183,8 +183,20 @@ describe("tool.registry", () => {
       })).find((tool) => tool.id === "task")
       if (!task) throw new Error("task tool not found")
 
-      expect(task.jsonSchema).toBeUndefined()
-      expect(ToolJsonSchema.fromSchema(task.parameters).properties).toHaveProperty("background")
+      const schema = ToolJsonSchema.fromTool(task)
+      expect(schema).toMatchObject({
+        type: "object",
+        required: ["tasks"],
+        properties: {
+          tasks: { type: "array", minItems: 1, maxItems: 8, items: { required: ["description", "prompt"] } },
+        },
+      })
+      expect(Object.keys(schema.properties ?? {})).toEqual(["tasks"])
+      expect(schema).not.toHaveProperty("properties.tasks.items.properties.background")
+      expect(task.description).toContain("Only the legacy singular brief form accepts background=true")
+      const legacy = { description: "Inspect the registry", prompt: "Inspect the registry.", background: true }
+      expect(Schema.decodeUnknownSync(task.parameters)(legacy)).toEqual(legacy)
+      expect(Result.isSuccess(Schema.decodeUnknownResult(task.parameters)({ tasks: [legacy] }))).toBe(false)
     }),
   )
 

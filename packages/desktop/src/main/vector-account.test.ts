@@ -11,6 +11,7 @@ function fixture() {
     fetchDelay: undefined as Promise<void> | undefined,
     syncDelay: undefined as Promise<void> | undefined,
     failSync: false,
+    name: undefined as string | undefined,
   }
   const urls: string[] = []
   const tokens: Array<string | undefined> = []
@@ -44,7 +45,11 @@ function fixture() {
     fetch: async (_url, init) => {
       requests.push(init)
       await state.fetchDelay
-      return Response.json({ token, expiresAt: state.now + 100_000, user: { email: "fixture@example.test" } })
+      return Response.json({
+        token,
+        expiresAt: state.now + 100_000,
+        user: { email: "fixture@example.test", ...(state.name === undefined ? {} : { name: state.name }) },
+      })
     },
     sync: async (value) => {
       tokens.push(value)
@@ -218,4 +223,32 @@ test("cancelling an exchange in flight prevents storage and expired saved grants
     pending: false,
     error: "Your Vector sign-in expired. Sign in again.",
   })
+})
+
+test("the signed-in name is kept for the sidebar, and older sign-ins without one still work", async () => {
+  const app = fixture()
+  app.state.name = "  Ada Lovelace  "
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  expect(app.controller.status()).toMatchObject({
+    authenticated: true,
+    email: "fixture@example.test",
+    name: "Ada Lovelace",
+  })
+  expect(app.state.stored).toMatchObject({ email: "fixture@example.test", name: "Ada Lovelace" })
+  const { name: _, ...older } = app.state.stored as { name: string }
+  app.state.stored = older
+  const status = app.controller.status()
+  expect(status).toMatchObject({ authenticated: true, email: "fixture@example.test" })
+  expect(status).not.toHaveProperty("name")
+})
+
+test("a missing or blank name never fails sign-in", async () => {
+  const app = fixture()
+  app.state.name = "   "
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  expect(app.controller.status()).toMatchObject({ authenticated: true, email: "fixture@example.test" })
+  expect(app.controller.status()).not.toHaveProperty("name")
+  expect(app.state.stored).not.toHaveProperty("name")
 })
