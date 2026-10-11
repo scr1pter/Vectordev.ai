@@ -22,7 +22,7 @@ describe("Ripgrep", () => {
           // Windows cannot create filenames containing these control characters.
           if (process.platform === "win32") return
           const cwd = path.join(tmp.path, "search")
-          const names = ["\n../outside.txt", "\r../outside.txt"]
+          const names = ["\n../outside.txt", "\r../outside.txt"].map((name) => RelativePath.make(name))
           for (const name of names) {
             yield* Effect.promise(() => fs.mkdir(path.dirname(path.join(cwd, name)), { recursive: true }))
             yield* Effect.promise(() => fs.writeFile(path.join(cwd, name), "needle admitted multiline file\n"))
