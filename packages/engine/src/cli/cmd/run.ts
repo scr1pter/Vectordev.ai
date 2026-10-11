@@ -19,6 +19,7 @@ import { pathToFileURL } from "url"
 import { open } from "node:fs/promises"
 import { Effect, Schema } from "effect"
 import { PublicSession } from "@vectordevai/schema/public-session"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
@@ -32,10 +33,8 @@ import { MODEL_SETUP_GUIDANCE } from "@/provider/setup"
 type ModelInput = Parameters<VectorClient["session"]["prompt"]>[0]["model"]
 
 /** @internal Exported for focused permission-policy tests. */
-export function runPermissionReply(auto: boolean, permission: string): "once" | "reject" {
-  if (auto && permission !== "doom_loop" && permission !== "browser_sensitive" && !permission.startsWith("computer_"))
-    return "once"
-  return "reject"
+export function runPermissionReply(auto: boolean, permission: string, always?: readonly string[]): "once" | "reject" {
+  return auto && PermissionPolicy.canAutoApprove(permission, always) ? "once" : "reject"
 }
 
 function pick(value: string | undefined): ModelInput | undefined {
@@ -963,9 +962,8 @@ export const RunCommand = effectCmd({
               const permission = event.properties
               if (!(await inRun(permission.sessionID))) continue
 
-              // Repeated identical tool calls are a safety stop, not ordinary capability approval. Even the
-              // dangerous auto mode must stop rather than turn a stuck model loop into unbounded execution.
-              if (runPermissionReply(auto, permission.permission) === "once") {
+              // Non-interactive auto mode cannot supply the fresh approval required for sensitive actions.
+              if (runPermissionReply(auto, permission.permission, permission.always) === "once") {
                 await client.permission.reply({
                   requestID: permission.id,
                   reply: "once",

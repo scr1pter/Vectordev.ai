@@ -18,6 +18,23 @@ test("CLI auto mode rejects safety and sensitive permissions", () => {
   expect(runPermissionReply(false, "bash")).toBe("reject")
 })
 
+test("CLI auto mode cannot supply fresh Cloud approval", () => {
+  for (const permission of [
+    "vector_cloud_publish",
+    "vector_cloud_database",
+    "vector_cloud_environment",
+    "vector_cloud_hosting",
+  ]) {
+    expect(runPermissionReply(true, permission, [])).toBe("reject")
+    expect(runPermissionReply(true, permission, ["*"])).toBe("reject")
+  }
+  expect(runPermissionReply(true, "vector_cloud_future_action", [])).toBe("reject")
+  expect(runPermissionReply(true, "vector_cloud_future_action")).toBe("reject")
+  expect(runPermissionReply(true, "vector_cloud_read", [])).toBe("reject")
+  expect(runPermissionReply(true, "vector_cloud_read", ["status:project:*"])).toBe("once")
+  expect(runPermissionReply(false, "vector_cloud_read", ["status:project:*"])).toBe("reject")
+})
+
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 function lastUserText(body: Record<string, unknown>) {
