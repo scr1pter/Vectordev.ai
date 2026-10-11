@@ -773,7 +773,21 @@ describe("SessionProjector", () => {
       const helper = yield* sessions.get(helperID)
       expect(helper).toMatchObject({ internal: "vectorscope.review", parentID: sessionID, cost: 0.75 })
       expect(yield* sessions.get(sessionID)).toMatchObject({ cost: 0, subagentCost: 0.75, subagentTokens: tokens })
-      expect((yield* sessions.list({})).map((session) => session.id)).toEqual([sessionID])
+      expect((yield* sessions.list({ limit: 1 })).map((session) => session.id)).toEqual([sessionID])
+      // A corrupt imported parent cycle must never roll a session's own spend back into itself.
+      yield* db.update(SessionTable).set({ parent_id: helperID }).where(eq(SessionTable.id, sessionID)).run()
+      yield* events.publish(SessionEvent.AncillaryUsage, {
+        sessionID: helperID,
+        timestamp: DateTime.makeUnsafe(2),
+        usageID: EventV2.ID.create(),
+        purpose: "title",
+        model,
+        cost: 0.25,
+        tokens,
+      })
+      expect((yield* sessions.get(helperID)).cost).toBe(1)
+      expect((yield* sessions.get(helperID)).subagentCost).toBeUndefined()
+      expect((yield* sessions.get(sessionID)).subagentCost).toBe(1)
     }).pipe(Effect.provide(sessionsLayer)),
   )
 

@@ -11,6 +11,22 @@ export default {
       yield* tx.run(`ALTER TABLE \`session\` ADD \`subagent_tokens_reasoning\` integer DEFAULT 0 NOT NULL;`)
       yield* tx.run(`ALTER TABLE \`session\` ADD \`subagent_tokens_cache_read\` integer DEFAULT 0 NOT NULL;`)
       yield* tx.run(`ALTER TABLE \`session\` ADD \`subagent_tokens_cache_write\` integer DEFAULT 0 NOT NULL;`)
+      // Existing descendants count too. Each ancestor/descendant pair appears once; own counters exclude children.
+      yield* tx.run(`
+        WITH RECURSIVE ancestry(ancestor, descendant) AS (
+          SELECT parent_id, id FROM session WHERE parent_id IS NOT NULL
+          UNION
+          SELECT session.parent_id, ancestry.descendant
+          FROM session JOIN ancestry ON session.id = ancestry.ancestor
+          WHERE session.parent_id IS NOT NULL
+        )
+        UPDATE session SET
+          subagent_tokens_input = coalesce((SELECT sum(child.tokens_input) FROM ancestry JOIN session child ON child.id = ancestry.descendant WHERE ancestry.ancestor = session.id AND child.id != session.id), 0),
+          subagent_tokens_output = coalesce((SELECT sum(child.tokens_output) FROM ancestry JOIN session child ON child.id = ancestry.descendant WHERE ancestry.ancestor = session.id AND child.id != session.id), 0),
+          subagent_tokens_reasoning = coalesce((SELECT sum(child.tokens_reasoning) FROM ancestry JOIN session child ON child.id = ancestry.descendant WHERE ancestry.ancestor = session.id AND child.id != session.id), 0),
+          subagent_tokens_cache_read = coalesce((SELECT sum(child.tokens_cache_read) FROM ancestry JOIN session child ON child.id = ancestry.descendant WHERE ancestry.ancestor = session.id AND child.id != session.id), 0),
+          subagent_tokens_cache_write = coalesce((SELECT sum(child.tokens_cache_write) FROM ancestry JOIN session child ON child.id = ancestry.descendant WHERE ancestry.ancestor = session.id AND child.id != session.id), 0);
+      `)
       // Helper sessions created before the column existed are known by the titles Vector gave them. Classifying them
       // takes them out of session lists without deleting them or their spend.
       yield* tx.run(`

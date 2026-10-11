@@ -408,7 +408,9 @@ describe("DatabaseMigration", () => {
     await run(
       Effect.gen(function* () {
         const db = yield* makeDb
-        yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, title text NOT NULL, cost real NOT NULL)`)
+        yield* db.run(
+          sql`CREATE TABLE session (id text PRIMARY KEY, title text NOT NULL, cost real NOT NULL, parent_id text, tokens_input integer DEFAULT 0, tokens_output integer DEFAULT 0, tokens_reasoning integer DEFAULT 0, tokens_cache_read integer DEFAULT 0, tokens_cache_write integer DEFAULT 0)`,
+        )
         const rows = [
           ["autocomplete", "Vector Tool · Autocomplete"],
           ["planner", "Vector Tool · Browser Agent Planner"],
@@ -423,7 +425,9 @@ describe("DatabaseMigration", () => {
         for (const [id, title] of rows)
           yield* db.run(sql`INSERT INTO session (id, title, cost) VALUES (${id}, ${title}, 1.5)`)
         // The swarm planner was untitled; only the prompt the desktop sent it says what it was.
-        yield* db.run(sql`CREATE TABLE session_input (id text PRIMARY KEY, session_id text NOT NULL, prompt text NOT NULL)`)
+        yield* db.run(
+          sql`CREATE TABLE session_input (id text PRIMARY KEY, session_id text NOT NULL, prompt text NOT NULL)`,
+        )
         const inputs = [
           ["swarm", "You are Vector's read-only swarm coordinator. Inspect the current project and decompose it."],
           ["automation", "Run the nightly dependency audit for this repository."],
@@ -435,7 +439,21 @@ describe("DatabaseMigration", () => {
           )
         }
 
+        yield* db.run(
+          sql`UPDATE session SET parent_id = 'own', tokens_input = 10, tokens_output = 2 WHERE id = 'review'`,
+        )
+        yield* db.run(
+          sql`UPDATE session SET parent_id = 'review', tokens_input = 20, tokens_cache_read = 5 WHERE id = 'verify'`,
+        )
         yield* DatabaseMigration.applyOnly(db, [sessionInternalHelpersMigration])
+        expect(
+          yield* db.get(
+            sql`SELECT subagent_tokens_input as input, subagent_tokens_output as output, subagent_tokens_cache_read as cached FROM session WHERE id = 'own'`,
+          ),
+        ).toEqual({ input: 30, output: 2, cached: 5 })
+        expect(yield* db.get(sql`SELECT subagent_tokens_input as input FROM session WHERE id = 'review'`)).toEqual({
+          input: 20,
+        })
 
         expect(yield* db.all(sql`SELECT id, internal, cost FROM session ORDER BY id`)).toEqual([
           { id: "autocomplete", internal: "codespace.autocomplete", cost: 1.5 },

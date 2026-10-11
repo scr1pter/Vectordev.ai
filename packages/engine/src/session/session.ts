@@ -293,7 +293,7 @@ export type GlobalInfo = Types.DeepMutable<Schema.Schema.Type<typeof GlobalInfo>
 export const UsageDay = Schema.Struct({
   date: Schema.String,
   tokens: NonNegativeInt,
-  // Known recorded spend, including ancillary model work; activity remains transcript-only.
+  // Known recorded spend, including ancillary model work; task activity remains transcript-only.
   cost: Schema.Finite,
   tasks: NonNegativeInt,
 }).annotate({ identifier: "SessionUsageDay" })
@@ -1263,7 +1263,11 @@ export function summarizeUsage(
     if (!usage) return
     const date = localDateKey(DateTime.toEpochMillis(usage.timestamp))
     const current = days.get(date) ?? { date, tokens: 0, cost: 0, tasks: new Set<string>() }
-    days.set(date, { ...current, cost: current.cost + Math.max(0, usage.cost ?? 0) })
+    days.set(date, {
+      ...current,
+      cost: current.cost + Math.max(0, usage.cost ?? 0),
+      tokens: current.tokens + usageTokens({ tokens: usage.tokens ?? EmptyTokens }),
+    })
   })
   const activity = [...days.values()]
     .map((day): UsageDay => ({ date: day.date, tokens: day.tokens, cost: day.cost, tasks: day.tasks.size }))
@@ -1312,9 +1316,10 @@ export function summarizeUsage(
     })
     return result
   }, new Map<string, Omit<UsageEffort, "percentage">>())
+  const transcriptTokens = assistant.reduce((total, message) => total + usageTokens(message), 0)
   const percentage = (tokens: number, responses: number) => {
     const totalResponses = assistant.length
-    const share = lifetimeTokens > 0 ? tokens / lifetimeTokens : totalResponses > 0 ? responses / totalResponses : 0
+    const share = transcriptTokens > 0 ? tokens / transcriptTokens : totalResponses > 0 ? responses / totalResponses : 0
     return Math.round(share * 1_000) / 10
   }
   const durations = assistant
@@ -1337,7 +1342,16 @@ export function summarizeUsage(
       cost: Math.max(0, message.cost),
     })),
     ...[...attempts.values()].flatMap((usage) =>
-      usage ? [{ sessionID: usage.sessionID, responses: 0, tokens: 0, cost: Math.max(0, usage.cost ?? 0) }] : [],
+      usage
+        ? [
+            {
+              sessionID: usage.sessionID,
+              responses: 0,
+              tokens: usageTokens({ tokens: usage.tokens ?? EmptyTokens }),
+              cost: Math.max(0, usage.cost ?? 0),
+            },
+          ]
+        : [],
     ),
   ].reduce((result, item) => {
     const id = helpers.get(item.sessionID)
@@ -1356,15 +1370,28 @@ export function summarizeUsage(
     .map((helper): UsageHelper => ({ ...helper, sessions: helper.sessions.size }))
     .sort((a, b) => b.cost - a.cost || b.tokens - a.tokens || a.id.localeCompare(b.id))
 
+  const tokens = [
+    ...assistant.map((message) => message.tokens),
+    ...[...attempts.values()].flatMap((usage) => (usage?.tokens ? [usage.tokens] : [])),
+  ]
   return {
     lifetimeTokens,
     lifetimeCost: activity.reduce((total, day) => total + day.cost, 0),
     ...(unpricedResponses ? { unpricedResponses } : {}),
-    inputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.input)), 0),
-    outputTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.output)), 0),
-    reasoningTokens: assistant.reduce((total, message) => total + Math.max(0, Math.round(message.tokens.reasoning)), 0),
-    cachedTokens: assistant.reduce(
-      (total, message) => total + Math.max(0, Math.round(message.tokens.cache.read + message.tokens.cache.write)),
+    inputTokens: tokens.reduce(
+      (total, tokens) => total + Math.max(0, Math.round(tokens.input)),
+      0,
+    ),
+    outputTokens: tokens.reduce(
+      (total, tokens) => total + Math.max(0, Math.round(tokens.output)),
+      0,
+    ),
+    reasoningTokens: tokens.reduce(
+      (total, tokens) => total + Math.max(0, Math.round(tokens.reasoning)),
+      0,
+    ),
+    cachedTokens: tokens.reduce(
+      (total, tokens) => total + Math.max(0, Math.round(tokens.cache.read + tokens.cache.write)),
       0,
     ),
     peakTokens: activity.reduce((peak, day) => Math.max(peak, day.tokens), 0),
@@ -1392,7 +1419,7 @@ export function summarizeUsage(
   }
 }
 
-function usageTokens(message: typeof SessionV1.Assistant.Type) {
+function usageTokens(message: Pick<typeof SessionV1.Assistant.Type, "tokens">) {
   const components =
     message.tokens.input +
     message.tokens.output +

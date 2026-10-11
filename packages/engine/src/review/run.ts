@@ -69,6 +69,7 @@ import { Truncate } from "@/tool/truncate"
 import type { ResolvedModel } from "./model"
 
 export interface RunInput {
+  parentID?: SessionID
   directory: string
   trigger: Trigger
   trust: Trust
@@ -276,6 +277,7 @@ export const run: (
       const session = yield* sessions.create({
         title: `Vectorscope review · ${input.head.slice(0, 7)} · ${spec.name}`,
         internal: `vectorscope.${spec.name}`,
+        parentID: input.parentID,
         permission: rules,
       })
       const track: Track = {
