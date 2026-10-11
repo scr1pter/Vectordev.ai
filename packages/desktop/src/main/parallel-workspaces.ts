@@ -159,6 +159,8 @@ export type ParallelWorkspaceRecord = {
   diff: string
   checkpointPath?: string
   pullRequestUrl?: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
   baselineHashes?: Record<string, string>
   contextFiles?: string[]
   contextIndexedFiles?: number
@@ -1363,6 +1365,29 @@ export function listParallelWorkspaces(scope?: { sourcePath?: string; parentSess
     if ("parentSessionId" in scope && record.parentSessionId !== scope.parentSessionId) return false
     return true
   })
+}
+
+// Cloud actions an agent takes from its isolated workspace belong to the
+// project the workspace was created from (see cloud-scope.ts).
+export function parallelWorkspaceCloudScopes() {
+  return readRecords().map((record) => ({
+    id: record.id,
+    name: record.name,
+    sourcePath: record.sourcePath,
+    isolatedPath: record.isolatedPath,
+  }))
+}
+
+// Called when a preview of this workspace's worktree is published, from the
+// Cloud console or by the workspace's own agent.
+export function recordParallelWorkspacePreview(id: string, url: string) {
+  if (!readRecords().some((record) => record.id === id)) return
+  updateRecord(id, (current) => ({
+    ...current,
+    previewUrl: url,
+    lastActivityAt: now(),
+    logs: [`Published a preview: ${url}`, ...current.logs].slice(0, 120),
+  }))
 }
 
 export function getParallelWorkspace(id: string) {

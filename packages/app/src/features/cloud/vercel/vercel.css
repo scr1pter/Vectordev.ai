@@ -1,0 +1,216 @@
+/* Vercel controls inside Vector Cloud. Built from the console's own
+   panels, rows, chips and buttons (cloud-console.css); only the layout the
+   Vercel screens add lives here. */
+
+.vercel-section + .vercel-section {
+  margin-top: 12px;
+}
+.vercel-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.vercel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.vercel-warning {
+  color: #e2c089;
+}
+.vercel-text-button {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cc-purple);
+  font-size: 12px;
+  cursor: pointer;
+}
+.vercel-text-button:hover {
+  text-decoration: underline;
+}
+
+.vercel-link {
+  display: grid;
+  gap: 10px;
+  margin-top: 13px;
+}
+.vercel-link .cloud-linked-project {
+  margin-top: 0;
+  flex-wrap: wrap;
+}
+.vercel-link .cloud-provider-linker {
+  margin-top: 0;
+}
+.vercel-link-picker {
+  display: grid;
+  gap: 10px;
+}
+.vercel-field {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+}
+.vercel-field > span {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+.vercel-link select.cloud-input,
+.vercel-section select.cloud-input {
+  appearance: auto;
+  color-scheme: dark;
+}
+.vercel-create {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--cc-line);
+  border-radius: 7px;
+  background: var(--cc-glass-soft);
+}
+
+.vercel-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.vercel-detail {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--cc-line);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--cc-muted);
+  font-size: 11.5px;
+}
+.vercel-detail p {
+  margin: 0;
+}
+.vercel-detail .cloud-link {
+  display: inline;
+}
+
+.vercel-log-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.vercel-env-form {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1.2fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+.vercel-env-form .vercel-targets,
+.vercel-env-form .vercel-actions {
+  grid-column: 1 / -1;
+}
+.vercel-targets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+.vercel-key {
+  color: var(--cc-purple);
+  font-family: var(--vx-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+}
+.vercel-env-entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.vercel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.vercel-table th,
+.vercel-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--cc-line);
+  text-align: left;
+  vertical-align: middle;
+}
+.vercel-table th {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.vercel-plan {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.vercel-plan p {
+  margin: 0;
+}
+.vercel-plan .cloud-button {
+  width: fit-content;
+}
+
+.vercel-records {
+  display: grid;
+  gap: 6px;
+}
+.vercel-record {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  font-family: var(--vx-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.72);
+}
+.vercel-record > span:first-child {
+  color: var(--cc-purple);
+  font-weight: 650;
+}
+.vercel-record code {
+  overflow-wrap: anywhere;
+}
+
+.vercel-protection {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--cc-line);
+}
+.vercel-protection strong {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12.5px;
+}
+.vercel-protection p {
+  margin: 0;
+  color: var(--cc-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .vercel-env-form,
+  .vercel-log-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vercel-record {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+  .vercel-record > :last-child {
+    grid-column: 1 / -1;
+  }
+}

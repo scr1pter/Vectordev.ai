@@ -3,6 +3,7 @@ export * as PermissionV2 from "./permission"
 import { makeLocationNode } from "./effect/app-node"
 import { Context, Deferred, Effect as EffectRuntime, Layer, Schema } from "effect"
 import { Permission } from "@vectordevai/schema/permission"
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 import { EventV2 } from "./event"
 import { Location } from "./location"
 import { AgentV2 } from "./agent"
@@ -18,11 +19,11 @@ export const ID = Permission.ID
 export type ID = typeof ID.Type
 
 function isSensitiveAction(action: string) {
-  return action === "browser_sensitive" || action.startsWith("computer_")
+  return !PermissionPolicy.canAutoApprove(action, ["*"])
 }
 
 export function canAlwaysApprove(action: string, resources: readonly string[] | undefined) {
-  return !isSensitiveAction(action) && Boolean(resources?.length)
+  return PermissionPolicy.canAlwaysApprove(action, resources)
 }
 
 export const Source = Permission.Source
@@ -169,7 +170,11 @@ const layer = Layer.effect(
       const remembered = yield* savedRules()
       const all = [...rules, ...remembered]
       const effects = input.resources.map((resource) => evaluate(input.action, resource, rules, remembered).effect)
-      const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
+      const effect: Permission.Effect = effects.includes("deny")
+        ? "deny"
+        : PermissionPolicy.requiresCloudApproval(input.action, input.save) || effects.includes("ask")
+          ? "ask"
+          : "allow"
       return { effect, rules: all }
     })
 
@@ -289,7 +294,7 @@ const layer = Layer.effect(
               EffectRuntime.catchTag("Session.NotFoundError", () => EffectRuntime.succeed(undefined)),
             )
             if (!rules) continue
-            if (denied(input, rules)) continue
+            if (denied(input, rules) || PermissionPolicy.requiresCloudApproval(input.action, input.save)) continue
             if (
               !item.request.resources.every(
                 (resource) => evaluate(item.request.action, resource, rules, rememberedRules).effect === "allow",

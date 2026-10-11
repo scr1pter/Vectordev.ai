@@ -1443,7 +1443,7 @@ noLLMServer.instance.skip(
         ]),
       )
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 it.instance("static loop returns assistant text through local provider", () =>
@@ -2440,7 +2440,7 @@ unixNoLLMServer(
       expect(tool.state.metadata.output).toContain("err")
       yield* run.assertNotBusy(chat.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 unixNoLLMServer(
@@ -2464,7 +2464,7 @@ unixNoLLMServer(
       expect(tool.state.metadata.output).toContain(dir)
       yield* run.assertNotBusy(chat.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 unixNoLLMServer(
@@ -2486,7 +2486,7 @@ unixNoLLMServer(
         expect(tool.state.output).toContain("configured")
       }),
     ),
-  { config: { ...cfg, shell: "bash" } },
+  { trusted: true, config: { ...cfg, shell: "bash" } },
   30_000,
 )
 
@@ -2513,7 +2513,7 @@ unixNoLLMServer(
         yield* run.assertNotBusy(chat.id)
       }),
     ),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 unixNoLLMServer(
@@ -2539,7 +2539,7 @@ unixNoLLMServer(
       expect(tool.state.metadata.output).toContain("README.md")
       yield* run.assertNotBusy(chat.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 unixNoLLMServer(
@@ -2561,7 +2561,7 @@ unixNoLLMServer(
       expect(tool.state.metadata.output).toContain("not found")
       yield* run.assertNotBusy(chat.id)
     }),
-  { config: cfg },
+  { trusted: true, config: cfg },
 )
 
 unixNoLLMServer(
@@ -2589,7 +2589,7 @@ unixNoLLMServer(
         expect(Exit.isSuccess(exit)).toBe(true)
       }),
     ),
-  { config: cfg },
+  { trusted: true, config: cfg },
   30_000,
 )
 
@@ -2728,6 +2728,7 @@ unixNoLLMServer(
       }),
     ),
   {
+    trusted: true,
     git: true,
     config: {
       ...cfg,
@@ -2842,7 +2843,7 @@ unixNoLLMServer(
         }
       }),
     ),
-  { git: true, config: cfg },
+  { trusted: true, git: true, config: cfg },
   30_000,
 )
 
@@ -2886,7 +2887,7 @@ unixNoLLMServer(
         }
       }),
     ),
-  { git: true, config: cfg },
+  { trusted: true, git: true, config: cfg },
   30_000,
 )
 
@@ -2969,7 +2970,7 @@ unixNoLLMServer(
 
       yield* Fiber.await(sh)
     }),
-  { git: true, config: cfg },
+  { trusted: true, git: true, config: cfg },
   30_000,
 )
 
@@ -2995,7 +2996,7 @@ unixNoLLMServer(
         yield* Fiber.await(a)
       }),
     ),
-  { git: true, config: cfg },
+  { trusted: true, git: true, config: cfg },
   30_000,
 )
 

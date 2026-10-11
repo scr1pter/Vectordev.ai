@@ -62,53 +62,38 @@ import { runBrowserAgent } from "./browser-agent"
 import { prepareAgentTask } from "./context-budget"
 import { speakVoiceText, stopVoiceSynthesis } from "./voice-synthesis"
 import { cancelBackgroundTask, clearCompletedBackgroundTasks, listBackgroundTasks } from "./background-tasks"
+import { cloudOverview, recordPublishAttempt, watchCloudChanges } from "./cloud-overview"
 import {
+  checkAllDeploymentHealth,
+  checkDeploymentHealth,
   detectPublishTargets,
-  fetchDeploymentRuntimeLogs,
-  promoteDeployment,
   publishProject,
   rerunDeploymentChecks,
-  rollbackDeployment,
   type PublishProjectInput,
 } from "./publish"
 import {
-  addDomain,
   applyEnv,
-  checkAllDeployments,
-  checkDeployment,
-  connectDatabase,
   detectBuildSettings,
-  disconnectDatabase,
   getBuildSettings,
   getDatabase,
   listDeployments,
-  listDomains,
   listEnv,
   removeDeployment,
-  removeDomain,
   removeEnv,
   setBuildSettings,
   setEnv,
-  verifyDomain,
 } from "./cloud-console"
 import {
-  addCloudProviderDomain,
   connectCloudProvider,
   connectCloudProviderWithToken,
-  connectSupabaseProject,
   disconnectCloudProvider,
-  getSupabaseServiceSnapshot,
-  linkCloudProviderProject,
   listCloudProviderConnections,
   listCloudProviderProjectLinks,
   listCloudProviderResources,
-  removeCloudProviderDomain,
-  syncCloudProviderEnvironment,
-  unlinkCloudProviderProject,
-  verifyCloudProviderDomain,
   type CloudProviderId,
 } from "./cloud-connections"
-import { getCloudAwsStatus, listCloudAwsResources } from "./cloud-aws"
+import { runSupabaseCommand } from "./cloud-supabase"
+import { vercelIpc, VERCEL_IPC_PREFIX } from "./cloud-vercel-ipc"
 import {
   detectGithub,
   publishToGithub,
@@ -165,6 +150,7 @@ import {
   mergeParallelWorkspace,
   mergeParallelWorkspaceSelection,
   openParallelWorkspacePullRequest,
+  parallelWorkspaceCloudScopes,
   refreshParallelWorkspace,
   removeParallelWorkspaceRecord,
   runParallelWorkspace,
@@ -473,7 +459,25 @@ export function registerIpcHandlers(deps: Deps) {
   handle("publish-project", (event: IpcMainInvokeEvent, input: PublishProjectInput) =>
     publishProject(input, (progress) => {
       if (!event.sender.isDestroyed()) event.sender.send("cloud-publish-progress", progress)
+    }).then((result) => {
+      // A first deployment reaches production whatever was asked.
+      recordPublishAttempt(
+        input.scopeProjectPath ?? input.projectPath,
+        input.production === true || result.environment === "production",
+        result,
+      )
+      return result
     }),
+  )
+  // Every window's Cloud card refreshes when cloud state changes, whether a
+  // Cloud screen, the preview panel or the agent changed it.
+  watchCloudChanges(() =>
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send("cloud-changed")
+    }),
+  )
+  handle("cloud-overview", (_event: IpcMainInvokeEvent, directory: string) =>
+    cloudOverview(directory, parallelWorkspaceCloudScopes()),
   )
   handle("github-detect", (_event, options?: { refresh?: boolean }) =>
     detectGithub(options?.refresh === true ? refreshAgentEnvironment() : undefined),
@@ -561,59 +565,22 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-provider-links-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listCloudProviderProjectLinks(projectPath, taskId),
   )
-  handle(
-    "cloud-provider-links-set",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-      projectId: string,
-    ) => linkCloudProviderProject(projectPath, taskId, provider, projectId),
-  )
-  handle(
-    "cloud-provider-links-remove",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel" | "netlify") =>
-      unlinkCloudProviderProject(projectPath, taskId, provider),
-  )
-  handle(
-    "cloud-provider-env-sync",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, provider: "vercel" | "netlify") =>
-      syncCloudProviderEnvironment(projectPath, taskId, provider),
-  )
-  handle(
-    "cloud-provider-domains-add",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-      domain: string,
-    ) => addCloudProviderDomain(projectPath, taskId, provider, domain),
-  )
-  handle(
-    "cloud-provider-domains-verify",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      verifyCloudProviderDomain(projectPath, taskId, id),
-  )
-  handle(
-    "cloud-provider-domains-remove",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      removeCloudProviderDomain(projectPath, taskId, id),
-  )
-  handle(
-    "cloud-supabase-project-connect",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, projectRef: string) =>
-      connectSupabaseProject(projectPath, taskId, projectRef),
-  )
-  handle("cloud-supabase-services", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    getSupabaseServiceSnapshot(projectPath, taskId),
-  )
-  handle("cloud-aws-status", (_event: IpcMainInvokeEvent, input?: { profile?: string; region?: string }) =>
-    getCloudAwsStatus(input),
-  )
-  handle("cloud-aws-resources", (_event: IpcMainInvokeEvent, input?: { profile?: string; region?: string }) =>
-    listCloudAwsResources(input),
+  // The Vercel controls in Vector Cloud (window.api.cloud.vercel), one
+  // channel each; the agent's vector_cloud actions call the same functions.
+  for (const [name, listener] of Object.entries(vercelIpc)) {
+    const call = listener as (...args: unknown[]) => unknown
+    handle(`${VERCEL_IPC_PREFIX}${name}`, (_event: IpcMainInvokeEvent, ...args: unknown[]) => call(...args))
+  }
+
+  // Every Supabase control in the console, through the same commands the agent uses.
+  handle("cloud-supabase", (event: IpcMainInvokeEvent, command: unknown, input: unknown) =>
+    runSupabaseCommand(command, input, {
+      caller: "console",
+      workspaces: parallelWorkspaceCloudScopes,
+      progress: (progress) => {
+        if (!event.sender.isDestroyed()) event.sender.send("cloud-supabase-progress", progress)
+      },
+    }),
   )
   handle("cloud-deployments-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     listDeployments(projectPath, taskId),
@@ -626,25 +593,10 @@ export function registerIpcHandlers(deps: Deps) {
   handle(
     "cloud-deployments-check",
     (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      checkDeployment(projectPath, taskId, id),
+      checkDeploymentHealth({ projectPath, taskId, id }),
   )
   handle("cloud-deployments-check-all", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    checkAllDeployments(projectPath, taskId),
-  )
-  handle(
-    "cloud-deployments-promote",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      promoteDeployment({ projectPath, taskId, id }),
-  )
-  handle(
-    "cloud-deployments-rollback",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      rollbackDeployment({ projectPath, taskId, id }),
-  )
-  handle(
-    "cloud-deployments-logs",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      fetchDeploymentRuntimeLogs({ projectPath, taskId, id }),
+    checkAllDeploymentHealth(projectPath, taskId),
   )
   handle(
     "cloud-deployments-rerun-checks",
@@ -656,8 +608,21 @@ export function registerIpcHandlers(deps: Deps) {
   )
   handle(
     "cloud-env-set",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, key: string, value: string) =>
-      setEnv(projectPath, taskId, key, value),
+    (
+      _event: IpcMainInvokeEvent,
+      projectPath: string,
+      taskId: string | undefined,
+      key: string,
+      value: string,
+      visibility?: "public" | "server",
+    ) =>
+      setEnv(
+        projectPath,
+        taskId,
+        key,
+        value,
+        visibility === "public" || visibility === "server" ? visibility : undefined,
+      ),
   )
   handle(
     "cloud-env-remove",
@@ -667,42 +632,9 @@ export function registerIpcHandlers(deps: Deps) {
   handle("cloud-env-apply", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     applyEnv(projectPath, taskId),
   )
-  handle("cloud-domains-list", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    listDomains(projectPath, taskId),
-  )
-  handle(
-    "cloud-domains-add",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      input: { domain: string; slug?: string },
-    ) => addDomain(projectPath, taskId, input),
-  )
-  handle(
-    "cloud-domains-verify",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      verifyDomain(projectPath, taskId, id),
-  )
-  handle(
-    "cloud-domains-remove",
-    (_event: IpcMainInvokeEvent, projectPath: string, taskId: string | undefined, id: string) =>
-      removeDomain(projectPath, taskId, id),
-  )
+
   handle("cloud-db-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getDatabase(projectPath, taskId),
-  )
-  handle(
-    "cloud-db-connect",
-    (
-      _event: IpcMainInvokeEvent,
-      projectPath: string,
-      taskId: string | undefined,
-      input: { provider: "supabase"; url: string; anonKey: string },
-    ) => connectDatabase(projectPath, taskId, input),
-  )
-  handle("cloud-db-disconnect", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
-    disconnectDatabase(projectPath, taskId),
   )
   handle("cloud-build-get", (_event: IpcMainInvokeEvent, projectPath: string, taskId?: string) =>
     getBuildSettings(projectPath, taskId),

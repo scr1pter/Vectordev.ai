@@ -14,6 +14,20 @@ describe("canAutoAcceptPermission", () => {
     },
   )
 
+  test.each(["vector_cloud_publish", "vector_cloud_database", "vector_cloud_environment", "vector_cloud_hosting"])(
+    "requires a new manual decision for account action %s even with saved patterns",
+    (permission) => {
+      expect(canAutoAcceptPermission(permission, ["*"])).toBe(false)
+      expect(canAlwaysAllowPermission(permission, ["*"])).toBe(false)
+    },
+  )
+
+  test("keeps each-time future cloud actions manual while allowing repeatable read-only inspection", () => {
+    expect(canAutoAcceptPermission("vector_cloud_future", [])).toBe(false)
+    expect(canAlwaysAllowPermission("vector_cloud_future", [])).toBe(false)
+    expect(canAutoAcceptPermission("vector_cloud_inspect", ["supabase/project/preview"])).toBe(true)
+  })
+
   test("requires a manual decision for future computer permissions", () => {
     expect(canAutoAcceptPermission("computer_new_action")).toBe(false)
   })

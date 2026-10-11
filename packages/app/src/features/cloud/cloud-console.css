@@ -230,9 +230,6 @@
 .cloud-provider-mark[data-provider="supabase"] {
   color: #8ddbb0;
 }
-.cloud-provider-mark[data-provider="netlify"] {
-  color: #7dd8d1;
-}
 .cloud-connection-main {
   min-width: 0;
 }
@@ -421,6 +418,12 @@
   font-style: normal;
   white-space: nowrap;
 }
+.cloud-service-list em[data-tone="success"] {
+  color: #8fd8ac;
+}
+.cloud-service-list em[data-tone="warning"] {
+  color: #e2c089;
+}
 .cloud-service-icon {
   display: grid;
   width: 30px;
@@ -444,59 +447,6 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-}
-
-.cloud-aws-controls {
-  display: grid;
-  grid-template-columns: minmax(150px, 220px) minmax(140px, 190px) minmax(220px, 1fr);
-  align-items: end;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--cc-line);
-  border-radius: 8px;
-  background: var(--cc-glass-soft);
-}
-.cloud-aws-controls label {
-  display: grid;
-  gap: 6px;
-}
-.cloud-aws-controls label > span {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 10.5px;
-  font-weight: 600;
-}
-.cloud-aws-identity {
-  display: grid;
-  align-self: center;
-  gap: 3px;
-  padding-left: 8px;
-}
-.cloud-aws-identity strong {
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 12.5px;
-  font-weight: 610;
-}
-.cloud-aws-identity small {
-  color: var(--cc-muted);
-  font-size: 10.5px;
-  line-height: 1.4;
-}
-.cloud-resource-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.cloud-resource-chips span {
-  max-width: 240px;
-  overflow: hidden;
-  padding: 3px 7px;
-  border: 1px solid var(--cc-line);
-  border-radius: 5px;
-  color: rgba(255, 255, 255, 0.55);
-  font-family: var(--vx-mono, ui-monospace, monospace);
-  font-size: 9.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .cloud-segment {
@@ -774,6 +724,11 @@
   background: rgba(230, 120, 125, 0.08);
   color: #f0b3b6;
 }
+.cloud-notice[data-tone="warning"] {
+  border-color: rgba(214, 169, 92, 0.3);
+  background: rgba(214, 169, 92, 0.08);
+  color: #ecd3a6;
+}
 .cloud-notice[data-tone="info"] {
   border-color: rgba(147, 116, 236, 0.3);
   background: rgba(147, 116, 236, 0.08);
@@ -897,13 +852,6 @@
   }
   .cloud-source-control-actions {
     justify-content: flex-start;
-  }
-  .cloud-aws-controls {
-    grid-template-columns: 1fr 1fr;
-  }
-  .cloud-aws-identity {
-    grid-column: 1 / -1;
-    padding-left: 0;
   }
 }
 
@@ -1132,11 +1080,5 @@
   }
   .cloud-heading-with-action {
     flex-direction: column;
-  }
-  .cloud-aws-controls {
-    grid-template-columns: 1fr;
-  }
-  .cloud-aws-identity {
-    grid-column: auto;
   }
 }

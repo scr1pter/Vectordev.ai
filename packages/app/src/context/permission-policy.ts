@@ -1,12 +1,7 @@
-export function canAutoAcceptPermission(permission?: string) {
-  if (permission === "browser_sensitive") return false
-  return !permission?.startsWith("computer_")
-}
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
 
-export function canAlwaysAllowPermission(permission?: string, always?: readonly string[]) {
-  if (permission === "browser_sensitive" || permission?.startsWith("computer_")) return false
-  return Boolean(always?.length)
-}
+export const canAutoAcceptPermission = PermissionPolicy.canAutoApprove
+export const canAlwaysAllowPermission = PermissionPolicy.canAlwaysApprove
 
 export function computerPermissionDetails(input: {
   permission: string

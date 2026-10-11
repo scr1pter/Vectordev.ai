@@ -72,7 +72,7 @@ const PRODUCT_DOCUMENTATION = [
     section: "Cloud Services",
     title: "Deployments",
     where: "Cloud Services → Deployments.",
-    body: "Publish through the user's own Vercel or Netlify account. Builds run on that account, and completed deployments appear with their live URLs. If no publisher is detected, Vector provides setup guidance.",
+    body: "Publish through the user's own Vercel account. Builds run on that account, and completed deployments appear with their live URLs. If no publisher is detected, Vector provides setup guidance.",
   },
   {
     section: "Cloud Services",

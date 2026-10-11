@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
+
+import { fakeVercel } from "../../test/fake-vercel"
 
 // cloud-logs reaches electron-store through ./store and cloud-connections
 // imports electron's shell, so both are mocked before the module is imported.
@@ -22,7 +25,12 @@ mock.module("./store", () => ({
     const bucket = store.get(name)!
     return {
       get: (key: string) => bucket.get(key),
-      set: (key: string, value: unknown) => bucket.set(key, value),
+      // electron-store writes its file on set; cloud-console tightens its mode after.
+      set: (key: string, value: unknown) => {
+        mkdirSync(userDataPath, { recursive: true })
+        writeFileSync(join(userDataPath, name), "", { flag: "a" })
+        bucket.set(key, value)
+      },
       delete: (key: string) => bucket.delete(key),
       path: join(userDataPath, name),
     }
@@ -30,9 +38,7 @@ mock.module("./store", () => ({
   removeStoreFileIfEmpty: () => undefined,
 }))
 
-const { boundLogLines, fetchCloudLogs, netlifyLogEntries, truncateLogTail, vercelLogEntries } = await import(
-  "./cloud-logs"
-)
+const { boundLogLines, fetchCloudLogs, truncateLogTail, vercelLogEntries } = await import("./cloud-logs")
 const { cloudProjectScopeKey } = await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
 
@@ -130,24 +136,6 @@ describe("provider log parsing", () => {
       { at: 2, text: "[stderr] boom" },
     ])
   })
-
-  test("composes a Netlify tail from the deploy state, summary and build error", () => {
-    expect(
-      netlifyLogEntries(
-        {
-          state: "error",
-          error_message: "Build script returned non-zero exit code: 2",
-          summary: { messages: [{ type: "error", title: "Build failed", description: "tsc found 3 errors" }] },
-        },
-        { error: "Command failed with exit code 2: bun run build" },
-      ),
-    ).toEqual([
-      { text: "state: error" },
-      { text: "[error] Build failed — tsc found 3 errors" },
-      { text: "[error] Build script returned non-zero exit code: 2" },
-      { text: "[error] Command failed with exit code 2: bun run build" },
-    ])
-  })
 })
 
 describe("fetchCloudLogs", () => {
@@ -168,72 +156,101 @@ describe("fetchCloudLogs", () => {
     expect(report.nextStep).toContain("list_deployments")
   })
 
-  test("reads the Vercel deployment events and redacts the project's own secrets", async () => {
+  // The linked project lives in team_1 while the connection's default is
+  // team_9: the build log has to be read in the link's own team.
+  function linkFakeProject(api: ReturnType<typeof fakeVercel>) {
+    const remote = api.addProject({ name: "demo", teamId: "team_1" })
+    seed("cloud-provider-links", cloudProjectScopeKey(PROJECT), [
+      { provider: "vercel", projectId: remote.id, projectName: "demo", teamId: "team_1", linkedAt: "2026-09-01" },
+    ])
+    return remote
+  }
+
+  test("reads a recorded deployment's build events from the linked project's team and redacts secrets", async () => {
+    const api = fakeVercel({ token: "vercel-token" })
+    process.env.VECTOR_VERCEL_API_URL = api.url
+    try {
+      seedVercelConnection()
+      const remote = linkFakeProject(api)
+      api.addDeployment({
+        projectId: remote.id,
+        uid: "dpl_demo",
+        url: "demo-abc.vercel.app",
+        events: [
+          { type: "stdout", created: 2, payload: { text: "API_KEY=s3cr3t-value" } },
+          { type: "stderr", created: 3, payload: { text: "TypeError: undefined is not a function" } },
+          { type: "stdout", created: 1, payload: { text: "Build started" } },
+          { type: "stdout", created: 4, payload: { text: "auth vercel-token" } },
+        ],
+      })
+      seedDeployment({ providerDeploymentId: "dpl_demo" })
+      seed("cloud-projects", cloudProjectScopeKey(PROJECT), {
+        env: [{ key: "API_KEY", value: "s3cr3t-value" }],
+        database: null,
+        domains: [],
+        build: null,
+      })
+
+      const report = await fetchCloudLogs({ projectPath: PROJECT, deploymentId: "dep_1", limit: 5 })
+
+      const events = api.requests("GET").find((item) => item.path === "/v3/deployments/dpl_demo/events")
+      expect(events?.query).toMatchObject({ limit: "5", direction: "backward", teamId: "team_1" })
+      expect(report.ok).toBe(true)
+      expect(report.deploymentId).toBe("dep_1")
+      expect(report.url).toBe("https://demo-abc.vercel.app/")
+      expect(report.logs?.source).toBe("provider")
+      expect(report.logs?.tail).toBe(
+        "Build started\nAPI_KEY=[REDACTED]\n[stderr] TypeError: undefined is not a function\nauth [redacted]",
+      )
+      expect(JSON.stringify(report)).not.toContain("s3cr3t-value")
+      // The connection's own token has no recognisable prefix; it is removed as an exact string.
+      expect(JSON.stringify(report)).not.toContain("vercel-token")
+    } finally {
+      await api.stop()
+      delete process.env.VECTOR_VERCEL_API_URL
+    }
+  })
+
+  test("falls back to the recorded build output when Vercel cannot find the deployment", async () => {
+    const api = fakeVercel({ token: "vercel-token" })
+    process.env.VECTOR_VERCEL_API_URL = api.url
+    try {
+      seedVercelConnection()
+      linkFakeProject(api)
+      seedDeployment({
+        checks: [
+          {
+            id: "check_1",
+            type: "health",
+            label: "Health",
+            status: "failed",
+            required: true,
+            checkedAt: "2026-09-01T10:01:00.000Z",
+            output: "GET / returned 500",
+          },
+        ],
+      })
+
+      const report = await fetchCloudLogs({ projectPath: PROJECT, deploymentId: "dep_1" })
+
+      expect(report.ok).toBe(true)
+      expect(report.logs?.source).toBe("build")
+      expect(report.logs?.detail).toContain("Falling back")
+      expect(report.logs?.tail).toBe("recorded build output\n[Health] failed\nGET / returned 500")
+    } finally {
+      await api.stop()
+      delete process.env.VECTOR_VERCEL_API_URL
+    }
+  })
+
+  test("shows the recorded output without calling Vercel when no project is linked", async () => {
     seedDeployment()
     seedVercelConnection()
-    seed("cloud-projects", cloudProjectScopeKey(PROJECT), {
-      env: [{ key: "API_KEY", value: "s3cr3t-value" }],
-      database: null,
-      domains: [],
-      build: null,
-    })
-
-    const requests: string[] = []
-    const report = await fetchCloudLogs({ projectPath: PROJECT, limit: 5 }, async (input, init) => {
-      requests.push(String(input))
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer vercel-token")
-      return Response.json([
-        { type: "stdout", created: 2, payload: { text: "API_KEY=s3cr3t-value" } },
-        { type: "stderr", created: 3, payload: { text: "TypeError: undefined is not a function" } },
-        { type: "stdout", created: 1, payload: { text: "Build started" } },
-      ])
-    })
-
-    expect(requests).toHaveLength(1)
-    expect(requests[0]).toContain("https://api.vercel.com/v3/deployments/demo-abc.vercel.app/events")
-    expect(requests[0]).toContain("limit=5")
-    expect(requests[0]).toContain("teamId=team_9")
-    expect(report.ok).toBe(true)
-    expect(report.deploymentId).toBe("dep_1")
-    expect(report.url).toBe("https://demo-abc.vercel.app/")
-    expect(report.logs?.source).toBe("provider")
-    expect(report.logs?.tail).toBe("Build started\nAPI_KEY=[REDACTED]\n[stderr] TypeError: undefined is not a function")
-    expect(JSON.stringify(report)).not.toContain("s3cr3t-value")
-  })
-
-  test("falls back to the recorded build output when the provider call fails", async () => {
-    seedDeployment({
-      checks: [
-        {
-          id: "check_1",
-          type: "health",
-          label: "Health",
-          status: "failed",
-          required: true,
-          checkedAt: "2026-09-01T10:01:00.000Z",
-          output: "GET / returned 500",
-        },
-      ],
-    })
-    seedVercelConnection()
-
-    const report = await fetchCloudLogs({ projectPath: PROJECT }, async () =>
-      Response.json({ error: { message: "Deployment not found" } }, { status: 404 }),
-    )
-
-    expect(report.ok).toBe(true)
-    expect(report.logs?.source).toBe("build")
-    expect(report.logs?.detail).toContain("Falling back")
-    expect(report.logs?.tail).toBe("recorded build output\n[Health] failed\nGET / returned 500")
-  })
-
-  test("explains the missing connection when no provider token is stored", async () => {
-    seedDeployment({ log: undefined })
     const report = await fetchCloudLogs({ projectPath: PROJECT }, async () => {
       throw new Error("no network call expected")
     })
     expect(report.ok).toBe(true)
-    expect(report.logs?.detail).toContain("Connect Vercel")
-    expect(report.logs?.tail).toBe("")
+    expect(report.logs?.detail).toContain("No Vercel project is linked")
+    expect(report.logs?.tail).toBe("recorded build output")
   })
 })

@@ -2,29 +2,23 @@ import type { VectorAccountPlatform } from "@vectordevai/app/vector-account"
 import type { DesktopMenuAction } from "@vectordevai/app/desktop-menu"
 import type { WslServersPlatform } from "@vectordevai/app/wsl/types"
 import type { UpdaterState } from "@vectordevai/app/updater"
-import type {
-  CloudRuntimeLogResult,
-  PublishProgressEvent,
-  PublishProjectInput,
-  PublishResult,
-  PublishTarget,
-} from "../main/publish"
+import type { PublishProgressEvent, PublishProjectInput, PublishResult, PublishTarget } from "../main/publish"
 import type {
   CloudBuildSettings,
   CloudDatabaseConnection,
   CloudDeployment,
-  CloudDomain,
   CloudEnvVar,
+  CloudEnvVisibility,
 } from "../main/cloud-console"
 import type {
   CloudProviderConnection,
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudProviderSyncResult,
-  CloudSupabaseServices,
 } from "../main/cloud-connections"
-import type { CloudAwsSnapshot, CloudAwsStatus } from "../main/cloud-aws"
+import type { CloudOverview } from "../main/cloud-overview"
+import type { SupabaseCommand, SupabaseProgressEvent } from "../main/cloud-supabase"
+import type { VercelCloudApi } from "../main/cloud-vercel-ipc"
 import type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 import type {
   GithubAuthStatus,
@@ -109,36 +103,24 @@ export type {
   PullRequestReviewComment,
   PullRequestSummary,
 } from "../main/github-pr"
-export type {
-  CloudRuntimeLogResult,
-  PublishProgressEvent,
-  PublishProjectInput,
-  PublishResult,
-  PublishTarget,
-} from "../main/publish"
+export type { PublishProgressEvent, PublishProjectInput, PublishResult, PublishTarget } from "../main/publish"
 export type {
   CloudBuildSettings,
   CloudDatabaseConnection,
   CloudDeployment,
   CloudDeploymentCheck,
-  CloudDomain,
-  CloudDomainProvider,
-  CloudDomainStatus,
   CloudEnvVar,
+  CloudEnvVisibility,
   CloudGitMetadata,
   CloudRequiredChecks,
 } from "../main/cloud-console"
+export type { VercelCloudApi } from "../main/cloud-vercel-ipc"
 export type {
   CloudProviderConnection,
   CloudProviderId,
   CloudProviderProjectLink,
   CloudProviderResource,
-  CloudProviderSyncResult,
-  CloudSupabaseBucket,
-  CloudSupabaseFunction,
-  CloudSupabaseServices,
 } from "../main/cloud-connections"
-export type { CloudAwsResource, CloudAwsService, CloudAwsSnapshot, CloudAwsStatus } from "../main/cloud-aws"
 export type { GithubOauthPushInput, GithubPublishInput, GithubPublishResult, GithubStatus } from "../main/github"
 export type {
   GithubAuthStatus,
@@ -576,6 +558,8 @@ export type ParallelWorkspaceRecord = {
   diff: string
   checkpointPath?: string
   pullRequestUrl?: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
   baselineHashes?: Record<string, string>
   contextFiles?: string[]
   contextIndexedFiles?: number
@@ -875,6 +859,10 @@ export type ElectronAPI = {
     subscribe: (cb: (event: PublishProgressEvent) => void) => () => void
   }
   cloud: {
+    /** The live summary for the session's Cloud card; `directory` may be an agent workspace. */
+    overview: (directory: string) => Promise<CloudOverview>
+    /** Fires whenever cloud state changes; returns the unsubscribe. */
+    onChange: (cb: () => void) => () => void
     connections: {
       list: () => Promise<CloudProviderConnection[]>
       connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>
@@ -884,84 +872,36 @@ export type ElectronAPI = {
     providers: {
       resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>
       links: (projectPath: string, taskId?: string) => Promise<CloudProviderProjectLink[]>
-      link: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel" | "netlify",
-        projectId: string,
-      ) => Promise<CloudProviderProjectLink>
-      unlink: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel" | "netlify",
-      ) => Promise<CloudProviderProjectLink[]>
-      syncEnvironment: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel" | "netlify",
-      ) => Promise<CloudProviderSyncResult>
-      addDomain: (
-        projectPath: string,
-        taskId: string | undefined,
-        provider: "vercel" | "netlify",
-        domain: string,
-      ) => Promise<CloudDomain>
-      verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-      removeDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
     }
+    vercel: VercelCloudApi
     deployments: {
       list: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
       remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment[]>
       check: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
       checkAll: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
-      promote: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-      rollback: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-      logs: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudRuntimeLogResult>
       rerunChecks: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
     }
     env: {
       list: (projectPath: string, taskId?: string) => Promise<CloudEnvVar[]>
-      set: (projectPath: string, taskId: string | undefined, key: string, value: string) => Promise<CloudEnvVar[]>
+      set: (
+        projectPath: string,
+        taskId: string | undefined,
+        key: string,
+        value: string,
+        visibility?: CloudEnvVisibility,
+      ) => Promise<CloudEnvVar[]>
       remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
       apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
     }
-    domains: {
-      list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
-      add: (
-        projectPath: string,
-        taskId: string | undefined,
-        input: { domain: string; slug?: string },
-      ) => Promise<CloudDomain>
-      verify: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-      remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
-    }
     database: {
       get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
-      connect: (
-        projectPath: string,
-        taskId: string | undefined,
-        input: {
-          provider: "supabase"
-          url: string
-          anonKey: string
-          projectRef?: string
-          projectName?: string
-          managedByOAuth?: boolean
-        },
-      ) => Promise<CloudDatabaseConnection>
-      connectProject: (
-        projectPath: string,
-        taskId: string | undefined,
-        projectRef: string,
-      ) => Promise<CloudDatabaseConnection>
-      disconnect: (projectPath: string, taskId?: string) => Promise<void>
     }
-    services: {
-      supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
-    }
-    aws: {
-      status: (input?: { profile?: string; region?: string }) => Promise<CloudAwsStatus>
-      resources: (input?: { profile?: string; region?: string }) => Promise<CloudAwsSnapshot>
+    supabase: {
+      run: (
+        command: SupabaseCommand,
+        input: Record<string, unknown>,
+      ) => Promise<{ ok: boolean; error?: string; needsSetup?: boolean; nextStep?: string } & Record<string, unknown>>
+      subscribe: (cb: (event: SupabaseProgressEvent) => void) => () => void
     }
     build: {
       get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>

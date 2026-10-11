@@ -182,7 +182,7 @@ export const {
 
         case "permission.asked": {
           const request = event.properties
-          if (permission.mode === "auto" && canAutoApprovePermission(request.permission)) {
+          if (permission.mode === "auto" && canAutoApprovePermission(request.permission, request.always)) {
             void sdk.client.permission.reply({
               requestID: request.id,
               reply: "once",

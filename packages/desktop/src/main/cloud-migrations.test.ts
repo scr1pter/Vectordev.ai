@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -36,6 +37,7 @@ const { applyCloudMigrations, applyMigrationFiles, discoverMigrations, planMigra
   await import("./cloud-migrations")
 const { cloudProjectScopeKey } = await import("./cloud-console")
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
+const { startCloudBridge, stopCloudBridge } = await import("./cloud-bridge")
 
 let project = ""
 
@@ -71,18 +73,51 @@ function seedSupabase() {
   ])
 }
 
-// A fake Management API: remembers every statement and answers the tracking
-// query from the names it has been told are already applied.
-function fakeRunner(applied: string[] = [], failOn?: string) {
+const sha = (sql: string) => createHash("sha256").update(sql).digest("hex")
+
+// A fake database behind the Management API's query endpoint. It answers the
+// history queries from its state and, like the real setup statement, moves an
+// older release's public.vector_migrations rows into the private table.
+function fakeDatabase(
+  state: {
+    tracked?: { name: string; checksum?: string }[]
+    legacy?: string[]
+    versions?: string[]
+  } = {},
+  failOn?: string,
+) {
   const statements: string[] = []
   const runner = async (sql: string) => {
     statements.push(sql)
     if (failOn && sql.includes(failOn)) throw new Error(`syntax error at or near "${failOn}"`)
-    if (sql.startsWith("select name from public.vector_migrations")) return applied.map((name) => ({ name }))
+    if (sql.startsWith("create schema if not exists vector;")) {
+      state.tracked = [...(state.tracked ?? []), ...(state.legacy ?? []).map((name) => ({ name }))]
+      state.legacy = undefined
+      return []
+    }
+    if (sql.includes("to_regclass('vector.schema_migrations')")) {
+      return [{ tracked: Boolean(state.tracked), legacy: Boolean(state.legacy), cli: Boolean(state.versions) }]
+    }
+    if (sql.startsWith("select name, checksum from vector.schema_migrations")) {
+      return (state.tracked ?? []).map((row) => ({ name: row.name, checksum: row.checksum ?? null }))
+    }
+    if (sql.startsWith("select name from public.vector_migrations"))
+      return (state.legacy ?? []).map((name) => ({ name }))
+    if (sql.startsWith("select version from supabase_migrations")) {
+      return (state.versions ?? []).map((version) => ({ version }))
+    }
+    // A file's own statements and its record succeed or fail together.
+    const recorded = sql.match(
+      /insert into vector\.schema_migrations \(name, checksum\) values \('([^']+)', '([^']+)'\)/,
+    )
+    if (recorded) state.tracked = [...(state.tracked ?? []), { name: recorded[1], checksum: recorded[2] }]
     return []
   }
-  return { runner, statements }
+  return { runner, statements, state }
 }
+
+const writes = (statements: string[]) =>
+  statements.filter((sql) => /\b(create|insert|update|delete|drop|alter|revoke)\b/i.test(sql))
 
 beforeEach(async () => {
   store.clear()
@@ -91,6 +126,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  await stopCloudBridge()
   await rm(project, { recursive: true, force: true })
 })
 
@@ -124,18 +160,27 @@ describe("migration discovery", () => {
 
 describe("migration planning", () => {
   test("splits discovered files into applied and pending, keeping file order", () => {
-    const files = ["a.sql", "b.sql", "c.sql"].map((name) => ({ name, path: `/tmp/${name}` }))
-    const plan = planMigrations(files, ["b.sql", "a.sql"])
+    const files = ["a.sql", "b.sql", "c.sql"].map((name) => ({ name, path: `/tmp/${name}`, checksum: sha(name) }))
+    const plan = planMigrations(files, {
+      tracked: [
+        { name: "b.sql", checksum: sha("b.sql") },
+        { name: "a.sql", checksum: sha("a.sql") },
+      ],
+      versions: [],
+    })
     expect(plan.alreadyApplied).toEqual(["a.sql", "b.sql"])
     expect(plan.pending.map((file) => file.name)).toEqual(["c.sql"])
+    expect(plan.changed).toEqual([])
   })
 })
 
 describe("applyMigrationFiles", () => {
-  test("a dry run reads the tracking table and writes nothing", async () => {
+  test("a dry run reads the history and writes nothing", async () => {
     await writeMigrations("supabase/migrations", { "0001_init.sql": "create table posts ();", "0002_likes.sql": "x" })
     const discovery = await discoverMigrations(project)
-    const { runner, statements } = fakeRunner(["0001_init.sql"])
+    const { runner, statements } = fakeDatabase({
+      tracked: [{ name: "0001_init.sql", checksum: sha("create table posts ();") }],
+    })
 
     const outcome = await applyMigrationFiles({ discovery, runner, dryRun: true })
     expect(outcome).toMatchObject({
@@ -143,44 +188,112 @@ describe("applyMigrationFiles", () => {
       directory: "supabase/migrations",
       alreadyApplied: ["0001_init.sql"],
       pending: ["0002_likes.sql"],
+      changed: [],
       applied: [],
     })
-    expect(statements).toEqual(["select name from public.vector_migrations order by name;"])
+    expect(writes(statements)).toEqual([])
   })
 
-  test("a dry run survives a database that has never run a migration", async () => {
+  test("a dry run on a database that has never run a migration creates nothing", async () => {
     await writeMigrations("supabase/migrations", { "0001_init.sql": "create table posts ();" })
     const discovery = await discoverMigrations(project)
-    const outcome = await applyMigrationFiles({
-      discovery,
-      dryRun: true,
-      runner: async () => {
-        throw new Error('relation "public.vector_migrations" does not exist')
-      },
-    })
+    const { runner, statements } = fakeDatabase()
+    const outcome = await applyMigrationFiles({ discovery, dryRun: true, runner })
     expect(outcome.pending).toEqual(["0001_init.sql"])
     expect(outcome.alreadyApplied).toEqual([])
+    expect(statements).toHaveLength(1)
+    expect(writes(statements)).toEqual([])
   })
 
-  test("applies only the pending files, in order, and records each one", async () => {
+  test("keeps tracking in a private schema and runs each file with its record in one query", async () => {
     await writeMigrations("supabase/migrations", {
       "0001_init.sql": "create table posts (id uuid primary key);",
       "0002_likes.sql": "alter table posts add column likes int;",
     })
     const discovery = await discoverMigrations(project)
-    const { runner, statements } = fakeRunner(["0001_init.sql"])
+    const { runner, statements, state } = fakeDatabase({
+      tracked: [{ name: "0001_init.sql", checksum: sha("create table posts (id uuid primary key);") }],
+    })
 
     const outcome = await applyMigrationFiles({ discovery, runner, dryRun: false })
     expect(outcome.applied).toEqual(["0002_likes.sql"])
     expect(outcome.alreadyApplied).toEqual(["0001_init.sql"])
     expect(outcome.pending).toEqual([])
     expect(outcome.failed).toBeUndefined()
-    expect(statements[0]).toContain("create table if not exists public.vector_migrations")
-    expect(statements).toContain("alter table posts add column likes int;")
+    const setup = statements[0]
+    expect(setup).toContain("create schema if not exists vector;")
+    expect(setup).toContain("create table if not exists vector.schema_migrations")
+    expect(setup).toContain("alter table vector.schema_migrations enable row level security;")
+    expect(setup).toContain("array['anon', 'authenticated']")
+    expect(setup).toContain("revoke all on schema vector from %I")
+    expect(setup).not.toContain("public.vector_migrations (")
     expect(statements).toContain(
-      "insert into public.vector_migrations (name) values ('0002_likes.sql') on conflict do nothing;",
+      `alter table posts add column likes int;\n;\ninsert into vector.schema_migrations (name, checksum) values ('0002_likes.sql', '${sha("alter table posts add column likes int;")}') on conflict (name) do update set checksum = excluded.checksum;`,
     )
-    expect(statements).not.toContain("create table posts (id uuid primary key);")
+    expect(statements.some((sql) => sql.includes("create table posts (id uuid primary key);"))).toBe(false)
+    expect(state.tracked).toEqual([
+      { name: "0001_init.sql", checksum: sha("create table posts (id uuid primary key);") },
+      { name: "0002_likes.sql", checksum: sha("alter table posts add column likes int;") },
+    ])
+  })
+
+  test("moves an older release's public tracking rows and records their checksums", async () => {
+    await writeMigrations("supabase/migrations", {
+      "0001_init.sql": "create table posts ();",
+      "0002_likes.sql": "alter table posts add column likes int;",
+    })
+    const discovery = await discoverMigrations(project)
+
+    const preview = fakeDatabase({ legacy: ["0001_init.sql"] })
+    const planned = await applyMigrationFiles({ discovery, runner: preview.runner, dryRun: true })
+    expect(planned).toMatchObject({ alreadyApplied: ["0001_init.sql"], pending: ["0002_likes.sql"] })
+    expect(writes(preview.statements)).toEqual([])
+
+    const { runner, statements, state } = fakeDatabase({ legacy: ["0001_init.sql"] })
+    const outcome = await applyMigrationFiles({ discovery, runner, dryRun: false })
+    expect(statements[0]).toContain("insert into vector.schema_migrations (name, applied_at)")
+    expect(statements[0]).toContain("select name, applied_at from public.vector_migrations")
+    expect(statements[0]).toContain("drop table public.vector_migrations;")
+    expect(state.legacy).toBeUndefined()
+    expect(outcome).toMatchObject({ alreadyApplied: ["0001_init.sql"], applied: ["0002_likes.sql"] })
+    expect(statements).toContain(
+      `update vector.schema_migrations set checksum = '${sha("create table posts ();")}' where name = '0001_init.sql' and checksum is null;`,
+    )
+  })
+
+  test("treats versions the Supabase CLI recorded as already applied", async () => {
+    await writeMigrations("supabase/migrations", {
+      "20240101000000_init.sql": "create table posts ();",
+      "20240102000000_likes.sql": "alter table posts add column likes int;",
+    })
+    const discovery = await discoverMigrations(project)
+    const { runner, statements } = fakeDatabase({ versions: ["20240101000000"] })
+
+    const outcome = await applyMigrationFiles({ discovery, runner, dryRun: false })
+    expect(outcome.alreadyApplied).toEqual(["20240101000000_init.sql"])
+    expect(outcome.appliedByCli).toEqual(["20240101000000_init.sql"])
+    expect(outcome.applied).toEqual(["20240102000000_likes.sql"])
+    expect(statements.some((sql) => sql.includes("create table posts ();"))).toBe(false)
+  })
+
+  test("refuses to run anything when an applied file was changed", async () => {
+    await writeMigrations("supabase/migrations", {
+      "0001_init.sql": "create table posts (id bigint primary key);",
+      "0002_likes.sql": "alter table posts add column likes int;",
+    })
+    const discovery = await discoverMigrations(project)
+    const state = { tracked: [{ name: "0001_init.sql", checksum: sha("create table posts (id uuid primary key);") }] }
+
+    const preview = await applyMigrationFiles({ discovery, runner: fakeDatabase({ ...state }).runner, dryRun: true })
+    expect(preview.changed).toEqual(["0001_init.sql"])
+    expect(preview.failed?.error).toContain("0001_init.sql changed after it was applied")
+
+    const { runner, statements } = fakeDatabase({ ...state })
+    const outcome = await applyMigrationFiles({ discovery, runner, dryRun: false })
+    expect(outcome.applied).toEqual([])
+    expect(outcome.pending).toEqual(["0002_likes.sql"])
+    expect(outcome.failed?.name).toBe("0001_init.sql")
+    expect(statements.some((sql) => sql.includes("alter table posts add column likes int;"))).toBe(false)
   })
 
   test("stops at the first failure and says what did and did not run", async () => {
@@ -190,7 +303,7 @@ describe("applyMigrationFiles", () => {
       "0003_later.sql": "create index on posts (likes);",
     })
     const discovery = await discoverMigrations(project)
-    const { runner, statements } = fakeRunner([], "tabel")
+    const { runner, statements, state } = fakeDatabase({}, "tabel")
 
     const outcome = await applyMigrationFiles({
       discovery,
@@ -202,7 +315,8 @@ describe("applyMigrationFiles", () => {
     expect(outcome.failed?.name).toBe("0002_broken.sql")
     expect(outcome.failed?.error).toContain("[redacted]")
     expect(outcome.pending).toEqual(["0003_later.sql"])
-    expect(statements).not.toContain("create index on posts (likes);")
+    expect(statements.some((sql) => sql.includes("create index on posts (likes);"))).toBe(false)
+    expect(state.tracked?.map((row) => row.name)).toEqual(["0001_init.sql"])
   })
 })
 
@@ -230,30 +344,119 @@ describe("applyCloudMigrations", () => {
 
     const queries: string[] = []
     const urls: string[] = []
-    const report = await applyCloudMigrations({ projectPath: project }, async (input, init) => {
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (input, init) => {
       urls.push(String(input))
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer sbp_management_token")
       queries.push(String(JSON.parse(String(init?.body)).query))
       return Response.json([])
-    })
+    }
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    const report = await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)
 
     expect(new Set(urls)).toEqual(new Set(["https://api.supabase.com/v1/projects/abcdefghijkl/database/query"]))
     expect(report.ok).toBe(true)
     expect(report.migrations?.applied).toEqual(["0001_init.sql"])
     expect(report.migrations?.projectRef).toBe("abcdefghijkl")
-    expect(queries).toContain("create table posts (id uuid primary key);")
+    expect(
+      queries.some(
+        (query) =>
+          query.startsWith("create table posts (id uuid primary key);") &&
+          query.includes("insert into vector.schema_migrations"),
+      ),
+    ).toBe(true)
     expect(JSON.stringify(report)).not.toContain("sbp_management_token")
+  })
+
+  test.each(["edit", "add", "history"])("refuses %s after approval before any database mutation", async (change) => {
+    const sql = "create table posts (id uuid primary key);\n-- down\ndrop table posts;"
+    await writeMigrations("supabase/migrations", { "0001_init.sql": sql })
+    seedSupabase()
+    const database = fakeDatabase()
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (_input, init) =>
+      Response.json(await database.runner(JSON.parse(String(init?.body)).query))
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    expect(plan.statements).toEqual([
+      {
+        label: "Migration supabase/migrations/0001_init.sql",
+        sql: "create table posts (id uuid primary key);\n",
+        length: "create table posts (id uuid primary key);\n".length,
+        truncated: false,
+      },
+    ])
+    expect(writes(database.statements)).toEqual([])
+    if (change === "edit") await writeMigrations("supabase/migrations", { "0001_init.sql": "drop table customers;" })
+    if (change === "add") await writeMigrations("supabase/migrations", { "0002_new.sql": "drop table customers;" })
+    if (change === "history") database.state.tracked = [{ name: "0001_init.sql", checksum: sha(sql) }]
+    await expect(applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)).rejects.toThrow(
+      "changed after approval",
+    )
+    expect(writes(database.statements)).toEqual([])
+  })
+
+  test("the agent bridge describes forward SQL and refuses changed files after approval", async () => {
+    await writeMigrations("supabase/migrations", { "0001_init.sql": "create table posts ();" })
+    seedSupabase()
+    const database = fakeDatabase()
+    const bridge = await startCloudBridge({
+      request: async (_input, init) => Response.json(await database.runner(JSON.parse(String(init?.body)).query)),
+    })
+    const command = async (input: Record<string, unknown>) =>
+      (
+        await fetch(`${bridge.url}/command`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json" },
+          body: JSON.stringify({ projectPath: project, ...input }),
+        })
+      ).json()
+    const plan = await command({ command: "describe", action: "apply_migrations" })
+    const approvalID = plan.approved.approvalID
+    expect(typeof approvalID).toBe("string")
+    expect(plan).toMatchObject({
+      ok: true,
+      repeatable: false,
+      statements: [{ sql: "create table posts ();", truncated: false }],
+      approved: { approvalID: expect.any(String) },
+    })
+    await writeMigrations("supabase/migrations", { "0002_new.sql": "drop table customers;" })
+    expect(await command({ command: "apply_migrations", approvalID })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("changed after approval"),
+    })
+    expect(writes(database.statements)).toEqual([])
+  })
+
+  test("binds approvals to their scope and consumes them only once", async () => {
+    await writeMigrations("supabase/migrations", { "0001_init.sql": "create table posts ();" })
+    seedSupabase()
+    const database = fakeDatabase()
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (_input, init) =>
+      Response.json(await database.runner(JSON.parse(String(init?.body)).query))
+    expect((await applyCloudMigrations({ projectPath: project }, request)).ok).toBe(false)
+    const wrong = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    expect(
+      (await applyCloudMigrations({ projectPath: project, taskId: "other", approvalID: wrong.approvalID }, request)).ok,
+    ).toBe(false)
+    expect(writes(database.statements)).toEqual([])
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    expect(
+      (await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)).migrations?.applied,
+    ).toEqual(["0001_init.sql"])
+    const count = database.statements.length
+    expect((await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)).ok).toBe(false)
+    expect(database.statements).toHaveLength(count)
   })
 
   test("keeps the partial result when Postgres rejects a migration", async () => {
     await writeMigrations("supabase/migrations", { "0001_broken.sql": "alter tabel posts;" })
     seedSupabase()
 
-    const report = await applyCloudMigrations({ projectPath: project }, async (_input, init) => {
+    const request: Parameters<typeof applyCloudMigrations>[1] = async (_input, init) => {
       const query = String(JSON.parse(String(init?.body)).query)
       if (query.includes("tabel")) return Response.json({ message: 'syntax error at or near "tabel"' }, { status: 400 })
       return Response.json([])
-    })
+    }
+    const plan = await applyCloudMigrations({ projectPath: project, prepare: true }, request)
+    const report = await applyCloudMigrations({ projectPath: project, approvalID: plan.approvalID }, request)
 
     expect(report.ok).toBe(true)
     expect(report.migrations?.applied).toEqual([])

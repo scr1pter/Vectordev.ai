@@ -163,7 +163,8 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         if (!tab || tab.type !== "draft") throw new Error(`Draft not found: ${draftID}`)
         return tab
       },
-      newDraft(draft: Omit<DraftTab, "type" | "draftID">, prompt?: string) {
+      /** `send` submits the prompt as soon as the draft can, starting the agent. */
+      newDraft(draft: Omit<DraftTab, "type" | "draftID">, prompt?: string, options?: { send?: boolean }) {
         const draftID = uuid()
         void startTransition(() => {
           setStore(
@@ -171,7 +172,11 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
               tabs.push({ type: "draft", draftID, ...draft })
             }),
           )
-          navigate(prompt ? `${draftHref(draftID)}&prompt=${encodeURIComponent(prompt)}` : draftHref(draftID))
+          navigate(
+            prompt
+              ? `${draftHref(draftID)}&prompt=${encodeURIComponent(prompt)}${options?.send ? "&send=1" : ""}`
+              : draftHref(draftID),
+          )
         })
         return draftID
       },

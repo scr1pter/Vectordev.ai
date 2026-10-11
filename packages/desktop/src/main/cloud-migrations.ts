@@ -1,4 +1,5 @@
 import { VECTOR_USER_AGENT } from "./user-agent"
+import { createHash, randomUUID } from "node:crypto"
 import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -23,6 +24,34 @@ export type MigrationDiscovery = {
   skipped: string[]
 }
 
+export type AppliedMigrations = {
+  /** Rows in Vector's own tracking table; a row moved from an older release has no checksum. */
+  tracked: { name: string; checksum?: string }[]
+  /** Versions the Supabase CLI recorded in supabase_migrations.schema_migrations. */
+  versions: string[]
+}
+
+type MigrationApproval = {
+  directory?: string
+  files: { name: string; checksum: string }[]
+  pending: string[]
+}
+
+export type MigrationStatement = { label: string; sql: string; length: number; truncated: false }
+
+const approvals = new Map<
+  string,
+  {
+    projectPath: string
+    taskId?: string
+    directory: string
+    projectRef: string
+    createdAt: number
+    snapshot: MigrationApproval
+  }
+>()
+const APPROVAL_TTL = 10 * 60_000
+
 export type MigrationOutcome = {
   dryRun: boolean
   directory?: string
@@ -30,6 +59,8 @@ export type MigrationOutcome = {
   discovered: string[]
   skipped: string[]
   alreadyApplied: string[]
+  appliedByCli: string[]
+  changed: string[]
   pending: string[]
   applied: string[]
   failed?: { name: string; error: string }
@@ -38,7 +69,12 @@ export type MigrationOutcome = {
 export type CloudMigrationsInput = {
   projectPath: string
   taskId?: string
+  /** Where the migration files are read from; defaults to projectPath. */
+  directory?: string
   dryRun?: boolean
+  approvalID?: string
+  /** Prepare exact statements for confirmation without changing the database. */
+  prepare?: boolean
 }
 
 export type CloudMigrationReport = {
@@ -47,20 +83,80 @@ export type CloudMigrationReport = {
   error?: string
   nextStep?: string
   migrations?: MigrationOutcome
+  approvalID?: string
+  statements?: MigrationStatement[]
 }
 
 // Ordered by how strong a signal each location is: a Supabase project says what
 // it is, a bare `migrations/` at the repo root could belong to any tool.
 export const MIGRATION_DIRECTORIES = ["supabase/migrations", "db/migrations", "database/migrations", "migrations"]
 
-const TRACKING_TABLE = "public.vector_migrations"
-const CREATE_TRACKING_TABLE = `create table if not exists ${TRACKING_TABLE} (
+export const TRACKING_TABLE = "vector.schema_migrations"
+// Vector's tracking lives in its own schema, outside what Supabase's Data API
+// exposes (public by default), with row level security on and no policies, and
+// the anon and authenticated roles get no access to it. Older releases kept it
+// in public.vector_migrations, where those roles could read and rewrite which
+// migrations count as applied; its rows move here and that table is dropped.
+// Sent as one query, so it is a single implicit transaction.
+const SETUP_TRACKING = `create schema if not exists vector;
+create table if not exists ${TRACKING_TABLE} (
   name text primary key,
+  checksum text,
   applied_at timestamptz not null default now()
-);`
-const SELECT_APPLIED = `select name from ${TRACKING_TABLE} order by name;`
+);
+alter table ${TRACKING_TABLE} enable row level security;
+do $$
+declare
+  role_name text;
+begin
+  foreach role_name in array array['anon', 'authenticated'] loop
+    if exists (select 1 from pg_roles where rolname = role_name) then
+      execute format('revoke all on schema vector from %I', role_name);
+      execute format('revoke all on all tables in schema vector from %I', role_name);
+    end if;
+  end loop;
+  if to_regclass('public.vector_migrations') is not null then
+    insert into ${TRACKING_TABLE} (name, applied_at)
+      select name, applied_at from public.vector_migrations
+      on conflict (name) do nothing;
+    drop table public.vector_migrations;
+  end if;
+end
+$$;`
+// Read-only: which history tables exist. A dry run must not create anything.
+const DETECT_TRACKING = `select
+  to_regclass('${TRACKING_TABLE}') is not null as tracked,
+  to_regclass('public.vector_migrations') is not null as legacy,
+  to_regclass('supabase_migrations.schema_migrations') is not null as cli;`
+const SELECT_TRACKED = `select name, checksum from ${TRACKING_TABLE} order by name;`
+const SELECT_LEGACY = "select name from public.vector_migrations order by name;"
+// The Supabase CLI records `supabase db push` runs by version, the timestamp
+// prefix of the filename: https://supabase.com/docs/reference/cli/supabase-migration-repair
+const SELECT_CLI_VERSIONS = "select version from supabase_migrations.schema_migrations;"
 const MIGRATION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.sql$/
 const MAX_MIGRATION_CHARS = 1_000_000
+// A rollback lives in down/<name>.down.sql, or after a line reading `-- down`
+// (or dbmate's `-- migrate:down`) in the migration itself. A <name>.down.sql
+// beside the migrations is never run forward here, though the Supabase CLI
+// would run it; migration_status warns about that.
+const DOWN_FILE = /\.down\.sql$/i
+const DOWN_MARKER = /^--\s*(?:migrate:)?down\s*$/im
+
+// What a forward run executes: everything above a `-- down` section.
+export function upSection(sql: string): string {
+  const marker = DOWN_MARKER.exec(sql)
+  return marker ? sql.slice(0, marker.index) : sql
+}
+
+export function downSection(sql: string): string | undefined {
+  const marker = DOWN_MARKER.exec(sql)
+  const down = marker ? sql.slice(marker.index + marker[0].length).trim() : ""
+  return down || undefined
+}
+
+export function isDownMigration(name: string): boolean {
+  return DOWN_FILE.test(name)
+}
 
 function stringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined
@@ -78,7 +174,8 @@ export async function discoverMigrations(projectPath: string): Promise<Migration
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => undefined)
     if (!entries) continue
     const names = entries
-      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".sql"))
+      // A paired .down.sql is a rollback, never a forward migration.
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".sql") && !isDownMigration(entry.name))
       .map((entry) => entry.name)
       // Plain code-unit order, the same order the Supabase CLI applies them in:
       // timestamp-prefixed filenames sort into the order they were written.
@@ -94,30 +191,57 @@ export async function discoverMigrations(projectPath: string): Promise<Migration
   return { files: [], skipped: [] }
 }
 
-export function planMigrations(
-  files: MigrationFile[],
-  applied: readonly string[],
-): { pending: MigrationFile[]; alreadyApplied: string[] } {
-  const done = new Set(applied)
+export function planMigrations<File extends MigrationFile & { checksum: string }>(
+  files: File[],
+  applied: AppliedMigrations,
+) {
+  const tracked = new Map(applied.tracked.map((row) => [row.name, row.checksum]))
+  const versions = new Set(applied.versions)
+  const byCli = (file: MigrationFile) => !tracked.has(file.name) && versions.has(file.name.match(/^(\d+)_/)?.[1] ?? "")
+  const done = (file: MigrationFile) => tracked.has(file.name) || byCli(file)
   return {
-    pending: files.filter((file) => !done.has(file.name)),
-    alreadyApplied: files.filter((file) => done.has(file.name)).map((file) => file.name),
+    pending: files.filter((file) => !done(file)),
+    alreadyApplied: files.filter(done).map((file) => file.name),
+    appliedByCli: files.filter(byCli).map((file) => file.name),
+    // A recorded checksum that no longer matches means an applied file was
+    // edited; running the rest on top of it would hide that drift.
+    changed: files
+      .filter((file) => tracked.get(file.name) !== undefined && tracked.get(file.name) !== file.checksum)
+      .map((file) => file.name),
+    // Rows moved from an older release carry no checksum yet.
+    unverified: files.filter((file) => tracked.has(file.name) && tracked.get(file.name) === undefined),
   }
 }
 
-function appliedNames(result: unknown): string[] {
-  const rows = Array.isArray(result)
-    ? result
-    : result && typeof result === "object" && Array.isArray(Reflect.get(result, "result"))
-      ? (Reflect.get(result, "result") as unknown[])
-      : []
-  return rows
-    .map((row) => (typeof row === "string" ? row : stringField(row, "name")))
-    .filter((name): name is string => Boolean(name))
+export function rows(result: unknown): unknown[] {
+  if (Array.isArray(result)) return result
+  if (!result || typeof result !== "object") return []
+  const nested = Reflect.get(result, "result")
+  return Array.isArray(nested) ? nested : []
 }
 
-function quoted(value: string): string {
+export function quoted(value: string): string {
   return `'${value.split("'").join("''")}'`
+}
+
+export async function readApplied(runner: SupabaseSqlRunner, dryRun: boolean): Promise<AppliedMigrations> {
+  if (!dryRun) await runner(SETUP_TRACKING)
+  const exists = rows(await runner(DETECT_TRACKING))[0]
+  const has = (key: string) => Boolean(exists && typeof exists === "object" && Reflect.get(exists, key) === true)
+  const [tracked, legacy, versions] = await Promise.all([
+    has("tracked") ? runner(SELECT_TRACKED).then(rows) : [],
+    // Only a dry run can still see the old table: a real run has moved it.
+    has("legacy") ? runner(SELECT_LEGACY).then(rows) : [],
+    has("cli") ? runner(SELECT_CLI_VERSIONS).then(rows) : [],
+  ])
+  return {
+    tracked: [...tracked, ...legacy]
+      .map((row) => ({ name: stringField(row, "name") ?? "", checksum: stringField(row, "checksum") }))
+      .filter((row) => row.name),
+    versions: versions
+      .map((row) => stringField(row, "version"))
+      .filter((version): version is string => Boolean(version)),
+  }
 }
 
 export async function applyMigrationFiles(input: {
@@ -125,37 +249,94 @@ export async function applyMigrationFiles(input: {
   runner: SupabaseSqlRunner
   dryRun: boolean
   redact?: (value: string) => string
-}): Promise<MigrationOutcome> {
+  approved?: MigrationApproval
+  prepare?: boolean
+}): Promise<MigrationOutcome & { snapshot?: MigrationApproval; statements?: MigrationStatement[] }> {
   const redact = input.redact ?? ((value: string) => value)
+  const files = await Promise.all(
+    input.discovery.files.map(async (file) => {
+      const sql = await readFile(file.path, "utf8")
+      return { ...file, sql, checksum: createHash("sha256").update(sql).digest("hex") }
+    }),
+  )
+  const snapshotFiles = files.map((file) => ({ name: file.name, checksum: file.checksum }))
+  if (
+    input.approved &&
+    (input.approved.directory !== input.discovery.directory ||
+      JSON.stringify(input.approved.files) !== JSON.stringify(snapshotFiles))
+  )
+    throw new Error("Migration files changed after approval. Review the SQL again; nothing was applied.")
+  // Validate both local files and remote history before even creating the tracking table.
+  const plan = planMigrations(files, await readApplied(input.runner, input.dryRun || Boolean(input.approved)))
+  if (
+    input.approved &&
+    JSON.stringify(input.approved.pending) !== JSON.stringify(plan.pending.map((file) => file.name))
+  ) {
+    throw new Error("Applied migration history changed after approval. Review the SQL again; nothing was applied.")
+  }
   const outcome: MigrationOutcome = {
     dryRun: input.dryRun,
     directory: input.discovery.directory,
-    discovered: input.discovery.files.map((file) => file.name),
+    discovered: files.map((file) => file.name),
     skipped: input.discovery.skipped,
-    alreadyApplied: [],
-    pending: [],
+    alreadyApplied: plan.alreadyApplied,
+    appliedByCli: plan.appliedByCli,
+    changed: plan.changed,
+    pending: plan.pending.map((file) => file.name),
     applied: [],
   }
-
-  // A plan must not write, so the tracking table is only read here. A database
-  // that has never run a migration has no table yet, and that is not an error.
-  const applied = input.dryRun
-    ? await input.runner(SELECT_APPLIED).then(appliedNames, () => [])
-    : await input.runner(CREATE_TRACKING_TABLE).then(() => input.runner(SELECT_APPLIED).then(appliedNames))
-
-  const plan = planMigrations(input.discovery.files, applied)
-  outcome.alreadyApplied = plan.alreadyApplied
-  outcome.pending = plan.pending.map((file) => file.name)
+  if (plan.changed.length) {
+    outcome.failed = {
+      name: plan.changed[0],
+      error: `${plan.changed.join(", ")} changed after ${plan.changed.length === 1 ? "it was" : "they were"} applied. Restore the applied ${plan.changed.length === 1 ? "file" : "files"} and write a new migration for the change; nothing was applied.`,
+    }
+    return outcome
+  }
+  if (input.prepare) {
+    const statements = plan.pending.map(
+      (file): MigrationStatement => ({
+        label: `Migration ${input.discovery.directory}/${file.name}`,
+        sql: upSection(file.sql),
+        length: upSection(file.sql).length,
+        truncated: false,
+      }),
+    )
+    if (statements.reduce((length, statement) => length + statement.length, 0) > 100_000) {
+      throw new Error("Pending SQL exceeds the 100,000-character approval limit. Apply a smaller migration batch.")
+    }
+    return {
+      ...outcome,
+      statements,
+      snapshot: { directory: input.discovery.directory, files: snapshotFiles, pending: outcome.pending },
+    }
+  }
   if (input.dryRun) return outcome
+  if (input.approved) await input.runner(SETUP_TRACKING)
+
+  // Trust on first use for rows moved from an older release, which had none.
+  if (plan.unverified.length) {
+    await input.runner(
+      plan.unverified
+        .map(
+          (file) =>
+            `update ${TRACKING_TABLE} set checksum = ${quoted(file.checksum)} where name = ${quoted(file.name)} and checksum is null;`,
+        )
+        .join("\n"),
+    )
+  }
 
   for (const file of plan.pending) {
     try {
-      const sql = await readFile(file.path, "utf8")
-      if (sql.length > MAX_MIGRATION_CHARS) {
+      if (file.sql.length > MAX_MIGRATION_CHARS) {
         throw new Error(`${file.name} is larger than ${MAX_MIGRATION_CHARS} characters; split it into smaller files.`)
       }
-      if (sql.trim()) await input.runner(sql)
-      await input.runner(`insert into ${TRACKING_TABLE} (name) values (${quoted(file.name)}) on conflict do nothing;`)
+      // The file and its tracking row go in one query, which Postgres runs as a
+      // single implicit transaction: a failure rolls both back, so a migration
+      // is never recorded without its schema or applied without its record.
+      // https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-MULTI-STATEMENT
+      await input.runner(
+        `${upSection(file.sql)}\n;\ninsert into ${TRACKING_TABLE} (name, checksum) values (${quoted(file.name)}, ${quoted(file.checksum)}) on conflict (name) do update set checksum = excluded.checksum;`,
+      )
       outcome.applied.push(file.name)
     } catch (error) {
       // Stop on the first failure: later migrations were written against the
@@ -171,7 +352,16 @@ export async function applyMigrationFiles(input: {
   return outcome
 }
 
-export function supabaseSqlRunner(projectRef: string, token: string, request: CloudFetch = fetch): SupabaseSqlRunner {
+// Request and response shapes follow the Management API's run-a-query
+// endpoint: https://supabase.com/docs/reference/api/v1-run-a-query
+// `readOnly` runs the query as Supabase's read-only role, so a statement that
+// would change data fails instead of running.
+export function supabaseSqlRunner(
+  projectRef: string,
+  token: string,
+  request: CloudFetch = fetch,
+  options: { readOnly?: boolean } = {},
+): SupabaseSqlRunner {
   const url = `https://api.supabase.com/v1/projects/${encodeURIComponent(projectRef)}/database/query`
   return async (sql: string) => {
     const response = await request(url, {
@@ -182,7 +372,7 @@ export function supabaseSqlRunner(projectRef: string, token: string, request: Cl
         "content-type": "application/json",
         "user-agent": VECTOR_USER_AGENT,
       },
-      body: JSON.stringify({ query: sql }),
+      body: JSON.stringify(options.readOnly ? { query: sql, read_only: true } : { query: sql }),
       // Schema changes take locks and rebuild indexes; the 20s used for reads
       // elsewhere would abandon a migration that is still succeeding.
       signal: AbortSignal.timeout(60_000),
@@ -202,8 +392,8 @@ export async function applyCloudMigrations(
   input: CloudMigrationsInput,
   request: CloudFetch = fetch,
 ): Promise<CloudMigrationReport> {
-  const dryRun = input.dryRun === true
-  const discovery = await discoverMigrations(input.projectPath)
+  const dryRun = input.dryRun === true || input.prepare === true
+  const discovery = await discoverMigrations(input.directory ?? input.projectPath)
   if (!discovery.directory) {
     return {
       ok: false,
@@ -219,6 +409,26 @@ export async function applyCloudMigrations(
       needsSetup: true,
       error: "No Supabase project is connected to this project.",
       nextStep: "Ask the user to open Vector Cloud > Database and connect a Supabase project.",
+    }
+  }
+  for (const [id, approval] of approvals) {
+    if (Date.now() - approval.createdAt > APPROVAL_TTL) approvals.delete(id)
+  }
+  const approval = input.approvalID ? approvals.get(input.approvalID) : undefined
+  if (!dryRun) {
+    if (input.approvalID) approvals.delete(input.approvalID)
+    if (
+      !approval ||
+      approval.projectPath !== input.projectPath ||
+      approval.taskId !== input.taskId ||
+      approval.directory !== (input.directory ?? input.projectPath) ||
+      approval.projectRef !== database.projectRef
+    ) {
+      return {
+        ok: false,
+        error:
+          "Review the pending migration SQL again before applying it. Its approval is missing, expired, or belongs to another database.",
+      }
     }
   }
   const token = await getSupabaseManagementToken(request).catch(() => undefined)
@@ -241,6 +451,8 @@ export async function applyCloudMigrations(
         discovered: [],
         skipped: discovery.skipped,
         alreadyApplied: [],
+        appliedByCli: [],
+        changed: [],
         pending: [],
         applied: [],
       },
@@ -250,15 +462,32 @@ export async function applyCloudMigrations(
   const outcome = await applyMigrationFiles({
     discovery,
     dryRun,
-    runner: supabaseSqlRunner(database.projectRef, token, request),
-    redact: (value) => redactCloudLog(input.projectPath, input.taskId, value),
+    runner: supabaseSqlRunner(database.projectRef, token, request, { readOnly: dryRun }),
+    approved: approval?.snapshot,
+    prepare: input.prepare,
+    redact: (value) => redactCloudLog(input.projectPath, input.taskId, value, [token]),
   })
+  const approvalID = input.prepare && outcome.snapshot && !outcome.failed ? randomUUID() : undefined
+  if (approvalID && outcome.snapshot) {
+    if (approvals.size >= 100) approvals.delete(approvals.keys().next().value!)
+    approvals.set(approvalID, {
+      projectPath: input.projectPath,
+      taskId: input.taskId,
+      directory: input.directory ?? input.projectPath,
+      projectRef: database.projectRef,
+      createdAt: Date.now(),
+      snapshot: outcome.snapshot,
+    })
+  }
+  const { snapshot, statements, ...migrations } = outcome
   return {
+    approvalID,
+    statements,
     // A migration that Postgres rejected is a result, not a transport failure:
     // the agent has to see which files did apply before it rewrites the one that
     // did not, and the bridge turns a non-ok report into a thrown error.
     ok: true,
     error: outcome.failed ? `${outcome.failed.name} failed: ${outcome.failed.error}` : undefined,
-    migrations: { ...outcome, projectRef: database.projectRef },
+    migrations: { ...migrations, projectRef: database.projectRef },
   }
 }

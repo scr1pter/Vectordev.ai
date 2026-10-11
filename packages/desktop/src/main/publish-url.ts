@@ -6,13 +6,7 @@ export function normalizeDeployUrl(value?: string) {
   return parsed.toString()
 }
 
-export function extractDeployUrl(output: string, target: "vercel" | "netlify") {
-  if (target === "netlify") {
-    return normalizeDeployUrl(
-      output.match(/(?:Website|Deploy) URL:\s*(https:\/\/\S+)/i)?.[1] ??
-        output.match(/(https:\/\/[a-z0-9-]+\.netlify\.app\S*)/i)?.[1],
-    )
-  }
+export function extractDeployUrl(output: string) {
   const matches = output.match(/https:\/\/[a-z0-9.-]+\.vercel\.app\S*/gi)
   return normalizeDeployUrl(matches?.at(-1))
 }

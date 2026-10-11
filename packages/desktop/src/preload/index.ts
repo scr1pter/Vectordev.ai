@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 import type { ElectronAPI, WslServersEvent } from "./types"
+import { vercelPreloadApi } from "./cloud-vercel"
 import type { UpdaterState } from "@vectordevai/app/updater"
 
 const updaterCallbacks = new Set<(state: UpdaterState) => void>()
@@ -233,6 +234,12 @@ const api: ElectronAPI = {
     },
   },
   cloud: {
+    overview: (directory) => ipcRenderer.invoke("cloud-overview", directory),
+    onChange: (cb) => {
+      const handler = () => cb()
+      ipcRenderer.on("cloud-changed", handler)
+      return () => ipcRenderer.removeListener("cloud-changed", handler)
+    },
     connections: {
       list: () => ipcRenderer.invoke("cloud-connections-list"),
       connect: (provider) => ipcRenderer.invoke("cloud-connections-connect", provider),
@@ -242,55 +249,33 @@ const api: ElectronAPI = {
     providers: {
       resources: (provider) => ipcRenderer.invoke("cloud-provider-resources-list", provider),
       links: (projectPath, taskId) => ipcRenderer.invoke("cloud-provider-links-list", projectPath, taskId),
-      link: (projectPath, taskId, provider, projectId) =>
-        ipcRenderer.invoke("cloud-provider-links-set", projectPath, taskId, provider, projectId),
-      unlink: (projectPath, taskId, provider) =>
-        ipcRenderer.invoke("cloud-provider-links-remove", projectPath, taskId, provider),
-      syncEnvironment: (projectPath, taskId, provider) =>
-        ipcRenderer.invoke("cloud-provider-env-sync", projectPath, taskId, provider),
-      addDomain: (projectPath, taskId, provider, domain) =>
-        ipcRenderer.invoke("cloud-provider-domains-add", projectPath, taskId, provider, domain),
-      verifyDomain: (projectPath, taskId, id) =>
-        ipcRenderer.invoke("cloud-provider-domains-verify", projectPath, taskId, id),
-      removeDomain: (projectPath, taskId, id) =>
-        ipcRenderer.invoke("cloud-provider-domains-remove", projectPath, taskId, id),
     },
+    vercel: vercelPreloadApi(ipcRenderer),
     deployments: {
       list: (projectPath, taskId) => ipcRenderer.invoke("cloud-deployments-list", projectPath, taskId),
       remove: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-remove", projectPath, taskId, id),
       check: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-check", projectPath, taskId, id),
       checkAll: (projectPath, taskId) => ipcRenderer.invoke("cloud-deployments-check-all", projectPath, taskId),
-      promote: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-promote", projectPath, taskId, id),
-      rollback: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-rollback", projectPath, taskId, id),
-      logs: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-deployments-logs", projectPath, taskId, id),
       rerunChecks: (projectPath, taskId, id) =>
         ipcRenderer.invoke("cloud-deployments-rerun-checks", projectPath, taskId, id),
     },
     env: {
       list: (projectPath, taskId) => ipcRenderer.invoke("cloud-env-list", projectPath, taskId),
-      set: (projectPath, taskId, key, value) => ipcRenderer.invoke("cloud-env-set", projectPath, taskId, key, value),
+      set: (projectPath, taskId, key, value, visibility) =>
+        ipcRenderer.invoke("cloud-env-set", projectPath, taskId, key, value, visibility),
       remove: (projectPath, taskId, key) => ipcRenderer.invoke("cloud-env-remove", projectPath, taskId, key),
       apply: (projectPath, taskId) => ipcRenderer.invoke("cloud-env-apply", projectPath, taskId),
     },
-    domains: {
-      list: (projectPath, taskId) => ipcRenderer.invoke("cloud-domains-list", projectPath, taskId),
-      add: (projectPath, taskId, input) => ipcRenderer.invoke("cloud-domains-add", projectPath, taskId, input),
-      verify: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-domains-verify", projectPath, taskId, id),
-      remove: (projectPath, taskId, id) => ipcRenderer.invoke("cloud-domains-remove", projectPath, taskId, id),
-    },
     database: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-db-get", projectPath, taskId),
-      connect: (projectPath, taskId, input) => ipcRenderer.invoke("cloud-db-connect", projectPath, taskId, input),
-      connectProject: (projectPath, taskId, projectRef) =>
-        ipcRenderer.invoke("cloud-supabase-project-connect", projectPath, taskId, projectRef),
-      disconnect: (projectPath, taskId) => ipcRenderer.invoke("cloud-db-disconnect", projectPath, taskId),
     },
-    services: {
-      supabase: (projectPath, taskId) => ipcRenderer.invoke("cloud-supabase-services", projectPath, taskId),
-    },
-    aws: {
-      status: (input) => ipcRenderer.invoke("cloud-aws-status", input),
-      resources: (input) => ipcRenderer.invoke("cloud-aws-resources", input),
+    supabase: {
+      run: (command, input) => ipcRenderer.invoke("cloud-supabase", command, input),
+      subscribe: (cb) => {
+        const handler = (_: unknown, event: Parameters<typeof cb>[0]) => cb(event)
+        ipcRenderer.on("cloud-supabase-progress", handler)
+        return () => ipcRenderer.removeListener("cloud-supabase-progress", handler)
+      },
     },
     build: {
       get: (projectPath, taskId) => ipcRenderer.invoke("cloud-build-get", projectPath, taskId),

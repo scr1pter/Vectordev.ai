@@ -23,7 +23,11 @@ function release(id: string, status: CloudDeployment["releaseStatus"], target = 
 describe("cloud release transitions", () => {
   test("promotes a preview and supersedes only the current release in the same scope", () => {
     const result = transitionReleaseRecords(
-      [release("preview", "preview"), release("current", "current"), release("other-target", "current", "netlify")],
+      [
+        release("preview", "preview"),
+        release("current", "current"),
+        release("other-target", "current", "retired-host"),
+      ],
       "preview",
       { productionUrl: "https://vector.example.com", rollback: false, at: "now" },
     )

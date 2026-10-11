@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer"
 import { createHmac, createPublicKey, timingSafeEqual } from "node:crypto"
 
-export type CloudOAuthProvider = "vercel" | "netlify" | "supabase"
+export type CloudOAuthProvider = "vercel" | "supabase"
 
 export type CloudOAuthEnvironment = Record<string, string | undefined>
 
@@ -19,7 +19,7 @@ type StartOAuthInput = {
 }
 
 type ExchangeOAuthInput = {
-  provider: Exclude<CloudOAuthProvider, "netlify">
+  provider: CloudOAuthProvider
   code: string
   state: string
   codeVerifier?: string
@@ -35,7 +35,7 @@ type OAuthTokenPayload = {
 
 type OAuthFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 
-const PROVIDERS = new Set<CloudOAuthProvider>(["vercel", "netlify", "supabase"])
+const PROVIDERS = new Set<CloudOAuthProvider>(["vercel", "supabase"])
 
 export function isCloudOAuthProvider(value: unknown): value is CloudOAuthProvider {
   return typeof value === "string" && PROVIDERS.has(value as CloudOAuthProvider)
@@ -94,11 +94,6 @@ export function oauthProviderConfig(
       missing.push("VECTOR_SUPABASE_CLIENT_SECRET")
     }
   }
-  if (provider === "netlify") {
-    if (!envValue(env, "VECTOR_NETLIFY_CLIENT_ID", "NETLIFY_OAUTH_CLIENT_ID")) {
-      missing.push("VECTOR_NETLIFY_CLIENT_ID")
-    }
-  }
   return { provider, configured: missing.length === 0, callbackUrl, missing }
 }
 
@@ -150,7 +145,7 @@ export function createOAuthAuthorizeUrl(
   if (!config.configured) {
     throw new Error(`${input.provider} OAuth is not configured. Missing ${config.missing.join(", ")}.`)
   }
-  if (input.provider !== "supabase") requireOAuthRelayState(input.state)
+  if (input.provider === "vercel") requireOAuthRelayState(input.state)
   const state = signOAuthState(input.provider, input.state, env)
 
   if (input.provider === "vercel") {
@@ -160,26 +155,17 @@ export function createOAuthAuthorizeUrl(
     return { authorizeUrl: authorizeUrl.toString(), callbackUrl: config.callbackUrl, state }
   }
 
-  if (input.provider === "supabase") {
-    const challenge = input.codeChallenge
-    if (!challenge || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
-      throw new Error("Supabase OAuth requires a valid S256 PKCE code challenge.")
-    }
-    const authorizeUrl = new URL("https://api.supabase.com/v1/oauth/authorize")
-    authorizeUrl.searchParams.set("client_id", envValue(env, "VECTOR_SUPABASE_CLIENT_ID", "SUPABASE_OAUTH_CLIENT_ID"))
-    authorizeUrl.searchParams.set("redirect_uri", config.callbackUrl)
-    authorizeUrl.searchParams.set("response_type", "code")
-    authorizeUrl.searchParams.set("state", state)
-    authorizeUrl.searchParams.set("code_challenge", challenge)
-    authorizeUrl.searchParams.set("code_challenge_method", "S256")
-    return { authorizeUrl: authorizeUrl.toString(), callbackUrl: config.callbackUrl, state }
+  const challenge = input.codeChallenge
+  if (!challenge || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) {
+    throw new Error("Supabase OAuth requires a valid S256 PKCE code challenge.")
   }
-
-  const authorizeUrl = new URL("https://app.netlify.com/authorize")
-  authorizeUrl.searchParams.set("client_id", envValue(env, "VECTOR_NETLIFY_CLIENT_ID", "NETLIFY_OAUTH_CLIENT_ID"))
-  authorizeUrl.searchParams.set("response_type", "token")
+  const authorizeUrl = new URL("https://api.supabase.com/v1/oauth/authorize")
+  authorizeUrl.searchParams.set("client_id", envValue(env, "VECTOR_SUPABASE_CLIENT_ID", "SUPABASE_OAUTH_CLIENT_ID"))
   authorizeUrl.searchParams.set("redirect_uri", config.callbackUrl)
+  authorizeUrl.searchParams.set("response_type", "code")
   authorizeUrl.searchParams.set("state", state)
+  authorizeUrl.searchParams.set("code_challenge", challenge)
+  authorizeUrl.searchParams.set("code_challenge_method", "S256")
   return { authorizeUrl: authorizeUrl.toString(), callbackUrl: config.callbackUrl, state }
 }
 
@@ -419,24 +405,22 @@ function deepLinkPage(deepLink: string, provider: string, failed?: string): Resp
 
 export function createOAuthCallbackResponse(provider: CloudOAuthProvider, requestUrl: string): Response {
   const url = new URL(requestUrl)
-  if (provider !== "supabase") {
-    const label = provider === "vercel" ? "Vercel" : "Netlify"
+  if (provider === "vercel") {
     // Vercel has no PKCE for integration codes. Encrypt the result in the
     // browser so an intercepted custom-scheme URL cannot redeem the code.
     return callbackPage(
-      `<h1 id="status">Finish connecting ${label}</h1><p id="detail">Vector is securely transferring authorization back to the desktop app.</p><a id="return" href="#">Return to Vector</a>`,
+      `<h1 id="status">Finish connecting Vercel</h1><p id="detail">Vector is securely transferring authorization back to the desktop app.</p><a id="return" href="#">Return to Vector</a>`,
       `(async()=>{
-        const provider=${JSON.stringify(provider)};
+        const provider="vercel";
         const out=new URL("vector://cloud/oauth");
         out.searchParams.set("provider",provider);
-        const values=new URLSearchParams(provider==="netlify"?(location.hash.slice(1)||location.search):location.search);
+        const values=new URLSearchParams(location.search);
         const state=values.get("state")||"";
         if(state)out.searchParams.set("state",state);
-        if(provider==="netlify")location.hash="";
         try{
           const error=values.get("error_description")||values.get("error");
           if(error)throw new Error(error);
-          const authorization=values.get(provider==="netlify"?"access_token":"code");
+          const authorization=values.get("code");
           if(!authorization||!state)throw new Error("The provider did not return complete authorization.");
           if(new TextEncoder().encode(authorization).length>16384)throw new Error("The provider authorization is too large.");
           const signedAt=state.indexOf("~");

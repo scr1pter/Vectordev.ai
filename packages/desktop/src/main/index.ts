@@ -46,7 +46,7 @@ import { cleanupStoreFiles, removeLegacyAccessFiles } from "./store-cleanup"
 import { startBrowserBridge, stopBrowserBridge } from "./browser-bridge"
 import { startCloudBridge, stopCloudBridge } from "./cloud-bridge"
 import { setupSecureRuntimeSecrets } from "./secure-runtime"
-import { handleCloudOAuthDeepLinks } from "./cloud-connections"
+import { forgetRetiredCloudProviders, handleCloudOAuthDeepLinks } from "./cloud-connections"
 import { registerManagedVectorAccount, vectorAccount } from "./vector-account-runtime"
 import { backgroundModeStatus, requestQuit } from "./background-mode"
 import {
@@ -354,9 +354,17 @@ const main = Effect.gen(function* () {
   const browserBridge = yield* Effect.promise(() => startBrowserBridge())
   process.env.VECTOR_BROWSER_BRIDGE_URL = browserBridge.url
   process.env.VECTOR_BROWSER_BRIDGE_TOKEN = browserBridge.token
-  const cloudBridge = yield* Effect.promise(() => startCloudBridge())
+  const cloudBridge = yield* Effect.promise(() =>
+    startCloudBridge({
+      workspaces: async () => {
+        const { parallelWorkspaceCloudScopes } = await import("./parallel-workspaces")
+        return parallelWorkspaceCloudScopes()
+      },
+    }),
+  )
   process.env.VECTOR_CLOUD_BRIDGE_URL = cloudBridge.url
   process.env.VECTOR_CLOUD_BRIDGE_TOKEN = cloudBridge.token
+  if (forgetRetiredCloudProviders()) logger.log("removed a retired Netlify credential from the cloud vault")
 
   if (!TEST_ONBOARDING && process.env.VECTOR_ENABLE_LEGACY_MIGRATION === "1") migrate()
   yield* Effect.promise(() => cleanupStoreFiles(app.getPath("userData"))).pipe(

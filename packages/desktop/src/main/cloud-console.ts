@@ -1,14 +1,20 @@
-import { VECTOR_USER_AGENT } from "./user-agent"
 import { randomUUID, createHash } from "node:crypto"
-import { resolveCname } from "node:dns/promises"
 import { chmodSync, constants } from "node:fs"
-import { lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
+import { lstat, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 
 import { getStore } from "./store"
 import { transitionReleaseRecords } from "./cloud-release-state"
 import { redactText } from "./security-redaction"
 import { isSupabasePublicKey } from "./cloud-public-key"
+import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
+import {
+  ensureEnvIgnored,
+  projectRefFromUrl,
+  scaffoldSupabaseClient,
+  supabaseFramework,
+  supabasePublicEnvNames,
+} from "./cloud-supabase-env"
 
 // The Vector Cloud console is the desktop-side brain behind the full-page
 // dashboard: it tracks real deployments, writes env vars into the project's
@@ -58,11 +64,23 @@ export type CloudDeployment = {
   statusCode?: number
   latencyMs?: number
   healthError?: string
+  /** How the last health probe ended; "protected" means Deployment Protection kept Vector out. */
+  probe?: "ok" | "failed" | "protected"
   checks: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  /** Vercel's own id (dpl_...) for this release. */
+  providerDeploymentId?: string
+  /** The stable per-branch preview address of an agent workspace's release. */
+  alias?: string
 }
 
-export type CloudEnvVar = { key: string; value: string }
+// "public" values may reach browser code; "server" values must not, so they can
+// never use a name that a bundler inlines into the client.
+export type CloudEnvVisibility = "public" | "server"
+export type CloudEnvVar = { key: string; value: string; visibility: CloudEnvVisibility }
+
+// At rest a value is encrypted with the same vault as provider tokens.
+type StoredEnvVar = { key: string; secret: string; visibility: CloudEnvVisibility }
 
 export type CloudDeploymentCheck = {
   id: string
@@ -112,24 +130,6 @@ type PackageManifest = {
   dependencies: Record<string, string>
   devDependencies: Record<string, string>
   nodeVersion: string
-}
-
-export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vector-cloud" | "vercel" | "netlify"
-
-export type CloudDomain = {
-  id: string
-  domain: string
-  projectPath?: string
-  slug?: string
-  provider: CloudDomainProvider
-  providerProjectId?: string
-  providerProjectName?: string
-  cnameTarget: string
-  status: CloudDomainStatus
-  lastCheckedAt?: string
-  detail?: string
-  createdAt: string
 }
 
 export type CloudDatabaseConnection = {
@@ -189,8 +189,11 @@ function readDeployments(): CloudDeployment[] {
       statusCode: typeof item.statusCode === "number" ? item.statusCode : undefined,
       latencyMs: typeof item.latencyMs === "number" ? item.latencyMs : undefined,
       healthError: typeof item.healthError === "string" ? item.healthError : undefined,
+      probe: item.probe === "ok" || item.probe === "failed" || item.probe === "protected" ? item.probe : undefined,
       checks: Array.isArray(item.checks) ? item.checks.filter(isCloudDeploymentCheck) : [],
       git: isCloudGitMetadata(item.git) ? item.git : undefined,
+      providerDeploymentId: typeof item.providerDeploymentId === "string" ? item.providerDeploymentId : undefined,
+      alias: typeof item.alias === "string" ? cleanDeploymentUrl(item.alias) : undefined,
     }))
 }
 
@@ -239,6 +242,7 @@ export function recordDeployment(input: {
   durationMs?: number
   checks?: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  providerDeploymentId?: string
 }): CloudDeployment {
   const records = readDeployments()
   const environment = input.environment ?? "production"
@@ -267,6 +271,7 @@ export function recordDeployment(input: {
       output: check.output ? redactCloudLog(input.projectPath, input.taskId, check.output).slice(-20_000) : undefined,
     })),
     git: input.git,
+    providerDeploymentId: input.providerDeploymentId,
   }
   const rest =
     environment === "production"
@@ -289,12 +294,21 @@ function sameDeploymentScope(a: CloudDeployment, b: CloudDeployment): boolean {
   return a.projectPath === b.projectPath && a.target === b.target
 }
 
+// Vercel is the only hosting provider. Releases an older version recorded for a
+// retired host (Netlify, or the scrapped hosted publish service) stay in the
+// store untouched but are not listed, promoted or rolled back.
+function supportedDeployment(record: CloudDeployment): boolean {
+  return record.target === "vercel"
+}
+
 export function listDeployments(projectPath: string, taskId?: string): CloudDeployment[] {
-  return readDeployments().filter((record) => record.projectPath === projectPath)
+  return readDeployments().filter((record) => record.projectPath === projectPath && supportedDeployment(record))
 }
 
 export function getDeployment(projectPath: string, taskId: string | undefined, id: string): CloudDeployment {
-  const deployment = readDeployments().find((item) => item.id === id && item.projectPath === projectPath)
+  const deployment = readDeployments().find(
+    (item) => item.id === id && item.projectPath === projectPath && supportedDeployment(item),
+  )
   if (!deployment) throw new Error("That deployment is no longer in this project's history.")
   return deployment
 }
@@ -332,6 +346,50 @@ export function markDeploymentPromoted(
   return updated.find((item) => item.id === selected.id)!
 }
 
+// The release Vector recorded for a Vercel deployment, when Vector made it:
+// matched by Vercel's id, or by address for releases recorded before the id was.
+export function releaseForProviderDeployment(projectPath: string, deployment: { id: string; url: string }) {
+  const host = (value: string) => (URL.canParse(value) ? new URL(value).host : value)
+  return listDeployments(projectPath).find(
+    (item) => item.providerDeploymentId === deployment.id || host(item.url) === host(deployment.url),
+  )
+}
+
+// Production moved on Vercel (a promote or rollback from Vector Cloud or the
+// agent). Vector's release for that deployment becomes current; the release
+// that was current is superseded or rolled back, even when Vercel now serves a
+// deployment Vector did not make.
+export function recordProductionMove(
+  projectPath: string,
+  deployment: { id: string; url: string },
+  input: { productionUrl?: string; rollback?: boolean },
+) {
+  const at = now()
+  const release = releaseForProviderDeployment(projectPath, deployment)
+  const records = readDeployments()
+  if (release) {
+    writeDeployments(
+      transitionReleaseRecords(records, release.id, {
+        productionUrl: input.productionUrl,
+        rollback: Boolean(input.rollback),
+        at,
+      }),
+    )
+    return
+  }
+  writeDeployments(
+    records.map((item) =>
+      item.projectPath === projectPath && supportedDeployment(item) && item.releaseStatus === "current"
+        ? {
+            ...item,
+            releaseStatus: input.rollback ? ("rolled-back" as const) : ("superseded" as const),
+            rolledBackAt: input.rollback ? at : item.rolledBackAt,
+          }
+        : item,
+    ),
+  )
+}
+
 export function removeDeployment(projectPath: string, taskId: string | undefined, id: string): CloudDeployment[] {
   const records = readDeployments()
   const removed = records.find((item) => item.id === id && item.projectPath === projectPath)
@@ -340,72 +398,7 @@ export function removeDeployment(projectPath: string, taskId: string | undefined
   }
   const next = removed ? records.filter((item) => item.id !== id) : records
   writeDeployments(next)
-  // Best-effort delete on the remote publish service, if configured. The
-  // endpoint is built by another agent, so tolerate its absence entirely.
-  const endpoint = process.env.VECTOR_CLOUD_URL?.replace(/\/$/, "")
-  const token = process.env.VECTOR_CLOUD_TOKEN
-  if (removed?.target === "vector-cloud" && endpoint && token) {
-    void fetch(`${endpoint}/api/deployments?slug=${encodeURIComponent(removed.slug)}`, {
-      method: "DELETE",
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(10_000),
-    }).catch(() => undefined)
-  }
-  return next.filter((record) => record.projectPath === projectPath)
-}
-
-export async function checkDeployment(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-): Promise<CloudDeployment> {
-  const records = readDeployments()
-  const deployment = records.find((item) => item.id === id && item.projectPath === projectPath)
-  if (!deployment) throw new Error("That deployment is no longer in this project's history.")
-
-  const startedAt = Date.now()
-  const checkedAt = now()
-  const settings = getBuildSettings(projectPath, taskId)
-  const healthUrl = new URL(settings?.healthPath ?? "/", deployment.url).toString()
-  const probe = await fetch(healthUrl, {
-    method: "GET",
-    redirect: "follow",
-    headers: { "user-agent": VECTOR_USER_AGENT },
-    signal: AbortSignal.timeout(12_000),
-  })
-    .then(async (response) => {
-      await response.body?.cancel().catch(() => undefined)
-      return {
-        status: response.ok ? ("ready" as const) : ("degraded" as const),
-        statusCode: response.status,
-        healthError: response.ok ? undefined : `HTTP ${response.status} ${response.statusText}`.trim(),
-      }
-    })
-    .catch((error) => ({
-      status: "unreachable" as const,
-      statusCode: undefined,
-      healthError: error instanceof Error ? error.message : String(error),
-    }))
-
-  const updated: CloudDeployment = {
-    ...deployment,
-    ...probe,
-    lastCheckedAt: checkedAt,
-    latencyMs: Date.now() - startedAt,
-    checks: upsertDeploymentCheck(deployment.checks, {
-      id: "health",
-      type: "health",
-      label: `Health check ${settings?.healthPath ?? "/"}`,
-      status: probe.status === "ready" ? "passed" : "failed",
-      required: settings?.requiredChecks.health ?? true,
-      details:
-        probe.status === "ready" ? `HTTP ${probe.statusCode} in ${Date.now() - startedAt} ms` : probe.healthError,
-      durationMs: Date.now() - startedAt,
-      checkedAt,
-    }),
-  }
-  writeDeployments(records.map((item) => (item.id === updated.id ? updated : item)))
-  return updated
+  return next.filter((record) => record.projectPath === projectPath && supportedDeployment(record))
 }
 
 export function upsertDeploymentCheck(
@@ -415,22 +408,15 @@ export function upsertDeploymentCheck(
   return [...checks.filter((item) => item.id !== check.id), check]
 }
 
-export async function checkAllDeployments(projectPath: string, taskId?: string): Promise<CloudDeployment[]> {
-  const deployments = listDeployments(projectPath, taskId)
-  await Promise.all(deployments.map((item) => checkDeployment(projectPath, taskId, item.id)))
-  return listDeployments(projectPath, taskId)
-}
-
 // ---- Per-project data (env vars + database) -------------------------------
 
 type ProjectData = {
-  env: CloudEnvVar[]
+  env: StoredEnvVar[]
   database: CloudDatabaseConnection
-  domains: CloudDomain[]
   build: CloudBuildSettings | null
 }
 
-// A project's cloud state (env, database, domains, build settings) belongs to
+// A project's cloud state (env, database, build settings) belongs to
 // the project, not to whichever chat session touched it. The Cloud Console
 // renders with no taskId while the vector_cloud tool passes its session id, so
 // keying on taskId gave the agent an empty second copy of everything the user
@@ -446,22 +432,32 @@ export function cloudProjectScopeKey(projectPath: string): string {
 
 function readProject(projectPath: string): ProjectData {
   const raw = getStore(PROJECTS_STORE).get(cloudProjectScopeKey(projectPath))
-  if (!raw || typeof raw !== "object") return { env: [], database: null, domains: [], build: null }
+  if (!raw || typeof raw !== "object") return { env: [], database: null, build: null }
   const data = raw as Partial<ProjectData>
-  const env = Array.isArray(data.env)
-    ? data.env.filter((item): item is CloudEnvVar => typeof item?.key === "string" && typeof item?.value === "string")
-    : []
+  const stored: unknown[] = Array.isArray(data.env) ? data.env : []
+  const env = stored
+    .map((item): StoredEnvVar | undefined => {
+      if (!item || typeof item !== "object") return
+      const key = Reflect.get(item, "key")
+      if (typeof key !== "string") return
+      const secret = Reflect.get(item, "secret")
+      const visibility = Reflect.get(item, "visibility")
+      if (typeof secret === "string") {
+        return {
+          key,
+          secret,
+          visibility: visibility === "public" || visibility === "server" ? visibility : envVisibility(key),
+        }
+      }
+      // Older releases stored the value in plaintext. It is encrypted here and
+      // written back below, so plaintext does not outlive the first read.
+      const value = Reflect.get(item, "value")
+      if (typeof value === "string")
+        return { key, secret: encryptCloudCredential(value), visibility: envVisibility(key) }
+    })
+    .filter((item): item is StoredEnvVar => Boolean(item))
   const database =
     data.database && typeof data.database === "object" && data.database.provider === "supabase" ? data.database : null
-  const domains = Array.isArray(data.domains)
-    ? data.domains
-        .filter((item): item is CloudDomain => typeof item?.id === "string" && typeof item?.domain === "string")
-        .map((item) => ({
-          ...item,
-          provider:
-            item.provider === "vercel" || item.provider === "netlify" ? item.provider : ("vector-cloud" as const),
-        }))
-    : []
   const build =
     data.build &&
     typeof data.build === "object" &&
@@ -477,7 +473,11 @@ function readProject(projectPath: string): ProjectData {
             : defaultRequiredChecks(),
         }
       : null
-  return { env, database, domains, build }
+  const project = { env, database, build }
+  if (stored.some((item) => item && typeof item === "object" && typeof Reflect.get(item, "value") === "string")) {
+    writeProject(projectPath, project)
+  }
+  return project
 }
 
 function defaultRequiredChecks(): CloudRequiredChecks {
@@ -497,21 +497,29 @@ function isCloudRequiredChecks(value: unknown): value is CloudRequiredChecks {
 function writeProject(projectPath: string, data: ProjectData) {
   const store = getStore(PROJECTS_STORE)
   store.set(cloudProjectScopeKey(projectPath), data)
-  // This file holds DATABASE_URL and service-role keys in plaintext and
-  // electron-store creates it with the process umask (0644). It also rewrites
-  // the file atomically through a temp file plus rename, which drops the mode
-  // again, so the tightening has to be reapplied on every write.
+  // Environment values here are vault-encrypted, but names, database and domain
+  // details are not, and electron-store creates the file with the process umask
+  // (0644). It also rewrites the file atomically through a temp file plus
+  // rename, which drops the mode again, so the tightening is reapplied on every
+  // write.
   chmodSync(store.path, 0o600)
 }
 
-export function redactCloudLog(projectPath: string, taskId: string | undefined, value: string): string {
-  // Two layers, and both are needed: the stored env values catch the user's own
-  // secrets verbatim, and redactText catches everything a build or provider CLI
-  // prints that Vector never stored — including the VERCEL_TOKEN /
-  // NETLIFY_AUTH_TOKEN that publish injects into the build child's environment.
+// `secrets` are values known only to the caller, such as the provider token it
+// put in a child's environment: a Vercel token has no prefix redactText knows.
+export function redactCloudLog(
+  projectPath: string,
+  taskId: string | undefined,
+  value: string,
+  secrets: (string | undefined)[] = [],
+): string {
+  // Two layers, and both are needed: the stored env values and the caller's
+  // secrets catch exact strings, and redactText catches everything a build or
+  // provider prints that Vector never held, such as bearer headers and
+  // token-shaped strings.
   return redactText(
-    readProject(projectPath).env.reduce(
-      (output, item) => (item.value.length >= 4 ? output.split(item.value).join("[redacted]") : output),
+    [...listEnv(projectPath).map((item) => item.value), ...secrets].reduce<string>(
+      (output, secret) => (secret && secret.length >= 4 ? output.split(secret).join("[redacted]") : output),
       value,
     ),
   )
@@ -524,16 +532,22 @@ export function getBuildSettings(projectPath: string, taskId?: string): CloudBui
   return readProject(projectPath).build
 }
 
-export async function detectBuildSettings(projectPath: string, taskId?: string): Promise<CloudBuildSettings> {
-  const stats = projectPath ? await stat(projectPath).catch(() => undefined) : undefined
+// `directory` is where the files are read from: an agent's worktree detects its
+// own package.json while the settings stay with the project it belongs to.
+export async function detectBuildSettings(
+  projectPath: string,
+  taskId?: string,
+  directory = projectPath,
+): Promise<CloudBuildSettings> {
+  const stats = directory ? await stat(directory).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) throw new Error("Open a project folder before detecting its build settings.")
 
-  const packageJson = await readFile(join(projectPath, "package.json"), "utf8")
+  const packageJson = await readFile(join(directory, "package.json"), "utf8")
     .then(parsePackageManifest)
     .catch(() => undefined)
 
-  const packageManager = await detectPackageManager(projectPath, Boolean(packageJson))
-  const hasNpmLock = Boolean(await stat(join(projectPath, "package-lock.json")).catch(() => undefined))
+  const packageManager = await detectPackageManager(directory, Boolean(packageJson))
+  const hasNpmLock = Boolean(await stat(join(directory, "package-lock.json")).catch(() => undefined))
   const dependencies = { ...packageJson?.dependencies, ...packageJson?.devDependencies }
   const framework =
     "next" in dependencies
@@ -694,54 +708,111 @@ function normalizeHealthPath(value: string): string {
 
 // ---- Environment variables ------------------------------------------------
 
-export function listEnv(projectPath: string, taskId?: string): CloudEnvVar[] {
-  return readProject(projectPath).env
+// Bundlers inline variables with these prefixes into browser code (Vite,
+// Next.js, Astro and SvelteKit, Create React App, Expo, Nuxt, Gatsby, Vue CLI,
+// Storybook), so anything under them is public once the app is built.
+const CLIENT_ENV_PREFIXES = [
+  "VITE_",
+  "NEXT_PUBLIC_",
+  "PUBLIC_",
+  "REACT_APP_",
+  "EXPO_PUBLIC_",
+  "NUXT_PUBLIC_",
+  "GATSBY_",
+  "VUE_APP_",
+  "STORYBOOK_",
+]
+
+export function clientEnvPrefix(key: string): string | undefined {
+  return CLIENT_ENV_PREFIXES.find((prefix) => key.startsWith(prefix))
 }
 
-export function setEnv(projectPath: string, taskId: string | undefined, key: string, value: string): CloudEnvVar[] {
+function envVisibility(key: string): CloudEnvVisibility {
+  return clientEnvPrefix(key) ? "public" : "server"
+}
+
+export function listEnv(projectPath: string, taskId?: string): CloudEnvVar[] {
+  return readProject(projectPath).env.map((item) => ({
+    key: item.key,
+    value: decryptEnvValue(item),
+    visibility: item.visibility,
+  }))
+}
+
+function decryptEnvValue(item: StoredEnvVar): string {
+  try {
+    return decryptCloudCredential(item.secret)
+  } catch {
+    throw new Error(
+      `The saved value of ${item.key} cannot be decrypted on this device. Remove it in Vector Cloud > Environment variables and set it again.`,
+    )
+  }
+}
+
+export function setEnv(
+  projectPath: string,
+  taskId: string | undefined,
+  key: string,
+  value: string,
+  visibility?: CloudEnvVisibility,
+): CloudEnvVar[] {
   const trimmedKey = (key ?? "").trim()
   if (!KEY_PATTERN.test(trimmedKey)) {
     throw new Error(
       `"${trimmedKey}" is not a valid environment variable name. Use letters, digits and underscores, starting with a letter or underscore.`,
     )
   }
+  const prefix = clientEnvPrefix(trimmedKey)
+  if (visibility === "server" && prefix) {
+    throw new Error(
+      `${trimmedKey} starts with ${prefix}, which puts its value into browser code. Give a server-only value a name without that prefix.`,
+    )
+  }
+  const entry = {
+    key: trimmedKey,
+    secret: encryptCloudCredential(value),
+    visibility: visibility ?? envVisibility(trimmedKey),
+  }
   const data = readProject(projectPath)
-  const existing = data.env.find((item) => item.key === trimmedKey)
-  const nextEnv = existing
-    ? data.env.map((item) => (item.key === trimmedKey ? { key: trimmedKey, value } : item))
-    : [...data.env, { key: trimmedKey, value }]
+  const nextEnv = data.env.some((item) => item.key === trimmedKey)
+    ? data.env.map((item) => (item.key === trimmedKey ? entry : item))
+    : [...data.env, entry]
   writeProject(projectPath, { ...data, env: nextEnv })
-  return nextEnv
+  return listEnv(projectPath)
 }
 
 export function removeEnv(projectPath: string, taskId: string | undefined, key: string): CloudEnvVar[] {
   const data = readProject(projectPath)
-  const nextEnv = data.env.filter((item) => item.key !== key)
-  writeProject(projectPath, { ...data, env: nextEnv })
-  return nextEnv
+  writeProject(projectPath, { ...data, env: data.env.filter((item) => item.key !== key) })
+  return listEnv(projectPath)
 }
 
 // The real payoff: flush the stored vars into the project's actual .env. Any
 // lines the user wrote above the Vector marker are preserved; the managed block
-// below the marker is rewritten from scratch.
-export async function applyEnv(projectPath: string, taskId?: string): Promise<{ written: string }> {
-  const stats = projectPath ? await stat(projectPath).catch(() => undefined) : undefined
+// below the marker is rewritten from scratch. `directory` is where the .env is
+// written: an agent's worktree gets the variables of the project it belongs to.
+export async function applyEnv(
+  projectPath: string,
+  taskId?: string,
+  directory = projectPath,
+): Promise<{ written: string }> {
+  const stats = directory ? await stat(directory).catch(() => undefined) : undefined
   if (!stats?.isDirectory()) {
     throw new Error("Open a project folder before applying environment variables.")
   }
   const project = readProject(projectPath)
-  const vars = project.env
+  const vars = listEnv(projectPath)
   for (const item of vars) {
     if (/[\r\n]/.test(item.value)) {
       throw new Error(`The value for "${item.key}" contains a line break, which cannot be written to .env.`)
     }
   }
-  const manifest = await readFile(join(projectPath, "package.json"), "utf8")
+  const manifest = await readFile(join(directory, "package.json"), "utf8")
     .then(parsePackageManifest)
     .catch(() => undefined)
   const vite =
     project.build?.framework === "Vite" || Boolean(manifest?.dependencies.vite || manifest?.devDependencies.vite)
-  const envPath = join(projectPath, ".env")
+  const envPath = join(directory, ".env")
   const existingFile = await lstat(envPath).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error
   })
@@ -769,7 +840,7 @@ export async function applyEnv(projectPath: string, taskId?: string): Promise<{ 
   const output = preamble ? `${preamble}\n\n${managed}\n` : `${managed}\n`
   // Replace the directory entry rather than following a link swapped in after
   // the read. A fresh private file also tightens older permissive .env files.
-  const temporary = join(projectPath, `.env.vector-${randomUUID()}`)
+  const temporary = join(directory, `.env.vector-${randomUUID()}`)
   try {
     await writeFile(temporary, output, { encoding: "utf8", flag: "wx", mode: 0o600 })
     await rename(temporary, envPath)
@@ -802,13 +873,8 @@ function formatViteEnvValue(value: string) {
 
 // ---- Custom domains -------------------------------------------------------
 
-// The CNAME target apps should point at. Configurable for staging/self-host.
-function cnameTarget(): string {
-  return process.env.VECTOR_CLOUD_DOMAIN_TARGET || "cname.vectordev.app"
-}
-
-// Lowercase, strip protocol/path/trailing slash, drop a leading "www.", and
-// require something that looks like a real hostname with at least one dot.
+// Lowercase, strip protocol/path/trailing dot, and require something that
+// looks like a real hostname with at least one dot.
 export function normalizeCloudDomain(raw: string): string {
   let domain = (raw ?? "").trim().toLowerCase()
   domain = domain.replace(/^[a-z][a-z0-9+.-]*:\/\//, "")
@@ -822,145 +888,25 @@ export function normalizeCloudDomain(raw: string): string {
 
 function requireProject(projectPath: string): string {
   const path = (projectPath ?? "").trim()
-  if (!path) throw new Error("Open a project before managing its domains.")
+  if (!path) throw new Error("Open a project first.")
   return path
-}
-
-// Domains are scoped to a project (a Vector task's workspace), so each app
-// manages its own custom domains instead of a single global pool.
-export function listDomains(projectPath: string, taskId?: string): CloudDomain[] {
-  if (!(projectPath ?? "").trim()) return []
-  return readProject(projectPath).domains
-}
-
-export function addDomain(
-  projectPath: string,
-  taskId: string | undefined,
-  input: {
-    domain: string
-    slug?: string
-    provider?: CloudDomainProvider
-    providerProjectId?: string
-    providerProjectName?: string
-    cnameTarget?: string
-    status?: CloudDomainStatus
-    detail?: string
-  },
-): CloudDomain {
-  const path = requireProject(projectPath)
-  const domain = normalizeCloudDomain(input.domain)
-  const data = readProject(path)
-  if (data.domains.find((item) => item.domain === domain)) {
-    throw new Error(`${domain} is already connected to this project.`)
-  }
-  const record: CloudDomain = {
-    id: randomUUID(),
-    domain,
-    projectPath: path,
-    slug: input.slug?.trim() || undefined,
-    provider: input.provider ?? "vector-cloud",
-    providerProjectId: input.providerProjectId?.trim() || undefined,
-    providerProjectName: input.providerProjectName?.trim() || undefined,
-    cnameTarget: input.cnameTarget?.trim() || cnameTarget(),
-    status: input.status ?? "pending",
-    detail: input.detail?.trim() || undefined,
-    createdAt: now(),
-  }
-  writeProject(path, { ...data, domains: [record, ...data.domains] })
-  return record
-}
-
-export function updateDomainRecord(
-  projectPath: string,
-  taskId: string | undefined,
-  id: string,
-  patch: Partial<Omit<CloudDomain, "id" | "domain" | "projectPath" | "createdAt">>,
-): CloudDomain {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const index = data.domains.findIndex((item) => item.id === id)
-  if (index === -1) throw new Error("That domain is no longer connected to this project.")
-  const updated = { ...data.domains[index], ...patch }
-  const domains = [...data.domains]
-  domains[index] = updated
-  writeProject(path, { ...data, domains })
-  return updated
-}
-
-// Real DNS check: resolve the domain's CNAME records and see whether any point
-// at our target. DNS propagation lag looks like a missing record, not an error.
-export async function verifyDomain(projectPath: string, taskId: string | undefined, id: string): Promise<CloudDomain> {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const index = data.domains.findIndex((item) => item.id === id)
-  if (index === -1) throw new Error("That domain is no longer connected to this project.")
-  const record = data.domains[index]
-  const target = record.cnameTarget.toLowerCase().replace(/\.+$/, "")
-
-  let status: CloudDomainStatus = record.status
-  let detail: string | undefined
-
-  try {
-    const cnames = await resolveCname(record.domain)
-    const matched = cnames.some((entry) => {
-      const value = entry.toLowerCase().replace(/\.+$/, "")
-      return value === target || value.endsWith(target)
-    })
-    if (matched) {
-      status = "verified"
-      detail = undefined
-    } else {
-      status = "pending"
-      detail = "CNAME not found yet — DNS can take a few minutes."
-    }
-  } catch (error) {
-    const code = error && typeof error === "object" ? Reflect.get(error, "code") : undefined
-    if (code === "ENOTFOUND" || code === "ENODATA") {
-      status = "pending"
-      detail = `No CNAME record found for ${record.domain} yet. Add a CNAME pointing at ${target}, then re-check — DNS can take a few minutes.`
-    } else {
-      status = "error"
-      detail = error instanceof Error ? error.message : String(error)
-    }
-  }
-
-  const next: CloudDomain = { ...record, status, detail, lastCheckedAt: now() }
-  const domains = [...data.domains]
-  domains[index] = next
-  writeProject(path, { ...data, domains })
-  return next
-}
-
-export function removeDomain(projectPath: string, taskId: string | undefined, id: string): CloudDomain[] {
-  const path = requireProject(projectPath)
-  const data = readProject(path)
-  const domains = data.domains.filter((item) => item.id !== id)
-  writeProject(path, { ...data, domains })
-  return domains
 }
 
 // ---- Database connector (Supabase) ----------------------------------------
 
 export function getDatabase(projectPath: string, taskId?: string): CloudDatabaseConnection {
-  return readProject(projectPath).database
+  const database = readProject(projectPath).database
+  // Records saved before the reference was stored still name their project in
+  // the URL, and every Management API call needs it.
+  if (!database || database.projectRef) return database
+  return { ...database, projectRef: projectRefFromUrl(database.url) }
 }
 
-const SUPABASE_CLIENT_SNIPPET = `import { createClient } from "@supabase/supabase-js"
-
-// Vector-managed Supabase client. Values come from your project's env — set via
-// the Vector Cloud console (Database + Environment Variables), written to .env.
-const supabaseUrl =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_SUPABASE_URL) ||
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.SUPABASE_URL) ||
-  (typeof process !== "undefined" && process.env && process.env.SUPABASE_URL)
-
-const supabaseAnonKey =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) ||
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.SUPABASE_ANON_KEY) ||
-  (typeof process !== "undefined" && process.env && process.env.SUPABASE_ANON_KEY)
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
-`
+// Only the stored record changes; .env and the variables stay as they are.
+export function saveDatabase(projectPath: string, connection: CloudDatabaseConnection): void {
+  const data = readProject(projectPath)
+  writeProject(projectPath, { ...data, database: connection })
+}
 
 export async function connectDatabase(
   projectPath: string,
@@ -973,6 +919,7 @@ export async function connectDatabase(
     projectName?: string
     managedByOAuth?: boolean
   },
+  directory = projectPath,
 ): Promise<CloudDatabaseConnection> {
   const url = (input.url ?? "").trim()
   let host = ""
@@ -994,37 +941,28 @@ export async function connectDatabase(
     provider: "supabase",
     url,
     anonKey,
-    projectRef: input.projectRef?.trim() || undefined,
+    projectRef: input.projectRef?.trim() || projectRefFromUrl(url),
     projectName: input.projectName?.trim() || undefined,
     managedByOAuth: input.managedByOAuth === true,
     connectedAt: now(),
   }
 
-  // Merge the credentials into the project's managed env vars so a later
-  // applyEnv writes them to .env alongside everything else.
-  setEnv(projectPath, taskId, "SUPABASE_URL", url)
-  setEnv(projectPath, taskId, "SUPABASE_ANON_KEY", anonKey)
-  setEnv(projectPath, taskId, "VITE_SUPABASE_URL", url)
-  setEnv(projectPath, taskId, "VITE_SUPABASE_ANON_KEY", anonKey)
+  // Only the names the framework's bundler exposes to browser code, so a
+  // Next.js app is not handed VITE_* values it can never read.
+  const framework = await supabaseFramework(directory)
+  const names = supabasePublicEnvNames(framework)
+  setEnv(projectPath, taskId, names.url, url, "public")
+  setEnv(projectPath, taskId, names.key, anonKey, "public")
 
   const data = readProject(projectPath)
   writeProject(projectPath, { ...data, database: connection })
 
-  // Scaffold a minimal client so `import { supabase }` just works. Never
-  // clobber an existing file, and don't fail the connection if src/ is locked.
-  try {
-    const libDir = join(projectPath, "src", "lib")
-    const clientPath = join(libDir, "supabase.js")
-    const alreadyExists = await stat(clientPath).catch(() => undefined)
-    if (!alreadyExists) {
-      await mkdir(libDir, { recursive: true })
-      await writeFile(clientPath, SUPABASE_CLIENT_SNIPPET, "utf8")
-    }
-  } catch {
-    // Best-effort scaffold; the stored connection + env vars are the real payoff.
-  }
-
-  await applyEnv(projectPath, taskId)
+  // A minimal client so `import { supabase }` just works. It never replaces an
+  // existing file, and a locked src/ does not fail the connection.
+  await scaffoldSupabaseClient(directory, framework).catch(() => undefined)
+  // A .gitignore that is a link or directory is the user's own arrangement.
+  await ensureEnvIgnored(directory).catch(() => undefined)
+  await applyEnv(projectPath, taskId, directory)
 
   return connection
 }

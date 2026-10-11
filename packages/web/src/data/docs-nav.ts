@@ -99,8 +99,8 @@ export const docsNav: DocGroup[] = [
       },
       {
         id: "cloud-services",
-        title: "Cloud services",
-        blurb: "Deployments, domains, databases and logs through your own Vercel, Netlify, Supabase and AWS accounts.",
+        title: "Vector Cloud",
+        blurb: "Deployments, domains, databases and logs through your own Vercel and Supabase accounts.",
       },
       {
         id: "multiplayer",

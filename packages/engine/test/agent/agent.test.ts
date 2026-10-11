@@ -671,6 +671,67 @@ it.instance("default permission asks for risky and unsandboxed operations", () =
   }),
 )
 
+it.instance("Vector Cloud publishing, database and host environment changes ask by default", () =>
+  Effect.gen(function* () {
+    for (const name of ["build", "plan", "general", "debug", "test", "performance", "migration"]) {
+      const agent = yield* load((svc) => svc.get(name))
+      expect(evalPerm(agent, "vector_cloud_publish")).toBe("ask")
+      expect(evalPerm(agent, "vector_cloud_database")).toBe("ask")
+      expect(evalPerm(agent, "vector_cloud_environment")).toBe("ask")
+      expect(evalPerm(agent, "vector_cloud_hosting")).toBe("ask")
+    }
+    // A dry run only reads which migrations a database has applied.
+    const build = yield* load((svc) => svc.get("build"))
+    expect(evalPerm(build, "vector_cloud_inspect")).toBe("allow")
+  }),
+)
+
+it.instance(
+  "a wildcard allow does not approve Vector Cloud changes",
+  () =>
+    Effect.gen(function* () {
+      for (const name of ["build", "deployer"]) {
+        const agent = yield* load((svc) => svc.get(name))
+        expect(evalPerm(agent, "vector_cloud_publish")).toBe("ask")
+        expect(evalPerm(agent, "vector_cloud_database")).toBe("ask")
+        expect(evalPerm(agent, "vector_cloud_environment")).toBe("ask")
+        expect(evalPerm(agent, "vector_cloud_hosting")).toBe("ask")
+        expect(evalPerm(agent, "edit")).toBe("allow")
+      }
+    }),
+  {
+    config: {
+      permission: { "*": "allow" },
+      agent: { deployer: { description: "Ships releases", mode: "subagent", permission: { "*": "allow" } } },
+    },
+  },
+)
+
+it.instance(
+  "a rule that names a Vector Cloud permission decides it",
+  () =>
+    Effect.gen(function* () {
+      const build = yield* load((svc) => svc.get("build"))
+      expect(evalPerm(build, "vector_cloud_publish")).toBe("allow")
+      expect(evalPerm(build, "vector_cloud_database")).toBe("ask")
+      expect(evalPerm(build, "vector_cloud_environment")).toBe("deny")
+      const deployer = yield* load((svc) => svc.get("deployer"))
+      expect(evalPerm(deployer, "vector_cloud_publish")).toBe("allow")
+      expect(evalPerm(deployer, "vector_cloud_database")).toBe("allow")
+      expect(evalPerm(deployer, "vector_cloud_environment")).toBe("allow")
+      expect(evalPerm(deployer, "vector_cloud_hosting")).toBe("allow")
+      expect(evalPerm(build, "vector_cloud_hosting")).toBe("ask")
+    }),
+  {
+    config: {
+      permission: { vector_cloud_publish: "allow", vector_cloud_environment: "deny" },
+      agent: {
+        deployer: { description: "Ships releases", mode: "subagent", permission: { "vector_cloud_*": "allow" } },
+      },
+    },
+  },
+)
+
 it.instance("sensitive credential files require approval by default", () =>
   Effect.gen(function* () {
     const build = yield* load((svc) => svc.get("build"))

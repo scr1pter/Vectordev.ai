@@ -42,6 +42,7 @@ import { DialogSelectServer, useServerManagementController } from "@/components/
 import { DialogServerV2 } from "@/components/settings-v2/dialog-server-v2"
 import { ServerConnection, serverName, useServer } from "@/context/server"
 import { sessionHasOpenTab, useTabs } from "@/context/tabs"
+import { cloudHref } from "@/features/cloud/cloud-handoff"
 import { useServerSync, type ServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
 import { useNotification } from "@/context/notification"
@@ -763,9 +764,7 @@ export function NewHome() {
               <button
                 type="button"
                 data-variant="secondary"
-                onClick={() => {
-                  navigate("/cloud")
-                }}
+                onClick={() => navigate(cloudHref(newSessionProject()?.worktree))}
               >
                 <svg viewBox="0 0 16 16" class="size-4" aria-hidden="true">
                   <path
@@ -784,7 +783,7 @@ export function NewHome() {
                     stroke-linejoin="round"
                   />
                 </svg>
-                Cloud services
+                Vector Cloud
               </button>
               <button type="button" data-variant="secondary" onClick={openSettings}>
                 <IconV2 name="settings-gear" />

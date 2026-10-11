@@ -29,11 +29,20 @@ export type CloudDeployment = {
   statusCode?: number
   latencyMs?: number
   healthError?: string
+  /** How the last health probe ended; "protected" means Deployment Protection kept Vector out. */
+  probe?: "ok" | "failed" | "protected"
   checks: CloudDeploymentCheck[]
   git?: CloudGitMetadata
+  /** Vercel's own id (dpl_...) for this release. */
+  providerDeploymentId?: string
+  /** The stable per-branch preview address of an agent workspace's release. */
+  alias?: string
 }
 
-export type CloudEnvVar = { key: string; value: string }
+// "public" values may reach browser code; "server" values never use a name a
+// bundler inlines into the client.
+export type CloudEnvVisibility = "public" | "server"
+export type CloudEnvVar = { key: string; value: string; visibility: CloudEnvVisibility }
 
 export type CloudDeploymentCheck = {
   id: string
@@ -78,24 +87,6 @@ export type CloudBuildSettings = {
   updatedAt: string
 }
 
-export type CloudDomainStatus = "pending" | "verified" | "error"
-export type CloudDomainProvider = "vector-cloud" | "vercel" | "netlify"
-
-export type CloudDomain = {
-  id: string
-  domain: string
-  projectPath?: string
-  slug?: string
-  provider: CloudDomainProvider
-  providerProjectId?: string
-  providerProjectName?: string
-  cnameTarget: string
-  status: CloudDomainStatus
-  lastCheckedAt?: string
-  detail?: string
-  createdAt: string
-}
-
 export type CloudDatabaseConnection = {
   provider: "supabase"
   url: string
@@ -106,7 +97,7 @@ export type CloudDatabaseConnection = {
   connectedAt: string
 } | null
 
-export type CloudProviderId = "vercel" | "netlify" | "supabase"
+export type CloudProviderId = "vercel" | "supabase"
 
 export type CloudProviderConnection = {
   provider: CloudProviderId
@@ -132,89 +123,55 @@ export type CloudProviderResource = {
 }
 
 export type CloudProviderProjectLink = {
-  provider: "vercel" | "netlify"
+  provider: "vercel"
   projectId: string
   projectName: string
   accountId?: string
   accountName?: string
+  teamId?: string
   url?: string
+  linkedFrom?: string
   linkedAt: string
 }
 
-export type CloudProviderSyncResult = {
-  provider: "vercel" | "netlify"
-  projectId: string
-  projectName: string
-  changed: number
-  syncedAt: string
-  detail: string
-}
-
-export type CloudSupabaseBucket = {
+// The live summary behind the session's Cloud card. Names and states only:
+// never a token, key or environment value.
+export type CloudReleaseSummary = {
   id: string
-  name: string
-  public: boolean
-  createdAt?: string
-  updatedAt?: string
+  url: string
+  environment: "preview" | "production"
+  releaseStatus: CloudDeployment["releaseStatus"]
+  status: CloudDeployment["status"]
+  createdAt: string
+  workspaceName?: string
+  failedChecks: { label: string; details?: string }[]
 }
 
-export type CloudSupabaseFunction = {
-  id: string
-  name: string
-  slug: string
-  status?: string
-  version?: number
-  createdAt?: string
-  updatedAt?: string
+export type CloudPublishFailure = {
+  at: string
+  environment: "preview" | "production"
+  error: string
+  checks: { label: string; status: string; required: boolean; details?: string; output?: string }[]
+  log?: string
 }
 
-export type CloudSupabaseServices = {
-  connected: boolean
-  projectRef?: string
-  projectName?: string
-  region?: string
-  dashboardUrl?: string
-  detail?: string
-  storage: { available: boolean; buckets: CloudSupabaseBucket[]; detail?: string }
-  functions: { available: boolean; functions: CloudSupabaseFunction[]; detail?: string }
-}
-
-export type CloudAwsStatus = {
-  installed: boolean
-  configured: boolean
-  version?: string
-  accountId?: string
-  arn?: string
-  profile?: string
-  profiles: string[]
-  region: string
-  detail: string
-}
-
-export type CloudAwsResource = {
-  id: string
-  name: string
-  state?: string
-  detail?: string
-  createdAt?: string
-}
-
-export type CloudAwsService = {
-  id: "s3" | "ec2" | "lambda" | "sagemaker" | "ecs"
-  label: string
-  available: boolean
-  consoleUrl: string
-  resources: CloudAwsResource[]
-  detail?: string
-}
-
-export type CloudAwsSnapshot = {
-  status: CloudAwsStatus
-  services: CloudAwsService[]
-  refreshedAt: string
+export type CloudOverview = {
+  /** The main project every cloud record belongs to. */
+  projectPath: string
+  /** Where files are built and published from: an agent's worktree, or the project itself. */
+  directory: string
+  workspace?: { id: string; name: string }
+  hosting: { provider: "Vercel"; connected: boolean; account?: string; project?: { id: string; name: string } }
+  database: { provider: "Supabase"; accountConnected: boolean; account?: string; connected: boolean; name?: string }
+  latest?: CloudReleaseSummary
+  production?: CloudReleaseSummary
+  failure?: CloudPublishFailure
+  git?: { branch: string; commit: string; dirty: boolean }
 }
 
 export type CloudApi = {
+  overview: (directory: string) => Promise<CloudOverview>
+  onChange: (callback: () => void) => () => void
   connections: {
     list: () => Promise<CloudProviderConnection[]>
     connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>
@@ -224,88 +181,28 @@ export type CloudApi = {
   providers: {
     resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>
     links: (projectPath: string, taskId?: string) => Promise<CloudProviderProjectLink[]>
-    link: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-      projectId: string,
-    ) => Promise<CloudProviderProjectLink>
-    unlink: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-    ) => Promise<CloudProviderProjectLink[]>
-    syncEnvironment: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-    ) => Promise<CloudProviderSyncResult>
-    addDomain: (
-      projectPath: string,
-      taskId: string | undefined,
-      provider: "vercel" | "netlify",
-      domain: string,
-    ) => Promise<CloudDomain>
-    verifyDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-    removeDomain: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
   }
   deployments: {
     list: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
     remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment[]>
     check: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
     checkAll: (projectPath: string, taskId?: string) => Promise<CloudDeployment[]>
-    promote: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-    rollback: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
-    logs: (
-      projectPath: string,
-      taskId: string | undefined,
-      id: string,
-    ) => Promise<{ log: string; fetchedAt: string; source: "provider" | "build" }>
     rerunChecks: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDeployment>
   }
   env: {
     list: (projectPath: string, taskId?: string) => Promise<CloudEnvVar[]>
-    set: (projectPath: string, taskId: string | undefined, key: string, value: string) => Promise<CloudEnvVar[]>
+    set: (
+      projectPath: string,
+      taskId: string | undefined,
+      key: string,
+      value: string,
+      visibility?: CloudEnvVisibility,
+    ) => Promise<CloudEnvVar[]>
     remove: (projectPath: string, taskId: string | undefined, key: string) => Promise<CloudEnvVar[]>
     apply: (projectPath: string, taskId?: string) => Promise<{ written: string }>
   }
-  domains: {
-    list: (projectPath: string, taskId?: string) => Promise<CloudDomain[]>
-    add: (
-      projectPath: string,
-      taskId: string | undefined,
-      input: { domain: string; slug?: string },
-    ) => Promise<CloudDomain>
-    verify: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain>
-    remove: (projectPath: string, taskId: string | undefined, id: string) => Promise<CloudDomain[]>
-  }
   database: {
     get: (projectPath: string, taskId?: string) => Promise<CloudDatabaseConnection>
-    connect: (
-      projectPath: string,
-      taskId: string | undefined,
-      input: {
-        provider: "supabase"
-        url: string
-        anonKey: string
-        projectRef?: string
-        projectName?: string
-        managedByOAuth?: boolean
-      },
-    ) => Promise<CloudDatabaseConnection>
-    connectProject: (
-      projectPath: string,
-      taskId: string | undefined,
-      projectRef: string,
-    ) => Promise<CloudDatabaseConnection>
-    disconnect: (projectPath: string, taskId?: string) => Promise<void>
-  }
-  services: {
-    supabase: (projectPath: string, taskId?: string) => Promise<CloudSupabaseServices>
-  }
-  aws: {
-    status: (input?: { profile?: string; region?: string }) => Promise<CloudAwsStatus>
-    resources: (input?: { profile?: string; region?: string }) => Promise<CloudAwsSnapshot>
   }
   build: {
     get: (projectPath: string, taskId?: string) => Promise<CloudBuildSettings | null>
@@ -322,9 +219,9 @@ export function cloudApi(): CloudApi | undefined {
   return (globalThis.window?.api as (Record<string, unknown> & { cloud?: CloudApi }) | undefined)?.cloud
 }
 
-// Publishing runs through the user's own Vercel / Netlify CLI (or the token-gated
-// Vector Cloud service). Exposed as window.api.publish by the desktop main.
-export type PublishTargetId = "vector-cloud" | "vercel" | "netlify"
+// Publishing runs through the user's own Vercel account. Exposed as
+// window.api.publish by the desktop main.
+export type PublishTargetId = "vercel"
 
 export type PublishTarget = {
   id: PublishTargetId
@@ -332,6 +229,8 @@ export type PublishTarget = {
   loginHint: string
   available: boolean
   account?: string
+  /** What stops publishing on this machine. */
+  problem?: "no_node" | "not_connected"
 }
 
 export type PublishResult = {
@@ -340,8 +239,15 @@ export type PublishResult = {
   target: string
   log: string
   error?: string
+  errorCode?: string
   deploymentId?: string
+  providerDeploymentId?: string
+  environment?: "preview" | "production"
+  productionUrl?: string
+  alias?: string
   checks?: CloudDeploymentCheck[]
+  protectedChecks?: "skipped"
+  notes?: string[]
 }
 
 export type PublishProgressEvent = {
@@ -394,6 +300,8 @@ export type CloudAgentWorkspace = {
   status: string
   changedFilesCount: number
   lastAction: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
 }
 
 type CloudAgentWorkspaceApi = {

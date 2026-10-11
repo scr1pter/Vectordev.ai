@@ -73,6 +73,7 @@ import {
 import { useTabs } from "@/context/tabs"
 import { sessionHref } from "@/utils/session-route"
 import { DB_INTENT_EVENT } from "@/features/cloud/db-intent"
+import { cloudHref, DATABASE_SETUP_PROMPT, requestComposerPrompt } from "@/features/cloud/cloud-handoff"
 import { OnboardingProgress } from "@/features/onboarding/onboarding"
 import { SpotlightTour } from "@/features/onboarding/spotlight-tour"
 import { createSpotlightSteps } from "@/features/onboarding/spotlight-steps"
@@ -237,6 +238,8 @@ type ParallelWorkspaceRecord = {
   diff: string
   checkpointPath?: string
   pullRequestUrl?: string
+  /** The latest Vercel preview of this workspace, at its stable branch address when Vercel assigned one. */
+  previewUrl?: string
   contextFiles?: string[]
   contextIndexedFiles?: number
   contextTokenEstimate?: number
@@ -3122,11 +3125,11 @@ export default function NewLayout(props: ParentProps) {
     setOnboardingFlag("dismissed")
   }
 
-  // ---- Cloud Services: "set up a database" proposal ------------------------
+  // ---- Vector Cloud: "set up a database" proposal ---------------------------
   // When the agent is asked to do auth / accounts / data, submit.ts emits
-  // DB_INTENT_EVENT. We surface a one-click proposal to wire Supabase into the
-  // active project — proposal only; the real connect flow runs in the Cloud
-  // Database panel, which opens focused via cloudInitialSection.
+  // DB_INTENT_EVENT. The proposal either asks the agent to set the database up
+  // (it checks database_status, then links or creates one; creating asks the
+  // user first) or opens the project's Database screen in Vector Cloud.
   const [dbProposal, setDbProposal] = createSignal<({ reason: string } & TaskScope) | undefined>()
   const [dbProposalSuppressed, setDbProposalSuppressed] = createSignal<TaskScope | undefined>()
   const scopeMatches = (candidate: TaskScope | undefined, active = activeTaskScope()) => {
@@ -3156,7 +3159,19 @@ export default function NewLayout(props: ParentProps) {
     onCleanup(() => globalThis.window?.removeEventListener(DB_INTENT_EVENT, onIntent))
   })
 
-  const openCloudDatabaseSetup = () => {
+  const askVectorForDatabase = () => {
+    const scope = activeTaskScope()
+    setDbProposal(undefined)
+    setDbProposalSuppressed(scope)
+    // The session on screen takes it as its next message (queued behind a
+    // running turn). With no composer on screen, a new session on the project
+    // starts with it.
+    if (requestComposerPrompt({ text: DATABASE_SETUP_PROMPT, send: true })) return
+    if (!scope.projectPath) return
+    tabs.newDraft({ server: server.key, directory: scope.projectPath }, DATABASE_SETUP_PROMPT, { send: true })
+  }
+
+  const openCloudDatabase = () => {
     const scope = activeTaskScope()
     setDbProposal(undefined)
     setDbProposalSuppressed(scope)
@@ -3164,12 +3179,7 @@ export default function NewLayout(props: ParentProps) {
     setSidePanelOpen(false)
     setBrowserAgentOpen(false)
     setParallelOpen(false)
-    if (scope.projectPath) layout.home.setSelection({ server: server.key, directory: scope.projectPath })
-    navigate("/")
-    showToast({
-      title: "Cloud Services is on Home",
-      description: "Open Cloud Services there to configure this repository's database.",
-    })
+    navigate(cloudHref(scope.projectPath, "database"))
   }
 
   const dismissDbProposal = () => {
@@ -3586,6 +3596,19 @@ export default function NewLayout(props: ParentProps) {
                 View PR
               </a>
             </Show>
+            <Show when={record().previewUrl}>
+              {(url) => (
+                <a
+                  href={url()}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={url()}
+                  class="inline-flex h-9 items-center rounded-[9px] border border-[color:var(--vx-line)] px-3 text-[11.5px] text-white/65 transition hover:bg-white/[0.05] hover:text-white"
+                >
+                  View preview
+                </a>
+              )}
+            </Show>
             <div class="flex-1" />
             <Show when={record().mergeState === "none" && !isParallelWorkspaceRunning(record())}>
               <Show when={record().isolation === "git-worktree" && !record().pullRequestUrl}>
@@ -3737,15 +3760,22 @@ export default function NewLayout(props: ParentProps) {
           <div class="min-w-0 flex-1">
             <div class="text-[13px] font-semibold text-white">This looks like it needs a database</div>
             <p class="text-[11.5px] text-white/55">
-              Vector can connect Supabase to {projectDisplayName()} — auth, users and data wired into your project.
+              Vector can link or create a Supabase database for {projectDisplayName()} and wire auth and data into it.
             </p>
           </div>
           <button
             type="button"
-            class="shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-white/15"
-            onClick={openCloudDatabaseSetup}
+            class="shrink-0 rounded-lg bg-[var(--vx-purple)] px-3 py-1.5 text-[12px] font-semibold text-white transition hover:brightness-110"
+            onClick={askVectorForDatabase}
           >
-            Go to Home →
+            Ask Vector to set it up
+          </button>
+          <button
+            type="button"
+            class="shrink-0 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-white/15"
+            onClick={openCloudDatabase}
+          >
+            Open Database
           </button>
           <button
             type="button"
@@ -4842,6 +4872,19 @@ export default function NewLayout(props: ParentProps) {
                     >
                       View PR
                     </a>
+                  </Show>
+                  <Show when={record().previewUrl}>
+                    {(url) => (
+                      <a
+                        href={url()}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={url()}
+                        class="inline-flex h-9 items-center rounded-[10px] border border-[color:var(--vx-line)] px-3 text-[12px] text-white/65 transition hover:bg-white/[0.05] hover:text-white"
+                      >
+                        View preview
+                      </a>
+                    )}
                   </Show>
                   <div class="flex-1" />
                   <Show when={record().mergeState === "none" && !isParallelWorkspaceRunning(record())}>

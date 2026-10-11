@@ -111,6 +111,36 @@ describe("PermissionV2", () => {
     expect(PermissionV2.evaluate("bash", "pwd", [...deny, ...allow]).effect).toBe("allow")
   })
 
+  it.effect("Cloud account actions ask under configured allow and never retain approval", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "*", resource: "*", effect: "allow" }])
+      const service = yield* PermissionV2.Service
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({ projectID: Project.ID.global, action: "vector_cloud_publish", resources: ["*"] })
+      for (const action of [
+        "vector_cloud_publish",
+        "vector_cloud_database",
+        "vector_cloud_environment",
+        "vector_cloud_hosting",
+        "vector_cloud_future",
+      ]) {
+        const input = assertion({ action, save: action === "vector_cloud_future" ? [] : ["*"] })
+        expect(yield* service.ask(input)).toMatchObject({ effect: "ask" })
+        yield* service.reply({ requestID: input.id, reply: "always" })
+        expect(yield* saved.list({ projectID: Project.ID.global })).toEqual([])
+        expect(yield* service.ask(input)).toMatchObject({ effect: "ask" })
+        yield* service.reply({ requestID: input.id, reply: "once" })
+      }
+      expect(yield* service.ask(assertion({ action: "vector_cloud_inspect", save: ["*"] }))).toMatchObject({
+        effect: "allow",
+      })
+      yield* setRules([{ action: "*", resource: "*", effect: "deny" }])
+      expect(yield* service.ask(assertion({ action: "vector_cloud_publish", save: ["*"] }))).toMatchObject({
+        effect: "deny",
+      })
+    }),
+  )
+
   it.effect("returns the evaluated effect and only queues prompts", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])

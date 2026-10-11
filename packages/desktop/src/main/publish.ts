@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process"
-import { readdir, readFile, stat, writeFile } from "node:fs/promises"
-import { basename, extname, join, relative } from "node:path"
+import { readdir, readFile, stat } from "node:fs/promises"
+import { basename, join, matchesGlob, relative } from "node:path"
 import { untrustedChildEnvironment } from "@vectordevai/core/child-environment"
 
 import {
-  checkDeployment,
   getBuildSettings,
   getDeployment,
+  listDeployments,
   markDeploymentPromoted,
   recordDeployment,
   redactCloudLog,
@@ -18,21 +18,42 @@ import {
   type CloudGitMetadata,
 } from "./cloud-console"
 import { scanProjectSecrets } from "./secret-scanner"
-import {
-  cachedCloudProviderConnection,
-  getCloudProviderProjectLink,
-  getCloudProviderRuntimeAuth,
-} from "./cloud-connections"
-import { extractDeployUrl, normalizeDeployUrl } from "./publish-url"
+import { cachedCloudProviderConnection } from "./cloud-connections"
+import { extractDeployUrl } from "./publish-url"
 import { agentEnvironment, resolveAgentPath, runCli, shimmedCommand } from "./external-agents"
+import {
+  objectField,
+  parseJson,
+  stringField,
+  vercelLinkContext,
+  vercelRequest,
+  VercelError,
+  type VercelErrorCode,
+  type VercelFetch,
+  type VercelLinkContext,
+} from "./cloud-vercel-api"
+import { autoLinkVercelProject, readVercelProject, vercelBypassSecret } from "./cloud-vercel-projects"
+import {
+  assignVercelBranchAlias,
+  inspectInProject,
+  promoteVercelDeployment,
+  vercelBuildLogs,
+  type VercelDeployment,
+} from "./cloud-vercel-deployments"
+import { probeVercelUrl, protectionBypassHeaders, protectsDeployment, type VercelProbe } from "./cloud-vercel-checks"
+import type { CloudBrowserCheckResult } from "./cloud-browser-check"
 
-export { normalizeDeployUrl } from "./publish-url"
+// Publish the user's app to their own Vercel account. Every release is first
+// an immutable deployment that Vector checks; production only moves when the
+// user asked for it and the checks ran and passed. Vector never proxies the code.
 
-// Publish the user's app straight from the Preview panel — Lovable-style, but
-// BYOK like everything else in Vector: deploys go to the USER's own Vercel or
-// Netlify account through their CLI login. Vector never proxies the code.
+export type PublishTargetId = "vercel"
 
-export type PublishTargetId = "vector-cloud" | "vercel" | "netlify"
+// Deploys run this exact Vercel CLI through npx, so a release does not change
+// with whatever CLI happens to be installed.
+export const VERCEL_CLI_VERSION = "59.26.0"
+
+const NO_NODE = `Publishing needs Node.js: Vector runs the Vercel CLI (vercel@${VERCEL_CLI_VERSION}) through npx, and npx was not found. Install Node.js 18 or later from nodejs.org, then publish again.`
 
 export type PublishTarget = {
   id: PublishTargetId
@@ -40,9 +61,13 @@ export type PublishTarget = {
   command: string[]
   loginHint: string
   available: boolean
-  /** The logged-in account (e.g. Vercel/Netlify username), when detectable. */
+  /** The connected Vercel account. */
   account?: string
+  /** What stops publishing on this machine. */
+  problem?: "no_node" | "not_connected"
 }
+
+export type PublishErrorCode = VercelErrorCode | "checks_failed" | "checks_blocked" | "build_failed" | "deploy_failed"
 
 export type PublishResult = {
   ok: boolean
@@ -50,8 +75,25 @@ export type PublishResult = {
   target: string
   log: string
   error?: string
+  errorCode?: PublishErrorCode
   deploymentId?: string
+  providerDeploymentId?: string
+  environment?: "preview" | "production"
+  productionUrl?: string
+  /** The stable per-branch preview address of an agent workspace. */
+  alias?: string
   checks?: CloudDeploymentCheck[]
+  /** Deployment Protection kept Vector's checks out of the deployment's own URL. */
+  protectedChecks?: "skipped"
+  notes?: string[]
+}
+
+export type PublishOptions = {
+  /** The CLI to run instead of the pinned one, for tests. */
+  command?: string[]
+  request?: VercelFetch
+  sleep?: (ms: number) => Promise<void>
+  browserCheck?: (url: string, id: string, headers: Record<string, string>) => Promise<CloudBrowserCheckResult>
 }
 
 export type PublishProjectInput = {
@@ -85,14 +127,7 @@ export type PublishProgressEvent = {
 
 export type PublishProgressEmitter = (event: PublishProgressEvent) => void
 
-export type CloudRuntimeLogResult = {
-  log: string
-  fetchedAt: string
-  source: "provider" | "build"
-}
-
-const activePublishes = new Map<string, ReturnType<typeof spawn>>()
-const activeVectorPublishes = new Set<string>()
+const activePublishes = new Set<string>()
 
 function scopeFor(input: PublishProjectInput) {
   return {
@@ -112,21 +147,12 @@ function emitProgress(
   emit({ runId: input.runId, stage, level, message, at: new Date().toISOString() })
 }
 
-// `path` is what resolveAgentPath found. npm installs vercel and netlify as .cmd shims on Windows: a bare name
+// `path` is what resolveAgentPath found. npm installs npx as a .cmd shim on Windows: a bare name
 // never finds them there (libuv's PATH search only tries .com and .exe), and Node will not run a .cmd itself, so
 // runCli launches it through cmd.exe.
 function execOk(path: string | undefined, args: string[]) {
   if (!path) return Promise.resolve(false)
   return runCli(path, args, 10_000, agentEnvironment()).then((result) => !result.failed)
-}
-
-// Capture stdout so we can read the logged-in account (`vercel whoami`).
-// Read-only; returns undefined when the CLI is missing or not logged in.
-function execOut(path: string | undefined, args: string[]) {
-  if (!path) return Promise.resolve(undefined)
-  return runCli(path, args, 10_000, agentEnvironment()).then((result) =>
-    result.failed ? undefined : result.stdout.trim() || undefined,
-  )
 }
 
 function runProcess(input: {
@@ -171,138 +197,80 @@ function runProcess(input: {
   })
 }
 
+// Runs the Vercel CLI with the user's token as VERCEL_TOKEN. A Vercel token is a
+// plain string with no prefix a pattern could recognise, so every chunk the CLI
+// prints is scrubbed of that exact string before it is streamed, logged or
+// returned. The tail of each chunk is held back until the next one, so a token
+// split across two chunks is still caught.
+export async function runVercel(input: {
+  command: string[]
+  args: string[]
+  cwd: string
+  token?: string
+  env?: NodeJS.ProcessEnv
+  timeoutMs?: number
+  onOutput?: (output: string) => void
+}) {
+  const token = input.token ?? ""
+  const scrub = (text: string) => (token ? text.split(token).join("[redacted]") : text)
+  let pending = ""
+  const flush = (text: string, final: boolean) => {
+    const combined = scrub(pending + text)
+    const held = final || !token ? 0 : Math.min(combined.length, token.length - 1)
+    pending = combined.slice(combined.length - held)
+    const ready = combined.slice(0, combined.length - held)
+    if (ready) input.onOutput?.(ready)
+  }
+  const launch = shimmedCommand(input.command[0], [...input.command.slice(1), ...input.args])
+  const result = await runProcess({
+    command: launch.command,
+    args: launch.args,
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
+    cwd: input.cwd,
+    timeoutMs: input.timeoutMs,
+    env: { ...input.env, ...(token ? { VERCEL_TOKEN: token } : {}) },
+    onOutput: (text) => flush(text, false),
+  })
+  flush("", true)
+  return { ...result, log: scrub(result.log) }
+}
+
 export async function detectPublishTargets(): Promise<PublishTarget[]> {
-  const vercelConnection = cachedCloudProviderConnection("vercel")
-  const netlifyConnection = cachedCloudProviderConnection("netlify")
-  // Each is the CLI's resolved path when it runs, so a deploy launches exactly what was detected.
-  // There is deliberately no `npx --yes` fallback: it would download and run whatever version
-  // of the CLI the registry serves at that moment, even during detection.
-  const [vercel, netlify] = await Promise.all(
-    ["vercel", "netlify"].map(async (cli) => {
-      const path = await resolveAgentPath(cli, agentEnvironment())
-      return (await execOk(path, ["--version"])) ? path : undefined
-    }),
-  )
-  // Only ask who's logged in when the CLI is actually installed.
-  const [vercelAccount, netlifyAccount] = await Promise.all([
-    vercel ? execOut(vercel, ["whoami"]) : Promise.resolve(undefined),
-    netlify
-      ? execOut(netlify, ["status"]).then((out) => out?.match(/Email:\s*(\S+)/i)?.[1])
-      : Promise.resolve(undefined),
-  ])
+  const connection = cachedCloudProviderConnection("vercel")
+  const command = await vercelCommand()
+  const problem = !command ? ("no_node" as const) : !connection.connected ? ("not_connected" as const) : undefined
   return [
-    {
-      // Vector's own hosting (alpha): a token-gated static publish service.
-      // Configured via env until cloud accounts exist.
-      id: "vector-cloud",
-      label: "Vector Cloud",
-      command: [],
-      loginHint: "Set VECTOR_CLOUD_URL and VECTOR_CLOUD_TOKEN to enable Vector Cloud publishing.",
-      available: Boolean(process.env.VECTOR_CLOUD_URL && process.env.VECTOR_CLOUD_TOKEN),
-    },
     {
       id: "vercel",
       label: "Vercel",
-      command: vercel ? [vercel] : ["vercel"],
-      // Publishing runs the installed CLI, so without it the target says how to get it rather than just greying out.
-      loginHint: !vercel
-        ? "Install the Vercel CLI (npm install -g vercel) to publish to Vercel."
-        : vercelConnection.connected
-          ? "Connected through Vector Cloud."
-          : "Connect Vercel in Vector Cloud, or sign in with the Vercel CLI.",
-      available: Boolean(vercel) && Boolean(vercelConnection.connected || vercelAccount),
-      account: vercelConnection.account ?? vercelAccount,
-    },
-    {
-      id: "netlify",
-      label: "Netlify",
-      command: netlify ? [netlify] : ["netlify"],
-      loginHint: !netlify
-        ? "Install the Netlify CLI (npm install -g netlify-cli) to publish to Netlify."
-        : netlifyConnection.connected
-          ? "Connected through Vector Cloud."
-          : "Connect Netlify in Vector Cloud, or sign in with the Netlify CLI.",
-      available: Boolean(netlify) && Boolean(netlifyConnection.connected || netlifyAccount),
-      account: netlifyConnection.account ?? netlifyAccount,
+      command: command ?? ["npx", "--yes", `vercel@${VERCEL_CLI_VERSION}`],
+      available: !problem,
+      account: connection.account,
+      problem,
+      loginHint:
+        problem === "no_node"
+          ? NO_NODE
+          : problem === "not_connected"
+            ? "Connect Vercel in Vector Cloud > Connections to publish."
+            : `Connected${connection.account ? ` as ${connection.account}` : ""}.`,
     },
   ]
 }
 
-// Every app published from Vector carries a small floating badge linking back
-// to vectordev.ai — the marker comment keeps injection idempotent.
-const BADGE_MARKER = "vector-badge"
-const BADGE_SNIPPET = `    <!-- ${BADGE_MARKER} -->
-    <a href="https://vectordev.ai" target="_blank" rel="noopener" style="position:fixed;right:14px;bottom:14px;z-index:2147483647;display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:rgba(16,15,19,0.92);color:#f5f3ff;font:600 12px/1 Inter,system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 24px rgba(0,0,0,0.35);border:1px solid rgba(147,116,236,0.4)">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:linear-gradient(135deg,#f0a36e,#ec7fae,#9374ec,#6ba6dd)"></span>
-      Deployed with Vector
-    </a>
-`
-
-function stampVectorBadge(html: string) {
-  if (html.includes(BADGE_MARKER) || !/<\/body>/i.test(html)) return html
-  return html.replace(/<\/body>/i, `${BADGE_SNIPPET}  </body>`)
+// The pinned CLI through the user's own npx, or undefined without Node.
+async function vercelCommand() {
+  const npx = await resolveAgentPath("npx", agentEnvironment())
+  if (!(await execOk(npx, ["--version"]))) return
+  return [npx!, "--yes", `vercel@${VERCEL_CLI_VERSION}`]
 }
-
-async function injectVectorBadge(directory: string) {
-  for (const candidate of ["index.html", join("public", "index.html")]) {
-    const path = join(directory, candidate)
-    const html = await readFile(path, "utf8").catch(() => undefined)
-    if (html === undefined) continue
-    if (html.includes(BADGE_MARKER)) return "present"
-    if (!/<\/body>/i.test(html)) continue
-    await writeFile(path, stampVectorBadge(html), "utf8")
-    return "injected"
-  }
-  // Framework apps without a plain index.html (e.g. Next.js) skip the badge
-  // rather than guessing at build internals.
-  return "skipped"
-}
-
-function parsePublishResponse(value: unknown) {
-  if (!value || typeof value !== "object") return {}
-  const string = (key: string) => {
-    const item = Reflect.get(value, key)
-    return typeof item === "string" ? item : undefined
-  }
-  return {
-    ok: Reflect.get(value, "ok") === true,
-    url: normalizeDeployUrl(string("url")),
-    slug: string("slug"),
-    error: string("error"),
-  }
-}
-
-const TEXT_EXTENSIONS = new Set([
-  ".html",
-  ".htm",
-  ".css",
-  ".js",
-  ".mjs",
-  ".json",
-  ".svg",
-  ".txt",
-  ".md",
-  ".map",
-  ".xml",
-  ".webmanifest",
-])
-const SKIP_DIRECTORIES = new Set(["node_modules", ".git", ".vercel", ".netlify", "dist", ".next", ".turbo"])
-// Any framework build with code splitting and images clears a few hundred files,
-// so this is a real ceiling rather than a working limit — but it is enforced by
-// throwing, because the previous cap stopped the walk mid-directory and shipped
-// whatever half of the site readdir happened to reach.
-const MAX_UPLOAD_FILES = 2_000
-// Hidden entries are excluded by default: .npmrc carries a registry auth token,
-// .git carries the whole history. These are the hidden names a static host
-// genuinely serves, and dropping .well-known broke ACME and app-site-association.
-const PUBLISHABLE_HIDDEN_NAMES = new Set([".htaccess", ".nojekyll", ".well-known"])
 
 // The directory that actually ships. Publish-time checks have to look here and
 // not only at the project root: a bundler bakes VITE_*/NEXT_PUBLIC_* values into
 // these files, and a scan of the source never sees them. Returns undefined when
 // the project publishes from its own root, as a plain static site does.
 async function resolveDeployRoot(projectPath: string, configuredOutput?: string) {
-  if (configuredOutput && configuredOutput !== ".") {
+  if (configuredOutput === ".") return undefined
+  if (configuredOutput) {
     const configuredRoot = join(projectPath, configuredOutput)
     return (await stat(configuredRoot).catch(() => undefined))?.isDirectory() ? configuredRoot : undefined
   }
@@ -314,56 +282,11 @@ async function resolveDeployRoot(projectPath: string, configuredOutput?: string)
   return undefined
 }
 
-// Collect a static bundle for Vector Cloud: prefer a built dist/ (or build/)
-// with an index.html, otherwise the project root for plain static apps.
-async function collectStaticFiles(projectPath: string, configuredOutput?: string) {
-  const root = (await resolveDeployRoot(projectPath, configuredOutput)) ?? projectPath
-  if (configuredOutput && configuredOutput !== "." && !(await stat(join(root, "index.html")).catch(() => undefined))) {
-    throw new Error(
-      `The configured output directory "${configuredOutput}" does not contain index.html. Run the build or update Build & runtime settings.`,
-    )
-  }
-  const files: { path: string; content: string; encoding: "utf8" | "base64" }[] = []
-  let total = 0
-  const walk = async (directory: string) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const full = join(directory, entry.name)
-      if (entry.name.startsWith(".") && !PUBLISHABLE_HIDDEN_NAMES.has(entry.name)) continue
-      if (entry.isDirectory()) {
-        if (root === projectPath && SKIP_DIRECTORIES.has(entry.name)) continue
-        await walk(full)
-        continue
-      }
-      if (!entry.isFile()) continue
-      if (files.length >= MAX_UPLOAD_FILES) {
-        throw new Error(
-          `This app has more than ${MAX_UPLOAD_FILES} files, which is over Vector Cloud's alpha limit. Publish the built output instead.`,
-        )
-      }
-      const buffer = await readFile(full)
-      total += buffer.byteLength
-      if (total > 10 * 1024 * 1024)
-        throw new Error("This app is over Vector Cloud's 10 MB alpha limit. Publish the built output instead.")
-      const utf8 = TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase())
-      files.push({
-        path: relative(root, full).split("\\").join("/"),
-        content: buffer.toString(utf8 ? "utf8" : "base64"),
-        encoding: utf8 ? "utf8" : "base64",
-      })
-    }
-  }
-  await walk(root)
-  if (!files.some((file) => file.path === "index.html")) {
-    throw new Error("Vector Cloud needs an index.html at the app root (or in dist/) — build the app first.")
-  }
-  return files
-}
-
 function runBuild(command: string, projectPath: string, onOutput?: (output: string) => void) {
   return runProcess({ command, cwd: projectPath, shell: true, onOutput })
 }
 
-async function readGitMetadata(projectPath: string): Promise<CloudGitMetadata | undefined> {
+export async function readGitMetadata(projectPath: string): Promise<CloudGitMetadata | undefined> {
   const read = (args: string[]) =>
     runProcess({ command: "git", args, cwd: projectPath, timeoutMs: 10_000 }).then((result) =>
       result.ok ? result.log.trim() : "",
@@ -450,7 +373,15 @@ async function runPreflightChecks(
       const text = redactCloudLog(scope.projectPath, scope.taskId, output).trim()
       if (text) emitProgress(input, emit, stage, "info", text.slice(-800))
     })
-    const check = commandCheck(type, label, required, result, Date.now() - startedAt)
+    // A failed preflight returns its checks straight to the agent and the
+    // preview panel, before any deployment record would redact them.
+    const check = commandCheck(
+      type,
+      label,
+      required,
+      { ok: result.ok, log: redactCloudLog(scope.projectPath, scope.taskId, result.log) },
+      Date.now() - startedAt,
+    )
     checks.push(check)
     if (result.log.trim()) logs.push(result.log.trim())
     emitProgress(input, emit, stage, result.ok ? "success" : "error", check.details ?? label)
@@ -502,6 +433,7 @@ async function runPreflightChecks(
     await Promise.all([
       scanProjectSecrets(input.projectPath),
       deployRoot ? scanProjectSecrets(deployRoot, input.projectPath) : [],
+      servedEnvFile(input.projectPath, settings, deployRoot),
     ])
   ).flat()
   const secretsRequired = settings?.requiredChecks.secrets ?? true
@@ -536,251 +468,277 @@ async function runPreflightChecks(
   }
 }
 
+// Environment files are deliberately omitted from credential-content scans. Check their public paths instead,
+// including build output: a build can copy a secret file verbatim without embedding a recognizable token.
+async function servedEnvFile(directory: string, settings: CloudBuildSettings | null, deployRoot?: string) {
+  const manifest = await readFile(join(directory, "package.json"), "utf8")
+    .then(parseJson)
+    .catch(() => undefined)
+  if (
+    !deployRoot &&
+    settings?.outputDirectory !== "." &&
+    (settings?.buildCommand || stringField(objectField(manifest, "scripts"), "build"))
+  )
+    return []
+  const ignored = deployRoot
+    ? []
+    : (await readFile(join(directory, ".vercelignore"), "utf8").catch(() => ""))
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#"))
+  const root = deployRoot ?? directory
+  const findings: { file: string; line: number; kind: string }[] = []
+  const walk = async (folder: string): Promise<void> => {
+    const entries = await readdir(folder, { withFileTypes: true })
+    for (const entry of entries) {
+      if ([".git", ".vercel", "node_modules"].includes(entry.name)) continue
+      const path = join(folder, entry.name)
+      const local = relative(root, path).split("\\").join("/")
+      const rule = ignored.findLast((value) => {
+        const pattern = value.replace(/^!/, "").replace(/^\//, "").replace(/\/$/, "")
+        return matchesGlob(pattern.includes("/") ? local : entry.name, pattern)
+      })
+      if (rule && !rule.startsWith("!")) continue
+      if (entry.isDirectory()) {
+        await walk(path)
+        continue
+      }
+      if (!/^\.env(?:\.|$)/.test(entry.name)) continue
+      if (!deployRoot && !rule && (entry.name === ".env.local" || /^\.env\..*\.local$/.test(entry.name))) continue
+      findings.push({
+        file: relative(directory, path).split("\\").join("/"),
+        line: 0,
+        kind: `public at /${local}: remove it from the published output or exclude it with .vercelignore`,
+      })
+    }
+  }
+  await walk(root)
+  return findings
+}
+
 function requiredChecksPassed(checks: CloudDeploymentCheck[]): boolean {
   return checks.every((check) => !check.required || check.status === "passed" || check.status === "skipped")
 }
 
+type CheckAccess = {
+  /** Protection Bypass for Automation secret, sent as a header. */
+  bypass?: string
+  /** Deployment Protection covers the URL being checked. */
+  protectedUrl: boolean
+}
+
+const PROTECTED_DETAIL =
+  "Protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Vector Cloud > Project settings so Vector can check protected deployments."
+
+// One probe of the release's health path, as the release check and
+// Observability both run it.
+function probeHealth(settings: CloudBuildSettings | null, access: CheckAccess, url: string, options: PublishOptions) {
+  return probeVercelUrl(new URL(settings?.healthPath ?? "/", url).toString(), {
+    bypass: access.bypass,
+    projectProtected: access.protectedUrl,
+    request: options.request,
+  })
+}
+
+// What a probe says about the release. Deployment Protection leaves its status
+// as it was: a sign-in page says nothing about whether the app works.
+function probeFields(deployment: CloudDeployment, probe: VercelProbe): Partial<CloudDeployment> {
+  return {
+    status:
+      probe.kind === "ok"
+        ? "ready"
+        : probe.kind === "protected"
+          ? deployment.status
+          : probe.statusCode
+            ? "degraded"
+            : "unreachable",
+    statusCode: probe.statusCode,
+    latencyMs: probe.latencyMs,
+    healthError: probe.kind === "failed" ? probe.error : undefined,
+    probe: probe.kind,
+    lastCheckedAt: new Date().toISOString(),
+  }
+}
+
+// The health check of a release check. Deployment Protection leaves it
+// "skipped" with the reason, not "failed".
+async function healthCheck(
+  input: PublishProjectInput,
+  deployment: CloudDeployment,
+  settings: CloudBuildSettings | null,
+  access: CheckAccess,
+  url: string,
+  options: PublishOptions,
+  emit?: PublishProgressEmitter,
+) {
+  const scope = scopeFor(input)
+  const healthPath = settings?.healthPath ?? "/"
+  emitProgress(input, emit, "checking", "info", `Checking ${healthPath}.`)
+  const probe = await probeHealth(settings, access, url, options)
+  const details =
+    probe.kind === "ok"
+      ? `HTTP ${probe.statusCode} in ${probe.latencyMs} ms`
+      : probe.kind === "protected"
+        ? PROTECTED_DETAIL
+        : (probe.error ?? "Health check failed.")
+  const updated = updateDeployment(scope.projectPath, scope.taskId, deployment.id, {
+    ...probeFields(deployment, probe),
+    checks: upsertDeploymentCheck(
+      deployment.checks,
+      makeCheck({
+        id: "health",
+        type: "health",
+        label: `Health check ${healthPath}`,
+        status: probe.kind === "ok" ? "passed" : probe.kind === "protected" ? "skipped" : "failed",
+        required: settings?.requiredChecks.health ?? true,
+        details,
+        durationMs: probe.latencyMs,
+      }),
+    ),
+  })
+  emitProgress(
+    input,
+    emit,
+    "checking",
+    probe.kind === "failed" ? "error" : probe.kind === "ok" ? "success" : "warning",
+    details,
+  )
+  return { deployment: updated, kind: probe.kind }
+}
+
+// Health and browser checks against `url`. A check Deployment Protection kept
+// out is "skipped" with the reason, not "failed": nothing about the release
+// itself is known to be wrong. `blocked` says a required check was kept out,
+// so the release is not known to work either.
 async function runPostDeployChecks(
   input: PublishProjectInput,
   deployment: CloudDeployment,
   settings: CloudBuildSettings | null,
+  access: CheckAccess,
+  url: string,
+  options: PublishOptions,
   emit?: PublishProgressEmitter,
 ) {
   const scope = scopeFor(input)
-  let current = deployment
-  if (settings?.requiredChecks.health ?? true) {
-    emitProgress(input, emit, "checking", "info", `Checking ${settings?.healthPath ?? "/"} on the deployed app.`)
-    current = await checkDeployment(scope.projectPath, scope.taskId, current.id)
-    const health = current.checks.find((check) => check.id === "health")
-    emitProgress(
-      input,
-      emit,
-      "checking",
-      health?.status === "passed" ? "success" : "error",
-      health?.details ?? "Health check failed.",
-    )
-  }
-  if (!(settings?.requiredChecks.browser ?? true)) {
-    return updateDeployment(scope.projectPath, scope.taskId, current.id, {
+  const health =
+    (settings?.requiredChecks.health ?? true)
+      ? await healthCheck(input, deployment, settings, access, url, options, emit)
+      : undefined
+  const checked = health?.deployment ?? deployment
+  // Without a health probe to go by, the project's protection settings decide.
+  const kept = health ? health.kind === "protected" : access.protectedUrl && !access.bypass
+  const browser = (check: Omit<CloudDeploymentCheck, "checkedAt" | "id" | "type" | "label">) =>
+    updateDeployment(scope.projectPath, scope.taskId, checked.id, {
       checks: upsertDeploymentCheck(
-        current.checks,
-        makeCheck({
-          id: "browser",
-          type: "browser",
-          label: "Browser smoke test",
-          status: "skipped",
-          required: false,
-          details: "Browser smoke testing is disabled in Build & runtime.",
-        }),
+        checked.checks,
+        makeCheck({ id: "browser", type: "browser", label: "Browser smoke test", ...check }),
       ),
     })
-  }
-
-  emitProgress(input, emit, "checking", "info", "Rendering the deployment in Vector's isolated browser.")
-  const { runCloudBrowserCheck } = await import("./cloud-browser-check")
-  const browser = await runCloudBrowserCheck(current.url, current.id)
-  current = updateDeployment(scope.projectPath, scope.taskId, current.id, {
-    checks: upsertDeploymentCheck(
-      current.checks,
-      makeCheck({
-        id: "browser",
-        type: "browser",
-        label: "Browser smoke test",
-        status: browser.ok ? "passed" : "failed",
-        required: true,
-        details: browser.details,
-        output: browser.output,
-        durationMs: browser.durationMs,
-        screenshotPath: browser.screenshotPath,
+  if (!(settings?.requiredChecks.browser ?? true)) {
+    return {
+      deployment: browser({
+        status: "skipped",
+        required: false,
+        details: "Browser smoke testing is disabled in Build & runtime.",
       }),
-    ),
-  })
-  emitProgress(input, emit, "checking", browser.ok ? "success" : "error", browser.details)
-  return current
+      blocked: health?.kind === "protected",
+    }
+  }
+  if (kept) {
+    emitProgress(input, emit, "checking", "warning", PROTECTED_DETAIL)
+    return { deployment: browser({ status: "skipped", required: true, details: PROTECTED_DETAIL }), blocked: true }
+  }
+  emitProgress(input, emit, "checking", "info", "Rendering the deployment in Vector's isolated browser.")
+  const rendered = await renderDeployment(options, url, checked.id, protectionBypassHeaders(access.bypass))
+  emitProgress(input, emit, "checking", rendered.ok ? "success" : "error", rendered.details)
+  return {
+    deployment: browser({
+      status: rendered.ok ? "passed" : "failed",
+      required: true,
+      details: rendered.details,
+      output: rendered.output,
+      durationMs: rendered.durationMs,
+      screenshotPath: rendered.screenshotPath,
+    }),
+    blocked: false,
+  }
 }
 
-async function publishToVectorCloud(input: PublishProjectInput, emit?: PublishProgressEmitter): Promise<PublishResult> {
-  const endpoint = process.env.VECTOR_CLOUD_URL?.replace(/\/$/, "")
-  const token = process.env.VECTOR_CLOUD_TOKEN
-  if (!endpoint || !token) {
-    return { ok: false, target: "vector-cloud", log: "", error: "Vector Cloud is not configured on this machine." }
-  }
-  const directory = input.projectPath
-  if (!directory || !(await stat(directory).catch(() => undefined))?.isDirectory()) {
-    return { ok: false, target: "vector-cloud", log: "", error: "Open a project before publishing." }
-  }
-  const scope = scopeFor(input)
-  const startedAt = Date.now()
-  const settings = getBuildSettings(scope.projectPath, scope.taskId)
-  emitProgress(
-    input,
-    emit,
-    "preparing",
-    "info",
-    `Preparing ${input.workspaceName ?? basename(directory)} for Vector Cloud.`,
-  )
-  const preflight = await runPreflightChecks(input, settings, emit)
-  const preflightLog = redactCloudLog(scope.projectPath, scope.taskId, preflight.log).slice(-40_000)
-  if (!preflight.ok) {
-    emitProgress(input, emit, "failed", "error", "Required pre-deploy checks failed.")
-    return {
-      ok: false,
-      target: "vector-cloud",
-      log: preflightLog,
-      checks: preflight.checks,
-      error: "Required pre-deploy checks failed. Review the evidence, repair the project, and publish again.",
-    }
-  }
-
-  // Stamp the badge into the copy that ships, never into the project. Writing to
-  // the source index.html here both missed the deploy — the build has already run,
-  // so dist/index.html is what uploads — and left an edit the user never asked for
-  // in a tracked file.
-  const files = (await collectStaticFiles(directory, settings?.outputDirectory)).map((file) =>
-    file.path === "index.html" ? { ...file, content: stampVectorBadge(file.content) } : file,
-  )
-  emitProgress(input, emit, "uploading", "info", `Uploading ${files.length} files to Vector Cloud.`)
-  const response = await fetch(`${endpoint}/api/publish`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      name: input.workspaceName ?? (basename(scope.projectPath) || "app"),
-      project: basename(scope.projectPath) || "app",
-      environment: "preview",
-      files,
-    }),
-    signal: AbortSignal.timeout(120_000),
-  })
-  const body = parsePublishResponse(await response.json().catch(() => undefined))
-  if (!response.ok || !body.ok || !body.url) {
-    const error = body.error ?? `Vector Cloud responded with ${response.status}.`
-    emitProgress(input, emit, "failed", "error", error)
-    return { ok: false, target: "vector-cloud", log: preflightLog, checks: preflight.checks, error }
-  }
-
-  const log = redactCloudLog(
-    scope.projectPath,
-    scope.taskId,
-    [preflightLog.trim(), `Published ${files.length} files to Vector Cloud.`].filter(Boolean).join("\n"),
-  )
-  let deployment = recordDeployment({
-    slug: body.slug ?? body.url.match(/\/s\/([^/]+)/)?.[1] ?? body.url,
-    url: body.url,
-    name: input.workspaceName ?? (basename(scope.projectPath) || "app"),
-    projectPath: scope.projectPath,
-    taskId: scope.taskId,
-    deploymentPath: directory,
-    workspaceId: input.workspaceId,
-    workspaceName: input.workspaceName,
-    target: "vector-cloud",
-    environment: "preview",
-    log,
-    durationMs: Date.now() - startedAt,
-    checks: preflight.checks,
-    git: await readGitMetadata(directory),
-  })
-  emitProgress(input, emit, "uploading", "success", `Preview deployed at ${body.url}`)
-  deployment = await runPostDeployChecks(input, deployment, settings, emit)
-  if (!requiredChecksPassed(deployment.checks)) {
-    const error = "The preview deployed, but required release checks failed. Production was not changed."
-    emitProgress(input, emit, "failed", "error", error)
-    return {
-      ok: false,
-      target: "vector-cloud",
-      url: deployment.url,
-      log,
-      deploymentId: deployment.id,
-      checks: deployment.checks,
-      error,
-    }
-  }
-  if (input.production !== false) {
-    deployment = await promoteDeployment(
-      { projectPath: scope.projectPath, taskId: scope.taskId, id: deployment.id, runId: input.runId },
-      emit,
-    )
-  }
-  emitProgress(
-    input,
-    emit,
-    "complete",
-    "success",
-    input.production === false ? "Preview is ready." : "Production release is live.",
-  )
-  return {
-    ok: true,
-    target: "vector-cloud",
-    url: deployment.productionUrl ?? deployment.url,
-    log,
-    deploymentId: deployment.id,
-    checks: deployment.checks,
-  }
+// The isolated browser loads Electron, so it is imported only when a check renders.
+async function renderDeployment(options: PublishOptions, url: string, id: string, headers: Record<string, string>) {
+  if (options.browserCheck) return options.browserCheck(url, id, headers)
+  const { runCloudBrowserCheck } = await import("./cloud-browser-check")
+  return runCloudBrowserCheck(url, id, headers)
 }
 
 export async function publishProject(
   input: PublishProjectInput,
   emit?: PublishProgressEmitter,
+  options: PublishOptions = {},
 ): Promise<PublishResult> {
   const scope = scopeFor(input)
-  const publishKey = `${input.projectPath}:${input.target}`
-  if (input.target === "vector-cloud") {
-    if (activeVectorPublishes.has(publishKey)) {
-      return { ok: false, target: input.target, log: "", error: "A publish is already running for this project." }
-    }
-    activeVectorPublishes.add(publishKey)
-    return publishToVectorCloud(input, emit).finally(() => activeVectorPublishes.delete(publishKey))
-  }
   const directory = input.projectPath
+  const production = input.production === true
+  const publishKey = `${scope.projectPath}:${directory}`
+  const fail = (error: string, extra: Partial<PublishResult> = {}): PublishResult => {
+    emitProgress(input, emit, "failed", "error", error)
+    return { ok: false, target: "vercel", log: "", error, ...extra }
+  }
   if (!directory || !(await stat(directory).catch(() => undefined))?.isDirectory()) {
-    return { ok: false, target: input.target, log: "", error: "Open a project before publishing." }
+    return fail("Open a project before publishing.")
   }
   if (
     !(await stat(join(directory, "package.json")).catch(() => undefined)) &&
     !(await stat(join(directory, "index.html")).catch(() => undefined))
   ) {
-    return {
-      ok: false,
-      target: input.target,
-      log: "",
-      error: "This project has no package.json or index.html to publish yet.",
-    }
+    return fail("This project has no package.json or index.html to publish yet.")
   }
-  if (activePublishes.has(publishKey)) {
-    return { ok: false, target: input.target, log: "", error: "A publish is already running for this project." }
+  if (activePublishes.has(publishKey)) return fail("A publish is already running for this project.")
+
+  const command = options.command ?? (await vercelCommand())
+  if (!command) return fail(NO_NODE, { errorCode: "no_node" })
+  const context = await prepareVercel(scope.projectPath, directory, options).catch((error: unknown) => error)
+  if (!isLinkContext(context)) {
+    return fail(context instanceof Error ? context.message : String(context), {
+      errorCode: context instanceof VercelError ? context.code : undefined,
+    })
   }
 
-  const targets = await detectPublishTargets()
-  const target = targets.find((item) => item.id === input.target)
-  if (!target?.available) {
-    return {
-      ok: false,
-      target: input.target,
-      log: "",
-      error: `${input.target} is not available on this machine. ${target?.loginHint ?? ""}`.trim(),
-    }
+  activePublishes.add(publishKey)
+  try {
+    return await deployAndCheck(input, context, command, production, options, emit)
+  } finally {
+    activePublishes.delete(publishKey)
   }
-  if (target.id !== "vercel" && target.id !== "netlify") {
-    return { ok: false, target: target.id, log: "", error: "Unsupported publish target." }
-  }
-  const providerAuth = await getCloudProviderRuntimeAuth(target.id)
-  const providerLink = getCloudProviderProjectLink(scope.projectPath, scope.taskId, target.id)
-  if (providerAuth.token && !providerLink) {
-    return {
-      ok: false,
-      target: target.id,
-      log: "",
-      error: `Choose a ${target.label} project in Vector Cloud before publishing.`,
-    }
-  }
-  const providerEnv: NodeJS.ProcessEnv =
-    target.id === "vercel"
-      ? providerAuth.token
-        ? { VERCEL_TOKEN: providerAuth.token }
-        : {}
-      : providerAuth.token
-        ? { NETLIFY_AUTH_TOKEN: providerAuth.token }
-        : {}
+}
 
+function isLinkContext(value: unknown): value is VercelLinkContext {
+  return Boolean(value && typeof value === "object" && "link" in value && "auth" in value)
+}
+
+// The three things a deploy needs before anything is built: a connection, a
+// linked project (found from .vercel/project.json when there is one), and a
+// token Vercel still accepts.
+async function prepareVercel(projectPath: string, directory: string, options: PublishOptions) {
+  await autoLinkVercelProject(projectPath, directory, options.request).catch(() => undefined)
+  const context = await vercelLinkContext(projectPath)
+  await vercelRequest(context.auth, "/v2/user", { request: options.request, unscoped: true })
+  return context
+}
+
+async function deployAndCheck(
+  input: PublishProjectInput,
+  context: VercelLinkContext,
+  command: string[],
+  production: boolean,
+  options: PublishOptions,
+  emit?: PublishProgressEmitter,
+): Promise<PublishResult> {
+  const scope = scopeFor(input)
+  const directory = input.projectPath
+  const secrets = [context.auth.token]
+  const redact = (text: string) => redactCloudLog(scope.projectPath, scope.taskId, text, secrets)
+  const notes: string[] = []
   const startedAt = Date.now()
   const settings = getBuildSettings(scope.projectPath, scope.taskId)
   emitProgress(
@@ -788,150 +746,308 @@ export async function publishProject(
     emit,
     "preparing",
     "info",
-    `Preparing ${input.workspaceName ?? basename(directory)} for ${target.label}.`,
+    `Preparing ${input.workspaceName ?? basename(directory)} for the Vercel project ${context.link.projectName}.`,
   )
   const preflight = await runPreflightChecks(input, settings, emit)
-  const preflightLog = redactCloudLog(scope.projectPath, scope.taskId, preflight.log).slice(-40_000)
+  const preflightLog = redact(preflight.log).slice(-40_000)
   if (!preflight.ok) {
     emitProgress(input, emit, "failed", "error", "Required pre-deploy checks failed.")
     return {
       ok: false,
-      target: target.id,
+      target: "vercel",
       log: preflightLog,
       checks: preflight.checks,
+      errorCode: "checks_failed",
       error: "Required pre-deploy checks failed. Review the evidence, repair the project, and publish again.",
     }
   }
 
-  await injectVectorBadge(directory).catch(() => "skipped")
-  const directProduction = target.id === "netlify" && input.production !== false
-  const destinationArgs =
-    target.id === "vercel"
-      ? providerLink
-        ? ["--project", providerLink.projectId, ...(providerLink.accountId ? ["--scope", providerLink.accountId] : [])]
-        : []
-      : providerLink
-        ? ["--site", providerLink.projectId]
-        : []
-  const args =
-    target.id === "vercel"
-      ? [...target.command.slice(1), "--yes", ...destinationArgs]
-      : [...target.command.slice(1), "deploy", "--build", ...destinationArgs, ...(directProduction ? ["--prod"] : [])]
+  // --skip-domain builds a production deployment without moving production's
+  // domains, so the checks run before anyone is served it
+  // (https://vercel.com/docs/cli/deploy#skip-domain).
   emitProgress(
     input,
     emit,
     "uploading",
     "info",
-    directProduction
-      ? `Deploying directly to ${target.label} production.`
-      : `Creating an immutable ${target.label} preview.`,
+    production ? "Creating a production build on Vercel, not yet live." : "Creating a Vercel preview deployment.",
   )
-
-  const launch = shimmedCommand(target.command[0], args)
-  const command = await new Promise<{ ok: boolean; code: number | null; signal: NodeJS.Signals | null; log: string }>(
-    (resolve) => {
-      const child = spawn(launch.command, launch.args, {
-        cwd: directory,
-        env: untrustedChildEnvironment(process.env, providerEnv, { CI: "1", FORCE_COLOR: "0" }),
-        windowsVerbatimArguments: launch.windowsVerbatimArguments,
-      })
-      activePublishes.set(publishKey, child)
-      let output = ""
-      const capture = (chunk: Buffer) => {
-        const text = chunk.toString()
-        output = (output + text).slice(-40_000)
-        const redacted = redactCloudLog(scope.projectPath, scope.taskId, text).trim()
-        if (redacted) emitProgress(input, emit, "uploading", "info", redacted.slice(-800))
-      }
-      child.stdout?.on("data", capture)
-      child.stderr?.on("data", capture)
-      const timeout = setTimeout(() => child.kill("SIGTERM"), 10 * 60_000)
-      child.on("close", (code, signal) => {
-        clearTimeout(timeout)
-        activePublishes.delete(publishKey)
-        resolve({ ok: code === 0 && !signal, code, signal, log: output })
-      })
-      child.on("error", (error) => {
-        clearTimeout(timeout)
-        activePublishes.delete(publishKey)
-        resolve({ ok: false, code: null, signal: null, log: `${output}\n${error.message}` })
-      })
+  const accountId =
+    context.link.accountId ?? context.auth.teamId ?? (await readVercelProject(context, options.request)).accountId
+  const run = await runVercel({
+    command,
+    args: ["deploy", "--yes", ...(production ? ["--prod", "--skip-domain"] : [])],
+    cwd: directory,
+    token: context.auth.token,
+    // https://vercel.com/kb/guide/how-can-i-use-github-actions-with-vercel: these
+    // two name the project, so the CLI neither asks nor writes .vercel/.
+    env: {
+      VERCEL_ORG_ID: accountId,
+      VERCEL_PROJECT_ID: context.link.projectId,
+      ...(options.command ? {} : { PATH: agentEnvironment().PATH }),
     },
-  )
-
-  const commandLog = redactCloudLog(scope.projectPath, scope.taskId, command.log).slice(-40_000)
-  const log = [preflightLog.trim(), commandLog.trim()].filter(Boolean).join("\n")
-  if (command.signal) {
-    emitProgress(input, emit, "failed", "error", "Publish timed out after 10 minutes.")
-    return { ok: false, target: target.id, log, checks: preflight.checks, error: "Publish timed out after 10 minutes." }
+    onOutput: (text) => {
+      const redacted = redact(text).trim()
+      if (redacted) emitProgress(input, emit, "uploading", "info", redacted.slice(-800))
+    },
+  })
+  const log = [preflightLog.trim(), redact(run.log).slice(-40_000).trim()].filter(Boolean).join("\n")
+  if (run.signal) {
+    return {
+      ...failure(input, emit, "Publish timed out after 10 minutes.", "deploy_failed"),
+      log,
+      checks: preflight.checks,
+    }
   }
-  const url = extractDeployUrl(command.log, target.id)
-  if (!command.ok || !url) {
-    const needsLogin =
-      /not (?:logged|authenticated)|no existing credentials|please login|vercel login|netlify login/i.test(command.log)
-    const error = needsLogin
-      ? `You are not logged in to ${target.label}. ${target.loginHint} Then publish again.`
-      : command.ok
-        ? "The deploy finished but no URL was found in the output."
-        : `${target.label} exited with code ${command.code}.`
-    emitProgress(input, emit, "failed", "error", error)
-    return { ok: false, target: target.id, log, checks: preflight.checks, error }
+  const url = extractDeployUrl(run.log)
+  if (!url) {
+    const classified = classifyCliFailure(run.log, run.code, context.link.projectName)
+    return { ...failure(input, emit, classified.error, classified.code), log, checks: preflight.checks }
+  }
+  const deployed = await inspectInProject(context, url, options.request).catch((error: unknown) => error)
+  if (!deployed || deployed instanceof Error || typeof deployed !== "object") {
+    const message = deployed instanceof Error ? deployed.message : "unknown error"
+    return {
+      ...failure(input, emit, `Vercel deployed ${url}, but Vector could not read it back: ${message}`, "deploy_failed"),
+      url,
+      log,
+      checks: preflight.checks,
+    }
+  }
+  const remote = deployed as VercelDeployment
+  if (remote.state !== "READY") {
+    const tail = await vercelBuildLogs(scope.projectPath, remote.id, 60, { request: options.request })
+      .then((result) =>
+        result.entries
+          .toSorted((left, right) => (left.at ?? 0) - (right.at ?? 0))
+          .map((entry) => entry.text)
+          .join("\n"),
+      )
+      .catch(() => "")
+    return {
+      ...failure(
+        input,
+        emit,
+        `Vercel's build ${remote.state === "CANCELED" ? "was canceled" : "failed"}${remote.errorMessage ? `: ${remote.errorMessage}` : "."} Read the build log, fix the cause and publish again.`,
+        "build_failed",
+      ),
+      url: remote.url,
+      providerDeploymentId: remote.id,
+      log: [log, redact(tail)].filter(Boolean).join("\n").slice(-40_000),
+      checks: preflight.checks,
+    }
+  }
+  // Vercel makes a project's first deployment production even without --prod
+  // (https://vercel.com/docs/cli/deploy#prod).
+  if (!production && remote.current) {
+    notes.push(
+      "Vercel treats a project's first deployment as production, so this release is already live in production.",
+    )
   }
 
-  const parsed = new URL(url)
+  const git = await readGitMetadata(directory)
   let deployment = recordDeployment({
-    slug: parsed.hostname.replace(/\./g, "-") || basename(directory),
-    url,
+    slug: new URL(remote.url).hostname.replace(/\./g, "-"),
+    url: remote.url,
     name: input.workspaceName ?? basename(scope.projectPath),
     projectPath: scope.projectPath,
     taskId: scope.taskId,
     deploymentPath: directory,
     workspaceId: input.workspaceId,
     workspaceName: input.workspaceName,
-    target: target.id,
-    environment: directProduction ? "production" : "preview",
+    target: "vercel",
+    environment: remote.current ? "production" : "preview",
     log,
     durationMs: Date.now() - startedAt,
     checks: preflight.checks,
-    git: await readGitMetadata(directory),
+    git,
+    providerDeploymentId: remote.id,
   })
-  emitProgress(input, emit, "uploading", "success", `Deployment available at ${url}`)
-  deployment = await runPostDeployChecks(input, deployment, settings, emit)
+  emitProgress(input, emit, "uploading", "success", `Deployment available at ${remote.url}`)
+
+  const project = await readVercelProject(context, options.request).catch(() => undefined)
+  const access: CheckAccess = {
+    bypass: await vercelBypassSecret(context, options.request).catch(() => undefined),
+    protectedUrl: protectsDeployment(project?.protection, remote.target),
+  }
+  const checked = await runPostDeployChecks(input, deployment, settings, access, remote.url, options, emit)
+  deployment = checked.deployment
   if (!requiredChecksPassed(deployment.checks)) {
-    const error = directProduction
-      ? "The production deployment completed, but required checks failed. Review the evidence and repair immediately."
-      : "The preview deployed, but required release checks failed. Production was not changed."
-    emitProgress(input, emit, "failed", "error", error)
     return {
-      ok: false,
-      target: target.id,
+      ...failure(
+        input,
+        emit,
+        remote.current
+          ? "This release is live in production and its required release checks failed. Roll back if the site is broken."
+          : "The deployment was built, but required release checks failed. Production was not changed.",
+        "checks_failed",
+      ),
       url: deployment.url,
       log,
       deploymentId: deployment.id,
+      providerDeploymentId: remote.id,
+      environment: remote.current ? "production" : "preview",
       checks: deployment.checks,
-      error,
+      notes,
     }
   }
-  if (target.id === "vercel" && input.production !== false) {
-    deployment = await promoteDeployment(
-      { projectPath: scope.projectPath, taskId: scope.taskId, id: deployment.id, runId: input.runId },
-      emit,
-    )
+  // A production build Deployment Protection kept the checks out of is not
+  // known to work, so production stays where it is. Checking the production
+  // domain after promoting would put the release live first.
+  if (production && !remote.current && checked.blocked) {
+    return {
+      ...failure(
+        input,
+        emit,
+        `Vercel Deployment Protection kept Vector's release checks out of this production build, so production was not moved to it. Turn on Protection Bypass for Automation in Vector Cloud > Project settings, then publish to production again.`,
+        "checks_blocked",
+      ),
+      url: deployment.url,
+      log,
+      deploymentId: deployment.id,
+      providerDeploymentId: remote.id,
+      environment: "preview",
+      checks: deployment.checks,
+      protectedChecks: "skipped",
+      notes,
+    }
   }
-  emitProgress(
-    input,
-    emit,
-    "complete",
-    "success",
-    input.production === false ? "Preview is ready." : "Production release is live.",
-  )
+
+  const alias =
+    input.workspaceId && git?.branch && git.branch !== "detached"
+      ? await assignVercelBranchAlias(context, remote.id, git.branch, options.request).catch((error: unknown) => {
+          notes.push(
+            `Vercel did not assign the branch address: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          return undefined
+        })
+      : undefined
+  if (alias) deployment = updateDeployment(scope.projectPath, scope.taskId, deployment.id, { alias })
+  if (input.workspaceId) {
+    const { recordParallelWorkspacePreview } = await import("./parallel-workspaces")
+    recordParallelWorkspacePreview(input.workspaceId, alias ?? deployment.url)
+  }
+
+  if (!production || remote.current) {
+    emitProgress(
+      input,
+      emit,
+      "complete",
+      "success",
+      remote.current ? "Production release is live." : "Preview is ready.",
+    )
+    return {
+      ok: true,
+      target: "vercel",
+      url: alias ?? deployment.url,
+      log,
+      deploymentId: deployment.id,
+      providerDeploymentId: remote.id,
+      environment: remote.current ? "production" : "preview",
+      productionUrl: deployment.productionUrl,
+      alias,
+      checks: deployment.checks,
+      protectedChecks: checked.blocked ? "skipped" : undefined,
+      notes,
+    }
+  }
+
+  emitProgress(input, emit, "promoting", "info", `Promoting ${remote.url} to production.`)
+  const promoted = await promoteVercelDeployment(scope.projectPath, remote.id, {
+    ...options,
+    report: (level, message) => emitProgress(input, emit, "checking", level, message),
+  }).catch((error: unknown) => error)
+  if (promoted instanceof Error || !promoted || typeof promoted !== "object") {
+    const message = promoted instanceof Error ? promoted.message : "unknown error"
+    // The Supabase security check runs as part of the promotion and records
+    // itself on the release; a refusal from it is a failed check, and the
+    // build stays reachable at its own address.
+    const checks = getDeployment(scope.projectPath, scope.taskId, deployment.id).checks
+    if (!requiredChecksPassed(checks)) {
+      return {
+        ...failure(input, emit, message, "checks_failed"),
+        url: deployment.url,
+        log,
+        deploymentId: deployment.id,
+        providerDeploymentId: remote.id,
+        environment: "preview",
+        checks,
+        notes,
+      }
+    }
+    return {
+      ...failure(
+        input,
+        emit,
+        `The production build passed its checks, but promotion failed: ${message}`,
+        "deploy_failed",
+      ),
+      url: deployment.url,
+      log,
+      deploymentId: deployment.id,
+      providerDeploymentId: remote.id,
+      checks: deployment.checks,
+      notes,
+    }
+  }
+  const productionUrl =
+    "productionUrl" in promoted && typeof promoted.productionUrl === "string" ? promoted.productionUrl : undefined
+  deployment = markDeploymentPromoted(scope.projectPath, scope.taskId, deployment.id, { productionUrl })
+  emitProgress(input, emit, "promoting", "success", `Production now serves ${productionUrl ?? remote.url}.`)
+  emitProgress(input, emit, "complete", "success", "Production release is live.")
   return {
     ok: true,
-    target: target.id,
-    url: deployment.productionUrl ?? deployment.url,
+    target: "vercel",
+    url: productionUrl ?? deployment.url,
     log,
     deploymentId: deployment.id,
+    providerDeploymentId: remote.id,
+    environment: "production",
+    productionUrl,
     checks: deployment.checks,
+    notes,
+  }
+}
+
+function failure(
+  input: PublishProjectInput,
+  emit: PublishProgressEmitter | undefined,
+  error: string,
+  errorCode: PublishErrorCode,
+): PublishResult {
+  emitProgress(input, emit, "failed", "error", error)
+  return { ok: false, target: "vercel", log: "", error, errorCode }
+}
+
+// The CLI prints its own wording; these are the causes a user can act on.
+function classifyCliFailure(
+  log: string,
+  code: number | null,
+  projectName: string,
+): { error: string; code: PublishErrorCode } {
+  if (
+    /token is not valid|invalid token|not authorized|not authenticated|no existing credentials|please (?:log ?in|login)/i.test(
+      log,
+    )
+  ) {
+    return {
+      error:
+        "Vercel rejected Vector's saved token: it expired, was revoked or lost access. Reconnect Vercel in Vector Cloud > Connections.",
+      code: "token_rejected",
+    }
+  }
+  if (/project not found|could not find (?:the )?project|project .* (?:was )?not found/i.test(log)) {
+    return {
+      error: `The Vercel CLI could not find the linked project ${projectName}. Link the project again in Vector Cloud > Connections.`,
+      code: "not_linked",
+    }
+  }
+  if (/command not found|ENOENT|npm ERR! code E404|could not determine executable/i.test(log)) {
+    return { error: NO_NODE, code: "no_node" }
+  }
+  return {
+    error: `The Vercel CLI exited with code ${code ?? "unknown"} and printed no deployment URL. Read the log for its reason.`,
+    code: "deploy_failed",
   }
 }
 
@@ -942,159 +1058,89 @@ export type DeploymentActionInput = {
   runId?: string
 }
 
-async function vectorCloudPromotion(deployment: CloudDeployment) {
-  const endpoint = process.env.VECTOR_CLOUD_URL?.replace(/\/$/, "")
-  const token = process.env.VECTOR_CLOUD_TOKEN
-  if (!endpoint || !token) throw new Error("Vector Cloud is not configured on this machine.")
-  const response = await fetch(`${endpoint}/api/promote`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ project: basename(deployment.projectPath) || deployment.name, slug: deployment.slug }),
-    signal: AbortSignal.timeout(30_000),
-  })
-  const body = parsePublishResponse(await response.json().catch(() => undefined))
-  if (!response.ok || !body.ok || !body.url) {
-    throw new Error(body.error ?? `Vector Cloud promotion failed with ${response.status}.`)
-  }
-  return body.url
-}
-
-async function vercelDeploymentCommand(deployment: CloudDeployment, action: "promote" | "rollback") {
-  const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
-  if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
-  const auth = await getCloudProviderRuntimeAuth("vercel")
-  const launch = shimmedCommand(target.command[0], [...target.command.slice(1), action, deployment.url, "--yes"])
-  const result = await runProcess({
-    ...launch,
-    cwd: deployment.deploymentPath ?? deployment.projectPath,
-    env: auth.token ? { VERCEL_TOKEN: auth.token } : undefined,
-  })
-  if (!result.ok) throw new Error(redactCloudLog(deployment.projectPath, deployment.taskId, result.log).slice(-4_000))
-  return extractDeployUrl(result.log, "vercel") ?? deployment.url
-}
-
-export async function promoteDeployment(
-  input: DeploymentActionInput,
-  emit?: PublishProgressEmitter,
-): Promise<CloudDeployment> {
-  const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  if (deployment.workspaceId) {
-    throw new Error("Merge this agent workspace into the main project before promoting it to production.")
-  }
-  if (!requiredChecksPassed(deployment.checks)) {
-    throw new Error("This release has failed required checks and cannot be promoted.")
-  }
-  const progressInput: PublishProjectInput = {
+function actionProgress(deployment: CloudDeployment, runId?: string): PublishProjectInput {
+  return {
     projectPath: deployment.deploymentPath ?? deployment.projectPath,
     scopeProjectPath: deployment.projectPath,
     scopeTaskId: deployment.taskId,
-    target: isPublishTargetId(deployment.target) ? deployment.target : "vector-cloud",
-    runId: input.runId,
+    target: "vercel",
+    runId,
   }
-  emitProgress(progressInput, emit, "promoting", "info", `Promoting ${deployment.url} to production.`)
-  const productionUrl =
-    deployment.target === "vector-cloud"
-      ? await vectorCloudPromotion(deployment)
-      : deployment.target === "vercel"
-        ? await vercelDeploymentCommand(deployment, "promote")
-        : (() => {
-            throw new Error("Promotion is available for Vector Cloud and Vercel deployments.")
-          })()
-  const promoted = markDeploymentPromoted(input.projectPath, input.taskId, input.id, { productionUrl })
-  emitProgress(progressInput, emit, "promoting", "success", `Production now points to ${productionUrl}`)
-  return promoted
 }
 
-export async function rollbackDeployment(
+export async function rerunDeploymentChecks(
   input: DeploymentActionInput,
-  emit?: PublishProgressEmitter,
+  options: PublishOptions = {},
 ): Promise<CloudDeployment> {
   const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  if (deployment.releaseStatus === "current") throw new Error("That release is already live in production.")
-  if (!requiredChecksPassed(deployment.checks)) {
-    throw new Error("This release has failed required checks and cannot be restored.")
-  }
-  const progressInput: PublishProjectInput = {
-    projectPath: deployment.deploymentPath ?? deployment.projectPath,
-    scopeProjectPath: deployment.projectPath,
-    scopeTaskId: deployment.taskId,
-    target: isPublishTargetId(deployment.target) ? deployment.target : "vector-cloud",
-    runId: input.runId,
-  }
-  emitProgress(progressInput, emit, "promoting", "info", `Rolling production back to ${deployment.url}.`)
-  const productionUrl =
-    deployment.target === "vector-cloud"
-      ? await vectorCloudPromotion(deployment)
-      : deployment.target === "vercel"
-        ? await vercelDeploymentCommand(deployment, "rollback")
-        : (() => {
-            throw new Error("Rollback is available for Vector Cloud and Vercel deployments.")
-          })()
-  const restored = markDeploymentPromoted(input.projectPath, input.taskId, input.id, {
-    productionUrl,
-    rollback: true,
-  })
-  emitProgress(progressInput, emit, "promoting", "success", `Production restored to ${productionUrl}`)
-  return restored
-}
-
-export async function fetchDeploymentRuntimeLogs(input: DeploymentActionInput): Promise<CloudRuntimeLogResult> {
-  const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  const fetchedAt = new Date().toISOString()
-  if (deployment.target === "vector-cloud") {
-    const log = [
-      deployment.log ?? "No build output was recorded.",
-      ...deployment.checks.filter((check) => check.output).map((check) => `\n[${check.label}]\n${check.output}`),
-    ].join("\n")
-    updateDeployment(input.projectPath, input.taskId, input.id, { runtimeLog: log, runtimeLogFetchedAt: fetchedAt })
-    return { log, fetchedAt, source: "build" }
-  }
-  if (deployment.target !== "vercel") {
-    throw new Error(
-      "Runtime log streaming is currently available for Vercel. Netlify deployments keep their build log in Vector.",
-    )
-  }
-  const target = (await detectPublishTargets()).find((item) => item.id === "vercel")
-  if (!target?.available) throw new Error(`Vercel is unavailable. ${target?.loginHint ?? ""}`.trim())
-  const auth = await getCloudProviderRuntimeAuth("vercel")
-  const launch = shimmedCommand(target.command[0], [
-    ...target.command.slice(1),
-    "logs",
-    "--deployment",
+  const checked = await runPostDeployChecks(
+    actionProgress(deployment, input.runId),
+    deployment,
+    getBuildSettings(input.projectPath, input.taskId),
+    releaseAccess(await projectCheckAccess(input.projectPath, options), deployment),
     deployment.url,
-    "--json",
-    "--limit",
-    "100",
-    "--since",
-    "1h",
-  ])
-  const result = await runProcess({
-    ...launch,
-    cwd: deployment.deploymentPath ?? deployment.projectPath,
-    timeoutMs: 30_000,
-    env: auth.token ? { VERCEL_TOKEN: auth.token } : undefined,
-  })
-  const log = redactCloudLog(deployment.projectPath, deployment.taskId, result.log).slice(-40_000)
-  if (!result.ok) throw new Error(log || "Vercel logs could not be read.")
-  updateDeployment(input.projectPath, input.taskId, input.id, { runtimeLog: log, runtimeLogFetchedAt: fetchedAt })
-  return { log, fetchedAt, source: "provider" }
+    options,
+  )
+  return checked.deployment
 }
 
-export async function rerunDeploymentChecks(input: DeploymentActionInput): Promise<CloudDeployment> {
-  const deployment = getDeployment(input.projectPath, input.taskId, input.id)
-  const settings = getBuildSettings(input.projectPath, input.taskId)
-  const progressInput: PublishProjectInput = {
-    projectPath: deployment.deploymentPath ?? deployment.projectPath,
-    scopeProjectPath: deployment.projectPath,
-    scopeTaskId: deployment.taskId,
-    workspaceId: deployment.workspaceId,
-    workspaceName: deployment.workspaceName,
-    target: isPublishTargetId(deployment.target) ? deployment.target : "vector-cloud",
-    runId: input.runId,
+// Observability's probe of one release: how it answers now. It leaves the
+// release checks alone, because those decide whether production may move to
+// the release, and one transient failure here must not block a later rollback.
+// A release whose project is no longer linked is probed without protection details.
+export async function checkDeploymentHealth(input: DeploymentActionInput, options: PublishOptions = {}) {
+  return probeRelease(
+    getDeployment(input.projectPath, input.taskId, input.id),
+    getBuildSettings(input.projectPath, input.taskId),
+    await projectCheckAccess(input.projectPath, options).catch(() => undefined),
+    options,
+  )
+}
+
+// Each probe is a request to the user's own app, so only a few run at once;
+// the project's protection is read once for all of them.
+const PROBE_BATCH = 4
+
+export async function checkAllDeploymentHealth(projectPath: string, taskId?: string, options: PublishOptions = {}) {
+  const releases = listDeployments(projectPath, taskId)
+  const settings = getBuildSettings(projectPath, taskId)
+  const access = await projectCheckAccess(projectPath, options).catch(() => undefined)
+  const batches = Array.from({ length: Math.ceil(releases.length / PROBE_BATCH) }, (_, index) =>
+    releases.slice(index * PROBE_BATCH, (index + 1) * PROBE_BATCH),
+  )
+  for (const batch of batches) {
+    await Promise.all(batch.map((deployment) => probeRelease(deployment, settings, access, options)))
   }
-  return runPostDeployChecks(progressInput, deployment, settings)
+  return listDeployments(projectPath, taskId)
 }
 
-function isPublishTargetId(value: string): value is PublishTargetId {
-  return value === "vector-cloud" || value === "vercel" || value === "netlify"
+async function probeRelease(
+  deployment: CloudDeployment,
+  settings: CloudBuildSettings | null,
+  access: ProjectCheckAccess | undefined,
+  options: PublishOptions,
+) {
+  const probe = await probeHealth(settings, releaseAccess(access, deployment), deployment.url, options)
+  return updateDeployment(deployment.projectPath, deployment.taskId, deployment.id, probeFields(deployment, probe))
+}
+
+type ProjectCheckAccess = Awaited<ReturnType<typeof projectCheckAccess>>
+
+async function projectCheckAccess(projectPath: string, options: PublishOptions) {
+  const context = await vercelLinkContext(projectPath)
+  const [project, bypass] = await Promise.all([
+    readVercelProject(context, options.request).catch(() => undefined),
+    vercelBypassSecret(context, options.request).catch(() => undefined),
+  ])
+  return { bypass, protection: project?.protection }
+}
+
+function releaseAccess(access: ProjectCheckAccess | undefined, deployment: CloudDeployment): CheckAccess {
+  return {
+    bypass: access?.bypass,
+    protectedUrl: protectsDeployment(
+      access?.protection,
+      deployment.releaseStatus === "current" ? "production" : "preview",
+    ),
+  }
 }

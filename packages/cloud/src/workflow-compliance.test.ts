@@ -43,11 +43,11 @@ describe("release workflow supply-chain policy", () => {
     }
   })
 
-  test("cloud deploy verifies an exact Vercel CLI package", async () => {
-    const script = await read("script/deploy-cloud.sh")
-    expect(script).toContain("VERCEL_VERSION=48.8.0")
-    expect(script).toContain("VERCEL_INTEGRITY='sha512-")
-    expect(script).toContain('test "$actual_integrity" = "$VERCEL_INTEGRITY"')
-    expect(script).not.toMatch(/npx --yes vercel(?:\s|$)/)
+  test("desktop publishing selects an exact Vercel CLI version", async () => {
+    const source = await read("packages/desktop/src/main/publish.ts")
+    expect(source).toMatch(/VERCEL_CLI_VERSION = "\d+\.\d+\.\d+"/)
+    expect(source).toContain("vercel@${VERCEL_CLI_VERSION}")
+    expect(source).not.toContain('"vercel@latest"')
+    expect(await Bun.file(`${root}/script/deploy-cloud.sh`).exists()).toBe(false)
   })
 })

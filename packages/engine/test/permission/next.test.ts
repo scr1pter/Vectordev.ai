@@ -1368,3 +1368,45 @@ it.instance(
     }),
   { git: true },
 )
+
+it.instance(
+  "ask - Cloud writes stay manual under broad allow and cannot retain approval",
+  () =>
+    Effect.gen(function* () {
+      for (const permission of [
+        "vector_cloud_publish",
+        "vector_cloud_database",
+        "vector_cloud_environment",
+        "vector_cloud_hosting",
+        "vector_cloud_future",
+      ]) {
+        const input = {
+          sessionID: SessionID.make("session_cloud"),
+          permission,
+          patterns: ["vercel/project/production/each-time"],
+          metadata: {},
+          always: permission === "vector_cloud_future" ? [] : ["*"],
+          ruleset: [{ permission: "*", pattern: "*", action: "allow" as const }],
+        }
+        for (const decision of ["always", "once"] as const) {
+          const fiber = yield* ask(input).pipe(Effect.forkScoped)
+          const requests = yield* waitForPending(1)
+          yield* reply({ requestID: requests[0].id, reply: decision })
+          yield* Fiber.join(fiber)
+        }
+        expect(
+          yield* fail(ask({ ...input, ruleset: [{ permission: "*", pattern: "*", action: "deny" }] })),
+        ).toBeInstanceOf(PermissionV1.DeniedError)
+      }
+      yield* ask({
+        sessionID: SessionID.make("session_cloud"),
+        permission: "vector_cloud_inspect",
+        patterns: ["supabase/project/preview"],
+        metadata: {},
+        always: ["supabase/project/preview"],
+        ruleset: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      expect(yield* list()).toEqual([])
+    }),
+  { git: true },
+)

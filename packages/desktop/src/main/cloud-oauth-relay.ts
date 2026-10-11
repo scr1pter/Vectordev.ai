@@ -38,7 +38,7 @@ export function readCloudOAuthCallback(
     return code
   }
   // Custom URL handlers are not exclusive. Only this pending desktop flow can
-  // decrypt the Vercel code or Netlify token; there is no plaintext fallback.
+  // decrypt the Vercel code; there is no plaintext fallback.
   // RSA wraps only the AES key so provider credentials may exceed OAEP limits.
   const encrypted = url.searchParams.get("encrypted") ?? ""
   const parts = encrypted.split(".")
@@ -70,7 +70,6 @@ export function cloudOAuthAuthorizeUrl(provider: CloudProviderId, value: string)
   const url = new URL(value)
   const origins = {
     vercel: "https://vercel.com",
-    netlify: "https://app.netlify.com",
     supabase: "https://api.supabase.com",
   }
   if (url.origin !== origins[provider] || url.username || url.password) {

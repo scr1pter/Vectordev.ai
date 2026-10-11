@@ -2,7 +2,7 @@ import type { SpotlightStep } from "./spotlight-tour"
 
 // The full tour: every control in the shipped UI, surface by surface, in the
 // order a new user meets them — Home, the composer, the sidebar, the panels,
-// Cloud Services, then Settings. Claims here must match what each control
+// Vector Cloud, then Settings. Claims here must match what each control
 // actually does; when a surface changes, its step changes with it.
 //
 // The host (layout) supplies the state transitions. Every callback must be
@@ -71,11 +71,11 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
     {
       id: "home-cloud-button",
       section: "Home",
-      title: "Cloud Services.",
-      body: "One console for shipping: deployments, live health checks, domains, environment variables, databases, and build configuration — scoped to whichever repository you pick. We'll visit it later in the tour.",
+      title: "Vector Cloud.",
+      body: "One console for shipping: Vercel deployments, live health checks, domains, environment variables, and a Supabase database, scoped to whichever repository you pick. We'll visit it later in the tour.",
       target: byText(
         '[data-vector-home] .vector-home-heading__actions button[data-variant="secondary"]',
-        "Cloud services",
+        "Vector Cloud",
       ),
       placement: "bottom",
       prepare: host.goHome,
@@ -343,9 +343,9 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
 
     {
       id: "cloud-home",
-      section: "Cloud Services",
+      section: "Vector Cloud",
       title: "Ship it from here.",
-      body: "Pick a repository and Cloud Services becomes its release console: publish to your own Vercel or Netlify account, check live health, point domains, manage .env variables, wire a Supabase database, and tune build settings. Your code never proxies through Vector.",
+      body: "Pick a repository and Vector Cloud becomes its release console: publish previews and releases to your own Vercel account, check live health, point domains, manage .env variables, link a Supabase database, and tune build settings. The agent can do the same from chat, and asks before anything changes.",
       tip: "Deploy early, even half-finished — a live URL makes every change after it feel real.",
       target: "[data-vector-cloud-home]",
       placement: "auto",
@@ -355,9 +355,9 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
     },
     {
       id: "cloud-sections",
-      section: "Cloud Services",
-      title: "Six panels, one console.",
-      body: "Deployments publishes and lists live URLs. Observability checks every deployed endpoint. Domains handles DNS with live verification. Environment writes your .env. Database wires Supabase in. Build & runtime detects and pins your build settings.",
+      section: "Vector Cloud",
+      title: "One console per repository.",
+      body: "Deployments publishes previews and promotes them to production. Logs and Observability show build output and live health. Domains handles DNS with live verification. Environment variables writes your .env. Database links Supabase. Connections holds your Vercel and Supabase accounts, and Project settings pins your build.",
       target: "[data-cloud-console] .cloud-sidebar",
       placement: "right",
       group: "cloud",
@@ -446,7 +446,7 @@ export function createSpotlightSteps(host: SpotlightTourHost): SpotlightStep[] {
       id: "finale",
       section: "You're set",
       title: "You know every button now.",
-      body: "That's the whole workspace: Home, the composer, the sidebar, project tools, connections, Cloud Services, and Settings. Next up is a short checklist — connect a model, open a repository, run your first task.",
+      body: "That's the whole workspace: Home, the composer, the sidebar, project tools, connections, Vector Cloud, and Settings. Next up is a short checklist — connect a model, open a repository, run your first task.",
       tip: "Replay this tour any time from Getting started (the ? in the sidebar footer).",
       prepare: () => {
         host.closeSettingsDialog()

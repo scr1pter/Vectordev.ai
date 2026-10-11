@@ -1092,6 +1092,21 @@ export const dict = {
   "settings.permissions.tool.external_directory.description": "Access files outside the project directory",
   "settings.permissions.tool.doom_loop.title": "Doom Loop",
   "settings.permissions.tool.doom_loop.description": "Detect repeated tool calls with identical input",
+  "settings.permissions.tool.vector_cloud_publish.title": "Publish",
+  "settings.permissions.tool.vector_cloud_publish.description":
+    "Deploy, promote, roll back, redeploy or cancel releases on your Vercel account",
+  "settings.permissions.tool.vector_cloud_database.title": "Supabase",
+  "settings.permissions.tool.vector_cloud_database.description":
+    "Create, link or change your Supabase project: schema, SQL, auth, storage, Edge Functions and secrets",
+  "settings.permissions.tool.vector_cloud_environment.title": "Host environment",
+  "settings.permissions.tool.vector_cloud_environment.description":
+    "Change your Vercel project's environment variables, or pull its development values into .env",
+  "settings.permissions.tool.vector_cloud_hosting.title": "Hosting settings",
+  "settings.permissions.tool.vector_cloud_hosting.description":
+    "Create, link or configure your Vercel project, its deployment protection and its domains",
+  "settings.permissions.tool.vector_cloud_inspect.title": "Inspect database",
+  "settings.permissions.tool.vector_cloud_inspect.description":
+    "Read which migrations your Supabase database has applied",
 
   "session.delete.failed.title": "Failed to delete session",
   "session.delete.title": "Delete session",

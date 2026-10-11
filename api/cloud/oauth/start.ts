@@ -12,7 +12,7 @@ export async function POST(request: Request): Promise<Response> {
     | { provider?: unknown; state?: unknown; codeChallenge?: unknown }
     | undefined
   if (!isCloudOAuthProvider(body?.provider)) {
-    return jsonResponse(400, { ok: false, error: "Choose vercel, netlify, or supabase." })
+    return jsonResponse(400, { ok: false, error: "Choose vercel or supabase." })
   }
   if (typeof body?.state !== "string") {
     return jsonResponse(400, { ok: false, error: "A secure OAuth state value is required." })

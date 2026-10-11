@@ -11,6 +11,7 @@ import {
   createResource,
   Switch,
   Match,
+  untrack,
   type JSX,
 } from "solid-js"
 import { createStore, type SetStoreFunction, type Store } from "solid-js/store"
@@ -78,6 +79,7 @@ import type { ReferenceInfo } from "@vectordevai/sdk/v2/client"
 import { modelVariantDescription, modelVariantLabel, visibleModelVariants } from "@/context/model-variant"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { detectParallelIntent } from "@/features/delegation/delegation"
+import { holdsHandoff } from "@/features/cloud/cloud-handoff"
 import { createOutcomes } from "@/features/economics/economics-repository"
 import { recommendationAvailable, recommendModel } from "@/features/economics/economics-recommender"
 import { categorizeTask } from "@/features/economics/task-categorizer"
@@ -200,6 +202,13 @@ export interface PromptInputProps {
   onAbort?: () => void
   onSubmit?: () => void
   toolbar?: JSX.Element
+  /**
+   * A prompt handed to this composer to send as soon as models and agents have
+   * loaded. It is sent only while the composer still holds exactly this text.
+   */
+  autoSubmit?: string
+  /** Called once when that automatic submission starts. */
+  onAutoSubmit?: () => void
 }
 
 const EXAMPLES = [
@@ -1547,6 +1556,26 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       autoModelRouting: settings.general.autoModelRouting,
       connectProvider: () => setModelStartNudge((count) => count + 1),
     })
+
+  // A prompt another surface handed over to send (Fix this deploy, for example)
+  // goes through the same submission as pressing Enter, so it gets the user's
+  // model, agent and permissions. Without a model, that submission keeps the
+  // prompt in the composer and points the user at connecting one.
+  createEffect(() => {
+    const text = props.autoSubmit
+    if (!text) return
+    if (!sync().data.provider_loaded || props.controls.model.loading || props.controls.agents.loading) return
+    // Wait for the default model to be chosen, unless there is none to choose.
+    const selection = props.controls.model.selection
+    if (!selection.current() && selection.list().length > 0) return
+    untrack(() => {
+      props.onAutoSubmit?.()
+      // A composer the user changed since keeps what they wrote, and an empty
+      // one is never submitted, since that would stop a running turn.
+      if (!holdsHandoff(prompt.current(), text)) return
+      void handleSubmit(new Event("submit"))
+    })
+  })
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "u") {

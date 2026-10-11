@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "rewrites": [
-    { "source": "/p/:tenant/:project/:path*", "destination": "/api/site?tenant=:tenant&project=:project&path=:path*" },
-    { "source": "/p/:tenant/:project", "destination": "/api/site?tenant=:tenant&project=:project&path=" },
-    { "source": "/s/:tenant/:project/:slug/:path*", "destination": "/api/site?tenant=:tenant&project=:project&slug=:slug&path=:path*" },
-    { "source": "/s/:tenant/:project/:slug", "destination": "/api/site?tenant=:tenant&project=:project&slug=:slug&path=" }
-  ]
-}

@@ -64,6 +64,17 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Agent" })
 export type Info = DeepMutable<Schema.Schema.Type<typeof Info>>
 
+// Permissions whose Vector Cloud actions publish, change a database, write a
+// host's environment or change hosting settings (projects, protection and
+// domains). Keep agent defaults explicit; the runtime permission boundary also
+// requires a fresh decision when a configured rule allows one of these actions.
+const CLOUD_MUTATIONS = [
+  "vector_cloud_publish",
+  "vector_cloud_database",
+  "vector_cloud_environment",
+  "vector_cloud_hosting",
+]
+
 const GeneratedAgent = Schema.Struct({
   identifier: Schema.String,
   whenToUse: Schema.String,
@@ -151,6 +162,12 @@ const layer = Layer.effect(
           webfetch: "ask",
           private_network: "ask",
           websearch: "ask",
+          // Vector Cloud actions that publish, change a database or write a
+          // host's environment act on the user's own accounts and may bill them.
+          vector_cloud_publish: "ask",
+          vector_cloud_database: "ask",
+          vector_cloud_environment: "ask",
+          vector_cloud_hosting: "ask",
           external_directory: {
             "*": "ask",
             ...Object.fromEntries(whitelistedDirs.map((dir) => [dir, "allow"])),
@@ -525,6 +542,22 @@ const layer = Layer.effect(
             ...Permission.fromConfig(cfg.agent?.[name]?.permission ?? {}),
             ...userCeiling(name),
           ])
+        }
+
+        // A wildcard allow (an agent's or the user's "*": "allow") must not silently
+        // approve cloud actions in the agent defaults. The runtime also requires
+        // confirmation when a rule names a Cloud mutation explicitly.
+        for (const name in agents) {
+          const permission = agents[name].permission
+          const unnamed = CLOUD_MUTATIONS.filter((key) => {
+            const rule = Permission.evaluate(key, "*", permission)
+            return rule.action === "allow" && !rule.permission.startsWith("vector_cloud")
+          })
+          if (!unnamed.length) continue
+          agents[name].permission = Permission.merge(
+            permission,
+            Permission.fromConfig(Object.fromEntries(unnamed.map((key) => [key, "ask" as const]))),
+          )
         }
 
         // Ensure Truncate.GLOB is allowed unless explicitly configured

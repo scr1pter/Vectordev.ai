@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, on, onCleanup, Show } from "solid-js"
 import { usePlatform } from "@/context/platform"
 import { DialogGithubPush } from "@/components/session-github-push"
 import { DialogGitlabPush } from "@/components/session-gitlab-push"
@@ -9,23 +9,34 @@ import {
   cloudApi,
   publishApi,
   type CloudAgentWorkspace,
-  type CloudAwsSnapshot,
   type CloudBuildSettings,
   type CloudDeployment,
-  type CloudDomain,
-  type CloudDomainProvider,
   type CloudDatabaseConnection,
   type CloudProviderConnection,
   type CloudProviderId,
   type CloudProviderProjectLink,
   type CloudProviderResource,
-  type CloudSupabaseServices,
   type PublishProgressEvent,
   type PublishTarget,
-  type PublishTargetId,
 } from "./cloud-api"
 import { cloudProviderConnectionMode, cloudProviderTokenGuide } from "./cloud-provider-token"
 import { createCloudEnvironment } from "./cloud-environment"
+import { VercelDeployments } from "./vercel/vercel-deployments"
+import { VercelDomains } from "./vercel/vercel-domains"
+import { VercelEnvironment } from "./vercel/vercel-environment"
+import { VercelLink } from "./vercel/vercel-link"
+import { VercelLogs } from "./vercel/vercel-logs"
+import { vercelApi } from "./vercel/vercel-api"
+import { productionChecksBlocked, publishOutcome } from "./vercel/vercel-model"
+import { VercelSettings } from "./vercel/vercel-settings"
+import { supabaseClient } from "./supabase/supabase-api"
+import { SupabaseAuth } from "./supabase/supabase-auth"
+import { SupabaseDatabase } from "./supabase/supabase-database"
+import { SupabaseFunctions } from "./supabase/supabase-functions"
+import { SupabaseLogs, SupabaseSecurity } from "./supabase/supabase-observe"
+import { SupabaseStorage } from "./supabase/supabase-storage"
+import { deployRepairPrompt, publishPlan, publishRan, uncommittedNote, type DeployEvidence } from "./cloud-handoff"
+import { createCloudOverview } from "./cloud-overview"
 import "./cloud-console.css"
 
 export type CloudSection =
@@ -33,7 +44,6 @@ export type CloudSection =
   | "connections"
   | "deployments"
   | "logs"
-  | "analytics"
   | "observability"
   | "domains"
   | "environment"
@@ -41,9 +51,8 @@ export type CloudSection =
   | "authentication"
   | "storage"
   | "functions"
-  | "realtime"
-  | "delivery"
-  | "aws"
+  | "data-logs"
+  | "security"
   | "settings"
 type Notice = { tone: "info" | "success" | "error"; text: string }
 type BuildDraft = Omit<CloudBuildSettings, "source" | "updatedAt">
@@ -55,11 +64,9 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
     items: [
       { id: "deployments", label: "Deployments" },
       { id: "logs", label: "Logs" },
-      { id: "analytics", label: "Analytics" },
       { id: "observability", label: "Observability" },
       { id: "domains", label: "Domains" },
       { id: "environment", label: "Environment variables" },
-      { id: "delivery", label: "Delivery & security" },
     ],
   },
   {
@@ -69,14 +76,14 @@ const SECTION_GROUPS: { label?: string; items: { id: CloudSection; label: string
       { id: "authentication", label: "Authentication" },
       { id: "storage", label: "Storage" },
       { id: "functions", label: "Edge functions" },
-      { id: "realtime", label: "Realtime" },
+      { id: "data-logs", label: "Database logs" },
+      { id: "security", label: "Security" },
     ],
   },
   {
-    label: "Connections",
+    label: "Setup",
     items: [
-      { id: "connections", label: "Integrations" },
-      { id: "aws", label: "AWS" },
+      { id: "connections", label: "Connections" },
       { id: "settings", label: "Project settings" },
     ],
   },
@@ -129,6 +136,7 @@ function sectionIcon(id: CloudSection) {
           />
         </>
       )
+    case "data-logs":
     case "logs":
       return (
         <>
@@ -141,16 +149,6 @@ function sectionIcon(id: CloudSection) {
             stroke-linejoin="round"
           />
         </>
-      )
-    case "analytics":
-      return (
-        <path
-          d="M3 12.8V9.7M6.3 12.8V6.5M9.7 12.8V8M13 12.8V3.4M2.3 13.2h11.4"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.15"
-          stroke-linecap="round"
-        />
       )
     case "domains":
       return (
@@ -209,6 +207,7 @@ function sectionIcon(id: CloudSection) {
           />
         </>
       )
+    case "security":
     case "authentication":
       return (
         <>
@@ -241,41 +240,6 @@ function sectionIcon(id: CloudSection) {
           stroke-width="1.1"
           stroke-linecap="round"
         />
-      )
-    case "realtime":
-      return (
-        <path
-          d="M3.2 8a4.8 4.8 0 0 1 8.35-3.2M12.8 8a4.8 4.8 0 0 1-8.35 3.2M10.8 4.8h.75V4M4.45 12v-.8h.75"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.15"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      )
-    case "delivery":
-      return (
-        <>
-          <circle cx="8" cy="8" r="5.3" fill="none" stroke="currentColor" stroke-width="1.1" />
-          <path
-            d="M4.2 4.4c2.1 1.4 5.5 1.4 7.6 0M4.2 11.6c2.1-1.4 5.5-1.4 7.6 0M8 2.7c-1.9 2.9-1.9 7.7 0 10.6 1.9-2.9 1.9-7.7 0-10.6Z"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1"
-          />
-        </>
-      )
-    case "aws":
-      return (
-        <>
-          <path
-            d="M2.8 5.2 8 2.7l5.2 2.5L8 7.8 2.8 5.2Zm0 0v5.6L8 13.3l5.2-2.5V5.2M8 7.8v5.5"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.1"
-            stroke-linejoin="round"
-          />
-        </>
       )
     case "settings":
       return (
@@ -316,25 +280,20 @@ function cleanDeploymentUrl(value: string) {
   return parsed.toString()
 }
 
-function isPublishTargetId(value: string): value is PublishTargetId {
-  return value === "vector-cloud" || value === "vercel" || value === "netlify"
-}
-
 function isPackageManager(value: string): value is BuildDraft["packageManager"] {
   return value === "bun" || value === "pnpm" || value === "yarn" || value === "npm" || value === "static"
 }
 
 function providerLabel(provider: CloudProviderId) {
-  if (provider === "vercel") return "Vercel"
-  if (provider === "netlify") return "Netlify"
-  return "Supabase"
+  return provider === "vercel" ? "Vercel" : "Supabase"
 }
 
 export function CloudConsole(props: {
   projectPath: string
   taskId?: string
   onClose: () => void
-  onRepair?: (context: string) => void
+  /** Starts the agent on a failed release, with `prompt` (redacted evidence) as its first message. */
+  onRepair: (prompt: string) => void
   initialSection?: CloudSection
   embedded?: boolean
 }) {
@@ -345,18 +304,38 @@ export function CloudConsole(props: {
   const publish = publishApi()
   const workspaceApi = cloudAgentWorkspaceApi()
   const [section, setSection] = createSignal<CloudSection>(props.initialSection ?? "overview")
+  // A deep link that names a section opens it, even when Cloud is already open.
+  createEffect(
+    on(
+      () => props.initialSection,
+      (value) => value && setSection(value),
+      { defer: true },
+    ),
+  )
   const [notice, setNotice] = createSignal<Notice>()
 
   const [publishTargets, setPublishTargets] = createSignal<PublishTarget[]>([])
-  const [publishTargetId, setPublishTargetId] = createSignal<PublishTargetId>("vercel")
-  const [deploymentEnvironment, setDeploymentEnvironment] = createSignal<"preview" | "production">("production")
+  const vercelTarget = () => publishTargets().find((item) => item.id === "vercel")
+  const [deploymentEnvironment, setDeploymentEnvironment] = createSignal<"preview" | "production">("preview")
+  // The project's git state, kept live, for the warning before a publish.
+  const overview = api && createCloudOverview({ api, directory: () => props.projectPath || undefined })
   const [publishing, setPublishing] = createSignal(false)
   const [activeRunId, setActiveRunId] = createSignal("")
   const [publishEvents, setPublishEvents] = createSignal<PublishProgressEvent[]>([])
+  // A publish that failed before any release was recorded (a failed build, a
+  // rejected deploy) has no row in the list, so its evidence is kept here.
+  const [failedPublish, setFailedPublish] = createSignal<DeployEvidence>()
 
   const [deployments, setDeployments] = createSignal<CloudDeployment[]>([])
   const [agentWorkspaces, setAgentWorkspaces] = createSignal<CloudAgentWorkspace[]>([])
-  const [domains, setDomains] = createSignal<CloudDomain[]>([])
+  // Bumped after a publish so the Vercel deployment list reads the new one.
+  const [vercelRefresh, setVercelRefresh] = createSignal(0)
+  // The linked Vercel project has never been deployed: Vercel makes its first
+  // deployment production whatever Vector asks for, so publishing confirms.
+  const [firstRelease, setFirstRelease] = createSignal(false)
+  // Deployment Protection covers production builds and Vector has no bypass
+  // secret: a production publish would stop before promotion.
+  const [productionBlocked, setProductionBlocked] = createSignal(false)
   const environment = createCloudEnvironment({ api: () => api, notice: setNotice })
   const envVars = () => environment.state.variables
   const [database, setDatabase] = createSignal<CloudDatabaseConnection>(null)
@@ -371,14 +350,6 @@ export function CloudConsole(props: {
   const [manualToken, setManualToken] = createSignal("")
   const [manualTokenError, setManualTokenError] = createSignal("")
   const [buildSettings, setBuildSettings] = createSignal<CloudBuildSettings | null>(null)
-  const [supabaseServices, setSupabaseServices] = createSignal<CloudSupabaseServices>()
-  const [supabaseServicesBusy, setSupabaseServicesBusy] = createSignal(false)
-  const [supabaseServicesLoaded, setSupabaseServicesLoaded] = createSignal(false)
-  const [awsSnapshot, setAwsSnapshot] = createSignal<CloudAwsSnapshot>()
-  const [awsBusy, setAwsBusy] = createSignal(false)
-  const [awsLoaded, setAwsLoaded] = createSignal(false)
-  const [awsProfile, setAwsProfile] = createSignal("")
-  const [awsRegion, setAwsRegion] = createSignal("")
   const [buildDraft, setBuildDraft] = createSignal<BuildDraft>({
     framework: "",
     packageManager: "npm",
@@ -391,27 +362,18 @@ export function CloudConsole(props: {
     requiredChecks: { test: false, secrets: true, health: true, browser: true },
   })
 
-  const [domainDraft, setDomainDraft] = createSignal("")
-  const [domainProvider, setDomainProvider] = createSignal<Exclude<CloudDomainProvider, "vector-cloud">>("vercel")
-  const [verifyingId, setVerifyingId] = createSignal("")
   const [confirmId, setConfirmId] = createSignal("")
-  const [copiedId, setCopiedId] = createSignal("")
-  const [expandedLogId, setExpandedLogId] = createSignal("")
   const [checkingId, setCheckingId] = createSignal("")
   const [checkingAll, setCheckingAll] = createSignal(false)
-  const [deploymentActionId, setDeploymentActionId] = createSignal("")
-  const [expandedChecksId, setExpandedChecksId] = createSignal("")
   const [detectingBuild, setDetectingBuild] = createSignal(false)
   const [savingBuild, setSavingBuild] = createSignal(false)
   let confirmTimer: ReturnType<typeof setTimeout> | undefined
-  let copiedTimer: ReturnType<typeof setTimeout> | undefined
   const unsubscribePublish = publish?.subscribe((event) => {
     if (event.runId !== activeRunId()) return
     setPublishEvents((items) => [...items, event].slice(-200))
   })
   onCleanup(() => {
     clearTimeout(confirmTimer)
-    clearTimeout(copiedTimer)
     unsubscribePublish?.()
   })
 
@@ -435,39 +397,39 @@ export function CloudConsole(props: {
     const taskId = props.taskId
     const scope = environment.scope()
     const isCurrent = () => environment.isCurrent(scope)
-    const [nextDeployments, nextDomains, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] =
-      await Promise.all([
-        api.deployments.list(projectPath, taskId).catch(() => []),
-        projectPath ? api.domains.list(projectPath, taskId).catch(() => []) : Promise.resolve([]),
-        projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
-        projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
-        projectPath && workspaceApi
-          ? workspaceApi.list({ sourcePath: projectPath, parentSessionId: taskId }).catch(() => [])
-          : Promise.resolve([]),
-        api.connections.list().catch(() => []),
-        projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
-        environment.refresh(),
-      ])
+    const [nextDeployments, nextDatabase, nextBuild, nextWorkspaces, nextConnections, nextLinks] = await Promise.all([
+      api.deployments.list(projectPath, taskId).catch(() => []),
+      projectPath ? api.database.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
+      projectPath ? api.build.get(projectPath, taskId).catch(() => null) : Promise.resolve(null),
+      projectPath && workspaceApi
+        ? workspaceApi.list({ sourcePath: projectPath, parentSessionId: taskId }).catch(() => [])
+        : Promise.resolve([]),
+      api.connections.list().catch(() => []),
+      projectPath ? api.providers.links(projectPath, taskId).catch(() => []) : Promise.resolve([]),
+      environment.refresh(),
+    ])
     if (!isCurrent()) return
     setDeployments(nextDeployments)
-    setDomains(nextDomains)
     setDatabase(nextDatabase)
     setBuildSettings(nextBuild)
     setAgentWorkspaces(nextWorkspaces)
     setConnections(nextConnections)
     setProviderLinks(nextLinks)
-    if (!nextLinks.some((item) => item.provider === domainProvider())) {
-      const first = nextLinks.find((item) => item.provider === "vercel" || item.provider === "netlify")
-      if (first) setDomainProvider(first.provider)
-    }
-    const connectedProviders = nextConnections.filter((item) => item.connected).map((item) => item.provider)
+    // Only the Database picker lists provider resources; the Vercel link reads its own team's projects.
+    const connectedProviders = nextConnections
+      .filter((item) => item.connected && item.provider === "supabase")
+      .map((item) => item.provider)
     const resources = await Promise.all(
       connectedProviders.map(async (provider) => ({
         provider,
         items: await api.providers.resources(provider).catch(() => []),
       })),
     )
+    const vercel = nextLinks.some((item) => item.provider === "vercel") ? vercelApi() : undefined
+    const vercelStatus = vercel ? await vercel.status(projectPath).catch(() => undefined) : undefined
     if (!isCurrent()) return
+    setFirstRelease(Boolean(vercelStatus?.project && !vercelStatus.project.productionDeploymentId))
+    setProductionBlocked(productionChecksBlocked(vercelStatus?.project))
     setProviderResources(
       Object.fromEntries(resources.map((entry) => [entry.provider, entry.items])) as Partial<
         Record<CloudProviderId, CloudProviderResource[]>
@@ -495,52 +457,34 @@ export function CloudConsole(props: {
     setDatabase(null)
     setProviderLinks([])
     setProviderSelections({})
-    setSupabaseServices(undefined)
-    setSupabaseServicesLoaded(false)
     if (api) void refreshAll()
   })
 
   const projectName = createMemo(() => props.projectPath.split("/").filter(Boolean).at(-1) ?? "No project")
 
   // --- Deployments ---------------------------------------------------------
-  const removeDeployment = async (deployment: CloudDeployment) => {
-    if (!api) return
-    try {
-      setDeployments(await api.deployments.remove(props.projectPath, props.taskId, deployment.id))
-      setNotice({
-        tone: "success",
-        text:
-          deployment.target === "vector-cloud"
-            ? `Unpublished ${deployment.name}.`
-            : `Removed ${deployment.name} from Vector's deployment history. Manage the live site in ${deployment.target === "vercel" ? "Vercel" : "Netlify"}.`,
-      })
-    } catch {
-      setNotice({ tone: "error", text: `Could not remove ${deployment.name} — try again.` })
-    }
-  }
-
-  const runPublish = async (override?: {
-    target?: PublishTargetId
-    environment?: "preview" | "production"
-    workspace?: CloudAgentWorkspace
-  }) => {
+  const runPublish = async (override?: { environment?: "preview" | "production"; workspace?: CloudAgentWorkspace }) => {
     if (!publish || !props.projectPath) return
-    const targetId = override?.target ?? publishTargetId()
     const environment = override?.environment ?? deploymentEnvironment()
-    const target = publishTargets().find((item) => item.id === targetId)
-    if (target && !target.available) {
-      setNotice({ tone: "error", text: target.loginHint || `${target.label} is not available on this machine.` })
+    // The same rule as the agent's publish: the Vercel account connected in
+    // Vector Cloud, a linked project, and a machine that can run the deploy.
+    const hosting = hostingState()
+    if (!hosting.ready) {
+      setNotice({ tone: "error", text: hosting.detail })
       return
     }
     const runId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`
     setActiveRunId(runId)
     setPublishEvents([])
+    setFailedPublish(undefined)
     setPublishing(true)
     setNotice({
       tone: "info",
       text: override?.workspace
         ? `Publishing ${override.workspace.name} as an isolated preview…`
-        : `Publishing a ${environment} release to ${target?.label ?? targetId}… this can take a minute.`,
+        : environment === "production"
+          ? `Building ${vercelProjectName()} for production on Vercel, then checking it before promotion…`
+          : `Publishing a preview of ${vercelProjectName()} to Vercel… this can take a minute.`,
     })
     try {
       const result = await publish.run({
@@ -550,23 +494,32 @@ export function CloudConsole(props: {
         scopeTaskId: override?.workspace ? props.taskId : undefined,
         workspaceId: override?.workspace?.id,
         workspaceName: override?.workspace?.name,
-        target: targetId,
+        target: "vercel",
         production: override?.workspace ? false : environment === "production",
         runId,
       })
-      if (result.ok && result.url) {
-        setNotice({
-          tone: "success",
-          text: `${override?.workspace ? "Workspace preview" : "Release"} live at ${result.url}`,
-        })
-      } else {
-        setNotice({
-          tone: "error",
-          text: result.error ?? "Publish failed — make sure the CLI is installed and you're logged in.",
+      setNotice(publishOutcome(result, override?.workspace?.name))
+      if (!result.ok && !result.deploymentId && publishRan(result)) {
+        setFailedPublish({
+          project: override?.workspace?.name ?? vercelProjectName(),
+          environment: result.environment ?? environment,
+          url: result.url,
+          error: result.error,
+          checks: result.checks ?? [],
+          log: result.log,
         })
       }
+      if (result.ok) setFirstRelease(false)
+      if (result.deploymentId || result.providerDeploymentId) setVercelRefresh((value) => value + 1)
       if (api && (result.deploymentId || result.url)) {
         setDeployments(await api.deployments.list(props.projectPath, props.taskId).catch(() => deployments()))
+      }
+      if (override?.workspace && workspaceApi) {
+        setAgentWorkspaces(
+          await workspaceApi
+            .list({ sourcePath: props.projectPath, parentSessionId: props.taskId })
+            .catch(() => agentWorkspaces()),
+        )
       }
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Publish failed." })
@@ -575,49 +528,43 @@ export function CloudConsole(props: {
     }
   }
 
-  const copyDeploymentUrl = async (deployment: CloudDeployment) => {
-    const url = cleanDeploymentUrl(deployment.productionUrl ?? deployment.url)
-    if (!url) {
-      setNotice({ tone: "error", text: "This deployment does not have a valid public link yet." })
-      return
-    }
-    try {
-      if (!navigator.clipboard) throw new Error("Clipboard unavailable")
-      await navigator.clipboard.writeText(url)
-      setCopiedId(deployment.id)
-      clearTimeout(copiedTimer)
-      copiedTimer = setTimeout(() => setCopiedId((current) => (current === deployment.id ? "" : current)), 1500)
-    } catch {
-      setNotice({ tone: "error", text: "Could not copy — try selecting the link instead." })
-    }
-  }
-
-  const openDeploymentUrl = (deployment: CloudDeployment) => {
-    const url = cleanDeploymentUrl(deployment.productionUrl ?? deployment.url)
-    if (!url) {
-      setNotice({ tone: "error", text: "This deployment does not have a valid public link yet." })
-      return
-    }
-    platform.openLink(url)
-  }
-
   const checkDeployment = async (deployment: CloudDeployment) => {
     if (!api || !props.projectPath) return
     setCheckingId(deployment.id)
     try {
       const updated = await api.deployments.check(props.projectPath, props.taskId, deployment.id)
       setDeployments((items) => items.map((item) => (item.id === updated.id ? updated : item)))
-      setNotice({
-        tone: updated.status === "ready" ? "success" : "error",
-        text:
-          updated.status === "ready"
-            ? `${updated.name} responded with HTTP ${updated.statusCode} in ${formatDuration(updated.latencyMs)}.`
-            : `${updated.name} is ${updated.status}: ${updated.healthError ?? "health check failed"}`,
-      })
+      setNotice(
+        updated.probe === "protected"
+          ? {
+              tone: "info",
+              text: `${updated.name} is protected by Vercel Deployment Protection, so Vector could not open it. Turn on Protection Bypass for Automation in Project settings to check it.`,
+            }
+          : updated.probe === "ok"
+            ? {
+                tone: "success",
+                text: `${updated.name} responded with HTTP ${updated.statusCode} in ${formatDuration(updated.latencyMs)}.`,
+              }
+            : {
+                tone: "error",
+                text: `${updated.name} is ${updated.status}: ${updated.healthError ?? "health check failed"}`,
+              },
+      )
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Health check failed." })
     } finally {
       setCheckingId("")
+    }
+  }
+
+  // Forgets a release from Vector's history; the deployment stays on Vercel.
+  const forgetDeployment = async (deployment: CloudDeployment) => {
+    if (!api) return
+    try {
+      setDeployments(await api.deployments.remove(props.projectPath, props.taskId, deployment.id))
+      setNotice({ tone: "info", text: `Removed ${deployment.name} from Vector's history. It stays on Vercel.` })
+    } catch (error) {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not remove that release." })
     }
   }
 
@@ -627,109 +574,17 @@ export function CloudConsole(props: {
     try {
       const next = await api.deployments.checkAll(props.projectPath, props.taskId)
       setDeployments(next)
-      const healthy = next.filter((item) => item.status === "ready").length
+      const healthy = next.filter((item) => item.probe === "ok").length
+      const protectedCount = next.filter((item) => item.probe === "protected").length
       setNotice({
         tone: healthy === next.length ? "success" : "info",
-        text: `${healthy} of ${next.length} deployments are healthy.`,
+        text: `${healthy} of ${next.length} deployments are healthy.${protectedCount ? ` ${protectedCount} could not be opened because of Deployment Protection.` : ""}`,
       })
     } catch (error) {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : "Health checks failed." })
     } finally {
       setCheckingAll(false)
     }
-  }
-
-  const replaceDeployment = (updated: CloudDeployment) => {
-    setDeployments((items) => items.map((item) => (item.id === updated.id ? updated : item)))
-  }
-
-  const promoteRelease = async (deployment: CloudDeployment) => {
-    if (!api) return
-    setDeploymentActionId(deployment.id)
-    try {
-      const updated = await api.deployments.promote(props.projectPath, props.taskId, deployment.id)
-      setDeployments(await api.deployments.list(props.projectPath, props.taskId))
-      setNotice({ tone: "success", text: `${updated.name} is now the current production release.` })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Promotion failed." })
-    } finally {
-      setDeploymentActionId("")
-    }
-  }
-
-  const rollbackRelease = async (deployment: CloudDeployment) => {
-    if (!api) return
-    setDeploymentActionId(deployment.id)
-    try {
-      const updated = await api.deployments.rollback(props.projectPath, props.taskId, deployment.id)
-      setDeployments(await api.deployments.list(props.projectPath, props.taskId))
-      setNotice({ tone: "success", text: `Production rolled back to ${updated.name}.` })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Rollback failed." })
-    } finally {
-      setDeploymentActionId("")
-    }
-  }
-
-  const readRuntimeLogs = async (deployment: CloudDeployment) => {
-    if (!api) return
-    setDeploymentActionId(deployment.id)
-    try {
-      const result = await api.deployments.logs(props.projectPath, props.taskId, deployment.id)
-      replaceDeployment({ ...deployment, runtimeLog: result.log, runtimeLogFetchedAt: result.fetchedAt })
-      setExpandedLogId(deployment.id)
-      setNotice({
-        tone: "success",
-        text: `Loaded ${result.source === "provider" ? "runtime" : "build and check"} logs.`,
-      })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not read deployment logs." })
-    } finally {
-      setDeploymentActionId("")
-    }
-  }
-
-  const rerunChecks = async (deployment: CloudDeployment) => {
-    if (!api) return
-    setDeploymentActionId(deployment.id)
-    try {
-      const updated = await api.deployments.rerunChecks(props.projectPath, props.taskId, deployment.id)
-      replaceDeployment(updated)
-      const failed = updated.checks.filter((check) => check.required && check.status === "failed").length
-      setNotice({
-        tone: failed ? "error" : "success",
-        text: failed
-          ? `${failed} required check${failed === 1 ? "" : "s"} failed.`
-          : "All required release checks passed.",
-      })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not run release checks." })
-    } finally {
-      setDeploymentActionId("")
-    }
-  }
-
-  const repairDeployment = async (deployment: CloudDeployment) => {
-    const evidence = [
-      `Repair the deployment for ${deployment.name}.`,
-      `Deployment: ${cleanDeploymentUrl(deployment.url) || deployment.url}`,
-      deployment.git
-        ? `Git: ${deployment.git.branch} at ${deployment.git.commitShort}${deployment.git.dirty ? " (dirty)" : ""}`
-        : "",
-      ...deployment.checks
-        .filter((check) => check.status === "failed")
-        .map((check) => `${check.label}: ${check.details ?? "failed"}\n${check.output ?? ""}`),
-      deployment.runtimeLog ?? deployment.log ?? "",
-      "Find the root cause, make the smallest safe fix, run the relevant checks, and explain what changed.",
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-    if (props.onRepair) {
-      props.onRepair(evidence)
-      return
-    }
-    await navigator.clipboard?.writeText(evidence).catch(() => undefined)
-    setNotice({ tone: "info", text: "Repair context copied. Return to the agent and paste it into the composer." })
   }
 
   const detectBuild = async () => {
@@ -774,135 +629,38 @@ export function CloudConsole(props: {
     }
   }
 
-  // --- Domains -------------------------------------------------------------
-  const addDomain = async () => {
-    if (!api || !props.projectPath || !domainDraft().trim()) return
-    const provider = domainProvider()
-    if (!providerLink(provider)) {
-      setNotice({ tone: "error", text: `Link a ${providerLabel(provider)} project before adding a domain.` })
-      return
-    }
-    try {
-      await api.providers.addDomain(props.projectPath, props.taskId, provider, domainDraft().trim())
-      setDomainDraft("")
-      setDomains(await api.domains.list(props.projectPath, props.taskId))
-      setNotice({
-        tone: "success",
-        text: `Domain attached to ${providerLabel(provider)}. Configure the DNS record shown, then verify.`,
-      })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not add domain." })
-    }
-  }
-  const verifyDomain = async (domain: CloudDomain) => {
-    if (!api || !props.projectPath) return
-    setVerifyingId(domain.id)
-    try {
-      const updated =
-        domain.provider === "vector-cloud"
-          ? await api.domains.verify(props.projectPath, props.taskId, domain.id)
-          : await api.providers.verifyDomain(props.projectPath, props.taskId, domain.id)
-      setDomains((list) => list.map((item) => (item.id === updated.id ? updated : item)))
-      setNotice(
-        updated.status === "verified"
-          ? {
-              tone: "success",
-              text:
-                updated.provider === "vector-cloud"
-                  ? `${updated.domain} DNS is verified.`
-                  : `${updated.domain} is verified on ${providerLabel(updated.provider)}.`,
-            }
-          : { tone: "info", text: updated.detail ?? "Not verified yet — DNS can take a few minutes." },
-      )
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        text: error instanceof Error ? error.message : "Verification failed — check your connection and try again.",
-      })
-    } finally {
-      setVerifyingId("")
-    }
-  }
-  const removeDomain = async (domain: CloudDomain) => {
-    if (!api || !props.projectPath) return
-    try {
-      setDomains(
-        domain.provider === "vector-cloud"
-          ? await api.domains.remove(props.projectPath, props.taskId, domain.id)
-          : await api.providers.removeDomain(props.projectPath, props.taskId, domain.id),
-      )
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        text: error instanceof Error ? error.message : "Could not remove domain — try again.",
-      })
-    }
-  }
-
   createEffect(() => {
     if (section() !== "environment") environment.hide()
   })
 
   // --- Provider connections ------------------------------------------------
   const providerConnection = (provider: CloudProviderId) => connections().find((item) => item.provider === provider)
-  const providerLink = (provider: "vercel" | "netlify") => providerLinks().find((item) => item.provider === provider)
+  const providerLink = (provider: "vercel") => providerLinks().find((item) => item.provider === provider)
+  const vercelProjectName = () => providerLink("vercel")?.projectName ?? "this project"
 
-  const supabaseDashboard = (pathname = "") => {
-    const ref = database()?.projectRef
-    if (!ref) return "https://supabase.com/dashboard/projects"
-    return `https://supabase.com/dashboard/project/${encodeURIComponent(ref)}${pathname}`
-  }
-
-  const deploymentDashboard = (provider: "vercel" | "netlify", pathname = "") => {
-    const link = providerLink(provider)
-    if (!link) return provider === "vercel" ? "https://vercel.com/dashboard" : "https://app.netlify.com/"
-    if (provider === "vercel" && link.accountName) {
-      return `https://vercel.com/${encodeURIComponent(link.accountName)}/${encodeURIComponent(link.projectName)}${pathname}`
+  // Whether this project can publish now, decided the way the preview's
+  // Publish decides it: a connected Vercel account, a linked project, and a
+  // machine that can run the deploy.
+  const hostingState = createMemo(() => {
+    const connection = providerConnection("vercel")
+    const link = providerLink("vercel")
+    const plan = publishPlan(
+      {
+        provider: "Vercel",
+        connected: connection?.connected === true,
+        account: connection?.account,
+        project: link && { id: link.projectId, name: link.projectName },
+      },
+      vercelTarget(),
+    )
+    if (plan.ready) return { ready: true, tone: "success", label: `Vercel · ${plan.project}`, detail: "", fix: false }
+    return {
+      ready: false,
+      tone: connection?.connected ? "warning" : undefined,
+      label: !connection?.connected ? "Not connected" : plan.connect ? "Link a Vercel project" : "Cannot publish yet",
+      detail: plan.reason,
+      fix: plan.connect,
     }
-    return provider === "vercel"
-      ? "https://vercel.com/dashboard"
-      : `https://app.netlify.com/sites/${encodeURIComponent(link.projectName)}${pathname}`
-  }
-
-  const refreshSupabaseServices = async () => {
-    if (!api || !props.projectPath) return
-    setSupabaseServicesBusy(true)
-    try {
-      setSupabaseServices(await api.services.supabase(props.projectPath, props.taskId))
-    } catch (error) {
-      setSupabaseServices(undefined)
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not load Supabase services." })
-    } finally {
-      setSupabaseServicesBusy(false)
-      setSupabaseServicesLoaded(true)
-    }
-  }
-
-  const refreshAws = async () => {
-    if (!api) return
-    setAwsBusy(true)
-    try {
-      const snapshot = await api.aws.resources({
-        profile: awsProfile() || undefined,
-        region: awsRegion() || undefined,
-      })
-      setAwsSnapshot(snapshot)
-      if (!awsProfile() && snapshot.status.profile) setAwsProfile(snapshot.status.profile)
-      if (!awsRegion()) setAwsRegion(snapshot.status.region)
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not inspect AWS." })
-    } finally {
-      setAwsBusy(false)
-      setAwsLoaded(true)
-    }
-  }
-
-  createEffect(() => {
-    const current = section()
-    if (["authentication", "storage", "functions", "realtime"].includes(current) && !supabaseServicesLoaded()) {
-      void refreshSupabaseServices()
-    }
-    if (current === "aws" && !awsLoaded()) void refreshAws()
   })
 
   const connectProvider = async (provider: CloudProviderId) => {
@@ -911,8 +669,10 @@ export function CloudConsole(props: {
     try {
       const connection = await api.connections.connect(provider)
       setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
-      const resources = await api.providers.resources(provider).catch(() => [])
-      setProviderResources((current) => ({ ...current, [provider]: resources }))
+      if (provider === "supabase") {
+        const resources = await api.providers.resources(provider).catch(() => [])
+        setProviderResources((current) => ({ ...current, [provider]: resources }))
+      }
       setNotice({
         tone: "success",
         text: `${providerLabel(provider)} connected${connection.account ? ` as ${connection.account}` : ""}.`,
@@ -957,8 +717,10 @@ export function CloudConsole(props: {
       // The saved credential no longer belongs in the renderer draft.
       cancelManualToken()
       setConnections((items) => [connection, ...items.filter((item) => item.provider !== provider)])
-      const resources = await api.providers.resources(provider).catch(() => [])
-      setProviderResources((current) => ({ ...current, [provider]: resources }))
+      if (provider === "supabase") {
+        const resources = await api.providers.resources(provider).catch(() => [])
+        setProviderResources((current) => ({ ...current, [provider]: resources }))
+      }
       setNotice({
         tone: "success",
         text: `${providerLabel(provider)} connected${connection.account ? ` as ${connection.account}` : ""}.`,
@@ -997,75 +759,30 @@ export function CloudConsole(props: {
     }
   }
 
-  const linkProviderProject = async (provider: CloudProviderId) => {
-    if (provider === "supabase") return
-    if (!api || !props.projectPath) return
-    const projectId = providerSelections()[provider]
-    if (!projectId) return
-    setProviderBusy(provider)
-    try {
-      const link = await api.providers.link(props.projectPath, props.taskId, provider, projectId)
-      setProviderLinks((items) => [link, ...items.filter((item) => item.provider !== provider)])
-      setNotice({ tone: "success", text: `${link.projectName} is linked to this Vector project.` })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not link that project." })
-    } finally {
-      setProviderBusy("")
-    }
-  }
-
-  const unlinkProviderProject = async (provider: CloudProviderId) => {
-    if (provider === "supabase") return
-    if (!api || !props.projectPath) return
-    setProviderBusy(provider)
-    try {
-      setProviderLinks(await api.providers.unlink(props.projectPath, props.taskId, provider))
-      setNotice({ tone: "info", text: `${providerLabel(provider)} project link removed.` })
-    } catch (error) {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not unlink that project." })
-    } finally {
-      setProviderBusy("")
-    }
-  }
-
-  // --- Database ------------------------------------------------------------
-  const connectSupabaseProject = async () => {
-    if (!api || !props.projectPath) return
-    const projectRef = providerSelections().supabase
-    if (!projectRef) return
-    const scope = environment.scope()
-    setProviderBusy("supabase")
-    try {
-      const connection = await api.database.connectProject(scope.projectPath, scope.taskId, projectRef)
-      if (!environment.isCurrent(scope)) return
-      setDatabase(connection)
-      await environment.refresh()
-      if (!environment.isCurrent(scope)) return
-      setSupabaseServices(undefined)
-      setSupabaseServicesLoaded(false)
-      setNotice({
-        tone: "success",
-        text: `${connection?.projectName ?? "Supabase"} connected. Vector configured the project locally without asking you to copy API keys.`,
-      })
-    } catch (error) {
-      if (!environment.isCurrent(scope)) return
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not connect the database." })
-    } finally {
-      setProviderBusy("")
-    }
-  }
-  const disconnectDb = async () => {
+  // --- Supabase ------------------------------------------------------------
+  // Database, auth, storage, functions, logs and security all run the desktop's
+  // Supabase commands, the same ones the agent uses through vector_cloud.
+  const supabase = supabaseClient(() => ({ projectPath: props.projectPath, taskId: props.taskId }))
+  const supabaseLinked = () => Boolean(database()?.projectRef)
+  const refreshDatabase = async () => {
     if (!api || !props.projectPath) return
     const scope = environment.scope()
-    try {
-      await api.database.disconnect(scope.projectPath, scope.taskId)
-      if (!environment.isCurrent(scope)) return
-      setDatabase(null)
-      setNotice({ tone: "info", text: "Supabase disconnected. Your .env keys were left in place." })
-    } catch (error) {
-      if (!environment.isCurrent(scope)) return
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : "Could not disconnect — try again." })
-    }
+    const next = await api.database.get(scope.projectPath, scope.taskId).catch(() => null)
+    if (!environment.isCurrent(scope)) return
+    setDatabase(next)
+    await environment.refresh()
+  }
+  // Getters keep the spread props reactive.
+  const supabasePanel = {
+    client: supabase,
+    get linked() {
+      return supabaseLinked()
+    },
+    get projectName() {
+      return database()?.projectName ?? database()?.projectRef
+    },
+    notice: setNotice,
+    onOpenDatabase: () => setSection("database"),
   }
 
   return (
@@ -1080,7 +797,7 @@ export function CloudConsole(props: {
         </button>
         <img src="/vector-logo.png" alt="" class="size-9 rounded-[10px] object-cover" draggable={false} />
         <div class="min-w-0">
-          <div class="text-[13px] font-semibold text-white">Cloud Services</div>
+          <div class="text-[13px] font-semibold text-white">Vector Cloud</div>
           <div class="max-w-[440px] truncate text-[11px] text-white/45">
             {props.projectPath || "Open a project to manage its cloud"}
           </div>
@@ -1169,7 +886,7 @@ export function CloudConsole(props: {
                 <button class="cloud-metric" type="button" onClick={() => setSection("connections")}>
                   <span class="cloud-metric-value">{connections().filter((item) => item.connected).length}</span>
                   <strong>Cloud accounts</strong>
-                  <small>Vercel, Netlify, and Supabase connections</small>
+                  <small>Vercel and Supabase connections</small>
                 </button>
                 <button class="cloud-metric" type="button" onClick={() => setSection("environment")}>
                   <span class="cloud-metric-value">{envVars().length}</span>
@@ -1186,7 +903,7 @@ export function CloudConsole(props: {
                     <strong>Deploy and publish</strong>
                     <small>Build, verify, promote, and roll back releases.</small>
                   </span>
-                  <em>{publishTargets().filter((item) => item.available).length} targets ready</em>
+                  <em data-tone={hostingState().tone}>{hostingState().label}</em>
                 </button>
                 <button type="button" onClick={() => setSection("database")}>
                   <span class="cloud-service-icon">
@@ -1194,19 +911,15 @@ export function CloudConsole(props: {
                   </span>
                   <span>
                     <strong>Data services</strong>
-                    <small>Database, authentication, storage, functions, and realtime.</small>
+                    <small>Database, authentication, storage, and functions.</small>
                   </span>
-                  <em>{database() ? "Supabase linked" : "Setup needed"}</em>
-                </button>
-                <button type="button" onClick={() => setSection("aws")}>
-                  <span class="cloud-service-icon">
-                    <Icon name="providers" />
-                  </span>
-                  <span>
-                    <strong>AWS</strong>
-                    <small>Inspect compute, storage, functions, containers, and model training.</small>
-                  </span>
-                  <em>{awsSnapshot()?.status.configured ? "Connected" : "Open integration"}</em>
+                  <em data-tone={database() ? "success" : undefined}>
+                    {database()
+                      ? `Supabase · ${database()?.projectName ?? database()?.projectRef ?? "connected"}`
+                      : providerConnection("supabase")?.connected
+                        ? "Choose a Supabase project"
+                        : "No database"}
+                  </em>
                 </button>
               </section>
             </Show>
@@ -1218,8 +931,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Your accounts</div>
                   <h1>Cloud connections</h1>
                   <p>
-                    Sign in once, then let Vector publish, link projects, and configure your database through your own
-                    accounts. Provider tokens stay encrypted on this device.
+                    Connect your Vercel and Supabase accounts once, then publish, link projects, and configure your
+                    database here or by asking Vector. Access tokens stay encrypted on this device.
                   </p>
                 </div>
               </div>
@@ -1252,17 +965,15 @@ export function CloudConsole(props: {
                 </div>
               </section>
               <div class="cloud-connection-list">
-                <For each={["vercel", "netlify", "supabase"] as CloudProviderId[]}>
+                <For each={["vercel", "supabase"] as CloudProviderId[]}>
                   {(provider) => {
                     const connection = () => providerConnection(provider)
                     const connectionMode = () => cloudProviderConnectionMode(connection())
                     const tokenGuide = () => cloudProviderTokenGuide(provider)
-                    const linked = () => (provider === "supabase" ? undefined : providerLink(provider))
-                    const resources = () => providerResources()[provider] ?? []
                     return (
                       <section class="cloud-panel cloud-connection-card">
                         <div class="cloud-provider-mark" data-provider={provider}>
-                          {provider === "vercel" ? "V" : provider === "netlify" ? "N" : "S"}
+                          {provider === "vercel" ? "V" : "S"}
                         </div>
                         <div class="cloud-connection-main">
                           <div class="flex items-center gap-2">
@@ -1279,13 +990,11 @@ export function CloudConsole(props: {
                             >
                               {connectionMode() === "connected"
                                 ? "Connected"
-                                : connectionMode() === "oauth"
-                                  ? "Not connected"
-                                  : connectionMode() === "token"
-                                    ? "Manual connection"
-                                    : connectionMode() === "checking"
-                                      ? "Checking…"
-                                      : "Unavailable"}
+                                : connectionMode() === "checking"
+                                  ? "Checking…"
+                                  : connectionMode() === "unavailable"
+                                    ? "Unavailable"
+                                    : "Not connected"}
                             </span>
                           </div>
                           <p class="cloud-muted mt-1 text-[12px]">
@@ -1294,7 +1003,7 @@ export function CloudConsole(props: {
                                 ? `Signed in as ${connection()?.account}`
                                 : "Account authorized"
                               : connectionMode() === "token"
-                                ? "Hosted sign-in is not configured. Connect with a personal access token encrypted on this device."
+                                ? `Connect with a ${providerLabel(provider)} access token. It takes about two minutes, and the token stays encrypted on this device.`
                                 : (connection()?.detail ?? "Checking provider availability…")}
                           </p>
 
@@ -1360,58 +1069,13 @@ export function CloudConsole(props: {
                             </form>
                           </Show>
 
-                          <Show when={connection()?.connected && provider !== "supabase"}>
-                            <Show
-                              when={linked()}
-                              fallback={
-                                <div class="cloud-provider-linker">
-                                  <select
-                                    class="cloud-input"
-                                    value={providerSelections()[provider] ?? ""}
-                                    onChange={(event) =>
-                                      setProviderSelections((current) => ({
-                                        ...current,
-                                        [provider]: event.currentTarget.value,
-                                      }))
-                                    }
-                                  >
-                                    <option value="">Choose a {providerLabel(provider)} project</option>
-                                    <For each={resources()}>
-                                      {(resource) => <option value={resource.id}>{resource.name}</option>}
-                                    </For>
-                                  </select>
-                                  <button
-                                    class="cloud-button"
-                                    data-variant="primary"
-                                    type="button"
-                                    disabled={
-                                      !props.projectPath ||
-                                      !providerSelections()[provider] ||
-                                      providerBusy() === provider
-                                    }
-                                    onClick={() => void linkProviderProject(provider)}
-                                  >
-                                    Link project
-                                  </button>
-                                </div>
-                              }
-                            >
-                              {(item) => (
-                                <div class="cloud-linked-project">
-                                  <span>
-                                    Linked to <strong>{item().projectName}</strong>
-                                  </span>
-                                  <button
-                                    class="cloud-button"
-                                    type="button"
-                                    disabled={providerBusy() === provider}
-                                    onClick={() => void unlinkProviderProject(provider)}
-                                  >
-                                    Unlink
-                                  </button>
-                                </div>
-                              )}
-                            </Show>
+                          <Show when={connection()?.connected && provider === "vercel" && props.projectPath}>
+                            <VercelLink
+                              projectPath={props.projectPath}
+                              detectedFramework={buildSettings()?.framework}
+                              notice={setNotice}
+                              onChange={() => void refreshAll()}
+                            />
                           </Show>
 
                           <Show when={connection()?.connected && provider === "supabase"}>
@@ -1509,8 +1173,9 @@ export function CloudConsole(props: {
                 <div class="cloud-panel mb-3">
                   <div class="cloud-panel-title">Publish this project</div>
                   <p class="cloud-muted mt-1 text-[12px]">
-                    Vector runs the whole deploy on your own Vercel or Netlify account — authorize once, then it's a
-                    single click. Your code is never proxied through Vector.
+                    Vector runs the whole deploy on your own Vercel account — authorize once, then it's a single click.
+                    Your code is never proxied through Vector. A preview never changes production; a production build is
+                    checked first, and production moves to it only if the checks pass.
                   </p>
                   <div class="cloud-segment mt-3" aria-label="Deployment environment">
                     <button
@@ -1528,55 +1193,93 @@ export function CloudConsole(props: {
                       Production
                     </button>
                   </div>
+                  <Show when={publish && uncommittedNote(overview?.overview()?.git)}>
+                    {(note) => (
+                      <p class="cloud-notice" data-tone="warning" style={{ margin: "12px 0 0" }}>
+                        {note()}
+                      </p>
+                    )}
+                  </Show>
                   <div class="mt-3 flex flex-wrap items-center gap-2">
-                    <For each={publishTargets()}>
-                      {(target) => (
-                        <button
-                          type="button"
-                          class="cloud-button"
-                          data-variant={publishTargetId() === target.id ? "primary" : undefined}
-                          title={target.available ? undefined : target.loginHint}
-                          onClick={() => setPublishTargetId(target.id)}
-                        >
-                          {target.label}
-                          {target.available ? "" : " · setup needed"}
-                        </button>
-                      )}
-                    </For>
                     <button
                       class="cloud-button ml-auto"
-                      data-variant="primary"
+                      data-variant={deploymentEnvironment() === "production" || firstRelease() ? "warning" : "primary"}
                       type="button"
-                      disabled={!publish || publishing()}
-                      onClick={() => void runPublish()}
+                      disabled={!publish || publishing() || !hostingState().ready}
+                      onClick={() =>
+                        deploymentEnvironment() === "production" || firstRelease()
+                          ? requestConfirm("publish-production", () => void runPublish())
+                          : void runPublish()
+                      }
                     >
-                      {publishing() ? "Publishing…" : "Publish →"}
+                      {publishing()
+                        ? "Publishing…"
+                        : confirmId() === "publish-production"
+                          ? deploymentEnvironment() === "production"
+                            ? `Confirm: publish ${vercelProjectName()} to production on Vercel?`
+                            : `Confirm: ${vercelProjectName()}'s first deployment goes live in production?`
+                          : deploymentEnvironment() === "production"
+                            ? "Publish to production →"
+                            : "Publish preview →"}
                     </button>
                   </div>
-                  <Show when={publish && publishTargets().find((item) => item.id === publishTargetId())}>
-                    {(target) => (
+                  <Show when={deploymentEnvironment() === "production" && !firstRelease() && productionBlocked()}>
+                    <p class="cloud-muted mt-2 text-[11px]">
+                      Vercel Deployment Protection covers {vercelProjectName()}'s production builds, so Vector cannot
+                      check them and production will not move. Turn on Protection Bypass for Automation in Project
+                      settings first.
+                    </p>
+                  </Show>
+                  <Show when={firstRelease()}>
+                    <p class="cloud-muted mt-2 text-[11px]">
+                      {vercelProjectName()} has never been deployed, and Vercel makes a project's first deployment
+                      production, whichever you choose. Release checks run after it is live.
+                    </p>
+                  </Show>
+                  <Show when={publish && hostingState().ready && providerLink("vercel")}>
+                    {(link) => (
                       <p class="cloud-muted mt-2 text-[11px]">
-                        {target().account ? (
-                          <span>
-                            <span class="text-[color:var(--vx-green)]">●</span> Connected to {target().label} as{" "}
-                            <strong class="text-white/70">{target().account}</strong>.
-                          </span>
-                        ) : (
-                          target().loginHint
-                        )}
+                        <span class="text-[color:var(--vx-green)]">●</span> Publishes to the Vercel project{" "}
+                        <strong class="text-white/70">{link().projectName}</strong>
+                        {providerConnection("vercel")?.account ? ` as ${providerConnection("vercel")?.account}` : ""}.
                       </p>
                     )}
                   </Show>
                   <Show when={!publish}>
                     <p class="cloud-muted mt-2 text-[11px]">Publishing runs in Vector Desktop.</p>
                   </Show>
-                  <Show
-                    when={publish && publishTargets().length > 0 && !publishTargets().some((item) => item.available)}
-                  >
-                    <p class="cloud-muted mt-2 text-[11px]">
-                      No publisher detected. Install the Vercel CLI (<code>npm i -g vercel</code>) and run{" "}
-                      <code>vercel login</code> in Terminal, then reopen this panel.
-                    </p>
+                  <Show when={publish && !hostingState().ready}>
+                    <div class="cloud-inline-empty mt-3">
+                      <span>{hostingState().detail}</span>
+                      <Show when={hostingState().fix}>
+                        <button class="cloud-button" type="button" onClick={() => setSection("connections")}>
+                          Open Connections
+                        </button>
+                      </Show>
+                    </div>
+                  </Show>
+                  <Show when={!publishing() && failedPublish()}>
+                    {(failed) => (
+                      <div class="cloud-inline-empty mt-3">
+                        <span>
+                          {failed().checks.some((check) => check.status === "failed")
+                            ? `Failed: ${failed()
+                                .checks.filter((check) => check.status === "failed")
+                                .map((check) => check.label)
+                                .join(", ")}.`
+                            : "The publish did not finish."}{" "}
+                          No release was recorded.
+                        </span>
+                        <button
+                          class="cloud-button"
+                          data-variant="primary"
+                          type="button"
+                          onClick={() => props.onRepair(deployRepairPrompt(failed()))}
+                        >
+                          Fix this deploy
+                        </button>
+                      </div>
+                    )}
                   </Show>
                   <Show when={publishEvents().length}>
                     <div class="cloud-pipeline mt-4">
@@ -1616,6 +1319,9 @@ export function CloudConsole(props: {
                       </div>
                       <span class="cloud-status">{agentWorkspaces().length} workspaces</span>
                     </div>
+                    <Show when={publish && !hostingState().ready}>
+                      <p class="cloud-muted mt-2 text-[11px]">{hostingState().detail}</p>
+                    </Show>
                     <div class="cloud-workspace-grid mt-3">
                       <For
                         each={agentWorkspaces().filter(
@@ -1623,8 +1329,9 @@ export function CloudConsole(props: {
                         )}
                       >
                         {(workspace) => {
-                          const preview = () =>
+                          const release = () =>
                             deployments().find((deployment) => deployment.workspaceId === workspace.id)
+                          const preview = () => workspace.previewUrl ?? release()?.alias ?? release()?.url
                           return (
                             <div class="cloud-workspace-row">
                               <div class="min-w-0">
@@ -1637,9 +1344,9 @@ export function CloudConsole(props: {
                                 </div>
                                 <p>{workspace.lastAction || workspace.taskPrompt}</p>
                                 <Show when={preview()}>
-                                  {(item) => (
-                                    <a class="cloud-link" href={item().url} target="_blank" rel="noopener noreferrer">
-                                      {item().url}
+                                  {(url) => (
+                                    <a class="cloud-link" href={url()} target="_blank" rel="noopener noreferrer">
+                                      {url()}
                                     </a>
                                   )}
                                 </Show>
@@ -1648,10 +1355,21 @@ export function CloudConsole(props: {
                                 class="cloud-button"
                                 data-variant="primary"
                                 type="button"
-                                disabled={!publish || publishing()}
-                                onClick={() => void runPublish({ environment: "preview", workspace })}
+                                disabled={!publish || publishing() || !hostingState().ready}
+                                onClick={() =>
+                                  firstRelease()
+                                    ? requestConfirm(
+                                        `publish-${workspace.id}`,
+                                        () => void runPublish({ environment: "preview", workspace }),
+                                      )
+                                    : void runPublish({ environment: "preview", workspace })
+                                }
                               >
-                                {preview() ? "Redeploy preview" : "Publish preview"}
+                                {confirmId() === `publish-${workspace.id}`
+                                  ? "Confirm: first deployment goes to production?"
+                                  : preview()
+                                    ? "Redeploy preview"
+                                    : "Publish preview"}
                               </button>
                             </div>
                           )
@@ -1661,229 +1379,14 @@ export function CloudConsole(props: {
                   </div>
                 </Show>
               </Show>
-              <Show
-                when={deployments().length}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("deployments")}
-                    </svg>
-                    <strong>Nothing published yet</strong>
-                    <p>Open a project, hit Publish in the preview, and your live apps appear here.</p>
-                  </div>
-                }
-              >
-                <div class="cloud-list">
-                  <For each={deployments()}>
-                    {(deployment) => {
-                      const failedChecks = () =>
-                        deployment.checks.filter((check) => check.required && check.status === "failed")
-                      const passedChecks = () => deployment.checks.filter((check) => check.status === "passed")
-                      const canPromote = () =>
-                        deployment.releaseStatus === "preview" &&
-                        !deployment.workspaceId &&
-                        (deployment.target === "vector-cloud" || deployment.target === "vercel") &&
-                        failedChecks().length === 0
-                      const canRollback = () =>
-                        (deployment.releaseStatus === "superseded" || deployment.releaseStatus === "rolled-back") &&
-                        (deployment.target === "vector-cloud" || deployment.target === "vercel") &&
-                        failedChecks().length === 0
-                      return (
-                        <div class="cloud-row cloud-row-block">
-                          <div class="min-w-0 flex-1">
-                            <div class="flex flex-wrap items-center gap-2">
-                              <span class="cloud-health-dot" data-status={deployment.status} />
-                              <strong class="truncate text-[13px] text-white/85">{deployment.name}</strong>
-                              <span
-                                class="cloud-status"
-                                data-tone={deployment.releaseStatus === "current" ? "success" : undefined}
-                              >
-                                {deployment.releaseStatus}
-                              </span>
-                              <span class="cloud-status">{deployment.target}</span>
-                              <Show when={deployment.workspaceName}>
-                                <span class="cloud-status">agent · {deployment.workspaceName}</span>
-                              </Show>
-                              <Show when={deployment.checks.length}>
-                                <span class="cloud-status" data-tone={failedChecks().length ? "error" : "success"}>
-                                  {failedChecks().length
-                                    ? `${failedChecks().length} failed`
-                                    : `${passedChecks().length} checks passed`}
-                                </span>
-                              </Show>
-                            </div>
-                            <a
-                              href={cleanDeploymentUrl(deployment.productionUrl ?? deployment.url)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              class="cloud-link"
-                            >
-                              {cleanDeploymentUrl(deployment.productionUrl ?? deployment.url)}
-                            </a>
-                            <p class="cloud-muted text-[11px]">
-                              {formatDate(deployment.createdAt)} ·{" "}
-                              {deployment.durationMs === undefined
-                                ? "duration unavailable"
-                                : `built in ${formatDuration(deployment.durationMs)}`}
-                              {deployment.lastCheckedAt ? ` · checked ${formatDate(deployment.lastCheckedAt)}` : ""}
-                            </p>
-                            <Show when={deployment.git}>
-                              {(git) => (
-                                <p class="cloud-git-line">
-                                  <span>{git().branch}</span>
-                                  <code>{git().commitShort}</code>
-                                  <span>{git().commitMessage}</span>
-                                  <Show when={git().dirty}>
-                                    <strong>uncommitted changes</strong>
-                                  </Show>
-                                </p>
-                              )}
-                            </Show>
-                            <Show when={expandedChecksId() === deployment.id}>
-                              <div class="cloud-check-list">
-                                <For
-                                  each={deployment.checks}
-                                  fallback={<p>No release checks recorded for this older deployment.</p>}
-                                >
-                                  {(check) => (
-                                    <div class="cloud-check" data-status={check.status}>
-                                      <span class="cloud-check-mark">
-                                        {check.status === "passed" ? "✓" : check.status === "failed" ? "!" : "–"}
-                                      </span>
-                                      <div>
-                                        <strong>{check.label}</strong>
-                                        <p>
-                                          {check.details ?? check.status}
-                                          {check.durationMs === undefined
-                                            ? ""
-                                            : ` · ${formatDuration(check.durationMs)}`}
-                                        </p>
-                                        <Show when={check.output}>
-                                          <pre>{check.output}</pre>
-                                        </Show>
-                                      </div>
-                                    </div>
-                                  )}
-                                </For>
-                              </div>
-                            </Show>
-                            <Show when={expandedLogId() === deployment.id}>
-                              <pre class="cloud-log mt-3">
-                                {deployment.runtimeLog ?? deployment.log ?? "No logs recorded for this deployment."}
-                              </pre>
-                            </Show>
-                          </div>
-                          <div class="cloud-deployment-actions">
-                            <button
-                              class="cloud-button"
-                              type="button"
-                              disabled={!api || deploymentActionId() === deployment.id}
-                              onClick={() => void rerunChecks(deployment)}
-                            >
-                              {deploymentActionId() === deployment.id ? "Working…" : "Run checks"}
-                            </button>
-                            <button
-                              class="cloud-button"
-                              type="button"
-                              onClick={() =>
-                                setExpandedChecksId((current) => (current === deployment.id ? "" : deployment.id))
-                              }
-                            >
-                              {expandedChecksId() === deployment.id ? "Hide evidence" : "Evidence"}
-                            </button>
-                            <button
-                              class="cloud-button"
-                              type="button"
-                              disabled={!api || deploymentActionId() === deployment.id}
-                              onClick={() => void readRuntimeLogs(deployment)}
-                            >
-                              Runtime logs
-                            </button>
-                            <Show when={canPromote()}>
-                              <button
-                                class="cloud-button"
-                                data-variant="primary"
-                                type="button"
-                                disabled={deploymentActionId() === deployment.id}
-                                onClick={() =>
-                                  requestConfirm(`promote-${deployment.id}`, () => void promoteRelease(deployment))
-                                }
-                              >
-                                {confirmId() === `promote-${deployment.id}` ? "Confirm promote?" : "Promote"}
-                              </button>
-                            </Show>
-                            <Show when={canRollback()}>
-                              <button
-                                class="cloud-button"
-                                data-variant="warning"
-                                type="button"
-                                disabled={deploymentActionId() === deployment.id}
-                                onClick={() =>
-                                  requestConfirm(`rollback-${deployment.id}`, () => void rollbackRelease(deployment))
-                                }
-                              >
-                                {confirmId() === `rollback-${deployment.id}` ? "Confirm rollback?" : "Roll back"}
-                              </button>
-                            </Show>
-                            <Show when={failedChecks().length}>
-                              <button
-                                class="cloud-button"
-                                data-variant="primary"
-                                type="button"
-                                onClick={() => void repairDeployment(deployment)}
-                              >
-                                Repair with Vector
-                              </button>
-                            </Show>
-                            <Show when={isPublishTargetId(deployment.target) ? deployment.target : undefined}>
-                              {(targetId) => (
-                                <button
-                                  class="cloud-button"
-                                  type="button"
-                                  disabled={!publish || publishing()}
-                                  onClick={() =>
-                                    void runPublish({ target: targetId(), environment: deployment.environment })
-                                  }
-                                >
-                                  Redeploy
-                                </button>
-                              )}
-                            </Show>
-                            <button
-                              class="cloud-button"
-                              type="button"
-                              onClick={() => void copyDeploymentUrl(deployment)}
-                            >
-                              {copiedId() === deployment.id ? "Copied" : "Copy"}
-                            </button>
-                            <button class="cloud-button" type="button" onClick={() => openDeploymentUrl(deployment)}>
-                              Open
-                            </button>
-                            <button
-                              class="cloud-button"
-                              data-variant="danger"
-                              type="button"
-                              disabled={!api || deployment.releaseStatus === "current"}
-                              title={
-                                deployment.releaseStatus === "current"
-                                  ? "Promote another release before removing the live version."
-                                  : undefined
-                              }
-                              onClick={() =>
-                                requestConfirm(
-                                  `remove-deployment-${deployment.id}`,
-                                  () => void removeDeployment(deployment),
-                                )
-                              }
-                            >
-                              {confirmId() === `remove-deployment-${deployment.id}` ? "Confirm remove?" : "Remove"}
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    }}
-                  </For>
-                </div>
+              <Show when={props.projectPath && providerConnection("vercel")?.connected}>
+                <VercelDeployments
+                  projectPath={props.projectPath}
+                  notice={setNotice}
+                  refreshKey={vercelRefresh()}
+                  onRepair={props.onRepair}
+                  onOpenConnections={() => setSection("connections")}
+                />
               </Show>
             </Show>
 
@@ -1894,152 +1397,33 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Build and runtime output</div>
                   <h1>Logs</h1>
                   <p>
-                    Read the output attached to each deployment. Vector asks the linked provider for runtime logs when
-                    available and falls back to its recorded build and check evidence.
+                    Read what any deployment of the linked Vercel project printed while it built, or what the running
+                    app is logging now: requests, errors and console output.
                   </p>
                 </div>
               </div>
               <Show
-                when={deployments().length}
+                when={props.projectPath && providerConnection("vercel")?.connected}
                 fallback={
                   <div class="cloud-empty">
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("logs")}
                     </svg>
-                    <strong>No deployment logs yet</strong>
-                    <p>Publish this repository once and its build and runtime evidence will appear here.</p>
+                    <strong>{props.projectPath ? "Connect Vercel to read logs" : "No project open"}</strong>
+                    <p>
+                      {props.projectPath
+                        ? "Connect Vercel and link this repository's project in Connections."
+                        : "Open a project to read its deployment logs."}
+                    </p>
                   </div>
                 }
               >
-                <div class="cloud-list">
-                  <For each={deployments()}>
-                    {(deployment) => (
-                      <div class="cloud-row cloud-row-block">
-                        <div class="min-w-0 flex-1">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <span class="cloud-health-dot" data-status={deployment.status} />
-                            <strong class="truncate text-[13px] text-white/85">{deployment.name}</strong>
-                            <span class="cloud-status">{deployment.target}</span>
-                            <span class="cloud-status">{deployment.environment}</span>
-                          </div>
-                          <p class="cloud-muted mt-1 text-[11px]">
-                            {deployment.runtimeLogFetchedAt
-                              ? `Runtime output fetched ${formatDate(deployment.runtimeLogFetchedAt)}`
-                              : `Built ${formatDate(deployment.createdAt)}`}
-                          </p>
-                          <Show when={expandedLogId() === deployment.id}>
-                            <pre class="cloud-log mt-3">
-                              {deployment.runtimeLog ?? deployment.log ?? "No output was returned for this deployment."}
-                            </pre>
-                          </Show>
-                        </div>
-                        <div class="cloud-deployment-actions">
-                          <button
-                            class="cloud-button"
-                            type="button"
-                            disabled={!api || deploymentActionId() === deployment.id}
-                            onClick={() => void readRuntimeLogs(deployment)}
-                          >
-                            {deploymentActionId() === deployment.id ? "Loading…" : "Read logs"}
-                          </button>
-                          <button class="cloud-button" type="button" onClick={() => openDeploymentUrl(deployment)}>
-                            Open release
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </div>
+                <VercelLogs
+                  projectPath={props.projectPath}
+                  notice={setNotice}
+                  onOpenConnections={() => setSection("connections")}
+                />
               </Show>
-            </Show>
-
-            {/* Analytics */}
-            <Show when={section() === "analytics"}>
-              <div class="cloud-heading">
-                <div>
-                  <div class="cloud-kicker">Release performance</div>
-                  <h1>Analytics</h1>
-                  <p>
-                    Vector summarizes the release evidence it owns locally. Traffic analytics and speed insights stay in
-                    your linked hosting account and open directly from here.
-                  </p>
-                </div>
-              </div>
-              <div class="cloud-grid">
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">{deployments().length}</span>
-                  <strong>Total releases</strong>
-                  <small>Preview and production deployments</small>
-                </div>
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">
-                    {deployments().length
-                      ? `${Math.round((deployments().filter((item) => item.status === "ready").length / deployments().length) * 100)}%`
-                      : "—"}
-                  </span>
-                  <strong>Health rate</strong>
-                  <small>Latest reachable release checks</small>
-                </div>
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">
-                    {formatDuration(
-                      deployments().filter((item) => item.durationMs !== undefined).length
-                        ? Math.round(
-                            deployments().reduce((total, item) => total + (item.durationMs ?? 0), 0) /
-                              deployments().filter((item) => item.durationMs !== undefined).length,
-                          )
-                        : undefined,
-                    )}
-                  </span>
-                  <strong>Average build</strong>
-                  <small>Across deployments with recorded duration</small>
-                </div>
-                <div class="cloud-metric">
-                  <span class="cloud-metric-value">
-                    {formatDuration(
-                      deployments().filter((item) => item.latencyMs !== undefined).length
-                        ? Math.round(
-                            deployments().reduce((total, item) => total + (item.latencyMs ?? 0), 0) /
-                              deployments().filter((item) => item.latencyMs !== undefined).length,
-                          )
-                        : undefined,
-                    )}
-                  </span>
-                  <strong>Average latency</strong>
-                  <small>From Vector's latest health probes</small>
-                </div>
-              </div>
-              <section class="cloud-service-list mt-4">
-                <button type="button" onClick={() => platform.openLink(deploymentDashboard("vercel", "/analytics"))}>
-                  <span class="cloud-service-icon">V</span>
-                  <span>
-                    <strong>Vercel Analytics</strong>
-                    <small>Open traffic analytics for the linked Vercel project.</small>
-                  </span>
-                  <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => platform.openLink(deploymentDashboard("vercel", "/speed-insights"))}
-                >
-                  <span class="cloud-service-icon">
-                    <Icon name="status" />
-                  </span>
-                  <span>
-                    <strong>Speed Insights</strong>
-                    <small>Inspect Core Web Vitals in the provider dashboard.</small>
-                  </span>
-                  <em>{providerLink("vercel") ? "Open" : "Connect first"}</em>
-                </button>
-                <button type="button" onClick={() => platform.openLink(deploymentDashboard("netlify", "/analytics"))}>
-                  <span class="cloud-service-icon">N</span>
-                  <span>
-                    <strong>Netlify Analytics</strong>
-                    <small>Open analytics for the linked Netlify site.</small>
-                  </span>
-                  <em>{providerLink("netlify") ? "Open" : "Connect first"}</em>
-                </button>
-              </section>
             </Show>
 
             {/* Observability */}
@@ -2084,50 +1468,78 @@ export function CloudConsole(props: {
                 </div>
                 <div class="cloud-list">
                   <For each={deployments()}>
-                    {(deployment) => (
-                      <div class="cloud-row">
-                        <span class="cloud-health-dot" data-status={deployment.status} />
-                        <div class="min-w-0 flex-1">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <strong class="truncate text-[13px] text-white/85">{deployment.name}</strong>
-                            <span
-                              class="cloud-status"
-                              data-tone={
-                                deployment.status === "ready"
-                                  ? "success"
-                                  : deployment.status === "unknown"
-                                    ? undefined
-                                    : "error"
-                              }
-                            >
-                              {deployment.status === "unknown" ? "not checked" : deployment.status}
-                            </span>
+                    {(deployment) => {
+                      // Deployment Protection kept the probe out: not a failure, and not unchecked either.
+                      const protectedHealth = () =>
+                        deployment.checks.find((check) => check.type === "health" && check.status === "skipped")
+                      return (
+                        <div class="cloud-row">
+                          <span class="cloud-health-dot" data-status={deployment.status} />
+                          <div class="min-w-0 flex-1">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <strong class="truncate text-[13px] text-white/85">{deployment.name}</strong>
+                              <span
+                                class="cloud-status"
+                                data-tone={
+                                  deployment.status === "ready"
+                                    ? "success"
+                                    : deployment.status === "unknown"
+                                      ? undefined
+                                      : "error"
+                                }
+                              >
+                                {deployment.status === "unknown"
+                                  ? protectedHealth()
+                                    ? "protected"
+                                    : "not checked"
+                                  : deployment.status}
+                              </span>
+                            </div>
+                            <p class="cloud-muted mt-1 truncate text-[11px]">
+                              {cleanDeploymentUrl(deployment.url) || deployment.url}
+                            </p>
+                            <Show when={deployment.healthError}>
+                              <p class="mt-1 text-[11px] text-[#f0b3b6]">{deployment.healthError}</p>
+                            </Show>
+                            <Show when={deployment.status === "unknown" && protectedHealth()}>
+                              {(check) => <p class="cloud-muted mt-1 text-[11px]">{check().details}</p>}
+                            </Show>
                           </div>
-                          <p class="cloud-muted mt-1 truncate text-[11px]">
-                            {cleanDeploymentUrl(deployment.url) || deployment.url}
-                          </p>
-                          <Show when={deployment.healthError}>
-                            <p class="mt-1 text-[11px] text-[#f0b3b6]">{deployment.healthError}</p>
-                          </Show>
+                          <div class="cloud-observation">
+                            <span>HTTP</span>
+                            <strong>{deployment.statusCode ?? "—"}</strong>
+                          </div>
+                          <div class="cloud-observation">
+                            <span>Latency</span>
+                            <strong>{formatDuration(deployment.latencyMs)}</strong>
+                          </div>
+                          <button
+                            class="cloud-button"
+                            type="button"
+                            disabled={!api || checkingId() === deployment.id}
+                            onClick={() => void checkDeployment(deployment)}
+                          >
+                            {checkingId() === deployment.id ? "Checking…" : "Check"}
+                          </button>
+                          <button
+                            class="cloud-button"
+                            data-variant="danger"
+                            type="button"
+                            disabled={!api || deployment.releaseStatus === "current"}
+                            title={
+                              deployment.releaseStatus === "current"
+                                ? "The release serving production stays in the history."
+                                : "Remove from Vector's history; the deployment stays on Vercel."
+                            }
+                            onClick={() =>
+                              requestConfirm(`forget-${deployment.id}`, () => void forgetDeployment(deployment))
+                            }
+                          >
+                            {confirmId() === `forget-${deployment.id}` ? "Confirm remove?" : "Remove"}
+                          </button>
                         </div>
-                        <div class="cloud-observation">
-                          <span>HTTP</span>
-                          <strong>{deployment.statusCode ?? "—"}</strong>
-                        </div>
-                        <div class="cloud-observation">
-                          <span>Latency</span>
-                          <strong>{formatDuration(deployment.latencyMs)}</strong>
-                        </div>
-                        <button
-                          class="cloud-button"
-                          type="button"
-                          disabled={!api || checkingId() === deployment.id}
-                          onClick={() => void checkDeployment(deployment)}
-                        >
-                          {checkingId() === deployment.id ? "Checking…" : "Check"}
-                        </button>
-                      </div>
-                    )}
+                      )
+                    }}
                   </For>
                 </div>
               </Show>
@@ -2140,133 +1552,32 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Bring your own domain</div>
                   <h1>Domains</h1>
                   <p>
-                    Attach a domain you own to the linked Vercel or Netlify project for <strong>{projectName()}</strong>
-                    . Vector performs the provider action and checks the result.
+                    Attach a domain you own to the linked Vercel project for <strong>{projectName()}</strong>. Vector
+                    shows the exact DNS records Vercel asks for, verifies them and reports the certificate.
                   </p>
                 </div>
               </div>
               <Show
-                when={props.projectPath}
+                when={props.projectPath && providerConnection("vercel")?.connected}
                 fallback={
                   <div class="cloud-empty">
                     <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
                       {sectionIcon("domains")}
                     </svg>
-                    <strong>No project open</strong>
-                    <p>Open a project to connect a custom domain to it.</p>
+                    <strong>{props.projectPath ? "Connect Vercel to add a domain" : "No project open"}</strong>
+                    <p>
+                      {props.projectPath
+                        ? "Connect Vercel and link this repository's project in Connections."
+                        : "Open a project to connect a custom domain to it."}
+                    </p>
                   </div>
                 }
               >
-                <div class="cloud-panel">
-                  <div class="cloud-panel-title">Connect a domain</div>
-                  <Show
-                    when={providerLinks().length}
-                    fallback={
-                      <div class="cloud-inline-empty mt-3">
-                        <span>Link a Vercel or Netlify project before connecting a domain.</span>
-                        <button class="cloud-button" type="button" onClick={() => setSection("connections")}>
-                          Open Connections
-                        </button>
-                      </div>
-                    }
-                  >
-                    <form
-                      class="mt-3 grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)_auto]"
-                      onSubmit={(event) => {
-                        event.preventDefault()
-                        void addDomain()
-                      }}
-                    >
-                      <select
-                        class="cloud-input"
-                        value={domainProvider()}
-                        onChange={(event) =>
-                          setDomainProvider(event.currentTarget.value as Exclude<CloudDomainProvider, "vector-cloud">)
-                        }
-                      >
-                        <For each={providerLinks()}>
-                          {(link) => <option value={link.provider}>{providerLabel(link.provider)}</option>}
-                        </For>
-                      </select>
-                      <input
-                        class="cloud-input min-w-0"
-                        value={domainDraft()}
-                        onInput={(event) => setDomainDraft(event.currentTarget.value)}
-                        placeholder="app.yourdomain.com"
-                      />
-                      <button
-                        class="cloud-button"
-                        data-variant="primary"
-                        type="submit"
-                        disabled={
-                          !api || !props.projectPath || !domainDraft().trim() || !providerLink(domainProvider())
-                        }
-                      >
-                        Add domain
-                      </button>
-                    </form>
-                  </Show>
-                </div>
-                <Show when={domains().length}>
-                  <div class="cloud-list mt-3">
-                    <For each={domains()}>
-                      {(domain) => (
-                        <div class="cloud-row cloud-row-block">
-                          <div class="min-w-0 flex-1">
-                            <div class="flex items-center gap-2">
-                              <strong class="text-[13px] text-white/85">{domain.domain}</strong>
-                              <span class="cloud-provider-chip">
-                                {domain.provider === "vector-cloud" ? "Legacy DNS" : providerLabel(domain.provider)}
-                              </span>
-                              <span
-                                class="cloud-status"
-                                data-tone={
-                                  domain.status === "verified"
-                                    ? "success"
-                                    : domain.status === "error"
-                                      ? "error"
-                                      : "warning"
-                                }
-                              >
-                                {domain.status}
-                              </span>
-                            </div>
-                            <div class="cloud-code mt-2">
-                              CNAME {domain.domain} → {domain.cnameTarget}
-                            </div>
-                            <Show when={domain.providerProjectName}>
-                              <p class="cloud-muted mt-1 text-[11px]">Attached to {domain.providerProjectName}</p>
-                            </Show>
-                            <Show when={domain.detail}>
-                              <p class="cloud-muted mt-1 text-[11px]">{domain.detail}</p>
-                            </Show>
-                          </div>
-                          <div class="flex shrink-0 items-center gap-2">
-                            <button
-                              class="cloud-button"
-                              type="button"
-                              disabled={!api || verifyingId() === domain.id}
-                              onClick={() => void verifyDomain(domain)}
-                            >
-                              {verifyingId() === domain.id ? "Checking…" : "Verify"}
-                            </button>
-                            <button
-                              class="cloud-button"
-                              data-variant="danger"
-                              type="button"
-                              disabled={!api}
-                              onClick={() =>
-                                requestConfirm(`remove-domain-${domain.id}`, () => void removeDomain(domain))
-                              }
-                            >
-                              {confirmId() === `remove-domain-${domain.id}` ? "Confirm remove?" : "Remove"}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </For>
-                  </div>
-                </Show>
+                <VercelDomains
+                  projectPath={props.projectPath}
+                  notice={setNotice}
+                  onOpenConnections={() => setSection("connections")}
+                />
               </Show>
             </Show>
 
@@ -2277,8 +1588,8 @@ export function CloudConsole(props: {
                   <div class="cloud-kicker">Secrets & config</div>
                   <h1>Environment variables</h1>
                   <p>
-                    Manage variables for <strong>{projectName()}</strong>. Write them locally, or securely sync them to
-                    a linked Vercel or Netlify project through your authorized account.
+                    Manage variables for <strong>{projectName()}</strong>. Write them locally, and manage the linked
+                    Vercel project's variables per environment: compare, review a sync plan, or pull development values.
                   </p>
                 </div>
               </div>
@@ -2296,6 +1607,10 @@ export function CloudConsole(props: {
               >
                 <div class="cloud-panel">
                   <div class="cloud-panel-title">Add a variable</div>
+                  <p class="cloud-muted mt-1 text-[12px]">
+                    Values are encrypted on this device. Server-only values can never use a browser-visible name such as
+                    VITE_ or NEXT_PUBLIC_.
+                  </p>
                   <form
                     class="mt-3 flex flex-wrap gap-2"
                     onSubmit={(event) => {
@@ -2324,6 +1639,20 @@ export function CloudConsole(props: {
                       spellcheck={false}
                       disabled={Boolean(environment.state.busy)}
                     />
+                    <select
+                      class="cloud-input"
+                      aria-label="Who can read this value"
+                      value={environment.state.visibility}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value
+                        environment.setVisibility(value === "public" || value === "server" ? value : "")
+                      }}
+                      disabled={Boolean(environment.state.busy)}
+                    >
+                      <option value="">From the name</option>
+                      <option value="server">Server only</option>
+                      <option value="public">Public (browser)</option>
+                    </select>
                     <button
                       class="cloud-button"
                       data-variant="primary"
@@ -2347,21 +1676,6 @@ export function CloudConsole(props: {
                     >
                       Write to .env
                     </button>
-                    <For each={providerLinks()}>
-                      {(link) => (
-                        <button
-                          class="cloud-button"
-                          data-variant="primary"
-                          type="button"
-                          disabled={!api || !envVars().length || Boolean(environment.state.busy)}
-                          onClick={() => void environment.sync(link.provider)}
-                        >
-                          {environment.state.busy === link.provider
-                            ? "Syncing…"
-                            : `Sync to ${providerLabel(link.provider)}`}
-                        </button>
-                      )}
-                    </For>
                   </div>
                 </div>
                 <div class="cloud-list mt-2">
@@ -2385,6 +1699,9 @@ export function CloudConsole(props: {
                             {environment.state.revealedKey === variable.key ? variable.value || '""' : "••••••••••••"}
                           </span>
                         </code>
+                        <span class="cloud-status" data-tone={variable.visibility === "public" ? "warning" : undefined}>
+                          {variable.visibility === "public" ? "public" : "server only"}
+                        </span>
                         <button class="cloud-button" type="button" onClick={() => environment.reveal(variable.key)}>
                           {environment.state.revealedKey === variable.key ? "Hide" : "Reveal"}
                         </button>
@@ -2401,18 +1718,26 @@ export function CloudConsole(props: {
                     )}
                   </For>
                 </div>
+                <Show when={providerConnection("vercel")?.connected}>
+                  <VercelEnvironment
+                    projectPath={props.projectPath}
+                    notice={setNotice}
+                    onLocalChange={() => void environment.refresh()}
+                    onOpenConnections={() => setSection("connections")}
+                  />
+                </Show>
               </Show>
             </Show>
 
-            {/* Database */}
+            {/* Supabase: the console and the agent run the same commands */}
             <Show when={section() === "database"}>
               <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Data for your app</div>
                   <h1>Database</h1>
                   <p>
-                    Choose a project from your connected Supabase account. Vector configures the public client values in
-                    this repository without making you copy keys between dashboards.
+                    The Supabase project this repository uses: link or create it, keep its server credentials, apply and
+                    roll back migrations, and query it.
                   </p>
                 </div>
               </div>
@@ -2428,559 +1753,73 @@ export function CloudConsole(props: {
                   </div>
                 }
               >
-                <Show
-                  when={database()}
-                  fallback={
-                    <div class="cloud-panel">
-                      <div class="cloud-panel-title">
-                        {providerConnection("supabase")?.connected ? "Choose a Supabase project" : "Connect Supabase"}
-                      </div>
-                      <Show
-                        when={providerConnection("supabase")?.connected}
-                        fallback={
-                          <>
-                            <p class="cloud-muted mt-1 text-[12px]">
-                              Connect your Supabase account in Connections using hosted sign-in or an available personal
-                              access token.
-                            </p>
-                            <button
-                              class="cloud-button mt-3"
-                              data-variant="primary"
-                              type="button"
-                              disabled={!api}
-                              onClick={() => {
-                                setSection("connections")
-                                if (cloudProviderConnectionMode(providerConnection("supabase")) === "token")
-                                  openManualToken("supabase")
-                              }}
-                            >
-                              Set up Supabase connection
-                            </button>
-                          </>
-                        }
-                      >
-                        <p class="cloud-muted mt-1 text-[12px]">
-                          Select the existing Supabase project this repository should use.
-                        </p>
-                        <div class="cloud-provider-linker mt-3">
-                          <select
-                            class="cloud-input"
-                            value={providerSelections().supabase ?? ""}
-                            onChange={(event) =>
-                              setProviderSelections((current) => ({
-                                ...current,
-                                supabase: event.currentTarget.value,
-                              }))
-                            }
-                          >
-                            <option value="">Choose a Supabase project</option>
-                            <For each={providerResources().supabase ?? []}>
-                              {(resource) => (
-                                <option value={resource.id}>
-                                  {resource.name}
-                                  {resource.region ? ` · ${resource.region}` : ""}
-                                </option>
-                              )}
-                            </For>
-                          </select>
-                          <button
-                            class="cloud-button"
-                            data-variant="primary"
-                            type="button"
-                            disabled={!api || !providerSelections().supabase || providerBusy() === "supabase"}
-                            onClick={() => void connectSupabaseProject()}
-                          >
-                            {providerBusy() === "supabase" ? "Connecting…" : "Use this project"}
-                          </button>
-                        </div>
-                      </Show>
-                    </div>
-                  }
-                >
-                  {(connection) => (
-                    <div class="cloud-panel cloud-gradient-edge">
-                      <div class="flex items-center justify-between">
-                        <div>
-                          <div class="cloud-panel-title">Supabase connected</div>
-                          <p class="cloud-muted mt-1 text-[12px]">
-                            {connection().projectName ?? connection().projectRef ?? connection().url}
-                          </p>
-                          <p class="cloud-muted text-[11px]">
-                            Connected {formatDate(connection().connectedAt)} ·{" "}
-                            {connection().managedByOAuth ? "managed through Supabase OAuth" : "local configuration"} ·
-                            client at src/lib/supabase.js
-                          </p>
-                        </div>
-                        <button
-                          class="cloud-button"
-                          data-variant="danger"
-                          type="button"
-                          disabled={!api}
-                          onClick={() => requestConfirm("disconnect-db", () => void disconnectDb())}
-                        >
-                          {confirmId() === "disconnect-db" ? "Confirm disconnect?" : "Disconnect"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </Show>
+                <SupabaseDatabase
+                  {...supabasePanel}
+                  connected={Boolean(providerConnection("supabase")?.connected)}
+                  onOpenConnections={() => {
+                    setSection("connections")
+                    if (cloudProviderConnectionMode(providerConnection("supabase")) === "token")
+                      openManualToken("supabase")
+                  }}
+                  onDatabaseChange={refreshDatabase}
+                  openLink={(url) => platform.openLink(url)}
+                />
               </Show>
             </Show>
 
-            {/* Authentication */}
             <Show when={section() === "authentication"}>
               <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Supabase identity</div>
                   <h1>Authentication</h1>
-                  <p>
-                    Attach authentication to this repository through its linked Supabase project. Vector can prepare the
-                    client configuration and your agent can implement the application code against it.
-                  </p>
+                  <p>Where sign-in may return to, which sign-in methods are on, and who has an account.</p>
                 </div>
               </div>
-              <Show
-                when={database()?.projectRef}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("authentication")}
-                    </svg>
-                    <strong>Connect Supabase first</strong>
-                    <p>Choose Database in this sidebar, connect a project, then return here.</p>
-                    <button
-                      class="cloud-button mt-4"
-                      data-variant="primary"
-                      type="button"
-                      onClick={() => setSection("database")}
-                    >
-                      Open Database
-                    </button>
-                  </div>
-                }
-              >
-                <section class="cloud-service-list">
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/users"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="shield" />
-                    </span>
-                    <span>
-                      <strong>Users</strong>
-                      <small>Manage users, identities, sessions, and invitations in Supabase.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/providers"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="providers" />
-                    </span>
-                    <span>
-                      <strong>Sign-in providers</strong>
-                      <small>Configure email, OAuth, and other supported identity providers.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/auth/policies"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="review" />
-                    </span>
-                    <span>
-                      <strong>Authorization policies</strong>
-                      <small>Review row-level security and access policies before release.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                </section>
-              </Show>
+              <SupabaseAuth {...supabasePanel} icon={sectionIcon("authentication")} />
             </Show>
 
-            {/* Storage */}
             <Show when={section() === "storage"}>
-              <div class="cloud-heading cloud-heading-with-action">
+              <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Supabase objects</div>
                   <h1>Storage</h1>
-                  <p>
-                    Inspect the buckets connected to this repository without copying service credentials into Vector.
-                  </p>
+                  <p>Buckets for the files your app stores, public or private.</p>
                 </div>
-                <button
-                  class="cloud-button"
-                  type="button"
-                  disabled={supabaseServicesBusy()}
-                  onClick={() => void refreshSupabaseServices()}
-                >
-                  {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
-                </button>
               </div>
-              <Show
-                when={supabaseServices()?.connected}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("storage")}
-                    </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect one from Database to inspect its storage buckets.</p>
-                  </div>
-                }
-              >
-                <div class="cloud-list">
-                  <For
-                    each={supabaseServices()?.storage.buckets ?? []}
-                    fallback={
-                      <div class="cloud-empty">
-                        <strong>
-                          {supabaseServices()?.storage.available ? "No storage buckets" : "Storage unavailable"}
-                        </strong>
-                        <p>
-                          {supabaseServices()?.storage.detail ??
-                            "Create a bucket in Supabase when this application needs object storage."}
-                        </p>
-                      </div>
-                    }
-                  >
-                    {(bucket) => (
-                      <div class="cloud-row">
-                        <span class="cloud-service-icon">
-                          <Icon name="folder" />
-                        </span>
-                        <span class="min-w-0 flex-1">
-                          <strong class="block truncate text-[13px] text-white/85">{bucket.name}</strong>
-                          <small class="cloud-muted">
-                            {bucket.public ? "Public bucket" : "Private bucket"}
-                            {bucket.updatedAt ? ` · updated ${formatDate(bucket.updatedAt)}` : ""}
-                          </small>
-                        </span>
-                        <span class="cloud-status" data-tone={bucket.public ? "warning" : "success"}>
-                          {bucket.public ? "public" : "private"}
-                        </span>
-                      </div>
-                    )}
-                  </For>
-                </div>
-                <div class="mt-4 flex justify-end">
-                  <button
-                    class="cloud-button"
-                    data-variant="primary"
-                    type="button"
-                    onClick={() => platform.openLink(supabaseDashboard("/storage/buckets"))}
-                  >
-                    Open Storage
-                  </button>
-                </div>
-              </Show>
+              <SupabaseStorage {...supabasePanel} icon={sectionIcon("storage")} />
             </Show>
 
-            {/* Edge Functions */}
             <Show when={section() === "functions"}>
-              <div class="cloud-heading cloud-heading-with-action">
+              <div class="cloud-heading">
                 <div>
                   <div class="cloud-kicker">Serverless logic</div>
                   <h1>Edge functions</h1>
-                  <p>Inspect functions deployed in the Supabase project attached to this repository.</p>
+                  <p>Deploy the functions in supabase/functions and manage the secrets they read.</p>
                 </div>
-                <button
-                  class="cloud-button"
-                  type="button"
-                  disabled={supabaseServicesBusy()}
-                  onClick={() => void refreshSupabaseServices()}
-                >
-                  {supabaseServicesBusy() ? "Refreshing…" : "Refresh"}
-                </button>
               </div>
-              <Show
-                when={supabaseServices()?.connected}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("functions")}
-                    </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect a database project before inspecting its Edge Functions.</p>
-                  </div>
-                }
-              >
-                <div class="cloud-list">
-                  <For
-                    each={supabaseServices()?.functions.functions ?? []}
-                    fallback={
-                      <div class="cloud-empty">
-                        <strong>
-                          {supabaseServices()?.functions.available ? "No Edge Functions" : "Functions unavailable"}
-                        </strong>
-                        <p>
-                          {supabaseServices()?.functions.detail ??
-                            "No functions have been deployed in this Supabase project."}
-                        </p>
-                      </div>
-                    }
-                  >
-                    {(fn) => (
-                      <div class="cloud-row">
-                        <span class="cloud-service-icon">
-                          <Icon name="code" />
-                        </span>
-                        <span class="min-w-0 flex-1">
-                          <strong class="block truncate text-[13px] text-white/85">{fn.name}</strong>
-                          <small class="cloud-muted">
-                            {fn.slug}
-                            {fn.version ? ` · version ${fn.version}` : ""}
-                          </small>
-                        </span>
-                        <Show when={fn.status}>
-                          <span class="cloud-status">{fn.status}</span>
-                        </Show>
-                      </div>
-                    )}
-                  </For>
-                </div>
-                <div class="mt-4 flex justify-end">
-                  <button
-                    class="cloud-button"
-                    data-variant="primary"
-                    type="button"
-                    onClick={() => platform.openLink(supabaseDashboard("/functions"))}
-                  >
-                    Open Functions
-                  </button>
-                </div>
-              </Show>
+              <SupabaseFunctions {...supabasePanel} icon={sectionIcon("functions")} />
             </Show>
 
-            {/* Realtime */}
-            <Show when={section() === "realtime"}>
+            <Show when={section() === "data-logs"}>
               <div class="cloud-heading">
                 <div>
-                  <div class="cloud-kicker">Live data</div>
-                  <h1>Realtime</h1>
-                  <p>Use the repository's Supabase connection for database changes, broadcast, and presence.</p>
+                  <div class="cloud-kicker">Supabase services</div>
+                  <h1>Database logs</h1>
+                  <p>Recent logs from the API gateway, Postgres, Auth, Storage and Edge Functions.</p>
                 </div>
               </div>
-              <Show
-                when={database()?.projectRef}
-                fallback={
-                  <div class="cloud-empty">
-                    <svg viewBox="0 0 16 16" class="cloud-empty-icon" aria-hidden="true">
-                      {sectionIcon("realtime")}
-                    </svg>
-                    <strong>No Supabase project linked</strong>
-                    <p>Connect a project from Database to use Realtime.</p>
-                  </div>
-                }
-              >
-                <section class="cloud-service-list">
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/realtime/inspector"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="status" />
-                    </span>
-                    <span>
-                      <strong>Realtime inspector</strong>
-                      <small>Inspect live channels and messages for this project.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                  <button type="button" onClick={() => platform.openLink(supabaseDashboard("/database/replication"))}>
-                    <span class="cloud-service-icon">
-                      <Icon name="branch" />
-                    </span>
-                    <span>
-                      <strong>Database replication</strong>
-                      <small>Choose which database changes may be streamed to clients.</small>
-                    </span>
-                    <em>Open</em>
-                  </button>
-                </section>
-              </Show>
+              <SupabaseLogs {...supabasePanel} icon={sectionIcon("logs")} />
             </Show>
 
-            {/* Delivery & security */}
-            <Show when={section() === "delivery"}>
+            <Show when={section() === "security"}>
               <div class="cloud-heading">
                 <div>
-                  <div class="cloud-kicker">Hosting platform services</div>
-                  <h1>Delivery & security</h1>
-                  <p>
-                    Open CDN, firewall, flags, workflows, sandboxes, and image controls in the hosting account linked to
-                    this repository. Vector keeps the repository association; the provider remains the source of truth.
-                  </p>
+                  <div class="cloud-kicker">Before you ship</div>
+                  <h1>Security</h1>
+                  <p>Supabase's security advisors and a scan for server keys in what Vector would publish.</p>
                 </div>
               </div>
-              <section class="cloud-service-list">
-                <For
-                  each={[
-                    {
-                      name: "CDN",
-                      detail: "Caching and global delivery for the linked deployment.",
-                      icon: "cloud-upload" as const,
-                    },
-                    {
-                      name: "Firewall",
-                      detail: "Traffic controls and security rules owned by your provider.",
-                      icon: "shield" as const,
-                    },
-                    {
-                      name: "Feature flags",
-                      detail: "Manage release flags alongside the linked project.",
-                      icon: "sliders" as const,
-                    },
-                    {
-                      name: "Workflows",
-                      detail: "Inspect durable project workflows when your provider supports them.",
-                      icon: "branch" as const,
-                    },
-                    {
-                      name: "Sandboxes",
-                      detail: "Open isolated execution resources in the provider dashboard.",
-                      icon: "terminal" as const,
-                    },
-                    {
-                      name: "Image delivery",
-                      detail: "Configure project image optimization and delivery.",
-                      icon: "photo" as const,
-                    },
-                  ]}
-                >
-                  {(service) => (
-                    <button type="button" onClick={() => platform.openLink(deploymentDashboard("vercel"))}>
-                      <span class="cloud-service-icon">
-                        <Icon name={service.icon} />
-                      </span>
-                      <span>
-                        <strong>{service.name}</strong>
-                        <small>{service.detail}</small>
-                      </span>
-                      <em>{providerLink("vercel") ? "Open Vercel" : "Connect Vercel"}</em>
-                    </button>
-                  )}
-                </For>
-              </section>
-              <Show when={providerLink("netlify")}>
-                <div class="mt-4 flex justify-end">
-                  <button
-                    class="cloud-button"
-                    type="button"
-                    onClick={() => platform.openLink(deploymentDashboard("netlify"))}
-                  >
-                    Open linked Netlify site
-                  </button>
-                </div>
-              </Show>
-            </Show>
-
-            {/* AWS */}
-            <Show when={section() === "aws"}>
-              <div class="cloud-heading cloud-heading-with-action">
-                <div>
-                  <div class="cloud-kicker">Local AWS account</div>
-                  <h1>AWS integrations</h1>
-                  <p>
-                    Vector uses your locally authenticated AWS CLI. It can inspect S3, EC2, Lambda, ECS, and SageMaker
-                    without copying credentials into the app or its logs.
-                  </p>
-                </div>
-                <button
-                  class="cloud-button"
-                  data-variant="primary"
-                  type="button"
-                  disabled={awsBusy()}
-                  onClick={() => void refreshAws()}
-                >
-                  {awsBusy() ? "Refreshing…" : "Refresh AWS"}
-                </button>
-              </div>
-              <div class="cloud-aws-controls">
-                <label>
-                  <span>Profile</span>
-                  <select
-                    class="cloud-input"
-                    value={awsProfile()}
-                    onChange={(event) => {
-                      setAwsProfile(event.currentTarget.value)
-                      setAwsLoaded(false)
-                      setAwsSnapshot(undefined)
-                    }}
-                  >
-                    <option value="">Default profile</option>
-                    <For each={awsSnapshot()?.status.profiles ?? []}>
-                      {(profile) => <option value={profile}>{profile}</option>}
-                    </For>
-                  </select>
-                </label>
-                <label>
-                  <span>Region</span>
-                  <input
-                    class="cloud-input"
-                    value={awsRegion()}
-                    onInput={(event) => setAwsRegion(event.currentTarget.value)}
-                    placeholder="us-east-1"
-                  />
-                </label>
-                <div class="cloud-aws-identity">
-                  <strong>
-                    {awsSnapshot()?.status.configured
-                      ? `Account ${awsSnapshot()?.status.accountId}`
-                      : "AWS not connected"}
-                  </strong>
-                  <small>{awsSnapshot()?.status.detail ?? "Checking the AWS CLI on this computer…"}</small>
-                </div>
-              </div>
-              <div class="cloud-list mt-4">
-                <For each={awsSnapshot()?.services ?? []}>
-                  {(service) => (
-                    <div class="cloud-row cloud-row-block">
-                      <span class="cloud-service-icon">
-                        <Icon
-                          name={
-                            service.id === "s3"
-                              ? "folder"
-                              : service.id === "lambda"
-                                ? "code"
-                                : service.id === "sagemaker"
-                                  ? "models"
-                                  : "server"
-                          }
-                        />
-                      </span>
-                      <div class="min-w-0 flex-1">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <strong class="text-[13px] text-white/85">{service.label}</strong>
-                          <span class="cloud-status" data-tone={service.available ? "success" : "warning"}>
-                            {service.available ? `${service.resources.length} found` : "Unavailable"}
-                          </span>
-                        </div>
-                        <Show when={service.detail}>
-                          <p class="cloud-muted mt-1 text-[11px]">{service.detail}</p>
-                        </Show>
-                        <Show when={service.resources.length}>
-                          <div class="cloud-resource-chips mt-2">
-                            <For each={service.resources.slice(0, 8)}>
-                              {(resource) => (
-                                <span title={resource.id}>
-                                  {resource.name}
-                                  {resource.state ? ` · ${resource.state}` : ""}
-                                </span>
-                              )}
-                            </For>
-                            <Show when={service.resources.length > 8}>
-                              <span>+{service.resources.length - 8} more</span>
-                            </Show>
-                          </div>
-                        </Show>
-                      </div>
-                      <button class="cloud-button" type="button" onClick={() => platform.openLink(service.consoleUrl)}>
-                        Open AWS
-                      </button>
-                    </div>
-                  )}
-                </For>
-              </div>
-              <Show when={awsSnapshot() && !awsSnapshot()?.status.installed}>
-                <div class="cloud-notice mt-4" data-tone="info">
-                  Install AWS CLI v2, run <code>aws configure</code> or use AWS SSO, then refresh. Vector never asks for
-                  the access key itself.
-                </div>
-              </Show>
+              <SupabaseSecurity {...supabasePanel} icon={sectionIcon("authentication")} />
             </Show>
 
             {/* Build and runtime */}
@@ -2991,7 +1830,7 @@ export function CloudConsole(props: {
                   <h1>Build & runtime</h1>
                   <p>
                     Detect the project framework and keep its install, build, output, and Node settings attached to this
-                    repository. Cloud Services uses these settings for its build before publishing.
+                    repository. Vector Cloud uses these settings for its build before publishing.
                   </p>
                 </div>
               </div>
@@ -3165,6 +2004,13 @@ export function CloudConsole(props: {
                     </button>
                   </div>
                 </div>
+                <Show when={providerConnection("vercel")?.connected}>
+                  <VercelSettings
+                    projectPath={props.projectPath}
+                    notice={setNotice}
+                    onOpenConnections={() => setSection("connections")}
+                  />
+                </Show>
               </Show>
             </Show>
           </div>
