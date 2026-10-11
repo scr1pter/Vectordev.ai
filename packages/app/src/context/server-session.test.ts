@@ -129,6 +129,32 @@ describe("server session", () => {
     expect(ctx.store.get("root")?.cost).toBe(0.0003)
   })
 
+  test("a session read answered after a newer session.updated keeps the newer session", async () => {
+    const answers: ((value: { data: Session }) => void)[] = []
+    const client = {
+      session: { get: () => new Promise((resolve) => answers.push(resolve)) },
+    } as unknown as VectorClient
+    const store = createServerSession(client)
+    store.apply({ type: "session.created", properties: { info: session("root") } })
+
+    // The title's spend lands first and starts a read; the title itself arrives before the read is answered.
+    store.apply({ type: "session.next.ancillary.usage", properties: { sessionID: "root", cost: 0.0003 } })
+    const titled = {
+      ...session("root"),
+      title: "Refactor the request module",
+      cost: 0.0003,
+      time: { created: 1, updated: 3 },
+    }
+    store.apply({ type: "session.updated", properties: { info: titled } })
+    answers[0]!({ data: { ...session("root"), cost: 0.0003, time: { created: 1, updated: 2 } } })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(answers).toHaveLength(1)
+    expect(store.get("root")?.title).toBe("Refactor the request module")
+    expect(store.get("root")?.time.updated).toBe(3)
+  })
+
   test("loads session content through the server client", async () => {
     const ctx = setup({ root: session("root") })
 

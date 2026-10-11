@@ -238,6 +238,10 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
     const request = client.session.get({ sessionID }).then((result) => {
       if (!result.data) throw sessionNotFoundError(sessionID)
       if (generations.get(sessionID) !== active) return result.data
+      // A session.updated event (a new title, say) can land while this read is in flight. The engine bumps a session's
+      // updated time on every write, so an older snapshot must not replace it.
+      const current = data.info[sessionID]
+      if (current && current.time.updated > result.data.time.updated) return current
       return remember(result.data)
     })
     requests.set(sessionID, request)
