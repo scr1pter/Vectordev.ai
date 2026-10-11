@@ -25,7 +25,6 @@ import { bestOwnFreeModel } from "@/utils/free-model"
 import { freeModelName } from "@vectordevai/core/free-model-choice"
 import { decodeRouteSegment, projectPathFromWorkspaceRoute, sessionIDFromRouteValue } from "@/utils/project-route"
 import { taskScopeId, taskScopeSearch, type TaskScope } from "@/utils/task-scope"
-import { sessionIDFromEvent } from "@/utils/session-event"
 import { WORKSPACE_FILE_SAVED_EVENT, workspaceFileSavedDetail } from "@/utils/workspace-file-saved"
 import { WORKSPACE_MODE_CHANGED_EVENT, workspaceModeFromEvent, type WorkspaceMode } from "@/utils/workspace-mode"
 import { reviewCatalog, runReview, workflowModel, workingTreeChanges } from "@/features/pull-requests/ai-review"
@@ -77,19 +76,13 @@ import {
   recordSessionOutcome,
 } from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
-import { measureUsage } from "@/features/economics/token-usage"
-import {
-  createSessionOutcomeRecorder,
-  measureSessionEconomics,
-  outcomeFromSession,
-} from "@/features/economics/session-outcomes"
-import { createSessionFamilyRefresher, sessionFamilyEventID } from "@/features/economics/session-family"
+import { measureSessionEconomics } from "@/features/economics/session-outcomes"
+import { createSessionEconomics } from "@/features/economics/session-economics"
 import { createWorkspaceOutcomeRecorder, type WorkspaceOutcomeRecord } from "@/features/economics/workspace-outcomes"
 import {
   ONBOARDING_UPDATED_EVENT,
   readOnboardingFlags,
   setOnboardingFlag,
-  successfulActivationFromSession,
 } from "@/features/onboarding/onboarding-progress"
 import { ParallelDiffReview } from "@/components/parallel-diff-review"
 import { WorkspaceNavigation, type WorkspaceNavigationItem } from "@/components/workspace-navigation"
@@ -2816,108 +2809,25 @@ export default function NewLayout(props: ParentProps) {
     ))
   }
 
-  // Ordinary sessions feed the economics engine too. Learning only from
-  // validated parallel runs left it with too few samples to ever recommend
-  // anything, which is why the feature looked dead.
-  const sessionOutcomes = createSessionOutcomeRecorder(async (sessionID, directory, current) => {
-    const client = serverSDK().createClient({ directory })
-    const before = await client.session.get({ sessionID }).catch(() => undefined)
-    if (!current()) return
-    if (!before?.data) throw new Error("Session metadata is unavailable")
-    // Child spend is recorded through the root's family refresh; its full history is not a separate sample.
-    if (before.data.parentID) return
-    const history = await client.session.messages({ sessionID })
-    if (!Array.isArray(history.data)) throw new Error("Session history is unavailable")
-    if (!current()) return
-    if (successfulActivationFromSession(history.data)) {
+  const sessionEconomics = createSessionEconomics({
+    client: (directory) => serverSDK().createClient({ directory }),
+    save: recordSessionOutcome,
+    activated: () => {
       setOnboardingFlag("providerVerified")
       setOnboardingFlag("taskCompleted")
-    }
-    // Missing usage is not evidence to remove a previous sample. Measured mixed-model usage is.
-    if (!measureUsage(history.data.map((entry) => entry.info))) return
-    const session = await client.session.get({ sessionID })
-    if (!session.data) throw new Error("Session metadata is unavailable")
-    if (!current()) return
-    // Do not assign a newer metadata revision to history fetched before that revision existed.
-    if (
-      session.data.time.updated !== before.data.time.updated ||
-      session.data.cost !== before.data.cost ||
-      session.data.unpricedSteps !== before.data.unpricedSteps ||
-      session.data.subagentCost !== before.data.subagentCost ||
-      session.data.subagentUnpricedSteps !== before.data.subagentUnpricedSteps
-    )
-      throw new Error("Session changed while collecting usage")
-    const parts = Object.fromEntries(history.data.map((entry) => [entry.info.id, entry.parts]))
-    const outcome = outcomeFromSession({
-      sessionID,
-      projectId: directory,
-      messages: history.data,
-      parts,
-      spend: session.data,
-    })
-    if (!outcome) {
-      const models = new Set(
-        history.data.flatMap((entry) => {
-          const usage = measureUsage([entry.info])
-          return usage?.provider && usage.model ? [JSON.stringify([usage.provider, usage.model])] : []
-        }),
-      )
-      if (models.size < 2) return
-    }
-    await recordSessionOutcome({
-      sessionID,
-      projectId: directory,
-      updatedAt: history.data.reduce(
-        (latest, entry) =>
-          Math.max(
-            latest,
-            entry.info.role === "assistant"
-              ? (entry.info.time.completed ?? entry.info.time.created)
-              : entry.info.time.created,
-          ),
-        session.data.time.updated,
-      ),
-      outcome,
-    })
-  })
-  const sessionFamily = createSessionFamilyRefresher(
-    async (sessionID, directory) => {
-      const result = await serverSDK().createClient({ directory }).session.get({ sessionID })
-      return result.data
     },
-    async (sessionID, directory, revision) => {
-      if (!(await sessionOutcomes.refresh(sessionID, directory, revision))) return false
+    async workspaces(sessionID, directory) {
       const workspaces = parallelRecords().filter(
         (record) => record.agentSessionId === sessionID && record.isolatedPath === directory,
       )
       const recorded = await Promise.all(workspaces.map((record) => workspaceOutcomes.observe(record, true)))
       return recorded.every(Boolean)
     },
-  )
-  const stopSessionOutcomes = serverSDK().event.listen((event) => {
-    const directory = (event as { name?: string }).name
-    if (!directory) return
-    const familyID = sessionFamilyEventID(event.details)
-    if (familyID) void sessionFamily.refresh(familyID, directory).catch(() => undefined)
-    if (event.details.type === "session.updated") {
-      const session = event.details.properties.info
-      sessionOutcomes.changed(session.id, directory, session.time.updated)
-      return
-    }
-    const sessionID = sessionIDFromEvent(event.details)
-    if (!sessionID) return
-    if (event.details.type === "message.updated") {
-      const message = event.details.properties.info
-      if (message.role === "assistant" && message.time.completed)
-        sessionOutcomes.changed(sessionID, directory, message.time.completed)
-      return
-    }
-    if (event.details.type === "session.idle") void sessionOutcomes.idle(sessionID, directory)
   })
+  const stopSessionOutcomes = serverSDK().event.listen((event) => sessionEconomics.handle(event))
   onCleanup(() => {
     stopSessionOutcomes()
-    sessionFamily.dispose()
-    sessionOutcomes.dispose()
+    sessionEconomics.dispose()
   })
 
   const taskRoute = () => /\/session\/[^/?#]+/.test(location.pathname)
