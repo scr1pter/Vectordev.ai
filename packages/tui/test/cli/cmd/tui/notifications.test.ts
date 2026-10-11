@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import Notifications from "../../../../src/feature-plugins/system/notifications"
-import type { Event, PermissionRequest, QuestionRequest, Session } from "@vectordevai/sdk/v2"
+import {
+  createVectorClient,
+  type Event,
+  type PermissionRequest,
+  type QuestionRequest,
+  type Session,
+} from "@vectordevai/sdk/v2"
 import type { TuiAttentionNotifyInput } from "@vectordevai/plugin/tui"
 import { createTuiPluginApi } from "../../../fixture/tui-plugin"
 
@@ -46,6 +52,10 @@ async function setup() {
           }
         },
       },
+      client: createVectorClient({
+        baseUrl: "http://engine.test",
+        fetch: async () => Response.json({ ...session("hidden", "Review"), internal: "vectorscope.review" }),
+      }),
       state: {
         session: {
           get: (sessionID: string) => sessions[sessionID],
@@ -105,6 +115,18 @@ describe("internal notifications TUI plugin", () => {
     harness.emit({ id: "event-2", type: "permission.asked", properties: permission("permission-1") })
 
     expect(harness.notifications).toEqual([questionNotification, permissionNotification])
+  })
+
+  test("looks up an unseen helper before notifying after reconnect", async () => {
+    const harness = await setup()
+    harness.emit({
+      id: "event-hidden",
+      type: "permission.asked",
+      properties: permission("permission-hidden", "hidden"),
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(harness.notifications).toEqual([])
   })
 
   test("dedupes pending questions and permissions until they are resolved", async () => {
