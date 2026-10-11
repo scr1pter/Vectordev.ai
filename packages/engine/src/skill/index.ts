@@ -193,12 +193,16 @@ const discoverSkills = Effect.fnUntraced(function* (
       yield* scan(state, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "global" })
     }
 
-    const upDirs = yield* fsys
-      .up({ targets: externalDirs, start: directory, stop: worktree })
-      .pipe(Effect.catch(() => Effect.succeed([] as string[])))
+    const trusted = yield* config.trust()
+    const upDirs = !trusted.trusted
+      ? []
+      : yield* fsys
+          .up({ targets: externalDirs, start: directory, stop: worktree })
+          .pipe(Effect.catch(() => Effect.succeed([] as string[])))
 
     for (const root of upDirs) {
-      yield* scan(state, root, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "project" })
+      const approved = yield* config.trustedPath(root)
+      if (approved) yield* scan(state, approved, EXTERNAL_SKILL_PATTERN, { dot: true, scope: "project" })
     }
   }
 

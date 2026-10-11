@@ -340,6 +340,7 @@ type State = {
   deps: Fiber.Fiber<void>[]
   trust: WorkspaceTrust.Snapshot
   trusted: boolean
+  trustedSnapshot: WorkspaceTrust.TrustedSnapshot | undefined
   ceiling: PermissionCeiling | undefined
 }
 
@@ -365,6 +366,7 @@ export interface Interface {
   readonly storedMcp: (name: string) => Effect.Effect<Record<string, unknown>>
   readonly invalidate: () => Effect.Effect<void>
   readonly directories: () => Effect.Effect<string[]>
+  readonly trustedPath: (path: string) => Effect.Effect<string | undefined>
   readonly waitForDependencies: () => Effect.Effect<void>
   readonly trust: () => Effect.Effect<TrustStatus>
   readonly approve: () => Effect.Effect<void>
@@ -651,7 +653,7 @@ const layer = Layer.effect(
               properties: {
                 title: "Project settings ignored",
                 message:
-                  "Vector is not loading this project's vector.json or .vector settings until you trust it. Trust it from the app, or run `vector trust approve` in the project.",
+                  "Vector is not loading this project's vector.json or .vector settings until you trust it. Use /trust in the TUI, Trust project in the app, or run `vector trust approve` in the project.",
                 variant: "warning",
                 duration: 15_000,
               },
@@ -973,6 +975,7 @@ const layer = Layer.effect(
           deps,
           trust: trustSnapshot,
           trusted,
+          trustedSnapshot,
           ceiling:
             trusted && projectGrants
               ? {
@@ -1012,6 +1015,12 @@ const layer = Layer.effect(
 
     const permissionCeiling = Effect.fn("Config.permissionCeiling")(function* () {
       return yield* InstanceState.use(state, (s) => s.ceiling)
+    })
+
+    const trustedPath = Effect.fn("Config.trustedPath")(function* (path: string) {
+      return yield* InstanceState.use(state, (s) =>
+        s.trustedSnapshot ? WorkspaceTrust.materializedPathOption(s.trustedSnapshot, path) : undefined,
+      )
     })
 
     const trust = Effect.fn("Config.trust")(function* () {
@@ -1173,6 +1182,7 @@ const layer = Layer.effect(
       directories,
       waitForDependencies,
       trust,
+      trustedPath,
       approve,
       permissionCeiling,
     })

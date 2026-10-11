@@ -62,6 +62,9 @@ describe("server authentication", () => {
     expect(() => ServerAuth.assertSecurePasswordTransport("127.0.0.1", "secret")).not.toThrow()
     expect(() => ServerAuth.assertSecurePasswordTransport("http://localhost:4096", "secret")).not.toThrow()
     expect(() => ServerAuth.assertSecurePasswordTransport("https://vector.example", "secret")).not.toThrow()
+    for (const host of ["10.0.0.2", "192.168.1.4", "172.20.0.5", "100.64.0.1", "vector.local", "vector", "[fd00::1]"]) {
+      expect(() => ServerAuth.assertSecurePasswordTransport(`http://${host}:4096`, "secret")).not.toThrow()
+    }
     expect(() => ServerAuth.assertSecurePasswordTransport("http://vector.example", "secret")).toThrow("cleartext")
     expect(() => ServerAuth.assertSecurePasswordTransport("0.0.0.0", "secret")).toThrow("cleartext")
     expect(() => ServerAuth.assertSecurePasswordTransport("http://vector.example", undefined)).not.toThrow()

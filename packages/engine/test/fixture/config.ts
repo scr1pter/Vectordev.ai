@@ -12,6 +12,7 @@ export function make(overrides: Partial<Config.Interface> = {}) {
     storedMcp: () => Effect.succeed({}),
     invalidate: () => Effect.void,
     directories: () => Effect.succeed([]),
+    trustedPath: () => Effect.succeed(undefined),
     waitForDependencies: () => Effect.void,
     permissionCeiling: () => Effect.succeed(undefined),
     trust: () => Effect.succeed({ workspace: "", fingerprint: "", trusted: false, ignored: false }),

@@ -6,6 +6,18 @@ import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trus
 import { tmpdir } from "../fixture/tmpdir"
 
 describe("WorkspaceTrust", () => {
+  test("project skill instructions are part of the approved fingerprint", async () => {
+    await using workspace = await tmpdir()
+    await using state = await tmpdir()
+    const file = path.join(workspace.path, ".agents", "skills", "example", "SKILL.md")
+    await Bun.write(file, "Approved skill")
+    await WorkspaceTrust.approve(state.path, await WorkspaceTrust.snapshot(workspace.path, []))
+    await Bun.write(file, "Changed skill")
+    expect((await WorkspaceTrust.status(state.path, await WorkspaceTrust.snapshot(workspace.path, []))).trusted).toBe(
+      false,
+    )
+  })
+
   test("stores canonical workspace approval outside the workspace and invalidates changed content", async () => {
     await using workspace = await tmpdir()
     await using state = await tmpdir()

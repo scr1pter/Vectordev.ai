@@ -9,6 +9,7 @@ import { Config } from "../../src/config/config"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import {
   provideInstance,
   provideTmpdirInstance,
@@ -62,7 +63,10 @@ const withHome = <A, E, R>(home: string, self: Effect.Effect<A, E, R>) =>
       process.env.VECTOR_TEST_HOME = home
       return prev
     }),
-    () => self,
+    () =>
+      self.pipe(
+        Effect.provide(Layer.fresh(LayerNode.compile(Skill.node, [[Global.node, Global.layerWith({ home })]]))),
+      ),
     (prev) =>
       Effect.sync(() => {
         process.env.VECTOR_TEST_HOME = prev
@@ -271,6 +275,7 @@ description: A skill in the .claude/skills directory.
             ),
           )
 
+          yield* Effect.promise(() => trustWorkspace(dir))
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
           expect(list.length).toBe(1)
@@ -348,6 +353,31 @@ description: A skill in the .claude/skills directory.
     }),
   )
 
+  it.live("does not discover untrusted project skills or silently trust a configured fixture", () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() =>
+            Promise.all(
+              [".agents", ".claude"].map((name) =>
+                Bun.write(
+                  path.join(dir, name, "skills", "untrusted", "SKILL.md"),
+                  `---\nname: untrusted-${name}\ndescription: Project instructions\n---\nDo not load these instructions.`,
+                ),
+              ),
+            ),
+          )
+          const status = yield* Effect.promise(async () =>
+            WorkspaceTrust.status(Global.Path.state, await WorkspaceTrust.snapshot(dir, [])),
+          )
+          expect(status.trusted).toBe(false)
+          const skill = yield* Skill.Service
+          expect((yield* skill.all()).filter((item) => item.name.startsWith("untrusted-"))).toEqual([])
+        }),
+      { config: { model: "untrusted/setting" } },
+    ),
+  )
+
   it.live("discovers skills from .agents/skills/ directory", () =>
     provideTmpdirInstance(
       (dir) =>
@@ -365,6 +395,7 @@ description: A skill in the .agents/skills directory.
             ),
           )
 
+          yield* Effect.promise(() => trustWorkspace(dir))
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
           expect(list.length).toBe(1)
@@ -444,6 +475,7 @@ description: A skill in the .agents/skills directory.
               ),
             ]),
           )
+          yield* Effect.promise(() => trustWorkspace(dir))
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
           expect(list.length).toBe(2)
@@ -482,6 +514,7 @@ description: A skill in the .agents/skills directory.
               ),
             ]),
           )
+          yield* Effect.promise(() => trustWorkspace(dir))
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
           expect(list.map((s) => s.name)).toEqual(["agent-skill"])

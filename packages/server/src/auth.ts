@@ -207,11 +207,11 @@ export function isOwnerOnlyRoute(method: string, route: string) {
 export function assertSecurePasswordTransport(target: string | URL, password: string | undefined) {
   if (!password) return
   if (typeof target === "string" && !target.includes("://")) {
-    if (isLoopbackHostname(target)) return
+    if (isLocalNetworkHostname(target)) return
     throw new Error(`Refusing to send or accept a reusable password over cleartext transport to ${target}`)
   }
   const url = target instanceof URL ? target : new URL(target)
-  if (url.protocol === "https:" || url.protocol === "wss:" || isLoopbackHostname(url.hostname)) return
+  if (url.protocol === "https:" || url.protocol === "wss:" || isLocalNetworkHostname(url.hostname)) return
   throw new Error(`Refusing to send or accept a reusable password over cleartext transport to ${url.hostname}`)
 }
 
@@ -250,6 +250,28 @@ function claims<A extends string>(input: Option.Option<string>, decode: (input: 
     .map((value) => value.trim())
     .filter((value) => value !== "")
     .flatMap((value): A[] => Option.match(decode(value), { onNone: () => [], onSome: (claim) => [claim] }))
+}
+
+function isLocalNetworkHostname(input: string) {
+  const hostname = input
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+  if (isLoopbackHostname(hostname)) return true
+  if (isIP(hostname) === 4) {
+    const octets = hostname.split(".").map(Number)
+    return (
+      octets[0] === 10 ||
+      (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168) ||
+      (octets[0] === 169 && octets[1] === 254) ||
+      (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
+    )
+  }
+  if (isIP(hostname) === 4) return false
+  if (isIP(hostname) === 6) return /^f[cd][0-9a-f]{2}:/.test(hostname) || /^fe[89ab][0-9a-f]:/.test(hostname)
+  if (hostname.includes(":")) return false
+  return !hostname.includes(".") || /\.(?:local|lan|home|internal|home\.arpa)$/.test(hostname)
 }
 
 function isLoopbackHostname(input: string) {

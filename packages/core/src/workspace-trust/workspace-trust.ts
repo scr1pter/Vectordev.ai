@@ -90,9 +90,16 @@ export async function snapshot(workspace: string, inputs: readonly string[]): Pr
     ...normalizedInputs,
     ...names.map((name) => path.join(canonical, name)),
     path.join(canonical, ".vector"),
+    path.join(canonical, ".agents", "skills"),
+    path.join(canonical, ".claude", "skills"),
     ...normalizedInputs.flatMap((input) =>
       configNames.has(path.basename(input))
-        ? [...names.map((name) => path.join(path.dirname(input), name)), path.join(path.dirname(input), ".vector")]
+        ? [
+            ...names.map((name) => path.join(path.dirname(input), name)),
+            path.join(path.dirname(input), ".vector"),
+            path.join(path.dirname(input), ".agents", "skills"),
+            path.join(path.dirname(input), ".claude", "skills"),
+          ]
         : [],
     ),
   ]
