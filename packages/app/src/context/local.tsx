@@ -196,7 +196,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const free = bestOwnFreeModel(connected.flatMap((provider) => Object.values(provider.models)))
       if (free) return { providerID: "openrouter", modelID: free.id }
       if (connected.some((provider) => provider.id === "openrouter")) return
-      // Codium spends the account's credits, so it is chosen only when nothing else can run.
+      // Codium spends the account's credits, so it is never chosen automatically, even as the only provider.
       for (const provider of ModelPlanStatus.automaticProviders(connected)) {
         const configured = defaults[provider.id]
         if (configured) {

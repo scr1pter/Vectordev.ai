@@ -240,7 +240,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           .toSorted((a, b) => b.limit.context - a.limit.context)[0]
         if (free) return { providerID: "openrouter", modelID: free.id }
         if (sync.data.provider.some((provider) => provider.id === "openrouter")) return
-        // Codium spends the account's credits, so it is chosen only when nothing else can run.
+        // Codium spends the account's credits, so it is never chosen automatically, even as the only provider.
         const provider = ModelPlanStatus.automaticProviders(sync.data.provider)[0]
         if (!provider) return undefined
         const defaultModel = sync.data.provider_default[provider.id]
