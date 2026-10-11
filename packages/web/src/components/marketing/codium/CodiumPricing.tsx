@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { Check, ChevronRight, Coins, Minus, Plus, Repeat } from "lucide-react"
+import { Check, ChevronRight, Coins, Minus, Plus, User } from "lucide-react"
 import React from "react"
 import type { CodiumOffer, CodiumPricingView } from "../../../lib/codium-pricing"
 import { modelPlanRedirect } from "../../../lib/model-plans"
@@ -9,32 +9,68 @@ export type CodiumMode = "monthly" | "topup"
 
 const INTENT_KEY = "vector-codium-intent"
 const count = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
-const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-// Suggestions by position, so a repriced tier keeps a sensible line.
-const FIT = [
-  "Best for trying Codium on real work",
-  "Best for regular coding through the week",
-  "Best for coding every day",
-  "Best for long agent sessions",
-  "Best for parallel agents and heavy use",
-]
-const FREE = [
-  "The full Vector desktop workspace and terminal agent",
-  "Vector Agent, subagents and parallel agents",
-  "Vectorscope code review and the browser agent",
-  "Your own provider keys, billed by your provider",
-  "Free models through your own OpenRouter account",
-]
+const MODES = [
+  { mode: "monthly", label: "Individual", icon: User },
+  { mode: "topup", label: "Top-ups", icon: Coins },
+] as const
+// One line per card, by position, so a repriced tier keeps a sensible line.
+const FIT = {
+  monthly: [
+    "For trying Codium on everyday coding.",
+    "For coding with agents most days.",
+    "For daily agent work across projects.",
+    "For long sessions and parallel agents.",
+  ],
+  topup: [
+    "For finishing a task when credits run low.",
+    "For a busy week, without a new plan.",
+    "For a sprint or a large migration.",
+    "For heavy use without a subscription.",
+  ],
+}
+const FEATURES = {
+  monthly: [
+    "Monthly credits for every Codium model",
+    "Works in the Vector desktop app and CLI",
+    "Zero-data-retention model endpoints",
+    "No overage charges or automatic top-ups",
+    "Top up any time when credits run low",
+    "Cancel any time; access lasts the paid period",
+  ],
+  topup: [
+    "Credits for every Codium model",
+    "No subscription needed",
+    "Unused credits carry forward separately from any plan",
+    "Spent after the credits in a monthly plan",
+    "No automatic top-ups or overage charges",
+  ],
+}
 
-/** The Codium plan cards, usage estimates and questions on /codium. Purchases go through the account's checkout. */
+/** Codium's plan cards, usage estimates and questions on /codium. Purchases go through the account's checkout. */
 export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: CodiumMode }) {
-  const [mode, setMode] = React.useState(props.mode ?? "monthly")
+  const [mode, setMode] = React.useState<CodiumMode>(props.mode ?? "monthly")
   const [pending, setPending] = React.useState<{ id: string; signIn?: boolean }>()
   const [failure, setFailure] = React.useState<{ id: string; message: string }>()
-  const [open, setOpen] = React.useState(["credits"])
-  const offers = mode === "monthly" ? props.pricing.monthly : props.pricing.topups
-  const models = new Intl.ListFormat("en-US").format(props.pricing.models.map((model) => model.name))
+  const [open, setOpen] = React.useState(["run-out"])
+  const radios = React.useRef<(HTMLButtonElement | null)[]>([])
+  // Later cards give their usage on the default model and, when the catalog has one, the advanced model.
+  const featured = [...new Set([0, props.pricing.models.findIndex((model) => model.category === "advanced")])].filter(
+    (row) => row >= 0 && row < props.pricing.models.length,
+  )
+  const range = (tasks: readonly [number, number]) => `${count.format(tasks[0])}–${count.format(tasks[1])}`
+  const names = (category: "everyday" | "advanced") =>
+    new Intl.ListFormat("en-US", { type: "disjunction" }).format(
+      props.pricing.models.filter((model) => model.category === category).map((model) => model.name),
+    )
+
+  const choose = (next: CodiumMode, focus = false) => {
+    if (focus) radios.current[MODES.findIndex((item) => item.mode === next)]?.focus()
+    if (next === mode) return
+    setMode(next)
+    document.documentElement.dataset.codiumMode = next
+    history.pushState(history.state, "", codiumModeUrl(location.href, next))
+  }
 
   const buy = (offer: CodiumOffer, kind: CodiumMode, resumed = false) => {
     if (!offer.available || pending) return
@@ -54,6 +90,18 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
         })
       })
   }
+
+  // The tab lives in the address (?type=topups), so a shared link, a reload and the back button all restore it.
+  React.useEffect(() => {
+    const restore = () => {
+      const next = codiumMode(location.search)
+      setMode(next)
+      document.documentElement.dataset.codiumMode = next
+    }
+    restore()
+    addEventListener("popstate", restore)
+    return () => removeEventListener("popstate", restore)
+  }, [])
 
   // A purchase started before sign-in continues once the buyer is back from signing in.
   React.useEffect(() => {
@@ -81,60 +129,58 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
 
   const faq = [
     {
+      id: "run-out",
+      question: "What happens when my credits run out?",
+      answer: (
+        <p>
+          Before each Codium request, Vector checks that your credits can cover it. When they can't, Codium requests
+          pause: there are no overage charges and no automatic top-ups. Buy a top-up, wait for your plan to renew, or
+          keep working with your own provider keys or free models. The Vector workspace keeps working either way.
+        </p>
+      ),
+    },
+    {
+      id: "balance",
+      question: "Where can I see my balance?",
+      answer: (
+        <p>
+          On your <a href="/account">account page</a> while you're signed in. It lists monthly and top-up credits
+          separately, and a balance can lag behind requests that are still finishing.
+        </p>
+      ),
+    },
+    {
       id: "credits",
       question: "How do Codium credits work?",
       answer: (
         <p>
-          Every Codium purchase adds credits to your Vector account. Each request spends credits according to the model
-          you pick and the tokens it actually uses: input, output and reasoning all count, and cached input can cost
-          less. Costlier models spend credits faster. Every plan and top-up has the same models, so buying more gets you
-          more usage rather than different models.
+          Every purchase adds credits to your Vector account. Each request spends credits for the tokens it actually
+          uses with the model you picked: input, output and reasoning all count, and cached input costs less. Monthly
+          credits are spent first and reset when each billing period ends. Top-up credits don't renew and carry forward
+          separately from your subscription. Credits from a refunded or disputed payment are removed.
         </p>
       ),
     },
     {
-      id: "run-out",
-      question: "What happens when I run out of credits?",
+      id: "last-longer",
+      question: "How can I make my credits last longer?",
       answer: (
         <p>
-          Before each Codium request, Vector checks that your available credits can cover it. When they can't, Codium
-          requests pause. There are no overage charges and no automatic top-ups. Buy a top-up, wait for your monthly
-          allowance to renew, or keep going with your own provider keys or free models. The workspace keeps working
-          either way.
-        </p>
-      ),
-    },
-    {
-      id: "monthly-topup",
-      question: "What's the difference between monthly and top-up credits?",
-      answer: (
-        <p>
-          A monthly plan includes a fresh allowance each billing period. Unused monthly credits expire when the period
-          ends and don't roll over. A top-up is a one-time purchase that doesn't renew: its unused credits carry forward
-          separately from your subscription, and you can buy one with or without a plan. When you have both, monthly
-          credits are used first, and purchased credits cover a request the monthly remainder can't. Credits from a
-          refunded or disputed payment are removed.
-        </p>
-      ),
-    },
-    {
-      id: "own-keys",
-      question: "Can I use my own API keys instead?",
-      answer: (
-        <p>
-          Yes. The Vector workspace is free with a Vector account, and Codium is optional. Connect your own provider
-          keys, or your own OpenRouter account for free models, and those requests are billed by that provider instead
-          of using Codium credits. You choose the model for each task, so you can mix Codium with your own providers.{" "}
-          <a href="/docs/models">Models, free models and your own keys</a>
+          {names("everyday") && names("advanced")
+            ? `Use ${names("everyday")} for routine work and save ${names("advanced")} for hard problems. `
+            : ""}
+          Start a new session for each new task so the model doesn't keep re-reading old context, point agents at the
+          files that matter, and run fewer agents in parallel. Requests through your own provider keys or free models
+          don't use credits at all.
         </p>
       ),
     },
     {
       id: "models",
-      question: "Which models are included?",
+      question: "Which models are included, and where do my requests go?",
       answer: (
         <React.Fragment>
-          <p>Every plan and top-up includes the same coding models:</p>
+          <p>Every plan and top-up includes the same coding models, and Vector never switches models for you.</p>
           <ul>
             {props.pricing.models.map((model) => (
               <li key={model.id}>
@@ -143,7 +189,6 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
               </li>
             ))}
           </ul>
-          <p>Vector never switches models for you. The catalog can change as providers and their prices change.</p>
           <p>
             Codium requests, including the code and tool output a task sends, go through Vector and OpenRouter to a
             provider serving the model you picked. Vector asks OpenRouter to route them only to zero-data-retention
@@ -153,264 +198,247 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
         </React.Fragment>
       ),
     },
-    {
-      id: "change",
-      question: "How do I change or cancel my plan?",
-      answer: (
-        <p>
-          Open billing from your <a href="/account">account page</a> to update your payment method, see invoices or
-          cancel. A cancelled plan stays active until the end of the period you paid for, then stops renewing. To move
-          to a different monthly plan, cancel the current one and choose the new plan once its period ends. You can buy
-          a top-up at any time.
-        </p>
-      ),
-    },
-    {
-      id: "balance",
-      question: "Where can I see my balance?",
-      answer: (
-        <p>
-          On your <a href="/account">account page</a> while you're signed in, which lists monthly and purchased credits
-          separately. A balance can lag behind requests that are still finishing.
-        </p>
-      ),
-    },
   ]
 
   return (
-    <div className="codium-pricing">
-      <h2 className="codium-visually-hidden">Plans</h2>
+    <div className="cx-pricing">
+      <h2 className="cx-visually-hidden">Plans</h2>
       {props.pricing.topups.length > 0 && (
-        <div className="codium-toggle" role="group" aria-label="Purchase type">
-          <button type="button" aria-pressed={mode === "monthly"} onClick={() => setMode("monthly")}>
-            <Repeat size={14} aria-hidden="true" />
-            Monthly plans
-          </button>
-          <button type="button" aria-pressed={mode === "topup"} onClick={() => setMode("topup")}>
-            <Coins size={14} aria-hidden="true" />
-            One-time top-ups
-          </button>
+        <div
+          className="cx-toggle"
+          role="radiogroup"
+          aria-label="Choose how to buy Codium"
+          onKeyDown={(event) => {
+            const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key]
+            const target =
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? MODES.length - 1
+                  : step === undefined
+                    ? undefined
+                    : (MODES.findIndex((item) => item.mode === mode) + step + MODES.length) % MODES.length
+            if (target === undefined) return
+            event.preventDefault()
+            choose(MODES[target]!.mode, true)
+          }}
+        >
+          {MODES.map((item, index) => (
+            <button
+              key={item.mode}
+              ref={(element) => {
+                radios.current[index] = element
+              }}
+              type="button"
+              role="radio"
+              data-mode={item.mode}
+              aria-checked={mode === item.mode}
+              tabIndex={mode === item.mode ? 0 : -1}
+              onClick={() => choose(item.mode)}
+            >
+              <item.icon size={16} aria-hidden="true" />
+              {item.label}
+            </button>
+          ))}
         </div>
       )}
-      <p className="codium-mode-note">
-        {mode === "monthly"
-          ? "Plans renew automatically every month at the listed price until you cancel. Unused monthly credits reset when the period ends."
-          : "Buy credits once. Top-ups don't renew, and unused credits carry forward separately from any monthly plan."}
-      </p>
-      {!props.pricing.enabled && (
-        <p className="codium-soon">Codium purchases open soon. Prices shown are planned launch pricing.</p>
-      )}
 
-      <div className="codium-cards">
-        <article className="codium-card">
-          <header>
-            <h3>Free</h3>
-            <p>Best for bringing your own models</p>
-          </header>
-          <p className="codium-price">
-            <strong>$0</strong>
-            <span>/ month</span>
-          </p>
-          <div className="codium-action">
-            <a className="codium-button" href="/login">
-              Get Free
-              <ChevronRight size={14} aria-hidden="true" />
-            </a>
-          </div>
-          <div className="codium-allowance">
-            <p>No Codium credits included</p>
-            <p>Use your own keys or free models</p>
-          </div>
-          <div className="codium-features">
-            <ul>
-              {FREE.map((feature) => (
-                <li key={feature}>
-                  <Check size={15} aria-hidden="true" />
-                  {feature}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </article>
-
-        {offers.map((offer, index) => {
-          const first = offers[0]
-          // Later tiers differ only in how many credits they include. Their amounts sit in each card's own allowance,
-          // so "Everything in" carries over features, never a credit count that could read as adding up.
-          const multiple =
-            index > 0 && first.credits > 0 && offer.credits > first.credits ? offer.credits / first.credits : undefined
-          const features =
-            index === 0
-              ? [
-                  models && `Every Codium model: ${models}`,
-                  "Works in the Vector desktop app and CLI",
-                  ...(mode === "monthly"
-                    ? [
-                        "Fresh credits each billing period",
-                        "No overage charges or automatic top-ups",
-                        "Renews monthly until you cancel; access lasts the paid period",
-                      ]
+      {MODES.map((item) => {
+        const offers = item.mode === "monthly" ? props.pricing.monthly : props.pricing.topups
+        const monthly = item.mode === "monthly"
+        return (
+          <div className="cx-panel" data-mode={item.mode} key={item.mode}>
+            <div className="cx-cards">
+              {offers.map((offer, index) => {
+                const first = offers[0]!
+                const anchor = monthly ? first.name : `the ${usd.format(first.price)} top-up`
+                // Later tiers differ only in credits: a multiple of the first, so they never read as adding up, and the
+                // usage that buys. Credit amounts never appear.
+                const features =
+                  index === 0
+                    ? FEATURES[item.mode]
                     : [
-                        "Unused credits carry forward separately from any plan",
-                        "No subscription needed",
-                        "No automatic top-ups or overage charges",
-                      ]),
-                ].filter((feature): feature is string => Boolean(feature))
-              : multiple
-                ? [`${count.format(multiple)}× the credits`]
-                : []
-          return (
-            <article className="codium-card" key={offer.id}>
-              <header>
-                <h3>{offer.name}</h3>
-                <p>{FIT[index] ?? "Best for more usage"}</p>
-              </header>
-              <p className="codium-price">
-                <strong>{usd.format(offer.price)}</strong>
-                <span>{mode === "monthly" ? "/ month" : "one-time"}</span>
-              </p>
-              <div className="codium-action">
-                <button
-                  className="codium-button"
-                  type="button"
-                  disabled={!offer.available || pending !== undefined}
-                  onClick={() => buy(offer, mode)}
-                >
-                  {!offer.available ? (
-                    "Coming soon"
-                  ) : pending?.id === offer.id ? (
-                    pending.signIn ? (
-                      "Signing in…"
-                    ) : (
-                      "Opening checkout…"
-                    )
-                  ) : (
-                    <React.Fragment>
-                      {mode === "monthly" ? `Get ${offer.name}` : `Buy ${usd.format(offer.price)} top-up`}
-                      <ChevronRight size={14} aria-hidden="true" />
-                    </React.Fragment>
-                  )}
-                </button>
-                {failure?.id === offer.id && (
-                  <p className="codium-error" role="alert">
-                    {failure.message} <a href="/account">Open your account</a>
-                  </p>
-                )}
-              </div>
-              <div className="codium-allowance">
-                <p>
-                  {offer.credits > 0
-                    ? `${count.format(offer.credits)} Codium credits${mode === "monthly" ? " every month" : ""}`
-                    : "Credit allowance to be announced"}
-                </p>
-                {offer.tokens && (
-                  <p>{`Est. ${compact.format(offer.tokens.min)}–${compact.format(offer.tokens.max)} tokens${mode === "monthly" ? " per month" : ""}`}</p>
-                )}
-              </div>
-              <div className="codium-features">
-                {index > 0 && (
-                  <p className="codium-everything">{`Everything in ${first.name}${multiple ? ", with:" : ""}`}</p>
-                )}
-                {features.length > 0 && (
-                  <ul>
-                    {features.map((feature) => (
-                      <li key={feature}>
-                        <Check size={15} aria-hidden="true" />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {index === offers.length - 1 && (
-                  <p className="codium-fine">
-                    Credits are metered by actual model usage, and estimates are a guide rather than a guarantee.{" "}
-                    <a href="/legal/terms#codium">Codium terms</a>
-                  </p>
-                )}
-              </div>
-            </article>
-          )
-        })}
-      </div>
-
-      {props.pricing.models.length > 0 && offers.length > 0 && (
-        <section className="codium-usage" aria-labelledby="codium-usage-heading">
-          <h2 id="codium-usage-heading">Usage estimates</h2>
-          <div className="codium-table" role="region" aria-label="Estimated tokens by model" tabIndex={0}>
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Model</th>
-                  {offers.map((offer) => (
-                    <th scope="col" key={offer.id}>
-                      {offer.name}
-                    </th>
-                  ))}
-                  <th scope="col">Your own keys</th>
-                </tr>
-              </thead>
-              <tbody>
-                {props.pricing.models.map((model, row) => (
-                  <tr key={model.id}>
-                    <th scope="row">
-                      {model.name}
-                      {model.category && <span>{model.category === "advanced" ? "Advanced" : "Everyday"}</span>}
-                    </th>
-                    {offers.map((offer) => {
-                      const tokens = offer.usage[row]
-                      return <td key={offer.id}>{tokens === undefined ? "–" : `≈ ${compact.format(tokens)}`}</td>
-                    })}
-                    <td>
-                      <a href="/docs/models">Billed by your provider</a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="codium-notes">
-            <p>
-              Estimated tokens {mode === "monthly" ? "per month on each plan" : "from each top-up"}, assuming 80% input
-              and 20% output at each model's highest routed price.
-            </p>
-            <p>
-              Cached input can stretch credits further. Long reasoning, large files and repeated context use them
-              faster.
-            </p>
-            <p>
-              Estimates are a guide, not a guaranteed number of tokens or tasks. See the{" "}
-              <a href="/legal/terms#codium">Codium terms</a>.
-            </p>
-          </div>
-        </section>
-      )}
-
-      <section className="codium-faq" aria-labelledby="codium-faq-heading">
-        <h2 id="codium-faq-heading">Frequently asked questions</h2>
-        {faq.map((item) => {
-          const expanded = open.includes(item.id)
-          return (
-            <div className="codium-faq-item" key={item.id}>
-              <h3>
-                <button
-                  type="button"
-                  aria-expanded={expanded}
-                  aria-controls={`codium-faq-${item.id}`}
-                  onClick={() => setOpen(expanded ? open.filter((id) => id !== item.id) : [...open, item.id])}
-                >
-                  <span>{item.question}</span>
-                  {expanded ? <Minus size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
-                </button>
-              </h3>
-              <div className="codium-faq-answer" id={`codium-faq-${item.id}`} hidden={!expanded}>
-                {item.answer}
-              </div>
+                        offer.multiple &&
+                          (monthly
+                            ? `${count.format(offer.multiple)}× the monthly credits of ${anchor}`
+                            : `${count.format(offer.multiple)}× ${anchor}'s credits`),
+                        ...(monthly
+                          ? [
+                              "More room for daily coding and larger projects",
+                              "One monthly allowance across desktop and CLI",
+                            ]
+                          : ["A larger reserve for busy weeks", "Use across desktop and CLI without a subscription"]),
+                        ...featured.map((row) => {
+                          const tasks = offer.tasks[row]
+                          return (
+                            tasks &&
+                            `About ${range(tasks)} typical tasks${monthly ? " a month" : ""} with ${props.pricing.models[row]!.name}`
+                          )
+                        }),
+                      ].filter((feature) => typeof feature === "string")
+                return (
+                  <article className="cx-card" key={offer.id}>
+                    <div className="cx-card-top">
+                      <div className="cx-card-head">
+                        <h3>{offer.name}</h3>
+                        <p>{FIT[item.mode][index] ?? "For more usage."}</p>
+                      </div>
+                      <div className="cx-card-buy">
+                        <p className="cx-price">
+                          <span className="cx-amount">{usd.format(offer.price)}</span>
+                          <span className="cx-period">{monthly ? "/ month" : "one-time"}</span>
+                        </p>
+                        <button
+                          className="cx-button"
+                          type="button"
+                          disabled={!offer.available || pending !== undefined}
+                          onClick={() => buy(offer, item.mode)}
+                        >
+                          {!offer.available ? (
+                            "Coming soon"
+                          ) : pending?.id === offer.id ? (
+                            pending.signIn ? (
+                              "Signing in…"
+                            ) : (
+                              "Opening checkout…"
+                            )
+                          ) : (
+                            <React.Fragment>
+                              {monthly ? `Get ${offer.name}` : `Buy ${usd.format(offer.price)} top-up`}
+                              <ChevronRight size={16} aria-hidden="true" />
+                            </React.Fragment>
+                          )}
+                        </button>
+                        {failure?.id === offer.id && (
+                          <p className="cx-error" role="alert">
+                            {failure.message} <a href="/account">Open your account</a>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="cx-card-bottom">
+                      <div className="cx-card-list">
+                        {index > 0 && features.length > 0 && (
+                          <p className="cx-everything">{`Everything in ${anchor}, and:`}</p>
+                        )}
+                        <ul>
+                          {features.map((feature) => (
+                            <li key={feature}>
+                              <Check size={20} strokeWidth={1.5} aria-hidden="true" />
+                              {feature}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      {index === offers.length - 1 && (
+                        <p className="cx-fine">
+                          {monthly
+                            ? "Plans renew monthly at the listed price until you cancel. Monthly credits reset each billing period and don't roll over."
+                            : "Top-ups are one-time purchases that don't renew. Unused top-up credits carry forward separately from your subscription."}{" "}
+                          <a href="/legal/terms#codium">Codium terms</a>
+                        </p>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
             </div>
-          )
-        })}
+
+            {offers.some((offer) => offer.tasks.some(Boolean)) && (
+              <section className="cx-usage" aria-labelledby={`cx-usage-heading-${item.mode}`}>
+                <h2 id={`cx-usage-heading-${item.mode}`}>Usage estimates</h2>
+                <div className="cx-table" role="region" aria-label="Typical agent tasks by model" tabIndex={0}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Model</th>
+                        {offers.map((offer) => (
+                          <th scope="col" key={offer.id}>
+                            {offer.name}
+                          </th>
+                        ))}
+                        <th scope="col">Your own key</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {props.pricing.models.map((model, row) => (
+                        <tr key={model.id}>
+                          <th scope="row">{model.name}</th>
+                          {offers.map((offer) => {
+                            const tasks = offer.tasks[row]
+                            return <td key={offer.id}>{tasks ? range(tasks) : "–"}</td>
+                          })}
+                          <td>
+                            <a href="/docs/models">Usage-based</a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="cx-notes">
+                  <p>
+                    {monthly
+                      ? "Typical agent tasks a month on each plan, from a focused fix to a multi-file change."
+                      : "Typical agent tasks from each one-time top-up, from a focused fix to a multi-file change."}
+                  </p>
+                  <p>
+                    Long reasoning, large files and parallel agents use credits faster; cached context makes them last
+                    longer.
+                  </p>
+                  <p>
+                    Estimates are a guide, not a guaranteed number of tasks. See the{" "}
+                    <a href="/legal/terms#codium">Codium terms</a>.
+                  </p>
+                </div>
+              </section>
+            )}
+          </div>
+        )
+      })}
+
+      <section className="cx-faq" aria-labelledby="cx-faq-heading">
+        <h2 id="cx-faq-heading">Frequently asked questions</h2>
+        <div className="cx-faq-list">
+          {faq.map((item) => {
+            const expanded = open.includes(item.id)
+            return (
+              <div className="cx-faq-item" key={item.id}>
+                <h3>
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={`cx-faq-${item.id}`}
+                    onClick={() => setOpen(expanded ? open.filter((id) => id !== item.id) : [...open, item.id])}
+                  >
+                    <span>{item.question}</span>
+                    {expanded ? <Minus size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
+                  </button>
+                </h3>
+                {/* Closed answers stay in the layout so their height can animate, but out of reach of focus and readers. */}
+                <div className="cx-faq-answer" id={`cx-faq-${item.id}`} data-open={expanded} inert={!expanded}>
+                  <div>{item.answer}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </section>
     </div>
   )
+}
+
+/** The tab a /codium address selects: `?type=topups` shows the one-time packs, anything else the monthly plans. */
+export function codiumMode(search: string): CodiumMode {
+  return new URLSearchParams(search).get("type") === "topups" ? "topup" : "monthly"
+}
+
+/** The same address with a tab selected, keeping the rest of its query and its hash. */
+export function codiumModeUrl(href: string, mode: CodiumMode) {
+  const url = new URL(href)
+  if (mode === "topup") url.searchParams.set("type", "topups")
+  if (mode === "monthly") url.searchParams.delete("type")
+  return url
 }
 
 /** Where a purchase continues: the sign-in page for a signed-out visitor, or the plan's checkout session. */
@@ -427,7 +455,8 @@ async function checkoutDestination(id: string, mode: CodiumMode, resumed: boolea
     } catch {
       // Without storage, the buyer chooses the plan again after signing in.
     }
-    return "/login?returnTo=%2Fcodium"
+    const back = codiumModeUrl(location.href, mode)
+    return `/login?returnTo=${encodeURIComponent(`${back.pathname}${back.search}`)}`
   }
   const kind = mode === "monthly" ? "checkout" : "topup"
   const response = await fetch(`/api/model-plans/${kind}`, {

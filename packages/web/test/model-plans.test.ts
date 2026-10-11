@@ -9,7 +9,7 @@ import {
   configuredPlanModels,
   requireModelPlans,
 } from "../../../api/_lib/model-plan-config"
-import { modelPlanRequest, streamModelPlanResponse } from "../../../api/_lib/model-plan-chat"
+import { modelPlanRequest, requireModelPlanContext, streamModelPlanResponse } from "../../../api/_lib/model-plan-chat"
 import { verifyModelPlanWebhook } from "../../../api/_lib/model-plan-stripe"
 import { IncomingMessage, ServerResponse } from "node:http"
 import { Socket } from "node:net"
@@ -20,7 +20,7 @@ const names = [
   "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
   "MODEL_CREDIT_MARKUP_PERCENT",
   "STRIPE_MODEL_PLAN_WEBHOOK_SECRET",
-  ...[10, 20, 50, 100, 200].flatMap((price) => [
+  ...[10, 50, 100, 200].flatMap((price) => [
     `MODEL_PLAN_${price}_CREDITS_USD`,
     `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
     `MODEL_TOPUP_${price}_CREDITS_USD`,
@@ -31,8 +31,8 @@ const saved = new Map(names.map((name) => [name, process.env[name]]))
 afterEach(() =>
   names.forEach((name) => {
     const value = saved.get(name)
-    if (value === undefined) delete process.env[name]
-    else process.env[name] = value
+    delete process.env[name]
+    if (value !== undefined) process.env[name] = value
   }),
 )
 
@@ -81,30 +81,67 @@ function subscription() {
 }
 
 describe("subscription configuration", () => {
-  test("Codium prices use the draft markup and stay unavailable before payment setup", () => {
+  test("Codium stays unavailable without private allowance configuration", () => {
     names.forEach((name) => {
       delete process.env[name]
     })
-    expect(modelPlans().map((plan) => plan.price)).toEqual([10, 20, 50, 100, 200])
-    expect(modelPlans().map((plan) => plan.credits)).toEqual([8, 16, 40, 80, 160])
-    expect(modelTopups().map((pack) => pack.credits)).toEqual([8, 16, 40, 80, 160])
+    expect(modelPlans().map((plan) => plan.price)).toEqual([10, 50, 100, 200])
+    expect(modelPlans().map((plan) => plan.credits)).toEqual([0, 0, 0, 0])
+    expect(modelTopups().map((pack) => pack.credits)).toEqual([0, 0, 0, 0])
     expect(publicModelPlans().plans.every((plan) => !plan.available)).toBe(true)
     expect(publicModelPlans().topups.every((pack) => !pack.available)).toBe(true)
     expect(publicModelPlans().product).toBe("Vector Codium")
     expect(publicModelPlans()).not.toHaveProperty("markupPercent")
     expect(publicModelPlans().models.map((model) => model.id)).toEqual([
-      "qwen/qwen3-coder-next",
-      "minimax/minimax-m3",
-      "moonshotai/kimi-k2.7-code",
+      "deepseek/deepseek-v4.1-flash",
+      "xiaomi/mimo-v2.6-flash",
+      "anthropic/claude-haiku-5.5",
     ])
+    expect(publicModelPlans().catalogUpdated).toBe("2026-10-10")
     expect(() => requireModelPlans()).toThrow("not available yet")
+  })
+  test("the public configuration carries no credit amounts, model prices or limits", () => {
+    names.forEach((name) => delete process.env[name])
+    const config = publicModelPlans()
+    for (const offer of [...config.plans, ...config.topups])
+      expect(
+        Object.keys(offer).every((key) => ["id", "name", "price", "available", "multiple", "tasks"].includes(key)),
+      ).toBe(true)
+    for (const model of config.models)
+      expect(Object.keys(model).every((key) => ["id", "name", "category", "description"].includes(key))).toBe(true)
+    const text = JSON.stringify(config)
+    for (const key of [
+      "credits",
+      "inputPrice",
+      "outputPrice",
+      "contextLength",
+      "maxOutputTokens",
+      "markupPercent",
+      "cached",
+    ])
+      expect(text).not.toContain(`"${key}":`)
+  })
+  test("coarse usage ranges are independent of private allowances and prices", () => {
+    names.forEach((name) => delete process.env[name])
+    const original = publicModelPlans()
+    process.env.MODEL_CREDIT_MARKUP_PERCENT = "100"
+    process.env.MODEL_PLAN_10_CREDITS_USD = "0.5"
+    process.env.MODEL_TOPUP_100_CREDITS_USD = "70"
+    expect(publicModelPlans().plans.map((plan) => plan.tasks)).toEqual(original.plans.map((plan) => plan.tasks))
+    expect(publicModelPlans().topups.map((plan) => plan.tasks)).toEqual(original.topups.map((plan) => plan.tasks))
+    expect(original.plans.map((plan) => plan.multiple)).toEqual([undefined, 5, 10, 20])
+    expect(original.plans[0]!.tasks).toEqual([
+      [50, 500],
+      [80, 800],
+      [30, 300],
+    ])
   })
   test("markup is configurable and never rounds credits above the purchased allowance", () => {
     names.forEach((name) => delete process.env[name])
     process.env.MODEL_CREDIT_MARKUP_PERCENT = "30"
     expect(modelCreditMarkup()).toBe(30)
     expect(modelPlans()[0].credits).toBe(7.69)
-    expect(modelTopups()[4].credits).toBe(153.84)
+    expect(modelTopups()[3].credits).toBe(153.84)
     process.env.MODEL_PLAN_10_CREDITS_USD = "7"
     expect(modelPlans()[0].credits).toBe(7)
     process.env.MODEL_CREDIT_MARKUP_PERCENT = "NaN"
@@ -124,7 +161,7 @@ describe("subscription configuration", () => {
     expect(modelPlans()[0].credits).toBe(0)
     expect(modelTopups()[0].credits).toBe(0)
     process.env.MODEL_TOPUP_200_CREDITS_USD = "133.33"
-    expect(modelTopups()[4].credits).toBe(133.33)
+    expect(modelTopups()[3].credits).toBe(133.33)
   })
   test("configured paid models require bounded positive pricing and valid context", () => {
     process.env.MODEL_PLAN_MODELS_JSON = JSON.stringify([model])
@@ -174,6 +211,40 @@ describe("paid entitlement", () => {
 })
 
 describe("gateway request policy", () => {
+  test("reviewed model routing pins precision and effort and adds portable Haiku cache breakpoints", () => {
+    const models = configuredPlanModels()
+    for (const model of models) {
+      const body = modelPlanRequest(
+        {
+          model: model.id,
+          messages: [
+            { role: "system", content: "Stable instructions" },
+            { role: "user", content: "Fix it" },
+          ],
+          tool_choice: "required",
+          reasoning: { effort: "max" },
+          provider: { quantizations: ["fp4"] },
+        },
+        models,
+      )
+      if (model.id.startsWith("anthropic/")) {
+        expect(body.tool_choice).toBe("auto")
+        expect(body.reasoning).toEqual({ effort: "high" })
+        expect(body.messages[1]).toMatchObject({
+          content: [{ type: "text", text: "Fix it", cache_control: { type: "ephemeral" } }],
+        })
+        expect(() =>
+          requireModelPlanContext({ ...body, messages: [{ role: "user", content: "界".repeat(34_000) }] }, model),
+        ).toThrow()
+        expect(() => requireModelPlanContext(body, model)).not.toThrow()
+        continue
+      }
+      expect(body.provider.quantizations).toEqual(["fp8", "bf16"])
+      expect(body.tool_choice).toBe("required")
+      expect(body.reasoning).toEqual(model.id.startsWith("deepseek/") ? { effort: "high" } : undefined)
+    }
+  })
+
   test("preserves bounded retry timing without exposing upstream billing errors", async () => {
     for (const status of [402, 429]) {
       const response = new ServerResponse(new IncomingMessage(new Socket()))

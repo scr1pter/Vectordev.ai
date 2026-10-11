@@ -48,3 +48,8 @@ jobs:
         env:
           VECTOR_TEST_REDIS_URL: redis://127.0.0.1:6379
         run: bun test test/free-models-api.test.ts test/desktop-account.test.ts test/account-delete-body.test.ts
+      - name: Exercise Codium billing and public configuration
+        working-directory: packages/web
+        env:
+          VECTOR_TEST_REDIS_URL: redis://127.0.0.1:6379
+        run: bun test test/model-plans-api.test.ts test/model-topups-api.test.ts test/model-plans.test.ts test/model-plan-models-api.test.ts test/model-plan-status-api.test.ts test/model-plan-context.test.ts

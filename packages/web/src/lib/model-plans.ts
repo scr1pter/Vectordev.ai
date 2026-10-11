@@ -1,14 +1,16 @@
-export type ModelPlan = { id: string; name: string; price: number; credits: number; available: boolean }
-export type ModelPlanModel = {
+/**
+ * A purchase as the public configuration describes it. It never carries credit amounts: `multiple` is its credits as a
+ * multiple of the smallest purchase, and `tasks` its typical tasks for each catalog model, in catalog order.
+ */
+export type ModelPlan = {
   id: string
   name: string
-  contextLength: number
-  maxOutputTokens: number
-  inputPrice: number
-  outputPrice: number
-  category?: "everyday" | "advanced"
-  description?: string
+  price: number
+  available: boolean
+  multiple?: number
+  tasks?: (readonly [number, number] | null)[]
 }
+export type ModelPlanModel = { id: string; name: string; category?: "everyday" | "advanced"; description?: string }
 export type ModelPlanConfig = {
   enabled: boolean
   currency: "usd"
@@ -58,17 +60,6 @@ export function readModelPlanConfig(value: unknown): ModelPlanConfig {
           !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.:-]+$/.test(model.id) ||
           typeof model.name !== "string" ||
           !model.name.trim() ||
-          !amount(model.contextLength) ||
-          !Number.isSafeInteger(model.contextLength) ||
-          model.contextLength < 1 ||
-          !amount(model.maxOutputTokens) ||
-          !Number.isSafeInteger(model.maxOutputTokens) ||
-          model.maxOutputTokens < 1 ||
-          model.maxOutputTokens > model.contextLength ||
-          !amount(model.inputPrice) ||
-          model.inputPrice === 0 ||
-          !amount(model.outputPrice) ||
-          model.outputPrice === 0 ||
           (model.category !== undefined && model.category !== "everyday" && model.category !== "advanced") ||
           (model.description !== undefined && (typeof model.description !== "string" || !model.description.trim()))
         )
@@ -76,10 +67,6 @@ export function readModelPlanConfig(value: unknown): ModelPlanConfig {
         return {
           id: model.id,
           name: model.name,
-          contextLength: model.contextLength,
-          maxOutputTokens: model.maxOutputTokens,
-          inputPrice: model.inputPrice,
-          outputPrice: model.outputPrice,
           ...(model.category === undefined ? {} : { category: model.category }),
           ...(model.description === undefined ? {} : { description: model.description }),
         }
@@ -165,28 +152,16 @@ export function modelPlanRemaining(status: ModelPlanStatus) {
 }
 
 export function modelPlanPurchasable(config: ModelPlanConfig, plan: ModelPlan, status: ModelPlanStatus | undefined) {
-  return config.enabled && plan.available && plan.credits > 0 && status?.active === false
+  return config.enabled && plan.available && status?.active === false
 }
 
 export function modelTopupPurchasable(config: ModelPlanConfig, pack: ModelPlan, status: ModelPlanStatus | undefined) {
-  return config.enabled && pack.available && pack.credits > 0 && status !== undefined
+  return config.enabled && pack.available && status !== undefined
 }
 
 export function modelWalletRemaining(wallet: ModelPlanWallet) {
   if (wallet.remaining !== undefined) return Math.min(wallet.credits, wallet.remaining)
   if (wallet.used !== undefined) return Math.max(0, wallet.credits - wallet.used)
-}
-
-export function modelPlanTokenEstimate(credits: number, models: ModelPlanModel[] = []) {
-  if (!amount(credits) || credits === 0) return
-  const rates = models
-    .map((model) => model.inputPrice * 0.8 + model.outputPrice * 0.2)
-    .filter((value) => Number.isFinite(value) && value > 0)
-  if (!rates.length) return
-  const min = Math.floor((credits / Math.max(...rates)) * 1_000_000)
-  const max = Math.floor((credits / Math.min(...rates)) * 1_000_000)
-  if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max)) return
-  return { min, max }
 }
 
 /** Only navigate to the Stripe product requested; never trust an arbitrary API redirect. */
@@ -209,11 +184,32 @@ function readPlan(plan: unknown): ModelPlan {
     !plan.name.trim() ||
     !amount(plan.price) ||
     plan.price === 0 ||
-    !amount(plan.credits) ||
-    typeof plan.available !== "boolean"
+    typeof plan.available !== "boolean" ||
+    (plan.multiple !== undefined && (!amount(plan.multiple) || plan.multiple <= 1)) ||
+    (plan.tasks !== undefined &&
+      (!Array.isArray(plan.tasks) ||
+        plan.tasks.some(
+          (range) =>
+            range !== null &&
+            (!Array.isArray(range) ||
+              range.length !== 2 ||
+              !amount(range[0]) ||
+              !amount(range[1]) ||
+              range[0] < 1 ||
+              range[1] < range[0]),
+        )))
   )
     throw new Error("Vector could not load model plans. Try again.")
-  return { id: plan.id, name: plan.name, price: plan.price, credits: plan.credits, available: plan.available }
+  return {
+    id: plan.id,
+    name: plan.name,
+    price: plan.price,
+    available: plan.available,
+    ...(plan.multiple === undefined ? {} : { multiple: plan.multiple }),
+    ...(Array.isArray(plan.tasks)
+      ? { tasks: plan.tasks.map((range) => (Array.isArray(range) ? ([range[0], range[1]] as const) : null)) }
+      : {}),
+  }
 }
 
 function record(value: unknown): value is Record<string, unknown> {

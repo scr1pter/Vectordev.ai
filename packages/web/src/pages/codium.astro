@@ -2,66 +2,408 @@
 import { publicModelPlans } from "../../../../api/_lib/model-plan-config"
 import { CodiumPricing } from "../components/marketing/codium/CodiumPricing"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
-import MarketingNav from "../components/marketing/MarketingNav.astro"
-import SiteFooter from "../components/marketing/SiteFooter.astro"
 import { codiumPricing } from "../lib/codium-pricing"
 import { readModelPlanConfig } from "../lib/model-plans"
+import { wordmarkCells, wordmarkWidth } from "../lib/wordmark"
 
 export const prerender = true
 
-// Only Codium credits and token estimates reach the page and its island props, never model prices.
+// The public view carries only names, prices, relative tiers and precomputed coarse task ranges.
 const pricing = codiumPricing(readModelPlanConfig(publicModelPlans()))
 const prices = pricing.monthly.map((plan) => plan.price)
+const links = [
+  ["Docs", "/docs"],
+  ["Download", "/download"],
+  ["Codium", "/codium"],
+]
+const columns = [
+  {
+    title: "Product",
+    links: [
+      ["Desktop", "/download"],
+      ["CLI", "/docs/terminal-agent"],
+      ["Code review", "/docs/vectorscope"],
+      ["Models", "/docs/models"],
+      ["Codium", "/codium"],
+    ],
+  },
+  {
+    title: "Resources",
+    links: [
+      ["Docs", "/docs"],
+      ["Checksums", "/download/checksums"],
+      ["All installers (GitHub)", "https://github.com/scr1pter/Vectordev.ai/releases/latest"],
+    ],
+  },
+  {
+    title: "Legal",
+    links: [
+      ["Terms", "/legal/terms"],
+      ["Privacy", "/legal/privacy"],
+      ["Software license", "/legal/license"],
+      ["Third-party notices", "/legal/third-party"],
+    ],
+  },
+]
 ---
+
+
 
 <MarketingLayout
   title="Pricing · Vector Codium"
-  description={`Vector is free. Vector Codium adds managed coding models with credits: monthly plans or one-time top-ups${prices.length ? ` from $${Math.min(...prices)} to $${Math.max(...prices)}` : ""}, with no automatic overages.`}
+  description={`Vector is free. Vector Codium adds low-cost coding models with credits: monthly plans or one-time top-ups${prices.length ? ` from $${Math.min(...prices)} to $${Math.max(...prices)}` : ""}, with no automatic overages.`}
 >
-  <div class="codium-page">
-    <MarketingNav active="codium" />
-    <main>
-      <header class="codium-hero">
-        <p class="codium-eyebrow">Vector Codium</p>
+<script is:inline>
+  document.documentElement.dataset.codiumMode = new URLSearchParams(location.search).get("type") === "topups" ? "topup" : "monthly";
+</script>
+  <div class="cx-page">
+    <header class="cx-bar">
+      <a class="cx-brand" href="/" aria-label="Vector home">
+        <img src="/vector-logo.png" alt="" width="28" height="28" />
+        <svg viewBox={`0 0 ${wordmarkWidth} 7`} fill="currentColor" shape-rendering="crispEdges" aria-hidden="true">
+          {wordmarkCells.map((cell) => <rect x={cell.x} y={cell.y} width="1" height="1" />)}
+        </svg>
+      </a>
+      <nav class="cx-links" aria-label="Primary navigation">
+        {
+          links.map(([label, href]) => (
+            <a href={href} aria-current={href === "/codium" ? "page" : undefined}>
+              {label}
+            </a>
+          ))
+        }
+      </nav>
+      <div class="cx-actions">
+        <a class="cx-login" href="/login">Log in</a>
+        <details class="cx-menu">
+          <summary aria-label="Menu">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+              <line x1="3.5" y1="7" x2="16.5" y2="7"></line>
+              <line x1="3.5" y1="13" x2="16.5" y2="13"></line>
+            </svg>
+          </summary>
+          <nav class="cx-menu-panel" aria-label="Menu">
+            {
+              links.map(([label, href]) => (
+                <a href={href} aria-current={href === "/codium" ? "page" : undefined}>
+                  {label}
+                </a>
+              ))
+            }
+          </nav>
+        </details>
+      </div>
+    </header>
+
+    <main class="cx-main">
+      <header class="cx-hero">
+        <p class="cx-eyebrow">Vector Codium</p>
         <h1>Pricing</h1>
-        <p class="codium-lead">
-          The Vector workspace is free. Codium adds managed coding models you pay for with credits, monthly or as you
-          go.
-        </p>
+        <p class="cx-lead">Low-cost coding models for Vector: monthly plans that renew until you cancel, or one-time top-ups.</p>
       </header>
       <CodiumPricing client:load pricing={pricing} />
     </main>
-    <SiteFooter />
+
+    <footer class="cx-footer">
+      <div class="cx-footer-inner">
+        <a class="cx-footer-brand" href="/" aria-label="Vector home">
+          <img src="/vector-logo.png" alt="" width="32" height="32" />
+        </a>
+        <div class="cx-footer-columns">
+          {
+            columns.map((column) => (
+              <nav aria-label={column.title}>
+                <p>{column.title}</p>
+                <ul>
+                  {column.links.map(([label, href]) => (
+                    <li>
+                      <a href={href}>{label}</a>
+                    </li>
+                  ))}
+                </ul>
+              </nav>
+            ))
+          }
+        </div>
+      </div>
+      <div class="cx-footer-base">
+        <span>© 2026 Vector</span>
+        <span>Local-first. Your repositories. Your accounts. Your models.</span>
+      </div>
+    </footer>
   </div>
 </MarketingLayout>
 
 <style is:global>
-  .codium-page {
+  /* /codium has its own chrome on a plain black page, without the shared layout's grid and tinted background. */
+  html:has(.cx-page),
+  body:has(.cx-page) {
+    background: #000;
+  }
+
+  body:has(.cx-page)::before {
+    content: none;
+  }
+
+  .cx-page {
     min-height: 100vh;
-    background: radial-gradient(ellipse 820px 420px at 50% 60px, rgba(122, 84, 220, 0.2), transparent 70%);
-    font-family: var(--font-landing);
+    display: flex;
+    flex-direction: column;
+    color: #fff;
+    background: #000;
+    font-family: "Geist Variable", Geist, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 24px;
+    font-feature-settings: normal;
   }
-  .codium-page > .site-header { font-family: var(--font-sans); }
-  .codium-page main {
-    width: min(1240px, calc(100% - 48px));
+
+  .cx-bar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: 64px;
+    padding: 0 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    background: rgb(33, 33, 33);
+  }
+
+  .cx-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: 8px;
+  }
+
+  .cx-brand img {
+    border-radius: 7px;
+  }
+
+  .cx-brand svg {
+    width: 80px;
+    height: 14px;
+  }
+
+  .cx-links {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .cx-links a {
+    padding: 6px 12px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    line-height: 20px;
+    border-radius: 8px;
+    transition: color 150ms ease;
+  }
+
+  .cx-links a:hover,
+  .cx-links a[aria-current="page"] {
+    color: #fff;
+  }
+
+  .cx-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .cx-login {
+    height: 36px;
+    padding: 0 14px;
+    display: inline-flex;
+    align-items: center;
+    color: rgba(255, 255, 255, 0.8);
+    background: transparent;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+
+  .cx-login:hover {
+    color: #fff;
+  }
+
+  .cx-menu {
+    display: none;
+    position: relative;
+  }
+
+  .cx-menu summary {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    list-style: none;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+
+  .cx-menu summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .cx-menu-panel {
+    position: absolute;
+    top: calc(100% + 12px);
+    right: 0;
+    min-width: 200px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    background: rgb(33, 33, 33);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 16px;
+  }
+
+  .cx-menu-panel a {
+    padding: 10px 12px;
+    font-size: 16px;
+    line-height: 24px;
+    border-radius: 10px;
+  }
+
+  .cx-menu-panel a:hover,
+  .cx-menu-panel a[aria-current="page"] {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .cx-main {
+    width: 100%;
+    max-width: 1536px;
     margin: 0 auto;
-    padding: 64px 0 120px;
+    padding: 40px 32px 128px;
+    flex: 1;
   }
-  .codium-hero { max-width: 640px; margin: 0 auto 36px; text-align: center; }
-  .codium-eyebrow { margin: 0; color: var(--accent-strong); font-size: 13px; font-weight: 520; letter-spacing: 0.02em; }
-  .codium-hero h1 {
-    margin: 14px 0 0;
-    font-size: clamp(44px, 6vw, 64px);
-    font-weight: 520;
-    line-height: 1.05;
-    letter-spacing: -0.035em;
-    background: linear-gradient(170deg, #ffffff 0%, #f1eaff 44%, var(--accent-strong) 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+
+  .cx-hero {
+    text-align: center;
   }
-  .codium-lead { margin: 20px auto 0; color: var(--muted-strong); font-size: 15.5px; line-height: 1.65; }
-  @media (max-width: 640px) {
-    .codium-page main { width: calc(100% - 32px); padding-top: 36px; }
+
+  .cx-eyebrow {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 22.96px;
+    letter-spacing: -0.14px;
+  }
+
+  /* Fluid from 32px at a 375px phone to 64px at 1440px, like the reference's display type. */
+  .cx-hero h1 {
+    margin-top: 32px;
+    font-size: clamp(32px, 20.7323px + 3.0047vw, 64px);
+    font-weight: 500;
+    line-height: clamp(35.2px, calc(35.2px + 1.8 * ((100vw - 375px) / 66.5625)), 64px);
+    letter-spacing: -0.03em;
+  }
+
+  .cx-lead {
+    max-width: 460px;
+    margin: 32px auto 0;
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .cx-footer {
+    background: rgb(33, 33, 33);
+  }
+
+  .cx-footer-inner {
+    max-width: 1536px;
+    margin: 0 auto;
+    padding: 48px 32px 40px;
+    display: flex;
+    justify-content: space-between;
+    gap: 48px;
+  }
+
+  .cx-footer-columns {
+    display: flex;
+    gap: 96px;
+  }
+
+  .cx-footer-columns p {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .cx-footer-columns ul {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .cx-footer-columns a {
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .cx-footer-columns a:hover {
+    color: #aa8cff;
+  }
+
+  .cx-footer-base {
+    max-width: 1536px;
+    margin: 0 auto;
+    padding: 0 32px 40px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  @media (max-width: 767px) {
+    .cx-bar {
+      height: 72px;
+      padding: 0 16px;
+    }
+
+    .cx-login {
+      color: rgb(13, 13, 13);
+      background: rgb(249, 249, 249);
+      height: 38px;
+      padding: 0 12px;
+      font-size: 16px;
+    }
+
+    .cx-links {
+      display: none;
+    }
+
+    .cx-actions {
+      margin-left: auto;
+    }
+
+    .cx-menu {
+      display: block;
+    }
+
+    .cx-main {
+      padding: 20px 16px 128px;
+    }
+
+    .cx-footer-inner {
+      padding: 40px 16px 32px;
+      flex-direction: column;
+    }
+
+    .cx-footer-columns {
+      flex-wrap: wrap;
+      gap: 32px 48px;
+    }
+
+    .cx-footer-base {
+      padding: 0 16px 32px;
+      flex-direction: column;
+    }
   }
 </style>

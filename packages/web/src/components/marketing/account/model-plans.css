@@ -112,18 +112,12 @@
   font-weight: 600;
   letter-spacing: -0.04em;
 }
-.model-plan-price span,
-.model-plan-credits {
+.model-plan-price span {
   color: #e5ddeea6;
   font-size: 12px;
 }
-.model-plan-credits {
-  min-height: 36px;
-  margin: 10px 0 0;
-  line-height: 1.5;
-}
 .model-plan-estimate {
-  margin: 0 0 12px;
+  margin: 10px 0 12px;
   color: #d7c8ed;
   font-size: 12px;
   line-height: 1.5;
@@ -273,30 +267,11 @@
 .model-plans-catalog .model-plans-catalog-note {
   font-size: 11px;
 }
-.model-plans[data-public] {
-  padding: 30px;
-  background: #120e1ab3;
-}
-.model-plans[data-public] .model-plans-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-@media (max-width: 1000px) {
-  .model-plans[data-public] .model-plans-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-@media (max-width: 760px) {
-  .model-plans[data-public] .model-plans-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 @media (max-width: 560px) {
-  .model-plans,
-  .model-plans[data-public] {
+  .model-plans {
     padding: 22px 18px;
   }
-  .model-plans-grid,
-  .model-plans[data-public] .model-plans-grid {
+  .model-plans-grid {
     grid-template-columns: 1fr;
   }
 }

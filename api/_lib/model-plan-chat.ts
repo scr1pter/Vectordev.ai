@@ -10,7 +10,6 @@ import { ApiError, json, readJson, requireMethod, type ApiRequest, type ApiRespo
 import { requireUnrevokedAccount } from "./revocation.js"
 
 const MAX_BYTES = 4_500_000
-
 export async function requireModelPlanUser(request: ApiRequest, fetcher: typeof fetch = fetch, now = Date.now()) {
   const token = /^Bearer (vct_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)$/.exec(String(request.headers.authorization ?? ""))?.[1]
   const account = verifyCliToken(token ?? "", now)
@@ -64,6 +63,11 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
   const maximum = body.max_tokens ?? body.max_completion_tokens ?? Math.min(8192, model.maxOutputTokens)
   if (typeof maximum !== "number" || !Number.isSafeInteger(maximum) || maximum < 1)
     throw new ApiError(400, "MODEL_PLAN_OUTPUT", "The requested response length is invalid.")
+  const cacheIndex = messages.findLastIndex((message) =>
+    typeof message.content === "string"
+      ? message.content.length > 0
+      : Array.isArray(message.content) && message.content.some((part) => part.text.length > 0),
+  )
   return {
     ...Object.fromEntries(
       Object.entries(body).filter(([key]) =>
@@ -83,7 +87,27 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
       ),
     ),
     model: model.id,
-    messages,
+    messages: model.explicitCache
+      ? messages.map((message, index) => {
+          const content =
+            typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content
+          if (!Array.isArray(content)) return message
+          // One moving breakpoint works on every Anthropic-compatible endpoint; never forward arbitrary TTLs.
+          return {
+            ...message,
+            content: content.map((part, partIndex) => ({
+              type: "text",
+              text: part.text,
+              ...(index === cacheIndex && partIndex === content.findLastIndex((part) => part.text.length > 0)
+                ? { cache_control: { type: "ephemeral" } }
+                : {}),
+            })),
+          }
+        })
+      : messages,
+    ...(model.explicitCache && body.tool_choice === "required" ? { tool_choice: "auto" } : {}),
+    // Catalog policy owns effort; client overrides cannot silently increase spend or change reviewed quality.
+    reasoning: model.reasoningEffort ? { effort: model.reasoningEffort } : undefined,
     max_tokens: Math.min(maximum, model.maxOutputTokens),
     stream: true,
     stream_options: { include_usage: true },
@@ -94,6 +118,7 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
       data_collection: "deny",
       zdr: true,
       require_parameters: true,
+      ...(model.quantizations ? { quantizations: model.quantizations } : {}),
       max_price: { prompt: model.inputPrice, completion: model.outputPrice, request: 0, image: 0 },
     },
   }
@@ -105,10 +130,13 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
  * content per token; a JSON escape such as \n or \" adds a byte the model never reads, so it is not counted.
  * Counting each byte as a token rejected conversations at about a quarter of the window the catalog lists.
  */
-export function requireModelPlanContext(body: { max_tokens: number }, model: ModelPlanModel) {
+export function requireModelPlanContext<T extends { max_tokens: number }>(body: T, model: ModelPlanModel) {
   const text = JSON.stringify(body)
   const inputTokens = Math.ceil((Buffer.byteLength(text) - (text.match(/\\/g)?.length ?? 0)) / 4)
   if (inputTokens + body.max_tokens > model.contextLength) throw contextError()
+  // Without the provider tokenizer, an estimate cannot guarantee the long-prompt pricing boundary for arbitrary
+  // Unicode or adversarial tokenization. UTF-8 bytes conservatively bound prompt tokens for the capped Haiku route.
+  if (model.explicitCache && Buffer.byteLength(text) >= 100_000) throw contextError()
   return inputTokens
 }
 
@@ -218,8 +246,7 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
       requirePersistent: true,
     })
     const model = configuredPlanModels().find((model) => model.id === body.model)!
-    // The estimate covers tool schemas and formatting before choosing a credit pool. The provider key cap is the
-    // final spending control; its concurrent request accounting still depends on the upstream provider's enforcement.
+    // Estimate prompt tokens, including tool schemas, before reserving provider credit.
     const inputTokens = requireModelPlanContext(body, model)
     const requiredCredits = (inputTokens * model.inputPrice + body.max_tokens * model.outputPrice) / 1_000_000
     const key = await modelPlanCredential(account.id, fetcher, Date.now(), requiredCredits)

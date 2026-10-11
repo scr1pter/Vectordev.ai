@@ -2,7 +2,7 @@ import { Option, Schema } from "effect"
 import { ApiError } from "./http.js"
 import { CODIUM_CATALOG_UPDATED, CODIUM_MODELS } from "./codium-catalog.js"
 
-export const MODEL_PLAN_PRICES = [10, 20, 50, 100, 200] as const
+export const MODEL_PLAN_PRICES = [10, 50, 100, 200] as const
 export const MODEL_PLAN_ROOT = "https://openrouter.ai/api/v1"
 export const ModelPlanModel = Schema.Struct({
   id: Schema.String,
@@ -13,6 +13,9 @@ export const ModelPlanModel = Schema.Struct({
   outputPrice: Schema.Number,
   category: Schema.optional(Schema.Literals(["everyday", "advanced"])),
   description: Schema.optional(Schema.String),
+  quantizations: Schema.optional(Schema.Array(Schema.Literals(["fp8", "bf16"]))),
+  reasoningEffort: Schema.optional(Schema.Literals(["high"])),
+  explicitCache: Schema.optional(Schema.Boolean),
 })
 export type ModelPlanModel = typeof ModelPlanModel.Type
 
@@ -44,13 +47,20 @@ export function modelTopups() {
 }
 
 export function modelCreditMarkup() {
-  const value = Number(process.env.MODEL_CREDIT_MARKUP_PERCENT?.trim() || "25")
+  const configured = process.env.MODEL_CREDIT_MARKUP_PERCENT?.trim()
+  if (!configured) return undefined
+  const value = Number(configured)
   if (!Number.isFinite(value) || value < 0 || value > 300) throw configurationError()
   return value
 }
 
 function creditAllowance(price: number, override: string | undefined) {
-  const credits = override?.trim() ? Number(override) : Math.floor((price * 10_000) / (100 + modelCreditMarkup())) / 100
+  const markup = override?.trim() ? undefined : modelCreditMarkup()
+  const credits = override?.trim()
+    ? Number(override)
+    : markup === undefined
+      ? 0
+      : Math.floor((price * 10_000) / (100 + markup)) / 100
   return Number.isFinite(credits) && credits > 0 && credits <= price && Math.round(credits * 100) / 100 === credits
     ? credits
     : 0
@@ -117,36 +127,66 @@ export function requireModelTopups() {
     throw configurationError()
 }
 
+/**
+ * What anyone may read about Codium, for /codium and the account page: names, purchase prices, each purchase's credits
+ * as a multiple of the smallest one, and usage as ranges of typical tasks per model. Credit amounts, model prices and
+ * the task assumptions behind the ranges stay on the server, so no reader can work back to the dollars of model
+ * credit in a purchase.
+ */
 export function publicModelPlans() {
-  const plans = modelPlans()
   const enabled = modelPlansEnabled() && modelPlanConfigurationReady()
   const topups = modelTopups()
   const topupsEnabled =
     enabled &&
     topups.every((pack) => !!pack.credits && !!pack.priceID) &&
     new Set(topups.map((pack) => pack.priceID)).size === topups.length
+  const models = configuredPlanModels()
+
+  const offers = (items: { id: string; name: string; price: number; credits: number }[], available: boolean) =>
+    items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      available: available && item.credits > 0,
+      ...(item.price > items[0]!.price
+        ? {
+            multiple:
+              Math.round(
+                (item.credits > 0 && items[0]!.credits > 0
+                  ? item.credits / items[0]!.credits
+                  : item.price / items[0]!.price) * 10,
+              ) / 10,
+          }
+        : {}),
+      // Typical tasks for each model, in catalog order; null where a model has no reviewed assumptions.
+      tasks: models.map((model) => {
+        const range = CODIUM_TASK_RANGES[model.id]
+        return range ? ([(range[0] * item.price) / 10, (range[1] * item.price) / 10] as const) : null
+      }),
+    }))
   return {
     product: "Vector Codium",
     enabled,
     currency: "usd",
     interval: "month",
     catalogUpdated: CODIUM_CATALOG_UPDATED,
-    models: configuredPlanModels(),
-    plans: plans.map((plan) => ({
-      id: plan.id,
-      name: plan.name,
-      price: plan.price,
-      credits: plan.credits,
-      available: enabled,
+    models: models.map((model) => ({
+      id: model.id,
+      name: model.name,
+      ...(model.category === undefined ? {} : { category: model.category }),
+      ...(model.description === undefined ? {} : { description: model.description }),
     })),
-    topups: topups.map((pack) => ({
-      id: pack.id,
-      name: pack.name,
-      price: pack.price,
-      credits: pack.credits,
-      available: topupsEnabled,
-    })),
+    plans: offers(modelPlans(), enabled),
+    topups: offers(topups, topupsEnabled),
   }
+}
+
+// Coarse illustrative ranges reviewed for the launch catalog. They are deliberately independent of private credit
+// allowances and provider prices. Actual task size, cache warmth and reasoning vary; these are not guarantees.
+const CODIUM_TASK_RANGES: Record<string, readonly [number, number] | undefined> = {
+  "deepseek/deepseek-v4.1-flash": [50, 500],
+  "xiaomi/mimo-v2.6-flash": [80, 800],
+  "anthropic/claude-haiku-5.5": [30, 300],
 }
 
 export function modelPlanOrigin() {

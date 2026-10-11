@@ -16,6 +16,7 @@ const CatalogEndpoint = Schema.Struct({
   pricing: Schema.Record(Schema.String, Schema.Unknown),
   supported_parameters: Schema.Array(Schema.String),
   status: Schema.Number,
+  quantization: Schema.optional(Schema.String),
 })
 
 // Audit the configured catalog without substituting models or changing deployment settings.
@@ -52,6 +53,9 @@ export function auditModelPlanCatalog(
       const endpoint = decoded.value
       const reasons = [
         ...(endpoint.status !== 0 ? ["unavailable"] : []),
+        ...(configured.quantizations && !configured.quantizations.some((value) => value === endpoint.quantization)
+          ? ["quantization is outside the configured allowlist"]
+          : []),
         ...(!endpoint.tag.trim() || !endpoint.provider_name.trim() ? ["missing provider identity"] : []),
         ...(!supportsTools(endpoint.supported_parameters) ? ["missing tools/tool_choice"] : []),
         ...(!Number.isSafeInteger(endpoint.context_length) || endpoint.context_length < configured.contextLength
@@ -128,6 +132,8 @@ function withinPricingLimits(pricing: Readonly<Record<string, unknown>>, configu
     }
     const price = rate(value)
     if (price === undefined) return false
+    // The gateway turns off OpenRouter's web plugin and accepts only function tools, so no request can buy a search.
+    if (key === "web_search") return true
     if (key === "discount") return price <= 1
     if (key === "prompt" || key.startsWith("input_cache_")) return price * 1_000_000 <= configured.inputPrice
     if (key === "completion") return price * 1_000_000 <= configured.outputPrice

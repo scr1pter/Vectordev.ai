@@ -1,3 +1,4 @@
+import { RedisClient } from "bun"
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test"
 import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -15,23 +16,27 @@ import { stripeRecord } from "../../../api/_lib/model-plan-stripe"
 
 const directory = await mkdtemp(join(tmpdir(), "codium-topup-test-"))
 const socket = join(directory, "redis.sock")
-const processHandle = Bun.spawn(
-  [
-    process.env.VECTOR_TEST_VALKEY_SERVER ?? "valkey-server",
-    "--port",
-    "0",
-    "--unixsocket",
-    socket,
-    "--save",
-    "",
-    "--appendonly",
-    "no",
-    "--dir",
-    directory,
-  ],
-  { stdout: "ignore", stderr: "pipe" },
-)
+const database = process.env.VECTOR_TEST_REDIS_URL ? new RedisClient(process.env.VECTOR_TEST_REDIS_URL) : undefined
+const processHandle = database
+  ? undefined
+  : Bun.spawn(
+      [
+        process.env.VECTOR_TEST_VALKEY_SERVER ?? "valkey-server",
+        "--port",
+        "0",
+        "--unixsocket",
+        socket,
+        "--save",
+        "",
+        "--appendonly",
+        "no",
+        "--dir",
+        directory,
+      ],
+      { stdout: "ignore", stderr: "pipe" },
+    )
 async function redis(command: readonly (string | number)[]) {
+  if (database) return database.send(String(command[0]), command.slice(1).map(String))
   const child = Bun.spawn(
     [process.env.VECTOR_TEST_VALKEY_CLI ?? "valkey-cli", "-s", socket, "--json", ...command.map(String)],
     { stdout: "pipe", stderr: "pipe" },
@@ -65,7 +70,7 @@ const environment = [
   "KV_REST_API_TOKEN",
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
-  ...[10, 20, 50, 100, 200].flatMap((price) => [
+  ...[10, 50, 100, 200].flatMap((price) => [
     `STRIPE_MODEL_TOPUP_${price}_PRICE_ID`,
     `MODEL_TOPUP_${price}_CREDITS_USD`,
     `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
@@ -189,7 +194,8 @@ const fetcher: typeof fetch = Object.assign(
 )
 
 beforeAll(async () => {
-  for (let count = 0; count < 300 && !(await stat(socket).catch(() => undefined)); count++) await Bun.sleep(10)
+  if (!database)
+    for (let count = 0; count < 300 && !(await stat(socket).catch(() => undefined)); count++) await Bun.sleep(10)
   expect(await redis(["PING"])).toBe("PONG")
 })
 beforeEach(async () => {
@@ -202,7 +208,11 @@ beforeEach(async () => {
   Object.assign(process.env, {
     NODE_ENV: "development",
     MODEL_PLANS_ENABLED: "true",
-    MODEL_CREDIT_MARKUP_PERCENT: "25",
+    MODEL_CREDIT_MARKUP_PERCENT: "100",
+    MODEL_TOPUP_10_CREDITS_USD: "8",
+    MODEL_TOPUP_50_CREDITS_USD: "40",
+    MODEL_TOPUP_100_CREDITS_USD: "80",
+    MODEL_TOPUP_200_CREDITS_USD: "160",
     STRIPE_SECRET_KEY: "fixture",
     MODEL_PLAN_KEY_ENCRYPTION_SECRET: "ef".repeat(32),
     OPENROUTER_MANAGEMENT_KEY: "fixture",
@@ -212,21 +222,22 @@ beforeEach(async () => {
   delete process.env.VERCEL_ENV
   delete process.env.UPSTASH_REDIS_REST_URL
   delete process.env.UPSTASH_REDIS_REST_TOKEN
-  for (const price of [10, 20, 50, 100, 200]) {
+  for (const price of [10, 50, 100, 200]) {
     process.env[`STRIPE_MODEL_TOPUP_${price}_PRICE_ID`] = `price_topup${price}`
     process.env[`STRIPE_MODEL_PLAN_${price}_PRICE_ID`] = `price_monthly${price}`
-    delete process.env[`MODEL_TOPUP_${price}_CREDITS_USD`]
-    delete process.env[`MODEL_PLAN_${price}_CREDITS_USD`]
+    process.env[`MODEL_TOPUP_${price}_CREDITS_USD`] = String(price * 0.8)
+    process.env[`MODEL_PLAN_${price}_CREDITS_USD`] = String(price * 0.8)
   }
 })
 afterAll(async () => {
   server.stop(true)
-  processHandle.kill()
-  await processHandle.exited
+  processHandle?.kill()
+  database?.close()
+  await processHandle?.exited
   await rm(directory, { recursive: true, force: true })
   previous.forEach((value, key) => {
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
+    delete process.env[key]
+    if (value !== undefined) process.env[key] = value
   })
 })
 async function purchase(price = 10) {
@@ -283,7 +294,7 @@ function monthly() {
 test("top-up checkout works without a subscription and reuses or replaces only pending pack checkout", async () => {
   const first = await modelTopupCheckout(user, "codium-topup-10", fetcher)
   expect(await modelTopupCheckout(user, "codium-topup-10", fetcher)).toEqual(first)
-  expect(await modelTopupCheckout(user, "codium-topup-20", fetcher)).not.toEqual(first)
+  expect(await modelTopupCheckout(user, "codium-topup-50", fetcher)).not.toEqual(first)
   expect(sessions.get("cs_wallet1")?.status).toBe("expired")
   expect(sessions.size).toBe(2)
 })
@@ -291,6 +302,8 @@ test("top-up checkout works without a subscription and reuses or replaces only p
 test("replaces a pending top-up checkout when its allowance or Stripe price changes", async () => {
   const first = await modelTopupCheckout(user, "codium-topup-10", fetcher)
   process.env.MODEL_CREDIT_MARKUP_PERCENT = "50"
+  delete process.env.MODEL_TOPUP_10_CREDITS_USD
+  delete process.env.MODEL_TOPUP_200_CREDITS_USD
   const second = await modelTopupCheckout(user, "codium-topup-10", fetcher)
   expect(second.url).not.toBe(first.url)
   expect(sessions.get("cs_wallet1")?.status).toBe("expired")
@@ -340,12 +353,12 @@ test("a second completed purchase increases the same lifetime cap without cleari
   await purchase()
   await modelPlanCredential(user.id, fetcher)
   keys.get("wallet_key_1")!.data.usage = 7
-  const next = await purchase(20)
+  const next = await purchase(50)
   await reconcileModelTopup(user.id, String(next.checkout.id), fetcher)
   expect(await modelPlanCredential(user.id, fetcher)).toBe("wallet-secret-1")
   expect(keys.size).toBe(1)
-  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 24, usage: 7 })
-  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 24, used: 7, remaining: 17 } })
+  expect(keys.get("wallet_key_1")?.data).toMatchObject({ limit: 48, usage: 7 })
+  expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 48, used: 7, remaining: 41 } })
 })
 
 test("partial refunds reduce credits proportionally and disputes preserve spent-credit debt", async () => {
@@ -416,7 +429,7 @@ test("failure saving a grant does not expose credits and retry grants exactly on
 test("account deletion disables both funding keys, closes pending top-ups, and prevents reuse", async () => {
   await purchase()
   await modelPlanCredential(user.id, fetcher)
-  await modelTopupCheckout(user, "codium-topup-20", fetcher)
+  await modelTopupCheckout(user, "codium-topup-50", fetcher)
   await cancelModelPlanAccount(user.id, fetcher)
   expect(keys.get("wallet_key_1")?.data.disabled).toBe(true)
   expect(sessions.get("cs_wallet2")?.status).toBe("expired")
@@ -495,6 +508,8 @@ test("out-of-order completion after refund reads the current charge instead of r
 
 test("cent-denominated credit snapshots survive floating-point representation", async () => {
   process.env.MODEL_CREDIT_MARKUP_PERCENT = "50"
+  delete process.env.MODEL_TOPUP_10_CREDITS_USD
+  delete process.env.MODEL_TOPUP_200_CREDITS_USD
   const bought = await purchase(200)
   await reconcileModelTopup(user.id, String(bought.checkout.id), fetcher)
   expect(await modelPlanStatus(user.id, fetcher)).toMatchObject({ wallet: { credits: 133.33, remaining: 133.33 } })

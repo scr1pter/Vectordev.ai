@@ -1,35 +1,30 @@
-import { modelPlanTokenEstimate, type ModelPlan, type ModelPlanConfig } from "./model-plans"
+import type { ModelPlan, ModelPlanConfig } from "./model-plans"
 
 export type CodiumPricingView = ReturnType<typeof codiumPricing>
 export type CodiumOffer = CodiumPricingView["monthly"][number]
 
 /**
- * The public pricing page's view of the Codium configuration. It keeps only Codium credits and token estimates:
- * dollar credit amounts and model prices stay on the server, so neither the rendered page nor the props serialized
- * for its island reveal supplier cost or the difference between a purchase price and its credits.
+ * The /codium page's view of the public Codium configuration: names, prices, each offer's credits as a multiple of the
+ * smallest offer, and usage as ranges of typical agent tasks for each model. The public configuration carries no
+ * credit amounts or model prices, so neither the page nor the props serialized for its island can reveal them.
  */
 export function codiumPricing(config: ModelPlanConfig) {
   const models = config.models ?? []
-  const offer = (plan: ModelPlan) => ({
-    id: plan.id,
-    name: plan.name,
-    price: plan.price,
-    // Customer-facing Codium credits: 100 for each dollar of model credit.
-    credits: Math.round(plan.credits * 100),
-    available: config.enabled && plan.available && plan.credits > 0,
-    tokens: modelPlanTokenEstimate(plan.credits, models),
-    // Estimated tokens for each catalog model, in catalog order.
-    usage: models.map((model) => modelPlanTokenEstimate(plan.credits, [model])?.min),
-  })
+  const offers = (plans: ModelPlan[]) =>
+    plans.map((plan) => ({
+      id: plan.id,
+      // A top-up is named for the plan of the same price; the tab and its price line say it is one-time.
+      name: plan.name.replace(/ top-up$/i, ""),
+      price: plan.price,
+      available: config.enabled && plan.available,
+      multiple: plan.multiple,
+      // Typical agent tasks for each catalog model, in catalog order.
+      tasks: models.map((_, index) => plan.tasks?.[index] ?? null),
+    }))
   return {
     enabled: config.enabled,
-    models: models.map((model) => ({
-      id: model.id,
-      name: model.name,
-      ...(model.category === undefined ? {} : { category: model.category }),
-      ...(model.description === undefined ? {} : { description: model.description }),
-    })),
-    monthly: config.plans.map(offer),
-    topups: (config.topups ?? []).map(offer),
+    models,
+    monthly: offers(config.plans),
+    topups: offers(config.topups ?? []),
   }
 }
