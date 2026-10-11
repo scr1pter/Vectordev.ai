@@ -2464,6 +2464,9 @@ describe("session.llm.stream tool order", () => {
           expect(log.indexOf("call-check")).toBeGreaterThan(log.indexOf("call-edit:end"))
           expect(log.indexOf("call-check")).toBeGreaterThan(log.indexOf("call-write:end"))
         }),
-      { config: () => openAIConfig(loadFixture("openai", "gpt-5.2").model, `${state.server!.url.origin}/v1`) },
+      {
+        trusted: true,
+        config: () => openAIConfig(loadFixture("openai", "gpt-5.2").model, `${state.server!.url.origin}/v1`),
+      },
     )
 })

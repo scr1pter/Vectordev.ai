@@ -937,7 +937,7 @@ itGatedSnapshot.live(
           const call = parts.find((part): part is SessionV1.ToolPart => part.type === "tool")
           expect(call?.state.status).toBe("completed")
         }),
-      { config: (url) => providerCfg(url) },
+      { trusted: true, config: (url) => providerCfg(url) },
     ),
 )
 

@@ -700,6 +700,7 @@ it.instance(
       }
     }),
   {
+    trusted: true,
     config: {
       permission: { "*": "allow" },
       agent: { deployer: { description: "Ships releases", mode: "subagent", permission: { "*": "allow" } } },
@@ -708,7 +709,7 @@ it.instance(
 )
 
 it.instance(
-  "a rule that names a Vector Cloud permission decides it",
+  "explicit Cloud rules remain in agent metadata before runtime approval",
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
@@ -723,6 +724,7 @@ it.instance(
       expect(evalPerm(build, "vector_cloud_hosting")).toBe("ask")
     }),
   {
+    trusted: true,
     config: {
       permission: { vector_cloud_publish: "allow", vector_cloud_environment: "deny" },
       agent: {

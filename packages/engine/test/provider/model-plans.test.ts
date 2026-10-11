@@ -84,6 +84,7 @@ it.instance(
       expect((yield* provider.getModel(id, ModelV2.ID.make(codiumModel.id))).api.url).toBe(ModelPlans.API_URL)
     }),
   {
+    trusted: true,
     config: {
       model: `${ModelPlans.PROVIDER_ID}/${codiumModel.id}`,
       provider: {
@@ -264,6 +265,7 @@ it.instance(
       })
     }),
   {
+    trusted: true,
     config: {
       provider: {
         local: {
@@ -287,7 +289,7 @@ it.instance(
       expect(error).toMatchObject({ _tag: "ProviderNoProvidersError", codium: true })
       expect(error.message).toContain("Vector never chooses it for you")
     }),
-  { config: { enabled_providers: [ModelPlans.PROVIDER_ID] } },
+  { trusted: true, config: { enabled_providers: [ModelPlans.PROVIDER_ID] } },
 )
 
 it.instance("a Codium title stays on credits and records the gateway charge exactly once", () =>

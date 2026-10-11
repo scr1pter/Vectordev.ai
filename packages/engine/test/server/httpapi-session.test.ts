@@ -937,7 +937,7 @@ describe("session HttpApi", () => {
         expect(yield* ids({}, ExperimentalPaths.session)).not.toContain(helper.id)
         expect(yield* ids({ internal: "true" }, ExperimentalPaths.session)).toContain(helper.id)
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false, share: "disabled" } },
   )
 
   it.instance(

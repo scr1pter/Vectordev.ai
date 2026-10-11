@@ -3834,7 +3834,7 @@ describe("task batches", () => {
         expect(text).toContain(`<task-notification id="${child}" state="completed"`)
         expect(text).toContain("alpha verified")
       }),
-    { config: { provider: pricedProvider({ "test-model": {} }) } },
+    { trusted: true, config: { provider: pricedProvider({ "test-model": {} }) } },
   )
 
   it.instance(
