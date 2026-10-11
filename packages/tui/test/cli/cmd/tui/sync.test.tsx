@@ -77,6 +77,41 @@ describe("tui sync", () => {
     }
   })
 
+  test("lists the user's sessions but never Vector's helper sessions", async () => {
+    await using tmp = await tmpdir()
+    await Bun.write(`${tmp.path}/kv.json`, "{}")
+    const { app, emit, sync } = await mount(undefined, tmp.path)
+    const info = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      slug: id,
+      projectID: "proj_test",
+      directory: tmp.path,
+      title: id,
+      version: "test",
+      time: { created: 1, updated: 1 },
+      ...extra,
+    })
+    const updated = (session: ReturnType<typeof info>): GlobalEvent =>
+      ({
+        directory: tmp.path,
+        project: "proj_test",
+        payload: {
+          id: `evt_${session.id}`,
+          type: "session.updated",
+          properties: { sessionID: session.id, info: session },
+        },
+      }) as GlobalEvent
+
+    try {
+      emit(updated(info("ses_review", { internal: "vectorscope.review", parentID: "ses_own" })))
+      emit(updated(info("ses_own")))
+      await wait(() => sync.data.session.some((session) => session.id === "ses_own"))
+      expect(sync.data.session.map((session) => session.id)).not.toContain("ses_review")
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
   test("vcs branch updates only apply for the active workspace", async () => {
     await using tmp = await tmpdir()
     await Bun.write(`${tmp.path}/kv.json`, "{}")
