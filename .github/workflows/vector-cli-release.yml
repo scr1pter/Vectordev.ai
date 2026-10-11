@@ -59,8 +59,32 @@ env:
   VECTOR_CLI_RELEASE_DIR: ${{ github.workspace }}/cli-release
 
 jobs:
+  validate:
+    name: Require protected release environment
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require protected release environment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          reviewers=$(gh api "repos/$GITHUB_REPOSITORY/environments/production-release" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length') || {
+            echo "Create the production-release environment with required reviewers before releasing."
+            exit 1
+          }
+          test "$reviewers" -gt 0 || {
+            echo "production-release must have at least one required reviewer before releasing."
+            exit 1
+          }
+
   catalog:
     name: Publish only the reviewed immutable catalog
+    needs: validate
     if: inputs.phase == 'catalog'
     runs-on: ubuntu-24.04
     environment: production-release
@@ -143,6 +167,7 @@ jobs:
           cmp "$VECTOR_CATALOG_FILE" cli-release-catalog/api.json
 
   release:
+    needs: validate
     name: Prepare or publish all twelve native targets
     if: inputs.phase == 'prepare' || inputs.phase == 'stage' || inputs.phase == 'commit'
     runs-on: ubuntu-24.04

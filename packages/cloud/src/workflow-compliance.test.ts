@@ -4,6 +4,55 @@ const root = new URL("../../..", import.meta.url).pathname
 const read = (path: string) => Bun.file(`${root}/${path}`).text()
 
 describe("release workflow supply-chain policy", () => {
+  for (const [file, guard] of [
+    ["vector-cli-release.yml", "validate"],
+    ["vector-desktop-release.yml", "prepare"],
+  ] as const) {
+    test(`${file} rejects unprotected environments before any environment-bound job`, async () => {
+      const workflow = Bun.YAML.parse(await read(`.github/workflows/${file}`)) as {
+        jobs: Record<
+          string,
+          {
+            environment?: string
+            permissions?: Record<string, string>
+            needs?: string | string[]
+            steps?: Array<{ name: string; run?: string }>
+          }
+        >
+      }
+      const preflight = workflow.jobs[guard]
+      expect(preflight?.environment).toBeUndefined()
+      expect(preflight?.permissions).toEqual({ contents: "read", actions: "read" })
+      const ancestors = (name: string): string[] => {
+        const needs = workflow.jobs[name]?.needs
+        return [needs]
+          .flat()
+          .filter((value): value is string => typeof value === "string")
+          .flatMap((value) => [value, ...ancestors(value)])
+      }
+      for (const [name, job] of Object.entries(workflow.jobs)) {
+        if (job.environment === "production-release") expect(ancestors(name)).toContain(guard)
+      }
+      const script = preflight?.steps?.find((step) => step.name === "Require protected release environment")?.run
+      expect(script).toBeDefined()
+      // Run the actual workflow shell; only the remote GitHub response is substituted.
+      for (const response of ["1", "2", "0", "", "invalid", "missing", "forbidden"]) {
+        const command = `gh() {
+          test "$1" = api && test "$2" = repos/fixture/repo/environments/production-release || return 99
+          case "$FIXTURE_RESPONSE" in missing|forbidden) return 1;; esac
+          printf '%s\\n' "$FIXTURE_RESPONSE"
+        }
+        ${script}`
+        const child = Bun.spawn(["bash", "-c", command], {
+          env: { PATH: process.env.PATH ?? "", GITHUB_REPOSITORY: "fixture/repo", FIXTURE_RESPONSE: response },
+          stdout: "ignore",
+          stderr: "ignore",
+        })
+        expect(await child.exited).toBe(["1", "2"].includes(response) ? 0 : 1)
+      }
+    })
+  }
+
   test("CLI publication requires protected-main ancestry and production approval", async () => {
     const workflow = await read(".github/workflows/vector-cli-release.yml")
     expect(workflow.match(/environment: production-release/g)?.length).toBeGreaterThanOrEqual(2)
