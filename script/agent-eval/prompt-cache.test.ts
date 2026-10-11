@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { continued, createPromptCache, price, type Recorded } from "./prompt-cache"
+import { continued, createPromptCache, price, toolsOf, type Recorded } from "./prompt-cache"
 
 const rates = { input: 2, cacheWrite: 0, cacheRead: 0.1, output: 10 }
 const tools = [{ type: "function", name: "bash", description: "Run a command. ".repeat(400), parameters: {} }]
@@ -121,4 +121,26 @@ test("a generate:false warmup is counted as a request of its own", () => {
   const costs = price([warmup, responses("/a", { role: "user", content: "fix it" })], cache, rates)
   expect(costs.map((cost) => cost.who)).toEqual(["warmup", "agent"])
   expect(costs[0]?.costUsd).toBeGreaterThan(0)
+})
+
+test("namespaced additional tools identify Codex code mode without losing the transmitted context", () => {
+  const request: Recorded = {
+    body: {
+      input: [
+        {
+          type: "additional_tools",
+          tools: [
+            { type: "namespace", name: "functions", tools: [{ type: "custom", name: "exec", description: stable }] },
+          ],
+        },
+      ],
+    },
+    output: "",
+    sentBytes: 100,
+  }
+  expect(toolsOf(request).map((tool) => tool.name)).toEqual(["functions.exec"])
+  const costs = price([request], createPromptCache(), rates)
+  expect(costs[0]?.who).toBe("agent")
+  expect(costs[0]?.inputTokens).toBeGreaterThan(Math.floor(stable.length / 4))
+  expect(request.body.input).toHaveLength(1)
 })
