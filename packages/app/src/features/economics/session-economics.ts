@@ -4,6 +4,7 @@
 // which is why the feature looked dead. Ordinary sessions carry the same evidence.
 import type { Event, Session, VectorClient } from "@vectordevai/sdk/v2/client"
 import { successfulActivationFromSession } from "@/features/onboarding/onboarding-progress"
+import { isInternalSession } from "@/utils/internal-sessions"
 import type { recordSessionOutcome } from "./economics-repository"
 import { createSessionFamilyRefresher, sessionFamilyEventID } from "./session-family"
 import { createSessionOutcomeRecorder, outcomeFromSession } from "./session-outcomes"
@@ -83,10 +84,13 @@ export function createSessionEconomics(input: {
     async (sessionID, directory) => {
       // A running ancestor refreshes the family itself when it goes idle, so the walk stops there.
       if (input.working(sessionID)) return undefined
-      // Parent links never change, so only the root, whose revision decides the refresh, is read fresh.
+      // Vector's own tool and review sessions are not the user's tasks, so they are never a sample.
       const cached = input.cached(sessionID)
+      if (isInternalSession(cached)) return undefined
+      // Parent links never change, so only the root, whose revision decides the refresh, is read fresh.
       if (cached?.parentID) return cached
-      return (await input.client(directory).session.get({ sessionID })).data
+      const session = (await input.client(directory).session.get({ sessionID })).data
+      return isInternalSession(session) ? undefined : session
     },
     async (sessionID, directory, revision) => {
       if (!(await outcomes.refresh(sessionID, directory, revision))) return false

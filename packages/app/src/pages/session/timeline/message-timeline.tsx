@@ -77,6 +77,7 @@ import { filterVirtualIndexes } from "./virtual-items"
 import { SubagentTaskChip } from "@/features/background-tasks/subagent-task-chip"
 import { useBackgroundTasks } from "@/features/background-tasks/use-background-tasks"
 import { taskBatchEntries } from "@vectordevai/ui/task-batch"
+import { isInternalSession } from "@/utils/internal-sessions"
 
 const emptyMessages: MessageType[] = []
 const emptyParts: PartType[] = []
@@ -828,7 +829,9 @@ export function MessageTimeline(props: {
     const session = sync().session.get(sessionID)
     if (!session) return false
 
-    const sessions = (sync().data.session ?? []).filter((s) => !s.parentID && !s.time?.archived)
+    const sessions = (sync().data.session ?? []).filter(
+      (s) => !s.parentID && !s.time?.archived && !isInternalSession(s),
+    )
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 

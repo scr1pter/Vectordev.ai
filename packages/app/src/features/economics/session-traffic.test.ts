@@ -192,7 +192,10 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
     const existing = message.parts.findIndex((item) => item.id === value.id)
     if (existing === -1) message.parts.push(value)
     if (existing !== -1) message.parts[existing] = value
-    app.emit({ type: "message.part.updated", properties: { sessionID: message.info.sessionID, part: value, time: engine.tick() } })
+    app.emit({
+      type: "message.part.updated",
+      properties: { sessionID: message.info.sessionID, part: value, time: engine.tick() },
+    })
   }
   const status = (sessionID: string, type: "busy" | "idle") => {
     if (type === "busy") engine.status[sessionID] = { type }
@@ -201,7 +204,11 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
     if (type === "idle") app.emit({ type: "session.idle", properties: { sessionID } })
   }
   // A step takes seconds, so whatever the handlers started for it has finished before the next one.
-  const step = async (sessionID: string, user: Entry, tool?: { name: string; output: string; child?: () => Promise<void> }) => {
+  const step = async (
+    sessionID: string,
+    user: Entry,
+    tool?: { name: string; output: string; child?: () => Promise<void> },
+  ) => {
     status(sessionID, "busy")
     const created = engine.tick()
     const message: Entry = {
@@ -235,12 +242,29 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
     }
     part(message, { ...text })
     if (tool) {
-      const call = { id: id("prt"), sessionID, messageID: message.info.id, type: "tool", tool: tool.name, callID: id("call") }
-      part(message, { ...call, state: { status: "running", input: { filePath: "src/a.ts" }, time: { start: engine.tick() } } })
+      const call = {
+        id: id("prt"),
+        sessionID,
+        messageID: message.info.id,
+        type: "tool",
+        tool: tool.name,
+        callID: id("call"),
+      }
+      part(message, {
+        ...call,
+        state: { status: "running", input: { filePath: "src/a.ts" }, time: { start: engine.tick() } },
+      })
       await tool.child?.()
       part(message, {
         ...call,
-        state: { status: "completed", input: { filePath: "src/a.ts" }, output: tool.output, metadata: {}, title: "", time: { start: 1, end: engine.tick() } },
+        state: {
+          status: "completed",
+          input: { filePath: "src/a.ts" },
+          output: tool.output,
+          metadata: {},
+          title: "",
+          time: { start: 1, end: engine.tick() },
+        },
       })
     }
     const finish = {
@@ -266,7 +290,7 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
     await settle(engine)
   }
   return {
-    create(parentID?: string) {
+    create(parentID?: string, title = "New session") {
       const sessionID = id("ses")
       const time = engine.tick()
       const info = {
@@ -275,7 +299,7 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
         projectID: "project",
         directory,
         ...(parentID ? { parentID } : {}),
-        title: "New session",
+        title,
         version: "1",
         time: { created: time, updated: time },
         cost: 0,
@@ -293,14 +317,27 @@ function createScript(engine: ReturnType<typeof createEngine>, app: ReturnType<t
       }
       engine.history.get(sessionID)!.push(user)
       app.emit({ type: "message.updated", properties: { sessionID, info: user.info } })
-      part(user, { id: id("prt"), sessionID, messageID: user.info.id, type: "text", text: "Refactor the request module." })
+      part(user, {
+        id: id("prt"),
+        sessionID,
+        messageID: user.info.id,
+        type: "text",
+        text: "Refactor the request module.",
+      })
       return user
     },
     step,
     async title(sessionID: string) {
       app.emit({
         type: "session.next.ancillary.usage",
-        properties: { sessionID, usageID: id("evt"), purpose: "title", model: { providerID: "openai", id: "gpt-6.1-mini" }, cost: 0.0003, timestamp: engine.tick() },
+        properties: {
+          sessionID,
+          usageID: id("evt"),
+          purpose: "title",
+          model: { providerID: "openai", id: "gpt-6.1-mini" },
+          cost: 0.0003,
+          timestamp: engine.tick(),
+        },
       })
       touch(sessionID, 0.0003)
       const session = engine.sessions.get(sessionID)!
@@ -376,8 +413,20 @@ async function runSession(providerBody: string) {
     await script.step(background.id, background.prompt!)
     await script.idle(background.id)
   })
+  // Vectorscope runs each reviewer in a session of its own, which reports back to the review panel only.
+  const reviewers: string[] = []
+  await phase("Vectorscope review (2 reviewer sessions, 2 steps each)", async () => {
+    for (const name of ["review", "verify"]) {
+      const reviewer = script.create(undefined, `Vectorscope review · #7 · ${name}`)
+      reviewers.push(reviewer)
+      const task = script.prompt(reviewer)
+      await script.step(reviewer, task, { name: "read", output: "v".repeat(4_000) })
+      await script.step(reviewer, task)
+      await script.idle(reviewer)
+    }
+  })
   app.dispose()
-  return { phases, steps: 4 + 3 + 3, saved: app.saved, root }
+  return { phases, steps: 4 + 3 + 3, saved: app.saved, root, reviewers }
 }
 
 function summarize(requests: { path: string; bytes: number }[]) {
@@ -398,20 +447,25 @@ function summarize(requests: { path: string; bytes: number }[]) {
 
 test("a multi-step session with subagents fetches history only when its family settles", async () => {
   const body = process.env.VECTOR_TRAFFIC_PROVIDER_BODY
-  const result = await runSession(body ? await Bun.file(body).text() : JSON.stringify({ all: [], default: {}, connected: [] }))
+  const result = await runSession(
+    body ? await Bun.file(body).text() : JSON.stringify({ all: [], default: {}, connected: [] }),
+  )
   const all = result.phases.flatMap((phase) => phase.requests)
   const total = summarize(all)
   if (process.env.VECTOR_TRAFFIC_REPORT) {
     for (const phase of result.phases) console.log(JSON.stringify({ phase: phase.name, ...summarize(phase.requests) }))
     console.log(JSON.stringify({ phase: "session total", steps: result.steps, ...total }))
   }
+  const task = summarize(result.phases.slice(0, 5).flatMap((phase) => phase.requests))
   // The root's history is read once when the root goes idle and once when the background subagent settles after it.
-  expect(total.history).toBe(2)
+  expect(task.history).toBe(2)
   // Title spend refreshes the one session it changed instead of re-bootstrapping the directory.
   expect(total.bootstrap).toBe(0)
   expect(total.provider).toBe(0)
   for (const phase of result.phases.slice(0, 3)) expect(summarize(phase.requests).history).toBe(0)
-  expect(total.session).toBeLessThanOrEqual(7)
+  expect(task.session).toBeLessThanOrEqual(7)
+  // A reviewer session is Vector's own: no history read, no session read, no economics sample.
+  expect(summarize(result.phases[5].requests).requests).toBe(0)
   // Fewer reads, same evidence: the root's sample is recorded when it stops and again with the late subagent's spend.
   expect(result.saved.map((sample) => sample.sessionID)).toEqual([result.root, result.root])
   expect(result.saved[0].outcome?.costUsd).toBeCloseTo(0.0163 + 0.012 + 0.004, 10)
