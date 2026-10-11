@@ -49,7 +49,7 @@ configuration.vector.env.VECTOR_DISABLE_WEBSOCKETS = "1"
 await Bun.write(`${work}/http.json`, JSON.stringify(configuration, null, 2))
 '
 cd "$VECTOR_BENCH_WORK"
-bun test runner-self-test.ts
+bun ./runner-self-test.ts
 ```
 
 ## Matched nine runs per runtime
