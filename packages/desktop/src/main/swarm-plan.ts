@@ -54,9 +54,6 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   if (!Array.isArray(root.tasks)) throw new Error("The planning agent returned no task list.")
 
   const limit = Math.max(2, Number.isFinite(maxTasks) ? Math.floor(maxTasks) : 12)
-  // Dropping tasks or dependency edges can turn dependent work into parallel edits.
-  // Reject the graph so the caller can use the complete fallback workflow.
-  if (root.tasks.length > limit) throw new Error(`The planning agent exceeded the ${limit}-task limit.`)
   if (!root.tasks.every(isRecord)) throw new Error("The planning agent returned an invalid task.")
   const raw = root.tasks
   if (raw.length < 2) throw new Error("A swarm plan needs at least two coordinated tasks.")
@@ -77,7 +74,7 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
           ? "strong"
           : "balanced"
     const id = ids[index]
-    if (item.dependsOn !== undefined && !Array.isArray(item.dependsOn)) {
+    if (item.dependsOn != null && !Array.isArray(item.dependsOn)) {
       throw new Error(`Task ${id} returned an invalid dependency list.`)
     }
     const dependsOn = [
@@ -110,9 +107,38 @@ export function parseSwarmPlan(value: string, objective: string, maxTasks = 12):
   })
 
   assertAcyclic(tasks)
+  // Fold excess tasks into one serial assignment instead of dropping validation or dependency edges.
+  const ordered: SwarmPlanTask[] = []
+  const visited = new Set<string>()
+  const visit = (task: SwarmPlanTask) => {
+    if (visited.has(task.id)) return
+    task.dependsOn.forEach((id) => visit(tasks.find((item) => item.id === id)!))
+    visited.add(task.id)
+    ordered.push(task)
+  }
+  tasks.forEach(visit)
+  const retained = ordered.slice(0, limit - 1)
+  const excess = ordered.slice(limit - 1)
+  const trimmed =
+    tasks.length <= limit
+      ? tasks
+      : [
+          ...retained,
+          {
+            ...excess[0],
+            title: excess.map((task) => task.title).join("; "),
+            prompt: `Complete every task below in order, including its validation.\n\n${excess.map((task, index) => `${index + 1}. ${task.title}\n${task.prompt}`).join("\n\n")}`,
+            role: excess.some((task) => !["explore", "review", "security", "docs"].includes(task.role))
+              ? ("implement" as const)
+              : excess[0].role,
+            modelTier: excess.some((task) => task.modelTier === "strong") ? ("strong" as const) : ("balanced" as const),
+            dependsOn: retained.map((task) => task.id),
+            fileHints: [...new Set(excess.flatMap((task) => task.fileHints))],
+          },
+        ]
   return {
     summary: stringValue(root.summary) || `Vector decomposed the objective into ${tasks.length} coordinated tasks.`,
-    tasks,
+    tasks: trimmed,
   }
 }
 

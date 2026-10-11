@@ -243,7 +243,8 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
   const active = activeRuns.get(id)
   if (active && !active.controller.signal.aborted) return getSwarmRun(id)!
   // A stopped scheduler must finish unwinding before another one can own the run.
-  if (active) await active.completion
+  if (active && !(await waitForCleanup(active.completion)))
+    throw new Error("The stopped swarm is still cleaning up. Wait for its workspaces to settle before resuming.")
   const current = getSwarmRun(id)
   if (!current) throw new Error("Swarm run was not found.")
   if (["merged", "discarded", "needs review", "complete"].includes(current.status)) return current
@@ -279,29 +280,39 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
   return getSwarmRun(id)!
 }
 
-export async function stopSwarmRun(id: string) {
+export async function stopSwarmRun(id: string, timeoutMs = 10_000) {
   const current = getSwarmRun(id)
   if (!current) throw new Error("Swarm run was not found.")
   const active = activeRuns.get(id)
   if (!active && !["planning", "running", "interrupted"].includes(current.status)) return current
   active?.controller.abort()
-  await active?.completion
-  await Promise.all(
-    (getSwarmRun(id)?.tasks ?? [])
-      .filter((task) => task.workspaceId && ["creating", "queued", "running", "merging"].includes(task.status))
-      .map((task) => stopParallelWorkspace(task.workspaceId!).catch(() => undefined)),
-  )
+  const cleanup = (async () => {
+    await active?.completion
+    await Promise.all(
+      (getSwarmRun(id)?.tasks ?? [])
+        .filter((task) => task.workspaceId && ["creating", "queued", "running", "merging"].includes(task.status))
+        .map((task) => stopParallelWorkspace(task.workspaceId!).catch(() => undefined)),
+    )
+    return updateRun(id, (run) => ({
+      ...run,
+      status: "canceled",
+      currentStep: "Swarm stopped",
+      completedAt: now(),
+      tasks: run.tasks.map((task) =>
+        ["planned", "creating", "queued", "running", "merging"].includes(task.status)
+          ? { ...task, status: "canceled", completedAt: now(), lastAction: "Canceled by user" }
+          : task,
+      ),
+      logs: [...run.logs, `${now()}  Swarm stopped by the user.`].slice(-240),
+    }))
+  })()
+  if (await waitForCleanup(cleanup, timeoutMs)) return getSwarmRun(id)!
+  // Keep ownership until the operation settles. A late merge must be recorded complete before Resume can retry.
   return updateRun(id, (run) => ({
     ...run,
     status: "canceled",
-    currentStep: "Swarm stopped",
-    completedAt: now(),
-    tasks: run.tasks.map((task) =>
-      ["planned", "creating", "queued", "running", "merging"].includes(task.status)
-        ? { ...task, status: "canceled", completedAt: now(), lastAction: "Canceled by user" }
-        : task,
-    ),
-    logs: [...run.logs, `${now()}  Swarm stopped by the user.`].slice(-240),
+    currentStep: "Swarm stopped; workspace cleanup is still finishing",
+    logs: [...run.logs, `${now()}  Stop returned while workspace cleanup continues.`].slice(-240),
   }))
 }
 
@@ -351,7 +362,8 @@ export async function discardSwarmRun(id: string) {
   if (!getSwarmRun(id)) throw new Error("Swarm run was not found.")
   const active = activeRuns.get(id)
   active?.controller.abort()
-  await active?.completion
+  if (active && !(await waitForCleanup(active.completion)))
+    throw new Error("The stopped swarm is still cleaning up. Wait for its workspaces to settle before discarding.")
   const run = getSwarmRun(id)!
   const workspaceIDs = [run.coordinatorWorkspaceId, ...run.tasks.map((task) => task.workspaceId)].filter(
     (workspaceID): workspaceID is string => Boolean(workspaceID),
@@ -371,6 +383,12 @@ export async function discardSwarmRun(id: string) {
     completedAt: now(),
     logs: [...current.logs, `${now()}  All remaining isolated swarm workspaces were discarded.`].slice(-240),
   }))
+}
+
+async function waitForCleanup(completion: Promise<unknown>, timeoutMs = 10_000) {
+  const expired = Promise.withResolvers<boolean>()
+  const timer = setTimeout(() => expired.resolve(false), timeoutMs)
+  return Promise.race([completion.then(() => true), expired.promise]).finally(() => clearTimeout(timer))
 }
 
 function startSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
@@ -718,39 +736,41 @@ async function generateSwarmPlan(
   const sessionID = created?.data?.id
   if (!sessionID) throw new Error("Vector's planner did not return a session ID.")
   updateRun(run.id, (current) => ({ ...current, plannerSessionId: sessionID }))
-  try {
-    signal.throwIfAborted()
-    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/prompt`, {
-      method: "POST",
-      body: { prompt: { text: plannerPrompt(run) }, resume: true },
-      signal,
-    })
-    await waitForPlannerIdle(run.id, sessionID, engine, signal)
-    const context = await engineRequest<{ data?: unknown }>(
-      engine,
-      `/api/session/${encodeURIComponent(sessionID)}/context`,
-      { signal },
-    )
-    const messages = collectText(context?.data).reverse()
-    const parsed = messages
-      .map((message) => {
-        try {
-          return parseSwarmPlan(message, run.objective, run.maxAgents)
-        } catch {
-          return undefined
-        }
+  return Promise.resolve()
+    .then(async () => {
+      signal.throwIfAborted()
+      await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/prompt`, {
+        method: "POST",
+        body: { prompt: { text: plannerPrompt(run) }, resume: true },
+        signal,
       })
-      .find((plan) => plan)
-    if (!parsed) throw new Error("Vector could not validate the planner's dependency graph.")
-    return parsed
-  } catch (error) {
-    // Aborting the HTTP request does not interrupt the admitted model work.
-    await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/interrupt`, {
-      method: "POST",
-      signal: AbortSignal.timeout(5_000),
-    }).catch(() => undefined)
-    throw error
-  }
+      await waitForPlannerIdle(run.id, sessionID, engine, signal)
+      const context = await engineRequest<{ data?: unknown }>(
+        engine,
+        `/api/session/${encodeURIComponent(sessionID)}/context`,
+        { signal },
+      )
+      const messages = collectText(context?.data).reverse()
+      const parsed = messages
+        .map((message) => {
+          try {
+            return parseSwarmPlan(message, run.objective, run.maxAgents)
+          } catch {
+            return undefined
+          }
+        })
+        .find((plan) => plan)
+      if (!parsed) throw new Error("Vector could not validate the planner's dependency graph.")
+      return parsed
+    })
+    .catch(async (error) => {
+      // Aborting the HTTP request does not interrupt the admitted model work.
+      await engineRequest(engine, `/api/session/${encodeURIComponent(sessionID)}/interrupt`, {
+        method: "POST",
+        signal: AbortSignal.timeout(5_000),
+      }).catch(() => undefined)
+      throw error
+    })
 }
 
 function plannerPrompt(run: SwarmRunRecord) {

@@ -196,7 +196,6 @@ describe("tool.registry", () => {
       const legacy = { description: "Inspect the registry", prompt: "Inspect the registry.", background: true }
       expect(Schema.decodeUnknownSync(task.parameters)(legacy)).toEqual(legacy)
       expect(Result.isSuccess(Schema.decodeUnknownResult(task.parameters)({ tasks: [legacy] }))).toBe(false)
-
     }),
   )
 

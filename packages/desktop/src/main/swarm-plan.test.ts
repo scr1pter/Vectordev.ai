@@ -51,16 +51,27 @@ describe("swarm plan", () => {
     ).toThrow("unknown task missing")
   })
 
-  test("rejects oversized plans without dropping required tasks", () => {
-    expect(() =>
-      parseSwarmPlan(
-        JSON.stringify({
-          tasks: [{ id: "build", dependsOn: ["inspect"] }, { id: "review" }, { id: "inspect" }],
-        }),
-        "Objective",
-        2,
-      ),
-    ).toThrow("2-task limit")
+  test("folds oversized plans in dependency order without losing instructions", () => {
+    const plan = parseSwarmPlan(
+      JSON.stringify({
+        tasks: [
+          { id: "build", prompt: "Implement the change", dependsOn: ["inspect"] },
+          { id: "review", prompt: "Run all checks", dependsOn: ["build"] },
+          { id: "inspect", prompt: "Inspect first", dependsOn: null },
+        ],
+      }),
+      "Objective",
+      2,
+    )
+    expect(plan.tasks).toHaveLength(2)
+    expect(plan.tasks[0]?.id).toBe("inspect")
+    expect(plan.tasks[0]?.dependsOn).toEqual([])
+    expect(plan.tasks[1]?.dependsOn).toEqual(["inspect"])
+    expect(plan.tasks[1]?.prompt).toContain("Implement the change")
+    expect(plan.tasks[1]?.prompt).toContain("Run all checks")
+    expect(plan.tasks[1]?.prompt.indexOf("Implement the change")).toBeLessThan(
+      plan.tasks[1]!.prompt.indexOf("Run all checks"),
+    )
   })
 
   test.each([{ dependsOn: "inspect" }, { dependsOn: [null] }, { dependsOn: [1] }, { dependsOn: [""] }])(

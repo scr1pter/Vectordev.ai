@@ -219,6 +219,26 @@ describe("swarm lifecycle", () => {
     expect(getSwarmRun(run.id)?.status).toBe("canceled")
   })
 
+  test("Stop returns within its bound while provisioning settles and retains cleanup ownership", async () => {
+    const run = await seed("interrupted", [inspectTask])
+    const creating = Promise.withResolvers<void>()
+    onWrite = (name) => {
+      if (name === "swarm-orchestrator-state" && getSwarmRun(run.id)?.tasks[0]?.status === "creating")
+        creating.resolve()
+    }
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    await creating.promise
+    const started = Date.now()
+    const stopped = await stopSwarmRun(run.id, 0)
+    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(stopped.status).toBe("canceled")
+    expect(stopped.currentStep).toContain("cleanup")
+    const settled = await stopSwarmRun(run.id)
+    expect(settled.tasks[0]?.status).toBe("canceled")
+    expect(settled.tasks[0]?.workspaceId).toBeTruthy()
+    expect(requests).toEqual([])
+  })
+
   test("stopping an executing worker interrupts its session before the scheduler finishes", async () => {
     const run = await seed("interrupted", [inspectTask])
     await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
