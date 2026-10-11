@@ -1,10 +1,10 @@
 import { ServerAuth } from "@/server/auth"
-import { Effect, Encoding, Layer, Redacted } from "effect"
+import { Effect, Encoding, Layer, Redacted, Schema } from "effect"
 import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { ForbiddenError, UnauthorizedError } from "@vectordevai/protocol/errors"
 import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
-import { ptyConnectTicket } from "@/server/shared/pty-ticket"
+import { PtyID } from "@vectordevai/core/pty/schema"
 import { isPublicUIPath } from "@/server/shared/public-ui"
 export {
   Authorization as ServerAuthorization,
@@ -157,7 +157,13 @@ export const ptyConnectAuthorizationLayer = Layer.effect(
         const request = yield* HttpServerRequest.HttpServerRequest
         const url = new URL(request.url, "http://localhost")
         if (url.searchParams.has("auth_token")) return yield* validateCredential(effect, emptyCredential(), config)
-        const connection = ptyConnectTicket(url)
+        const route = yield* HttpRouter.RouteContext
+        const ticket = url.searchParams.get("ticket")
+        const ptyID = Schema.decodeUnknownOption(PtyID)(route.params.ptyID)
+        const connection =
+          request.method === "GET" && route.route.path === "/pty/:ptyID/connect" && ticket && ptyID._tag === "Some"
+            ? { ptyID: ptyID.value, ticket }
+            : undefined
         if (connection)
           return yield* effect.pipe(
             Effect.provideService(RequestPrincipal, {

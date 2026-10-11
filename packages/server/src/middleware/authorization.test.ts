@@ -3,11 +3,16 @@ import { Effect, Layer, Option, Schema } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { ServerAuth } from "../auth"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { Authorization, authorizationLayer } from "./authorization"
 
 const Api = HttpApi.make("guest-gate").add(
   HttpApiGroup.make("test")
     .add(
+      HttpApiEndpoint.get("connect", "/api/pty/:ptyID/connect", {
+        params: { ptyID: Schema.String },
+        success: Schema.String,
+      }),
       HttpApiEndpoint.post("pty", "/api/pty", { success: Schema.String }),
       HttpApiEndpoint.post("reply", "/api/session/:sessionID/permission/:requestID/reply", {
         params: { sessionID: Schema.String, requestID: Schema.String },
@@ -23,6 +28,11 @@ const Api = HttpApi.make("guest-gate").add(
 
 const handlers = HttpApiBuilder.group(Api, "test", (handlers) =>
   handlers
+    .handle("connect", () =>
+      RequestPrincipal.pipe(
+        Effect.map((principal) => (principal.kind === "pty-ticket" ? principal.ptyID : principal.kind)),
+      ),
+    )
     .handle("pty", () => Effect.succeed("ran"))
     .handle("reply", () => Effect.succeed("ran"))
     .handle("messages", () => Effect.succeed("ran")),
@@ -68,6 +78,20 @@ describe("guest owner-only gate", () => {
     `${route};x`,
     route.replace(/\/(?=[^/]*$)/, "//"),
   ]
+
+  test("recognises ticket access only for the matched GET connect route and its params", async () => {
+    for (const path of ["/api/pty/pty_probe/connect", "/API/PTY/pty_probe/CONNECT/", "/api//pty/pty_probe/connect;x"]) {
+      const response = await web.handler(new Request(`http://localhost${path}?ticket=placeholder`))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toBe("pty_probe")
+    }
+    expect(
+      (await web.handler(new Request("http://localhost/api/session/ses_1/message?ticket=placeholder"))).status,
+    ).toBe(401)
+    expect(
+      (await web.handler(new Request("http://localhost/api/pty?ticket=placeholder", { method: "POST" }))).status,
+    ).toBe(401)
+  })
 
   test("refuses a guest every spelling of an owner-only route", async () => {
     const attempts = [...spellings("/api/pty"), ...spellings("/api/session/ses_1/permission/per_1/reply")]

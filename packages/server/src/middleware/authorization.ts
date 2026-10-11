@@ -2,9 +2,9 @@ import { ServerAuth } from "../auth"
 import { ForbiddenError, UnauthorizedError } from "@vectordevai/protocol/errors"
 import { Authorization, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 export { Authorization } from "@vectordevai/protocol/middleware/authorization"
-import { ptyConnectTicket } from "@vectordevai/protocol/groups/pty"
-import { Effect, Encoding, Layer, Redacted } from "effect"
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { PtyID } from "@vectordevai/core/pty/schema"
+import { Effect, Encoding, Layer, Redacted, Schema } from "effect"
+import { HttpEffect, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 
 const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
 
@@ -51,7 +51,13 @@ export const authorizationLayer = Layer.effect(
         if (url.searchParams.has("auth_token")) return yield* unauthorized(emptyCredential(), config)
         // Browsers cannot set headers on WebSocket upgrades, so a ticketed PTY connect skips
         // credential checks here; the connect handler consumes and validates the ticket.
-        const connection = ptyConnectTicket(url)
+        const route = yield* HttpRouter.RouteContext
+        const ticket = url.searchParams.get("ticket")
+        const ptyID = Schema.decodeUnknownOption(PtyID)(route.params.ptyID)
+        const connection =
+          request.method === "GET" && route.route.path === "/api/pty/:ptyID/connect" && ticket && ptyID._tag === "Some"
+            ? { ptyID: ptyID.value, ticket }
+            : undefined
         if (connection)
           return yield* effect.pipe(
             Effect.provideService(RequestPrincipal, {

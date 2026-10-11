@@ -65,6 +65,17 @@ test("a path the URL parser reads as a public asset does not open /doc", async (
     // The router serves /doc for this target; the URL parser reads it as /site.webmanifest.
     expect(await status("/doc;/../site.webmanifest")).toBe(401)
     expect(await status("/doc")).toBe(401)
+    // The router stops at ';', while URL normalisation turns the suffix into a PTY connect path.
+    for (const target of [
+      "/api/session;/../pty/pty_probe/connect?ticket=forged",
+      "/api/session;/../pty/pty_probe/connect/?ticket=forged",
+      "/API/SESSION;/../pty/pty_probe/connect?ticket=forged",
+      "/session;/../pty/pty_probe/connect?ticket=forged",
+    ])
+      expect({ target, status: await status(target) }).toEqual({ target, status: 401 })
+    for (const target of ["/pty/pty_probe/connect?ticket=forged", "/API/PTY/pty_probe/CONNECT/?ticket=forged"])
+      expect({ target, status: await status(target) }).toEqual({ target, status: 403 })
+
     expect(await status("/site.webmanifest")).not.toBe(401)
   } finally {
     await listener.stop(true)
