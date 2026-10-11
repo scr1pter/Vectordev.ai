@@ -1,5 +1,6 @@
-import { createSignal, For, Show, type JSX } from "solid-js"
+import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js"
 import { usePlatform } from "@/context/platform"
+import type { VectorAccountStatus } from "../vector-account"
 
 export type WorkspaceNavigationItem = {
   id: string
@@ -94,7 +95,20 @@ export function WorkspaceNavigation(props: {
   const platform = usePlatform()
   const [localMode, setLocalMode] = createSignal<"agent" | "editor">(props.mode ?? "agent")
   const [helpOpen, setHelpOpen] = createSignal(false)
+  const [account, setAccount] = createSignal<VectorAccountStatus>({ authenticated: false, pending: false })
   const mode = () => props.mode ?? localMode()
+  // The signed-in person, as Codex and Claude show it: name from Google or the account, else the email.
+  const accountLabel = () => account().name || account().email || ""
+
+  onMount(() => {
+    const vectorAccount = platform.vectorAccount
+    if (!vectorAccount) return
+    onCleanup(vectorAccount.onChange(setAccount))
+    void vectorAccount
+      .status()
+      .then(setAccount)
+      .catch(() => undefined)
+  })
 
   const selectMode = (next: "agent" | "editor") => {
     setLocalMode(next)
@@ -684,7 +698,53 @@ export function WorkspaceNavigation(props: {
         data-vector-nav-footer
         class="grid min-h-[50px] shrink-0 grid-cols-[1fr_auto_auto] items-center gap-1 border-t border-[color:var(--vx-line)] px-3 py-2"
       >
-        <span class="truncate px-1 text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">Vector workspace</span>
+        <Show
+          when={platform.vectorAccount}
+          fallback={
+            <span class="truncate px-1 text-[11px] text-[color:var(--vx-workspace-text-tertiary)]">
+              Vector workspace
+            </span>
+          }
+        >
+          <Show
+            when={account().authenticated && accountLabel()}
+            fallback={
+              <button
+                type="button"
+                data-vector-account-chip
+                class="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-1 text-left text-[12px] text-white/60 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-60"
+                disabled={account().pending}
+                onClick={() =>
+                  void platform.vectorAccount
+                    ?.start()
+                    .then(setAccount)
+                    .catch(() => undefined)
+                }
+              >
+                <span class="truncate">
+                  {account().pending ? "Finish signing in in your browser" : "Sign in to Vector"}
+                </span>
+              </button>
+            }
+          >
+            <button
+              type="button"
+              data-vector-account-chip
+              class="flex min-w-0 items-center gap-2 rounded-[6px] px-1 py-1 text-left transition hover:bg-white/[0.05]"
+              title={account().email}
+              aria-label={`Account: ${accountLabel()}. Open settings`}
+              onClick={props.onSettings}
+            >
+              <span
+                aria-hidden="true"
+                class="grid size-6 shrink-0 place-items-center rounded-full bg-[color:var(--vx-purple)] text-[11px] font-medium uppercase text-white"
+              >
+                {accountLabel().trim().charAt(0)}
+              </span>
+              <span class="truncate text-[12.5px] text-white/85">{accountLabel()}</span>
+            </button>
+          </Show>
+        </Show>
         <button
           type="button"
           data-tour="nav-getting-started"

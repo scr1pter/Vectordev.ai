@@ -12,6 +12,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Durable).toBe(SchemaEventManifest.Durable)
     expect(EventManifest.Latest.size).toBe(94)
     expect(EventManifest.Latest.get("provider.unavailable")).toBe(Integration.Event.Unavailable)
+    expect(EventManifest.Latest.get("session.next.ancillary.usage")).toBe(SessionEvent.AncillaryUsage)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Latest.get("session.next.step.resumed")).toBe(SessionEvent.Step.Resumed)
     expect(EventManifest.Latest.get("session.next.ancillary.usage")).toBe(SessionEvent.AncillaryUsage)

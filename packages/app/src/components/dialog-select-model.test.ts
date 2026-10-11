@@ -521,7 +521,7 @@ test("only the server-marked approved plugin makes a paused provider selectable"
   }
 })
 
-describe("Free models inside of Vector", () => {
+describe("Models included with Vector", () => {
   const shared = model({ id: "vector", name: "Vector", source: "custom" }, "maker/coder:free", "Maker Coder:free", {
     freeModel: { source: "shared" },
     cost: { input: 0, output: 0 },
@@ -538,7 +538,7 @@ describe("Free models inside of Vector", () => {
       currentKey: pickerModelKey(shared),
       recentKeys: [pickerModelKey(shared)],
     })
-    expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
+    expect(sections.map((section) => section.label)).toEqual(["Models included with Vector"])
     expect(pickerKeys(sections)).toEqual([pickerModelKey(own)])
     expect(modelDisplayName(own)).toBe("Maker Coder")
     expect(modelTitle(own)).toContain("Your OpenRouter account")

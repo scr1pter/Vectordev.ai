@@ -13,6 +13,8 @@ const keep = new Set([
   "design",
   "docs",
   "download",
+  // The unlisted investor one-pager (noindex, shared by link only).
+  "investors",
   "legal",
   "login",
   "s",
