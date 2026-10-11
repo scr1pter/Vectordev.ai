@@ -463,7 +463,8 @@ test("a multi-step session with subagents fetches history only when its family s
   expect(total.bootstrap).toBe(0)
   expect(total.provider).toBe(0)
   for (const phase of result.phases.slice(0, 3)) expect(summarize(phase.requests).history).toBe(0)
-  expect(task.session).toBeLessThanOrEqual(7)
+  // One read after the title spend, then a snapshot before and a check after each of the two history reads.
+  expect(task.session).toBe(5)
   // A reviewer session is Vector's own: no history read, no session read, no economics sample.
   expect(summarize(result.phases[5].requests).requests).toBe(0)
   // Fewer reads, same evidence: the root's sample is recorded when it stops and again with the late subagent's spend.

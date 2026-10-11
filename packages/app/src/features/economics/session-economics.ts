@@ -22,13 +22,20 @@ export function createSessionEconomics(input: {
   // Parallel workspaces whose agent session is this root; resolves whether all of them recorded.
   workspaces: (sessionID: string, directory: string) => Promise<boolean>
 }) {
+  // The family walk reads a root fresh to learn its revision, then records it. That read is the sample's first
+  // snapshot instead of a second one: the check after the history read still catches any change since. A retry
+  // finds it taken and reads again.
+  const roots = new Map<string, Session>()
   const outcomes = createSessionOutcomeRecorder(async (sessionID, directory, current) => {
     const client = input.client(directory)
-    const before = await client.session.get({ sessionID }).catch(() => undefined)
+    const key = JSON.stringify([directory, sessionID])
+    const walked = roots.get(key)
+    roots.delete(key)
+    const before = walked ?? (await client.session.get({ sessionID }).catch(() => undefined))?.data
     if (!current()) return
-    if (!before?.data) throw new Error("Session metadata is unavailable")
+    if (!before) throw new Error("Session metadata is unavailable")
     // Child spend is recorded through the root's family refresh; its full history is not a separate sample.
-    if (before.data.parentID) return
+    if (before.parentID) return
     const history = await client.session.messages({ sessionID })
     if (!Array.isArray(history.data)) throw new Error("Session history is unavailable")
     if (!current()) return
@@ -40,11 +47,11 @@ export function createSessionEconomics(input: {
     if (!current()) return
     // Do not assign a newer metadata revision to history fetched before that revision existed.
     if (
-      session.data.time.updated !== before.data.time.updated ||
-      session.data.cost !== before.data.cost ||
-      session.data.unpricedSteps !== before.data.unpricedSteps ||
-      session.data.subagentCost !== before.data.subagentCost ||
-      session.data.subagentUnpricedSteps !== before.data.subagentUnpricedSteps
+      session.data.time.updated !== before.time.updated ||
+      session.data.cost !== before.cost ||
+      session.data.unpricedSteps !== before.unpricedSteps ||
+      session.data.subagentCost !== before.subagentCost ||
+      session.data.subagentUnpricedSteps !== before.subagentUnpricedSteps
     )
       throw new Error("Session changed while collecting usage")
     const parts = Object.fromEntries(history.data.map((entry) => [entry.info.id, entry.parts]))
@@ -90,7 +97,9 @@ export function createSessionEconomics(input: {
       // Parent links never change, so only the root, whose revision decides the refresh, is read fresh.
       if (cached?.parentID) return cached
       const session = (await input.client(directory).session.get({ sessionID })).data
-      return isInternalSession(session) ? undefined : session
+      if (!session || isInternalSession(session)) return undefined
+      if (!session.parentID) roots.set(JSON.stringify([session.directory, session.id]), session)
+      return session
     },
     async (sessionID, directory, revision) => {
       if (!(await outcomes.refresh(sessionID, directory, revision))) return false
@@ -117,6 +126,7 @@ export function createSessionEconomics(input: {
     dispose() {
       family.dispose()
       outcomes.dispose()
+      roots.clear()
     },
   }
 }
