@@ -304,6 +304,7 @@ const api: ElectronAPI = {
     start: () => ipcRenderer.invoke("vector-account-start"),
     cancel: () => ipcRenderer.invoke("vector-account-cancel"),
     logout: () => ipcRenderer.invoke("vector-account-logout"),
+    codium: () => ipcRenderer.invoke("vector-account-codium"),
     onChange: (callback) => {
       const handler = (_event: unknown, status: Parameters<typeof callback>[0]) => callback(status)
       ipcRenderer.on("vector-account-changed", handler)

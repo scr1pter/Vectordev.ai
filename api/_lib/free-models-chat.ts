@@ -33,14 +33,14 @@ export function freeModelLimit(reason: FreeModelLimitReason, resetAt: number): F
     code: "VECTOR_FREE_MODELS_LIMIT",
     reason,
     resetAt,
-    message: "You've used today's shared free models inside of Vector. Continue free with your own OpenRouter account.",
+    message: "You've used today's shared allowance for Models included with Vector. Continue free with your own OpenRouter account.",
   }
 }
 
 function setting(name: string, fallback: number, maximum: number) {
   const value = Number(process.env[name] ?? fallback)
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum)
-    throw new ApiError(503, "FREE_MODELS_CONFIGURATION", "Free models inside of Vector are temporarily unavailable.")
+    throw new ApiError(503, "FREE_MODELS_CONFIGURATION", "Models included with Vector are temporarily unavailable.")
   return value
 }
 
@@ -164,7 +164,7 @@ export async function handleFreeModelsChat(
       throw new ApiError(
         503,
         "FREE_MODELS_DISABLED",
-        "Free models inside of Vector are not enabled. Connect OpenRouter to use your own account.",
+        "Models included with Vector are not enabled. Connect OpenRouter to use your own account.",
       )
     const token = /^Bearer (vct_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)$/.exec(String(request.headers.authorization ?? ""))?.[1]
     const account = verifyCliToken(token ?? "", now)
@@ -174,7 +174,7 @@ export async function handleFreeModelsChat(
     const input = (() => {
       try {
         return {
-          ...freeModelRequest(body, catalog.models),
+          ...freeModelRequest(body, catalog.models, true),
           user: createHash("sha256").update(account.id).digest("hex"),
         }
       } catch (error) {
@@ -256,7 +256,7 @@ export async function handleFreeModelsChat(
                 ? error.statusCode === 413
                   ? "This conversation exceeds the 4.5 MB shared-request limit. Compact it or connect your own provider."
                   : error.message
-                : "Free models inside of Vector are temporarily unavailable. Connect OpenRouter to use your own account.",
+                : "Models included with Vector are temporarily unavailable. Connect OpenRouter to use your own account.",
           }
     if (response.headersSent) {
       response.end(`data: ${JSON.stringify({ error: detail })}\n\ndata: [DONE]\n\n`)

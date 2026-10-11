@@ -247,6 +247,7 @@ export function registerIpcHandlers(deps: Deps) {
   handle("vector-account-start", () => vectorAccount.start())
   handle("vector-account-cancel", () => vectorAccount.cancel())
   handle("vector-account-logout", () => vectorAccount.logout())
+  handle("vector-account-codium", () => vectorAccount.codium())
 
   const voiceOwners = new Set<number>()
   const updaterSubscriptions = createUpdaterSubscriptions()

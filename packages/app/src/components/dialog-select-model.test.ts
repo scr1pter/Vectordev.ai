@@ -84,6 +84,21 @@ describe("modelAccess", () => {
     expect(modelAccess(model(openaiKey, "custom", "Custom", { cost: { input: 0 } })).kind).toBe("none")
   })
 
+  test("Vector Codium models are marked as paid from Codium credits, in rows, search and sections", () => {
+    const codium: Provider = { id: "vector-plan", name: "Vector Codium", source: "custom", env: [], options: {} }
+    const coder = model(codium, "qwen/qwen3-coder-next", "Qwen3 Coder Next", { cost: { input: 0.12 } })
+    expect(modelAccess(coder)).toEqual({
+      kind: "codium",
+      label: "Codium credits",
+      title: "Uses your Vector Codium credits",
+      spoken: "uses your Codium credits",
+    })
+    expect(modelTitle(coder)).toContain("Uses your Vector Codium credits")
+    expect(matchRank(coder, "codium", NOW)).toBe(3)
+    const sections = buildModelSections({ models: [coder], now: NOW })
+    expect(sections.find((section) => section.items.includes(coder))?.access?.label).toBe("Codium credits")
+  })
+
   test("ambiguous environment credentials and unlisted providers claim no access method", () => {
     expect(modelAccess(model(copilotToken, "coding", "Coding", { cost: { input: 2 } })).kind).toBe("none")
     expect(modelAccess(model(unlistedKey, "coding", "Coding", { cost: { input: 2 } })).kind).toBe("none")
@@ -521,7 +536,7 @@ test("only the server-marked approved plugin makes a paused provider selectable"
   }
 })
 
-describe("Free models inside of Vector", () => {
+describe("Models included with Vector", () => {
   const shared = model({ id: "vector", name: "Vector", source: "custom" }, "maker/coder:free", "Maker Coder:free", {
     freeModel: { source: "shared" },
     cost: { input: 0, output: 0 },
@@ -538,7 +553,7 @@ describe("Free models inside of Vector", () => {
       currentKey: pickerModelKey(shared),
       recentKeys: [pickerModelKey(shared)],
     })
-    expect(sections.map((section) => section.label)).toEqual(["Free models inside of Vector"])
+    expect(sections.map((section) => section.label)).toEqual(["Models included with Vector"])
     expect(pickerKeys(sections)).toEqual([pickerModelKey(own)])
     expect(modelDisplayName(own)).toBe("Maker Coder")
     expect(modelTitle(own)).toContain("Your OpenRouter account")

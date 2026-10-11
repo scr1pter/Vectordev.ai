@@ -31,7 +31,7 @@ const PROVIDER_NOTES = [
   { match: (id: string) => id === "vercel", key: "dialog.provider.vercel.note" },
 ] as const
 
-const HIDDEN_PROVIDER_IDS = new Set(["vector"])
+const HIDDEN_PROVIDER_IDS = new Set(["vector", "vector-plan"])
 
 const providerDisplayName = (id: string, name: string) => brandProviderName(id, name)
 

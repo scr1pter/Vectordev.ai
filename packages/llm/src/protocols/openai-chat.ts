@@ -154,6 +154,9 @@ const OpenAIChatUsage = Schema.Struct({
       reasoning_tokens: Schema.optional(Schema.Number),
     }),
   ),
+  // OpenRouter-style gateways report what they billed for the request. Kept loose: other providers may send
+  // anything here, and callers validate it before use.
+  cost: Schema.optional(Schema.Unknown),
 })
 
 const OpenAIChatToolCallDeltaFunction = Schema.Struct({

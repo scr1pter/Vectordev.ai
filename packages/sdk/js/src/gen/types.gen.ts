@@ -4038,7 +4038,13 @@ export type SessionMessageAssistantTool = {
   }
 }
 
-export type SessionErrorAssistant = SessionErrorUnknown | FreeModelLimit
+export type SessionErrorCodium = {
+  type: "codium"
+  action: "credits" | "sign-in" | "unavailable"
+  message: string
+}
+
+export type SessionErrorAssistant = SessionErrorUnknown | FreeModelLimit | SessionErrorCodium
 
 export type SessionMessageAssistant = {
   id: string

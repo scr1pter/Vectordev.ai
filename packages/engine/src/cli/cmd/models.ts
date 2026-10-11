@@ -8,6 +8,7 @@ import { EOL } from "os"
 import { Effect } from "effect"
 import { Flag } from "@vectordevai/core/flag/flag"
 import { ModelCatalog } from "@vectordevai/core/model-catalog"
+import { ModelPlans } from "@vectordevai/core/model-plans"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import { ProviderV2 } from "@vectordevai/core/provider"
@@ -62,6 +63,12 @@ export const ModelsCommand = effectCmd({
         UI.println(`  ${freeModelName(model)} — ${freeModelSource(model)} (${model.providerID}/${model.id})`),
       )
     }
+
+    const codium = providers[ProviderV2.ID.make(ModelPlans.PROVIDER_ID)]
+    if (codium && (!args.provider || args.provider === ModelPlans.PROVIDER_ID))
+      UI.println(
+        `${ModelPlans.PROVIDER_NAME}: ${Object.keys(codium.models).length} models paid with Codium credits (${ModelPlans.PROVIDER_ID}/…). Run "vector codium" for your balance.`,
+      )
 
     const print = (providerID: ProviderV2.ID, verbose?: boolean) => {
       const p = providers[providerID]

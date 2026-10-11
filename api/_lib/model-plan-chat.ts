@@ -115,6 +115,19 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
   }
 }
 
+/**
+ * Rejects a request the model's context window cannot hold and returns its estimated input tokens, which also size
+ * the credit check. The gateway has no tokenizer, so it estimates tokens as Vector's clients do, at four bytes of
+ * content per token; a JSON escape such as \n or \" adds a byte the model never reads, so it is not counted.
+ * Counting each byte as a token rejected conversations at about a quarter of the window the catalog lists.
+ */
+export function requireModelPlanContext(body: { max_tokens: number }, model: ModelPlanModel) {
+  const text = JSON.stringify(body)
+  const inputTokens = Math.ceil((Buffer.byteLength(text) - (text.match(/\\/g)?.length ?? 0)) / 4)
+  if (inputTokens + body.max_tokens > model.contextLength) throw contextError()
+  return inputTokens
+}
+
 export async function streamModelPlanResponse(upstream: Response, response: ApiResponse) {
   if (upstream.status === 402 || upstream.status === 429) {
     const retry = upstream.headers.get("retry-after")
@@ -129,6 +142,11 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
     )
   if (upstream.status === 429)
     throw new ApiError(429, "MODEL_PLAN_BUSY", "This model is busy. Retry shortly or choose another included model.")
+  // The four-bytes-per-token estimate can undercount a provider's tokenizer. When the provider refuses the context,
+  // answer as the gateway's own check does, so Vector compacts the conversation instead of retrying a request that
+  // can never fit. The provider's wording is only matched, never passed on.
+  if (upstream.status === 413 || (upstream.status === 400 && contextRefused(await upstream.text().catch(() => ""))))
+    throw contextError()
   if (!upstream.ok || !upstream.body || !upstream.headers.get("content-type")?.includes("text/event-stream"))
     throw new ApiError(503, "MODEL_PLAN_UPSTREAM", "This model is temporarily unavailable.")
   response.statusCode = 200
@@ -185,6 +203,19 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
   }
 }
 
+function contextError() {
+  return new ApiError(
+    400,
+    "MODEL_PLAN_CONTEXT",
+    "This request may exceed the model context limit. Shorten the conversation or requested response.",
+  )
+}
+
+// How OpenAI-compatible providers word a context-window refusal.
+function contextRefused(body: string) {
+  return /context[ _-]?(length|window)|maximum context|too many tokens|prompt is too long/i.test(body.slice(0, 8_192))
+}
+
 export async function handleModelPlanChat(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
   const controller = new AbortController()
   const close = () => controller.abort()
@@ -203,18 +234,9 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
       requirePersistent: true,
     })
     const model = configuredPlanModels().find((model) => model.id === body.model)!
-    // The bound covers tool schemas and per-message formatting before choosing a credit pool. The provider key cap is
-    // the final spending control; its concurrent request accounting still depends on the upstream provider's
-    // enforcement.
-    const inputBound =
-      Math.ceil(Buffer.byteLength(JSON.stringify(body)) / PROMPT_BYTES_PER_TOKEN) + body.messages.length * 8 + 256
-    if (inputBound + body.max_tokens > model.contextLength)
-      throw new ApiError(
-        400,
-        "MODEL_PLAN_CONTEXT",
-        "This request may exceed the model context limit. Shorten the conversation or requested response.",
-      )
-    const requiredCredits = (inputBound * model.inputPrice + body.max_tokens * model.outputPrice) / 1_000_000
+    // Estimate prompt tokens, including tool schemas, before reserving provider credit.
+    const inputTokens = requireModelPlanContext(body, model)
+    const requiredCredits = (inputTokens * model.inputPrice + body.max_tokens * model.outputPrice) / 1_000_000
     const key = await modelPlanCredential(account.id, fetcher, Date.now(), requiredCredits)
     const upstream = await fetcher(`${MODEL_PLAN_ROOT}/chat/completions`, {
       method: "POST",

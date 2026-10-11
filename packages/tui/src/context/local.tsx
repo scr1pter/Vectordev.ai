@@ -1,6 +1,7 @@
 import { providerNoticeTracker, unavailableModel } from "@vectordevai/schema/provider-unavailable"
 import { renamedModel } from "@vectordevai/schema/provider-policy"
 import { retainFreeModelSelection } from "@vectordevai/schema/free-model"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { createStore } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { batch, createEffect, createMemo } from "solid-js"
@@ -239,10 +240,8 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           .toSorted((a, b) => b.limit.context - a.limit.context)[0]
         if (free) return { providerID: "openrouter", modelID: free.id }
         if (sync.data.provider.some((provider) => provider.id === "openrouter")) return
-        const provider =
-          sync.data.provider.find((provider) =>
-            Object.values(provider.models).some((model) => model.freeModel?.source !== "shared"),
-          ) ?? sync.data.provider[0]
+        // Codium spends the account's credits, so it is never chosen automatically, even as the only provider.
+        const provider = ModelPlanStatus.automaticProviders(sync.data.provider)[0]
         if (!provider) return undefined
         const defaultModel = sync.data.provider_default[provider.id]
         const firstModel = Object.values(provider.models)[0]

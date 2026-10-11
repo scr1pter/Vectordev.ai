@@ -3,6 +3,7 @@ import {
   freeModelsLimitTitle,
   type FreeModelsLimitNotice,
 } from "@vectordevai/core/free-model-choice"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { parseCommentNote, readCommentMetadata } from "@/utils/comment-note"
 import { AssistantMessage, Part, SessionStatus, SnapshotFileDiff, UserMessage } from "@vectordevai/sdk/v2"
 import { groupParts, renderable, type PartGroup } from "@vectordevai/session-ui/message-part"
@@ -35,6 +36,7 @@ export type TimelineRowMap = {
     userMessageID: string
     text: string
     freeLimit?: FreeModelsLimitNotice & { messageID: string; modelID: string }
+    codium?: "credits" | "sign-in" | "unavailable"
   }
 }
 
@@ -165,9 +167,11 @@ export namespace Timeline {
     if (error) {
       const data = error.data?.message
       const freeLimit = freeModelsLimitNotice(error)
+      const codium = ModelPlanStatus.failureAction(error)
       rows.push(
         new TimelineRow.Error({
           userMessageID: userMessage.id,
+          ...(codium ? { codium } : {}),
           ...(freeLimit && failed
             ? { freeLimit: { ...freeLimit, messageID: failed.id, modelID: failed.modelID } }
             : {}),

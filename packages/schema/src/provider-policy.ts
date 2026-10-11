@@ -216,6 +216,8 @@ export const SUPPORTED_PROVIDER_IDS = [
   "v0",
   "vancine",
   "vector",
+  // Vector Codium: managed coding models paid with Codium credits through vectordev.ai.
+  "vector-plan",
   "venice",
   "vercel",
   "vispark",

@@ -37,6 +37,7 @@ export namespace TimelineRow {
     userMessageID: string
     text: string
     freeLimit?: FreeModelsLimitNotice & { messageID: string; modelID: string }
+    codium?: "credits" | "sign-in" | "unavailable"
   }> {}
   export class Retry extends Data.TaggedClass("Retry")<{
     userMessageID: string

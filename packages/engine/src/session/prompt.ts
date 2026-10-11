@@ -695,7 +695,14 @@ const layer = Layer.effect(
       if (Provider.ModelNotFoundError.isInstance(err)) {
         yield* events.publish(Session.Event.Error, {
           sessionID,
-          error: new NamedError.Unknown({ message: err.message }).toObject(),
+          // A Codium notice carries its action, so the app can offer Sign in to Vector next to it.
+          error: err.codium
+            ? new SessionV1.APIError({
+                message: err.unavailable?.message ?? err.message,
+                isRetryable: false,
+                metadata: { codium: err.codium },
+              }).toObject()
+            : new NamedError.Unknown({ message: err.message }).toObject(),
         })
       }
       return yield* Effect.die(err)

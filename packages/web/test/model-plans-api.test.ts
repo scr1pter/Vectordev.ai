@@ -770,8 +770,10 @@ describe("model plan HTTP inference", () => {
       max_tokens: 1,
       response_format: {
         type: "json_schema",
-        // The gateway bounds a prompt at a token per three bytes, so this schema alone exceeds the context.
-        json_schema: { name: "fixture", schema: { type: "object", description: "x".repeat(model.contextLength * 3) } },
+        json_schema: {
+          name: "fixture",
+          schema: { type: "object", description: "x".repeat(model.contextLength * 4) },
+        },
       },
     })
     expect(response.status).toBe(400)
