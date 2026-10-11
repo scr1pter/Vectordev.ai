@@ -457,10 +457,13 @@ describe("subagent spend", () => {
       const childRevision = (yield* session.get(child.id)).time.updated
       yield* session.updatePart({ ...delegated.part, tokens: { ...delegated.part.tokens, input: 101 } })
       expect((yield* session.get(child.id)).time.updated).toBeGreaterThan(childRevision)
-      expect((yield* session.get(parent.id)).time.updated).toBe(firstRevision)
+      // The parent's token rollup changed with it, so its revision moves too.
+      const tokenRevision = (yield* session.get(parent.id)).time.updated
+      expect(tokenRevision).toBeGreaterThan(firstRevision)
+      expect((yield* session.get(parent.id)).subagentTokens?.input).toBe(101)
       const nested = yield* spend(grandchild.id, 0.25)
       const nestedRevision = (yield* session.get(parent.id)).time.updated
-      expect(nestedRevision).toBeGreaterThan(firstRevision)
+      expect(nestedRevision).toBeGreaterThan(tokenRevision)
       expect((yield* session.get(parent.id)).subagentCost).toBeCloseTo(2.65)
       expect((yield* session.get(child.id)).subagentCost).toBeCloseTo(0.25)
       yield* session.removePart({ sessionID: grandchild.id, messageID: nested.messageID, partID: nested.partID })
@@ -472,6 +475,101 @@ describe("subagent spend", () => {
       yield* session.remove(grandchild.id)
       yield* session.remove(child.id)
       yield* session.remove(parent.id)
+    }),
+  )
+})
+
+describe("helper sessions", () => {
+  const step = (sessionID: SessionID, cost: number, tokens: { input: number; output: number }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const messageID = MessageID.ascending()
+      const usage = { ...tokens, reasoning: 0, cache: { read: 0, write: 0 } }
+      yield* session.updateMessage({
+        id: messageID,
+        role: "assistant",
+        parentID: MessageID.ascending(),
+        sessionID,
+        mode: "review",
+        agent: "review",
+        cost,
+        path: { cwd: "/tmp", root: "/tmp" },
+        tokens: usage,
+        modelID: ModelV2.ID.make("review-model"),
+        providerID: ProviderV2.ID.make("anthropic"),
+        finish: "stop",
+        time: { created: Date.now(), completed: Date.now() + 10 },
+      })
+      yield* session.updatePart({
+        id: PartID.ascending(),
+        messageID,
+        sessionID,
+        type: "step-finish",
+        reason: "stop",
+        cost,
+        tokens: usage,
+      })
+    })
+
+  it.instance("stay out of session lists and count their spend towards the session that launched them", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionNs.Service
+      const launcher = yield* sessions.create({ title: "Fix the login flow" })
+      const subagent = yield* sessions.create({ parentID: launcher.id, title: "explore (@explore subagent)" })
+      const review = yield* sessions.create({
+        parentID: launcher.id,
+        internal: "vectorscope.review",
+        title: "Vectorscope review · uncommitted changes · review",
+      })
+      const standalone = yield* sessions.create({
+        internal: "vectorscope.security",
+        title: "Vectorscope review · #7 · security",
+      })
+      expect(review).toMatchObject({ internal: "vectorscope.review", parentID: launcher.id })
+
+      const ids = (input?: SessionNs.ListInput) =>
+        sessions.list({ limit: 50, ...input }).pipe(Effect.map((list) => list.map((session) => session.id)))
+      expect(yield* ids({ roots: true })).toEqual([launcher.id])
+      expect((yield* ids()).toSorted()).toEqual([launcher.id, subagent.id].toSorted())
+      expect((yield* ids({ internal: true })).toSorted()).toEqual(
+        [launcher.id, subagent.id, review.id, standalone.id].toSorted(),
+      )
+      const global = (yield* sessions.listGlobal({ limit: 200 })).map((session) => session.id)
+      expect(global).not.toContain(review.id)
+      expect(global).not.toContain(standalone.id)
+      expect((yield* sessions.listGlobal({ limit: 200, internal: true })).map((session) => session.id)).toContain(
+        standalone.id,
+      )
+      // The launcher still reaches its helpers, which its cost breakdown names.
+      expect((yield* sessions.children(launcher.id)).map((session) => session.id).toSorted()).toEqual(
+        [subagent.id, review.id].toSorted(),
+      )
+
+      yield* step(launcher.id, 0.5, { input: 1_000, output: 200 })
+      yield* step(subagent.id, 0.25, { input: 300, output: 50 })
+      yield* step(review.id, 1.25, { input: 4_000, output: 600 })
+      yield* step(standalone.id, 0.75, { input: 2_000, output: 100 })
+
+      expect(yield* sessions.get(launcher.id)).toMatchObject({
+        cost: 0.5,
+        subagentCost: 1.5,
+        tokens: { input: 1_000, output: 200 },
+        subagentTokens: { input: 4_300, output: 650, reasoning: 0, cache: { read: 0, write: 0 } },
+      })
+
+      // Usage keeps every dollar and token, counts only the user's own conversations, and names what helpers spent.
+      const usage = yield* sessions.usage()
+      expect(usage.lifetimeCost).toBeCloseTo(2.75)
+      expect(usage.lifetimeTokens).toBe(1_200 + 350 + 4_600 + 2_100)
+      expect(usage.conversations).toBe(2)
+      expect(usage.days.reduce((total, day) => total + day.tasks, 0)).toBe(2)
+      expect(usage.helpers).toEqual([
+        { id: "vectorscope.review", sessions: 1, responses: 1, tokens: 4_600, cost: 1.25 },
+        { id: "vectorscope.security", sessions: 1, responses: 1, tokens: 2_100, cost: 0.75 },
+      ])
+
+      yield* sessions.remove(standalone.id)
+      yield* sessions.remove(launcher.id)
     }),
   )
 })

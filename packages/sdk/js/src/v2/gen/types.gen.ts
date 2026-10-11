@@ -196,6 +196,7 @@ export type Session = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -206,6 +207,15 @@ export type Session = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -2354,6 +2364,7 @@ export type GlobalSession = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -2364,6 +2375,15 @@ export type GlobalSession = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -2426,6 +2446,14 @@ export type SessionUsageDay = {
   tasks: number
 }
 
+export type SessionUsageHelper = {
+  id: string
+  sessions: number
+  responses: number
+  tokens: number
+  cost: number
+}
+
 export type SessionUsageSummary = {
   lifetimeTokens: number
   lifetimeCost: number
@@ -2448,6 +2476,7 @@ export type SessionUsageSummary = {
   favoriteModels: Array<SessionUsageModel>
   effortLevels: Array<SessionUsageEffort>
   days: Array<SessionUsageDay>
+  helpers?: Array<SessionUsageHelper>
 }
 
 export type McpResource = {
@@ -2868,6 +2897,7 @@ export type Session1 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -2878,6 +2908,15 @@ export type Session1 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -2924,6 +2963,7 @@ export type Session2 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -2934,6 +2974,15 @@ export type Session2 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -2993,6 +3042,7 @@ export type Session3 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -3003,6 +3053,15 @@ export type Session3 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -3061,6 +3120,7 @@ export type Session4 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -3071,6 +3131,15 @@ export type Session4 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -3117,6 +3186,7 @@ export type Session5 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -3127,6 +3197,15 @@ export type Session5 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -3177,6 +3256,7 @@ export type Session6 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -3187,6 +3267,15 @@ export type Session6 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -3281,6 +3370,7 @@ export type Session7 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -3291,6 +3381,15 @@ export type Session7 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -3337,6 +3436,7 @@ export type Session8 = {
   directory: string
   path?: string
   parentID?: string
+  internal?: string
   summary?: {
     additions: number
     deletions: number
@@ -3347,6 +3447,15 @@ export type Session8 = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens?: {
     input: number
     output: number
@@ -5098,6 +5207,7 @@ export type AgentV2Info = {
 export type SessionV2Info = {
   id: string
   parentID?: string
+  internal?: string
   projectID: string
   agent?: string
   model?: ModelRef
@@ -5105,6 +5215,15 @@ export type SessionV2Info = {
   unpricedSteps?: number
   subagentCost?: number
   subagentUnpricedSteps?: number
+  subagentTokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   tokens: {
     input: number
     output: number
@@ -9081,6 +9200,7 @@ export type ExperimentalSessionListData = {
     directory?: string
     workspace?: string
     roots?: boolean | "true" | "false"
+    internal?: boolean | "true" | "false"
     start?: number
     cursor?: number
     search?: string
@@ -11120,6 +11240,7 @@ export type SessionListData = {
     scope?: "project"
     path?: string
     roots?: boolean | "true" | "false"
+    internal?: boolean | "true" | "false"
     start?: number
     search?: string
     limit?: number
@@ -11148,6 +11269,7 @@ export type SessionListResponse = SessionListResponses[keyof SessionListResponse
 export type SessionCreateData = {
   body?: {
     parentID?: string
+    internal?: string
     title?: string
     agent?: string
     model?: {
@@ -13355,6 +13477,9 @@ export type V2SessionCreateData = {
     agent?: string
     model?: ModelRef
     location?: LocationRef
+    title?: string
+    parentID?: string
+    internal?: string
   }
   path?: never
   query?: never

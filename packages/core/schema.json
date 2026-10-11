@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "eec8da65-21d6-4970-a945-f0b60619e075",
+  "id": "d2e8c1f9-f50c-4925-9334-86550ed7ceca",
   "prevIds": [
-    "00ec68cf-acec-41d2-8afb-6a1ba7797ab6"
+    "eec8da65-21d6-4970-a945-f0b60619e075"
   ],
   "ddl": [
     {
@@ -1282,6 +1282,16 @@
     },
     {
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "internal",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "text",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -1437,6 +1447,56 @@
       "default": "0",
       "generated": null,
       "name": "subagent_unpriced_steps",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "subagent_tokens_input",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "subagent_tokens_output",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "subagent_tokens_reasoning",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "subagent_tokens_cache_read",
+      "entityType": "columns",
+      "table": "session"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "subagent_tokens_cache_write",
       "entityType": "columns",
       "table": "session"
     },

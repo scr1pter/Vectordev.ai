@@ -38,7 +38,9 @@ const layer = Layer.effect(
     const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateInput) {
       const result = yield* session.create(input)
       const cfg = yield* config.get()
+      // A helper session is Vector's own work, never something to publish on the user's behalf.
       if (
+        !result.internal &&
         cfg.share !== "disabled" &&
         (cfg.share === "auto" || cfg.autoshare || ["1", "true"].includes(process.env.VECTOR_AUTO_SHARE ?? ""))
       )

@@ -891,6 +891,7 @@ export class Session extends HeyApiClient {
       directory?: string
       workspace?: string
       roots?: boolean | "true" | "false"
+      internal?: boolean | "true" | "false"
       start?: number
       cursor?: number
       search?: string
@@ -907,6 +908,7 @@ export class Session extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "query", key: "roots" },
+            { in: "query", key: "internal" },
             { in: "query", key: "start" },
             { in: "query", key: "cursor" },
             { in: "query", key: "search" },
@@ -3924,6 +3926,7 @@ export class Session2 extends HeyApiClient {
       scope?: "project"
       path?: string
       roots?: boolean | "true" | "false"
+      internal?: boolean | "true" | "false"
       start?: number
       search?: string
       limit?: number
@@ -3940,6 +3943,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "scope" },
             { in: "query", key: "path" },
             { in: "query", key: "roots" },
+            { in: "query", key: "internal" },
             { in: "query", key: "start" },
             { in: "query", key: "search" },
             { in: "query", key: "limit" },
@@ -3964,6 +3968,7 @@ export class Session2 extends HeyApiClient {
       directory?: string
       workspace?: string
       parentID?: string
+      internal?: string
       title?: string
       agent?: string
       model?: {
@@ -3987,6 +3992,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "directory" },
             { in: "query", key: "workspace" },
             { in: "body", key: "parentID" },
+            { in: "body", key: "internal" },
             { in: "body", key: "title" },
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
@@ -6149,6 +6155,9 @@ export class Session3 extends HeyApiClient {
       agent?: string
       model?: ModelRef
       location?: LocationRef
+      title?: string
+      parentID?: string
+      internal?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -6161,6 +6170,9 @@ export class Session3 extends HeyApiClient {
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "location" },
+            { in: "body", key: "title" },
+            { in: "body", key: "parentID" },
+            { in: "body", key: "internal" },
           ],
         },
       ],

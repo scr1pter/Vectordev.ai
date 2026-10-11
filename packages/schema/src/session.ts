@@ -16,10 +16,23 @@ export type ID = SessionID
 
 export const Event = SessionEvent
 
+const Tokens = Schema.Struct({
+  input: Schema.Finite,
+  output: Schema.Finite,
+  reasoning: Schema.Finite,
+  cache: Schema.Struct({
+    read: Schema.Finite,
+    write: Schema.Finite,
+  }),
+})
+
 export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({
   id: ID,
   parentID: ID.pipe(optional),
+  // Names the Vector helper that ran this session, such as a Vectorscope review or autocomplete. Helper sessions stay
+  // out of session lists; their spend counts towards parentID, the session that launched them, when there is one.
+  internal: Schema.String.pipe(optional),
   projectID: Project.ID,
   agent: Agent.ID.pipe(optional),
   model: Model.Ref.pipe(optional),
@@ -29,15 +42,9 @@ export const Info = Schema.Struct({
   // What the subagent sessions below this one spent, which cost leaves out, and how many of their steps were unpriced.
   subagentCost: Schema.Finite.pipe(optional),
   subagentUnpricedSteps: Schema.Finite.pipe(optional),
-  tokens: Schema.Struct({
-    input: Schema.Finite,
-    output: Schema.Finite,
-    reasoning: Schema.Finite,
-    cache: Schema.Struct({
-      read: Schema.Finite,
-      write: Schema.Finite,
-    }),
-  }),
+  // The tokens those sessions used, which tokens leaves out.
+  subagentTokens: Tokens.pipe(optional),
+  tokens: Tokens,
   time: Schema.Struct({
     created: DateTimeUtcFromMillis,
     updated: DateTimeUtcFromMillis,

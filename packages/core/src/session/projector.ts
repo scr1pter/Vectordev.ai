@@ -66,6 +66,7 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     project_id: info.projectID,
     workspace_id: info.workspaceID ?? null,
     parent_id: info.parentID,
+    internal: info.internal,
     slug: info.slug,
     directory: info.directory,
     path: info.path,
@@ -84,6 +85,11 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     unpriced_steps: info.unpricedSteps ?? 0,
     subagent_cost: info.subagentCost ?? 0,
     subagent_unpriced_steps: info.subagentUnpricedSteps ?? 0,
+    subagent_tokens_input: info.subagentTokens?.input ?? 0,
+    subagent_tokens_output: info.subagentTokens?.output ?? 0,
+    subagent_tokens_reasoning: info.subagentTokens?.reasoning ?? 0,
+    subagent_tokens_cache_read: info.subagentTokens?.cache.read ?? 0,
+    subagent_tokens_cache_write: info.subagentTokens?.cache.write ?? 0,
     tokens_input: (info.tokens ?? { input: 0 }).input,
     tokens_output: (info.tokens ?? { output: 0 }).output,
     tokens_reasoning: (info.tokens ?? { reasoning: 0 }).reasoning,
@@ -144,8 +150,8 @@ function applyUsage(
       .where(eq(SessionTable.id, sessionID))
       .run()
       .pipe(Effect.orDie)
-    if (delta.cost === 0 && delta.unpriced === 0) return
     // A subagent's spend also counts towards every session above it, so a parent's total covers what it delegated.
+    // Helper sessions Vector runs for a session (a Vectorscope review, autocomplete) are linked the same way.
     // The modified time is also the freshness revision read by economics consumers. Delegated spend must
     // invalidate a parent even when cancellation means it will never run or emit idle again.
     // UNION rather than UNION ALL stops the walk if a parent chain ever loops.
@@ -154,6 +160,11 @@ function applyUsage(
       .set({
         subagent_cost: sql`${SessionTable.subagent_cost} + ${delta.cost}`,
         subagent_unpriced_steps: sql`${SessionTable.subagent_unpriced_steps} + ${delta.unpriced}`,
+        subagent_tokens_input: sql`${SessionTable.subagent_tokens_input} + ${delta.input}`,
+        subagent_tokens_output: sql`${SessionTable.subagent_tokens_output} + ${delta.output}`,
+        subagent_tokens_reasoning: sql`${SessionTable.subagent_tokens_reasoning} + ${delta.reasoning}`,
+        subagent_tokens_cache_read: sql`${SessionTable.subagent_tokens_cache_read} + ${delta.read}`,
+        subagent_tokens_cache_write: sql`${SessionTable.subagent_tokens_cache_write} + ${delta.write}`,
         time_updated: sql`max(${SessionTable.time_updated} + 1, ${timestamp})`,
       })
       .where(
@@ -312,6 +323,11 @@ const layer = Layer.effectDiscard(
         unpriced_steps: _unpriced,
         subagent_cost: _subagentCost,
         subagent_unpriced_steps: _subagentUnpriced,
+        subagent_tokens_input: _subagentInput,
+        subagent_tokens_output: _subagentOutput,
+        subagent_tokens_reasoning: _subagentReasoning,
+        subagent_tokens_cache_read: _subagentCacheRead,
+        subagent_tokens_cache_write: _subagentCacheWrite,
         tokens_input: __,
         tokens_output: ___,
         tokens_reasoning: ____,

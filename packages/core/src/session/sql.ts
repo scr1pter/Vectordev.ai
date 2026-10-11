@@ -30,6 +30,9 @@ export const SessionTable = sqliteTable(
       .references(() => ProjectTable.id, { onDelete: "cascade" }),
     workspace_id: text().$type<WorkspaceV2.ID>(),
     parent_id: text().$type<SessionSchema.ID>(),
+    // Names the Vector helper that ran this session (a Vectorscope review, autocomplete, a planner). Helper sessions
+    // stay out of session lists; their spend still counts, towards parent_id when a session launched them.
+    internal: text(),
     slug: text().notNull(),
     directory: DatabasePath.directoryColumn().notNull(),
     path: DatabasePath.pathColumn(),
@@ -49,6 +52,12 @@ export const SessionTable = sqliteTable(
     // the work it delegated.
     subagent_cost: real().notNull().default(0),
     subagent_unpriced_steps: integer().notNull().default(0),
+    // The tokens those subagent sessions used, kept beside subagent_cost.
+    subagent_tokens_input: integer().notNull().default(0),
+    subagent_tokens_output: integer().notNull().default(0),
+    subagent_tokens_reasoning: integer().notNull().default(0),
+    subagent_tokens_cache_read: integer().notNull().default(0),
+    subagent_tokens_cache_write: integer().notNull().default(0),
     tokens_input: integer().notNull().default(0),
     tokens_output: integer().notNull().default(0),
     tokens_reasoning: integer().notNull().default(0),

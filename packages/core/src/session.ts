@@ -3,7 +3,7 @@ export * from "./session/schema"
 
 import { DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
 import { ListAnchor } from "@vectordevai/schema/session"
-import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
@@ -85,6 +85,9 @@ type CreateInput = {
   agent?: AgentV2.ID
   model?: ModelV2.Ref
   location: Location.Ref
+  title?: string
+  parentID?: SessionSchema.ID
+  internal?: string
 }
 
 type CompactInput = {
@@ -270,7 +273,9 @@ const layer = Layer.effect(
           directory: input.location.directory,
           path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
-          title: `New session - ${new Date(now).toISOString()}`,
+          parentID: input.parentID,
+          internal: input.internal,
+          title: input.title ?? `New session - ${new Date(now).toISOString()}`,
           agent: input.agent,
           model: input.model
             ? {
@@ -303,7 +308,9 @@ const layer = Layer.effect(
           )
         if (projected.type === "existing") return projected.session
         const preference = yield* sharingPreference(input.location)
+        // A helper session is Vector's own work, never something to publish on the user's behalf.
         if (
+          !input.internal &&
           preference !== "disabled" &&
           (preference === "auto" || ["1", "true"].includes(process.env.VECTOR_AUTO_SHARE ?? ""))
         )
@@ -325,7 +332,8 @@ const layer = Layer.effect(
         const requestedOrder = input.order ?? "desc"
         const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
         const sortColumn = SessionTable.time_created
-        const conditions: SQL[] = []
+        // Vector's helper sessions are reached through the session or surface that launched them, never listed.
+        const conditions: SQL[] = [isNull(SessionTable.internal)]
         if ("directory" in input) conditions.push(eq(SessionTable.directory, input.directory))
         if (input.workspaceID) conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
         if ("project" in input) conditions.push(eq(SessionTable.project_id, input.project))
@@ -346,7 +354,7 @@ const layer = Layer.effect(
         const query = db
           .select()
           .from(SessionTable)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .where(and(...conditions))
           .orderBy(
             order === "asc" ? asc(sortColumn) : desc(sortColumn),
             order === "asc" ? asc(SessionTable.id) : desc(SessionTable.id),

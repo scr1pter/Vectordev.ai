@@ -24,6 +24,7 @@ import { AbsolutePath } from "@vectordevai/core/schema"
 import { SessionSchema } from "@vectordevai/core/session/schema"
 import { SessionTable } from "@vectordevai/core/session/sql"
 import sessionMetadataMigration from "@vectordevai/core/database/migration/20260511173437_session-metadata"
+import sessionInternalHelpersMigration from "@vectordevai/core/database/migration/20261011044552_session_internal_helpers"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import { Database } from "@vectordevai/core/database/database"
 import { SessionProjector } from "@vectordevai/core/session/projector"
@@ -399,6 +400,42 @@ describe("DatabaseMigration", () => {
           tokens_cache_read: 5,
           tokens_cache_write: 6,
         })
+      }),
+    )
+  })
+
+  test("classifies helper sessions Vector created before they were marked, and keeps the user's own", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, title text NOT NULL, cost real NOT NULL)`)
+        const rows = [
+          ["autocomplete", "Vector Tool · Autocomplete"],
+          ["planner", "Vector Tool · Browser Agent Planner"],
+          ["inline", "Vector Tool · Inline selection edit"],
+          ["review", "Vectorscope review · #12 · review"],
+          ["security", "Vectorscope review · uncommitted changes · security"],
+          ["verify", "Vectorscope review · #12 · verify"],
+          ["cli", "Vectorscope review · 1a2b3c4 · review"],
+          ["own", "Fix the Vectorscope review panel"],
+          ["lookalike", "vector tool · lowercase is the user's"],
+        ]
+        for (const [id, title] of rows)
+          yield* db.run(sql`INSERT INTO session (id, title, cost) VALUES (${id}, ${title}, 1.5)`)
+
+        yield* DatabaseMigration.applyOnly(db, [sessionInternalHelpersMigration])
+
+        expect(yield* db.all(sql`SELECT id, internal, cost FROM session ORDER BY id`)).toEqual([
+          { id: "autocomplete", internal: "codespace.autocomplete", cost: 1.5 },
+          { id: "cli", internal: "vectorscope.review", cost: 1.5 },
+          { id: "inline", internal: "codespace.edit", cost: 1.5 },
+          { id: "lookalike", internal: null, cost: 1.5 },
+          { id: "own", internal: null, cost: 1.5 },
+          { id: "planner", internal: "browser-agent.planner", cost: 1.5 },
+          { id: "review", internal: "vectorscope.review", cost: 1.5 },
+          { id: "security", internal: "vectorscope.security", cost: 1.5 },
+          { id: "verify", internal: "vectorscope.verify", cost: 1.5 },
+        ])
       }),
     )
   })

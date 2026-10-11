@@ -568,6 +568,9 @@ export const SessionInfo = Schema.Struct({
   directory: Schema.String,
   path: optional(Schema.String),
   parentID: optional(SessionID),
+  // Names the Vector helper that ran this session, such as a Vectorscope review or autocomplete. Helper sessions stay
+  // out of session lists; their spend counts towards parentID, the session that launched them, when there is one.
+  internal: optional(Schema.String),
   summary: optional(SessionSummary),
   cost: optional(Schema.Finite),
   // Steps that ran on a model with no listed price; cost leaves them out, so a session with any is not fully priced.
@@ -575,6 +578,8 @@ export const SessionInfo = Schema.Struct({
   // What the subagent sessions below this one spent, which cost leaves out, and how many of their steps were unpriced.
   subagentCost: optional(Schema.Finite),
   subagentUnpricedSteps: optional(NonNegativeInt),
+  // The tokens those sessions used, which tokens leaves out.
+  subagentTokens: optional(SessionTokens),
   tokens: optional(SessionTokens),
   share: optional(SessionShare),
   title: Schema.String,
