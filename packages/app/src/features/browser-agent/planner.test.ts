@@ -36,6 +36,7 @@ describe("createBrowserPlanner", () => {
             return { data: { id: `ses_planner_${created.length}` } }
           },
           prompt: async (input) => {
+            expect(input.tools).toEqual({ "*": false })
             prompted.push(input.sessionID)
             return { data: { text: JSON.stringify({ summary: "Done", complete: true, actions: [] }) } }
           },

@@ -93,5 +93,31 @@ test("Editor opens a project file beside the active Vector Agent", async ({ page
   expect(await inheritedControls.count()).toBeGreaterThan(0)
   for (const control of await inheritedControls.all()) await expect(control).toBeHidden()
 
+  // Inline edits use a hidden text helper. It must not be able to edit files with apply_patch/bash or strand a
+  // permission/question request in a conversation the user cannot open.
+  const helper: { created?: Record<string, unknown>; prompted?: Record<string, unknown> } = {}
+  await page.route(/\/session(?:\?|$)/, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback()
+    helper.created = route.request().postDataJSON()
+    await route.fulfill({ json: { id: "ses_inline_helper", ...helper.created } })
+  })
+  await page.route(/\/session\/ses_inline_helper\/message(?:\?|$)/, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback()
+    helper.prompted = route.request().postDataJSON()
+    await route.fulfill({ json: { parts: [{ type: "text", text: "# Updated Vector Editor\n" }] } })
+  })
+  await editor.locator(".monaco-editor").click()
+  // Monaco chooses its modifier from the browser user agent (the Desktop Chrome fixture emulates Windows).
+  const modifier = await page.evaluate(() => (/Macintosh/.test(navigator.userAgent) ? "Meta" : "Control"))
+  await page.keyboard.press(`${modifier}+k`)
+  const instruction = editor.getByPlaceholder(/Describe how to change/)
+  await expect(instruction).toBeVisible()
+  await instruction.fill("Update the heading")
+  await instruction.press("Enter")
+  await expect.poll(() => helper.prompted).toBeDefined()
+  expect(helper.created).toMatchObject({ internal: "codespace.edit", parentID: sessionID })
+  expect(helper.prompted?.tools).toEqual({ "*": false })
+  await expect(editor.locator(".monaco-editor .view-lines")).toContainText("Updated Vector Editor")
+
   expect(errors).toEqual([])
 })

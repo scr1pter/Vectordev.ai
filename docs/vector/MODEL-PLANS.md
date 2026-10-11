@@ -71,7 +71,7 @@ When the gateway answers that the account has no plan or not enough credits (402
 Server secrets belong in the hosting environment, never in client builds or the repository. See `.env.example` for the complete list:
 
 - `MODEL_PLANS_ENABLED=false` while payment setup is deferred.
-- `MODEL_CREDIT_MARKUP_PERCENT` sets the purchase-to-credit conversion. Set it privately; blank uses the public fallback in `api/_lib/model-plan-config.ts`.
+- `MODEL_CREDIT_MARKUP_PERCENT` sets the purchase-to-credit conversion. Set it privately; there is no fallback. If blank, explicit private allowance overrides are required before purchases can become available.
 - `MODEL_PLAN_<price>_CREDITS_USD` and `MODEL_TOPUP_<price>_CREDITS_USD` set private allowances; valid values are greater than zero and no greater than the purchase price.
 - `MODEL_PLAN_MODELS_JSON` optionally overrides the catalog. Blank uses the reviewed defaults; `[]` intentionally offers no models.
 - `STRIPE_MODEL_PLAN_<price>_PRICE_ID` and `STRIPE_MODEL_TOPUP_<price>_PRICE_ID` map each of the four prices ($10, $50, $100 and $200) to recurring and one-time prices respectively.

@@ -2087,15 +2087,8 @@ export function CodespaceWorkbench(props: {
       variant: activeVariant(),
       executionMode: "normal",
       system: input.system,
-      tools: {
-        shell: false,
-        edit: false,
-        patch: false,
-        write: false,
-        read: false,
-        glob: false,
-        grep: false,
-      },
+      // The editor applies the returned text. No model tool or question can be handled in this hidden session.
+      tools: { "*": false },
       parts: [{ type: "text", text: input.prompt }],
     })
     const text = extractModelTextRaw(result.data)
@@ -2529,6 +2522,7 @@ export function CodespaceWorkbench(props: {
         agent: "autocomplete",
         model,
         executionMode: "normal",
+        tools: { "*": false },
         parts: [
           {
             type: "text",

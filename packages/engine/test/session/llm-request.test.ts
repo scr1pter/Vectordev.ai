@@ -174,6 +174,26 @@ describe("system prompt layout across sessions", () => {
     expect(stable?.providerOptions?.anthropic).toEqual({ cacheControl: { type: "ephemeral" } })
   })
 
+  test("a text-only helper's wildcard deny removes every tool, including patches and questions", async () => {
+    const value = input({ model: gpt, directory: "/work/helper" })
+    const schema = jsonSchema({ type: "object", properties: {} })
+    const prepared = await prepare({
+      ...value,
+      // The browser planner and inline editor provide the observation/file content themselves. Their prompt's
+      // tools: { "*": false } becomes this session rule, overriding even a permissive user-configured agent.
+      agent: { ...value.agent, permission: [{ permission: "*", pattern: "*", action: "allow" }] },
+      permission: [{ permission: "*", pattern: "*", action: "deny" }],
+      tools: Object.fromEntries(
+        ["apply_patch", "bash", "edit", "read", "question", "mcp_workspace_write", "future_tool"].map((name) => [
+          name,
+          tool({ description: name, inputSchema: schema }),
+        ]),
+      ),
+    })
+    expect(prepared.tools).toEqual({})
+    expect(value.agent.permission).toEqual([])
+  })
+
   test("tools go out in name order whatever order they were offered in", async () => {
     const value = input({ model: gpt, directory: "/work/a" })
     const schema = jsonSchema({ type: "object", properties: {} })

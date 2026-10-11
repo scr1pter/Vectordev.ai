@@ -276,7 +276,8 @@ export function createBrowserPlanner(deps: {
       agent: "build",
       model,
       system: PLANNER_SYSTEM,
-      tools: { bash: false, edit: false, patch: false, write: false },
+      // The planner returns a plan from the supplied observation; hidden sessions cannot surface tool approvals.
+      tools: { "*": false },
       parts: [
         {
           type: "text",
