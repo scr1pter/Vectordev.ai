@@ -5,15 +5,29 @@ import { createSessionOutcomeRecorder, outcomeFromSession } from "./session-outc
 import type { ModelOutcome } from "./economics-types"
 
 test("settlement and child lifecycle events invalidate the family, streaming events do not", () => {
+  const idle = () => false
   for (const type of ["session.idle", "session.next.ancillary.usage", "session.next.step.ended", "session.next.compaction.failed", "message.part.removed", "message.removed"]) {
-    expect(sessionFamilyEventID({ type, properties: { sessionID: "child" } } as Event)).toBe("child")
+    expect(sessionFamilyEventID({ type, properties: { sessionID: "child" } } as Event, idle)).toBe("child")
   }
-  expect(sessionFamilyEventID({ type: "message.part.updated", properties: { sessionID: "child", part: { type: "step-finish" } } } as Event)).toBe("child")
-  expect(sessionFamilyEventID({ type: "message.part.updated", properties: { sessionID: "child", part: { type: "text" } } } as Event)).toBeUndefined()
-  expect(sessionFamilyEventID({ type: "session.updated", properties: { info: { id: "child", parentID: "root" } } } as Event)).toBe("child")
-  expect(sessionFamilyEventID({ type: "session.updated", properties: { info: { id: "root" } } } as Event)).toBeUndefined()
-  expect(sessionFamilyEventID({ type: "session.deleted", properties: { info: { id: "child", parentID: "root" } } } as Event)).toBe("root")
-  expect(sessionFamilyEventID({ type: "session.deleted", properties: { info: { id: "root" } } } as Event)).toBeUndefined()
+  expect(sessionFamilyEventID({ type: "message.part.updated", properties: { sessionID: "child", part: { type: "step-finish" } } } as Event, idle)).toBe("child")
+  expect(sessionFamilyEventID({ type: "message.part.updated", properties: { sessionID: "child", part: { type: "text" } } } as Event, idle)).toBeUndefined()
+  expect(sessionFamilyEventID({ type: "session.updated", properties: { info: { id: "child", parentID: "root" } } } as Event, idle)).toBe("child")
+  expect(sessionFamilyEventID({ type: "session.updated", properties: { info: { id: "root" } } } as Event, idle)).toBeUndefined()
+  expect(sessionFamilyEventID({ type: "session.deleted", properties: { info: { id: "child", parentID: "root" } } } as Event, idle)).toBe("root")
+  expect(sessionFamilyEventID({ type: "session.deleted", properties: { info: { id: "root" } } } as Event, idle)).toBeUndefined()
+})
+
+test("a running session's per-step changes wait for its idle event", () => {
+  const working = (sessionID: string) => sessionID === "child"
+  for (const type of ["session.next.ancillary.usage", "session.next.step.ended", "session.next.compaction.ended", "message.part.removed", "message.removed"]) {
+    expect(sessionFamilyEventID({ type, properties: { sessionID: "child" } } as Event, working)).toBeUndefined()
+  }
+  expect(sessionFamilyEventID({ type: "message.part.updated", properties: { sessionID: "child", part: { type: "step-finish" } } } as Event, working)).toBeUndefined()
+  expect(sessionFamilyEventID({ type: "session.updated", properties: { info: { id: "child", parentID: "root" } } } as Event, working)).toBeUndefined()
+  // Settlement still reaches the family while other sessions in it run.
+  expect(sessionFamilyEventID({ type: "session.idle", properties: { sessionID: "child" } } as Event, working)).toBe("child")
+  expect(sessionFamilyEventID({ type: "session.deleted", properties: { info: { id: "grandchild", parentID: "child" } } } as Event, working)).toBe("child")
+  expect(sessionFamilyEventID({ type: "session.next.step.ended", properties: { sessionID: "other" } } as Event, working)).toBe("other")
 })
 
 test("late grandchild settlement refreshes one root sample without another parent turn", async () => {
@@ -134,7 +148,7 @@ test("failed ancestry reads and a deleted child do not suppress the retained par
   state.fail = false
   await family.refresh("child", "/repo")
   expect(committed).toEqual([])
-  const parentID = sessionFamilyEventID({ type: "session.deleted", properties: { info: { id: "child", parentID: root.id } } } as Event)
+  const parentID = sessionFamilyEventID({ type: "session.deleted", properties: { info: { id: "child", parentID: root.id } } } as Event, () => false)
   expect(parentID).toBe(root.id)
   await family.refresh(parentID!, "/repo")
   expect(committed).toEqual([root.id])

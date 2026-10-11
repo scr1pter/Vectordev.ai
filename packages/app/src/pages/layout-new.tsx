@@ -2811,6 +2811,8 @@ export default function NewLayout(props: ParentProps) {
 
   const sessionEconomics = createSessionEconomics({
     client: (directory) => serverSDK().createClient({ directory }),
+    working: (sessionID) => serverSync().session.data.session_working(sessionID),
+    cached: (sessionID) => serverSync().session.get(sessionID),
     save: recordSessionOutcome,
     activated: () => {
       setOnboardingFlag("providerVerified")

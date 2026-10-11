@@ -2,8 +2,7 @@
 //
 // Learning only from validated parallel runs left the engine with too few samples to ever recommend anything,
 // which is why the feature looked dead. Ordinary sessions carry the same evidence.
-import type { Event, VectorClient } from "@vectordevai/sdk/v2/client"
-import { sessionIDFromEvent } from "@/utils/session-event"
+import type { Event, Session, VectorClient } from "@vectordevai/sdk/v2/client"
 import { successfulActivationFromSession } from "@/features/onboarding/onboarding-progress"
 import type { recordSessionOutcome } from "./economics-repository"
 import { createSessionFamilyRefresher, sessionFamilyEventID } from "./session-family"
@@ -12,6 +11,10 @@ import { measureUsage } from "./token-usage"
 
 export function createSessionEconomics(input: {
   client: (directory: string) => VectorClient
+  // The app's live session status: a running session's sample is read when it stops, not on every step.
+  working: (sessionID: string) => boolean
+  // Session metadata the app already holds, for the parent links of a subagent.
+  cached: (sessionID: string) => Session | undefined
   save: typeof recordSessionOutcome
   // The session's history shows a prompt that got a real answer.
   activated: () => void
@@ -77,7 +80,14 @@ export function createSessionEconomics(input: {
     })
   })
   const family = createSessionFamilyRefresher(
-    async (sessionID, directory) => (await input.client(directory).session.get({ sessionID })).data,
+    async (sessionID, directory) => {
+      // A running ancestor refreshes the family itself when it goes idle, so the walk stops there.
+      if (input.working(sessionID)) return undefined
+      // Parent links never change, so only the root, whose revision decides the refresh, is read fresh.
+      const cached = input.cached(sessionID)
+      if (cached?.parentID) return cached
+      return (await input.client(directory).session.get({ sessionID })).data
+    },
     async (sessionID, directory, revision) => {
       if (!(await outcomes.refresh(sessionID, directory, revision))) return false
       return input.workspaces(sessionID, directory)
@@ -87,22 +97,18 @@ export function createSessionEconomics(input: {
     handle(event: { name?: string; details: Event }) {
       const directory = event.name
       if (!directory) return
-      const familyID = sessionFamilyEventID(event.details)
+      // Idle reaches the root through the family refresh too, which records each settled revision once.
+      const familyID = sessionFamilyEventID(event.details, input.working)
       if (familyID) void family.refresh(familyID, directory).catch(() => undefined)
       if (event.details.type === "session.updated") {
         const session = event.details.properties.info
         outcomes.changed(session.id, directory, session.time.updated)
         return
       }
-      const sessionID = sessionIDFromEvent(event.details)
-      if (!sessionID) return
-      if (event.details.type === "message.updated") {
-        const message = event.details.properties.info
-        if (message.role === "assistant" && message.time.completed)
-          outcomes.changed(sessionID, directory, message.time.completed)
-        return
-      }
-      if (event.details.type === "session.idle") void outcomes.idle(sessionID, directory)
+      if (event.details.type !== "message.updated") return
+      const message = event.details.properties.info
+      if (message.role === "assistant" && message.time.completed)
+        outcomes.changed(message.sessionID, directory, message.time.completed)
     },
     dispose() {
       family.dispose()
