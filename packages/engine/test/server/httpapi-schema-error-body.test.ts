@@ -88,7 +88,7 @@ describe("schema-rejection wire shape", () => {
         expect(parsed.data.message).toEqual(expect.any(String))
         expect(parsed.data.message.length).toBeGreaterThan(0)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -104,7 +104,7 @@ describe("schema-rejection wire shape", () => {
         const parsed = JSON.parse(body)
         expect(parsed).toMatchObject({ name: "BadRequest", data: { kind: "Query" } })
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -118,7 +118,7 @@ describe("schema-rejection wire shape", () => {
         expect(parsed).toMatchObject({ _tag: "InvalidRequestError", kind: "Query" })
         expect(parsed.message).toEqual(expect.any(String))
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -142,7 +142,7 @@ describe("schema-rejection wire shape", () => {
         const parsed = JSON.parse(body)
         expect(parsed.data.message).not.toContain(huge)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -161,6 +161,6 @@ describe("schema-rejection wire shape", () => {
         // Field path in data.message — what made this PR worth shipping.
         expect(parsed.data.message).toMatch(/output/)
       }),
-    { config: { formatter: false, lsp: false } },
+    { trusted: true, config: { formatter: false, lsp: false } },
   )
 })

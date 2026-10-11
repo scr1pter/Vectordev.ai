@@ -3,14 +3,25 @@ export * as SkillDiscovery from "./discovery"
 import path from "path"
 import { createHash } from "node:crypto"
 import { Context, Effect, Layer, Schedule, Schema } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { FSUtil } from "../fs-util"
 import { Global } from "../global"
 import { makeGlobalNode } from "../effect/app-node"
 import { httpClient } from "../effect/app-node-platform"
 import { AbsolutePath } from "../schema"
+import { WebFetchRequest } from "../util/webfetch-request"
+import { collectBoundedResponseBody } from "../tool/http-body"
 
 const skillConcurrency = 4
+const maxIndexBytes = 1024 * 1024
+const maxFileBytes = 8 * 1024 * 1024
+// Skill URLs come from the user's own config (or a project they trusted), so an internal catalog is fine. A redirect
+// may not leave the catalog's origin, since only that origin was configured.
+const sameOrigin = (origin: string) => ({
+  authorize: (url: string) =>
+    new URL(url).origin === origin ? Effect.void : Effect.fail(new Error(`Skill files must stay on ${origin}`)),
+  authorizePrivate: () => Effect.void,
+})
 const fileConcurrency = 8
 
 function isSafeSegment(value: string) {
@@ -86,10 +97,13 @@ const layer = Layer.effect(
     const download = Effect.fn("SkillDiscovery.download")(function* (url: string, destination: string) {
       if (yield* fs.exists(destination).pipe(Effect.orDie)) return true
       return yield* HttpClientRequest.get(url).pipe(
-        http.execute,
-        Effect.flatMap((response) => response.arrayBuffer),
+        (request) => WebFetchRequest.execute(http, request, sameOrigin(new URL(url).origin)),
+        Effect.flatMap((response) =>
+          collectBoundedResponseBody(response, maxFileBytes, () => new Error("Skill file exceeds 8 MiB")),
+        ),
         Effect.flatMap((body) => fs.writeWithDirs(destination, new Uint8Array(body))),
         Effect.as(true),
+        Effect.scoped,
         Effect.catch((error) =>
           Effect.logError("failed to download skill file", { url, error }).pipe(Effect.as(false)),
         ),
@@ -103,8 +117,12 @@ const layer = Layer.effect(
         const index = new URL("index.json", source).href
         const data = yield* HttpClientRequest.get(index).pipe(
           HttpClientRequest.acceptJson,
-          http.execute,
-          Effect.flatMap(HttpClientResponse.schemaBodyJson(Index)),
+          (request) => WebFetchRequest.execute(http, request, sameOrigin(source.origin)),
+          Effect.flatMap((response) =>
+            collectBoundedResponseBody(response, maxIndexBytes, () => new Error("Skill index exceeds 1 MiB")),
+          ),
+          Effect.flatMap((body) => Schema.decodeUnknownEffect(Schema.fromJsonString(Index))(body.toString("utf8"))),
+          Effect.scoped,
           Effect.catch((error) =>
             Effect.logError("failed to fetch skill index", { url: index, error }).pipe(Effect.as(undefined)),
           ),

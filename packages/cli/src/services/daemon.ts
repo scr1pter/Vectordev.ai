@@ -60,7 +60,12 @@ export const layer = Layer.effect(
     })
 
     const createClient = Effect.fnUntraced(function* (url: string) {
-      return createVectorClient({ baseUrl: url, headers: ServerAuth.headers({ password: yield* password() }) })
+      const secret = yield* password()
+      yield* Effect.try({
+        try: () => ServerAuth.assertSecurePasswordTransport(url, secret),
+        catch: (cause) => cause,
+      })
+      return createVectorClient({ baseUrl: url, headers: ServerAuth.headers({ password: secret }) })
     })
 
     const healthy = Effect.fnUntraced(function* () {
@@ -135,7 +140,13 @@ export const layer = Layer.effect(
     })
 
     const transport = Effect.fn("cli.daemon.transport")(function* () {
-      return { url: yield* start(), headers: ServerAuth.headers({ password: yield* password() }) }
+      const url = yield* start()
+      const secret = yield* password()
+      yield* Effect.try({
+        try: () => ServerAuth.assertSecurePasswordTransport(url, secret),
+        catch: (cause) => cause,
+      })
+      return { url, headers: ServerAuth.headers({ password: secret }) }
     })
 
     const client = Effect.fn("cli.daemon.client")(function* () {

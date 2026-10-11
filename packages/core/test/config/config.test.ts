@@ -9,13 +9,13 @@ import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { ConfigMigrateV1 } from "@vectordevai/core/v1/config/migrate"
 import { ConfigV1 } from "@vectordevai/core/v1/config/config"
-import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
 import { Location } from "@vectordevai/core/location"
 import { Policy } from "@vectordevai/core/policy"
 import { Teams } from "@vectordevai/core/teams"
 import { Project } from "@vectordevai/core/project"
 import { AbsolutePath } from "@vectordevai/core/schema"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { location } from "../fixture/location"
 import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
@@ -40,7 +40,14 @@ function testLayer(
   )
   return AppNodeBuilder.build(LayerNode.group([Config.node, Policy.node]), [
     [Location.node, locationLayer],
-    [Global.node, Global.layerWith({ config: globalDirectory, home: path.join(directory, "home") })],
+    [
+      Global.node,
+      Global.layerWith({
+        config: globalDirectory,
+        home: path.join(directory, "home"),
+        state: path.join(path.dirname(globalDirectory), "state"),
+      }),
+    ],
     ...(team
       ? [
           [
@@ -818,6 +825,61 @@ describe("Config", () => {
     ),
   )
 
+  it.live("only accepts authority-narrowing policy from an untrusted project", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const root = path.join(tmp.path, "repo")
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(global, { recursive: true })
+            await fs.mkdir(root, { recursive: true })
+            await fs.writeFile(
+              path.join(root, "vector.json"),
+              JSON.stringify({
+                experimental: {
+                  policies: [
+                    { effect: "allow", action: "provider.use", resource: "openai" },
+                    { effect: "deny", action: "provider.use", resource: "anthropic" },
+                  ],
+                },
+              }),
+            )
+          })
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const policy = yield* Policy.Service
+
+            expect((yield* config.trust!()).trusted).toBe(false)
+            expect(yield* policy.evaluate("provider.use", "openai", "allow")).toBe("deny")
+            expect(yield* policy.evaluate("provider.use", "anthropic", "allow")).toBe("deny")
+          }).pipe(
+            Effect.provide(
+              testLayer(root, global, root, undefined, {
+                enabled: true,
+                orgs: [],
+                active: {
+                  id: "12345678-1234-4234-8234-123456789012",
+                  name: "Fixture team",
+                  revision: 1,
+                  config: {
+                    experimental: {
+                      policies: [{ effect: "deny", action: "provider.use", resource: "openai" }],
+                    },
+                  },
+                },
+              }),
+            ),
+          )
+        })
+      }),
+    ),
+  )
+
   it.live("loads global, ancestor, and .vector configuration up to the project boundary", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
@@ -887,6 +949,208 @@ describe("Config", () => {
           )
         })
       }),
+    ),
+  )
+
+  it.live("requires explicit trust for project executable config while keeping global config executable", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) => {
+        const global = path.join(tmp.path, "global")
+        const project = path.join(tmp.path, "project")
+        return Effect.gen(function* () {
+          yield* Effect.promise(async () => {
+            await fs.mkdir(global, { recursive: true })
+            await fs.mkdir(project, { recursive: true })
+            await fs.writeFile(path.join(global, "vector.json"), JSON.stringify({ plugins: ["global@1.0.0"] }))
+            await fs.writeFile(path.join(project, "vector.json"), JSON.stringify({ plugins: ["project@1.0.0"] }))
+          })
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const documents = (yield* config.entries()).filter(
+              (entry): entry is Config.Document => entry.type === "document",
+            )
+            const globalEntry = documents.find((entry) => entry.path === path.join(global, "vector.json"))!
+            const projectEntry = documents.find((entry) => entry.path === path.join(project, "vector.json"))!
+
+            expect(config.scope?.(globalEntry)).toBe("global")
+            expect(config.executable?.(globalEntry)).toBe(true)
+            expect(config.scope?.(projectEntry)).toBe("project")
+            expect(config.executable?.(projectEntry)).toBe(false)
+            expect((yield* config.trust!()).trusted).toBe(false)
+          }).pipe(Effect.provide(testLayer(project, global, project)))
+        })
+      }),
+    ),
+  )
+
+  it.live("fails closed when approved project config changes before loading", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const configFile = path.join(tmp.path, "vector.json")
+          yield* Effect.promise(() => fs.writeFile(configFile, JSON.stringify({ plugins: ["approved@1.0.0"] })))
+          const approved = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
+          yield* Effect.promise(() => WorkspaceTrust.approve(path.join(tmp.path, "state"), approved))
+          yield* Effect.promise(() => fs.writeFile(configFile, JSON.stringify({ plugins: ["changed@1.0.0"] })))
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const project = (yield* config.entries()).find(
+              (entry): entry is Config.Document => entry.type === "document" && entry.path === configFile,
+            )!
+            expect(config.executable?.(project)).toBe(false)
+            expect((yield* config.trust!()).trusted).toBe(false)
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
+    ),
+  )
+
+  it.live("binds trusted project executable paths to approved bytes", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const configFile = path.join(tmp.path, "vector.json")
+          const shell = path.join(tmp.path, "shell")
+          yield* Effect.promise(() =>
+            Promise.all([
+              fs.writeFile(configFile, JSON.stringify({ shell: "./shell" })),
+              fs.writeFile(shell, "approved\n"),
+            ]),
+          )
+          const approved = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
+          yield* Effect.promise(() => WorkspaceTrust.approve(path.join(tmp.path, "state"), approved))
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const project = (yield* config.entries()).find(
+              (entry): entry is Config.Document => entry.type === "document" && entry.path === configFile,
+            )!
+            expect(config.executable?.(project)).toBe(true)
+            expect(project.info.shell).not.toBe(shell)
+            expect(yield* Effect.promise(() => fs.readFile(project.info.shell!, "utf8"))).toBe("approved\n")
+
+            yield* Effect.promise(() => fs.writeFile(shell, "changed\n"))
+            expect(yield* Effect.promise(() => fs.readFile(project.info.shell!, "utf8"))).toBe("approved\n")
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
+    ),
+  )
+
+  it.live("materializes trusted project MCP scripts and cwd while rejecting package runners", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const configFile = path.join(tmp.path, "vector.json")
+          const server = path.join(tmp.path, "server.js")
+          yield* Effect.promise(() =>
+            Promise.all([
+              fs.writeFile(
+                configFile,
+                JSON.stringify({
+                  mcp: {
+                    servers: {
+                      approved: { type: "local", command: ["node", "server.js"] },
+                      runner: { type: "local", command: ["npm", "run", "mcp"] },
+                      wrapped: { type: "local", command: ["env", "npx", "attacker-package@latest"] },
+                      uvx: { type: "local", command: ["uvx", "attacker-package@latest"] },
+                      timed: { type: "local", command: ["time", "npx", "attacker-package@latest"] },
+                      preload: {
+                        type: "local",
+                        command: ["node", "server.js"],
+                        environment: { NODE_OPTIONS: `--require=${server}` },
+                      },
+                      javaAgent: {
+                        type: "local",
+                        command: ["java", "-jar", "server.js"],
+                        environment: { _JAVA_OPTIONS: `-javaagent:${server}` },
+                      },
+                    },
+                  },
+                  formatter: {
+                    approved: { command: ["node", "server.js"], extensions: [".js"] },
+                    builtin: { cwd: "tools" },
+                    preload: {
+                      command: ["node", "server.js"],
+                      environment: { NODE_OPTIONS: `--require=${server}` },
+                    },
+                    // A built-in formatter overridden without a command still launches with this environment.
+                    prettier: { environment: { PATH: path.join(tmp.path, "tools") } },
+                    biome: { environment: { BIOME_CONFIG_PATH: "biome.json" } },
+                  },
+                  lsp: {
+                    approved: { command: ["node", "server.js"] },
+                    preload: {
+                      command: ["node", "server.js"],
+                      env: { LD_PRELOAD: server },
+                    },
+                  },
+                }),
+              ),
+              fs.writeFile(server, "console.log('approved')\n"),
+              fs.mkdir(path.join(tmp.path, "tools")),
+            ]),
+          )
+          const approved = yield* Effect.promise(() => WorkspaceTrust.snapshot(tmp.path, [configFile]))
+          yield* Effect.promise(() => WorkspaceTrust.approve(path.join(tmp.path, "state"), approved))
+
+          return yield* Effect.gen(function* () {
+            const config = yield* Config.Service
+            const project = (yield* config.entries()).find(
+              (entry): entry is Config.Document => entry.type === "document" && entry.path === configFile,
+            )!
+            const local = project.info.mcp?.servers?.approved
+            expect(local?.type).toBe("local")
+            if (local?.type !== "local") return
+            expect(local.cwd).not.toBe(tmp.path)
+            expect(path.isAbsolute(local.command[0])).toBe(true)
+            expect(path.basename(local.command[0])).toMatch(/^node(?:\.exe)?$/)
+            expect(local.command[1]).not.toBe(server)
+            expect(project.info.mcp?.servers?.runner).toBeUndefined()
+            expect(project.info.mcp?.servers?.wrapped).toBeUndefined()
+            expect(project.info.mcp?.servers?.uvx).toBeUndefined()
+            expect(project.info.mcp?.servers?.timed).toBeUndefined()
+            expect(project.info.mcp?.servers?.preload).toBeUndefined()
+            expect(project.info.mcp?.servers?.javaAgent).toBeUndefined()
+
+            const formatter = project.info.formatter
+            expect(formatter && typeof formatter === "object" ? formatter.approved?.command?.[1] : undefined).toBe(
+              local.command[1],
+            )
+            expect(formatter && typeof formatter === "object" ? formatter.approved?.cwd : undefined).toBe(local.cwd)
+            const builtin = formatter && typeof formatter === "object" ? formatter.builtin : undefined
+            expect(builtin?.cwd).not.toBe(path.join(tmp.path, "tools"))
+            expect(path.basename(builtin?.cwd ?? "")).toBe("tools")
+            expect(formatter && typeof formatter === "object" ? formatter.preload : undefined).toBeUndefined()
+            expect(formatter && typeof formatter === "object" ? formatter.prettier : undefined).toBeUndefined()
+            expect(formatter && typeof formatter === "object" ? formatter.biome?.environment : undefined).toEqual({
+              BIOME_CONFIG_PATH: "biome.json",
+            })
+            const lsp = project.info.lsp
+            const approvedLsp = lsp && typeof lsp === "object" ? lsp.approved : undefined
+            expect(approvedLsp && "command" in approvedLsp ? approvedLsp.command[1] : undefined).toBe(local.command[1])
+            expect(approvedLsp && "command" in approvedLsp ? approvedLsp.cwd : undefined).toBe(local.cwd)
+            expect(lsp && typeof lsp === "object" ? lsp.preload : undefined).toBeUndefined()
+
+            yield* Effect.promise(() => fs.writeFile(server, "console.log('changed')\n"))
+            expect(yield* Effect.promise(() => fs.readFile(local.command[1], "utf8"))).toBe("console.log('approved')\n")
+          }).pipe(Effect.provide(testLayer(tmp.path)))
+        }),
+      ),
     ),
   )
 })

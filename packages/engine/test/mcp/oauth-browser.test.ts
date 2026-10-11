@@ -189,7 +189,7 @@ mcpTest.instance(
       expect(failure.mcpName).toBe("test-oauth-server")
       expect(failure.url).toContain("https://")
     }),
-  { config: config("test-oauth-server") },
+  { trusted: true, config: config("test-oauth-server") },
 )
 
 mcpTest.instance(
@@ -209,7 +209,7 @@ mcpTest.instance(
       expect(failure).toEqual(Option.none())
       expect(openCalledWith).toBeDefined()
     }),
-  { config: config("test-oauth-server-2") },
+  { trusted: true, config: config("test-oauth-server-2") },
 )
 
 mcpTest.instance(
@@ -239,5 +239,5 @@ mcpTest.instance(
       expect(url).toContain("https://")
       expect(transportCalls.at(-1)?.options.requestInit?.headers).toEqual({ "X-Custom-Header": "custom-value" })
     }),
-  { config: config("test-oauth-server-3", { "X-Custom-Header": "custom-value" }) },
+  { trusted: true, config: config("test-oauth-server-3", { "X-Custom-Header": "custom-value" }) },
 )

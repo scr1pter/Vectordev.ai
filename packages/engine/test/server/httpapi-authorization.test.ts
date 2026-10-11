@@ -116,21 +116,21 @@ describe("HttpApi authorization middleware", () => {
     }),
   )
 
-  itSecret.live("accepts auth token query credentials", () =>
+  itSecret.live("rejects reusable Basic credentials in query strings", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.get(`/probe?auth_token=${encodeURIComponent(token("vector", "secret"))}`)
 
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(401)
     }),
   )
 
-  itSecret.live("prefers auth token query credentials over basic auth", () =>
+  itSecret.live("rejects query credentials even when an Authorization header is present", () =>
     Effect.gen(function* () {
       const response = yield* HttpClientRequest.get(
         `/probe?auth_token=${encodeURIComponent(token("vector", "secret"))}`,
       ).pipe(HttpClientRequest.setHeader("authorization", basic("vector", "wrong")), HttpClient.execute)
 
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(401)
     }),
   )
 
@@ -145,11 +145,11 @@ describe("HttpApi authorization middleware", () => {
     }),
   )
 
-  itSecret.live("preserves handler errors when auth token query succeeds", () =>
+  itSecret.live("rejects query credentials before dispatching to a handler", () =>
     Effect.gen(function* () {
       const response = yield* HttpClient.get(`/missing?auth_token=${encodeURIComponent(token("vector", "secret"))}`)
 
-      expect(response.status).toBe(404)
+      expect(response.status).toBe(401)
     }),
   )
 

@@ -11,11 +11,7 @@ import { Location } from "@vectordevai/core/location"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { Shell } from "@vectordevai/core/shell"
 import { CorsConfig, isAllowedRequestOrigin, type CorsOptions } from "@vectordevai/server/cors"
-import {
-  PTY_CONNECT_TICKET_QUERY,
-  PTY_CONNECT_TOKEN_HEADER,
-  PTY_CONNECT_TOKEN_HEADER_VALUE,
-} from "@/server/shared/pty-ticket"
+import { PTY_CONNECT_TOKEN_HEADER, PTY_CONNECT_TOKEN_HEADER_VALUE } from "@/server/shared/pty-ticket"
 import { Effect, Layer, Option, Queue, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -184,6 +180,7 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
         params: { ptyID: PtyID }
         request: HttpServerRequest.HttpServerRequest
       }) {
+        if (!validOrigin(ctx.request, cors)) return HttpServerResponse.empty({ status: 403 })
         const exists = yield* pty(Pty.Service.use((service) => service.get(ctx.params.ptyID))).pipe(
           Effect.map((info) => info.status === "running"),
           Effect.catchTag("Pty.NotFoundError", () => Effect.succeed(false)),
@@ -192,13 +189,6 @@ export const ptyConnectHandlers = HttpApiBuilder.group(PtyConnectApi, "pty-conne
 
         const query = Schema.decodeUnknownOption(CursorQuery)(yield* HttpServerRequest.ParsedSearchParams)
         if (Option.isNone(query)) return HttpServerResponse.empty({ status: 400 })
-        const ticket = new URL(ctx.request.url, "http://localhost").searchParams.get(PTY_CONNECT_TICKET_QUERY)
-        if (ticket) {
-          const valid = validOrigin(ctx.request, cors)
-            ? yield* tickets.consume({ ticket, ptyID: ctx.params.ptyID, ...(yield* ticketScope) })
-            : false
-          if (!valid) return HttpServerResponse.empty({ status: 403 })
-        }
         const parsedCursor = query.value.cursor === undefined ? undefined : Number(query.value.cursor)
         const cursor =
           parsedCursor !== undefined && Number.isSafeInteger(parsedCursor) && parsedCursor >= -1

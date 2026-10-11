@@ -1,5 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { describe, expect } from "bun:test"
+import fs from "node:fs/promises"
+import path from "path"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Effect, Layer } from "effect"
 import { provideTmpdirInstance, testInstanceStoreLayer, TestInstance } from "../fixture/fixture"
@@ -7,6 +9,9 @@ import { testEffect } from "../lib/effect"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Format } from "../../src/format"
 import * as Formatter from "../../src/format/formatter"
+
+const appendFixture = path.join(import.meta.dir, "../fixture/formatter-append.js")
+const cwdFixture = path.join(import.meta.dir, "../fixture/formatter-cwd.js")
 
 const it = testEffect(
   Layer.mergeAll(LayerNode.compile(LayerNode.group([Format.node, CrossSpawnSpawner.node])), NodeFileSystem.layer),
@@ -32,7 +37,7 @@ describe("Format", () => {
           expect(gofmt!.extensions).toContain(".go")
         }),
       ),
-    { config: { formatter: true } },
+    { trusted: true, config: { formatter: true } },
   )
 
   it.instance(
@@ -48,7 +53,7 @@ describe("Format", () => {
           expect(mix).toBeDefined()
         }),
       ),
-    { config: { formatter: { gofmt: {} } } },
+    { trusted: true, config: { formatter: { gofmt: {} } } },
   )
 
   it.instance(
@@ -63,7 +68,7 @@ describe("Format", () => {
           expect(mix).toBeDefined()
         }),
       ),
-    { config: { formatter: { gofmt: { disabled: true } } } },
+    { trusted: true, config: { formatter: { gofmt: { disabled: true } } } },
   )
 
   it.instance(
@@ -76,7 +81,7 @@ describe("Format", () => {
           expect(statuses.find((item) => item.name === "uv")).toBeUndefined()
         }),
       ),
-    { config: { formatter: { ruff: { disabled: true } } } },
+    { trusted: true, config: { formatter: { ruff: { disabled: true } } } },
   )
 
   it.instance(
@@ -89,7 +94,7 @@ describe("Format", () => {
           expect(statuses.find((item) => item.name === "uv")).toBeUndefined()
         }),
       ),
-    { config: { formatter: { uv: { disabled: true } } } },
+    { trusted: true, config: { formatter: { uv: { disabled: true } } } },
   )
 
   it.instance("service initializes without error", () => Format.Service.use(() => Effect.void))
@@ -105,7 +110,7 @@ describe("Format", () => {
         const formatted = yield* Format.use.file(file)
         expect(formatted).toBe(false)
       }),
-    { config: { formatter: false } },
+    { trusted: true, config: { formatter: false } },
   )
 
   testEffect(
@@ -116,10 +121,9 @@ describe("Format", () => {
     ),
   ).live("status() initializes formatter state per directory", () =>
     Effect.gen(function* () {
-      const a = yield* provideTmpdirInstance(() => Format.use.status(), {
-        config: { formatter: false },
-      })
+      const a = yield* provideTmpdirInstance(() => Format.use.status(), { trusted: true, config: { formatter: false } })
       const b = yield* provideTmpdirInstance(() => Format.use.status(), {
+        trusted: true,
         config: {
           formatter: true,
         },
@@ -187,7 +191,35 @@ describe("Format", () => {
 
         expect(max).toBe(2)
       }),
-    { config: { formatter: { gofmt: {}, mix: {} } } },
+    { trusted: true, config: { formatter: { gofmt: {}, mix: {} } } },
+  )
+
+  it.instance(
+    "runs trusted custom formatters from their materialized working directory",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const file = path.join(test.directory, "test.cwd")
+        yield* Effect.promise(() => Bun.write(file, "x"))
+
+        expect(yield* Format.use.file(file)).toBe(true)
+        const cwd = yield* Effect.promise(() => Bun.file(file).text())
+        expect(cwd).not.toBe(path.join(test.directory, "tools"))
+        expect(path.basename(cwd)).toBe("tools")
+      }),
+    {
+      trusted: true,
+      config: {
+        formatter: {
+          cwd: {
+            command: ["bun", cwdFixture, "$FILE"],
+            cwd: "tools",
+            extensions: [".cwd"],
+          },
+        },
+      },
+      init: (directory) => Effect.promise(() => fs.mkdir(path.join(directory, "tools"))),
+    },
   )
 
   it.instance(
@@ -208,24 +240,15 @@ describe("Format", () => {
         expect(yield* Effect.promise(() => Bun.file(file).text())).toBe("xAB")
       }),
     {
+      trusted: true,
       config: {
         formatter: {
           first: {
-            command: [
-              "node",
-              "-e",
-              "const fs = require('fs'); const file = process.argv[1]; fs.writeFileSync(file, fs.readFileSync(file, 'utf8') + 'A')",
-              "$FILE",
-            ],
+            command: ["bun", appendFixture, "A", "$FILE"],
             extensions: [".seq"],
           },
           second: {
-            command: [
-              "node",
-              "-e",
-              "const fs = require('fs'); const file = process.argv[1]; fs.writeFileSync(file, fs.readFileSync(file, 'utf8') + 'B')",
-              "$FILE",
-            ],
+            command: ["bun", appendFixture, "B", "$FILE"],
             extensions: [".seq"],
           },
         },

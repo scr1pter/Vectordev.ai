@@ -2,6 +2,7 @@ export * as Config from "./config"
 
 import { makeLocationNode } from "./effect/app-node"
 import path from "path"
+import { fileURLToPath } from "node:url"
 import { type ParseError, parse } from "jsonc-parser"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Permission } from "@vectordevai/schema/permission"
@@ -29,6 +30,7 @@ import { ConfigMigration } from "./config/migration"
 import { Flag } from "./flag/flag"
 import { EffectFlock } from "./util/effect-flock"
 import { Teams } from "./teams"
+import { WorkspaceTrust } from "./workspace-trust/workspace-trust"
 
 export class Info extends Schema.Class<Info>("Config.Info")({
   $schema: Schema.optional(Schema.String).annotate({
@@ -122,6 +124,7 @@ export class Directory extends Schema.Class<Directory>("Config.Directory")({
 }) {}
 
 export type Entry = Document | Directory
+export type Scope = "global" | "project"
 
 export function latest<K extends keyof Info>(entries: readonly Entry[], key: K): Info[K] | undefined {
   return entries
@@ -132,6 +135,14 @@ export function latest<K extends keyof Info>(entries: readonly Entry[], key: K):
 export interface Interface {
   /** Returns location config documents and supplemental directories from lowest to highest priority. */
   readonly entries: () => Effect.Effect<Entry[]>
+  /** Returns where a loaded entry came from. Unknown injected entries are treated as global. */
+  readonly scope?: (entry: Entry) => Scope
+  /** Project executable entries require an unchanged explicit workspace approval. */
+  readonly executable?: (entry: Entry) => boolean
+  /** Resolves approved project executable content to its private captured copy. */
+  readonly executablePath?: (entry: Entry, input: string) => string
+  readonly trust?: () => Effect.Effect<WorkspaceTrust.Status>
+  readonly approve?: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@vector/v2/Config") {}
@@ -144,6 +155,7 @@ const layer = Layer.effect(
     const location = yield* Location.Service
     const policy = yield* Policy.Service
     const teams = yield* Teams.Service
+    const scopes = new WeakMap<Entry, Scope>()
     yield* ConfigMigration.discover({
       directory: location.directory,
       worktree: location.project.directory,
@@ -156,8 +168,13 @@ const layer = Layer.effect(
     const decodeInfo = Schema.decodeUnknownOption(Info, decodeOptions)
     const decodeV1Info = Schema.decodeUnknownOption(ConfigV1.Info, decodeOptions)
 
-    const loadFile = Effect.fnUntraced(function* (filepath: string) {
-      const text = yield* fs.readFileStringSafe(filepath)
+    const loadFile = Effect.fnUntraced(function* (
+      filepath: string,
+      snapshot?: WorkspaceTrust.Snapshot,
+      trusted?: WorkspaceTrust.TrustedSnapshot,
+      workspace?: string,
+    ) {
+      const text = snapshot ? WorkspaceTrust.readFileString(snapshot, filepath) : yield* fs.readFileStringSafe(filepath)
       if (!text) return
 
       const errors: ParseError[] = []
@@ -170,15 +187,25 @@ const layer = Layer.effect(
           : decodeInfo(input),
       )
       if (!info) return
-      return new Document({ type: "document", path: filepath, info })
+      return new Document({
+        type: "document",
+        path: filepath,
+        info: trusted && workspace ? bindTrustedProjectExecutables(info, trusted, filepath, workspace) : info,
+      })
     })
 
-    const loadDirectory = Effect.fnUntraced(function* (directory: AbsolutePath) {
+    const loadDirectory = Effect.fnUntraced(function* (
+      directory: AbsolutePath,
+      snapshot?: WorkspaceTrust.Snapshot,
+      trusted?: WorkspaceTrust.TrustedSnapshot,
+      workspace?: string,
+      runtimeDirectory = directory,
+    ) {
       return [
-        ...(yield* Effect.forEach(names, (file) => loadFile(path.join(directory, file))).pipe(
-          Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
-        )),
-        new Directory({ type: "directory", path: directory }),
+        ...(yield* Effect.forEach(names, (file) =>
+          loadFile(path.join(directory, file), snapshot, trusted, workspace),
+        ).pipe(Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)))),
+        new Directory({ type: "directory", path: runtimeDirectory }),
       ]
     })
 
@@ -196,21 +223,72 @@ const layer = Layer.effect(
               stop: location.project.directory,
             })
             .pipe(Effect.orDie)
-    const directories = [
-      globalDirectory,
-      ...discovered
-        .filter((item) => path.basename(item) === ".vector")
-        .toReversed()
-        .map((directory) => AbsolutePath.make(directory)),
-    ]
+    const projectDirectories = discovered
+      .filter((item) => path.basename(item) === ".vector")
+      .toReversed()
+      .map((directory) => AbsolutePath.make(directory))
+    const directories = [globalDirectory, ...projectDirectories]
     // A config closer to the opened directory should win over one higher up.
     // Search starts nearby, so reverse the results before applying them.
     const directPaths = discovered.filter((item) => path.basename(item) !== ".vector").toReversed()
-    const direct = yield* Effect.forEach(directPaths, loadFile).pipe(
+    const tuiPaths =
+      locationIsGlobal || Flag.VECTOR_DISABLE_PROJECT_CONFIG
+        ? []
+        : yield* fs
+            .up({
+              targets: ["tui.jsonc", "tui.json"],
+              start: location.directory,
+              stop: location.project.directory,
+            })
+            .pipe(Effect.orDie)
+    const workspace =
+      location.project.directory === path.parse(location.project.directory).root
+        ? location.directory
+        : location.project.directory
+    const trustSnapshot = yield* Effect.promise(() =>
+      WorkspaceTrust.snapshot(workspace, [...directPaths, ...tuiPaths, ...projectDirectories]).catch((cause) =>
+        WorkspaceTrust.unavailableSnapshot(workspace, cause),
+      ),
+    )
+    const snapshotFailure = WorkspaceTrust.unavailableReason(trustSnapshot)
+    if (snapshotFailure) {
+      yield* Effect.logWarning("disabling project config because workspace trust capture failed", {
+        workspace,
+        reason: snapshotFailure,
+      })
+    }
+    const trustStatus = yield* Effect.promise(() => WorkspaceTrust.status(global.state, trustSnapshot))
+    const trustedSnapshot =
+      !snapshotFailure && !Flag.VECTOR_PURE && trustStatus.trusted
+        ? yield* Effect.promise(() => WorkspaceTrust.materialize(global.state, trustSnapshot))
+        : undefined
+    const direct = yield* Effect.forEach(directPaths, (file) =>
+      loadFile(file, trustSnapshot, trustedSnapshot, workspace),
+    ).pipe(
       Effect.orDie,
       Effect.map((configs) => configs.filter((config): config is Document => config !== undefined)),
     )
-    const supplementary = yield* Effect.forEach(directories, loadDirectory).pipe(Effect.orDie)
+    const supplementary = [
+      yield* loadDirectory(globalDirectory).pipe(Effect.orDie),
+      ...(yield* Effect.forEach(projectDirectories, (directory) =>
+        loadDirectory(
+          directory,
+          trustSnapshot,
+          trustedSnapshot,
+          workspace,
+          trustedSnapshot ? AbsolutePath.make(WorkspaceTrust.materializedPath(trustedSnapshot, directory)) : directory,
+        ),
+      ).pipe(Effect.orDie)),
+    ]
+    for (const entry of supplementary[0] ?? []) scopes.set(entry, "global")
+    for (const entry of direct) scopes.set(entry, "project")
+    for (const group of supplementary.slice(1)) for (const entry of group) scopes.set(entry, "project")
+
+    const executable = (entry: Entry) => scopes.get(entry) !== "project" || trustedSnapshot !== undefined
+    const executablePath = (entry: Entry, input: string) =>
+      scopes.get(entry) === "project" && trustedSnapshot
+        ? WorkspaceTrust.materializedPath(trustedSnapshot, input)
+        : input
     // Apply general settings first and more specific settings last:
     // global config, project files, then `.vector` files.
     const team = yield* teams.current().pipe(Effect.orDie)
@@ -230,7 +308,9 @@ const layer = Layer.effect(
     // Team defaults have the same precedence as customer-hosted configuration:
     // personal and project settings remain authoritative on this machine.
     const localConfigs = [...(supplementary[0] ?? []), ...direct, ...supplementary.slice(1).flat()]
-    const configs = [...(teamInfo ? [new Document({ type: "document", info: teamInfo })] : []), ...localConfigs]
+    const teamConfig = teamInfo ? new Document({ type: "document", info: teamInfo }) : undefined
+    if (teamConfig) scopes.set(teamConfig, "global")
+    const configs = [...(teamConfig ? [teamConfig] : []), ...localConfigs]
     // Rules use the opposite order so a user-global rule can override a
     // repository rule. Statement order inside each file stays unchanged.
     yield* policy.load([
@@ -238,12 +318,25 @@ const layer = Layer.effect(
       ...localConfigs
         .filter((config): config is Document => config.type === "document")
         .toReversed()
-        .flatMap((config) => config.info.experimental?.policies ?? []),
+        .flatMap((config) => {
+          const statements = config.info.experimental?.policies ?? []
+          if (scopes.get(config) !== "project" || trustStatus.trusted) return statements
+          return statements.filter((statement) => statement.effect === "deny")
+        }),
     ])
 
     return Service.of({
       entries: Effect.fn("Config.entries")(function* () {
         return configs
+      }),
+      scope: (entry) => scopes.get(entry) ?? "global",
+      executable,
+      executablePath,
+      trust: Effect.fn("Config.trust")(function* () {
+        return yield* Effect.promise(() => WorkspaceTrust.status(global.state, trustSnapshot))
+      }),
+      approve: Effect.fn("Config.approve")(function* () {
+        yield* Effect.promise(() => WorkspaceTrust.approve(global.state, trustSnapshot))
       }),
     })
   }),
@@ -256,3 +349,112 @@ export const node = makeLocationNode({
   layer,
   deps: [FSUtil.node, Global.node, Location.node, Policy.node, EffectFlock.node, Teams.node],
 })
+
+function bindTrustedProjectExecutables(
+  info: Info,
+  trusted: WorkspaceTrust.TrustedSnapshot,
+  source: string,
+  workspace: string,
+) {
+  const shell = info.shell ? trustedExecutableValue(info.shell, path.dirname(source), trusted) : undefined
+  const formatter =
+    info.formatter && typeof info.formatter === "object"
+      ? rewriteCommandEntries(
+          info.formatter,
+          workspace,
+          trusted,
+          (entry, command) =>
+            new ConfigFormatter.Entry({
+              ...entry,
+              ...(command ? { command: command.command, cwd: command.cwd } : {}),
+            }),
+        )
+      : info.formatter
+  const lsp =
+    info.lsp && typeof info.lsp === "object"
+      ? rewriteCommandEntries(
+          info.lsp,
+          workspace,
+          trusted,
+          (entry, command) =>
+            command ? new ConfigLSP.Server({ ...entry, command: command.command, cwd: command.cwd }) : entry,
+        )
+      : info.lsp
+  const mcp = info.mcp
+    ? new ConfigMCP.Info({
+        ...info.mcp,
+        servers: info.mcp.servers
+          ? Object.fromEntries(
+              Object.entries(info.mcp.servers)
+                .map(([name, server]): [string, ConfigMCP.Local | ConfigMCP.Remote | undefined] => {
+                  if (server.type !== "local") return [name, server]
+                  const cwd = server.cwd ? path.resolve(workspace, server.cwd) : workspace
+                  const command = WorkspaceTrust.materializedCommand(trusted, server.command, cwd, server.environment)
+                  if (!command) return [name, undefined]
+                  return [
+                    name,
+                    new ConfigMCP.Local({
+                      ...server,
+                      command: command.command,
+                      cwd: command.cwd,
+                    }),
+                  ]
+                })
+                .filter((entry): entry is [string, ConfigMCP.Local | ConfigMCP.Remote] => entry[1] !== undefined),
+            )
+          : undefined,
+      })
+    : undefined
+  return new Info({ ...info, shell, formatter, lsp, mcp })
+}
+
+function rewriteCommandEntries<T extends Record<string, object>>(
+  value: T,
+  base: string,
+  trusted: WorkspaceTrust.TrustedSnapshot,
+  bind: (entry: Record<string, unknown>, command?: { command: string[]; cwd: string }) => object,
+): T {
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([name, entry]) => {
+      if (!entry || typeof entry !== "object") return [[name, entry]]
+      // An entry without a command overrides a built-in formatter, which still launches with this environment, so a
+      // PATH or preload variable would run live, unapproved programs just as a project command would.
+      const environment = "environment" in entry ? entry.environment : "env" in entry ? entry.env : undefined
+      const projectEnvironment = stringEnvironment(environment)
+      if (
+        environment !== undefined &&
+        (!projectEnvironment || WorkspaceTrust.unsafeProjectEnvironment(projectEnvironment))
+      )
+        return []
+      if (!("command" in entry) || !Array.isArray(entry.command)) {
+        if (!("cwd" in entry) || typeof entry.cwd !== "string") return [[name, entry]]
+        const cwd = WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, entry.cwd))
+        if (!cwd) return []
+        return [[name, bind({ ...entry, cwd })]]
+      }
+      if (!entry.command.every((item): item is string => typeof item === "string")) return []
+      const cwd = "cwd" in entry && typeof entry.cwd === "string" ? path.resolve(base, entry.cwd) : base
+      const command = WorkspaceTrust.materializedCommand(trusted, entry.command, cwd, projectEnvironment)
+      if (!command) return []
+      return [[name, bind(entry as Record<string, unknown>, command)]]
+    }),
+  ) as T
+}
+
+function stringEnvironment(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return
+  const entries = Object.entries(value)
+  if (entries.some(([, item]) => typeof item !== "string")) return
+  return Object.fromEntries(entries) as Record<string, string>
+}
+
+function trustedExecutableValue(value: unknown, base: string, trusted: WorkspaceTrust.TrustedSnapshot) {
+  if (typeof value !== "string") return
+  if (value.startsWith("file:")) return WorkspaceTrust.materializedPathOption(trusted, fileURLToPath(value))
+  if (/^[A-Za-z]:/.test(value) || value.startsWith("\\\\")) {
+    return WorkspaceTrust.materializedPathOption(trusted, value)
+  }
+  if (URL.canParse(value)) return value
+  if (!path.isAbsolute(value) && !value.includes("/") && !value.includes("\\")) return value
+  return WorkspaceTrust.materializedPathOption(trusted, path.resolve(base, value))
+}

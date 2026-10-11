@@ -1,8 +1,13 @@
 import { logo } from "../logo"
+import stripAnsi from "strip-ansi"
 
 const reset = "\x1b[0m"
 const bold = "\x1b[1m"
 const dim = "\x1b[90m"
+
+export function sanitizeTerminalText(text: string) {
+  return stripAnsi(text).replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "")
+}
 
 function wordmark(pad = "") {
   const draw = (line: string, fg: string, shadow: string, bg: string) =>
@@ -25,11 +30,13 @@ function wordmark(pad = "") {
 
 export function sessionEpilogue(input: { title: string; sessionID?: string }) {
   const weak = (text: string) => `${dim}${text.padEnd(10, " ")}${reset}`
+  const title = sanitizeTerminalText(input.title)
+  const sessionID = sanitizeTerminalText(input.sessionID ?? "")
   return [
     ...wordmark("  "),
     "",
-    `  ${weak("Session")}${bold}${input.title}${reset}`,
-    `  ${weak("Continue")}${bold}vector -s ${input.sessionID}${reset}`,
+    `  ${weak("Session")}${bold}${title}${reset}`,
+    `  ${weak("Continue")}${bold}vector -s ${sessionID}${reset}`,
     "",
   ].join("\n")
 }

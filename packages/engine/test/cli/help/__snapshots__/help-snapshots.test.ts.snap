@@ -6,21 +6,24 @@ exports[`vector CLI help-text snapshots every documented command emits stable he
 start ACP (Agent Client Protocol) server
 
 Options:
-  -h, --help         show help                                                             [boolean]
-  -v, --version      show version number                                                   [boolean]
-      --print-logs   print logs to stderr                                                  [boolean]
-      --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-      --pure         run without external plugins                                          [boolean]
-      --port         port to listen on                                         [number] [default: 0]
-      --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
-      --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
+  -h, --help             show help                                                         [boolean]
+  -v, --version          show version number                                               [boolean]
+      --print-logs       print logs to stderr                                              [boolean]
+      --log-level        log level              [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure             run without external plugins                                      [boolean]
+      --port             port to listen on                                     [number] [default: 0]
+      --hostname         hostname to listen on                       [string] [default: "127.0.0.1"]
+      --mdns             enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
-      --unsecured    explicitly allow a network listener without a password
+      --unsecured        explicitly allow a network listener without a password
                                                                           [boolean] [default: false]
-      --mdns-domain  custom domain name for mDNS service (default: vector.local)
+      --trusted-network  accept the server password over plain HTTP on a non-loopback address, on a
+                         network you trust such as a container bridge or a private LAN
+                                                                          [boolean] [default: false]
+      --mdns-domain      custom domain name for mDNS service (default: vector.local)
                                                                   [string] [default: "vector.local"]
-      --cors         additional domains to allow for CORS                      [array] [default: []]
-      --cwd          working directory [string] [default: "<HOME>"]"
+      --cors             additional domains to allow for CORS                  [array] [default: []]
+      --cwd              working directory [string] [default: "<HOME>"]"
 `;
 
 exports[`vector CLI help-text snapshots every documented command emits stable help text: vector mcp --help 1`] = `
@@ -232,20 +235,23 @@ exports[`vector CLI help-text snapshots every documented command emits stable he
 starts a headless vector server
 
 Options:
-  -h, --help         show help                                                             [boolean]
-  -v, --version      show version number                                                   [boolean]
-      --print-logs   print logs to stderr                                                  [boolean]
-      --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-      --pure         run without external plugins                                          [boolean]
-      --port         port to listen on                                         [number] [default: 0]
-      --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
-      --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
+  -h, --help             show help                                                         [boolean]
+  -v, --version          show version number                                               [boolean]
+      --print-logs       print logs to stderr                                              [boolean]
+      --log-level        log level              [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure             run without external plugins                                      [boolean]
+      --port             port to listen on                                     [number] [default: 0]
+      --hostname         hostname to listen on                       [string] [default: "127.0.0.1"]
+      --mdns             enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
-      --unsecured    explicitly allow a network listener without a password
+      --unsecured        explicitly allow a network listener without a password
                                                                           [boolean] [default: false]
-      --mdns-domain  custom domain name for mDNS service (default: vector.local)
+      --trusted-network  accept the server password over plain HTTP on a non-loopback address, on a
+                         network you trust such as a container bridge or a private LAN
+                                                                          [boolean] [default: false]
+      --mdns-domain      custom domain name for mDNS service (default: vector.local)
                                                                   [string] [default: "vector.local"]
-      --cors         additional domains to allow for CORS                      [array] [default: []]"
+      --cors             additional domains to allow for CORS                  [array] [default: []]"
 `;
 
 exports[`vector CLI help-text snapshots every documented command emits stable help text: vector web --help 1`] = `
@@ -254,20 +260,23 @@ exports[`vector CLI help-text snapshots every documented command emits stable he
 start vector server and open web interface
 
 Options:
-  -h, --help         show help                                                             [boolean]
-  -v, --version      show version number                                                   [boolean]
-      --print-logs   print logs to stderr                                                  [boolean]
-      --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
-      --pure         run without external plugins                                          [boolean]
-      --port         port to listen on                                         [number] [default: 0]
-      --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
-      --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
+  -h, --help             show help                                                         [boolean]
+  -v, --version          show version number                                               [boolean]
+      --print-logs       print logs to stderr                                              [boolean]
+      --log-level        log level              [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure             run without external plugins                                      [boolean]
+      --port             port to listen on                                     [number] [default: 0]
+      --hostname         hostname to listen on                       [string] [default: "127.0.0.1"]
+      --mdns             enable mDNS service discovery (defaults hostname to 0.0.0.0)
                                                                           [boolean] [default: false]
-      --unsecured    explicitly allow a network listener without a password
+      --unsecured        explicitly allow a network listener without a password
                                                                           [boolean] [default: false]
-      --mdns-domain  custom domain name for mDNS service (default: vector.local)
+      --trusted-network  accept the server password over plain HTTP on a non-loopback address, on a
+                         network you trust such as a container bridge or a private LAN
+                                                                          [boolean] [default: false]
+      --mdns-domain      custom domain name for mDNS service (default: vector.local)
                                                                   [string] [default: "vector.local"]
-      --cors         additional domains to allow for CORS                      [array] [default: []]"
+      --cors             additional domains to allow for CORS                  [array] [default: []]"
 `;
 
 exports[`vector CLI help-text snapshots every documented command emits stable help text: vector models --help 1`] = `

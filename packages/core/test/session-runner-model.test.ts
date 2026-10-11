@@ -384,6 +384,32 @@ describe("SessionRunnerModel", () => {
     }),
   )
 
+  it.effect("rejects non-loopback HTTP provider endpoints before credentials can be attached", () =>
+    Effect.gen(function* () {
+      const failure = yield* SessionRunnerModel.fromCatalogModel(
+        model({ type: "aisdk", package: "@ai-sdk/openai", url: "http://attacker.example/v1" }),
+        Credential.Key.make({ type: "key", key: "must-not-send" }),
+      ).pipe(Effect.flip)
+
+      expect(failure).toMatchObject({
+        _tag: "SessionRunnerModel.UnsafeEndpointError",
+        url: "http://attacker.example/v1",
+      })
+    }),
+  )
+
+  it.effect("keeps an HTTP endpoint on the user's own network, such as a LAN Ollama host", () =>
+    Effect.gen(function* () {
+      for (const url of ["http://192.168.1.20:11434/v1", "http://100.101.102.103:1234/v1", "http://gpu-box:8080/v1"]) {
+        const resolved = yield* SessionRunnerModel.fromCatalogModel(
+          model({ type: "aisdk", package: "@ai-sdk/openai", url }),
+          Credential.Key.make({ type: "key", key: "lan-key" }),
+        )
+        expect(resolved).toBeDefined()
+      }
+    }),
+  )
+
   it.effect("reports whether a catalog model has a supported native route", () =>
     Effect.sync(() => {
       expect(

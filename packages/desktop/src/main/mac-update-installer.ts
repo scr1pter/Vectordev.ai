@@ -65,6 +65,32 @@ if [ ! -x "$SOURCE/Contents/MacOS/Vector" ]; then
   fail "The downloaded update does not contain a valid Vector.app"
 fi
 
+if ! /usr/bin/codesign --verify --deep --strict --verbose=2 "$SOURCE"; then
+  fail "The downloaded update has an invalid code signature"
+fi
+
+# Interim releases are ad-hoc signed, so they carry no Team ID, and still reach installed copies through
+# Check for Updates (owner decision, 2 October 2026). Once the installed app carries a Team ID, an update must
+# keep it and its designated requirement and pass Gatekeeper, so a signed install is never replaced by an
+# unsigned or differently signed app.
+CURRENT_TEAM=$(/usr/bin/codesign -d --verbose=4 "$TARGET" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p' | /usr/bin/head -n 1)
+if [ -n "$CURRENT_TEAM" ] && [ "$CURRENT_TEAM" != "not set" ]; then
+  SOURCE_TEAM=$(/usr/bin/codesign -d --verbose=4 "$SOURCE" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p' | /usr/bin/head -n 1)
+  if [ "$SOURCE_TEAM" != "$CURRENT_TEAM" ]; then
+    fail "The downloaded update does not match Vector's signing identity"
+  fi
+
+  CURRENT_REQUIREMENT=$(/usr/bin/codesign -d -r- "$TARGET" 2>&1 | /usr/bin/sed -n 's/^designated => //p' | /usr/bin/head -n 1)
+  SOURCE_REQUIREMENT=$(/usr/bin/codesign -d -r- "$SOURCE" 2>&1 | /usr/bin/sed -n 's/^designated => //p' | /usr/bin/head -n 1)
+  if [ -z "$CURRENT_REQUIREMENT" ] || [ "$SOURCE_REQUIREMENT" != "$CURRENT_REQUIREMENT" ]; then
+    fail "The downloaded update does not match Vector's designated requirement"
+  fi
+
+  if ! /usr/sbin/spctl --assess --type execute --verbose=2 "$SOURCE"; then
+    fail "The downloaded update is not notarized for this Mac"
+  fi
+fi
+
 rm -rf "$BACKUP"
 if [ -e "$TARGET" ] && ! mv "$TARGET" "$BACKUP"; then
   fail "Could not move the current app aside"

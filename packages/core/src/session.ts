@@ -212,7 +212,17 @@ const layer = Layer.effect(
     const sharingPreference = (location: Location.Ref) =>
       Effect.gen(function* () {
         const configuration = yield* Config.Service
-        return Config.latest(yield* configuration.entries(), "share")
+        const entries = yield* configuration.entries()
+        const trusted = Config.latest(
+          entries.filter((entry) => configuration.executable?.(entry) !== false),
+          "share",
+        )
+        const untrusted = Config.latest(
+          entries.filter((entry) => configuration.executable?.(entry) === false),
+          "share",
+        )
+        // An untrusted project can turn sharing down or off, never on.
+        return untrusted === "disabled" || (untrusted === "manual" && trusted === "auto") ? untrusted : trusted
       }).pipe(
         Effect.provide(locations.get(location)),
         Effect.catchCause(() => Effect.succeed("disabled" as const)),

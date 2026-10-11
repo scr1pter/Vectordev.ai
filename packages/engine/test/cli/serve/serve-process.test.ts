@@ -8,7 +8,7 @@
 import { describe, expect } from "bun:test"
 import path from "node:path"
 import { Effect } from "effect"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { HttpClient } from "effect/unstable/http"
 import { cliIt } from "../../lib/cli-process"
 
 describe("vector serve (subprocess)", () => {
@@ -107,7 +107,7 @@ describe("vector serve (subprocess)", () => {
   )
 
   cliIt.live(
-    "starts an explicitly unsecured listener and keeps configured authentication active",
+    "starts an explicitly unsecured listener but refuses configured authentication over cleartext",
     ({ vector }) =>
       Effect.gen(function* () {
         const unsecured = yield* vector.serve({ hostname: "0.0.0.0", extraArgs: ["--unsecured"] })
@@ -116,28 +116,31 @@ describe("vector serve (subprocess)", () => {
         unsecured.kill()
         yield* Effect.promise(() => unsecured.exited)
 
-        const secured = yield* vector.serve({
+        const secured = yield* vector
+          .serve({
+            hostname: "0.0.0.0",
+            extraArgs: ["--unsecured"],
+            env: {
+              VECTOR_SERVER_PASSWORD: "owner-secret",
+              VECTOR_SERVER_USERNAME: "alice",
+            },
+          })
+          .pipe(Effect.flip)
+        expect(secured.message).toContain("--trusted-network")
+
+        // A container or private LAN opts in to carrying the password over plain HTTP.
+        const trusted = yield* vector.serve({
           hostname: "0.0.0.0",
-          extraArgs: ["--unsecured"],
+          extraArgs: ["--trusted-network"],
           env: {
             VECTOR_SERVER_PASSWORD: "owner-secret",
             VECTOR_SERVER_USERNAME: "alice",
           },
         })
-        const unauthorized = yield* HttpClientRequest.get(`http://127.0.0.1:${secured.port}/config`).pipe(
-          HttpClientRequest.setHeader("authorization", `Basic ${btoa("vector:owner-secret")}`),
-          HttpClient.execute,
-        )
-        expect(unauthorized.status).toBe(401)
-        expect(yield* unauthorized.json).toEqual({
-          _tag: "UnauthorizedError",
-          message: "Authentication required. Use the configured server username: alice.",
-        })
-        const authorized = yield* HttpClientRequest.get(`http://127.0.0.1:${secured.port}/config`).pipe(
-          HttpClientRequest.setHeader("authorization", `Basic ${btoa("alice:owner-secret")}`),
-          HttpClient.execute,
-        )
-        expect(authorized.status).toBe(200)
+        const anonymous = yield* HttpClient.get(`http://127.0.0.1:${trusted.port}/config`)
+        expect(anonymous.status).toBe(401)
+        trusted.kill()
+        yield* Effect.promise(() => trusted.exited)
       }),
     60_000,
   )

@@ -128,6 +128,11 @@ export type UnauthorizedError = {
   message: string
 }
 
+export type ForbiddenError = {
+  _tag: "ForbiddenError"
+  message: string
+}
+
 export type OAuth = {
   type: "oauth"
   refresh: string
@@ -2113,6 +2118,7 @@ export type Config = {
         [key: string]: {
           disabled?: boolean
           command?: Array<string>
+          cwd?: string
           environment?: {
             [key: string]: string
           }
@@ -2131,6 +2137,7 @@ export type Config = {
             }
           | {
               command: Array<string>
+              cwd?: string
               extensions?: Array<string>
               disabled?: boolean
               env?: {
@@ -2187,6 +2194,12 @@ export type TeamsError = {
     code: "unavailable" | "denied" | "invalid" | "storage"
     message: string
   }
+}
+
+export type ProjectTrustStatus = {
+  workspace: string
+  trusted: boolean
+  ignored: boolean
 }
 
 export type Model = {
@@ -3726,11 +3739,6 @@ export type V2Event =
   | GlobalDisposed
 
 export type V2EventStream = string
-
-export type ForbiddenError = {
-  _tag: "ForbiddenError"
-  message: string
-}
 
 export type ProjectCopyError = {
   name: "ProjectCopyError"
@@ -8349,6 +8357,10 @@ export type AuthRemoveErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type AuthRemoveError = AuthRemoveErrors[keyof AuthRemoveErrors]
@@ -8376,6 +8388,10 @@ export type AuthExistsErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type AuthExistsError = AuthExistsErrors[keyof AuthExistsErrors]
@@ -8405,6 +8421,10 @@ export type AuthSetErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * ConflictError
    */
@@ -8453,6 +8473,10 @@ export type AppLogErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type AppLogError = AppLogErrors[keyof AppLogErrors]
@@ -8482,6 +8506,10 @@ export type ExperimentalControlPlaneMoveSessionErrors = {
    * MoveSessionError | InvalidRequestError
    */
   400: MoveSessionError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalControlPlaneMoveSessionError =
@@ -8509,6 +8537,10 @@ export type GlobalHealthErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type GlobalHealthError = GlobalHealthErrors[keyof GlobalHealthErrors]
@@ -8537,6 +8569,10 @@ export type GlobalEventErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type GlobalEventError = GlobalEventErrors[keyof GlobalEventErrors]
@@ -8562,6 +8598,10 @@ export type GlobalConfigGetErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type GlobalConfigGetError = GlobalConfigGetErrors[keyof GlobalConfigGetErrors]
@@ -8587,6 +8627,10 @@ export type GlobalConfigUpdateErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type GlobalConfigUpdateError = GlobalConfigUpdateErrors[keyof GlobalConfigUpdateErrors]
@@ -8612,6 +8656,10 @@ export type GlobalDisposeErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type GlobalDisposeError = GlobalDisposeErrors[keyof GlobalDisposeErrors]
@@ -8639,6 +8687,10 @@ export type GlobalUpgradeErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type GlobalUpgradeError = GlobalUpgradeErrors[keyof GlobalUpgradeErrors]
@@ -8675,6 +8727,10 @@ export type ExperimentalConsoleGetErrors = {
    * TeamsError | InvalidRequestError
    */
   400: TeamsError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalConsoleGetError = ExperimentalConsoleGetErrors[keyof ExperimentalConsoleGetErrors]
@@ -8703,6 +8759,10 @@ export type ExperimentalConsoleListOrgsErrors = {
    * TeamsError | InvalidRequestError
    */
   400: TeamsError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalConsoleListOrgsError =
@@ -8746,6 +8806,10 @@ export type ExperimentalConsoleSwitchOrgErrors = {
    * TeamsError | InvalidRequestError
    */
   400: TeamsError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalConsoleSwitchOrgError =
@@ -8771,6 +8835,15 @@ export type EventSubscribeData = {
   url: "/event"
 }
 
+export type EventSubscribeErrors = {
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type EventSubscribeError = EventSubscribeErrors[keyof EventSubscribeErrors]
+
 export type EventSubscribeResponses = {
   /**
    * Event stream
@@ -8795,6 +8868,10 @@ export type ConfigGetErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ConfigGetError = ConfigGetErrors[keyof ConfigGetErrors]
@@ -8823,6 +8900,10 @@ export type ConfigUpdateErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ConfigUpdateError = ConfigUpdateErrors[keyof ConfigUpdateErrors]
@@ -8835,6 +8916,70 @@ export type ConfigUpdateResponses = {
 }
 
 export type ConfigUpdateResponse = ConfigUpdateResponses[keyof ConfigUpdateResponses]
+
+export type ConfigTrustGetData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/config/trust"
+}
+
+export type ConfigTrustGetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ConfigTrustGetError = ConfigTrustGetErrors[keyof ConfigTrustGetErrors]
+
+export type ConfigTrustGetResponses = {
+  /**
+   * Project trust status
+   */
+  200: ProjectTrustStatus
+}
+
+export type ConfigTrustGetResponse = ConfigTrustGetResponses[keyof ConfigTrustGetResponses]
+
+export type ConfigTrustApproveData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/config/trust"
+}
+
+export type ConfigTrustApproveErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+}
+
+export type ConfigTrustApproveError = ConfigTrustApproveErrors[keyof ConfigTrustApproveErrors]
+
+export type ConfigTrustApproveResponses = {
+  /**
+   * Project trust status after approval
+   */
+  200: ProjectTrustStatus
+}
+
+export type ConfigTrustApproveResponse = ConfigTrustApproveResponses[keyof ConfigTrustApproveResponses]
 
 export type ConfigProvidersData = {
   body?: never
@@ -8851,6 +8996,10 @@ export type ConfigProvidersErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ConfigProvidersError = ConfigProvidersErrors[keyof ConfigProvidersErrors]
@@ -8889,6 +9038,10 @@ export type ExperimentalCapabilitiesGetErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalCapabilitiesGetError =
@@ -8921,6 +9074,10 @@ export type ToolListErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ToolListError = ToolListErrors[keyof ToolListErrors]
@@ -8949,6 +9106,10 @@ export type ToolIdsErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ToolIdsError = ToolIdsErrors[keyof ToolIdsErrors]
@@ -8977,6 +9138,10 @@ export type WorktreeRemoveErrors = {
    * WorktreeError | InvalidRequestError
    */
   400: WorktreeError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type WorktreeRemoveError = WorktreeRemoveErrors[keyof WorktreeRemoveErrors]
@@ -9005,6 +9170,10 @@ export type WorktreeListErrors = {
    * WorktreeError | InvalidRequestError
    */
   400: WorktreeError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type WorktreeListError = WorktreeListErrors[keyof WorktreeListErrors]
@@ -9033,6 +9202,10 @@ export type WorktreeCreateErrors = {
    * WorktreeError | InvalidRequestError
    */
   400: WorktreeError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type WorktreeCreateError = WorktreeCreateErrors[keyof WorktreeCreateErrors]
@@ -9061,6 +9234,10 @@ export type WorktreeResetErrors = {
    * WorktreeError | InvalidRequestError
    */
   400: WorktreeError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type WorktreeResetError = WorktreeResetErrors[keyof WorktreeResetErrors]
@@ -9095,6 +9272,10 @@ export type ExperimentalSessionListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalSessionListError = ExperimentalSessionListErrors[keyof ExperimentalSessionListErrors]
@@ -9123,6 +9304,10 @@ export type ExperimentalSessionUsageErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalSessionUsageError = ExperimentalSessionUsageErrors[keyof ExperimentalSessionUsageErrors]
@@ -9154,6 +9339,10 @@ export type ExperimentalSessionBackgroundErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalSessionBackgroundError =
@@ -9184,6 +9373,10 @@ export type ExperimentalResourceListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalResourceListError = ExperimentalResourceListErrors[keyof ExperimentalResourceListErrors]
@@ -9216,6 +9409,10 @@ export type FindTextErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FindTextError = FindTextErrors[keyof FindTextErrors]
@@ -9264,6 +9461,10 @@ export type FindFilesErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FindFilesError = FindFilesErrors[keyof FindFilesErrors]
@@ -9293,6 +9494,10 @@ export type FindSymbolsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FindSymbolsError = FindSymbolsErrors[keyof FindSymbolsErrors]
@@ -9322,6 +9527,10 @@ export type FileListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FileListError = FileListErrors[keyof FileListErrors]
@@ -9351,6 +9560,10 @@ export type FileReadErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FileReadError = FileReadErrors[keyof FileReadErrors]
@@ -9382,6 +9595,10 @@ export type FileWriteErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FileWriteError = FileWriteErrors[keyof FileWriteErrors]
@@ -9410,6 +9627,10 @@ export type FileStatusErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FileStatusError = FileStatusErrors[keyof FileStatusErrors]
@@ -9438,6 +9659,10 @@ export type InstanceDisposeErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type InstanceDisposeError = InstanceDisposeErrors[keyof InstanceDisposeErrors]
@@ -9466,6 +9691,10 @@ export type PathGetErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type PathGetError = PathGetErrors[keyof PathGetErrors]
@@ -9494,6 +9723,10 @@ export type VcsGetErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsGetError = VcsGetErrors[keyof VcsGetErrors]
@@ -9522,6 +9755,10 @@ export type VcsStatusErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsStatusError = VcsStatusErrors[keyof VcsStatusErrors]
@@ -9552,6 +9789,10 @@ export type VcsDiffErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsDiffError = VcsDiffErrors[keyof VcsDiffErrors]
@@ -9580,6 +9821,10 @@ export type VcsDiffRawErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsDiffRawError = VcsDiffRawErrors[keyof VcsDiffRawErrors]
@@ -9610,6 +9855,10 @@ export type VcsApplyErrors = {
    * VcsApplyError | InvalidRequestError
    */
   400: VcsApplyError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsApplyError2 = VcsApplyErrors[keyof VcsApplyErrors]
@@ -9642,6 +9891,10 @@ export type VcsCommitErrors = {
    * VcsCommitError | InvalidRequestError
    */
   400: VcsCommitError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsCommitError2 = VcsCommitErrors[keyof VcsCommitErrors]
@@ -9670,6 +9923,10 @@ export type VcsBranchesErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsBranchesError = VcsBranchesErrors[keyof VcsBranchesErrors]
@@ -9701,6 +9958,10 @@ export type VcsSwitchErrors = {
    * VcsSwitchError | InvalidRequestError
    */
   400: VcsSwitchError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type VcsSwitchError2 = VcsSwitchErrors[keyof VcsSwitchErrors]
@@ -9729,6 +9990,10 @@ export type CommandListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type CommandListError = CommandListErrors[keyof CommandListErrors]
@@ -9757,6 +10022,10 @@ export type AppAgentsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type AppAgentsError = AppAgentsErrors[keyof AppAgentsErrors]
@@ -9785,6 +10054,10 @@ export type AppSkillsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type AppSkillsError = AppSkillsErrors[keyof AppSkillsErrors]
@@ -9818,6 +10091,10 @@ export type LspStatusErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspStatusError = LspStatusErrors[keyof LspStatusErrors]
@@ -9848,6 +10125,10 @@ export type LspDiagnosticsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspDiagnosticsError = LspDiagnosticsErrors[keyof LspDiagnosticsErrors]
@@ -9876,6 +10157,10 @@ export type LspHoverErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspHoverError = LspHoverErrors[keyof LspHoverErrors]
@@ -9904,6 +10189,10 @@ export type LspDefinitionErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspDefinitionError = LspDefinitionErrors[keyof LspDefinitionErrors]
@@ -9932,6 +10221,10 @@ export type LspReferencesErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspReferencesError = LspReferencesErrors[keyof LspReferencesErrors]
@@ -9962,6 +10255,10 @@ export type LspSymbolsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspSymbolsError = LspSymbolsErrors[keyof LspSymbolsErrors]
@@ -9990,6 +10287,10 @@ export type LspRenameErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspRenameError = LspRenameErrors[keyof LspRenameErrors]
@@ -10018,6 +10319,10 @@ export type LspCodeActionErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type LspCodeActionError = LspCodeActionErrors[keyof LspCodeActionErrors]
@@ -10046,6 +10351,10 @@ export type FormatterStatusErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type FormatterStatusError = FormatterStatusErrors[keyof FormatterStatusErrors]
@@ -10074,6 +10383,10 @@ export type McpStatusErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type McpStatusError = McpStatusErrors[keyof McpStatusErrors]
@@ -10110,6 +10423,10 @@ export type McpAddErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type McpAddError = McpAddErrors[keyof McpAddErrors]
@@ -10142,6 +10459,10 @@ export type McpAuthRemoveErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10178,6 +10499,10 @@ export type McpAuthStartErrors = {
    * McpUnsupportedOAuthError | InvalidRequestError
    */
   400: McpUnsupportedOAuthError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10218,6 +10543,10 @@ export type McpAuthCallbackErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * McpServerNotFoundError
    */
   404: McpServerNotFoundError
@@ -10251,6 +10580,10 @@ export type McpAuthAuthenticateErrors = {
    * McpUnsupportedOAuthError | InvalidRequestError
    */
   400: McpUnsupportedOAuthError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10286,6 +10619,10 @@ export type McpConnectErrors = {
    */
   400: BadRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * McpServerNotFoundError
    */
   404: McpServerNotFoundError
@@ -10319,6 +10656,10 @@ export type McpDisconnectErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * McpServerNotFoundError
    */
@@ -10354,6 +10695,10 @@ export type McpRemoveErrors = {
    */
   400: BadRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * McpServerNotFoundError
    */
   404: McpServerNotFoundError
@@ -10387,6 +10732,10 @@ export type ProjectListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProjectListError = ProjectListErrors[keyof ProjectListErrors]
@@ -10415,6 +10764,10 @@ export type ProjectCurrentErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProjectCurrentError = ProjectCurrentErrors[keyof ProjectCurrentErrors]
@@ -10443,6 +10796,10 @@ export type ProjectInitGitErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProjectInitGitError = ProjectInitGitErrors[keyof ProjectInitGitErrors]
@@ -10478,6 +10835,10 @@ export type ProjectUpdateErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * ProjectNotFoundError
    */
   404: ProjectNotFoundError
@@ -10511,6 +10872,10 @@ export type ProjectDirectoriesErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProjectDirectoriesError = ProjectDirectoriesErrors[keyof ProjectDirectoriesErrors]
@@ -10543,6 +10908,10 @@ export type ExperimentalProjectCopyGenerateNameErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalProjectCopyGenerateNameError =
@@ -10575,6 +10944,10 @@ export type PtyShellsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type PtyShellsError = PtyShellsErrors[keyof PtyShellsErrors]
@@ -10607,6 +10980,10 @@ export type PtyListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type PtyListError = PtyListErrors[keyof PtyListErrors]
@@ -10643,6 +11020,10 @@ export type PtyCreateErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type PtyCreateError = PtyCreateErrors[keyof PtyCreateErrors]
@@ -10673,6 +11054,10 @@ export type PtyRemoveErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * PtyNotFoundError
    */
@@ -10707,6 +11092,10 @@ export type PtyGetErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * PtyNotFoundError
    */
@@ -10748,6 +11137,10 @@ export type PtyUpdateErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * PtyNotFoundError
    */
   404: PtyNotFoundError
@@ -10782,9 +11175,9 @@ export type PtyConnectTokenErrors = {
    */
   400: BadRequestError
   /**
-   * PtyForbiddenError
+   * PtyForbiddenError | ForbiddenError
    */
-  403: PtyForbiddenError
+  403: PtyForbiddenError | ForbiddenError
   /**
    * PtyNotFoundError
    */
@@ -10817,6 +11210,10 @@ export type QuestionListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type QuestionListError = QuestionListErrors[keyof QuestionListErrors]
@@ -10853,6 +11250,10 @@ export type QuestionReplyErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * QuestionNotFoundError
    */
   404: QuestionNotFoundError
@@ -10887,6 +11288,10 @@ export type QuestionRejectErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * QuestionNotFoundError
    */
   404: QuestionNotFoundError
@@ -10918,6 +11323,10 @@ export type PermissionListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type PermissionListError = PermissionListErrors[keyof PermissionListErrors]
@@ -10952,6 +11361,10 @@ export type PermissionReplyErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * PermissionNotFoundError
    */
   404: PermissionNotFoundError
@@ -10983,6 +11396,10 @@ export type ProviderListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProviderListError = ProviderListErrors[keyof ProviderListErrors]
@@ -11022,6 +11439,10 @@ export type ProviderAuthErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProviderAuthError2 = ProviderAuthErrors[keyof ProviderAuthErrors]
@@ -11062,6 +11483,10 @@ export type ProviderOauthAuthorizeErrors = {
    * ProviderAuthError | InvalidRequestError
    */
   400: ProviderAuthError1 | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProviderOauthAuthorizeError = ProviderOauthAuthorizeErrors[keyof ProviderOauthAuthorizeErrors]
@@ -11098,6 +11523,10 @@ export type ProviderOauthCallbackErrors = {
    * ProviderAuthError | InvalidRequestError
    */
   400: ProviderAuthError1 | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ProviderOauthCallbackError = ProviderOauthCallbackErrors[keyof ProviderOauthCallbackErrors]
@@ -11132,6 +11561,10 @@ export type SessionListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SessionListError = SessionListErrors[keyof SessionListErrors]
@@ -11174,6 +11607,10 @@ export type SessionCreateErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SessionCreateError = SessionCreateErrors[keyof SessionCreateErrors]
@@ -11202,6 +11639,10 @@ export type SessionStatusErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SessionStatusError = SessionStatusErrors[keyof SessionStatusErrors]
@@ -11235,6 +11676,10 @@ export type SessionDeleteErrors = {
    * BadRequest | PublicSessionError | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | PublicSessionError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11280,6 +11725,10 @@ export type SessionGetErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11323,6 +11772,10 @@ export type SessionUpdateErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11356,6 +11809,10 @@ export type SessionChildrenErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11391,6 +11848,10 @@ export type SessionTodoErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11425,6 +11886,10 @@ export type SessionDiffErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SessionDiffError = SessionDiffErrors[keyof SessionDiffErrors]
@@ -11457,6 +11922,10 @@ export type SessionMessagesErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11511,6 +11980,10 @@ export type SessionPromptErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11548,6 +12021,10 @@ export type SessionDeleteMessageErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11587,6 +12064,10 @@ export type SessionMessageErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11628,6 +12109,10 @@ export type SessionResumeFreeModelsErrors = {
    */
   400: InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11668,6 +12153,10 @@ export type SessionForkErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11701,6 +12190,10 @@ export type SessionAbortErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SessionAbortError = SessionAbortErrors[keyof SessionAbortErrors]
@@ -11736,6 +12229,10 @@ export type SessionInitErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11769,6 +12266,10 @@ export type SessionUnshareErrors = {
    * PublicSessionError | InvalidRequestError
    */
   400: PublicSessionError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11812,6 +12313,10 @@ export type SessionShareErrors = {
    */
   400: InvalidRequestError | PublicSessionError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11850,6 +12355,10 @@ export type SessionSharePreviewErrors = {
    */
   400: PublicSessionError | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -11883,6 +12392,10 @@ export type SessionShareFlushErrors = {
    * PublicSessionError | InvalidRequestError
    */
   400: PublicSessionError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11921,6 +12434,10 @@ export type SessionSummarizeErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -11972,6 +12489,10 @@ export type SessionPromptAsyncErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -12022,6 +12543,10 @@ export type SessionCommandErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -12067,6 +12592,10 @@ export type SessionShellErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -12111,6 +12640,10 @@ export type SessionRevertErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -12148,6 +12681,10 @@ export type SessionUnrevertErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * NotFoundError
    */
@@ -12190,6 +12727,10 @@ export type PostSessionIdPermissionsPermissionIdErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError | PermissionNotFoundError
    */
   404: NotFoundError | PermissionNotFoundError
@@ -12228,6 +12769,10 @@ export type PartDeleteErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -12264,6 +12809,10 @@ export type PartUpdateErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -12295,6 +12844,10 @@ export type SyncStartErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SyncStartError = SyncStartErrors[keyof SyncStartErrors]
@@ -12334,6 +12887,10 @@ export type SyncReplayErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SyncReplayError = SyncReplayErrors[keyof SyncReplayErrors]
@@ -12366,6 +12923,10 @@ export type SyncStealErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SyncStealError = SyncStealErrors[keyof SyncStealErrors]
@@ -12398,6 +12959,10 @@ export type SyncHistoryListErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type SyncHistoryListError = SyncHistoryListErrors[keyof SyncHistoryListErrors]
@@ -12436,6 +13001,10 @@ export type TuiAppendPromptErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiAppendPromptError = TuiAppendPromptErrors[keyof TuiAppendPromptErrors]
@@ -12464,6 +13033,10 @@ export type TuiOpenHelpErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiOpenHelpError = TuiOpenHelpErrors[keyof TuiOpenHelpErrors]
@@ -12492,6 +13065,10 @@ export type TuiOpenSessionsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiOpenSessionsError = TuiOpenSessionsErrors[keyof TuiOpenSessionsErrors]
@@ -12520,6 +13097,10 @@ export type TuiOpenThemesErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiOpenThemesError = TuiOpenThemesErrors[keyof TuiOpenThemesErrors]
@@ -12548,6 +13129,10 @@ export type TuiOpenModelsErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiOpenModelsError = TuiOpenModelsErrors[keyof TuiOpenModelsErrors]
@@ -12576,6 +13161,10 @@ export type TuiSubmitPromptErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiSubmitPromptError = TuiSubmitPromptErrors[keyof TuiSubmitPromptErrors]
@@ -12604,6 +13193,10 @@ export type TuiClearPromptErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiClearPromptError = TuiClearPromptErrors[keyof TuiClearPromptErrors]
@@ -12634,6 +13227,10 @@ export type TuiExecuteCommandErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiExecuteCommandError = TuiExecuteCommandErrors[keyof TuiExecuteCommandErrors]
@@ -12667,6 +13264,10 @@ export type TuiShowToastErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiShowToastError = TuiShowToastErrors[keyof TuiShowToastErrors]
@@ -12695,6 +13296,10 @@ export type TuiPublishErrors = {
    * BadRequest | InvalidRequestError
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiPublishError = TuiPublishErrors[keyof TuiPublishErrors]
@@ -12729,6 +13334,10 @@ export type TuiSelectSessionErrors = {
    */
   400: EffectHttpApiErrorBadRequest | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -12760,6 +13369,10 @@ export type TuiControlNextErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiControlNextError = TuiControlNextErrors[keyof TuiControlNextErrors]
@@ -12791,6 +13404,10 @@ export type TuiControlResponseErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type TuiControlResponseError = TuiControlResponseErrors[keyof TuiControlResponseErrors]
@@ -12819,6 +13436,10 @@ export type ExperimentalWorkspaceAdapterListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalWorkspaceAdapterListError =
@@ -12853,6 +13474,10 @@ export type ExperimentalWorkspaceListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalWorkspaceListError = ExperimentalWorkspaceListErrors[keyof ExperimentalWorkspaceListErrors]
@@ -12887,6 +13512,10 @@ export type ExperimentalWorkspaceCreateErrors = {
    * WorkspaceCreateError | BadRequest | InvalidRequestError
    */
   400: WorkspaceCreateError | EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalWorkspaceCreateError =
@@ -12917,6 +13546,10 @@ export type ExperimentalWorkspaceSyncListErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalWorkspaceSyncListError =
@@ -12947,6 +13580,10 @@ export type ExperimentalWorkspaceStatusErrors = {
    * Bad request
    */
   400: BadRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ExperimentalWorkspaceStatusError =
@@ -12979,6 +13616,10 @@ export type ExperimentalWorkspaceRemoveErrors = {
    * PublicSessionError | BadRequest | InvalidRequestError
    */
   400: PublicSessionError | EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * PublicShareRemovalError
    */
@@ -13018,6 +13659,10 @@ export type ExperimentalWorkspaceWarpErrors = {
    */
   400: WorkspaceWarpError | VcsApplyError | InvalidRequestError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * NotFoundError
    */
   404: NotFoundError
@@ -13051,6 +13696,10 @@ export type V2HealthGetErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2HealthGetError = V2HealthGetErrors[keyof V2HealthGetErrors]
@@ -13087,6 +13736,10 @@ export type V2LocationGetErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2LocationGetError = V2LocationGetErrors[keyof V2LocationGetErrors]
@@ -13121,6 +13774,10 @@ export type V2AgentListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2AgentListError = V2AgentListErrors[keyof V2AgentListErrors]
@@ -13156,6 +13813,10 @@ export type ServerSessionSessionImportArchiveErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ServerSessionSessionImportArchiveError =
@@ -13191,6 +13852,10 @@ export type ServerSessionSessionUnshareErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ServerSessionSessionUnshareError =
@@ -13224,6 +13889,10 @@ export type ServerSessionSessionShareErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ServerSessionSessionShareError = ServerSessionSessionShareErrors[keyof ServerSessionSessionShareErrors]
@@ -13258,6 +13927,10 @@ export type ServerSessionSessionSharePreviewErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ServerSessionSessionSharePreviewError =
@@ -13293,6 +13966,10 @@ export type ServerSessionSessionShareFlushErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type ServerSessionSessionShareFlushError =
@@ -13338,6 +14015,10 @@ export type V2SessionListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2SessionListError = V2SessionListErrors[keyof V2SessionListErrors]
@@ -13372,6 +14053,10 @@ export type V2SessionCreateErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2SessionCreateError = V2SessionCreateErrors[keyof V2SessionCreateErrors]
@@ -13403,6 +14088,10 @@ export type V2SessionActiveErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2SessionActiveError = V2SessionActiveErrors[keyof V2SessionActiveErrors]
@@ -13438,6 +14127,10 @@ export type V2SessionGetErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -13478,6 +14171,10 @@ export type V2SessionSwitchAgentErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -13514,6 +14211,10 @@ export type V2SessionSwitchModelErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -13552,6 +14253,10 @@ export type V2SessionResumeFreeModelsErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -13602,6 +14307,10 @@ export type V2SessionPromptErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -13643,6 +14352,10 @@ export type V2SessionCompactErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -13681,6 +14394,10 @@ export type V2SessionWaitErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -13724,6 +14441,10 @@ export type V2SessionRevertStageErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * MessageNotFoundError | SessionNotFoundError
    */
   404: MessageNotFoundError | SessionNotFoundError
@@ -13765,6 +14486,10 @@ export type V2SessionRevertClearErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -13804,6 +14529,10 @@ export type V2SessionRevertCommitErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -13838,6 +14567,10 @@ export type V2SessionContextErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -13883,6 +14616,10 @@ export type V2SessionHistoryErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -13919,6 +14656,10 @@ export type V2SessionEventsErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -13959,6 +14700,10 @@ export type V2SessionInterruptErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -13994,6 +14739,10 @@ export type V2SessionMessageErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError | MessageNotFoundError
    */
@@ -14039,6 +14788,10 @@ export type V2SessionMessagesErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -14081,6 +14834,10 @@ export type V2ModelListErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * ServiceUnavailableError
    */
   503: ServiceUnavailableError
@@ -14121,6 +14878,10 @@ export type V2ProviderListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * ServiceUnavailableError
    */
@@ -14164,6 +14925,10 @@ export type V2ProviderGetErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * ProviderNotFoundError
    */
@@ -14209,6 +14974,10 @@ export type V2IntegrationListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2IntegrationListError = V2IntegrationListErrors[keyof V2IntegrationListErrors]
@@ -14248,6 +15017,10 @@ export type V2IntegrationGetErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2IntegrationGetError = V2IntegrationGetErrors[keyof V2IntegrationGetErrors]
@@ -14290,6 +15063,10 @@ export type V2IntegrationConnectKeyErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2IntegrationConnectKeyError = V2IntegrationConnectKeyErrors[keyof V2IntegrationConnectKeyErrors]
@@ -14332,6 +15109,10 @@ export type V2IntegrationConnectOauthErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2IntegrationConnectOauthError = V2IntegrationConnectOauthErrors[keyof V2IntegrationConnectOauthErrors]
@@ -14372,6 +15153,10 @@ export type V2IntegrationAttemptCancelErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2IntegrationAttemptCancelError = V2IntegrationAttemptCancelErrors[keyof V2IntegrationAttemptCancelErrors]
@@ -14409,6 +15194,10 @@ export type V2IntegrationAttemptStatusErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2IntegrationAttemptStatusError = V2IntegrationAttemptStatusErrors[keyof V2IntegrationAttemptStatusErrors]
@@ -14451,6 +15240,10 @@ export type V2IntegrationAttemptCompleteErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2IntegrationAttemptCompleteError =
@@ -14489,6 +15282,10 @@ export type V2CredentialRemoveErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2CredentialRemoveError = V2CredentialRemoveErrors[keyof V2CredentialRemoveErrors]
@@ -14527,6 +15324,10 @@ export type V2CredentialUpdateErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2CredentialUpdateError = V2CredentialUpdateErrors[keyof V2CredentialUpdateErrors]
@@ -14561,6 +15362,10 @@ export type V2PermissionRequestListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2PermissionRequestListError = V2PermissionRequestListErrors[keyof V2PermissionRequestListErrors]
@@ -14595,6 +15400,10 @@ export type V2PermissionSavedListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2PermissionSavedListError = V2PermissionSavedListErrors[keyof V2PermissionSavedListErrors]
@@ -14628,6 +15437,10 @@ export type V2PermissionSavedRemoveErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2PermissionSavedRemoveError = V2PermissionSavedRemoveErrors[keyof V2PermissionSavedRemoveErrors]
@@ -14659,6 +15472,10 @@ export type V2SessionPermissionListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -14707,6 +15524,10 @@ export type V2SessionPermissionCreateErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError
    */
   404: SessionNotFoundError
@@ -14749,6 +15570,10 @@ export type V2SessionPermissionGetErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError | PermissionNotFoundError
    */
   404: PermissionNotFoundError | SessionNotFoundError
@@ -14790,6 +15615,10 @@ export type V2SessionPermissionReplyErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError | PermissionNotFoundError
    */
   404: PermissionNotFoundError | SessionNotFoundError
@@ -14828,6 +15657,10 @@ export type V2FsReadErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2FsReadError = V2FsReadErrors[keyof V2FsReadErrors]
@@ -14863,6 +15696,10 @@ export type V2FsListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2FsListError = V2FsListErrors[keyof V2FsListErrors]
@@ -14903,6 +15740,10 @@ export type V2FsFindErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2FsFindError = V2FsFindErrors[keyof V2FsFindErrors]
@@ -14940,6 +15781,10 @@ export type V2CommandListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2CommandListError = V2CommandListErrors[keyof V2CommandListErrors]
@@ -14977,6 +15822,10 @@ export type V2SkillListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2SkillListError = V2SkillListErrors[keyof V2SkillListErrors]
@@ -15009,6 +15858,10 @@ export type V2EventSubscribeErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2EventSubscribeError = V2EventSubscribeErrors[keyof V2EventSubscribeErrors]
@@ -15043,6 +15896,10 @@ export type V2PtyListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2PtyListError = V2PtyListErrors[keyof V2PtyListErrors]
@@ -15088,6 +15945,10 @@ export type V2PtyCreateErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2PtyCreateError = V2PtyCreateErrors[keyof V2PtyCreateErrors]
@@ -15128,6 +15989,10 @@ export type V2PtyRemoveErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * PtyNotFoundError
    */
   404: PtyNotFoundError
@@ -15167,6 +16032,10 @@ export type V2PtyGetErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * PtyNotFoundError
    */
@@ -15216,6 +16085,10 @@ export type V2PtyUpdateErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * PtyNotFoundError
    */
@@ -15348,6 +16221,10 @@ export type V2QuestionRequestListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2QuestionRequestListError = V2QuestionRequestListErrors[keyof V2QuestionRequestListErrors]
@@ -15382,6 +16259,10 @@ export type V2SessionQuestionListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError
    */
@@ -15421,6 +16302,10 @@ export type V2SessionQuestionReplyErrors = {
    */
   401: UnauthorizedError
   /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
+  /**
    * SessionNotFoundError | QuestionNotFoundError
    */
   404: QuestionNotFoundError | SessionNotFoundError
@@ -15456,6 +16341,10 @@ export type V2SessionQuestionRejectErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
   /**
    * SessionNotFoundError | QuestionNotFoundError
    */
@@ -15494,6 +16383,10 @@ export type V2ReferenceListErrors = {
    * UnauthorizedError
    */
   401: UnauthorizedError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2ReferenceListError = V2ReferenceListErrors[keyof V2ReferenceListErrors]
@@ -15532,6 +16425,10 @@ export type V2ProjectCopyRemoveErrors = {
    * ProjectCopyError | InvalidRequestError
    */
   400: ProjectCopyError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2ProjectCopyRemoveError = V2ProjectCopyRemoveErrors[keyof V2ProjectCopyRemoveErrors]
@@ -15568,6 +16465,10 @@ export type V2ProjectCopyCreateErrors = {
    * ProjectCopyError | InvalidRequestError
    */
   400: ProjectCopyError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2ProjectCopyCreateError = V2ProjectCopyCreateErrors[keyof V2ProjectCopyCreateErrors]
@@ -15600,6 +16501,10 @@ export type V2ProjectCopyRefreshErrors = {
    * ProjectCopyError | InvalidRequestError
    */
   400: ProjectCopyError | InvalidRequestError
+  /**
+   * ForbiddenError
+   */
+  403: ForbiddenError
 }
 
 export type V2ProjectCopyRefreshError = V2ProjectCopyRefreshErrors[keyof V2ProjectCopyRefreshErrors]
@@ -15629,9 +16534,9 @@ export type PtyConnectData = {
 
 export type PtyConnectErrors = {
   /**
-   * Forbidden
+   * Forbidden | ForbiddenError
    */
-  403: EffectHttpApiErrorForbidden
+  403: EffectHttpApiErrorForbidden | ForbiddenError
   /**
    * Not found
    */

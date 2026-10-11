@@ -60,7 +60,7 @@ describe("LSP service lifecycle", () => {
           expect(result).toBe(true)
         }),
       ),
-    { config: { lsp: true } },
+    { trusted: true, config: { lsp: true } },
   )
 
   it.instance(
@@ -72,7 +72,7 @@ describe("LSP service lifecycle", () => {
           expect(result).toBe(true)
         }),
       ),
-    { config: { lsp: { eslint: { disabled: true } } } },
+    { trusted: true, config: { lsp: { eslint: { disabled: true } } } },
   )
 
   it.instance("hasClients() returns false for files outside instance", () =>

@@ -3,11 +3,20 @@
 // same process. See `test/lib/cli-process.ts` for the harness — each test uses
 // `vector.run(message, opts?)` to spawn `bun src/index.ts run ...` with
 // `VECTOR_CONFIG_CONTENT` providing the test provider config inline.
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { realpath } from "node:fs/promises"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
+import { runPermissionReply } from "../../../src/cli/cmd/run"
+
+test("CLI auto mode rejects safety and sensitive permissions", () => {
+  expect(runPermissionReply(true, "doom_loop")).toBe("reject")
+  expect(runPermissionReply(true, "browser_sensitive")).toBe("reject")
+  expect(runPermissionReply(true, "computer_sensitive")).toBe("reject")
+  expect(runPermissionReply(true, "bash")).toBe("once")
+  expect(runPermissionReply(false, "bash")).toBe("reject")
+})
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
@@ -489,6 +498,20 @@ describe("vector run (non-interactive subprocess)", () => {
         expect(result.stderr).toContain("Stopped waiting for 1 background subagent(s)")
       }),
     60_000,
+  )
+
+  cliIt.concurrent(
+    "attach mode refuses passwords over remote cleartext transport",
+    ({ vector }) =>
+      Effect.gen(function* () {
+        const result = yield* vector.run("do not send credentials", {
+          extraArgs: ["--attach", "http://example.com", "--password", "secret", "--"],
+        })
+
+        expect(result.exitCode).not.toBe(0)
+        expect(result.stderr).toContain("Refusing to send or accept a reusable password over cleartext transport")
+      }),
+    30_000,
   )
 
   cliIt.live(

@@ -123,7 +123,9 @@ const layer = Layer.effect(
 
     const enabled = Effect.fnUntraced(function* () {
       if (location.vcs?.type !== "git") return false
-      return Config.latest(yield* config.entries(), "snapshots") !== false
+      // An untrusted project cannot turn undo snapshots off.
+      const entries = (yield* config.entries()).filter((entry) => config.executable?.(entry) !== false)
+      return Config.latest(entries, "snapshots") !== false
     })
 
     const capture = Effect.fn("Snapshot.capture")(function* () {

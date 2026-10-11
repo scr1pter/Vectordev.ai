@@ -42,7 +42,7 @@ accepted.instance(
       expect(value.permission).toMatchObject({ read: "deny", edit: "deny", bash: "ask" })
       expect(value.provider?.["fixture-team"]?.name).toBe("Team provider")
     }),
-  { config: { model: "personal/model", permission: { read: "deny" }, lsp: false, formatter: false } },
+  { trusted: true, config: { model: "personal/model", permission: { read: "deny" }, lsp: false, formatter: false } },
 )
 
 const rejected = testEffect(
@@ -68,5 +68,5 @@ rejected.instance(
       if (Exit.isFailure(result))
         expect(Cause.pretty(result.cause)).toContain("Synthetic signed team configuration rejected")
     }),
-  { config: { permission: { "*": "allow" }, lsp: false, formatter: false } },
+  { trusted: true, config: { permission: { "*": "allow" }, lsp: false, formatter: false } },
 )

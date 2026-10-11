@@ -7,10 +7,11 @@ import { type Platform, PlatformProvider } from "@/context/platform"
 import { dict as en } from "@/i18n/en"
 import { dict as zh } from "@/i18n/zh"
 import { handleNotificationClick } from "@/utils/notification-click"
-import { authFromToken } from "@/utils/server"
 import { observeTelemetryPreference, scrubDiagnosticEvent, telemetryEnabled } from "@/features/privacy/telemetry"
+import { openExternalUrl, safeExternalUrl, secureExternalAnchor } from "@/utils/external-url"
+import { consumeInviteCredentials } from "@/utils/server"
 import pkg from "../package.json"
-import { ServerConnection } from "./context/server"
+import { normalizeServerUrl, ServerConnection } from "./context/server"
 
 const DEFAULT_SERVER_URL_KEY = "vector.settings.dat:defaultServerUrl"
 
@@ -52,8 +53,16 @@ const setStorage = (key: string, value: string | null) => {
   }
 }
 
-const readDefaultServerUrl = () => getStorage(DEFAULT_SERVER_URL_KEY)
-const writeDefaultServerUrl = (url: string | null) => setStorage(DEFAULT_SERVER_URL_KEY, url)
+const readDefaultServerUrl = () => {
+  const stored = getStorage(DEFAULT_SERVER_URL_KEY)
+  if (!stored) return null
+  const safe = normalizeServerUrl(stored)
+  if (safe) return safe
+  setStorage(DEFAULT_SERVER_URL_KEY, null)
+  return null
+}
+const writeDefaultServerUrl = (url: string | null) =>
+  setStorage(DEFAULT_SERVER_URL_KEY, url ? (normalizeServerUrl(url) ?? null) : null)
 
 const notify: Platform["notify"] = async (title, description, href, options) => {
   if (!("Notification" in window)) return
@@ -80,8 +89,24 @@ const notify: Platform["notify"] = async (title, description, href, options) => 
 }
 
 const openLink: Platform["openLink"] = (url) => {
-  window.open(url, "_blank")
+  openExternalUrl(url)
 }
+
+document.addEventListener(
+  "click",
+  (event) => {
+    if (!(event.target instanceof Element)) return
+    const anchor = event.target.closest("a[href]")
+    if (!(anchor instanceof HTMLAnchorElement)) return
+    if (!safeExternalUrl(anchor.getAttribute("href") ?? "", location.href)) {
+      event.preventDefault()
+      return
+    }
+    if (anchor.target !== "_blank") return
+    if (!secureExternalAnchor(anchor, location.href)) event.preventDefault()
+  },
+  { capture: true },
+)
 
 const back: Platform["back"] = () => {
   window.history.back()
@@ -103,7 +128,9 @@ if (!(root instanceof HTMLElement) && import.meta.env.DEV) {
 const getCurrentUrl = () => {
   if (location.hostname.includes("vectordev.ai")) return "http://localhost:4096"
   if (import.meta.env.DEV)
-    return `http://${import.meta.env.VITE_VECTOR_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_VECTOR_SERVER_PORT ?? "4096"}`
+    return normalizeServerUrl(
+      `${import.meta.env.VITE_VECTOR_SERVER_HOST ?? "localhost"}:${import.meta.env.VITE_VECTOR_SERVER_PORT ?? "4096"}`,
+    )!
   return location.origin
 }
 
@@ -113,12 +140,15 @@ const getDefaultUrl = () => {
   return getCurrentUrl()
 }
 
-const clearAuthToken = () => {
+const clearLegacyAuthToken = () => {
   const params = new URLSearchParams(location.search)
   if (!params.has("auth_token")) return
   params.delete("auth_token")
   history.replaceState(null, "", location.pathname + (params.size ? `?${params}` : "") + location.hash)
 }
+
+const inviteCredentials = consumeInviteCredentials(location, (url) => history.replaceState(null, "", url))
+clearLegacyAuthToken()
 
 const platform: Platform = {
   platform: "web",
@@ -159,7 +189,8 @@ const configureCrashDiagnostics = () => {
     },
     integrations: (integrations) => {
       return integrations.filter(
-        (i) => i.name !== "Breadcrumbs" && !(import.meta.env.VITE_VECTOR_CHANNEL === "prod" && i.name === "GlobalHandlers"),
+        (i) =>
+          i.name !== "Breadcrumbs" && !(import.meta.env.VITE_VECTOR_CHANNEL === "prod" && i.name === "GlobalHandlers"),
       )
     },
   })
@@ -169,14 +200,11 @@ configureCrashDiagnostics()
 observeTelemetryPreference(configureCrashDiagnostics)
 
 if (root instanceof HTMLElement) {
-  const auth = authFromToken(new URLSearchParams(location.search).get("auth_token"))
-  clearAuthToken()
   const server: ServerConnection.Http = {
     type: "http",
-    authToken: !!auth,
     http: {
       url: getCurrentUrl(),
-      ...auth,
+      ...inviteCredentials,
     },
   }
   render(

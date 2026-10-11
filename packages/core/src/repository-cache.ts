@@ -147,7 +147,12 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                 const existing = yield* git.repo.discover(AbsolutePath.make(localPath))
                 const origin = existing ? yield* git.remote.get(existing) : undefined
                 const originReference = origin ? Repository.parse(origin) : undefined
-                const reuse = Boolean(existing && originReference && Repository.same(originReference, cloneTarget))
+                const reuse = Boolean(
+                  existing &&
+                    origin === input.reference.remote &&
+                    originReference &&
+                    Repository.same(originReference, cloneTarget),
+                )
                 if (exists && !reuse) {
                   yield* cacheOperation(fs.remove(localPath, { recursive: true }), "remove stale cache", localPath)
                 }
@@ -173,13 +178,13 @@ const layer: Layer.Layer<Service, never, FSUtil.Service | Git.Service | EffectFl
                   if (!existing)
                     return yield* new FetchFailedError({ repository, message: "Repository is unavailable" })
                   yield* git.sync
-                    .fetchRemotes(existing)
+                    .fetchRemotes(existing, { remoteUrl: input.reference.remote })
                     .pipe(Effect.mapError((error) => new FetchFailedError({ repository, message: error.message })))
 
                   if (input.branch) {
                     const requestedBranch = input.branch
                     yield* git.sync
-                      .fetchBranch(existing, { branch: requestedBranch })
+                      .fetchBranch(existing, { branch: requestedBranch, remoteUrl: input.reference.remote })
                       .pipe(Effect.mapError((error) => new FetchFailedError({ repository, message: error.message })))
 
                     yield* git.sync.checkoutRemoteBranch(existing, { branch: requestedBranch }).pipe(

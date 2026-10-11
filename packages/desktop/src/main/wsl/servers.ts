@@ -20,7 +20,7 @@ import {
   wslReinstallMessage,
   wslSignInMessage,
 } from "./startup"
-import { clearWslDistroState, wslServerIdToRestart } from "./policy"
+import { clearWslDistroState, isWslDistroName, wslServerIdToRestart } from "./policy"
 import {
   installWslDistro,
   installWslVector,
@@ -507,9 +507,9 @@ function writePersistedServers(servers: WslServerConfig[]) {
 function normalizePersistedServer(value: unknown): WslServerConfig[] {
   if (!value || typeof value !== "object") return []
   const record = value as Record<string, unknown>
-  const distro = typeof record.distro === "string" && record.distro.length > 0 ? record.distro : null
+  const distro = isWslDistroName(record.distro) ? record.distro : null
   if (!distro) return []
-  const id = typeof record.id === "string" && record.id.length > 0 ? record.id : wslServerIdForDistro(distro)
+  const id = wslServerIdForDistro(distro)
   return [
     {
       id,

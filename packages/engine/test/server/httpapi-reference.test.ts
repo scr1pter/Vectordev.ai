@@ -15,6 +15,7 @@ afterEach(async () => {
 describe("reference HttpApi", () => {
   test("lists usable references resolved in the server workspace", async () => {
     await using tmp = await tmpdir({
+      trusted: true,
       config: {
         formatter: false,
         lsp: false,

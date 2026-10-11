@@ -91,6 +91,7 @@ it.instance(
       expect(Permission.disabled(["edit", "write", "apply_patch"], effective)).toEqual(new Set())
     }),
   {
+    trusted: true,
     config: {
       agent: {
         my_subagent: {

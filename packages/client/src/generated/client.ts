@@ -262,7 +262,18 @@ export function make(options: ClientOptions) {
     health: {
       get: (requestOptions?: RequestOptions) =>
         request<HealthGetOutput>(
-          { method: "GET", path: `/api/health`, successStatus: 200, declaredStatuses: [400, 401], empty: false },
+          {
+            method: "GET",
+            path: (() => {
+              const path = `/api/health`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
+            successStatus: 200,
+            declaredStatuses: [400, 401, 403],
+            empty: false,
+          },
           requestOptions,
         ),
     },
@@ -271,10 +282,15 @@ export function make(options: ClientOptions) {
         request<LocationGetOutput>(
           {
             method: "GET",
-            path: `/api/location`,
+            path: (() => {
+              const path = `/api/location`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -285,10 +301,15 @@ export function make(options: ClientOptions) {
         request<AgentsListOutput>(
           {
             method: "GET",
-            path: `/api/agent`,
+            path: (() => {
+              const path = `/api/agent`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -299,10 +320,15 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsImportArchiveOutput }>(
           {
             method: "POST",
-            path: `/api/session/import`,
+            path: (() => {
+              const path = `/api/session/import`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { archive: input["archive"], location: input["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -311,7 +337,12 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsShareOutput }>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/share`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/share`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: {
               consent: input["consent"],
               expiresAt: input["expiresAt"],
@@ -319,7 +350,7 @@ export function make(options: ClientOptions) {
               remember: input["remember"],
             },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -328,9 +359,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsSharePreviewOutput }>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/share/preview`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/share/preview`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -339,9 +375,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsShareFlushOutput }>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/share/flush`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/share/flush`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -350,9 +391,14 @@ export function make(options: ClientOptions) {
         request<SessionsUnshareOutput>(
           {
             method: "DELETE",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/share`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/share`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -361,7 +407,12 @@ export function make(options: ClientOptions) {
         request<SessionsListOutput>(
           {
             method: "GET",
-            path: `/api/session`,
+            path: (() => {
+              const path = `/api/session`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: {
               workspace: input?.["workspace"],
               limit: input?.["limit"],
@@ -373,7 +424,7 @@ export function make(options: ClientOptions) {
               cursor: input?.["cursor"],
             },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -382,7 +433,12 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsCreateOutput }>(
           {
             method: "POST",
-            path: `/api/session`,
+            path: (() => {
+              const path = `/api/session`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: {
               id: input?.["id"],
               agent: input?.["agent"],
@@ -390,7 +446,7 @@ export function make(options: ClientOptions) {
               location: input?.["location"],
             },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -399,9 +455,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsActiveOutput }>(
           {
             method: "GET",
-            path: `/api/session/active`,
+            path: (() => {
+              const path = `/api/session/active`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -410,9 +471,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsGetOutput }>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -421,10 +487,15 @@ export function make(options: ClientOptions) {
         request<SessionsSwitchAgentOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/agent`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/agent`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { agent: input["agent"] },
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -433,10 +504,15 @@ export function make(options: ClientOptions) {
         request<SessionsSwitchModelOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/model`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/model`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { model: input["model"] },
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -445,10 +521,15 @@ export function make(options: ClientOptions) {
         request<SessionsResumeFreeModelsOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/free-models/resume`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/free-models/resume`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { messageID: input["messageID"], modelID: input["modelID"] },
             successStatus: 204,
-            declaredStatuses: [400, 401, 404, 409, 500],
+            declaredStatuses: [400, 401, 403, 404, 409, 500],
             empty: true,
           },
           requestOptions,
@@ -457,10 +538,15 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsPromptOutput }>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/prompt`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/prompt`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { id: input["id"], prompt: input["prompt"], delivery: input["delivery"], resume: input["resume"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404, 409],
+            declaredStatuses: [400, 401, 403, 404, 409],
             empty: false,
           },
           requestOptions,
@@ -469,9 +555,14 @@ export function make(options: ClientOptions) {
         request<SessionsCompactOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/compact`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/compact`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401, 404, 503],
+            declaredStatuses: [400, 401, 403, 404, 503],
             empty: true,
           },
           requestOptions,
@@ -480,9 +571,14 @@ export function make(options: ClientOptions) {
         request<SessionsWaitOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/wait`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/wait`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401, 404, 503],
+            declaredStatuses: [400, 401, 403, 404, 503],
             empty: true,
           },
           requestOptions,
@@ -491,10 +587,15 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsStageOutput }>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/revert/stage`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/revert/stage`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { messageID: input["messageID"], files: input["files"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404, 500],
+            declaredStatuses: [400, 401, 403, 404, 500],
             empty: false,
           },
           requestOptions,
@@ -503,9 +604,14 @@ export function make(options: ClientOptions) {
         request<SessionsClearOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/revert/clear`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/revert/clear`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401, 404, 500],
+            declaredStatuses: [400, 401, 403, 404, 500],
             empty: true,
           },
           requestOptions,
@@ -514,9 +620,14 @@ export function make(options: ClientOptions) {
         request<SessionsCommitOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/revert/commit`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/revert/commit`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -525,9 +636,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsContextOutput }>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/context`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/context`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401, 404, 500],
+            declaredStatuses: [400, 401, 403, 404, 500],
             empty: false,
           },
           requestOptions,
@@ -536,10 +652,15 @@ export function make(options: ClientOptions) {
         request<SessionsHistoryOutput>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/history`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/history`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { limit: input["limit"], after: input["after"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -548,10 +669,15 @@ export function make(options: ClientOptions) {
         sse<SessionsEventsOutput>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/event`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/event`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { after: input["after"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -560,9 +686,14 @@ export function make(options: ClientOptions) {
         request<SessionsInterruptOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/interrupt`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/interrupt`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -571,9 +702,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: SessionsMessageOutput }>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/message/${encodeURIComponent(input.messageID)}`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/message/${encodeURIComponent(input.messageID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -584,10 +720,15 @@ export function make(options: ClientOptions) {
         request<MessagesListOutput>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/message`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/message`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { limit: input["limit"], order: input["order"], cursor: input["cursor"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404, 500],
+            declaredStatuses: [400, 401, 403, 404, 500],
             empty: false,
           },
           requestOptions,
@@ -598,10 +739,15 @@ export function make(options: ClientOptions) {
         request<ModelsListOutput>(
           {
             method: "GET",
-            path: `/api/model`,
+            path: (() => {
+              const path = `/api/model`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 503],
+            declaredStatuses: [400, 401, 403, 503],
             empty: false,
           },
           requestOptions,
@@ -612,10 +758,15 @@ export function make(options: ClientOptions) {
         request<ProvidersListOutput>(
           {
             method: "GET",
-            path: `/api/provider`,
+            path: (() => {
+              const path = `/api/provider`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 503],
+            declaredStatuses: [400, 401, 403, 503],
             empty: false,
           },
           requestOptions,
@@ -624,10 +775,15 @@ export function make(options: ClientOptions) {
         request<ProvidersGetOutput>(
           {
             method: "GET",
-            path: `/api/provider/${encodeURIComponent(input.providerID)}`,
+            path: (() => {
+              const path = `/api/provider/${encodeURIComponent(input.providerID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404, 503],
+            declaredStatuses: [400, 401, 403, 404, 503],
             empty: false,
           },
           requestOptions,
@@ -638,10 +794,15 @@ export function make(options: ClientOptions) {
         request<IntegrationsListOutput>(
           {
             method: "GET",
-            path: `/api/integration`,
+            path: (() => {
+              const path = `/api/integration`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -650,10 +811,15 @@ export function make(options: ClientOptions) {
         request<IntegrationsGetOutput>(
           {
             method: "GET",
-            path: `/api/integration/${encodeURIComponent(input.integrationID)}`,
+            path: (() => {
+              const path = `/api/integration/${encodeURIComponent(input.integrationID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -662,11 +828,16 @@ export function make(options: ClientOptions) {
         request<IntegrationsConnectKeyOutput>(
           {
             method: "POST",
-            path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/key`,
+            path: (() => {
+              const path = `/api/integration/${encodeURIComponent(input.integrationID)}/connect/key`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             body: { key: input["key"], label: input["label"] },
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -675,11 +846,16 @@ export function make(options: ClientOptions) {
         request<IntegrationsConnectOauthOutput>(
           {
             method: "POST",
-            path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/oauth`,
+            path: (() => {
+              const path = `/api/integration/${encodeURIComponent(input.integrationID)}/connect/oauth`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             body: { methodID: input["methodID"], inputs: input["inputs"], label: input["label"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -688,10 +864,15 @@ export function make(options: ClientOptions) {
         request<IntegrationsAttemptStatusOutput>(
           {
             method: "GET",
-            path: `/api/integration/attempt/${encodeURIComponent(input.attemptID)}`,
+            path: (() => {
+              const path = `/api/integration/attempt/${encodeURIComponent(input.attemptID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -700,11 +881,16 @@ export function make(options: ClientOptions) {
         request<IntegrationsAttemptCompleteOutput>(
           {
             method: "POST",
-            path: `/api/integration/attempt/${encodeURIComponent(input.attemptID)}/complete`,
+            path: (() => {
+              const path = `/api/integration/attempt/${encodeURIComponent(input.attemptID)}/complete`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             body: { code: input["code"] },
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -713,10 +899,15 @@ export function make(options: ClientOptions) {
         request<IntegrationsAttemptCancelOutput>(
           {
             method: "DELETE",
-            path: `/api/integration/attempt/${encodeURIComponent(input.attemptID)}`,
+            path: (() => {
+              const path = `/api/integration/attempt/${encodeURIComponent(input.attemptID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -727,11 +918,16 @@ export function make(options: ClientOptions) {
         request<CredentialsUpdateOutput>(
           {
             method: "PATCH",
-            path: `/api/credential/${encodeURIComponent(input.credentialID)}`,
+            path: (() => {
+              const path = `/api/credential/${encodeURIComponent(input.credentialID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             body: { label: input["label"] },
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -740,10 +936,15 @@ export function make(options: ClientOptions) {
         request<CredentialsRemoveOutput>(
           {
             method: "DELETE",
-            path: `/api/credential/${encodeURIComponent(input.credentialID)}`,
+            path: (() => {
+              const path = `/api/credential/${encodeURIComponent(input.credentialID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -754,10 +955,15 @@ export function make(options: ClientOptions) {
         request<PermissionsListRequestsOutput>(
           {
             method: "GET",
-            path: `/api/permission/request`,
+            path: (() => {
+              const path = `/api/permission/request`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -766,10 +972,15 @@ export function make(options: ClientOptions) {
         request<{ readonly data: PermissionsListSavedOutput }>(
           {
             method: "GET",
-            path: `/api/permission/saved`,
+            path: (() => {
+              const path = `/api/permission/saved`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { projectID: input?.["projectID"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -778,9 +989,14 @@ export function make(options: ClientOptions) {
         request<PermissionsRemoveSavedOutput>(
           {
             method: "DELETE",
-            path: `/api/permission/saved/${encodeURIComponent(input.id)}`,
+            path: (() => {
+              const path = `/api/permission/saved/${encodeURIComponent(input.id)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -789,7 +1005,12 @@ export function make(options: ClientOptions) {
         request<{ readonly data: PermissionsCreateOutput }>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/permission`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/permission`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: {
               id: input["id"],
               action: input["action"],
@@ -800,7 +1021,7 @@ export function make(options: ClientOptions) {
               agent: input["agent"],
             },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -809,9 +1030,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: PermissionsListOutput }>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/permission`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/permission`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -820,9 +1046,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: PermissionsGetOutput }>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/permission/${encodeURIComponent(input.requestID)}`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/permission/${encodeURIComponent(input.requestID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -831,10 +1062,15 @@ export function make(options: ClientOptions) {
         request<PermissionsReplyOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/permission/${encodeURIComponent(input.requestID)}/reply`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/permission/${encodeURIComponent(input.requestID)}/reply`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { reply: input["reply"], message: input["message"] },
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -845,10 +1081,15 @@ export function make(options: ClientOptions) {
         request<FilesListOutput>(
           {
             method: "GET",
-            path: `/api/fs/list`,
+            path: (() => {
+              const path = `/api/fs/list`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"], path: input?.["path"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -857,10 +1098,15 @@ export function make(options: ClientOptions) {
         request<FilesFindOutput>(
           {
             method: "GET",
-            path: `/api/fs/find`,
+            path: (() => {
+              const path = `/api/fs/find`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"], query: input["query"], type: input["type"], limit: input["limit"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -871,10 +1117,15 @@ export function make(options: ClientOptions) {
         request<CommandsListOutput>(
           {
             method: "GET",
-            path: `/api/command`,
+            path: (() => {
+              const path = `/api/command`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -885,10 +1136,15 @@ export function make(options: ClientOptions) {
         request<SkillsListOutput>(
           {
             method: "GET",
-            path: `/api/skill`,
+            path: (() => {
+              const path = `/api/skill`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -897,7 +1153,18 @@ export function make(options: ClientOptions) {
     events: {
       subscribe: (requestOptions?: RequestOptions): AsyncIterable<EventsSubscribeOutput> =>
         sse<EventsSubscribeOutput>(
-          { method: "GET", path: `/api/event`, successStatus: 200, declaredStatuses: [400, 401], empty: false },
+          {
+            method: "GET",
+            path: (() => {
+              const path = `/api/event`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
+            successStatus: 200,
+            declaredStatuses: [400, 401, 403],
+            empty: false,
+          },
           requestOptions,
         ),
     },
@@ -906,10 +1173,15 @@ export function make(options: ClientOptions) {
         request<PtysListOutput>(
           {
             method: "GET",
-            path: `/api/pty`,
+            path: (() => {
+              const path = `/api/pty`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -918,7 +1190,12 @@ export function make(options: ClientOptions) {
         request<PtysCreateOutput>(
           {
             method: "POST",
-            path: `/api/pty`,
+            path: (() => {
+              const path = `/api/pty`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             body: {
               command: input?.["command"],
@@ -928,7 +1205,7 @@ export function make(options: ClientOptions) {
               env: input?.["env"],
             },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -937,10 +1214,15 @@ export function make(options: ClientOptions) {
         request<PtysGetOutput>(
           {
             method: "GET",
-            path: `/api/pty/${encodeURIComponent(input.ptyID)}`,
+            path: (() => {
+              const path = `/api/pty/${encodeURIComponent(input.ptyID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -949,11 +1231,16 @@ export function make(options: ClientOptions) {
         request<PtysUpdateOutput>(
           {
             method: "PUT",
-            path: `/api/pty/${encodeURIComponent(input.ptyID)}`,
+            path: (() => {
+              const path = `/api/pty/${encodeURIComponent(input.ptyID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             body: { title: input["title"], size: input["size"] },
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -962,10 +1249,15 @@ export function make(options: ClientOptions) {
         request<PtysRemoveOutput>(
           {
             method: "DELETE",
-            path: `/api/pty/${encodeURIComponent(input.ptyID)}`,
+            path: (() => {
+              const path = `/api/pty/${encodeURIComponent(input.ptyID)}`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -976,10 +1268,15 @@ export function make(options: ClientOptions) {
         request<QuestionsListRequestsOutput>(
           {
             method: "GET",
-            path: `/api/question/request`,
+            path: (() => {
+              const path = `/api/question/request`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -988,9 +1285,14 @@ export function make(options: ClientOptions) {
         request<{ readonly data: QuestionsListOutput }>(
           {
             method: "GET",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/question`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/question`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 200,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: false,
           },
           requestOptions,
@@ -999,10 +1301,15 @@ export function make(options: ClientOptions) {
         request<QuestionsReplyOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/question/${encodeURIComponent(input.requestID)}/reply`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/question/${encodeURIComponent(input.requestID)}/reply`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             body: { answers: input["answers"] },
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -1011,9 +1318,14 @@ export function make(options: ClientOptions) {
         request<QuestionsRejectOutput>(
           {
             method: "POST",
-            path: `/api/session/${encodeURIComponent(input.sessionID)}/question/${encodeURIComponent(input.requestID)}/reject`,
+            path: (() => {
+              const path = `/api/session/${encodeURIComponent(input.sessionID)}/question/${encodeURIComponent(input.requestID)}/reject`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             successStatus: 204,
-            declaredStatuses: [400, 401, 404],
+            declaredStatuses: [400, 401, 403, 404],
             empty: true,
           },
           requestOptions,
@@ -1024,10 +1336,15 @@ export function make(options: ClientOptions) {
         request<ReferencesListOutput>(
           {
             method: "GET",
-            path: `/api/reference`,
+            path: (() => {
+              const path = `/api/reference`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input?.["location"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -1038,11 +1355,16 @@ export function make(options: ClientOptions) {
         request<ProjectCopiesCreateOutput>(
           {
             method: "POST",
-            path: `/experimental/project/${encodeURIComponent(input.projectID)}/copy`,
+            path: (() => {
+              const path = `/experimental/project/${encodeURIComponent(input.projectID)}/copy`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             body: { strategy: input["strategy"], directory: input["directory"], name: input["name"] },
             successStatus: 200,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: false,
           },
           requestOptions,
@@ -1051,11 +1373,16 @@ export function make(options: ClientOptions) {
         request<ProjectCopiesRemoveOutput>(
           {
             method: "DELETE",
-            path: `/experimental/project/${encodeURIComponent(input.projectID)}/copy`,
+            path: (() => {
+              const path = `/experimental/project/${encodeURIComponent(input.projectID)}/copy`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             body: { directory: input["directory"], force: input["force"] },
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,
@@ -1064,10 +1391,15 @@ export function make(options: ClientOptions) {
         request<ProjectCopiesRefreshOutput>(
           {
             method: "POST",
-            path: `/experimental/project/${encodeURIComponent(input.projectID)}/copy/refresh`,
+            path: (() => {
+              const path = `/experimental/project/${encodeURIComponent(input.projectID)}/copy/refresh`
+              if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
+                throw new Error(`Refusing cross-origin endpoint path: ${path}`)
+              return path
+            })(),
             query: { location: input["location"] },
             successStatus: 204,
-            declaredStatuses: [400, 401],
+            declaredStatuses: [400, 401, 403],
             empty: true,
           },
           requestOptions,

@@ -1,6 +1,6 @@
-// Static UI assets the browser fetches without app-managed credentials, e.g.
-// the manifest link in <head>. These bypass auth so the page can install/render
-// the manifest icons even when a server password is configured.
+// Static UI assets fetched through router-authenticated test or legacy route
+// trees. The production UI fallback is public so it can bootstrap credentials
+// from a URL fragment; typed APIs and /doc keep their own auth layers.
 export const PUBLIC_UI_PATHS = new Set<string>([
   "/site.webmanifest",
   "/web-app-manifest-192x192.png",

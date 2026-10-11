@@ -1,14 +1,18 @@
-import { expect } from "bun:test"
+import { expect, spyOn } from "bun:test"
 import path from "path"
-import { pathToFileURL } from "url"
+import { mkdtemp, rm, symlink } from "node:fs/promises"
+import os from "node:os"
+import { fileURLToPath, pathToFileURL } from "url"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Effect, Layer } from "effect"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { Global } from "@vectordevai/core/global"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
 import { Config } from "@/config/config"
 import { ConfigPlugin } from "@/config/plugin"
 import { CurrentWorkingDirectory } from "@/config/tui-cwd"
+import { PluginLoader } from "@/plugin/loader"
 import { TuiConfig } from "../../src/config/tui"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -83,6 +87,28 @@ const getTuiPluginOrigins = (directory: string) =>
     ),
   )
 
+const getTuiState = (directory: string) =>
+  TuiConfig.Service.use((svc) =>
+    Effect.all({
+      config: svc.get(),
+      origins: svc.pluginOrigins(),
+    }),
+  ).pipe(
+    Effect.provide(
+      AppNodeBuilder.build(TuiConfig.node).pipe(Layer.provide(Layer.succeed(CurrentWorkingDirectory, directory))),
+    ),
+  )
+
+const approveWorkspace = (directory: string) =>
+  Effect.promise(async () => {
+    const snapshot = await WorkspaceTrust.snapshot(directory, [
+      path.join(directory, "vector.json"),
+      path.join(directory, "tui.json"),
+      path.join(directory, ".vector"),
+    ])
+    await WorkspaceTrust.approve(Global.Path.state, snapshot)
+  })
+
 it.instance("keeps server and tui plugin merge semantics aligned", () =>
   withCleanState(
     Effect.gen(function* () {
@@ -103,6 +129,8 @@ it.instance("keeps server and tui plugin merge semantics aligned", () =>
       yield* fs.writeJson(path.join(local, "tui.json"), {
         plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
       })
+      // Project plugins load only once the project is trusted, for the server and the TUI alike.
+      yield* approveWorkspace(test.directory)
 
       const server = yield* Config.use.get()
       const tui = yield* getTuiConfig(test.directory)
@@ -118,6 +146,143 @@ it.instance("keeps server and tui plugin merge semantics aligned", () =>
       expect(serverOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(serverPlugins)
       expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
       expect(serverOrigins.map((item) => item.scope)).toEqual(tuiOrigins.map((item) => item.scope))
+    }),
+  ),
+)
+
+it.instance("keeps project TUI plugins disabled before workspace trust", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const local = path.join(test.directory, ".vector")
+      yield* fs.makeDirectory(local, { recursive: true })
+
+      yield* fs.writeJson(path.join(local, "tui.json"), {
+        plugin: [["shared-plugin@2.0.0", { source: "local" }], "local-only@1.0.0"],
+      })
+
+      const tui = yield* getTuiConfig(test.directory)
+      const tuiOrigins = yield* getTuiPluginOrigins(test.directory)
+      const tuiPlugins = (tui.plugin ?? []).map((item) => ConfigPlugin.pluginSpecifier(item))
+
+      expect(tuiPlugins).toEqual([])
+      expect(tuiPlugins).not.toContain("shared-plugin@2.0.0")
+      expect(tuiPlugins).not.toContain("local-only@1.0.0")
+      expect(tuiOrigins.map((item) => ConfigPlugin.pluginSpecifier(item.spec))).toEqual(tuiPlugins)
+      expect(tuiOrigins).toEqual([])
+    }),
+  ),
+)
+
+it.instance("loads approved project config and plugins from captured bytes after live mutation", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const config = path.join(test.directory, "tui.json")
+      const plugin = path.join(test.directory, "plugin.ts")
+      const theme = path.join(test.directory, "theme.txt")
+      const executed = path.join(test.directory, "changed-executed.txt")
+      yield* fs.writeFileString(theme, "approved")
+      yield* fs.writeJson(config, { theme: `{file:${theme}}`, plugin: ["./plugin.ts"] })
+      yield* fs.writeFileString(
+        plugin,
+        'export const marker = "approved"\nexport default { id: "approved", tui: async () => {} }\n',
+      )
+      yield* approveWorkspace(test.directory)
+
+      const checkStatus = WorkspaceTrust.status
+      const state = yield* Effect.acquireUseRelease(
+        Effect.sync(() =>
+          spyOn(WorkspaceTrust, "status").mockImplementation(async (stateDirectory, snapshot) => {
+            const status = await checkStatus(stateDirectory, snapshot)
+            if (!status.trusted) return status
+            await Bun.write(config, JSON.stringify({ theme: "changed", plugin: ["./plugin.ts"] }))
+            await Bun.write(theme, "changed")
+            await Bun.write(
+              plugin,
+              `await Bun.write(${JSON.stringify(executed)}, "executed")\nexport const marker = "changed"\n`,
+            )
+            return status
+          }),
+        ),
+        () => getTuiState(test.directory),
+        (status) => Effect.sync(() => status.mockRestore()),
+      )
+
+      expect(state.config.theme).toBe("approved")
+      expect(state.origins).toHaveLength(1)
+      const origin = state.origins[0]
+      const spec = ConfigPlugin.pluginSpecifier(origin.spec)
+      expect(spec).not.toBe(pathToFileURL(plugin).href)
+      expect(fileURLToPath(spec)).toContain(path.join(Global.Path.state, "workspace-trust"))
+      expect(yield* fs.readFileString(fileURLToPath(spec))).toContain('marker = "approved"')
+
+      const loaded = yield* Effect.promise(() => PluginLoader.loadExternal({ items: state.origins, kind: "tui" }))
+      expect(loaded[0]?.mod.marker).toBe("approved")
+      expect(yield* fs.existsSafe(executed)).toBe(false)
+    }),
+  ),
+)
+
+it.instance("rejects a trusted project TUI plugin that was not captured", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const config = path.join(test.directory, "tui.json")
+      const plugin = path.join(test.directory, "late-plugin.ts")
+      const executed = path.join(test.directory, "late-executed.txt")
+      yield* fs.writeJson(config, { plugin: ["./late-plugin.ts"] })
+      yield* approveWorkspace(test.directory)
+
+      const checkStatus = WorkspaceTrust.status
+      const state = yield* Effect.acquireUseRelease(
+        Effect.sync(() =>
+          spyOn(WorkspaceTrust, "status").mockImplementation(async (stateDirectory, snapshot) => {
+            const status = await checkStatus(stateDirectory, snapshot)
+            if (!status.trusted) return status
+            await Bun.write(
+              plugin,
+              `await Bun.write(${JSON.stringify(executed)}, "executed")\nexport default { tui: async () => {} }\n`,
+            )
+            return status
+          }),
+        ),
+        () => getTuiState(test.directory),
+        (status) => Effect.sync(() => status.mockRestore()),
+      )
+
+      expect(state.config.plugin ?? []).toEqual([])
+      expect(state.origins).toEqual([])
+      expect(yield* Effect.promise(() => PluginLoader.loadExternal({ items: state.origins, kind: "tui" }))).toEqual([])
+      expect(yield* fs.existsSafe(executed)).toBe(false)
+    }),
+  ),
+)
+
+it.instance("rejects a trusted project TUI plugin reached through a symlink that leaves the workspace", () =>
+  withCleanState(
+    Effect.gen(function* () {
+      if (process.platform === "win32") return
+      const fs = yield* FSUtil.Service
+      const test = yield* TestInstance
+      const outside = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "vector-outside-plugin-"))),
+        (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+      )
+      const target = path.join(outside, "outside-plugin.ts")
+      const linked = path.join(test.directory, "linked-plugin.ts")
+      yield* fs.writeFileString(target, 'export default { id: "linked", tui: async () => {} }\n')
+      yield* Effect.promise(() => symlink(target, linked, "file"))
+      yield* fs.writeJson(path.join(test.directory, "tui.json"), { plugin: ["./linked-plugin.ts"] })
+      yield* approveWorkspace(test.directory)
+
+      const state = yield* getTuiState(test.directory)
+      expect(state.config.plugin ?? []).toEqual([])
+      expect(state.origins).toEqual([])
+      expect(yield* Effect.promise(() => PluginLoader.loadExternal({ items: state.origins, kind: "tui" }))).toEqual([])
     }),
   ),
 )
@@ -694,6 +859,8 @@ it.instance("applies env and file substitutions in tui.json", () =>
           theme: "{env:TUI_THEME_TEST}",
           keybinds: { app_exit: "{file:keybind.txt}" },
         })
+        // Substitution applies once the project is trusted; before that a project's references stay unread.
+        yield* approveWorkspace(test.directory)
 
         const config = yield* getTuiConfig(test.directory)
         expect(config.theme).toBe("env-theme")
@@ -716,6 +883,7 @@ it.instance("applies file substitutions when first identical token is in a comme
   "theme": "{file:theme.txt}"
 }`,
       )
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       expect(config.theme).toBe("resolved-theme")
@@ -747,6 +915,7 @@ it.instance("supports tuple plugin specs with options in tui.json", () =>
       yield* fs.writeJson(path.join(test.directory, "tui.json"), {
         plugin: [["acme-plugin@1.2.3", { enabled: true, label: "demo" }]],
       })
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       const origins = yield* getTuiPluginOrigins(test.directory)
@@ -776,6 +945,7 @@ it.instance("deduplicates tuple plugin specs by name with higher precedence winn
           ["second-plugin@3.0.0", { source: "project" }],
         ],
       })
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       const origins = yield* getTuiPluginOrigins(test.directory)
@@ -806,6 +976,7 @@ it.instance("tracks global and local plugin metadata in merged tui config", () =
       const test = yield* TestInstance
       yield* fs.writeJson(path.join(Global.Path.config, "tui.json"), { plugin: ["global-plugin@1.0.0"] })
       yield* fs.writeJson(path.join(test.directory, "tui.json"), { plugin: ["local-plugin@2.0.0"] })
+      yield* approveWorkspace(test.directory)
 
       const config = yield* getTuiConfig(test.directory)
       const origins = yield* getTuiPluginOrigins(test.directory)

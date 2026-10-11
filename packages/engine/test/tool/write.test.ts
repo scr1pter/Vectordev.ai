@@ -143,6 +143,7 @@ describe("tool.write", () => {
           expect(content.slice(1)).toBe("using Up;\n")
         }),
       {
+        trusted: true,
         config: {
           formatter: {
             stripbom: {

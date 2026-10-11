@@ -4,11 +4,10 @@ import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer } from "effect"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
-import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { Global } from "@vectordevai/core/global"
 import { Repository } from "@vectordevai/core/repository"
 import { RepositoryCache } from "@vectordevai/core/repository-cache"
-import { git, gitRemote } from "./fixture/git"
+import { commit, git, gitRemote } from "./fixture/git"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
@@ -44,6 +43,21 @@ describe("RepositoryCache", () => {
 
         expect(results.map((result) => result.status).toSorted()).toEqual(["cached", "cloned"])
         expect(results[0].localPath).toBe(results[1].localPath)
+      }).pipe(Effect.provide(cacheLayer(fixture.root))),
+    ),
+  )
+
+  it.live("refreshes from the exact configured remote URL", () =>
+    withRemote((fixture) =>
+      Effect.gen(function* () {
+        const cache = yield* RepositoryCache.Service
+        yield* cache.ensure({ reference: fixture.reference })
+        yield* Effect.promise(() => commit(fixture.source, "two\n", "second"))
+
+        const refreshed = yield* cache.ensure({ reference: fixture.reference, refresh: true })
+
+        expect(refreshed.status).toBe("refreshed")
+        expect(yield* read(path.join(refreshed.localPath, "README.md"))).toBe("two\n")
       }).pipe(Effect.provide(cacheLayer(fixture.root))),
     ),
   )

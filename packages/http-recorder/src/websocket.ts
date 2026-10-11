@@ -94,6 +94,7 @@ export const makeWebSocketExecutor = <E>(
             const events: WebSocketEvent[] = []
             const connection = yield* options.live.open(request)
             const closed = yield* Ref.make(false)
+            const recordable = yield* Ref.make(true)
             const closeLock = yield* Semaphore.make(1)
             return {
               sendText: (message) =>
@@ -102,31 +103,24 @@ export const makeWebSocketExecutor = <E>(
                 ),
               messages: connection.messages.pipe(
                 Stream.tap((message) =>
-                  Effect.sync(() =>
-                    events.push(
-                      typeof message === "string"
-                        ? redactEvent(textEvent("server", message))
-                        : {
-                            direction: "server",
-                            kind: "binary",
-                            body: Buffer.from(message).toString("base64"),
-                            bodyEncoding: "base64",
-                          },
-                    ),
-                  ),
+                  typeof message === "string"
+                    ? Effect.sync(() => events.push(redactEvent(textEvent("server", message))))
+                    : Ref.set(recordable, false),
                 ),
               ),
               close: closeLock.withPermit(
                 Effect.gen(function* () {
                   if (yield* Ref.get(closed)) return
                   yield* connection.close
-                  yield* options.cassette
-                    .append(
-                      options.name,
-                      { transport: "websocket", open: openSnapshot(request), events },
-                      options.metadata,
-                    )
-                    .pipe(Effect.orDie)
+                  if (yield* Ref.get(recordable)) {
+                    yield* options.cassette
+                      .append(
+                        options.name,
+                        { transport: "websocket", open: openSnapshot(request), events },
+                        options.metadata,
+                      )
+                      .pipe(Effect.orDie)
+                  }
                   yield* Ref.set(closed, true)
                 }),
               ),

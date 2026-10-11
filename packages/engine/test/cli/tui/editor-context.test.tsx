@@ -11,10 +11,14 @@ import { discoverEditorConnection } from "@vectordevai/tui/editor"
 
 const originalClaudePort = process.env.CLAUDE_CODE_SSE_PORT
 const originalVectorPort = process.env.VECTOR_EDITOR_SSE_PORT
+const originalClaudeToken = process.env.CLAUDE_CODE_IDE_AUTH_TOKEN
+const originalVectorToken = process.env.VECTOR_EDITOR_AUTH_TOKEN
 
 afterEach(() => {
   process.env.CLAUDE_CODE_SSE_PORT = originalClaudePort
   process.env.VECTOR_EDITOR_SSE_PORT = originalVectorPort
+  process.env.CLAUDE_CODE_IDE_AUTH_TOKEN = originalClaudeToken
+  process.env.VECTOR_EDITOR_AUTH_TOKEN = originalVectorToken
 })
 
 function nextTick() {
@@ -113,6 +117,7 @@ test("useEditorContext reconnect switches editor server by session directory", a
     path.join(ideDirectory, "3001.lock"),
     JSON.stringify({
       transport: "ws",
+      authToken: "startup-token",
       workspaceFolders: [startupDirectory],
     }),
   )
@@ -120,6 +125,7 @@ test("useEditorContext reconnect switches editor server by session directory", a
     path.join(ideDirectory, "3002.lock"),
     JSON.stringify({
       transport: "ws",
+      authToken: "session-token",
       workspaceFolders: [sessionDirectory],
     }),
   )
@@ -128,8 +134,12 @@ test("useEditorContext reconnect switches editor server by session directory", a
   process.env.VECTOR_EDITOR_SSE_PORT = undefined
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
-  const firstSocket = new FakeWebSocket("ws://127.0.0.1:3001")
-  const secondSocket = new FakeWebSocket("ws://127.0.0.1:3002")
+  const firstSocket = new FakeWebSocket("ws://127.0.0.1:3001", {
+    headers: { "x-claude-code-ide-authorization": "startup-token" },
+  })
+  const secondSocket = new FakeWebSocket("ws://127.0.0.1:3002", {
+    headers: { "x-claude-code-ide-authorization": "session-token" },
+  })
 
   const mounted = mountEditorContext(createWebSocketImpl(firstSocket, secondSocket))
   await nextTick()
@@ -161,15 +171,19 @@ test("useEditorContext favors configured port over lock files", async () => {
     path.join(ideDirectory, "3001.lock"),
     JSON.stringify({
       transport: "ws",
+      authToken: "lock-token",
       workspaceFolders: [startupDirectory],
     }),
   )
 
   process.env.CLAUDE_CODE_SSE_PORT = "4010"
   process.env.VECTOR_EDITOR_SSE_PORT = undefined
+  process.env.CLAUDE_CODE_IDE_AUTH_TOKEN = "environment-token"
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
-  const socket = new FakeWebSocket("ws://127.0.0.1:4010")
+  const socket = new FakeWebSocket("ws://127.0.0.1:4010", {
+    headers: { "x-claude-code-ide-authorization": "environment-token" },
+  })
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
   await nextTick()
@@ -189,6 +203,7 @@ test("useEditorContext clears selection when reconnecting", async () => {
     path.join(ideDirectory, "3001.lock"),
     JSON.stringify({
       transport: "ws",
+      authToken: "startup-token",
       workspaceFolders: [startupDirectory],
     }),
   )
@@ -197,7 +212,9 @@ test("useEditorContext clears selection when reconnecting", async () => {
   process.env.VECTOR_EDITOR_SSE_PORT = undefined
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
-  const socket = new FakeWebSocket("ws://127.0.0.1:3001")
+  const socket = new FakeWebSocket("ws://127.0.0.1:3001", {
+    headers: { "x-claude-code-ide-authorization": "startup-token" },
+  })
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
   await nextTick()
@@ -249,6 +266,7 @@ test("useEditorContext preserves selection for the next reconnect when requested
     path.join(ideDirectory, "3001.lock"),
     JSON.stringify({
       transport: "ws",
+      authToken: "startup-token",
       workspaceFolders: [startupDirectory],
     }),
   )
@@ -257,7 +275,9 @@ test("useEditorContext preserves selection for the next reconnect when requested
   process.env.VECTOR_EDITOR_SSE_PORT = undefined
   spyOn(process, "cwd").mockImplementation(() => startupDirectory)
   spyOn(os, "homedir").mockImplementation(() => tmp.path)
-  const socket = new FakeWebSocket("ws://127.0.0.1:3001")
+  const socket = new FakeWebSocket("ws://127.0.0.1:3001", {
+    headers: { "x-claude-code-ide-authorization": "startup-token" },
+  })
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
   await nextTick()
@@ -285,8 +305,11 @@ test("useEditorContext connects with VECTOR_EDITOR_SSE_PORT", async () => {
   await using tmp = await tmpdir()
   process.env.CLAUDE_CODE_SSE_PORT = undefined
   process.env.VECTOR_EDITOR_SSE_PORT = "4020"
+  process.env.VECTOR_EDITOR_AUTH_TOKEN = "vector-token"
   spyOn(process, "cwd").mockImplementation(() => tmp.path)
-  const socket = new FakeWebSocket("ws://127.0.0.1:4020")
+  const socket = new FakeWebSocket("ws://127.0.0.1:4020", {
+    headers: { "x-claude-code-ide-authorization": "vector-token" },
+  })
 
   const mounted = mountEditorContext(createWebSocketImpl(socket))
   await nextTick()

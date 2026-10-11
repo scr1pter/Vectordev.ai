@@ -5,6 +5,7 @@ import { DockPrompt } from "@vectordevai/session-ui/dock-prompt"
 import { Icon } from "@vectordevai/ui/icon"
 import { useLanguage } from "@/context/language"
 import { cloudPermissionScope, permissionStatements } from "./cloud-permission-scope"
+import { canAlwaysAllowPermission } from "@/context/permission-policy"
 
 export function SessionPermissionDock(props: {
   request: PermissionRequest
@@ -40,8 +41,7 @@ export function SessionPermissionDock(props: {
             <Button variant="ghost" size="normal" onClick={() => props.onDecide("reject")} disabled={props.responding}>
               {language.t("ui.permission.deny")}
             </Button>
-            {/* No "always" patterns means the request asks every time, so the button would act as once. */}
-            <Show when={props.request.always.length > 0}>
+            <Show when={canAlwaysAllowPermission(props.request.permission, props.request.always)}>
               <Button
                 variant="secondary"
                 size="normal"

@@ -46,7 +46,7 @@ import { PermissionProvider } from "@/context/permission"
 import { PlanModeProvider } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { PromptProvider } from "@/context/prompt"
-import { ServerConnection, ServerProvider, serverName, useServer } from "@/context/server"
+import { resolveRouteServer, ServerConnection, ServerProvider, serverName, useServer } from "@/context/server"
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TabsProvider, useTabs, type DraftTab } from "@/context/tabs"
 import { SDKProvider, useSDK } from "@/context/sdk"
@@ -101,21 +101,30 @@ const SessionRoute = () => {
 const TargetSessionRoute = () => {
   const params = useParams<{ serverKey: string; id: string }>()
   const global = useGlobal()
-  const conn = createMemo(() => {
-    const key = requireServerKey(params.serverKey)
-    return global.servers.list().find((item) => ServerConnection.key(item) === key)
-  })
+  const language = useLanguage()
+  const conn = createMemo(() => resolveRouteServer(global.servers.list(), requireServerKey(params.serverKey)))
 
   return (
     // Owns the server-identity remount. Session changes must NOT remount this
     // subtree (SessionRouteErrorBoundary resets and createSessionLineage
     // re-resolves reactively instead); both rely on this key for server changes.
-    <Show when={requireServerKey(params.serverKey)} keyed>
-      <ServerSDKProvider server={conn}>
-        <ServerSyncProvider server={conn}>
-          <TargetSessionRouteContent />
-        </ServerSyncProvider>
-      </ServerSDKProvider>
+    // A link to a server that is not in the user's list never connects to it; it says so instead.
+    <Show
+      when={conn()}
+      keyed
+      fallback={
+        <div class="flex h-full items-center justify-center p-6 text-center text-14-regular text-text-weak">
+          {language.t("app.server.unknownRoute")}
+        </div>
+      }
+    >
+      {(target) => (
+        <ServerSDKProvider server={() => target}>
+          <ServerSyncProvider server={() => target}>
+            <TargetSessionRouteContent />
+          </ServerSyncProvider>
+        </ServerSDKProvider>
+      )}
     </Show>
   )
 }

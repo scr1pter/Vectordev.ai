@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Deferred, Effect, Fiber, Layer } from "effect"
 import { AgentV2 } from "@vectordevai/core/agent"
 import { Database } from "@vectordevai/core/database/database"
@@ -103,6 +103,14 @@ function waitForRequest() {
 }
 
 describe("PermissionV2", () => {
+  test("preserves deny ceilings across trust tiers without changing ordered rules within a tier", () => {
+    const deny: PermissionV2.Ruleset = [{ action: "bash", resource: "*", effect: "deny" }]
+    const allow: PermissionV2.Ruleset = [{ action: "bash", resource: "pwd", effect: "allow" }]
+
+    expect(PermissionV2.evaluate("bash", "pwd", deny, allow).effect).toBe("deny")
+    expect(PermissionV2.evaluate("bash", "pwd", [...deny, ...allow]).effect).toBe("allow")
+  })
+
   it.effect("returns the evaluated effect and only queues prompts", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])
@@ -262,6 +270,64 @@ describe("PermissionV2", () => {
       yield* Fiber.join(fiber)
       expect(yield* service.list()).toEqual([])
       expect(yield* service.get(request.id)).toBeUndefined()
+    }),
+  )
+
+  it.effect("does not persist a sensitive permanent approval", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const service = yield* PermissionV2.Service
+      const asked = yield* Deferred.make<PermissionV2.Request>()
+      const events = yield* EventV2.Service
+      const unsubscribe = yield* events.listen((event) =>
+        event.type === PermissionV2.Event.Asked.type
+          ? Deferred.succeed(asked, event.data as PermissionV2.Request).pipe(Effect.asVoid)
+          : Effect.void,
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const fiber = yield* service
+        .assert(assertion({ action: "computer_sensitive", resources: ["window:42:0"], save: ["window:42:0"] }))
+        .pipe(Effect.forkScoped)
+      const request = yield* Deferred.await(asked)
+      yield* service.reply({ requestID: request.id, reply: "always" })
+      yield* Fiber.join(fiber)
+
+      const { db } = yield* Database.Service
+      expect(
+        yield* db.select().from(PermissionTable).where(eq(PermissionTable.project_id, Project.ID.global)).all(),
+      ).toEqual([])
+    }),
+  )
+
+  it.effect("purges previously saved sensitive approvals instead of authorizing them", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({
+        projectID: Project.ID.global,
+        action: "computer_sensitive",
+        resources: ["window:42:0"],
+      })
+
+      const service = yield* PermissionV2.Service
+      expect(
+        yield* service.ask(
+          assertion({ action: "computer_sensitive", resources: ["window:42:0"], save: ["window:42:0"] }),
+        ),
+      ).toEqual({ id: PermissionV2.ID.create("per_test"), effect: "ask" })
+      expect(yield* saved.list({ projectID: Project.ID.global })).toEqual([])
+    }),
+  )
+
+  it.effect("does not let a pending approval override a newly configured deny", () =>
+    Effect.gen(function* () {
+      yield* setup()
+      const { service, fiber, request } = yield* waitForRequest()
+      yield* setRules([{ action: "read", resource: "*", effect: "deny" }])
+      yield* service.reply({ requestID: request.id, reply: "once" })
+
+      expect(yield* Fiber.join(fiber).pipe(Effect.flip)).toBeInstanceOf(PermissionV2.DeniedError)
+      expect(yield* service.list()).toEqual([])
     }),
   )
 

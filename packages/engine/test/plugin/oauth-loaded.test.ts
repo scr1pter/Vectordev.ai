@@ -6,6 +6,7 @@ import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Npm } from "@vectordevai/core/npm"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { Global } from "@vectordevai/core/global"
 import { ProviderV2 } from "@vectordevai/core/provider"
 import { inspectOAuthPlugin, writeOAuthApproval, revokeOAuthApproval } from "@vectordevai/core/plugin/oauth-approval"
 import { providerCredentialAllowed, providerEnvironmentAllowed } from "@vectordevai/core/provider-policy"
@@ -13,7 +14,7 @@ import { Auth } from "../../src/auth"
 import { ProviderAuth } from "../../src/provider/auth"
 import { Provider } from "../../src/provider/provider"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
-import { TestInstance } from "../fixture/fixture"
+import { tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { NpmTest } from "../fake/npm"
 
@@ -28,14 +29,23 @@ for (const approved of [false, true]) {
     `Engine configuration loader and auth service ${approved ? "persist approved" : "reject unapproved"} community OAuth`,
     () =>
       Effect.gen(function* () {
-        const test = yield* TestInstance
+        // A dedicated installed package enabled from the user's own config. A trusted project runs its plugins from
+        // the approved workspace snapshot, so consent for an installed path never extends to a project reference.
+        const home = yield* tmpdirScoped()
+        const previous = Global.Path.config
+        ;(Global.Path as { config: string }).config = home
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            ;(Global.Path as { config: string }).config = previous
+          }),
+        )
         const auth = yield* Auth.Service
         const oauth = yield* ProviderAuth.Service
         const provider = yield* Provider.Service
-        const entry = path.join(test.directory, "owned-package", "owned-plugin.js")
+        const entry = path.join(home, "owned-package", "owned-plugin.js")
         yield* Effect.promise(() =>
           Bun.write(
-            path.join(test.directory, "owned-package", "package.json"),
+            path.join(home, "owned-package", "package.json"),
             JSON.stringify({
               name: "@example/integration-owned-auth",
               version: "1.0.0",
@@ -69,7 +79,7 @@ for (const approved of [false, true]) {
         }
         yield* Effect.promise(() =>
           Bun.write(
-            path.join(test.directory, "vector.json"),
+            path.join(home, "vector.json"),
             JSON.stringify({
               plugin: [[pathToFileURL(entry).href, { acceptRisk: true, vectorOAuthPlugin: approval.id }]],
               provider: {

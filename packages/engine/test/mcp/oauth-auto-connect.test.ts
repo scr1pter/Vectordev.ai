@@ -190,7 +190,7 @@ mcpTest.instance(
         expect(serverStatus["test-oauth"].status).toBe("needs_auth")
       }),
     ),
-  { config: config("test-oauth") },
+  { trusted: true, config: config("test-oauth") },
 )
 
 mcpTest.instance("state() generates a new state when none is saved", () =>
@@ -263,7 +263,7 @@ mcpTest.instance(
       expect(entry?.tokens?.accessToken).toBe("working-token")
       expect(entry?.clientInfo).toEqual(clientInfo)
     }),
-  { config: config("test-reauth-failure") },
+  { trusted: true, config: config("test-reauth-failure") },
 )
 
 mcpTest.instance(
@@ -289,7 +289,7 @@ mcpTest.instance(
       expect(entry?.clientInfo?.clientId).toBe("replacement-client")
       expect(entry?.serverUrl).toBe(url)
     }),
-  { config: config("test-reauth-success") },
+  { trusted: true, config: config("test-reauth-success") },
 )
 
 mcpTest.instance(
@@ -313,7 +313,7 @@ mcpTest.instance(
       expect(yield* mcp.getAuthStatus("test-status-url")).toBe("expired")
       expect(transportCalls).toHaveLength(0)
     }),
-  { config: config("test-status-url") },
+  { trusted: true, config: config("test-status-url") },
 )
 
 mcpTest.instance(
@@ -338,7 +338,7 @@ mcpTest.instance(
         expect(after["test-oauth-connect"]?.status).toBe("connected")
       }),
     ),
-  { config: config("test-oauth-connect") },
+  { trusted: true, config: config("test-oauth-connect") },
 )
 
 mcpTest.instance(
@@ -363,5 +363,5 @@ mcpTest.instance(
         expect(Object.keys(yield* mcp.resources())).toEqual(["test-oauth-resources:docs://readme"])
       }),
     ),
-  { config: config("test-oauth-resources") },
+  { trusted: true, config: config("test-oauth-resources") },
 )

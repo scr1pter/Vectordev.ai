@@ -1,11 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect } from "bun:test"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import path from "path"
 import { Effect, FileSystem, Layer } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 
 import { Instruction } from "../../src/session/instruction"
-import type { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { Global } from "@vectordevai/core/global"
 import { RuntimeFlags } from "../../src/effect/runtime-flags"
@@ -16,7 +16,7 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
-import { LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
+import { httpClient, LayerNodePlatform } from "@vectordevai/core/effect/app-node-platform"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { Config } from "@/config/config"
@@ -206,7 +206,39 @@ describe("Instruction.resolve", () => {
     ),
   )
 
-  test.todo("fetches remote instructions from config URLs via HttpClient", () => {})
+  it.live("fetches the remote instructions the user configured, including an intranet page", () =>
+    provideTmpdirInstance((dir) => {
+      const requests: string[] = []
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests.push(request.url)
+          return HttpClientResponse.fromWeb(request, new Response("Remote rules"))
+        }),
+      )
+      const layer = AppNodeBuilder.build(Instruction.node, [
+        [
+          Config.node,
+          Layer.succeed(
+            Config.Service,
+            TestConfig.make({
+              get: () => Effect.succeed({ instructions: ["https://1.1.1.1/rules", "http://127.0.0.1/private"] }),
+            }),
+          ),
+        ],
+        [Global.node, Global.layerWith({ home: dir, config: dir })],
+        [RuntimeFlags.node, RuntimeFlags.layer({})],
+        [httpClient, Layer.succeed(HttpClient.HttpClient, client)],
+      ])
+
+      return Effect.gen(function* () {
+        const instruction = yield* Instruction.Service
+        const system = yield* instruction.system()
+        expect(system).toContain("Instructions from: https://1.1.1.1/rules\nRemote rules")
+        expect(system).toContain("Instructions from: http://127.0.0.1/private\nRemote rules")
+        expect(requests.toSorted()).toEqual(["http://127.0.0.1/private", "https://1.1.1.1/rules"])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
 })
 
 describe("Instruction.system", () => {

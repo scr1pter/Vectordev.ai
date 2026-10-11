@@ -77,7 +77,7 @@ it.instance(
       expect(providers[ProviderV2.ID.amazonBedrock]).toBeDefined()
       expect(providers[ProviderV2.ID.amazonBedrock].options?.region).toBe("eu-west-1")
     }),
-  { config: { provider: { "amazon-bedrock": { options: { region: "eu-west-1" } } } } },
+  { trusted: true, config: { provider: { "amazon-bedrock": { options: { region: "eu-west-1" } } } } },
 )
 
 it.instance("Bedrock: falls back to AWS_REGION env var when no config region", () =>
@@ -102,7 +102,7 @@ it.instance(
       expect(providers[ProviderV2.ID.amazonBedrock]).toBeDefined()
       expect(providers[ProviderV2.ID.amazonBedrock].options?.region).toBe("eu-west-1")
     }),
-  { config: { provider: { "amazon-bedrock": { options: { region: "eu-west-1" } } } } },
+  { trusted: true, config: { provider: { "amazon-bedrock": { options: { region: "eu-west-1" } } } } },
 )
 
 it.instance(
@@ -125,6 +125,7 @@ it.instance(
       ).toBe("https://bedrock-mantle.us-east-2.api.aws/openai/v1/responses")
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "amazon-bedrock": {
@@ -164,6 +165,7 @@ it.instance(
       ).toBe("https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions")
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "amazon-bedrock": {
@@ -186,6 +188,7 @@ it.instance(
       expect(providers[ProviderV2.ID.amazonBedrock].options?.region).toBe("us-east-1")
     }),
   {
+    trusted: true,
     config: {
       provider: { "amazon-bedrock": { options: { profile: "my-custom-profile", region: "us-east-1" } } },
     },
@@ -204,6 +207,7 @@ it.instance(
       )
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "amazon-bedrock": {
@@ -226,7 +230,7 @@ it.instance(
       expect(providers[ProviderV2.ID.amazonBedrock]).toBeDefined()
       expect(providers[ProviderV2.ID.amazonBedrock].options?.region).toBe("us-east-1")
     }),
-  { config: { provider: { "amazon-bedrock": { options: { region: "us-east-1" } } } } },
+  { trusted: true, config: { provider: { "amazon-bedrock": { options: { region: "us-east-1" } } } } },
 )
 
 // Cross-region inference profile prefix handling.
@@ -243,6 +247,7 @@ it.instance(
       expect(providers[ProviderV2.ID.amazonBedrock].models["us.anthropic.claude-opus-4-5-20251101-v1:0"]).toBeDefined()
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "amazon-bedrock": {
@@ -266,6 +271,7 @@ it.instance(
       ).toBeDefined()
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "amazon-bedrock": {
@@ -287,6 +293,7 @@ it.instance(
       expect(providers[ProviderV2.ID.amazonBedrock].models["eu.anthropic.claude-opus-4-5-20251101-v1:0"]).toBeDefined()
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "amazon-bedrock": {
@@ -308,6 +315,7 @@ it.instance(
       expect(providers[ProviderV2.ID.amazonBedrock].models["anthropic.claude-opus-4-5-20251101-v1:0"]).toBeDefined()
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "amazon-bedrock": {

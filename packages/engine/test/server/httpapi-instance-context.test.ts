@@ -8,6 +8,8 @@ import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { registerAdapter } from "../../src/control-plane/adapters"
 import { WorkspaceV2 } from "@vectordevai/core/workspace"
+import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { PtyTicket } from "@vectordevai/core/pty/ticket"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
 import { InstanceRef, WorkspaceRef } from "../../src/effect/instance-ref"
@@ -44,7 +46,15 @@ const testStateLayer = Layer.effectDiscard(
 
 const workspaceLayer = workspaceLayerWithRuntimeFlags({ experimentalWorkspaces: true })
 
-const it = testEffect(Layer.mergeAll(testStateLayer, NodeHttpServer.layerTest, NodeServices.layer, workspaceLayer))
+const it = testEffect(
+  Layer.mergeAll(
+    testStateLayer,
+    NodeHttpServer.layerTest,
+    NodeServices.layer,
+    workspaceLayer,
+    LayerNode.compile(PtyTicket.node),
+  ),
+)
 
 const instanceContextTestLayer = Layer.mergeAll(
   instanceContextLayer,

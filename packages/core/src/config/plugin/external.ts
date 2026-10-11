@@ -47,9 +47,10 @@ export const Plugin = define({
     const location = yield* Location.Service
     const npm = yield* Npm.Service
     yield* Effect.gen(function* () {
-      const configured: { package: string; options?: Record<string, any> }[] = []
+      const configured: { package: string; options?: Record<string, any>; project: boolean }[] = []
 
       for (const entry of yield* config.entries()) {
+        if (config.executable?.(entry) === false) continue
         if (entry.type === "document") {
           const directory = entry.path ? path.dirname(entry.path) : location.directory
           for (const item of entry.info.plugins ?? []) {
@@ -61,7 +62,11 @@ export const Plugin = define({
               }
               return ref.package
             })()
-            configured.push({ package: packageName, options: ref.options })
+            configured.push({
+              package: config.executablePath?.(entry, packageName) ?? packageName,
+              options: ref.options,
+              project: config.scope?.(entry) === "project",
+            })
           }
         }
 
@@ -76,13 +81,19 @@ export const Plugin = define({
             })
             .pipe(Effect.orElseSucceed(() => []))
           files.sort()
-          for (const file of files) configured.push({ package: file })
+          for (const file of files)
+            configured.push({ package: config.executablePath?.(entry, file) ?? file, project: false })
         }
       }
 
       for (const ref of configured) {
         yield* Effect.gen(function* () {
           if (borrowedOAuthPlugin(ref.package)) return
+          // The user's own config may follow a range or the latest release; a project must name an exact version.
+          if (ref.project && !path.isAbsolute(ref.package) && !pinned(ref.package)) {
+            yield* Effect.logWarning(`Skipped mutable plugin package ${ref.package}; use an exact version`)
+            return
+          }
           const entrypoint = path.isAbsolute(ref.package)
             ? pathToFileURL(ref.package).href
             : (yield* npm.add(ref.package)).entrypoint
@@ -115,3 +126,8 @@ export const Plugin = define({
     }).pipe(Effect.forkScoped({ startImmediately: true }))
   }),
 })
+
+function pinned(spec: string) {
+  const match = spec.match(/^(?:@[^/]+\/[^@]+|[^@/][^@]*)@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/)
+  return match !== null
+}

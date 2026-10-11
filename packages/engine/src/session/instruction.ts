@@ -3,7 +3,7 @@ import { httpClient } from "@vectordevai/core/effect/app-node-platform"
 import path from "path"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { Effect, Layer, Context } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -11,7 +11,8 @@ import { Flag } from "@vectordevai/core/flag/flag"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@vectordevai/core/global"
-import type { MessageV2 } from "./message-v2"
+import { WebFetchRequest } from "@vectordevai/core/util/webfetch-request"
+import { collectBoundedResponseBody } from "@vectordevai/core/tool/http-body"
 import type { MessageID } from "./schema"
 
 function extract(messages: SessionV1.WithParts[]) {
@@ -104,13 +105,19 @@ const layer: Layer.Layer<
     })
 
     const fetch = Effect.fnUntraced(function* (url: string) {
-      const res = yield* http.execute(HttpClientRequest.get(url)).pipe(
+      // Instruction URLs come from the user's own config (or a project they trusted), so an intranet page is fine.
+      return yield* WebFetchRequest.execute(http, HttpClientRequest.get(url), {
+        authorize: () => Effect.void,
+        authorizePrivate: () => Effect.void,
+      }).pipe(
+        Effect.flatMap((response) =>
+          collectBoundedResponseBody(response, 1024 * 1024, () => new Error("Remote instructions exceed 1 MiB")),
+        ),
+        Effect.map((body) => new TextDecoder().decode(body)),
+        Effect.scoped,
         Effect.timeout(5000),
-        Effect.catch(() => Effect.succeed(null)),
+        Effect.catch(() => Effect.succeed("")),
       )
-      if (!res) return ""
-      const body = yield* res.arrayBuffer.pipe(Effect.catch(() => Effect.succeed(new ArrayBuffer(0))))
-      return new TextDecoder().decode(body)
     })
 
     const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {

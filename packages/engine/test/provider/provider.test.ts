@@ -11,7 +11,13 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { FSUtil } from "@vectordevai/core/fs-util"
 import { CrossSpawnSpawner } from "@vectordevai/core/cross-spawn-spawner"
 import { Global } from "@vectordevai/core/global"
-import { disposeAllInstances, provideInstanceEffect, tmpdirScoped, TestInstance } from "../fixture/fixture"
+import {
+  disposeAllInstances,
+  provideInstanceEffect,
+  tmpdirScoped,
+  TestInstance,
+  trustWorkspace,
+} from "../fixture/fixture"
 import { markPluginDependenciesReady } from "../fixture/plugin"
 import { Auth } from "@/auth"
 import { Config } from "@/config/config"
@@ -125,7 +131,7 @@ it.instance(
     const providers = yield* list
     expect(providers[ProviderV2.ID.anthropic]).toBeDefined()
   }),
-  { config: { provider: { anthropic: { options: { apiKey: "config-api-key" } } } } },
+  { trusted: true, config: { provider: { anthropic: { options: { apiKey: "config-api-key" } } } } },
 )
 
 it.instance(
@@ -135,7 +141,7 @@ it.instance(
     const providers = yield* list
     expect(providers[ProviderV2.ID.anthropic]).toBeUndefined()
   }),
-  { config: { disabled_providers: ["anthropic"] } },
+  { trusted: true, config: { disabled_providers: ["anthropic"] } },
 )
 
 it.instance(
@@ -147,7 +153,7 @@ it.instance(
     expect(providers[ProviderV2.ID.anthropic]).toBeDefined()
     expect(providers[ProviderV2.ID.openai]).toBeUndefined()
   }),
-  { config: { enabled_providers: ["anthropic"] } },
+  { trusted: true, config: { enabled_providers: ["anthropic"] } },
 )
 
 it.instance(
@@ -160,7 +166,7 @@ it.instance(
     expect(models).toContain("claude-sonnet-4-20250514")
     expect(models.length).toBe(1)
   }),
-  { config: { provider: { anthropic: { whitelist: ["claude-sonnet-4-20250514"] } } } },
+  { trusted: true, config: { provider: { anthropic: { whitelist: ["claude-sonnet-4-20250514"] } } } },
 )
 
 it.instance(
@@ -172,7 +178,7 @@ it.instance(
     const models = Object.keys(providers[ProviderV2.ID.anthropic].models)
     expect(models).not.toContain("claude-sonnet-4-20250514")
   }),
-  { config: { provider: { anthropic: { blacklist: ["claude-sonnet-4-20250514"] } } } },
+  { trusted: true, config: { provider: { anthropic: { blacklist: ["claude-sonnet-4-20250514"] } } } },
 )
 
 it.instance(
@@ -185,6 +191,7 @@ it.instance(
     expect(providers[ProviderV2.ID.anthropic].models["my-alias"].name).toBe("My Custom Alias")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: { models: { "my-alias": { id: "claude-sonnet-4-20250514", name: "My Custom Alias" } } },
@@ -202,6 +209,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("ollama")].models["custom-model"]).toBeDefined()
   }),
   {
+    trusted: true,
     config: {
       provider: {
         ollama: {
@@ -230,7 +238,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].models["active-model"]).toBeDefined()
     expect(providers[ProviderV2.ID.make("lmstudio")].models["alpha-model"]).toBeDefined()
   }),
-  { config: alphaProviderConfig },
+  { trusted: true, config: alphaProviderConfig },
 )
 
 experimentalModels.instance(
@@ -240,7 +248,7 @@ experimentalModels.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].models["active-model"]).toBeDefined()
     expect(providers[ProviderV2.ID.make("lmstudio")].models["alpha-model"]).toBeDefined()
   }),
-  { config: alphaProviderConfig },
+  { trusted: true, config: alphaProviderConfig },
 )
 
 it.instance(
@@ -254,6 +262,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("cerebras")].models["deepseek-r1"].capabilities.interleaved).toBe(false)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -290,7 +299,10 @@ it.instance(
     expect(providers[ProviderV2.ID.anthropic].options.headerTimeout).toBe(10000)
     expect(providers[ProviderV2.ID.anthropic].options.chunkTimeout).toBe(15000)
   }),
-  { config: { provider: { anthropic: { options: { timeout: 60000, headerTimeout: 10000, chunkTimeout: 15000 } } } } },
+  {
+    trusted: true,
+    config: { provider: { anthropic: { options: { timeout: 60000, headerTimeout: 10000, chunkTimeout: 15000 } } } },
+  },
 )
 
 it.instance("getModel returns model for valid provider/model", () =>
@@ -356,7 +368,7 @@ it.instance(
     expect(String(model.providerID)).toBe("anthropic")
     expect(String(model.modelID)).toBe("claude-sonnet-4-20250514")
   }),
-  { config: { model: "anthropic/claude-sonnet-4-20250514" } },
+  { trusted: true, config: { model: "anthropic/claude-sonnet-4-20250514" } },
 )
 
 it.instance(
@@ -366,7 +378,7 @@ it.instance(
     const model = yield* Provider.use.defaultModel()
     expect(String(model.providerID)).toBe("anthropic")
   }),
-  { config: { model: "retired-gateway/included-model" } },
+  { trusted: true, config: { model: "retired-gateway/included-model" } },
 )
 
 it.instance(
@@ -376,7 +388,7 @@ it.instance(
     expect(String(model.providerID)).toBe("kimi-code-plan-cn")
     expect(String(model.modelID)).toBe("k3")
   }),
-  { config: { model: "kimi-for-coding/k3" } },
+  { trusted: true, config: { model: "kimi-for-coding/k3" } },
 )
 
 it.instance(
@@ -392,6 +404,7 @@ it.instance(
     expect(Exit.isFailure(exit)).toBe(true)
   }),
   {
+    trusted: true,
     config: {
       model: "private-endpoint/private-model",
       provider: {
@@ -413,7 +426,7 @@ it.instance(
     expect(model.providerID).toBeDefined()
     expect(model.modelID).toBeDefined()
   }),
-  { config: { provider: {} } },
+  { trusted: true, config: { provider: {} } },
 )
 
 it.instance(
@@ -423,7 +436,7 @@ it.instance(
     expect(error).toBeInstanceOf(Provider.NoProvidersError)
     expect(error._tag).toBe("ProviderNoProvidersError")
   }),
-  { config: { enabled_providers: [] } },
+  { trusted: true, config: { enabled_providers: [] } },
 )
 
 it.instance(
@@ -434,6 +447,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://custom.openai.com/v1")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -460,6 +474,7 @@ it.instance(
     expect(model.cost.unpriced).toBe(true)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -482,6 +497,7 @@ it.instance(
     expect(model.options.customOption).toBe("custom-value")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -499,7 +515,10 @@ it.instance(
     const providers = yield* list
     expect(providers[ProviderV2.ID.anthropic]).toBeUndefined()
   }),
-  { config: { provider: { anthropic: { options: { apiKey: "test-api-key" }, whitelist: ["nonexistent-model"] } } } },
+  {
+    trusted: true,
+    config: { provider: { anthropic: { options: { apiKey: "test-api-key" }, whitelist: ["nonexistent-model"] } } },
+  },
 )
 
 it.instance("closest finds model by partial match", () =>
@@ -532,6 +551,7 @@ it.instance(
     expect(model.name).toBe("My Sonnet Alias")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -550,6 +570,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].models["model-1"].api.url).toBe("https://api.example.com/v1")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -572,6 +593,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://custom.override.com/v1")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -599,6 +621,7 @@ it.instance(
     expect(model.limit.context).toBeGreaterThan(0)
   }),
   {
+    trusted: true,
     config: {
       provider: { anthropic: { models: { "claude-sonnet-4-20250514": { name: "Custom Name for Sonnet" } } } },
     },
@@ -612,7 +635,7 @@ it.instance(
     const providers = yield* list
     expect(providers[ProviderV2.ID.openai]).toBeUndefined()
   }),
-  { config: { disabled_providers: ["openai"] } },
+  { trusted: true, config: { disabled_providers: ["openai"] } },
 )
 
 it.instance(
@@ -623,7 +646,7 @@ it.instance(
     const providers = yield* list
     expect(Object.keys(providers).length).toBe(0)
   }),
-  { config: { enabled_providers: [] } },
+  { trusted: true, config: { enabled_providers: [] } },
 )
 
 it.instance(
@@ -638,6 +661,7 @@ it.instance(
     expect(models.length).toBe(1)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -658,6 +682,7 @@ it.instance(
     expect(model.capabilities.output.text).toBe(true)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -683,6 +708,7 @@ it.instance(
     expect(model.cost.cache.write).toBe(7.5)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -729,6 +755,7 @@ it.instance(
     expect(model?.id).toBe(ModelV2.ID.make("new-flash"))
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -788,7 +815,7 @@ for (const entry of [
       )
       expect(model?.id).toBe(entry.expected ? ModelV2.ID.make(entry.expected) : undefined)
     }),
-    { config: oauthSmallModelConfig },
+    { trusted: true, config: oauthSmallModelConfig },
   )
 }
 
@@ -805,7 +832,7 @@ it.instance(
     expect(model?.id).toBe(ModelV2.ID.make("test-nano-flex"))
     expect(model?.options.serviceTier).toBe("flex")
   }),
-  { config: { ...oauthSmallModelConfig, small_model: "openai/test-nano-flex" } },
+  { trusted: true, config: { ...oauthSmallModelConfig, small_model: "openai/test-nano-flex" } },
 )
 
 it.instance(
@@ -830,6 +857,8 @@ it.instance(
     `,
       ),
     )
+    // A project plugin loads only once the workspace, plugin included, is trusted.
+    yield* Effect.promise(() => trustWorkspace(instance.directory))
     yield* set(
       "VECTOR_AUTH_CONTENT",
       JSON.stringify({
@@ -840,7 +869,7 @@ it.instance(
     expect(model?.id).toBe(ModelV2.ID.make("test-nano-flex"))
     expect(model?.options.serviceTier).toBe("flex")
   }),
-  { config: oauthSmallModelConfig },
+  { trusted: true, config: oauthSmallModelConfig },
 )
 
 it.instance(
@@ -854,6 +883,7 @@ it.instance(
     expect(alias.options.serviceTier).toBe("flex")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         openai: {
@@ -874,6 +904,7 @@ it.instance(
     expect(model?.options.serviceTier).toBe("flex")
   }),
   {
+    trusted: true,
     config: {
       small_model: "openai/test-nano-flex",
       provider: {
@@ -895,6 +926,7 @@ it.instance(
     expect(model?.options.serviceTier).toBe("flex")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         openai: {
@@ -915,6 +947,7 @@ it.instance(
     expect(model?.options.serviceTier).toBe("flex")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -935,6 +968,7 @@ it.instance(
     expect(model?.id).toBe(ModelV2.ID.make("claude-haiku"))
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -958,6 +992,7 @@ it.instance(
     expect(model).toBeUndefined()
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1000,7 +1035,7 @@ it.instance(
     expect(String(model?.providerID)).toBe("anthropic")
     expect(String(model?.id)).toBe("claude-sonnet-4-20250514")
   }),
-  { config: { small_model: "anthropic/claude-sonnet-4-20250514" } },
+  { trusted: true, config: { small_model: "anthropic/claude-sonnet-4-20250514" } },
 )
 
 it.instance(
@@ -1010,7 +1045,7 @@ it.instance(
     const model = yield* Provider.use.getSmallModel(ProviderV2.ID.anthropic)
     expect(model).toBeUndefined()
   }),
-  { config: { small_model: "anthropic/not-a-real-model" } },
+  { trusted: true, config: { small_model: "anthropic/not-a-real-model" } },
 )
 
 test("provider.sort prioritizes preferred models", () => {
@@ -1040,6 +1075,7 @@ it.instance(
     expect(providers[ProviderV2.ID.openai].options.timeout).toBe(60000)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: { options: { timeout: 30000 } },
@@ -1058,6 +1094,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("http://localhost:11434/v1")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1082,6 +1119,7 @@ it.instance(
     expect(providers[ProviderV2.ID.anthropic].models["sonnet"].name).toBe("sonnet")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1102,6 +1140,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].key).toBeUndefined()
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1126,6 +1165,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].key).toBe("my-api-key")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1152,6 +1192,7 @@ it.instance(
     expect(model.cost.unpriced).toBeUndefined()
   }),
   {
+    trusted: true,
     config: {
       provider: {
         openai: { models: { "gpt-5.4": { options: { store: false } } } },
@@ -1169,6 +1210,7 @@ it.instance(
     expect(model.cost.experimentalOver200K).toEqual({ input: 6, output: 22.5, cache: { read: 0.6, write: 0 } })
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1193,6 +1235,7 @@ it.instance(
     expect(model.cost.output).toBe(888)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1215,6 +1258,7 @@ it.instance(
     expect(model.capabilities.input.image).toBe(true)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         ai21: {
@@ -1255,6 +1299,7 @@ it.instance(
     expect(providers[ProviderV2.ID.google]).toBeUndefined()
   }),
   {
+    trusted: true,
     // enabled_providers takes precedence — only these are considered
     // Then disabled_providers filters from the enabled set
     config: { enabled_providers: ["anthropic", "openai"], disabled_providers: ["openai"] },
@@ -1268,6 +1313,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].models["basic-model"].capabilities.toolcall).toBe(false)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1289,6 +1335,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].models["model"].capabilities.toolcall).toBe(true)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1314,6 +1361,7 @@ it.instance(
     })
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1345,6 +1393,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")]).toBeDefined()
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1377,6 +1426,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("ai21")].name).toBe("ai21")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         ai21: {
@@ -1468,6 +1518,7 @@ it.instance(
     expect(model.limit.output).toBe(0)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1494,6 +1545,7 @@ it.instance(
     expect(providers[ProviderV2.ID.anthropic].options.headers["anthropic-beta"]).toBeDefined()
   }),
   {
+    trusted: true,
     config: {
       provider: { anthropic: { options: { headers: { "X-Custom": "custom-value" }, timeout: 30000 } } },
     },
@@ -1510,7 +1562,7 @@ it.instance(
       "X-BILLING-INVOKE-ORIGIN": "Vector",
     })
   }),
-  { config: { provider: { nvidia: { options: { apiKey: "test-api-key" } } } } },
+  { trusted: true, config: { provider: { nvidia: { options: { apiKey: "test-api-key" } } } } },
 )
 
 it.instance(
@@ -1523,7 +1575,10 @@ it.instance(
       "X-BILLING-INVOKE-ORIGIN": "Vector",
     })
   }),
-  { config: { provider: { nvidia: { options: { apiKey: "test-api-key", baseURL: "http://localhost:8000/v1" } } } } },
+  {
+    trusted: true,
+    config: { provider: { nvidia: { options: { apiKey: "test-api-key", baseURL: "http://localhost:8000/v1" } } } },
+  },
 )
 
 it.instance(
@@ -1533,6 +1588,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("nvidia")].options.headers["X-BILLING-INVOKE-ORIGIN"]).toBe("CustomOrigin")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         nvidia: {
@@ -1557,6 +1613,7 @@ it.instance(
     expect(model.api.npm).toBe("@ai-sdk/openai")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         openai: {
@@ -1592,6 +1649,7 @@ it.instance(
     expect(deepseek.name).toBe("DeepSeek R1")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         openrouter: {
@@ -1784,6 +1842,7 @@ it.instance(
     expect(model.variants!["max"]).toBeDefined()
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1804,6 +1863,7 @@ it.instance(
     expect(model.variants!["high"].thinking.budgetTokens).toBe(20000)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1829,6 +1889,7 @@ it.instance(
     expect(model.variants!["max"].customField).toBe("test")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1853,6 +1914,7 @@ it.instance(
     expect(Object.keys(model.variants!).length).toBe(0)
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1879,6 +1941,7 @@ it.instance(
     expect(model.variants!["high"].extraOption).toBe("custom-value")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         anthropic: {
@@ -1903,6 +1966,7 @@ it.instance(
     expect(model.variants!["medium"]).toBeDefined()
   }),
   {
+    trusted: true,
     config: {
       provider: { openai: { models: { "gpt-5": { variants: { high: { disabled: true } } } } } },
     },
@@ -1931,6 +1995,7 @@ it.instance(
     expect(model.variants!["custom"].disabled).toBeUndefined()
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1967,6 +2032,7 @@ it.instance(
     expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://my-proxy.com/v1")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -1996,6 +2062,7 @@ it.instance(
     expect(model.api.npm).toBe("@ai-sdk/openai-compatible")
   }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -2090,7 +2157,7 @@ it.instance(
     expect(provider).toBeDefined()
     expect(provider.models[ModelV2.ID.make("openai/fixture")].api.npm).toBe("ai-gateway-provider")
   }),
-  { config: { provider: { "cloudflare-ai-gateway": cloudflareGatewayConfig } } },
+  { trusted: true, config: { provider: { "cloudflare-ai-gateway": cloudflareGatewayConfig } } },
 )
 
 it.instance(
@@ -2107,6 +2174,7 @@ it.instance(
     })
   }),
   {
+    trusted: true,
     config: {
       provider: {
         "cloudflare-ai-gateway": {
@@ -2163,6 +2231,7 @@ it.effect("plugin config providers persist after instance dispose", () =>
         ].join("\n"),
       ),
     )
+    yield* Effect.promise(() => trustWorkspace(dir))
 
     const loadAndList = Effect.gen(function* () {
       const plugin = yield* Plugin.Service
@@ -2208,6 +2277,7 @@ it.instance(
         ].join("\n"),
       ),
     )
+    yield* Effect.promise(() => trustWorkspace(instance.directory))
 
     yield* set("ANTHROPIC_API_KEY", "test-anthropic-key")
     yield* set("OPENAI_API_KEY", "test-openai-key")
@@ -2237,6 +2307,7 @@ it.instance(
       ])
     }),
   {
+    trusted: true,
     config: {
       provider: Object.fromEntries(
         ["unsupported-fixture", "unsupported-fixture-two"].map((id) => [
@@ -2261,6 +2332,7 @@ it.instance(
       expect(providers[ProviderV2.ID.make("lmstudio")].options.baseURL).toBe("https://provider.example.test/v1")
     }),
   {
+    trusted: true,
     config: {
       provider: {
         lmstudio: {
@@ -2333,6 +2405,7 @@ it.instance("plugin-defined provider models retain custom provenance with a stor
     `,
       ),
     )
+    yield* Effect.promise(() => trustWorkspace(instance.directory))
     yield* set("VECTOR_AUTH_CONTENT", JSON.stringify({ "acme-gateway": { type: "api", key: "fixture-company-key" } }))
     const providers = yield* list
     expect(providers[ProviderV2.ID.make("acme-gateway")]).toMatchObject({
@@ -2395,6 +2468,7 @@ for (const entry of [
         expect(typeof language.doStream).toBe("function")
       }),
     {
+      trusted: true,
       config: {
         provider: { [entry.id]: { npm: entry.npm, options: entry.options, models: { fixture: { name: "Fixture" } } } },
       },
@@ -2462,6 +2536,7 @@ missingMirror.instance(
       expect(model.api.npm).toBe("@ai-sdk/openai-compatible")
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "acme-local": {

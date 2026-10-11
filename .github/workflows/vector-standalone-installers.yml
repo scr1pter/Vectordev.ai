@@ -16,7 +16,7 @@ permissions:
   contents: read
 jobs:
   windows-native:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -43,7 +43,7 @@ jobs:
         shell: pwsh
         run: bun test test/installation/native-identity.test.ts test/installation/ownership.test.ts
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1

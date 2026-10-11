@@ -1,4 +1,5 @@
 import { base64Encode } from "@vectordevai/core/util/encode"
+import { canAutoAcceptPermission } from "./permission-policy"
 
 export function acceptKey(sessionID: string, directory?: string) {
   if (!directory) return sessionID
@@ -38,32 +39,13 @@ function sessionLineage(session: { id: string; parentID?: string }[], sessionID:
   return ids
 }
 
-// Vector Cloud permissions that act on the user's provider accounts:
-// publishing and moving production, creating or changing a database and its
-// auth, storage and functions (which the provider may bill), hosting settings
-// and domains, and the host's environment variables. Auto-accept leaves every
-// one of them to the user, and any other cloud request that asks every time
-// (no "always" patterns) too. The read-only migration dry run
-// (vector_cloud_inspect) is the one cloud request it may answer.
-const ALWAYS_ASK = new Set([
-  "vector_cloud_publish",
-  "vector_cloud_database",
-  "vector_cloud_environment",
-  "vector_cloud_hosting",
-])
-
-export function alwaysAsks(permission: { permission?: string; always?: string[] }) {
-  if (!permission.permission?.startsWith("vector_cloud_")) return false
-  return ALWAYS_ASK.has(permission.permission) || permission.always?.length === 0
-}
-
 export function autoRespondsPermission(
   autoAccept: Record<string, boolean>,
   session: { id: string; parentID?: string }[],
   permission: { sessionID: string; permission?: string; always?: string[] },
   directory?: string,
 ) {
-  if (alwaysAsks(permission)) return false
+  if (!canAutoAcceptPermission(permission.permission, permission.always)) return false
   const value = sessionLineage(session, permission.sessionID)
     .map((id) => accepted(autoAccept, id, directory))
     .find((item): item is boolean => item !== undefined)

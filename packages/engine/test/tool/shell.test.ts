@@ -197,7 +197,7 @@ describe("tool.shell", () => {
 
   it.live("falls back from terminal-only configured shell", () =>
     Effect.gen(function* () {
-      const tmp = yield* tmpdirScoped({ config: { shell: "fish" } })
+      const tmp = yield* tmpdirScoped({ trusted: true, config: { shell: "fish" } })
       yield* runIn(
         tmp,
         Effect.gen(function* () {

@@ -128,7 +128,6 @@ const api: ElectronAPI = {
   setDisplayBackend: (backend) => ipcRenderer.invoke("set-display-backend", backend),
   parseMarkdownCommand: (markdown) => ipcRenderer.invoke("parse-markdown", markdown),
   checkAppExists: (appName) => ipcRenderer.invoke("check-app-exists", appName),
-  resolveAppPath: (appName) => ipcRenderer.invoke("resolve-app-path", appName),
   pathExists: (path) => ipcRenderer.invoke("path-exists", path),
   storeGet: (name, key) => ipcRenderer.invoke("store-get", name, key),
   storeSet: (name, key, value) => ipcRenderer.invoke("store-set", name, key, value),
@@ -283,6 +282,11 @@ const api: ElectronAPI = {
       detect: (projectPath, taskId) => ipcRenderer.invoke("cloud-build-detect", projectPath, taskId),
       set: (projectPath, taskId, input) => ipcRenderer.invoke("cloud-build-set", projectPath, taskId, input),
     },
+  },
+  serverCredentials: {
+    get: (url) => ipcRenderer.invoke("server-credential-get", url),
+    set: (url, credential) => ipcRenderer.invoke("server-credential-set", url, credential),
+    delete: (url) => ipcRenderer.invoke("server-credential-delete", url),
   },
   vectorAccount: {
     status: () => ipcRenderer.invoke("vector-account-status"),

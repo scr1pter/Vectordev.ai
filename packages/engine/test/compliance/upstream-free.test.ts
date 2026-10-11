@@ -120,6 +120,7 @@ it.instance(
       })
     }),
   {
+    trusted: true,
     config: {
       provider: {
         "unlisted-fixture-provider": {

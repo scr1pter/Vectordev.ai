@@ -10,6 +10,7 @@ export const Entry = Schema.Union([
   Disabled,
   Schema.Struct({
     command: Schema.mutable(Schema.Array(Schema.String)),
+    cwd: Schema.optional(Schema.String),
     extensions: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
     disabled: Schema.optional(Schema.Boolean),
     env: Schema.optional(Schema.Record(Schema.String, Schema.String)),

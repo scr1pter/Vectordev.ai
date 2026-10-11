@@ -5,6 +5,7 @@ import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/s
 import type { TextareaRenderable } from "@opentui/core"
 import { useTheme, selectedForeground } from "../../context/theme"
 import type { PermissionRequest } from "@vectordevai/sdk/v2"
+import { canAlwaysAllowPermission } from "../../util/permission"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../ui/border"
 import { useSync } from "../../context/sync"
@@ -314,6 +315,21 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               }
             }
 
+            if (permission === "private_network") {
+              const url = typeof data.url === "string" ? data.url : ""
+              return {
+                icon: "%",
+                title: `Reach your network: ${url}`,
+                body: (
+                  <Show when={url}>
+                    <box paddingLeft={1}>
+                      <text fg={theme.textMuted}>{"A local or private address: " + url}</text>
+                    </box>
+                  </Show>
+                ),
+              }
+            }
+
             if (permission === "websearch") {
               const query = typeof data.query === "string" ? data.query : ""
               return {
@@ -402,7 +418,13 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               title="Permission required"
               header={header()}
               body={current.body}
-              options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
+              options={{
+                once: "Allow once",
+                ...(canAlwaysAllowPermission(props.request.permission, props.request.always)
+                  ? { always: "Allow always" }
+                  : {}),
+                reject: "Reject",
+              }}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {

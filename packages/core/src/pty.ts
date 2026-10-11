@@ -2,6 +2,7 @@ export * as Pty from "./pty"
 
 import { makeLocationNode } from "./effect/app-node"
 import type { Disp, Proc } from "#pty"
+import path from "path"
 import { Context, Effect, Layer, Schema, Types } from "effect"
 import { Pty } from "@vectordevai/schema/pty"
 import { Config } from "./config"
@@ -165,7 +166,16 @@ const layer = Layer.effect(
 
     const create = Effect.fn("Pty.create")(function* (input: CreateInput) {
       const id = PtyID.ascending()
-      const command = input.command || Shell.preferred(Config.latest(yield* config.entries(), "shell"))
+      const shell = (yield* config.entries())
+        .filter(
+          (entry): entry is Config.Document =>
+            entry.type === "document" &&
+            entry.info.shell !== undefined &&
+            (config.executable?.(entry) ?? config.scope?.(entry) !== "project"),
+        )
+        .at(-1)
+      const command =
+        input.command || Shell.preferred(shell?.info.shell, shell?.path ? path.dirname(shell.path) : location.directory)
       const args = Shell.login(command) ? [...(input.args ?? []), "-l"] : [...(input.args ?? [])]
       const cwd = input.cwd || location.directory
       // The terminal runs whatever the user or a project script launches, so it must not inherit

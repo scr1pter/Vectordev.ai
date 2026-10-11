@@ -159,6 +159,7 @@ const layer = Layer.effect(
           browser_interact: "ask",
           browser_sensitive: "ask",
           webfetch: "ask",
+          private_network: "ask",
           websearch: "ask",
           // Vector Cloud actions that publish, change a database or write a
           // host's environment act on the user's own accounts and may bill them.
@@ -186,19 +187,21 @@ const layer = Layer.effect(
           "gh pr view*": "allow",
           "gh pr diff*": "allow",
           "gh pr review*": "ask",
-          "bun test*": "allow",
-          "bun typecheck*": "allow",
-          "bun run test*": "allow",
-          "bun run build*": "allow",
-          "npm test*": "allow",
-          "npm run test*": "allow",
-          "npm run build*": "allow",
-          "pnpm test*": "allow",
-          "pnpm run test*": "allow",
-          "pnpm run build*": "allow",
-          "pytest*": "allow",
-          "cargo test*": "allow",
-          "go test*": "allow",
+          // Test and build entrypoints execute repository-controlled code. A read-only specialist may run them only
+          // after an explicit approval; the shell sandbox remains a second boundary after approval.
+          "bun test*": "ask",
+          "bun typecheck*": "ask",
+          "bun run test*": "ask",
+          "bun run build*": "ask",
+          "npm test*": "ask",
+          "npm run test*": "ask",
+          "npm run build*": "ask",
+          "pnpm test*": "ask",
+          "pnpm run test*": "ask",
+          "pnpm run build*": "ask",
+          "pytest*": "ask",
+          "cargo test*": "ask",
+          "go test*": "ask",
         } as const
         // Flags that make an allowed command write a chosen file or run another program. They come after every other
         // rule, so no ask or allow can reopen them.
@@ -225,7 +228,7 @@ const layer = Layer.effect(
           security: ["webfetch", "websearch"],
         }
         const verificationCommands = Object.entries(readonlyVerificationBash)
-          .filter((entry) => entry[1] === "allow")
+          .filter((entry) => entry[1] !== "deny")
           .map((entry) => entry[0])
         const readonlySpecialist = (name: string, rules: PermissionV1.Rule[]) => {
           const tools = ["grep", "glob", "list", "read", ...readonlySpecialists[name]]
@@ -511,13 +514,32 @@ const layer = Layer.effect(
           item.permission = Permission.merge(item.permission, Permission.fromConfig(value.permission ?? {}))
         }
 
-        // Rebuilt after the config loop above, so a read-only specialist's own config rules are narrowed like the user's.
+        // A trusted project's config merges over the user's, so a project allow can replace a user-global deny.
+        // Replay the user's own rules from their first deny on, after everything else, so each such deny holds again
+        // and the user's later exceptions to it keep working.
+        const ceiling = yield* config.permissionCeiling()
+        const userCeiling = (name: string) => {
+          if (!ceiling) return []
+          const rules = [
+            ...Permission.fromConfig(ceiling.permission),
+            ...Permission.fromConfig(ceiling.agent[name] ?? {}),
+          ]
+          const first = rules.findIndex((rule) => rule.action === "deny")
+          return first === -1 ? [] : rules.slice(first)
+        }
+        for (const [name, item] of Object.entries(agents)) {
+          if (!(name in readonlySpecialists)) item.permission = Permission.merge(item.permission, userCeiling(name))
+        }
+
+        // Rebuilt after the config loop above, so a read-only specialist's own config rules, and the user ceiling, are
+        // narrowed like the user's.
         for (const name of Object.keys(readonlySpecialists)) {
           const item = agents[name]
           if (!item) continue
           item.permission = readonlySpecialist(name, [
             ...user,
             ...Permission.fromConfig(cfg.agent?.[name]?.permission ?? {}),
+            ...userCeiling(name),
           ])
         }
 

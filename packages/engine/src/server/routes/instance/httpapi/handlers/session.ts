@@ -44,6 +44,8 @@ import {
 } from "../groups/session"
 import { InvalidRequestError, PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
+import { allowsSessionID, allowsSessionLocation } from "./session-access"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -71,7 +73,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
       const directory = ctx.query.directory ? yield* InstanceState.directory : undefined
-      return yield* session
+      const sessions = yield* session
         .list({
           directory: ctx.query.scope === "project" ? undefined : directory,
           scope: ctx.query.scope,
@@ -89,10 +91,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
             }).pipe(Effect.as([])),
           ),
         )
+      const principal = yield* RequestPrincipal
+      return sessions.filter((item) => allowsSessionLocation(principal, item))
     })
 
     const status = Effect.fn("SessionHttpApi.status")(function* () {
-      return Object.fromEntries(yield* statusSvc.list())
+      const principal = yield* RequestPrincipal
+      const statuses = yield* statusSvc.list()
+      const allowed = yield* Effect.filter(statuses, ([sessionID]) => allowsSessionID(session, principal, sessionID))
+      return Object.fromEntries(allowed)
     })
 
     const requireSession = Effect.fn("SessionHttpApi.requireSession")(function* (sessionID: SessionID) {
@@ -324,16 +331,19 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return true
     })
 
+    // The owner's files are theirs to attach from anywhere. A guest's go through the workspace boundary and read
+    // permission, which only the owner can approve.
+    const attachments = Effect.gen(function* () {
+      return (yield* RequestPrincipal).kind === "owner" ? { userFile: () => true } : {}
+    })
+
     const prompt = Effect.fn("SessionHttpApi.prompt")(function* (ctx: {
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
       const message = yield* promptSvc
-        .prompt({
-          ...ctx.payload,
-          sessionID: ctx.params.sessionID,
-        })
+        .prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }, yield* attachments)
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
       return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
         contentType: "application/json",
@@ -345,7 +355,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof PromptPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }, yield* attachments).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })

@@ -22,6 +22,7 @@ import { schemaErrorLayer } from "./middleware/schema-error"
 import { PtyEnvironment } from "./pty-environment"
 import { layer as locationLayer } from "./location"
 import { sessionLocationLayer } from "./middleware/session-location"
+import { requestGuardLayer } from "./middleware/request-guard"
 
 const applicationServices = LayerNode.group([
   Database.node,
@@ -36,11 +37,12 @@ const applicationServices = LayerNode.group([
   LocationServiceMap.node,
 ])
 
-export function createRoutes(password?: string) {
+export function createRoutes(password?: string, options?: { readonly guardedHostname?: string }) {
   return makeRoutes(
     password
       ? ServerAuth.Config.configLayer({ username: "vector", password: Option.some(password) })
       : ServerAuth.Config.layer,
+    options,
   )
 }
 
@@ -48,7 +50,10 @@ export function createEmbeddedRoutes() {
   return makeRoutes(ServerAuth.Config.configLayer({ username: "vector", password: Option.none() }))
 }
 
-function makeRoutes<AuthError, AuthServices>(auth: Layer.Layer<ServerAuth.Config, AuthError, AuthServices>) {
+function makeRoutes<AuthError, AuthServices>(
+  auth: Layer.Layer<ServerAuth.Config, AuthError, AuthServices>,
+  options?: { readonly guardedHostname?: string },
+) {
   const serviceLayer = AppNodeBuilder.build(applicationServices, [[SessionExecution.node, SessionExecutionLocal.node]])
 
   return HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
@@ -57,6 +62,7 @@ function makeRoutes<AuthError, AuthServices>(auth: Layer.Layer<ServerAuth.Config
     Layer.provide(locationLayer),
     Layer.provide(authorizationLayer),
     Layer.provide(schemaErrorLayer),
+    Layer.provide(requestGuardLayer(options)),
     Layer.provide(auth),
     Layer.provide(serviceLayer),
   )

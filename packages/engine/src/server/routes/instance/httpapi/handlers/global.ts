@@ -12,6 +12,7 @@ import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
+import { type Principal, RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 import { GlobalUpgradeInput } from "../groups/global"
 
 function eventData(data: unknown): Sse.Event {
@@ -31,11 +32,21 @@ function parseBody(body: string) {
   }
 }
 
-function eventResponse() {
+function eventResponse(principal: Principal) {
   return Effect.gen(function* () {
     yield* Effect.logInfo("global event connected")
+    // An invited guest needs this stream to load the app, but only for the workspace it was invited to: the owner's
+    // other projects must not reach it.
+    const visible = (event: GlobalBusEvent) => {
+      if (principal.kind === "owner") return true
+      if (principal.kind !== "guest" || event.directory === undefined) return false
+      if (![...principal.workspaceDirectories.values()].includes(event.directory)) return false
+      return event.workspace === undefined || principal.workspaceIDs.has(event.workspace)
+    }
     const events = Stream.callback<GlobalBusEvent>((queue) => {
-      const handler = (event: GlobalBusEvent) => Queue.offerUnsafe(queue, event)
+      const handler = (event: GlobalBusEvent) => {
+        if (visible(event)) Queue.offerUnsafe(queue, event)
+      }
       return Effect.acquireRelease(
         Effect.sync(() => GlobalBus.on("event", handler)),
         () => Effect.sync(() => GlobalBus.off("event", handler)),
@@ -77,7 +88,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
     })
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {
-      return yield* eventResponse()
+      return yield* eventResponse(yield* RequestPrincipal)
     })
 
     const configGet = Effect.fn("GlobalHttpApi.configGet")(function* () {

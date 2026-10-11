@@ -1,8 +1,8 @@
 import { describe, expect } from "bun:test"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { httpClient } from "@vectordevai/core/effect/app-node-platform"
-import { Effect, Layer } from "effect"
-import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+import { Effect, Exit, Layer } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Agent } from "../../src/agent/agent"
 import { Truncate } from "@/tool/truncate"
 import { Config } from "@/config/config"
@@ -11,10 +11,22 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import { Tool } from "@/tool/tool"
 import { testEffect } from "../lib/effect"
 
+const requests: Request[] = []
+const permissionRequests: Array<Parameters<Tool.Context["ask"]>[0]> = []
+const rejected = new Set<string>()
+let respond = (_request: Request) => new Response("hello", { headers: { "content-type": "text/plain" } })
+const http = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.sync(() => {
+      const input = new Request(request.url, { headers: request.headers })
+      requests.push(input)
+      return HttpClientResponse.fromWeb(request, respond(input))
+    }),
+  ),
+)
 const it = testEffect(
-  LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node, Config.node]), [
-    [httpClient, FetchHttpClient.layer as Layer.Layer<HttpClient.HttpClient>],
-  ]),
+  LayerNode.compile(LayerNode.group([httpClient, Truncate.node, Agent.node, Config.node]), [[httpClient, http]]),
 )
 
 const ctx = {
@@ -25,17 +37,25 @@ const ctx = {
   abort: AbortSignal.any([]),
   messages: [],
   metadata: () => Effect.void,
-  ask: () => Effect.void,
+  ask: (input: Parameters<Tool.Context["ask"]>[0]) =>
+    Effect.sync(() => {
+      permissionRequests.push(input)
+    }).pipe(Effect.andThen(rejected.has(input.permission) ? Effect.die(new Error("rejected")) : Effect.void)),
 }
 
-const withFetch = <A, E, R>(
-  fetch: (req: Request) => Response | Promise<Response>,
-  fn: (url: URL) => Effect.Effect<A, E, R>,
-) =>
+const withFetch = <A, E, R>(fetch: (req: Request) => Response, fn: (url: URL) => Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
-    Effect.sync(() => Bun.serve({ port: 0, fetch })),
-    (server) => fn(server.url),
-    (server) => Effect.sync(() => server.stop(true)),
+    Effect.sync(() => {
+      requests.length = 0
+      permissionRequests.length = 0
+      respond = fetch
+    }),
+    () => fn(new URL("https://1.1.1.1")),
+    () =>
+      Effect.sync(() => {
+        rejected.clear()
+        respond = () => new Response("hello", { headers: { "content-type": "text/plain" } })
+      }),
   )
 
 const exec = Effect.fn("WebFetchToolTest.exec")(function* (args: Tool.InferParameters<typeof WebFetchTool>) {
@@ -62,9 +82,81 @@ describe("tool.webfetch", () => {
             expect(agents).toHaveLength(2)
             expect(agents[0]).toMatch(/^Mozilla\/.* Vector\//)
             expect(agents[1]).toMatch(/^Vector\//)
+            expect(permissionRequests.map((request) => request.patterns)).toEqual([[url.toString()]])
           }),
       )
     }),
+  )
+
+  it.instance("asks separately before reaching a private destination", () =>
+    Effect.gen(function* () {
+      requests.length = 0
+      permissionRequests.length = 0
+      rejected.add("private_network")
+
+      expect(Exit.isFailure(yield* Effect.exit(exec({ url: "http://127.0.0.1/private", format: "text" })))).toBe(true)
+      expect(permissionRequests.map((request) => [request.permission, request.patterns])).toEqual([
+        ["webfetch", ["http://127.0.0.1/private"]],
+        ["private_network", ["http://127.0.0.1"]],
+      ])
+      expect(requests).toEqual([])
+      rejected.clear()
+    }),
+  )
+
+  it.instance("fetches a local dev server once the user approves it", () =>
+    withFetch(
+      () => new Response("dev server up", { headers: { "content-type": "text/plain" } }),
+      () =>
+        Effect.gen(function* () {
+          const result = yield* exec({ url: "http://localhost:3000/health", format: "text" })
+
+          expect(result.output).toBe("dev server up")
+          expect(permissionRequests.map((request) => [request.permission, request.always])).toEqual([
+            ["webfetch", ["*"]],
+            ["private_network", ["http://localhost:3000"]],
+          ])
+          expect(requests.map((request) => request.url)).toEqual(["http://localhost:3000/health"])
+        }),
+    ),
+  )
+
+  it.instance("authorizes every public redirect destination", () =>
+    withFetch(
+      (request) =>
+        new URL(request.url).pathname === "/redirect"
+          ? new Response("", { status: 302, headers: { location: "/target" } })
+          : new Response("redirected", { headers: { "content-type": "text/plain" } }),
+      (url) =>
+        Effect.gen(function* () {
+          const source = new URL("/redirect", url).toString()
+          const target = new URL("/target", url).toString()
+          const result = yield* exec({ url: source, format: "text" })
+
+          expect(result.output).toBe("redirected")
+          expect(permissionRequests.map((request) => request.patterns)).toEqual([[source], [target]])
+          expect(requests.map((request) => request.url)).toEqual([source, target])
+        }),
+    ),
+  )
+
+  it.instance("asks again before following a public-to-private redirect", () =>
+    withFetch(
+      () => new Response("", { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data" } }),
+      (url) =>
+        Effect.gen(function* () {
+          rejected.add("private_network")
+          const source = new URL("/redirect-private", url).toString()
+
+          expect(Exit.isFailure(yield* Effect.exit(exec({ url: source, format: "text" })))).toBe(true)
+          expect(permissionRequests.map((request) => [request.permission, request.patterns])).toEqual([
+            ["webfetch", [source]],
+            ["webfetch", ["http://169.254.169.254/latest/meta-data"]],
+            ["private_network", ["http://169.254.169.254"]],
+          ])
+          expect(requests.map((request) => request.url)).toEqual([source])
+        }),
+    ),
   )
 
   it.instance("returns image responses as file attachments", () =>

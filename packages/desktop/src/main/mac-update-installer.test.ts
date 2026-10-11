@@ -201,7 +201,12 @@ describe("update failure marker", () => {
 
 describe.skipIf(process.platform === "win32")("mac update helper", () => {
   // Runs the real helper with stand-ins for macOS's ditto and open, which Linux does not have.
-  function helper(input: { ditto: "fails" | "empty" | "extracts"; open?: "fails-new"; mv?: "fails-new" }) {
+  function helper(input: {
+    ditto: "fails" | "empty" | "extracts"
+    open?: "fails-new"
+    mv?: "fails-new"
+    signature?: "invalid" | "team-mismatch" | "requirement-mismatch" | "notarization-fails" | "ad-hoc" | "ad-hoc-update"
+  }) {
     const app = fixture()
     const bin = join(app.root, "bin")
     mkdirSync(bin)
@@ -231,6 +236,35 @@ describe.skipIf(process.platform === "win32")("mac update helper", () => {
       ]),
       { mode: 0o755 },
     )
+    // An ad-hoc signature has no Team ID, a cdhash requirement that changes with every build, and no notarization.
+    const adHoc = input.signature === "ad-hoc"
+    const currentTeam = adHoc ? "not set" : "CURRENTTEAM"
+    const updatedTeam =
+      input.signature === "team-mismatch"
+        ? "OTHERTEAM"
+        : adHoc || input.signature === "ad-hoc-update"
+          ? "not set"
+          : currentTeam
+    const currentRequirement = adHoc ? "cdhash current" : "identifier current"
+    const updatedRequirement =
+      input.signature === "requirement-mismatch" ? "identifier other" : adHoc ? "cdhash updated" : currentRequirement
+    writeFileSync(
+      join(bin, "codesign"),
+      script([
+        'last=""; for arg in "$@"; do last="$arg"; done',
+        input.signature === "invalid" ? 'case "$*" in *--verify*) exit 1 ;; esac' : "",
+        'case "$*" in',
+        `  *--verbose=4*) case "$last" in */payload/Vector.app) team="${updatedTeam}" ;; *) team="${currentTeam}" ;; esac; echo "TeamIdentifier=$team" >&2 ;;`,
+        `  *-r-*) case "$last" in */payload/Vector.app) requirement="${updatedRequirement}" ;; *) requirement="${currentRequirement}" ;; esac; echo "designated => $requirement" >&2 ;;`,
+        "esac",
+        "exit 0",
+      ]),
+      { mode: 0o755 },
+    )
+    const notarized = input.signature !== "notarization-fails" && !adHoc && input.signature !== "ad-hoc-update"
+    writeFileSync(join(bin, "spctl"), script([notarized ? "exit 0" : "exit 1"]), {
+      mode: 0o755,
+    })
     const mv = spawnSync("sh", ["-c", "command -v mv"], { encoding: "utf8" }).stdout.trim()
     if (input.mv === "fails-new")
       writeFileSync(
@@ -245,7 +279,9 @@ describe.skipIf(process.platform === "win32")("mac update helper", () => {
       file,
       macUpdateInstallerScript
         .replaceAll("/usr/bin/ditto", join(bin, "ditto"))
-        .replaceAll("/usr/bin/open", join(bin, "open")),
+        .replaceAll("/usr/bin/open", join(bin, "open"))
+        .replaceAll("/usr/bin/codesign", join(bin, "codesign"))
+        .replaceAll("/usr/sbin/spctl", join(bin, "spctl")),
     )
     const marker = join(app.userData, "updater-failed.json")
     writeFileSync(marker, JSON.stringify({ version: "1.9.0", reason: "stale" }))
@@ -298,6 +334,60 @@ describe.skipIf(process.platform === "win32")("mac update helper", () => {
       version: "2.0.0",
       reason: "The downloaded update does not contain a valid Vector.app",
     })
+    expect(run.opened).toEqual([run.target])
+  })
+
+  test("rejects an invalid update signature before replacing the current app", () => {
+    const run = helper({ ditto: "extracts", signature: "invalid" })
+
+    expect(run.status).toBe(1)
+    expect(run.app).toBe("old")
+    expect(run.failure?.reason).toBe("The downloaded update has an invalid code signature")
+    expect(run.opened).toEqual([run.target])
+    expect(run.leftovers).toEqual([])
+  })
+
+  test("rejects a mismatched signing identity before replacing the current app", () => {
+    const run = helper({ ditto: "extracts", signature: "team-mismatch" })
+
+    expect(run.status).toBe(1)
+    expect(run.app).toBe("old")
+    expect(run.failure?.reason).toContain("signing identity")
+    expect(run.opened).toEqual([run.target])
+  })
+
+  test("rejects a mismatched designated requirement before replacing the current app", () => {
+    const run = helper({ ditto: "extracts", signature: "requirement-mismatch" })
+
+    expect(run.status).toBe(1)
+    expect(run.app).toBe("old")
+    expect(run.failure?.reason).toContain("designated requirement")
+    expect(run.opened).toEqual([run.target])
+  })
+
+  test("installs an ad-hoc signed update over an ad-hoc signed install", () => {
+    const run = helper({ ditto: "extracts", signature: "ad-hoc" })
+
+    expect(run.status).toBe(0)
+    expect(run.app).toBe("new")
+    expect(run.failure).toBeUndefined()
+  })
+
+  test("rejects an ad-hoc signed update over a signed install", () => {
+    const run = helper({ ditto: "extracts", signature: "ad-hoc-update" })
+
+    expect(run.status).toBe(1)
+    expect(run.app).toBe("old")
+    expect(run.failure?.reason).toContain("signing identity")
+    expect(run.opened).toEqual([run.target])
+  })
+
+  test("rejects a non-notarized update before replacing the current app", () => {
+    const run = helper({ ditto: "extracts", signature: "notarization-fails" })
+
+    expect(run.status).toBe(1)
+    expect(run.app).toBe("old")
+    expect(run.failure?.reason).toContain("not notarized")
     expect(run.opened).toEqual([run.target])
   })
 

@@ -16,6 +16,8 @@ import { ProviderV2 } from "@vectordevai/core/provider"
 import { ModelV2 } from "@vectordevai/core/model"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
+import { WorkspaceTrust } from "@vectordevai/core/workspace-trust/workspace-trust"
+import { Global } from "@vectordevai/core/global"
 
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Plugin.node, CrossSpawnSpawner.node]), [
@@ -26,16 +28,17 @@ const it = testEffect(
 )
 const systemHook = "experimental.chat.system.transform"
 
-function withProject<A, E, R>(source: string, self: Effect.Effect<A, E, R>) {
+function withProject<A, E, R>(source: string, self: Effect.Effect<A, E, R>, trusted = true) {
   return Effect.gen(function* () {
     const test = yield* TestInstance
     const file = path.join(test.directory, "plugin.ts")
+    const config = path.join(test.directory, "vector.json")
     yield* Effect.all(
       [
         Effect.promise(() => Bun.write(file, source)),
         Effect.promise(() =>
           Bun.write(
-            path.join(test.directory, "vector.json"),
+            config,
             JSON.stringify(
               {
                 $schema: "https://vectordev.ai/config.json",
@@ -49,6 +52,10 @@ function withProject<A, E, R>(source: string, self: Effect.Effect<A, E, R>) {
       ],
       { discard: true, concurrency: 2 },
     )
+    if (trusted) {
+      const snapshot = yield* Effect.promise(() => WorkspaceTrust.snapshot(test.directory, [config]))
+      yield* Effect.promise(() => WorkspaceTrust.approve(Global.Path.state, snapshot))
+    }
     return yield* self
   })
 }
@@ -70,6 +77,21 @@ const triggerSystemTransform = Effect.fn("PluginTriggerTest.triggerSystemTransfo
 })
 
 describe("plugin.trigger", () => {
+  it.instance("does not import a project plugin before workspace trust", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const marker = path.join(test.directory, "imported.txt")
+      yield* withProject(
+        `await Bun.write(${JSON.stringify(marker)}, "imported")\nexport default async () => ({})\n`,
+        Effect.gen(function* () {
+          expect(yield* triggerSystemTransform()).toEqual([])
+          expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
+        }),
+        false,
+      )
+    }),
+  )
+
   it.instance("plugin SDK calls the in-process server with a Request adapter", () =>
     withProject(
       [

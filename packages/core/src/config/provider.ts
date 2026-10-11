@@ -3,6 +3,7 @@ export * as ConfigProvider from "./provider"
 import { Schema } from "effect"
 import { ProviderV2 } from "../provider"
 import { ModelV2 } from "../model"
+import { WorkspaceTrust } from "../workspace-trust/workspace-trust"
 
 export class Request extends Schema.Class<Request>("ConfigV2.Provider.Request")({
   headers: Schema.Record(Schema.String, Schema.String).pipe(Schema.optional),
@@ -69,3 +70,22 @@ export class Info extends Schema.Class<Info>("ConfigV2.Provider")({
   request: Request.pipe(Schema.optional),
   models: Schema.Record(Schema.String, Model).pipe(Schema.optional),
 }) {}
+
+export function endpointsAllowed(info: Info) {
+  if (info.api?.url && !WorkspaceTrust.remoteUrlAllowed(info.api.url)) return false
+  return Object.values(info.models ?? {}).every(
+    (model) => !model.api || !("url" in model.api) || !model.api.url || WorkspaceTrust.remoteUrlAllowed(model.api.url),
+  )
+}
+
+export function projectHeaders(headers: Record<string, string> | undefined) {
+  if (!headers) return headers
+  return Object.fromEntries(Object.entries(headers).filter(([, value]) => !/\{(?:env|file):[^}]+\}/.test(value)))
+}
+
+export function projectBody(body: Record<string, unknown> | undefined) {
+  if (!body) return body
+  return Object.fromEntries(
+    Object.entries(body).filter(([key]) => !/(?:^|[-_])(?:api[-_]?key|token|secret|password)(?:$|[-_])/i.test(key)),
+  )
+}

@@ -1,19 +1,17 @@
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { GlobalBus } from "@/bus/global"
-import { ServerAuth } from "@/server/auth"
 import { EventV2 } from "@vectordevai/core/event"
 import { AbsolutePath } from "@vectordevai/core/schema"
 import { ServerEvent } from "@vectordevai/schema/server-event"
-import { Deferred, Effect, Encoding, Queue, Redacted, Result } from "effect"
+import { Deferred, Effect, Queue } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { EventApi } from "../groups/event"
 import { IncomingMessage } from "node:http"
-
-const AUTH_TOKEN_QUERY = "auth_token"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 
 type Presence = EventV2.Data<typeof ServerEvent.ClientJoined>
 
@@ -40,40 +38,6 @@ function eventData(data: unknown): Sse.Event {
 
 function eventID() {
   return EventV2.ID.create()
-}
-
-function emptyCredential(): ServerAuth.DecodedCredentials {
-  return { username: "", password: Redacted.make("") }
-}
-
-// Read-only mirror of the authorization middleware's credential parsing: the
-// auth_token query wins over the Basic header. Auth itself already happened.
-function decodeCredential(input: string): ServerAuth.DecodedCredentials {
-  const decoded = Encoding.decodeBase64String(input)
-  if (!Result.isSuccess(decoded)) return emptyCredential()
-  const separator = decoded.success.indexOf(":")
-  if (separator === -1) return emptyCredential()
-  return {
-    username: decoded.success.slice(0, separator),
-    password: Redacted.make(decoded.success.slice(separator + 1)),
-  }
-}
-
-function credentialFromRequest(request: HttpServerRequest.HttpServerRequest) {
-  const token = new URL(request.url, "http://localhost").searchParams.get(AUTH_TOKEN_QUERY)
-  if (token) return decodeCredential(token)
-  const match = /^Basic\s+(.+)$/i.exec(request.headers.authorization ?? "")
-  if (match) return decodeCredential(match[1])
-  return emptyCredential()
-}
-
-function usernameFromRequest(request: HttpServerRequest.HttpServerRequest, config: ServerAuth.Info) {
-  const credential = credentialFromRequest(request)
-  const identity = ServerAuth.identity(credential, config)
-  if (identity === "owner") return config.username
-  if (identity === "guest") return config.guestUsername ?? "guest"
-  // Unsecured server: nobody had to authenticate, so everyone is the owner.
-  return credential.username || config.username
 }
 
 // Effect's Node server only interrupts a request when the *response* emits
@@ -191,19 +155,17 @@ function eventResponse(events: EventV2.Interface, request: HttpServerRequest.Htt
 export const eventHandlers = HttpApiBuilder.group(EventApi, "event", (handlers) =>
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
-    // The auth middleware keeps its config to itself; read our own copy so we can
-    // name the connecting identity without touching the middleware.
-    const auth = yield* ServerAuth.Config
     return handlers.handleRaw(
       "subscribe",
       Effect.fn("EventHttpApi.subscribe")(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
+        const principal = yield* RequestPrincipal
         return yield* eventResponse(events, request, {
-          username: usernameFromRequest(request, auth),
+          username: principal.username,
           clientID: `cli_${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`,
           at: Date.now(),
         })
       }),
     )
-  }).pipe(Effect.provide(ServerAuth.Config.layer)),
+  }),
 )

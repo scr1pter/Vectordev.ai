@@ -181,6 +181,8 @@ export type ServerReadyData = {
   password: string | null
 }
 
+export type { OpenPathApplication } from "../main/open-path"
+
 export type WslServersAPI = WslServersPlatform
 export type UpdaterAPI = {
   subscribe: (cb: (state: UpdaterState) => void) => Promise<() => void>
@@ -735,6 +737,12 @@ export type ElectronAPI = {
   wslServers: WslServersAPI
   updater: UpdaterAPI
   vectorAccount: VectorAccountPlatform
+  /** Saved remote-server passwords, sealed with the OS keychain; set resolves false when none is available. */
+  serverCredentials: {
+    get: (url: string) => Promise<{ username?: string; password: string } | null>
+    set: (url: string, credential: { username?: string; password: string }) => Promise<boolean>
+    delete: (url: string) => Promise<void>
+  }
   reportBug: (input: { message: string; email?: string }) => Promise<{ delivered: boolean; error?: string }>
   askHelpAssistant: (input: {
     messages: { role: "user" | "assistant"; content: string }[]
@@ -756,8 +764,7 @@ export type ElectronAPI = {
   getDisplayBackend: () => Promise<LinuxDisplayBackend | null>
   setDisplayBackend: (backend: LinuxDisplayBackend | null) => Promise<void>
   parseMarkdownCommand: (markdown: string) => Promise<string>
-  checkAppExists: (appName: string) => Promise<boolean>
-  resolveAppPath: (appName: string) => Promise<string | null>
+  checkAppExists: (application: import("../main/open-path").OpenPathApplication) => Promise<boolean>
   pathExists: (path: string) => Promise<boolean>
   storeGet: (name: string, key: string) => Promise<string | null>
   storeSet: (name: string, key: string, value: string) => Promise<void>
@@ -791,7 +798,7 @@ export type ElectronAPI = {
   getPathForFile: (file: File) => string
   saveFilePicker: (opts?: { title?: string; defaultPath?: string }) => Promise<string | null>
   openLink: (url: string) => void
-  openPath: (path: string, app?: string) => Promise<void>
+  openPath: (path: string, app?: import("../main/open-path").OpenPathApplication) => Promise<void>
   readClipboardImage: () => Promise<{ buffer: ArrayBuffer; width: number; height: number } | null>
   showNotification: (title: string, body?: string) => void
   getMicrophonePermission: () => Promise<MicrophonePermissionState>

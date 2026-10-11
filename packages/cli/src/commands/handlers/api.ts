@@ -21,6 +21,7 @@ export default Runtime.handler(
     const transport = yield* daemon.transport()
     const params = Option.getOrElse(input.param, () => ({}))
     const request = yield* resolveRequest(transport, input.request, params)
+    const url = resolveRequestUrl(transport.url, request.path)
     const headers = new Headers(transport.headers)
     for (const header of input.header) {
       const index = header.indexOf(":")
@@ -31,7 +32,7 @@ export default Runtime.handler(
     if (body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json")
 
     const response = yield* Effect.tryPromise(() =>
-      fetch(new URL(request.path, transport.url), {
+      fetch(url, {
         method: request.method,
         headers,
         body,
@@ -53,8 +54,21 @@ export function resolveOperation(spec: OpenApi, operationID: string, params: Rec
 }
 
 export function rawRequest(input: readonly string[]) {
-  if (input.length !== 2 || !methods.has(input[0].toLowerCase()) || !input[1].startsWith("/")) return
+  if (input.length !== 2 || !methods.has(input[0].toLowerCase())) return
+  if (!isSameOriginPath(input[1])) throw new Error(`Invalid API path: ${input[1]}`)
   return { method: input[0].toUpperCase(), path: input[1] }
+}
+
+export function resolveRequestUrl(base: string, requestPath: string) {
+  if (!isSameOriginPath(requestPath)) throw new Error(`Invalid API path: ${requestPath}`)
+  const origin = new URL(base)
+  const url = new URL(requestPath, origin)
+  if (url.origin !== origin.origin) throw new Error(`Invalid API path: ${requestPath}`)
+  return url
+}
+
+function isSameOriginPath(requestPath: string) {
+  return requestPath.startsWith("/") && !requestPath.startsWith("//") && !requestPath.includes("\\")
 }
 
 function resolveRequest(

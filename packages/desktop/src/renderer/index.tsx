@@ -28,6 +28,7 @@ import { initI18n, t } from "./i18n"
 import { initializationData, initializationReady } from "./initialization"
 import { resetZoom, setPinchZoomEnabled, webviewZoom, zoomIn, zoomOut } from "./webview-zoom"
 import { availableStartupServer, readyWslConnections } from "./wsl/connections"
+import { openPathApplication } from "../main/open-path"
 import "./styles.css"
 import { Splash } from "@vectordevai/ui/logo"
 import { useTheme } from "@vectordevai/ui/theme/context"
@@ -241,11 +242,9 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
       window.api.openLink(url)
     },
     async openPath(path: string, app?: string) {
-      if (os === "windows") {
-        const resolvedApp = app ? await window.api.resolveAppPath(app).catch(() => null) : null
-        return window.api.openPath(path, resolvedApp ?? undefined)
-      }
-      return window.api.openPath(path, app)
+      const application = openPathApplication(app)
+      if (app && !application) throw new Error("Vector rejected an unsupported application.")
+      return window.api.openPath(path, application)
     },
 
     back() {
@@ -265,6 +264,7 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     },
 
     vectorAccount: window.api.vectorAccount,
+    serverCredentials: window.api.serverCredentials,
 
     exportDebugLogs: () => window.api.exportDebugLogs(),
 
@@ -331,7 +331,8 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     runDesktopMenuAction,
 
     checkAppExists: async (appName: string) => {
-      return window.api.checkAppExists(appName)
+      const application = openPathApplication(appName)
+      return application ? window.api.checkAppExists(application) : false
     },
 
     async readClipboardImage() {

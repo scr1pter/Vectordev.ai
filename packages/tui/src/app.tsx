@@ -750,6 +750,34 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         category: "Provider",
       },
       {
+        name: "project.trust",
+        title: "Trust project configuration",
+        slashName: "trust",
+        category: "System",
+        run: async () => {
+          const status = await sdk.client.config.trust.get(undefined, { throwOnError: true }).catch((error) => {
+            toast.show({ message: `Could not check project trust: ${String(error)}`, variant: "error" })
+          })
+          if (!status?.data) return
+          if (status.data.trusted) {
+            toast.show({ message: "This project configuration is already trusted.", variant: "info" })
+            return
+          }
+          const approved = await DialogConfirm.show(
+            dialog,
+            "Trust project configuration?",
+            `Allow project settings, skills, plugins, and configured commands from ${status.data.workspace}? Only approve projects whose code you trust.`,
+          )
+          if (approved !== true) return
+          const result = await sdk.client.config.trust.approve(undefined, { throwOnError: true }).catch((error) => {
+            toast.show({ message: `Could not trust project: ${String(error)}`, variant: "error" })
+          })
+          if (!result?.data?.trusted) return
+          await sync.bootstrap()
+          toast.show({ message: "Project configuration is trusted and reloaded.", variant: "success" })
+        },
+      },
+      {
         name: "vector.status",
         title: "View status",
         slashName: "status",

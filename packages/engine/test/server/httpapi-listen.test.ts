@@ -38,12 +38,12 @@ async function startListener() {
   return Server.listen({ hostname: "127.0.0.1", port: 0 })
 }
 
-async function startNoAuthListener() {
+async function startNoAuthListener(options: { cors?: string[]; loopbackOrigins?: boolean } = {}) {
   Flag.VECTOR_SERVER_PASSWORD = undefined
   Flag.VECTOR_SERVER_USERNAME = auth.username
   delete process.env.VECTOR_SERVER_PASSWORD
   process.env.VECTOR_SERVER_USERNAME = auth.username
-  return Server.listen({ hostname: "127.0.0.1", port: 0 })
+  return Server.listen({ hostname: "127.0.0.1", port: 0, ...options })
 }
 
 function authorization() {
@@ -169,7 +169,7 @@ async function openPtySocket(listener: Awaited<ReturnType<typeof startListener>>
 
 describe("HttpApi Server.listen", () => {
   testPty("serves HTTP routes and upgrades PTY websocket through Server.listen", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -220,7 +220,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("stop(true) is safe when called concurrently and repeatedly", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -240,7 +240,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("stop(true) can force a graceful stop already in progress", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -261,7 +261,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("graceful stop waits for an overlapping forced stop", async () => {
-    await using tmp = await tmpdir({ git: true, config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, git: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     let stopped = false
     try {
@@ -305,6 +305,7 @@ describe("HttpApi Server.listen", () => {
 
   test("plugin client requests reuse the listening server instance", async () => {
     await using tmp = await tmpdir({
+      trusted: true,
       init: async (directory) => {
         const plugin = path.join(directory, "plugin.ts")
         const initialized = path.join(directory, "initialized.txt")
@@ -381,7 +382,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("rejects unsafe PTY ticket mint and connect requests", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startListener()
     try {
       const info = await createCat(listener, tmp.path)
@@ -413,6 +414,10 @@ describe("HttpApi Server.listen", () => {
       scopedWs.close(1000)
 
       await expectSocketRejected(socketURL(listener, info.id, tmp.path, "not-a-ticket"))
+      await expectSocketRejected(socketURL(listener, info.id, tmp.path))
+      await expectSocketRejected(socketURL(listener, info.id, tmp.path), {
+        headers: { authorization: authorization(), origin: "https://evil.example" },
+      })
 
       const reusable = await connectTicket(listener, info.id, tmp.path)
       const ws = await openSocket(socketURL(listener, info.id, tmp.path, reusable.ticket))
@@ -433,7 +438,7 @@ describe("HttpApi Server.listen", () => {
   })
 
   testPty("keeps PTY websocket tickets optional when server auth is disabled", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startNoAuthListener()
     try {
       const info = await createCat(listener, tmp.path)
@@ -450,7 +455,7 @@ describe("HttpApi Server.listen", () => {
 
 describe("Server.listen Host check", () => {
   test("a passwordless loopback listener answers only requests addressed to a loopback name", async () => {
-    await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
     const listener = await startNoAuthListener()
     try {
       const health = new URL("/global/health", listener.url)
@@ -471,6 +476,28 @@ describe("Server.listen Host check", () => {
       expect((await fetch(config, { headers: { "x-vector-directory": tmp.path } })).status).toBe(200)
     } finally {
       await stop(listener, "timed out cleaning up host-checked listener").catch(() => undefined)
+    }
+  })
+
+  test("a passwordless listener refuses other local pages as origins", async () => {
+    await using tmp = await tmpdir({ trusted: true, config: { formatter: false, lsp: false } })
+    // A release build: running from source keeps trusting every local page for the app's dev server.
+    const listener = await startNoAuthListener({ cors: ["http://localhost:3000"], loopbackOrigins: false })
+    try {
+      const create = (origin: string) =>
+        fetch(new URL("/session", listener.url), {
+          method: "POST",
+          keepalive: false,
+          headers: { origin, "content-type": "application/json", "x-vector-directory": tmp.path },
+          body: "{}",
+        }).then((response) => response.status)
+      // A repository's dev server on another port cannot drive the passwordless listener.
+      expect(await create("http://localhost:5173")).toBe(403)
+      expect(await create("http://127.0.0.1:8080")).toBe(403)
+      expect(await create(`http://127.0.0.1:${listener.port}`)).toBe(200)
+      expect(await create("http://localhost:3000")).toBe(200)
+    } finally {
+      await stop(listener, "timed out cleaning up origin-checked listener").catch(() => undefined)
     }
   })
 

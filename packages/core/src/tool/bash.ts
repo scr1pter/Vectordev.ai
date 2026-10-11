@@ -11,6 +11,7 @@ import { LocationMutation } from "../location-mutation"
 import { AppProcess } from "../process"
 import { PermissionV2 } from "../permission"
 import { PositiveInt } from "../schema"
+import { which } from "../util/which"
 import { ToolRegistry } from "./registry"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
@@ -90,6 +91,19 @@ const externalCommandDirectories = (command: string, cwd: string) => {
   return [...directories]
 }
 
+const configuredShell = Effect.fnUntraced(function* (shell: string, cwd: string, fs: FSUtil.Interface) {
+  const candidate = path.isAbsolute(shell)
+    ? shell
+    : shell.includes("/") || shell.includes("\\")
+      ? path.resolve(cwd, shell)
+      : which(shell)
+  if (!candidate) return yield* Effect.fail(new Error(`Configured shell was not found: ${shell}`))
+  const canonical = yield* fs.realPath(candidate)
+  if ((yield* fs.stat(canonical)).type !== "File")
+    return yield* Effect.fail(new Error(`Configured shell is not a file: ${canonical}`))
+  return canonical
+})
+
 const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const tools = yield* Tools.Service
@@ -135,6 +149,24 @@ const layer = Layer.effectDiscard(
                 (directory) =>
                   `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
               )
+              const entries = yield* config.entries()
+              const selectedShell = Object.assign(
+                {},
+                ...entries.flatMap((entry) =>
+                  entry.type === "document" && config.executable?.(entry) !== false ? [entry.info] : [],
+                ),
+              ).shell
+              const shell = selectedShell ? yield* configuredShell(selectedShell, target.canonical, fs) : defaultShell()
+              if (selectedShell)
+                yield* permission.assert({
+                  action: "shell",
+                  resources: [shell],
+                  save: [shell],
+                  metadata: { configured: selectedShell },
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source,
+                })
               yield* permission.assert({
                 action: name,
                 resources: [input.command],
@@ -143,14 +175,8 @@ const layer = Layer.effectDiscard(
                 agent: context.agent,
                 source,
               })
-
               if ((yield* fs.stat(target.canonical)).type !== "Directory")
                 return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
-
-              const entries = yield* config.entries()
-              const shell =
-                Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
-                  .shell ?? defaultShell()
               const command = ChildProcess.make(input.command, [], {
                 cwd: target.canonical,
                 shell,

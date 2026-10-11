@@ -44,5 +44,5 @@ it.instance(
       expect(added?.description).toBe(PLUGIN_AGENT.description)
       expect(added?.mode).toBe(PLUGIN_AGENT.mode)
     }),
-  { config: { plugin: [pluginUrl] } },
+  { trusted: true, config: { plugin: [pluginUrl] } },
 )

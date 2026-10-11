@@ -36,7 +36,7 @@ function withTmp<T, A, E, R>(
   })
 }
 
-function load(dir: string, flags?: Parameters<typeof RuntimeFlags.layer>[0]) {
+function load(dir: string, flags?: Parameters<typeof RuntimeFlags.layer>[0], scope: "global" | "local" = "local") {
   const source = path.join(dir, "vector.json")
   return Effect.gen(function* () {
     const config = yield* Effect.promise(
@@ -55,7 +55,7 @@ function load(dir: string, flags?: Parameters<typeof RuntimeFlags.layer>[0]) {
               get: () =>
                 Effect.succeed({
                   plugin: plugins,
-                  plugin_origins: plugins.map((plugin) => ({ spec: plugin, source, scope: "local" as const })),
+                  plugin_origins: plugins.map((plugin) => ({ spec: plugin, source, scope })),
                 }),
               directories: () => Effect.succeed([dir]),
               waitForDependencies: () => Effect.die("Local plugins must not wait for SDK downloads"),
@@ -241,7 +241,51 @@ describe("plugin.loader.shared", () => {
     ),
   )
 
-  it.live("resolves npm plugin specs with explicit and default versions", () =>
+  it.live("resolves npm plugin specs with explicit and default versions from the user's global config", () =>
+    withTmp(
+      async (dir) => {
+        const acme = path.join(dir, "node_modules", "acme-plugin")
+        const scope = path.join(dir, "node_modules", "scope-plugin")
+        await fs.mkdir(acme, { recursive: true })
+        await fs.mkdir(scope, { recursive: true })
+        await Bun.write(
+          path.join(acme, "package.json"),
+          JSON.stringify({ name: "acme-plugin", type: "module", main: "./index.js" }, null, 2),
+        )
+        await Bun.write(path.join(acme, "index.js"), "export default { server: async () => ({}) }\n")
+        await Bun.write(
+          path.join(scope, "package.json"),
+          JSON.stringify({ name: "scope-plugin", type: "module", main: "./index.js" }, null, 2),
+        )
+        await Bun.write(path.join(scope, "index.js"), "export default { server: async () => ({}) }\n")
+
+        await Bun.write(
+          path.join(dir, "vector.json"),
+          JSON.stringify({ plugin: ["acme-plugin", "scope-plugin@2.3.4"] }, null, 2),
+        )
+
+        return { acme, scope }
+      },
+      (tmp) =>
+        Effect.gen(function* () {
+          const add = spyOn(Npm, "add").mockImplementation(async (pkg) => {
+            if (pkg === "acme-plugin@latest") return { directory: tmp.extra.acme, entrypoint: undefined }
+            return { directory: tmp.extra.scope, entrypoint: undefined }
+          })
+
+          try {
+            yield* load(tmp.path, undefined, "global")
+
+            expect(add.mock.calls).toContainEqual(["acme-plugin@latest"])
+            expect(add.mock.calls).toContainEqual(["scope-plugin@2.3.4"])
+          } finally {
+            add.mockRestore()
+          }
+        }),
+    ),
+  )
+
+  it.live("rejects bare mutable npm plugin specs from a project and resolves exact versions", () =>
     withTmp(
       async (dir) => {
         const acme = path.join(dir, "node_modules", "acme-plugin")
@@ -276,7 +320,8 @@ describe("plugin.loader.shared", () => {
           try {
             yield* load(tmp.path)
 
-            expect(add.mock.calls).toContainEqual(["acme-plugin@latest"])
+            expect(add.mock.calls).not.toContainEqual(["acme-plugin"])
+            expect(add.mock.calls).not.toContainEqual(["acme-plugin@latest"])
             expect(add.mock.calls).toContainEqual(["scope-plugin@2.3.4"])
           } finally {
             add.mockRestore()

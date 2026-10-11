@@ -6,13 +6,16 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ProjectNotFoundError } from "../errors"
 import { markInstanceForReload } from "../lifecycle"
+import { RequestPrincipal } from "@vectordevai/protocol/middleware/authorization"
 
 export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", (handlers) =>
   Effect.gen(function* () {
     const svc = yield* Project.Service
     const project = yield* ProjectV2.Service
 
+    // A guest is routed to its own workspace, and the owner's other projects stay out of its list.
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
+      if ((yield* RequestPrincipal).kind !== "owner") return [(yield* InstanceState.context).project]
       return yield* svc.list()
     })
 
