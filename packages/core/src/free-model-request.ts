@@ -1,5 +1,5 @@
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
-import { isFreeModelID } from "./free-model-catalog"
+import { isFreeModelID } from "./free-model-catalog.js"
 
 const DISABLED_PLUGINS = [
   "web",
@@ -27,7 +27,7 @@ export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[]
     throw new Error("Choose a free model and include conversation messages.")
   const selected = models.find((model) => model.id === body.model && isFreeModelID(model.id))
   if (!selected)
-    throw new Error("That free model is no longer available. Choose another model from Free models inside of Vector.")
+    throw new Error("That free model is no longer available. Choose another model from Models included with Vector.")
   if (
     (body.plugins !== undefined &&
       (!Array.isArray(body.plugins) ||
@@ -43,7 +43,7 @@ export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[]
     body.modalities !== undefined
   )
     throw new Error(
-      "Paid plugins, presets, and generated media are not available through Free models inside of Vector.",
+      "Paid plugins, presets, and generated media are not available through Models included with Vector.",
     )
   const messages = body.messages.map((value) => {
     if (
@@ -58,7 +58,7 @@ export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[]
         value.content.some((part) => !isRecord(part) || part.type !== "text" || typeof part.text !== "string")
       )
         throw new Error(
-          "Free models inside of Vector currently accept text and tool messages. Connect a provider that supports this attachment.",
+          "Models included with Vector currently accept text and tool messages. Connect a provider that supports this attachment.",
         )
     }
     if (
@@ -77,7 +77,7 @@ export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[]
     (!Array.isArray(body.tools) ||
       body.tools.some((tool) => !isRecord(tool) || tool.type !== "function" || !isRecord(tool.function)))
   )
-    throw new Error("Only local function tools are supported by Free models inside of Vector.")
+    throw new Error("Only local function tools are supported by Models included with Vector.")
   const fallbacks = [selected, ...models.filter((model) => model.id !== selected.id && isFreeModelID(model.id))].slice(
     0,
     3,

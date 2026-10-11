@@ -654,11 +654,23 @@ export const ShellTool = Tool.define(
               total += size
               list.push({ text: chunk, size })
               used += size
-              while (used > keep && list.length > 1) {
-                const item = list.shift()
+              while (used > keep) {
+                const item = list[0]
                 if (!item) break
-                used -= item.size
                 cut = true
+                const excess = used - keep
+                if (item.size <= excess) {
+                  list.shift()
+                  used -= item.size
+                  continue
+                }
+                // Trim only the excess: dropping a whole large chunk can discard the entire tail
+                // when a pipe delivers a command's final newline in a separate chunk.
+                const bytes = Buffer.from(item.text, "utf-8")
+                let offset = excess
+                while (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80) offset++
+                list[0] = { text: bytes.subarray(offset).toString("utf-8"), size: bytes.length - offset }
+                used -= offset
               }
 
               last = preview(last + chunk)

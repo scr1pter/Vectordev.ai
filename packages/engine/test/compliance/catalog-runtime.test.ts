@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { mkdtemp, rm, symlink } from "node:fs/promises"
+import { cp, mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { ModelCatalog } from "@vectordevai/schema/model-catalog"
@@ -30,8 +30,12 @@ const expected = JSON.parse(prepared)
 
 async function bundle(target: "bun" | "node", define: Record<string, string>) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "vector-catalog-runtime-"))
-  // Match the desktop builder's external dependencies, resolved from this package's installation.
-  await symlink(path.resolve(import.meta.dirname, "../../node_modules"), path.join(directory, "node_modules"), "dir")
+  // Resolve the external package itself: hoisted installs may put it above this package's node_modules.
+  await cp(
+    path.dirname(Bun.resolveSync("jsonc-parser/package.json", import.meta.dirname)),
+    path.join(directory, "node_modules/jsonc-parser"),
+    { recursive: true },
+  )
   // Isolate each compiler invocation from the test runner's module and file caches.
   await capture(
     [

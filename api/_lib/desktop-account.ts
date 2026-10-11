@@ -29,7 +29,11 @@ function binding(value: unknown) {
   return { state: value.state, challenge: value.challenge }
 }
 
-export async function mintDesktopCode(user: CliTokenUser, input: unknown, fetcher: typeof fetch = fetch) {
+export async function mintDesktopCode(
+  user: CliTokenUser & { name?: string },
+  input: unknown,
+  fetcher: typeof fetch = fetch,
+) {
   const request = binding(input)
   const code = randomBytes(32).toString("base64url")
   const expiresAt = Date.now() + TTL_SECONDS * 1_000
@@ -84,7 +88,10 @@ export async function consumeDesktopCode(input: unknown, fetcher: typeof fetch =
     typeof parsed.user.email !== "string"
   )
     throw invalid()
-  return { id: parsed.user.id, email: parsed.user.email }
+  // The name is display-only, so a missing or odd value never fails the exchange.
+  const name =
+    "name" in parsed.user && typeof parsed.user.name === "string" ? parsed.user.name.trim().slice(0, 120) : ""
+  return { id: parsed.user.id, email: parsed.user.email, ...(name ? { name } : {}) }
 }
 
 function codeKey(code: string) {
