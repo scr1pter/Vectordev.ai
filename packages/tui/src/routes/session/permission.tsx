@@ -114,7 +114,7 @@ function CloudBody(props: { request: PermissionRequest }) {
   const config = useTuiConfig()
   const details = createMemo(() => cloudPermissionDetails(props.request))
   return (
-    <scrollbox flexGrow={1} height="100%" scrollAcceleration={getScrollAcceleration(config)}>
+    <scrollbox focused flexGrow={1} height="100%" scrollAcceleration={getScrollAcceleration(config)}>
       <box flexDirection="column" paddingLeft={1} gap={1}>
         <Show when={details()?.summary}>
           {(summary) => (
