@@ -35,7 +35,6 @@ import {
 } from "./prompt-cache"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
-const ENGINE = join(REPO_ROOT, "packages", "engine", "src", "index.ts")
 const MODEL = "claude-sonnet-4-5"
 // Per million tokens. Anthropic Messages runs are priced at Claude Sonnet 4.5 list prices, with a 5-minute cache write
 // at 1.25x input and a read at 0.1x. OpenAI Responses runs are priced at the rates of the October 2026 live
@@ -153,10 +152,13 @@ const SCENARIOS: Scenario[] = [
   },
 ]
 
-type Call = { name: string; input: Record<string, unknown> } | { name: string; custom: string } | { text: string }
+type Call =
+  | { name: string; input: Record<string, unknown> }
+  | { name: string; custom: string; namespace?: string }
+  | { text: string }
 
-// The steps a runtime plays. Codex has no subagents, so it does a subagent's steps itself: the same work, without
-// the hand-off and without the subagent's report.
+// This script runs delegated work inline under Codex: the same fixture operations without a hand-off or a
+// subagent report. Current Codex versions support subagents; these cases do not compare equivalent topologies.
 function stepsFor(runtime: Runtime, scenario: Scenario) {
   if (runtime !== "codex") return scenario.steps
   return scenario.steps.filter((step) => step.kind !== "delegate" && !(step.kind === "answer" && step.sub))
@@ -219,11 +221,14 @@ function toolCall(runtime: Runtime, step: Step, dir: string): Call {
       description: step.description,
       prompt: step.prompt,
       subagent_type: step.agent === "explore" ? "Explore" : "general-purpose",
+      // The fixed script waits for the child report before the parent edits or verifies.
+      run_in_background: false,
     },
   }
 }
 
 const flags = parseFlags(process.argv.slice(2))
+const ENGINE = join(resolve(flags.engineRoot ?? REPO_ROOT), "packages", "engine", "src", "index.ts")
 const CODEX = flags.codex ?? process.env.VECTOR_EVAL_CODEX ?? "codex"
 const OPENAI_MODEL = flags.openaiModel ?? "gpt-5.5"
 const CODEX_MODEL = flags.codexModel ?? OPENAI_MODEL
@@ -295,6 +300,8 @@ for (const scenario of scenarios) {
         model: runtime === "codex" ? CODEX_MODEL : runtime === "vector-openai" ? OPENAI_MODEL : MODEL,
         exitCode: recorded.exitCode,
         unplayed: recorded.unplayed,
+        performance: recorded.performance,
+        verification: recorded.verification,
         requests: costs,
         totals: totals(costs),
         toolDefinitions: definitions,
@@ -313,6 +320,8 @@ await writeFile(
       rates: RATES,
       sessions: SESSIONS,
       websocket: flags.ws,
+      engineRoot: resolve(flags.engineRoot ?? REPO_ROOT),
+      memorySamplingMs: 100,
       scenarios: reports,
     },
     null,
@@ -348,23 +357,40 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
   // What each response was asked and answered, so a request that continues it can be priced on the whole context.
   const history = new Map<string, { input: unknown[]; output: unknown[] }>()
   let id = 0
+  let started = 0
+  const requestTimesMs: number[] = []
   // Plays the next scripted call for one Responses or Messages request and records it.
   const respond = (body: Record<string, unknown>, sentBytes: number, headers: Record<string, string>, ws: boolean) => {
-    const tools = Array.isArray(body.tools) ? body.tools : []
+    requestTimesMs.push(performance.now() - started)
+    const tools = toolsOf({ body, output: "", sentBytes })
     // Requests without tools are side calls such as title generation, and a generate:false request only warms the
     // cache; neither advances the script.
-    const call: Call =
+    const planned: Call =
       body.generate === false
         ? { text: "" }
         : tools.length === 0
           ? { text: "Bench task" }
           : (calls.shift() ?? { text: "Done." })
+    // Newer Codex releases advertise tool namespaces inside additional_tools and execute through code mode.
+    // Keep the exact same scripted shell/patch operations, using only the tool shape actually advertised.
+    const call: Call =
+      tools.some((tool) => tool.name === "functions.exec") && !("text" in planned)
+        ? {
+            name: "exec",
+            namespace: "functions",
+            custom:
+              "custom" in planned
+                ? `text(await tools.apply_patch(${JSON.stringify(planned.custom)}));`
+                : `text(await tools.exec_command(${JSON.stringify(planned.input)}));`,
+          }
+        : planned
     const n = ++id
     const priced = "input" in body ? continued(body, history) : body
     const items = body.generate === false ? [] : responseItems(call, n, body)
     if (Array.isArray(priced.input)) history.set(`resp_${n}`, { input: priced.input, output: items })
     requests.push({
       body: priced,
+      sentBody: body,
       output: "custom" in call ? call.custom : "input" in call ? JSON.stringify(call.input) : call.text,
       sentBytes,
       headers,
@@ -420,18 +446,34 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
     },
   })
   const base = `http://127.0.0.1:${server.port}`
+  const samplePhase = () => (requests.length === 0 ? "startup" : calls.length === 0 ? "tail" : "active")
+  started = performance.now()
   const result =
     runtime === "vector" || runtime === "vector-openai"
-      ? await exec("bun", vectorArgs(task.prompt, runtime), dir, vectorEnv(runtime, home, base, dir))
+      ? await exec("bun", vectorArgs(task.prompt, runtime), dir, vectorEnv(runtime, home, base, dir), true, samplePhase)
       : runtime === "claude-code"
-        ? await exec("claude", claudeArgs(task.prompt), dir, claudeEnv(home, base), true)
-        : await exec(CODEX, codexArgs(task.prompt), dir, await codexEnv(home, base), true)
+        ? await exec("claude", claudeArgs(task.prompt), dir, claudeEnv(home, base), true, samplePhase)
+        : await exec(CODEX, codexArgs(task.prompt), dir, await codexEnv(home, base), true, samplePhase)
   server.stop(true)
+  const verification = scenario.id === "long-loop" ? undefined : await exec(task.check.command, task.check.args, dir)
   if (!flags.keep) await rm(root, { recursive: true, force: true })
   if (requests.length === 0)
     return { error: `the agent sent no requests (exit ${result.exitCode}): ${result.output.slice(-800)}` }
   if (calls.length > 0) process.stderr.write(`  note: ${calls.length} scripted step(s) were never requested\n`)
-  return { exitCode: result.exitCode, requests, unplayed: calls.length }
+  return {
+    exitCode: result.exitCode,
+    requests,
+    unplayed: calls.length,
+    verification: verification ? { exitCode: verification.exitCode, output: verification.output } : undefined,
+    performance: {
+      wallMs: result.wallMs,
+      timeToFirstRequestMs: requestTimesMs[0],
+      requestTimesMs,
+      postTerminalMs: result.wallMs - (requestTimesMs.at(-1) ?? 0),
+      sampledPeakProcessTreeRssKiB: Math.max(0, ...result.samples.map((sample) => sample.rssKiB)),
+      samples: result.samples,
+    },
+  }
 }
 
 function vectorArgs(prompt: string, runtime: Runtime) {
@@ -509,7 +551,10 @@ function vectorEnv(runtime: Runtime, home: string, base: string, dir: string) {
     provider: runtime === "vector-openai" ? { openai } : { anthropic },
   }
   return {
+    PATH: process.env.PATH ?? "",
     PWD: dir,
+    VECTOR_EXPERIMENTAL_WEBSOCKET: flags.ws ? "1" : "0",
+    VECTOR_DISABLE_WEBSOCKETS: flags.ws ? "0" : "1",
     VECTOR_TEST_HOME: home,
     HOME: home,
     XDG_CONFIG_HOME: join(home, ".config"),
@@ -587,7 +632,14 @@ async function codexEnv(home: string, base: string) {
 function responseItems(call: Call, n: number, body: Record<string, unknown>) {
   const item =
     "custom" in call
-      ? { type: "custom_tool_call", id: `ctc_${n}`, call_id: `call_${n}`, name: call.name, input: call.custom }
+      ? {
+          type: "custom_tool_call",
+          id: `ctc_${n}`,
+          call_id: `call_${n}`,
+          name: call.name,
+          ...(call.namespace ? { namespace: call.namespace } : {}),
+          input: call.custom,
+        }
       : "input" in call
         ? {
             type: "function_call",
@@ -881,20 +933,76 @@ function table(rows: string[][]) {
 }
 
 // `clean` starts the process with only the given environment, nothing inherited.
-function exec(command: string, args: string[], cwd: string, env: Record<string, string> = {}, clean = false) {
-  return new Promise<{ exitCode: number; output: string }>((done) => {
+function exec(
+  command: string,
+  args: string[],
+  cwd: string,
+  env: Record<string, string> = {},
+  clean = false,
+  phase?: () => string,
+) {
+  return new Promise<{
+    exitCode: number
+    output: string
+    wallMs: number
+    samples: Array<{ atMs: number; phase: string; rssKiB: number }>
+  }>((done) => {
+    const started = performance.now()
+    const samples: Array<{ atMs: number; phase: string; rssKiB: number }> = []
     const child = spawn(command, args, {
       cwd,
       env: clean ? env : { ...process.env, ...env },
       stdio: ["ignore", "pipe", "pipe"],
     })
     const output: string[] = []
+    const tracked = new Map<number, string>()
+    let sampling = false
+    const sample = async () => {
+      if (sampling || !child.pid || !phase) return
+      sampling = true
+      const ps = Bun.spawn(["ps", "-axo", "pid=,ppid=,rss=,lstart="], { stdout: "pipe", stderr: "ignore" })
+      const lines = await new Response(ps.stdout).text()
+      if ((await ps.exited) === 0) {
+        const processes = lines
+          .trim()
+          .split("\n")
+          .map((line) => {
+            const fields = line.trim().split(/\s+/)
+            return {
+              pid: Number(fields[0]),
+              ppid: Number(fields[1]),
+              rss: Number(fields[2]) || 0,
+              start: fields.slice(3).join(" "),
+            }
+          })
+        const descendants = new Set(
+          processes
+            .filter((item) => item.pid === child.pid || tracked.get(item.pid) === item.start)
+            .map((item) => item.pid),
+        )
+        let prior = -1
+        while (prior !== descendants.size) {
+          prior = descendants.size
+          processes.filter((item) => descendants.has(item.ppid)).forEach((item) => descendants.add(item.pid))
+        }
+        const selected = processes.filter((item) => descendants.has(item.pid))
+        selected.forEach((item) => tracked.set(item.pid, item.start))
+        samples.push({
+          atMs: performance.now() - started,
+          phase: phase(),
+          rssKiB: selected.reduce((sum, item) => sum + item.rss, 0),
+        })
+      }
+      sampling = false
+    }
+    const samplingTimer = phase ? setInterval(() => void sample(), 100) : undefined
     child.stdout.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")))
     child.stderr.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")))
     const timer = setTimeout(() => child.kill("SIGKILL"), 240_000)
     child.once("close", (code) => {
       clearTimeout(timer)
-      done({ exitCode: code ?? 1, output: output.join("") })
+      clearInterval(samplingTimer)
+      done({ exitCode: code ?? 1, output: output.join(""), wallMs: performance.now() - started, samples })
     })
   })
 }
@@ -905,6 +1013,7 @@ function parseFlags(argv: string[]) {
     return at === -1 ? undefined : argv[at + 1]
   }
   return {
+    engineRoot: value("engine-root"),
     scenario: value("scenario"),
     runtime: value("runtime"),
     codex: value("codex"),

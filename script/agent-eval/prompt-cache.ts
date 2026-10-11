@@ -23,6 +23,7 @@ export type Recorded = {
   // What the provider prices: for a request that continues an earlier response (previous_response_id), the whole
   // context the provider rebuilds, not just the new items sent.
   body: Record<string, unknown>
+  sentBody?: Record<string, unknown>
   output: string
   // Bytes of the request as sent.
   sentBytes: number
@@ -194,7 +195,18 @@ export function systemBlocks(body: Record<string, unknown>): unknown[] {
 }
 
 export function toolsOf(request: Recorded | undefined) {
-  return Array.isArray(request?.body.tools) ? (request.body.tools as Array<Record<string, unknown>>) : []
+  const direct = Array.isArray(request?.body.tools) ? request.body.tools : []
+  const additional = Array.isArray(request?.body.input)
+    ? request.body.input.flatMap((item) =>
+        item?.type === "additional_tools" && Array.isArray(item.tools) ? item.tools : [],
+      )
+    : []
+  return [...direct, ...additional].flatMap(
+    (tool): Array<Record<string, unknown>> =>
+      tool?.type === "namespace" && Array.isArray(tool.tools)
+        ? tool.tools.map((nested: Record<string, unknown>) => ({ ...nested, name: `${tool.name}.${nested.name}` }))
+        : [tool],
+  )
 }
 
 // The main agent and a subagent are told apart by the tools they are offered.
