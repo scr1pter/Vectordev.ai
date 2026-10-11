@@ -1,6 +1,20 @@
 {
   "releases": [
     {
+      "tag": "v1.99.107",
+      "highlights": [
+        {
+          "source": "desktop",
+          "items": [
+            {
+              "title": "Models included with Vector",
+              "description": "The desktop app and terminal agent now group shared free models under Models included with Vector. Sign in to Vector to use the available models at no charge within the shared daily allowance; model availability can change. If you already connected OpenRouter, Vector prefers your own account and lists each free model once. Reaching the shared allowance offers a way to continue the same conversation with your connected OpenRouter account. Shared requests use eligible zero-price routes with zero data retention, and never switch to a paid model automatically. Desktop and CLI both use version 1.99.107."
+            }
+          ]
+        }
+      ]
+    },
+    {
       "tag": "v1.99.106",
       "highlights": [
         {

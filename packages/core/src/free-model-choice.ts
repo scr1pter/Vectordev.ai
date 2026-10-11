@@ -5,7 +5,7 @@ export type FreeModelChoice = {
   freeModel?: { source: "shared" | "openrouter" }
 }
 
-export const FREE_MODELS_TITLE = "Free models inside of Vector"
+export const FREE_MODELS_TITLE = "Models included with Vector"
 export const OPENROUTER_ACCOUNT_COPY =
   "Use your own free OpenRouter account: up to 50 requests a day, subject to availability. No payment or credits needed. Keep automatic top-ups, default or enforced account plugins, and external provider keys disabled."
 export const OPENROUTER_REMOTE_COPY =
@@ -68,7 +68,7 @@ export function freeModelsLimitNotice(error: unknown): FreeModelsLimitNotice | u
 }
 
 export function freeModelsLimitTitle(limit: FreeModelsLimitNotice) {
-  if (limit.reason === "user_daily") return "You've used today's shared free models inside of Vector"
+  if (limit.reason === "user_daily") return "You've used today's shared allowance for Models included with Vector"
   if (limit.reason === "user_minute") return "Give the shared free models a moment"
   if (limit.reason === "shared_daily") return "Today's shared free model allowance is used up"
   return "Shared free models are temporarily unavailable"
