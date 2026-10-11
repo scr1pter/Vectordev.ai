@@ -12,10 +12,13 @@ export const VectorPlanPlugin = define({
     const plans = yield* ModelPlans.Service
     const credentials = yield* FreeModels.CredentialsService
     const events = yield* EventV2.Service
+    // What the catalog last listed; undefined until the first listing, which then reads the answer itself.
+    const listed: { enabled?: boolean } = {}
     yield* ctx.catalog.transform(
       Effect.fn(function* (catalog) {
         const token = yield* credentials.get("vector")
         const current = yield* plans.catalog(token)
+        listed.enabled = current.enabled
         // Account entitlements, prices and destinations cannot come from repository configuration.
         catalog.provider.remove(ModelPlans.PROVIDER_ID)
         if (!current.enabled) return
@@ -42,6 +45,13 @@ export const VectorPlanPlugin = define({
           })
       }),
     )
+    // Listing answers within a short deadline, so a first read slower than that lists no Codium. Wait for
+    // vectordev.ai's answer once and list Codium as soon as it arrives instead of a minute later.
+    yield* Effect.gen(function* () {
+      const token = yield* credentials.get("vector")
+      const current = yield* plans.catalog(token, { wait: true })
+      if (current.enabled && listed.enabled === false) yield* ctx.catalog.reload()
+    }).pipe(Effect.forkScoped({ startImmediately: true }))
     yield* events.subscribe(Integration.Event.Updated).pipe(
       Stream.runForEach(() => ctx.catalog.reload()),
       Effect.forkScoped({ startImmediately: true }),

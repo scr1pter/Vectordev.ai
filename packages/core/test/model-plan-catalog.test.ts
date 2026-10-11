@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { DateTime, Effect, Exit } from "effect"
+import { DateTime, Deferred, Effect, Exit } from "effect"
 import { Catalog } from "../src/catalog"
 import { FreeModels } from "../src/free-models"
 import { ModelPlans } from "../src/model-plans"
@@ -117,3 +117,35 @@ for (const shared of [true, false])
       expect(String(resolved.value.id)).toBe(FREE_MODEL_FALLBACKS[0].id)
     }),
   )
+
+it.effect("a first catalog read slower than the listing deadline lists Codium as soon as vectordev.ai answers", () =>
+  Effect.gen(function* () {
+    const catalog = yield* Catalog.Service
+    const host = yield* PluginHost.make(yield* PluginV2.Service)
+    const reloaded = yield* Deferred.make<void>()
+    const answer = Promise.withResolvers<Response>()
+    const client = ModelPlans.createClient({ timeout: 5, request: () => answer.promise })
+    yield* VectorPlanPlugin.effect({
+      ...host,
+      catalog: {
+        ...host.catalog,
+        reload: () => host.catalog.reload().pipe(Effect.andThen(Deferred.succeed(reloaded, undefined))),
+      },
+    }).pipe(
+      Effect.provideService(ModelPlans.Service, {
+        catalog: (token, options) => Effect.promise(() => client.catalog(token, options)),
+        request: () => Promise.reject(new Error("Listing must not call the chat gateway")),
+      }),
+      Effect.provideService(FreeModels.CredentialsService, credentials),
+    )
+    const codium = () =>
+      catalog.model
+        .available()
+        .pipe(Effect.map((models) => models.filter((model) => String(model.providerID) === ModelPlans.PROVIDER_ID)))
+    // The listing gave up on its deadline while vectordev.ai was still answering.
+    expect(yield* codium()).toEqual([])
+    answer.resolve(Response.json({ enabled: true, models: [codiumModel] }))
+    yield* Deferred.await(reloaded)
+    expect((yield* codium()).map((model) => String(model.id))).toEqual([codiumModel.id])
+  }),
+)
