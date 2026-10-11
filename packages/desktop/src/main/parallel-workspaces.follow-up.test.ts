@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, setSystemTime, test } from "bun:test"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ExternalAgentRunResult, RunExternalAgentInput } from "./external-agents"
@@ -462,6 +462,77 @@ describe("sending a follow-up to an external workspace", () => {
     // discards exactly the work being followed up on.
     const seeded = await seed({ isolatedPath: join(userDataPath, "vanished") })
     await expect(followUpParallelWorkspace(seeded.id, engine, "hi")).rejects.toThrow("isolated folder is gone")
+  })
+
+  test("a shared-main agent is told that its edits apply directly to the project", async () => {
+    const sourcePath = join(userDataPath, "shared-project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Shared\n")
+    const created = await createParallelWorkspace({
+      name: "Shared agent",
+      taskPrompt: "Inspect README.md.",
+      runtime: "codex",
+      parentSessionId: "ses_parent",
+      sourcePath,
+      sharedPath: sourcePath,
+      teamId: "shared-team",
+    })
+    started.push(created.id)
+
+    await runParallelWorkspace(created.id, engine, undefined, dependencies)
+    await settle(created.id)
+
+    expect(runCalls[0]?.prompt).toContain(`shared workspace: ${sourcePath}`)
+    expect(runCalls[0]?.prompt).toContain("Your edits apply directly")
+    expect(runCalls[0]?.prompt).toContain("preserve their changes")
+    expect(runCalls[0]?.prompt).not.toContain("must remain untouched")
+  })
+
+  test("stopping during validation remains stopped and never launches a repair", async () => {
+    const sourcePath = join(userDataPath, "validation-project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Before\n")
+    await writeFile(join(sourcePath, "bun.lock"), "")
+    await writeFile(join(sourcePath, "package.json"), JSON.stringify({ scripts: { typecheck: "bun check.ts" } }))
+    await writeFile(
+      join(sourcePath, "check.ts"),
+      'await Bun.write(".validation-started", "yes"); await Bun.sleep(3000); process.exit(1)',
+    )
+    const created = await createParallelWorkspace({
+      name: "Cancelable validation",
+      taskPrompt: "Update README.md.",
+      runtime: "codex",
+      parentSessionId: "ses_parent",
+      sourcePath,
+    })
+    started.push(created.id)
+    runHandler = async () => {
+      await writeFile(join(created.isolatedPath, "README.md"), "# After\n")
+      return { exitCode: 0, summary: "Updated README.md.", output: [] }
+    }
+    await runParallelWorkspace(created.id, engine, undefined, dependencies)
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (await stat(join(created.isolatedPath, ".validation-started")).catch(() => undefined)) break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    expect(await stat(join(created.isolatedPath, ".validation-started")).catch(() => undefined)).toBeDefined()
+
+    await stopParallelWorkspace(created.id)
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (
+        listParallelWorkspaces()
+          .find((record) => record.id === created.id)
+          ?.finalSummary.includes("stopped")
+      )
+        break
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+    const stopped = listParallelWorkspaces().find((record) => record.id === created.id)!
+    expect(stopped.status).toBe("stopped")
+    expect(stopped.finalSummary).toBe("The parallel agent was stopped by the user.")
+    expect(stopped.validationReport).toBeUndefined()
+    expect(stopped.repairAttempts).toBe(0)
+    expect(runCalls).toHaveLength(1)
   })
 
   test("the message is appended as a user turn and the record is left queued", async () => {

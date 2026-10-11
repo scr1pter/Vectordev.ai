@@ -31,7 +31,6 @@ import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { AgentPlugin } from "./agent"
 import { CommandPlugin } from "./command"
 import { ModelCatalogPlugin } from "./model-catalog"
-import { ProviderPlugins } from "./provider"
 import { SkillPlugin } from "./skill"
 import { VariantPlugin } from "./variant"
 
@@ -112,6 +111,9 @@ const layer = Layer.effectDiscard(
       return plugin.add(PluginV2.ID.make(loaded.id), loaded.effect)
     }
 
+    // Every provider plugin imports define from this module, so a static import of the provider list closes a cycle:
+    // a provider module loaded first, as its own tests load it, finds its siblings uninitialized.
+    const { ProviderPlugins } = yield* Effect.promise(() => import("./provider"))
     yield* State.batch(
       Effect.gen(function* () {
         yield* add(ConfigReferencePlugin.Plugin)

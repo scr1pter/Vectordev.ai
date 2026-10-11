@@ -1,7 +1,20 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 import { execFileSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
-import { chmod, chown, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, utimes, writeFile } from "node:fs/promises"
+import {
+  chmod,
+  chown,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -514,7 +527,8 @@ describe.skipIf(!runnable)("cloneGithubRepository", () => {
   let sender = 100
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "vector-clone-"))
+    // Clones land under the parent's real path, and the macOS temp folder is a symlink (/var -> /private/var).
+    root = await realpath(await mkdtemp(join(tmpdir(), "vector-clone-")))
     parent = join(root, "parent")
     state = join(root, "state")
     await mkdir(parent)

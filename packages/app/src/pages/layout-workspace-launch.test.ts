@@ -11,6 +11,7 @@ import {
   parallelWorkspacePresentation,
   parallelWorkspaceToolDirectory,
   parallelWorkspaceView,
+  resolveTeamSharedPath,
 } from "./layout-workspace-launch"
 
 test("the Editor switch materializes project drafts and waits for mounted sessions", () => {
@@ -161,4 +162,64 @@ test("external workspace tools are scoped to the isolated checkout", () => {
       isolatedPath: "/repo/.vector/workspaces/claude-1",
     }),
   ).toBe("/repo/.vector/workspaces/claude-1")
+})
+
+test("joining a collaborative team reuses its original checkout across tasks and launch batches", async () => {
+  const scopes: { sourcePath: string }[] = []
+  const path = await resolveTeamSharedPath({
+    team: { topology: "collaborative", sourcePath: "/repo", memberIds: ["first", "second"] },
+    list: async (scope) => {
+      scopes.push(scope)
+      return [
+        { id: "unrelated", isolatedPath: "/repo/other-team" },
+        { id: "second", isolatedPath: "/repo/accidentally-split" },
+        { id: "first", isolatedPath: "/repo/shared" },
+      ]
+    },
+  })
+  expect(scopes).toEqual([{ sourcePath: "/repo" }])
+  expect(path).toBe("/repo/shared")
+})
+
+test("known shared paths and fresh teams do not load workspace records", async () => {
+  const list = async () => {
+    throw new Error("Unexpected workspace lookup")
+  }
+  expect(await resolveTeamSharedPath({ list })).toBeUndefined()
+  expect(
+    await resolveTeamSharedPath({
+      team: { topology: "isolated", sourcePath: "/repo", sharedPath: "/unused", memberIds: ["first"] },
+      list,
+    }),
+  ).toBeUndefined()
+  expect(
+    await resolveTeamSharedPath({
+      team: { topology: "collaborative", sourcePath: "/repo", sharedPath: "/repo/shared", memberIds: ["first"] },
+      list,
+    }),
+  ).toBe("/repo/shared")
+  expect(
+    await resolveTeamSharedPath({
+      team: { topology: "shared-main", sourcePath: "/repo", memberIds: ["first"] },
+      list,
+    }),
+  ).toBe("/repo")
+  expect(
+    await resolveTeamSharedPath({ team: { topology: "collaborative", sourcePath: "/repo", memberIds: [] }, list }),
+  ).toBeUndefined()
+})
+
+test("a missing team checkout or failed lookup stops the join instead of silently splitting the team", async () => {
+  const team = { topology: "collaborative" as const, sourcePath: "/repo", memberIds: ["missing"] }
+  await expect(
+    resolveTeamSharedPath({ team, list: async () => [{ id: "unrelated", isolatedPath: "/wrong" }] }),
+  ).rejects.toThrow("shared workspace could not be found")
+  await expect(
+    resolveTeamSharedPath({
+      team,
+      list: async () => {
+        throw new Error("Workspace service unavailable")
+      },
+    }),
+  ).rejects.toThrow("Workspace service unavailable")
 })

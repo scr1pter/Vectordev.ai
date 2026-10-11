@@ -15,6 +15,7 @@ describe("public event manifest", () => {
     expect(EventManifest.Latest.get("session.next.ancillary.usage")).toBe(SessionEvent.AncillaryUsage)
     expect(EventManifest.Latest.get("session.next.step.ended")).toBe(SessionEvent.Step.Ended)
     expect(EventManifest.Latest.get("session.next.step.resumed")).toBe(SessionEvent.Step.Resumed)
+    expect(EventManifest.Latest.get("session.next.ancillary.usage")).toBe(SessionEvent.AncillaryUsage)
     expect(EventManifest.Latest.get("todo.updated")).toBe(Todo.Event.Updated)
     expect(EventManifest.Latest.has("ide.installed")).toBe(false)
     expect(EventManifest.Latest.has("server.connected")).toBe(true)

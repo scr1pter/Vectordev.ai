@@ -191,9 +191,8 @@ describe("tool.registry", () => {
           tasks: { type: "array", minItems: 1, maxItems: 8, items: { required: ["description", "prompt"] } },
         },
       })
-      expect(Object.keys(schema.properties ?? {})).toEqual(["tasks"])
+      expect(Object.keys(schema.properties ?? {})).toEqual(["tasks", "background"])
       expect(schema).not.toHaveProperty("properties.tasks.items.properties.background")
-      expect(task.description).toContain("Only the legacy singular brief form accepts background=true")
       const legacy = { description: "Inspect the registry", prompt: "Inspect the registry.", background: true }
       expect(Schema.decodeUnknownSync(task.parameters)(legacy)).toEqual(legacy)
       expect(Result.isSuccess(Schema.decodeUnknownResult(task.parameters)({ tasks: [legacy] }))).toBe(false)

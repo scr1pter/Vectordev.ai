@@ -432,6 +432,7 @@ function CardView(props: {
   const [entering, setEntering] = createSignal(props.fresh)
   const expanded = () => !props.finished || props.open
   const canStop = () => props.card.agents.some((agent) => isLive(agent.status) && !!agent.sessionID)
+  const waiting = () => props.card.agents.find((agent) => agent.status === "waiting" && agent.sessionID)
   const mixed = () => new Set(props.card.agents.map((agent) => agent.status)).size > 1
   const agentCount = () => countAgents(props.card.agents)
 
@@ -489,7 +490,7 @@ function CardView(props: {
             aria-label={`Stop ${props.card.title}`}
             title="Stop"
             aria-busy={stopping()}
-            disabled={!canStop()}
+            disabled={stopping() || !canStop()}
             onClick={stop}
           >
             <StopIcon />
@@ -500,8 +501,18 @@ function CardView(props: {
           read a step brighter than the words after them. */}
       <p class="vector-bg-tasks-meta">
         <span class="vector-bg-tasks-kind">{props.card.kindLabel}</span>
-        <Show when={props.card.status === "waiting"}>
-          <span class="vector-bg-tasks-attention">Needs you</span>
+        <Show when={waiting()}>
+          {(agent) => (
+            <button
+              type="button"
+              class="vector-bg-tasks-attention"
+              aria-label={`Respond to ${agent().title}`}
+              title={`Open ${agent().title} to respond`}
+              onClick={() => props.tasks.openAgent(agent())}
+            >
+              Needs you
+            </button>
+          )}
         </Show>
         <time class="vector-bg-tasks-time">{formatDuration(elapsedMs(props.card, props.tasks.now()))}</time>
       </p>

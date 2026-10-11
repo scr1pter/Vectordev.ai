@@ -11,11 +11,7 @@ export function parallelWorkspaceComposerAvailable(input: {
   return input.taskOpen || input.draftOpen || input.returnTaskOpen
 }
 
-export function editorWorkspacePreparation(input: {
-  commandReady: boolean
-  draftID?: string
-  sourcePath: string
-}) {
+export function editorWorkspacePreparation(input: { commandReady: boolean; draftID?: string; sourcePath: string }) {
   if (input.commandReady) return "open" as const
   if (!input.draftID) return "wait" as const
   if (!input.sourcePath) return "missing-project" as const
@@ -60,6 +56,31 @@ export function parallelWorkspaceHref(input: {
 
 export function parallelWorkspaceToolDirectory(input: { sourcePath: string; isolatedPath: string }) {
   return input.isolatedPath
+}
+
+export async function resolveTeamSharedPath(input: {
+  team?: {
+    topology: "isolated" | "collaborative" | "shared-main"
+    sourcePath: string
+    sharedPath?: string
+    memberIds: readonly string[]
+  }
+  list: (scope: { sourcePath: string }) => Promise<readonly { id: string; isolatedPath: string }[]>
+}) {
+  const team = input.team
+  if (!team || team.topology === "isolated") return undefined
+  if (team.sharedPath) return team.sharedPath
+  if (team.topology === "shared-main") return team.sourcePath
+  if (team.memberIds.length === 0) return undefined
+
+  // Teams can include other tasks, whose workspaces are absent from the open
+  // task's cache. Resolve the original member's checkout from the full project.
+  const records = await input.list({ sourcePath: team.sourcePath })
+  const path = team.memberIds
+    .map((id) => records.find((record) => record.id === id)?.isolatedPath)
+    .find((value) => !!value)
+  if (!path) throw new Error("This team's shared workspace could not be found. Refresh the team before joining.")
+  return path
 }
 
 export function parallelWorkspaceNavigation(input: {

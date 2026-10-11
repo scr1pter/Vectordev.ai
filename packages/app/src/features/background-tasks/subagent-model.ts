@@ -372,7 +372,7 @@ function fromError(error: string | undefined): TaskStatus {
 export function agentStatus(input: StatusInput): TaskStatus {
   const busy = input.child === "busy" || input.child === "retry"
   const status = baseStatus(input, busy)
-  if (status === "running" && input.waiting) return "waiting"
+  if (isLive(status) && input.waiting) return "waiting"
   return status
 }
 
@@ -421,9 +421,9 @@ export function statusSummary(statuses: readonly TaskStatus[]) {
     .join(", ")
 }
 
-/** running beats waiting beats pending beats failed beats stopped beats done. */
+/** Surface requests for user input even while other agents are still working. */
 export function aggregateStatus(statuses: readonly TaskStatus[]): TaskStatus {
-  for (const status of ["running", "waiting", "pending", "failed", "stopped"] as const) {
+  for (const status of ["waiting", "running", "pending", "failed", "stopped"] as const) {
     if (statuses.includes(status)) return status
   }
   return "done"
@@ -929,6 +929,11 @@ export function runningAgentCount(cards: readonly CountedCard[]) {
   return countAgents(
     cards.flatMap((card) => card.agents.filter((agent) => agent.status === "running" || agent.status === "waiting")),
   )
+}
+
+/** Distinct agents blocked on a permission or question, including resumed runs. */
+export function waitingAgentCount(cards: readonly CountedCard[]) {
+  return countAgents(cards.flatMap((card) => card.agents.filter((agent) => agent.status === "waiting")))
 }
 
 /**

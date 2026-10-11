@@ -29,6 +29,7 @@ import {
   subagentKind,
   subagentTitle,
   taskPartLocations,
+  waitingAgentCount,
   type TaskSource,
 } from "./subagent-model"
 
@@ -323,6 +324,9 @@ describe("status", () => {
     expect(agentStatus({ reported: "completed", part: "completed" })).toBe("done")
     expect(agentStatus({ reported: "error", part: "error" })).toBe("failed")
     expect(agentStatus({ reported: "cancelled", part: "error" })).toBe("stopped")
+    expect(agentStatus({ reported: "completed", waiting: true })).toBe("done")
+    expect(agentStatus({ reported: "error", waiting: true })).toBe("failed")
+    expect(agentStatus({ reported: "cancelled", waiting: true })).toBe("stopped")
   })
 
   test("a live record follows the child: busy or retrying is running, waiting on a permission is waiting", () => {
@@ -336,6 +340,12 @@ describe("status", () => {
   test("a foreground error before the lifecycle merge maps its text", () => {
     expect(agentStatus({ reported: "running", part: "error", partError: "boom" })).toBe("failed")
     expect(agentStatus({ reported: "running", part: "error", partError: "Tool execution aborted" })).toBe("stopped")
+  })
+
+  test("a permission or question is visible before the child's busy event arrives", () => {
+    expect(agentStatus({ reported: "queued", part: "running", waiting: true })).toBe("waiting")
+    expect(agentStatus({ part: "pending", waiting: true })).toBe("waiting")
+    expect(agentStatus({ reported: "queued", part: "running", waiting: false })).toBe("pending")
   })
 
   test("a background part completes at launch but stays running while the child works", () => {
@@ -378,8 +388,9 @@ describe("status", () => {
     expect(statusSummary([])).toBe("")
   })
 
-  test("aggregate: running, then waiting, pending, failed, stopped, done", () => {
-    expect(aggregateStatus(["done", "running", "waiting"])).toBe("running")
+  test("aggregate: waiting, then running, pending, failed, stopped, done", () => {
+    expect(aggregateStatus(["done", "running", "waiting"])).toBe("waiting")
+    expect(aggregateStatus(["done", "running", "pending"])).toBe("running")
     expect(aggregateStatus(["done", "waiting", "pending"])).toBe("waiting")
     expect(aggregateStatus(["done", "pending", "failed"])).toBe("pending")
     expect(aggregateStatus(["done", "stopped", "failed"])).toBe("failed")
@@ -720,7 +731,7 @@ describe("buildTaskCards", () => {
     expect(agents[2]!.tokens).toBeUndefined()
   })
 
-  test("a child waiting on a permission reads as waiting; running still wins the card", () => {
+  test("a waiting child surfaces attention on its card and phase while siblings keep running", () => {
     const data = fixture()
     addUser(data, "msg_u1", "go")
     addAssistant(data, "msg_a1", "msg_u1", [
@@ -732,11 +743,16 @@ describe("buildTaskCards", () => {
     data.waiting.add("ses_c2")
     const card = buildTaskCards(source(data))[0]!
     expect(card.agents.map((agent) => agent.status)).toEqual(["running", "waiting"])
-    expect(card.status).toBe("running")
-    data.status.ses_c1 = { type: "idle" }
-    data.messages.ses_c1 = []
-    const settled = buildTaskCards(source(data))[0]!
-    expect(settled.status).toBe("running")
+    expect(card.status).toBe("waiting")
+    expect(card.phases[0]!.status).toBe("waiting")
+    expect(card.live).toBe(true)
+    expect(waitingAgentCount([card])).toBe(1)
+    expect(runningAgentCount([card])).toBe(2)
+    data.waiting.delete("ses_c2")
+    const resumed = buildTaskCards(source(data))[0]!
+    expect(resumed.status).toBe("running")
+    expect(resumed.phases[0]!.status).toBe("running")
+    expect(waitingAgentCount([resumed])).toBe(0)
   })
 
   test("live cards sort first, newest first; finished cards by most recent end", () => {
@@ -1268,6 +1284,7 @@ describe("chips, counts and dismissal", () => {
     expect(liveAgentCount([])).toBe(0)
     expect(runningAgentCount(twoPhaseCards())).toBe(1)
     expect(runningAgentCount([])).toBe(0)
+    expect(waitingAgentCount([])).toBe(0)
   })
 
   test("Stop all reaches every live background agent once and leaves foreground and finished ones", () => {
@@ -1299,6 +1316,7 @@ describe("chips, counts and dismissal", () => {
     expect(countAgents(agents)).toBe(4)
     expect(liveAgentCount([{ agents }])).toBe(3)
     expect(runningAgentCount([{ agents }])).toBe(1)
+    expect(waitingAgentCount([{ agents }, { agents }])).toBe(1)
   })
 
   test("the trash hides a finished card until it finishes again", () => {
