@@ -14,3 +14,9 @@ export function sameWorkspaceRevisions(
     )
   )
 }
+
+// Swarm runs and background task records carry no revision (their updatedAt has only millisecond precision), so a
+// poll that returns them is compared by content instead.
+export function samePolledRecords(previous: readonly unknown[], next: readonly unknown[]) {
+  return previous.length === next.length && JSON.stringify(previous) === JSON.stringify(next)
+}

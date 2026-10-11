@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createMemo, createRoot, createSignal } from "solid-js"
-import { sameWorkspaceRevisions } from "@/utils/workspace-revisions"
+import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-revisions"
 
 // The agent workspace list is polled every second or so, and the desktop's list call returns fresh objects each time.
 const poll = (revisions: Record<string, number>) =>
@@ -31,6 +31,28 @@ describe("polled agent workspaces", () => {
       setRecords(poll({ a: 4 }))
       rows()
       expect(builds.count).toBe(4)
+      dispose()
+    })
+  })
+
+  test("polled swarm runs and background tasks rebuild only when a poll brings new content", () => {
+    createRoot((dispose) => {
+      const task = (step: string) => [{ id: "task_1", status: "running", currentStep: step, logs: ["queued"] }]
+      const [records, setRecords] = createSignal(task("Reading"), { equals: samePolledRecords })
+      const builds = { count: 0 }
+      const rows = createMemo(() => {
+        builds.count += 1
+        return records().map((record) => record.currentStep)
+      })
+      rows()
+      for (let tick = 0; tick < 40; tick++) {
+        setRecords(task("Reading"))
+        rows()
+      }
+      expect(builds.count).toBe(1)
+      setRecords(task("Testing"))
+      expect(rows()).toEqual(["Testing"])
+      expect(builds.count).toBe(2)
       dispose()
     })
   })

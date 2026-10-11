@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { sameWorkspaceRevisions } from "./workspace-revisions"
+import { samePolledRecords, sameWorkspaceRevisions } from "./workspace-revisions"
 
 const poll = (revisions: Record<string, number | undefined>) =>
   Object.entries(revisions).map(([id, revision]) => ({ id, revision, name: `Agent ${id}` }))
@@ -16,5 +16,17 @@ describe("sameWorkspaceRevisions", () => {
   test("treats a record without a revision as changed", () => {
     expect(sameWorkspaceRevisions(poll({ a: undefined }), poll({ a: undefined }))).toBe(false)
     expect(sameWorkspaceRevisions(poll({ a: 1 }), poll({ a: undefined }))).toBe(false)
+  })
+})
+
+describe("samePolledRecords", () => {
+  const run = (status: string, logs: string[]) => ({ id: "run_1", status, updatedAt: "2026-10-11T10:00:00.000Z", logs })
+
+  test("an identical poll is unchanged; any field that differs, even at the same updatedAt, is a change", () => {
+    expect(samePolledRecords([run("running", ["planned"])], [run("running", ["planned"])])).toBe(true)
+    expect(samePolledRecords([run("running", ["planned"])], [run("running", ["planned", "started"])])).toBe(false)
+    expect(samePolledRecords([run("running", [])], [run("merging", [])])).toBe(false)
+    expect(samePolledRecords([run("running", [])], [])).toBe(false)
+    expect(samePolledRecords([], [])).toBe(true)
   })
 })

@@ -20,7 +20,7 @@ import { usePlanMode } from "@/context/plan-mode"
 import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "@/components/updater-action"
 import { pathKey } from "@/utils/path-key"
-import { sameWorkspaceRevisions } from "@/utils/workspace-revisions"
+import { samePolledRecords, sameWorkspaceRevisions } from "@/utils/workspace-revisions"
 import { modelDisplayName } from "@/utils/provider-brand"
 import { bestOwnFreeModel } from "@/utils/free-model"
 import { freeModelName } from "@vectordevai/core/free-model-choice"
@@ -600,7 +600,7 @@ export default function NewLayout(props: ParentProps) {
     equals: sameWorkspaceRevisions,
   })
   const [parallelSelectedID, setParallelSelectedID] = createSignal<string>()
-  const [swarmRuns, setSwarmRuns] = createSignal<SwarmRunRecord[]>([])
+  const [swarmRuns, setSwarmRuns] = createSignal<SwarmRunRecord[]>([], { equals: samePolledRecords })
   const [swarmSelectedID, setSwarmSelectedID] = createSignal<string>()
   const [parallelLaunchMode, setParallelLaunchMode] = createSignal<"agent" | "swarm">("agent")
   const [swarmStrategy, setSwarmStrategy] = createSignal<"economy" | "balanced" | "quality">("balanced")
@@ -710,7 +710,9 @@ export default function NewLayout(props: ParentProps) {
   const [followUpBusy, setFollowUpBusy] = createSignal(false)
   const [orchestrationOpen, setOrchestrationOpen] = createSignal(false)
   const [pendingAgentOpenID, setPendingAgentOpenID] = createSignal<string>()
-  const [backgroundTaskRecords, setBackgroundTaskRecords] = createSignal<BackgroundTaskRecord[]>([])
+  const [backgroundTaskRecords, setBackgroundTaskRecords] = createSignal<BackgroundTaskRecord[]>([], {
+    equals: samePolledRecords,
+  })
   globalThis.localStorage?.removeItem(RETIRED_WORK_STATE_KEY)
   const persistedLastProjectPath = globalThis.localStorage?.getItem(LAST_ACTIVE_PROJECT_KEY) ?? ""
   const [lastProjectPath, setLastProjectPath] = createSignal(
