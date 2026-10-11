@@ -114,8 +114,11 @@ export const authorizationRouterMiddleware = HttpRouter.middleware()(
     return (effect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
+        const route = yield* HttpRouter.RouteContext
         const url = new URL(request.url, "http://localhost")
-        if (isPublicUIPath(request.method, url.pathname)) return yield* effect
+        // Only the UI catch-all serves the asset the URL parser reads. /doc answers whatever spelling the router
+        // matched, and the URL parser reads /doc;/../site.webmanifest as an asset.
+        if (route.route.path === "/*" && isPublicUIPath(request.method, url.pathname)) return yield* effect
         if (url.searchParams.has("auth_token")) return yield* validateRawCredential(effect, emptyCredential(), config)
         if (!ServerAuth.required(config))
           return yield* effect.pipe(Effect.provideService(RequestPrincipal, ServerAuth.ownerPrincipal(config)))
