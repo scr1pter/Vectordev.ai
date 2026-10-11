@@ -568,7 +568,10 @@ function vectorEnv(runtime: Runtime, home: string, base: string, dir: string) {
     VECTOR_PURE: "1",
     VECTOR_DISABLE_AUTOUPDATE: "1",
     VECTOR_DISABLE_MODELS_FETCH: "1",
-    VECTOR_AUTH_CONTENT: "{}",
+    // The transport plugin loads only for an auth entry. This synthetic key stays in the
+    // isolated environment and makes WS runs exercise the real API-key fetch wrapper.
+    VECTOR_AUTH_CONTENT:
+      flags.ws && runtime === "vector-openai" ? JSON.stringify({ openai: { type: "api", key: "bench" } }) : "{}",
   }
 }
 
