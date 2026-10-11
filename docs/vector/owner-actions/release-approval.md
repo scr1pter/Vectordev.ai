@@ -2,20 +2,27 @@
 
 ## Current candidate: 1.99.107 (11 October 2026)
 
-The owner explicitly requested fixing the remaining CI failures, merging PR #13,
-and releasing the desktop app and CLI with **Models included with Vector**.
-Desktop and CLI version **1.99.107** are prepared together. This release continues
-the established interim unsigned installer and in-app update-feed policy;
-`1.99.107` is added to the existing version-specific unsigned allowlist. Publish it
-through the manual desktop workflow with `allow_unsigned=true` and
-`prerelease=false`, after the matching CLI and plugin packages and standalone CLI
-archives have been published and verified.
+The owner authorized finishing the handoff, landing the verified integration on
+`main`, and dispatching the desktop release. Desktop **1.99.107** is prepared;
+its `vectorRequiredCliVersion` remains **1.99.99**. Verify the already-published
+CLI, plugin packages and standalone CLI archives at **1.99.99**. This desktop-only
+release requires no new npm publication or CLI version bump.
 
-This is preparation, not a publication record. Final source CI, npm
-authentication, the pinned catalog, all native release checks, installer
-verification and update-feed verification remain required. Keep the website's
-published desktop version at **1.99.106** until those publication checks succeed.
-The older checkpoints below are retained as historical evidence.
+The release continues the established interim unsigned installer and in-app
+update-feed policy; `1.99.107` is in the version-specific unsigned allowlist.
+The owner must first create the GitHub `production-release` environment with
+required reviewers. The workflow refuses to proceed without that protection.
+Once it exists and the final checks pass, dispatch the manual desktop workflow
+from the exact integrated main commit with tag `v1.99.107`,
+`allow_unsigned=true` and `prerelease=false`. All platforms must build that same
+commit and immutable catalog.
+
+This is preparation, not a publication record. Final source CI, the pinned
+catalog, all native release checks, installer verification and all four
+update-feed checks remain required. Keep the website's published desktop version
+at **1.99.106** until publication is verified. The remaining sections preserve
+historical evidence; their version-specific commands do not supersede these
+desktop-only candidate instructions.
 
 ## Historical 1.99.99 release record
 
@@ -39,7 +46,7 @@ it and recheck parity before landing; never force-push main. The owner will star
 the desktop release workflow. Neither main landing nor publication is claimed at
 this checkpoint. No purchases or paid model fallbacks are authorized.
 
-## Current checkpoint
+## Historical 1.99.99 checkpoint
 
 The `release-validation` candidate and [draft PR #7](https://github.com/scr1pter/Vectordev.ai/pull/7)
 include main `9252aba12694b8a6729a4b31cca0f4205e0d3e13` as an ancestor. Main's
