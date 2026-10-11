@@ -140,7 +140,9 @@ export function SessionContextTab() {
     // Work Vector ran for this session under the hood, by helper, then its subagents; both are in the total above.
     ...[
       ...delegated().helpers,
-      ...(delegated().subagents ? [{ label: "subagents", ...delegated().subagents! }] : []),
+      ...(delegated().subagents
+        ? [{ label: delegated().split ? "subagents" : "subagents and helpers", ...delegated().subagents! }]
+        : []),
     ].map((part) => ({
       label: `Of which ${part.label}`,
       value: `${formatSessionCost({

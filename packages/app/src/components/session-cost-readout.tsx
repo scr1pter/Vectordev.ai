@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from "solid-js"
+import { For, Show, createMemo, createSignal } from "solid-js"
 import { TooltipV2 } from "@vectordevai/ui/v2/tooltip-v2"
 import { useSync } from "@/context/sync"
 import { useLanguage } from "@/context/language"
@@ -24,7 +24,8 @@ export function SessionCostReadout() {
   const cost = createMemo(() => sessionSpend(info()).cost)
   const unpriced = createMemo(() => sessionSpend(info()).unpricedSteps)
   const tokens = createMemo(() => sessionTokens(info()))
-  const delegated = createDelegatedSpend(info)
+  const [hovered, setHovered] = createSignal(false)
+  const delegated = createDelegatedSpend(info, hovered)
 
   const usd = createMemo(
     () =>
@@ -48,7 +49,9 @@ export function SessionCostReadout() {
   // Each helper by name, then whatever the subagents spent.
   const parts = createMemo(() => [
     ...delegated().helpers,
-    ...(delegated().subagents ? [{ label: "Subagents", ...delegated().subagents! }] : []),
+    ...(delegated().subagents
+      ? [{ label: delegated().split ? "Subagents" : "Subagents and helpers", ...delegated().subagents! }]
+      : []),
   ])
   const partText = (part: { cost: number; unpricedSteps: number; tokens: number }) =>
     `${formatSessionCost({
@@ -95,6 +98,10 @@ export function SessionCostReadout() {
       >
         <div
           data-component="session-cost-readout"
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          onFocusIn={() => setHovered(true)}
+          onFocusOut={() => setHovered(false)}
           class="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-[color:var(--vx-line)] bg-white/[0.03] px-2.5 text-[11px] font-medium tabular-nums text-white/62 transition-colors duration-150 hover:border-[color:var(--vx-line)] hover:text-white/80"
         >
           <span class="text-[#a78bfa]">{spend()}</span>

@@ -90,6 +90,7 @@ import {
   outcomeFromSession,
 } from "@/features/economics/session-outcomes"
 import { createSessionFamilyRefresher, sessionFamilyEventID } from "@/features/economics/session-family"
+import { isInternalSession } from "@/utils/internal-sessions"
 import { createWorkspaceOutcomeRecorder, type WorkspaceOutcomeRecord } from "@/features/economics/workspace-outcomes"
 import {
   ONBOARDING_UPDATED_EVENT,
@@ -2905,7 +2906,13 @@ export default function NewLayout(props: ParentProps) {
     const directory = (event as { name?: string }).name
     if (!directory) return
     const familyID = sessionFamilyEventID(event.details)
-    if (familyID) void sessionFamily.refresh(familyID, directory).catch(() => undefined)
+    // A helper's steps are not the task's own work, and autocomplete settles one on nearly every pause in typing.
+    // What a helper spent reaches the task's sample the next time the task itself settles.
+    const family =
+      event.details.type === "session.updated"
+        ? event.details.properties.info
+        : serverSync().session.get(familyID ?? "")
+    if (familyID && !isInternalSession(family)) void sessionFamily.refresh(familyID, directory).catch(() => undefined)
     if (event.details.type === "session.updated") {
       const session = event.details.properties.info
       sessionOutcomes.changed(session.id, directory, session.time.updated)
