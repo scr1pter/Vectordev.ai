@@ -1322,7 +1322,11 @@ describe("plugin.openai.http", () => {
       const reader = response.body!.getReader()
       expect((await reader.read()).done).toBe(false)
       ;(await upstream.promise).destroy()
-      const error = await reader.read().then(
+      // Native fetch may deliver already-buffered bytes before the socket error.
+      // A clean EOF still fails the Error assertion below.
+      const error = await (async () => {
+        while (!(await reader.read()).done) {}
+      })().then(
         () => undefined,
         (error: unknown) => error,
       )
