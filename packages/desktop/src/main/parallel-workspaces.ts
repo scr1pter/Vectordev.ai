@@ -1279,12 +1279,22 @@ export async function refreshParallelWorkspace(id: string) {
   if (!(await stat(record.isolatedPath).catch(() => undefined))) return record
   const { changedFiles, diff } =
     record.isolation === "git-worktree" ? await gitDiff(record) : await fallbackDiff(record)
+  const riskLevel = riskFromDiff(diff, changedFiles)
+  // Polling unchanged swarm workspaces must not advance their revision or rebuild every workspace view.
+  if (
+    record.diff === diff &&
+    record.riskLevel === riskLevel &&
+    record.changedFilesCount === changedFiles.length &&
+    JSON.stringify(record.changedFiles) === JSON.stringify(changedFiles) &&
+    (activeRuns.has(id) || queuedRuns.has(id) || !changedFiles.length || record.status === "needs review")
+  )
+    return record
   const updated = updateRecord(id, (current) => ({
     ...current,
     changedFiles,
     diff,
     changedFilesCount: changedFiles.length,
-    riskLevel: riskFromDiff(diff, changedFiles),
+    riskLevel,
     lastActivityAt: now(),
     lastAction: changedFiles.length
       ? `${changedFiles.length} changed file${changedFiles.length === 1 ? "" : "s"} detected`
