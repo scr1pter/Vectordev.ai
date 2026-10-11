@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-import { spawn } from "node:child_process"
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { dirname, join } from "node:path"
-import { cacheReadShare, meterLine, totalTokens, type Meter } from "./meter"
+import { cacheReadShare, totalTokens } from "./meter"
+import { capture } from "./capture"
+import { validateTask } from "./validation"
 import { aggregate, scoreTask, type FileDiff, type RuntimeId, type TaskRun, type TaskScore } from "./score"
 import { TASKS, scoringSpec, taskById, type EvalTask } from "./tasks"
 
@@ -107,22 +108,46 @@ async function main() {
     process.stderr.write(`--repeat must be an integer between 1 and 20.\n\n${USAGE}`)
     return 2
   }
+  if (flags.timeout !== undefined && (!Number.isFinite(flags.timeout) || flags.timeout <= 0)) {
+    process.stderr.write(`--timeout must be a positive finite number.\n\n${USAGE}`)
+    return 2
+  }
 
   const root = await mkdtemp(join(tmpdir(), "vector-agent-eval-"))
   const startedAt = new Date().toISOString()
   process.stderr.write(`Fixtures: ${root}\n`)
 
   const results: RuntimeReport[] = []
+  const launchers = new Map<RuntimeId, Launcher | undefined>()
   for (const runtime of runtimes) {
     const launcher = await resolveLauncher(runtime)
-    process.stderr.write(`\n=== ${RUNTIME_NAME[runtime]} — ${launcher ? launcher.label : "not installed"} ===\n`)
-    const reports: TaskReport[] = []
-    for (const task of tasks)
-      for (const attempt of Array.from({ length: flags.repeat }, (_, index) => index + 1))
-        reports.push(
+    launchers.set(runtime, launcher)
+    const version =
+      launcher &&
+      (await capture({
+        command: launcher.command,
+        args: [...launcher.prefix, "--version"],
+        cwd: REPO_ROOT,
+        timeoutMs: 10_000,
+      }))
+    results.push({
+      runtime,
+      launcher: launcher?.label,
+      version: version?.exitCode === 0 ? version.output.trim() : undefined,
+      aggregate: aggregate(runtime, []),
+      tasks: [],
+    })
+  }
+  const executionOrder: string[] = []
+  for (const [taskIndex, task] of tasks.entries())
+    for (const attempt of Array.from({ length: flags.repeat }, (_, index) => index + 1)) {
+      const offset = (taskIndex + attempt - 1) % results.length
+      for (const entry of [...results.slice(offset), ...results.slice(0, offset)]) {
+        executionOrder.push(`${entry.runtime}/${task.id}#${attempt}`)
+        entry.tasks.push(
           await runTask({
-            runtime,
-            launcher,
+            runtime: entry.runtime,
+            launcher: launchers.get(entry.runtime),
             task,
             root,
             model: flags.model,
@@ -131,21 +156,25 @@ async function main() {
             repetitions: flags.repeat,
           }),
         )
-    results.push({
-      runtime,
-      launcher: launcher?.label,
-      aggregate: aggregate(
-        runtime,
-        reports.map((report) => report.score),
-      ),
-      tasks: reports,
-    })
-  }
+      }
+    }
+  for (const entry of results)
+    entry.aggregate = aggregate(
+      entry.runtime,
+      entry.tasks.map((report) => report.score),
+    )
+  const revision = await git(REPO_ROOT, ["rev-parse", "HEAD"])
 
   const report = {
+    schemaVersion: 2,
+    mode: "live-public-fixture-smoke-test",
+    independentHoldout: false,
+    budgetEnforced: false,
     startedAt,
     completedAt: new Date().toISOString(),
     model: flags.model,
+    repositoryRevision: revision.exitCode === 0 ? revision.output.trim() : undefined,
+    executionOrder,
     platform: `${process.platform}-${process.arch}`,
     bun: Bun.version,
     repetitions: flags.repeat,
@@ -178,6 +207,7 @@ type TaskReport = {
 type RuntimeReport = {
   runtime: RuntimeId
   launcher?: string
+  version?: string
   aggregate: ReturnType<typeof aggregate>
   tasks: TaskReport[]
 }
@@ -225,6 +255,7 @@ async function runTask(input: {
     timeoutMs,
   })
   const wallMs = Date.now() - started
+  const agentCompleted = agent.completed && !agent.runtimeError && !agent.timedOut && agent.exitCode === 0
 
   const collected = await collectDiff(dir, fixture.baseline)
   if ("error" in collected) {
@@ -259,33 +290,40 @@ async function runTask(input: {
   }
   if (agent.timedOut) process.stderr.write(`  ${label}: agent hit the ${timeoutMs / 1000}s timeout\n`)
 
-  const check = await capture({
-    command: input.task.check.command,
-    args: input.task.check.args,
-    cwd: dir,
-    timeoutMs: CHECK_TIMEOUT_MS,
-  })
-  const protectedViolations = await findProtectedViolations(input.task, dir)
-  const assertionFailures = await findAssertionFailures(input.task, dir)
-  const mutationsCaught =
-    check.exitCode === 0 && protectedViolations.length === 0 && assertionFailures.length === 0
-      ? await countMutationsCaught(input.task, dir)
-      : 0
+  const check = await validateTask({ task: input.task, agentDir: dir, root: input.root, timeoutMs: CHECK_TIMEOUT_MS })
+  if (check.error) {
+    const run: TaskRun = { taskId: input.task.id, runtime: input.runtime, status: "harness-error", detail: check.error }
+    return {
+      attempt: input.attempt,
+      run,
+      score: scoreTask(spec, run),
+      agentOutputTail: tail(agent.output),
+      checkOutputTail: tail(check.output),
+    }
+  }
 
   const run: TaskRun = {
     taskId: input.task.id,
     runtime: input.runtime,
     status: "ran",
     wallMs,
+    validationWallMs: check.wallMs,
+    totalWallMs: Date.now() - started,
     agentExitCode: agent.exitCode,
-    checkExitCode: check.exitCode,
+    agentCompleted,
+    timedOut: agent.timedOut,
+    checkExitCode: check.checkExitCode,
     diff,
-    protectedViolations,
-    assertionFailures,
-    mutationsCaught,
+    protectedViolations: check.protectedViolations,
+    assertionFailures: check.assertionFailures,
+    mutationsCaught: check.mutationsCaught,
     costUsd: agent.meter.costUsd,
-    tokens: agent.meter.tokens,
+    knownCostUsd: agent.meter.knownCostUsd,
+    costComplete: agent.meter.costComplete !== false && agentCompleted,
+    costSource: agent.meter.costSource,
+    tokens: agentCompleted ? agent.meter.tokens : undefined,
     requests: agent.meter.requests,
+    toolCalls: agent.toolCalls,
   }
   const score = scoreTask(spec, run)
   process.stderr.write(
@@ -412,115 +450,6 @@ async function collectDiff(dir: string, baseline: string): Promise<{ diff: FileD
         removed: Number(parts[1]) || 0,
       })),
   }
-}
-
-async function findProtectedViolations(task: EvalTask, dir: string) {
-  const checked = await Promise.all(
-    task.protectedFiles.map(async (path) => {
-      const current = await readFile(join(dir, path), "utf8").catch(() => undefined)
-      return current === task.files[path] ? undefined : path
-    }),
-  )
-  return checked.filter((path): path is string => Boolean(path))
-}
-
-async function findAssertionFailures(task: EvalTask, dir: string) {
-  const checked = await Promise.all(
-    task.assertions.map(async (assertion) => {
-      const content = await readFile(join(dir, assertion.path), "utf8").catch(() => undefined)
-      if (content === undefined) return assertion.exists === false ? undefined : `${assertion.path} is missing`
-      if (assertion.exists === false) return `${assertion.path} should not exist`
-      const missing = (assertion.includes ?? []).filter((needle) => !content.includes(needle))
-      const lingering = (assertion.excludes ?? []).filter((needle) => content.includes(needle))
-      if (missing.length === 0 && lingering.length === 0) return undefined
-      return [
-        missing.length > 0 ? `${assertion.path} does not contain ${missing.join(", ")}` : undefined,
-        lingering.length > 0 ? `${assertion.path} still contains ${lingering.join(", ")}` : undefined,
-      ]
-        .filter(Boolean)
-        .join("; ")
-    }),
-  )
-  return checked.filter((entry): entry is string => Boolean(entry))
-}
-
-// Seeded-defect coverage: break the implementation one way at a time and
-// require the suite the agent wrote to notice. Runs strictly sequentially
-// because every mutation edits and restores the same file.
-function countMutationsCaught(task: EvalTask, dir: string) {
-  return task.mutations.reduce(async (previous, mutation) => {
-    const caught = await previous
-    const path = join(dir, mutation.path)
-    const original = await readFile(path, "utf8").catch(() => undefined)
-    if (original === undefined || !original.includes(mutation.find)) return caught
-    await writeFile(path, original.replace(mutation.find, mutation.replace))
-    const result = await capture({
-      command: task.check.command,
-      args: task.check.args,
-      cwd: dir,
-      timeoutMs: CHECK_TIMEOUT_MS,
-    })
-    await writeFile(path, original)
-    return caught + (result.exitCode === 0 ? 0 : 1)
-  }, Promise.resolve(0))
-}
-
-type CaptureResult = { exitCode: number; output: string; meter: Meter; timedOut: boolean }
-
-function capture(input: { command: string; args: string[]; cwd: string; timeoutMs: number }) {
-  return new Promise<CaptureResult>((resolve) => {
-    const child = spawn(input.command, input.args, {
-      cwd: input.cwd,
-      detached: process.platform !== "win32",
-      env: { ...process.env, CI: "1", NO_COLOR: "1", FORCE_COLOR: "0" },
-      // "ignore" rather than a pipe: several of these CLIs read a non-TTY stdin
-      // as their prompt and would block forever on an open, empty pipe.
-      stdio: ["ignore", "pipe", "pipe"],
-    })
-    const lines: string[] = []
-    let meter: Meter = {}
-    let settled = false
-    let timedOut = false
-
-    const consume = (chunk: Buffer) => {
-      chunk
-        .toString("utf8")
-        .split(/\r?\n/)
-        .forEach((line) => {
-          if (!line.trim()) return
-          lines.push(line)
-          if (lines.length > 4_000) lines.shift()
-          meter = meterLine(meter, line)
-        })
-    }
-    child.stdout.on("data", consume)
-    child.stderr.on("data", consume)
-
-    const timer = setTimeout(() => {
-      timedOut = true
-      if (process.platform === "win32" || !child.pid) {
-        child.kill("SIGKILL")
-        return
-      }
-      // These CLIs spawn their own tool subprocesses; killing the group is the
-      // only way a timeout does not leave a shell or a test runner behind.
-      process.kill(-child.pid, "SIGKILL")
-    }, input.timeoutMs)
-
-    const finish = (exitCode: number, extra?: string) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve({
-        exitCode,
-        output: [...lines, ...(extra ? [extra] : [])].join("\n"),
-        meter,
-        timedOut,
-      })
-    }
-    child.once("error", (error) => finish(127, error.message))
-    child.once("close", (code) => finish(timedOut ? 124 : (code ?? 1)))
-  })
 }
 
 // Quote the offending text rather than asserting "authentication problem", so a
@@ -679,6 +608,8 @@ function explain(report: TaskReport) {
     return `edited protected file(s): ${report.run.protectedViolations.join(", ")}`
   }
   if (report.run.assertionFailures.length > 0) return report.run.assertionFailures.join("; ")
+  if (!report.score.agentCompleted)
+    return `agent did not complete successfully (exit ${report.run.agentExitCode}${report.run.timedOut ? ", timed out" : ""})`
   if (report.run.checkExitCode !== 0) {
     return `check exited ${report.run.checkExitCode}: ${report.checkOutputTail.split("\n").filter(Boolean).slice(-2).join(" | ")}`
   }

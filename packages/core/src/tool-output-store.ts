@@ -61,14 +61,18 @@ const takePrefix = (input: string, maximumBytes: number) => {
 
 const takeSuffix = (input: string, maximumBytes: number) => {
   let bytes = 0
-  const content: string[] = []
-  for (const char of Array.from(input).toReversed()) {
-    const size = Buffer.byteLength(char, "utf-8")
+  let start = input.length
+  while (start > 0) {
+    const last = input.charCodeAt(start - 1)
+    const previous = start > 1 ? input.charCodeAt(start - 2) : 0
+    // Keep UTF-16 pairs intact while scanning only the retained suffix.
+    const width = last >= 0xdc00 && last <= 0xdfff && previous >= 0xd800 && previous <= 0xdbff ? 2 : 1
+    const size = Buffer.byteLength(input.slice(start - width, start), "utf-8")
     if (bytes + size > maximumBytes) break
-    content.unshift(char)
+    start -= width
     bytes += size
   }
-  return content.join("")
+  return input.slice(start)
 }
 
 const preview = (text: string, maxLines: number, maxBytes: number) => {

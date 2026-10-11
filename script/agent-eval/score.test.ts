@@ -63,10 +63,22 @@ test("a failed content assertion fails the run even when the check is green", ()
   expect(score.score).toBe(0)
 })
 
-test("an agent that crashed but still left a green tree passes", () => {
-  // The objective check is the arbiter, not the agent's own exit code: a CLI
-  // that exits 1 on a harmless warning must not be recorded as a failure.
-  expect(scoreTask(spec, ran({ agentExitCode: 1 })).outcome).toBe("pass")
+test("an agent that crashed can leave a correct artifact without completing the task", () => {
+  const score = scoreTask(spec, ran({ agentExitCode: 1 }))
+  expect(score.outcome).toBe("fail")
+  expect(score.artifactCorrect).toBe(true)
+  expect(score.agentCompleted).toBe(false)
+  expect(score.score).toBe(0)
+})
+
+test("a timeout or incomplete terminal event fails even if the exit code and artifact are green", () => {
+  for (const overrides of [{ timedOut: true }, { agentCompleted: false }]) {
+    const score = scoreTask(spec, ran(overrides))
+    expect(score.outcome).toBe("fail")
+    expect(score.artifactCorrect).toBe(true)
+    expect(score.agentCompleted).toBe(false)
+  }
+  expect(scoreTask(spec, ran({ agentExitCode: 1, agentCompleted: true })).outcome).toBe("fail")
 })
 
 test("out-of-scope edits cost discipline points proportional to file and line count", () => {
@@ -219,6 +231,74 @@ test("cost and tokens stay undefined when the runtime never reported them", () =
   expect(summary.totalCostUsd).toBeUndefined()
   expect(summary.totalTokens).toBeUndefined()
   expect(summary.costPerPass).toBeUndefined()
+  expect(summary.costMeasured).toBe(0)
+  expect(summary.tokenMeasured).toBe(0)
+})
+
+test("incomplete usage is a known subtotal, never a complete runtime total", () => {
+  const scores = [
+    scoreTask(
+      spec,
+      ran({ costUsd: 0.02, tokens: { input: 10, cacheRead: 0, cacheWrite: 0, output: 5, reasoning: 0 } }),
+    ),
+    scoreTask(spec, ran({ knownCostUsd: 0.01, costComplete: false })),
+  ]
+  const summary = aggregate("vector", scores)
+  expect(summary.totalCostUsd).toBeUndefined()
+  expect(summary.knownCostUsd).toBe(0.03)
+  expect(summary.costPerPass).toBeUndefined()
+  expect(summary.costMeasured).toBe(1)
+  expect(summary.totalTokens).toBeUndefined()
+  expect(summary.cacheReadShare).toBeUndefined()
+  expect(summary.tokenMeasured).toBe(1)
+})
+
+test("nonfinite, negative, and explicitly incomplete prices cannot score as known spend", () => {
+  for (const costUsd of [NaN, Infinity, -0.01]) {
+    const score = scoreTask(spec, ran({ costUsd }))
+    expect(score.costUsd).toBeUndefined()
+    expect(score.costComplete).toBe(false)
+    expect(aggregate("vector", [score]).totalCostUsd).toBeUndefined()
+  }
+  const score = scoreTask(spec, ran({ costUsd: 0, costComplete: false }))
+  expect(score.costUsd).toBeUndefined()
+  expect(score.costSource).toBe("unknown")
+})
+
+test("a measured free run stays zero and cost provenance is retained", () => {
+  const score = scoreTask(spec, ran({ costUsd: 0, costComplete: true, costSource: "catalog-estimate" }))
+  expect(score.costUsd).toBe(0)
+  expect(score.costSource).toBe("catalog-estimate")
+  const summary = aggregate("vector", [score])
+  expect(summary.totalCostUsd).toBe(0)
+  expect(summary.costPerPass).toBe(0)
+  expect(summary.costMeasured).toBe(1)
+})
+
+test("price overflow remains unknown instead of producing infinite dollars", () => {
+  const scores = [scoreTask(spec, ran({ costUsd: 1e308 })), scoreTask(spec, ran({ costUsd: 1e308 }))]
+  expect(aggregate("vector", scores).totalCostUsd).toBeUndefined()
+  expect(aggregate("vector", scores).knownCostUsd).toBeUndefined()
+  expect(aggregate("vector", scores).costPerPass).toBeUndefined()
+})
+
+test("agent, validation and end-to-end clocks remain distinct", () => {
+  const scores = [
+    scoreTask(spec, ran({ wallMs: 1_000, validationWallMs: 100, totalWallMs: 1_200 })),
+    scoreTask(spec, ran({ wallMs: 2_000, validationWallMs: 200, totalWallMs: 2_400 })),
+  ]
+  const summary = aggregate("vector", scores)
+  expect(summary.totalWallMs).toBe(3_000)
+  expect(summary.totalValidationWallMs).toBe(300)
+  expect(summary.totalEndToEndWallMs).toBe(3_600)
+  expect(aggregate("vector", [...scores, scoreTask(spec, ran())]).totalEndToEndWallMs).toBeUndefined()
+})
+
+test("zero input has no cache-hit percentage", () => {
+  const summary = aggregate("codex", [
+    scoreTask(spec, ran({ tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 1, reasoning: 0 } })),
+  ])
+  expect(summary.cacheReadShare).toBeUndefined()
 })
 
 test("the real task set scores against its own declared expectations", () => {

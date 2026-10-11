@@ -66,8 +66,41 @@ describe("ToolOutputStore", () => {
         expect(yield* fs.readFileString(result.outputPaths[0])).toBe(first + second)
         if (result.output.content[0]?.type !== "text") throw new Error("expected text preview")
         expect(Buffer.byteLength(result.output.content[0].text)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
+        expect(result.output.content[0].text.startsWith("HEAD-")).toBe(true)
+        expect(result.output.content[0].text.endsWith("-TAIL")).toBe(true)
       }),
     ),
+  )
+
+  it.live("bounds head and tail at UTF-8 character boundaries including isolated surrogates", () =>
+    Effect.gen(function* () {
+      for (const unit of ["é", "界", "🦄", "\ud800", "\udc00"]) {
+        for (const maxBytes of [500, 501, 502, 503, 504, 505, 506, 507]) {
+          yield* withStore(
+            ({ store, fs }) =>
+              Effect.gen(function* () {
+                const text = unit.repeat(1_000)
+                const result = yield* store.bound({
+                  sessionID,
+                  toolCallID: "call-unicode-boundary",
+                  output: { structured: {}, content: [{ type: "text", text }] },
+                })
+                expect(result.outputPaths).toHaveLength(1)
+                expect(yield* fs.readFileString(result.outputPaths[0])).toBe(Buffer.from(text).toString("utf8"))
+                if (result.output.content[0]?.type !== "text") throw new Error("expected text preview")
+                const [head, marker, tail] = result.output.content[0].text.split("\n\n")
+                expect(marker).toBe(`... output truncated; full content saved to ${result.outputPaths[0]} ...`)
+                const payloadBytes = maxBytes - Buffer.byteLength(marker) - 4
+                const unitBytes = Buffer.byteLength(unit)
+                expect(head).toBe(unit.repeat(Math.floor(Math.ceil(payloadBytes / 2) / unitBytes)))
+                expect(tail).toBe(unit.repeat(Math.floor(Math.floor(payloadBytes / 2) / unitBytes)))
+                expect(Buffer.byteLength(result.output.content[0].text)).toBeLessThanOrEqual(maxBytes)
+              }),
+            new Config.Info({ tool_output: new ConfigToolOutput.Info({ max_bytes: maxBytes }) }),
+          )
+        }
+      }
+    }),
   )
 
   it.live("uses bounded text for oversized structured-only output", () =>

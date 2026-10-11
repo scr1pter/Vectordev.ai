@@ -3,7 +3,7 @@
 // with different weights without spending another model call. run.ts owns
 // everything that observes the world and hands the observations in here.
 
-import { cacheReadShare, totalTokens, type Tokens } from "./meter"
+import { cacheReadShare, totalTokens, type CostSource, type Tokens } from "./meter"
 
 export type RuntimeId = "vector" | "claude-code" | "codex" | "cursor"
 
@@ -37,7 +37,11 @@ export type TaskRun = { taskId: string; runtime: RuntimeId } &
     | {
         status: "ran"
         wallMs: number
+        validationWallMs?: number
+        totalWallMs?: number
         agentExitCode: number
+        agentCompleted?: boolean
+        timedOut?: boolean
         checkExitCode: number
         diff: FileDiff[]
         // Files the task declared immutable (usually the tests that define
@@ -48,8 +52,12 @@ export type TaskRun = { taskId: string; runtime: RuntimeId } &
         assertionFailures: string[]
         mutationsCaught: number
         costUsd?: number
+        knownCostUsd?: number
+        costComplete?: boolean
+        costSource?: CostSource
         tokens?: Tokens
         requests?: number
+        toolCalls?: number
       }
   )
 
@@ -61,6 +69,9 @@ export type TaskScore = {
   category: TaskCategory
   outcome: TaskOutcome
   detail?: string
+  artifactCorrect?: boolean
+  agentCompleted?: boolean
+  timedOut?: boolean
   filesTouched: number
   linesTouched: number
   outOfScopeFiles: string[]
@@ -70,9 +81,15 @@ export type TaskScore = {
   disciplinePenalty: number
   mutationScore: number
   wallMs?: number
+  validationWallMs?: number
+  totalWallMs?: number
   costUsd?: number
+  knownCostUsd?: number
+  costComplete?: boolean
+  costSource?: CostSource
   tokens?: Tokens
   requests?: number
+  toolCalls?: number
   score: number
 }
 
@@ -88,11 +105,16 @@ export type RuntimeAggregate = {
   passRate?: number
   meanScore?: number
   totalWallMs: number
+  totalValidationWallMs?: number
+  totalEndToEndWallMs?: number
   totalOutOfScopeFiles: number
   totalCostUsd?: number
+  knownCostUsd?: number
+  costMeasured: number
   // What a passing task cost on average, undefined unless every measured task reported its cost.
   costPerPass?: number
   totalTokens?: number
+  tokenMeasured: number
   // The share of all input read from the prompt cache.
   cacheReadShare?: number
 }
@@ -150,12 +172,19 @@ export function scoreTask(spec: ScoringSpec, run: TaskRun): TaskScore {
   // non-test-writing task to zero.
   const mutationScore =
     spec.mutationCount === 0 ? 1 : round(Math.min(run.mutationsCaught, spec.mutationCount) / spec.mutationCount, 4)
-  const objective =
+  const artifactCorrect =
     run.checkExitCode === 0 && run.protectedViolations.length === 0 && run.assertionFailures.length === 0
+  const agentCompleted = run.agentExitCode === 0 && run.timedOut !== true && run.agentCompleted !== false
+  const objective = artifactCorrect && agentCompleted
+  const cost = validCost(run.costUsd)
+  const costComplete = run.costComplete !== false && cost !== undefined
 
   return {
     ...identity,
     outcome: objective ? "pass" : "fail",
+    artifactCorrect,
+    agentCompleted,
+    timedOut: run.timedOut,
     filesTouched: diff.length,
     linesTouched: diff.reduce((total, file) => total + file.added + file.removed, 0),
     outOfScopeFiles: outOfScope.map((file) => file.path),
@@ -165,9 +194,15 @@ export function scoreTask(spec: ScoringSpec, run: TaskRun): TaskScore {
     disciplinePenalty,
     mutationScore,
     wallMs: run.wallMs,
-    costUsd: run.costUsd,
+    validationWallMs: run.validationWallMs,
+    totalWallMs: run.totalWallMs,
+    costUsd: costComplete ? cost : undefined,
+    knownCostUsd: validCost(run.knownCostUsd) ?? cost,
+    costComplete,
+    costSource: costComplete ? run.costSource : "unknown",
     tokens: run.tokens,
     requests: run.requests,
+    toolCalls: run.toolCalls,
     score: objective ? Math.max(0, round(100 * mutationScore - disciplinePenalty, 1)) : 0,
   }
 }
@@ -175,7 +210,12 @@ export function scoreTask(spec: ScoringSpec, run: TaskRun): TaskScore {
 export function aggregate(runtime: RuntimeId, scores: TaskScore[]): RuntimeAggregate {
   const measured = scores.filter((entry) => entry.outcome === "pass" || entry.outcome === "fail")
   const passed = measured.filter((entry) => entry.outcome === "pass")
-  const costs = measured.map((entry) => entry.costUsd).filter((value): value is number => typeof value === "number")
+  const costs = measured
+    .map((entry) => validCost(entry.costUsd))
+    .filter((value): value is number => value !== undefined)
+  const knownCosts = measured
+    .map((entry) => validCost(entry.knownCostUsd) ?? validCost(entry.costUsd))
+    .filter((value): value is number => value !== undefined)
   const tokens = measured.map((entry) => entry.tokens).filter((value): value is Tokens => value !== undefined)
   const summed = tokens.reduce<Tokens>(
     (total, value) => ({
@@ -187,13 +227,7 @@ export function aggregate(runtime: RuntimeId, scores: TaskScore[]): RuntimeAggre
     }),
     { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, reasoning: 0 },
   )
-  const totalCostUsd =
-    costs.length === 0
-      ? undefined
-      : round(
-          costs.reduce((total, value) => total + value, 0),
-          4,
-        )
+  const totalCostUsd = costs.length === measured.length ? sumCosts(costs) : undefined
   return {
     runtime,
     measured: measured.length,
@@ -209,19 +243,43 @@ export function aggregate(runtime: RuntimeId, scores: TaskScore[]): RuntimeAggre
         ? undefined
         : round(measured.reduce((total, entry) => total + entry.score, 0) / measured.length, 1),
     totalWallMs: measured.reduce((total, entry) => total + (entry.wallMs ?? 0), 0),
+    totalValidationWallMs: sumComplete(measured.map((entry) => entry.validationWallMs)),
+    totalEndToEndWallMs: sumComplete(measured.map((entry) => entry.totalWallMs)),
     totalOutOfScopeFiles: measured.reduce((total, entry) => total + entry.outOfScopeFiles.length, 0),
     totalCostUsd,
+    knownCostUsd: sumCosts(knownCosts),
+    costMeasured: costs.length,
     // A run that failed still spent, so a passing task's cost carries the failed ones too.
     costPerPass:
       totalCostUsd === undefined || costs.length < measured.length || passed.length === 0
         ? undefined
         : round(totalCostUsd / passed.length, 4),
-    totalTokens: tokens.length === 0 ? undefined : totalTokens(summed),
-    cacheReadShare: tokens.length === 0 ? undefined : round(cacheReadShare(summed) ?? 0, 4),
+    totalTokens: tokens.length === 0 || tokens.length !== measured.length ? undefined : totalTokens(summed),
+    tokenMeasured: tokens.length,
+    cacheReadShare:
+      tokens.length === 0 || tokens.length !== measured.length || cacheReadShare(summed) === undefined
+        ? undefined
+        : round(cacheReadShare(summed)!, 4),
   }
+}
+
+function validCost(value: number | undefined) {
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function sumCosts(values: number[]) {
+  if (values.length === 0) return undefined
+  const total = validCost(values.reduce((sum, value) => sum + value, 0))
+  return total === undefined ? undefined : round(total, 4)
+}
+
+function sumComplete(values: (number | undefined)[]) {
+  if (values.length === 0 || values.some((value) => value === undefined)) return undefined
+  return values.reduce<number>((total, value) => total + value!, 0)
 }
 
 function round(value: number, places: number) {
   const factor = 10 ** places
-  return Math.round(value * factor) / factor
+  const scaled = value * factor
+  return Number.isFinite(scaled) ? Math.round(scaled) / factor : value
 }
