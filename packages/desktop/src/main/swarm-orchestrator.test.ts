@@ -239,6 +239,32 @@ describe("swarm lifecycle", () => {
     expect(requests).toEqual([])
   })
 
+  test("Resume joins pending cleanup on an inactive run and repeated Stop cannot cancel the new run", async () => {
+    const run = await seed("interrupted", [{ ...inspectTask, status: "running", workspaceId: "staging" }])
+    const cleaning = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const stopped = stopSwarmRun(run.id, 0, async () => {
+      cleaning.resolve()
+      await release.promise
+      return getParallelWorkspace("staging")!
+    })
+    await cleaning.promise
+    expect((await stopped).currentStep).toContain("cleanup")
+    const resuming = resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    let duplicateStops = 0
+    const joined = await stopSwarmRun(run.id, 0, async () => {
+      duplicateStops += 1
+      return getParallelWorkspace("staging")!
+    })
+    expect(duplicateStops).toBe(0)
+    expect(joined.status).toBe("canceled")
+    expect(requests).toEqual([])
+    release.resolve()
+    expect((await resuming).status).toBe("running")
+    await prompted.promise
+    expect(getSwarmRun(run.id)?.status).toBe("running")
+  })
+
   test("stopping an executing worker interrupts its session before the scheduler finishes", async () => {
     const run = await seed("interrupted", [inspectTask])
     await resumeSwarmRun(run.id, { url: server.url.toString(), directory })

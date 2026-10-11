@@ -27,6 +27,7 @@ import type { UnifiedDiffSelection } from "./unified-diff"
 const STORE_NAME = "swarm-orchestrator-state"
 const STORE_KEY = "runs"
 const activeRuns = new Map<string, { controller: AbortController; completion: Promise<void> }>()
+const stoppingRuns = new Map<string, Promise<SwarmRunRecord>>()
 
 export type SwarmRunStatus =
   | "planning"
@@ -240,6 +241,9 @@ export async function createSwarmRun(input: CreateSwarmRunInput, engine: Paralle
 }
 
 export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
+  const stopping = stoppingRuns.get(id)
+  if (stopping && !(await waitForCleanup(stopping)))
+    throw new Error("The stopped swarm is still cleaning up. Wait for its workspaces to settle before resuming.")
   const active = activeRuns.get(id)
   if (active && !active.controller.signal.aborted) return getSwarmRun(id)!
   // A stopped scheduler must finish unwinding before another one can own the run.
@@ -280,33 +284,42 @@ export async function resumeSwarmRun(id: string, engine: ParallelWorkspaceEngine
   return getSwarmRun(id)!
 }
 
-export async function stopSwarmRun(id: string, timeoutMs = 10_000) {
+export async function stopSwarmRun(id: string, timeoutMs = 10_000, stopWorkspace = stopParallelWorkspace) {
   const current = getSwarmRun(id)
   if (!current) throw new Error("Swarm run was not found.")
   const active = activeRuns.get(id)
-  if (!active && !["planning", "running", "interrupted"].includes(current.status)) return current
+  const stopping = stoppingRuns.get(id)
+  if (!active && !stopping && !["planning", "running", "interrupted"].includes(current.status)) return current
   active?.controller.abort()
-  const cleanup = (async () => {
-    await active?.completion
-    await Promise.all(
-      (getSwarmRun(id)?.tasks ?? [])
-        .filter((task) => task.workspaceId && ["creating", "queued", "running", "merging"].includes(task.status))
-        .map((task) => stopParallelWorkspace(task.workspaceId!).catch(() => undefined)),
-    )
-    return updateRun(id, (run) => ({
-      ...run,
-      status: "canceled",
-      currentStep: "Swarm stopped",
-      completedAt: now(),
-      tasks: run.tasks.map((task) =>
-        ["planned", "creating", "queued", "running", "merging"].includes(task.status)
-          ? { ...task, status: "canceled", completedAt: now(), lastAction: "Canceled by user" }
-          : task,
-      ),
-      logs: [...run.logs, `${now()}  Swarm stopped by the user.`].slice(-240),
-    }))
-  })()
+  const cleanup =
+    stopping ??
+    Promise.resolve()
+      .then(async () => {
+        await active?.completion
+        await Promise.all(
+          (getSwarmRun(id)?.tasks ?? [])
+            .filter((task) => task.workspaceId && ["creating", "queued", "running", "merging"].includes(task.status))
+            .map((task) => stopWorkspace(task.workspaceId!).catch(() => undefined)),
+        )
+        return updateRun(id, (run) => ({
+          ...run,
+          status: "canceled",
+          currentStep: "Swarm stopped",
+          completedAt: now(),
+          tasks: run.tasks.map((task) =>
+            ["planned", "creating", "queued", "running", "merging"].includes(task.status)
+              ? { ...task, status: "canceled", completedAt: now(), lastAction: "Canceled by user" }
+              : task,
+          ),
+          logs: [...run.logs, `${now()}  Swarm stopped by the user.`].slice(-240),
+        }))
+      })
+      .finally(() => {
+        if (stoppingRuns.get(id) === cleanup) stoppingRuns.delete(id)
+      })
+  stoppingRuns.set(id, cleanup)
   if (await waitForCleanup(cleanup, timeoutMs)) return getSwarmRun(id)!
+  if (stoppingRuns.get(id) !== cleanup) return getSwarmRun(id)!
   // Keep ownership until the operation settles. A late merge must be recorded complete before Resume can retry.
   return updateRun(id, (run) => ({
     ...run,
@@ -360,6 +373,9 @@ export async function mergeSwarmRunSelection(id: string, selection: UnifiedDiffS
 
 export async function discardSwarmRun(id: string) {
   if (!getSwarmRun(id)) throw new Error("Swarm run was not found.")
+  const stopping = stoppingRuns.get(id)
+  if (stopping && !(await waitForCleanup(stopping)))
+    throw new Error("The stopped swarm is still cleaning up. Wait for its workspaces to settle before discarding.")
   const active = activeRuns.get(id)
   active?.controller.abort()
   if (active && !(await waitForCleanup(active.completion)))
@@ -392,7 +408,7 @@ async function waitForCleanup(completion: Promise<unknown>, timeoutMs = 10_000) 
 }
 
 function startSwarmRun(id: string, engine: ParallelWorkspaceEngine) {
-  if (activeRuns.has(id)) return
+  if (activeRuns.has(id) || stoppingRuns.has(id)) return
   const controller = new AbortController()
   const completion = Promise.resolve()
     .then(() => executeSwarmRun(id, engine, controller))
