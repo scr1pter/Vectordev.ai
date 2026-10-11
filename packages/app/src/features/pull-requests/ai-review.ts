@@ -175,13 +175,15 @@ export type ReviewEstimate = {
   high?: number
 }
 
+export type ReviewSpend = { costUsd?: number; tokens: number; partial?: true }
+
 export type ReviewProgress =
   | { type: "status"; text: string }
   | { type: "checkout"; checkout: ReviewCheckout; label: string }
   // A reviewer's session started. Its spend is reported live through trackReviewSpend.
-  | { type: "session"; sessionID: string }
+  | { type: "session"; sessionID: string; costKind: CostKind }
   // What the review's sessions have spent so far.
-  | { type: "spend"; costUsd: number; tokens: number }
+  | ({ type: "spend" } & ReviewSpend)
 
 export type SpecialistRun = {
   name: Specialist
@@ -465,30 +467,45 @@ function promptHeadFiles(files: readonly HeadFile[], inlined: ReadonlySet<string
 
 // Adds up what a review's sessions have spent so far from the engine's message events, so the panel shows the cost
 // and tokens while the review runs. The finished review's figure still comes from the sessions' recorded messages.
-export function trackReviewSpend(onSpend: (spend: { costUsd: number; tokens: number }) => void) {
-  const sessions = new Set<string>()
-  const messages = new Map<string, { cost: number; tokens: number }>()
+export function trackReviewSpend(onSpend: (spend: ReviewSpend) => void) {
+  const sessions = new Map<string, CostKind>()
+  const messages = new Map<string, { cost: number; tokens: number; partial: boolean }>()
   return {
-    add(sessionID: string) {
-      sessions.add(sessionID)
+    add(sessionID: string, costKind: CostKind = "priced") {
+      sessions.set(sessionID, costKind)
     },
     observe(event: { type: string; properties?: unknown }) {
       if (event.type !== "message.updated") return
       const info = (event.properties as { info?: ReviewMessage["info"] & { id?: string; sessionID?: string } })?.info
       if (!info?.id || info.role !== "assistant" || !info.sessionID || !sessions.has(info.sessionID)) return
       const tokens = info.tokens
+      const count = tokens
+        ? tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
+        : 0
+      const priced =
+        ["priced", "free"].includes(sessions.get(info.sessionID)!) && Number.isFinite(info.cost) && info.cost! >= 0
       messages.set(info.id, {
-        cost: Math.max(0, info.cost ?? 0),
-        tokens: tokens ? tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write : 0,
+        cost: priced ? info.cost! : 0,
+        tokens: count,
+        // A running or stopped attempt without counters cannot establish zero spend.
+        partial: !priced || !!info.unpriced || (count === 0 && !info.cost),
       })
-      onSpend(
-        [...messages.values()].reduce(
-          (total, message) => ({ costUsd: total.costUsd + message.cost, tokens: total.tokens + message.tokens }),
-          { costUsd: 0, tokens: 0 },
-        ),
-      )
+      const values = [...messages.values()]
+      const cost = values.reduce((total, message) => total + message.cost, 0)
+      const partial = values.some((message) => message.partial)
+      onSpend({
+        costUsd: cost > 0 || !partial ? cost : undefined,
+        tokens: values.reduce((total, message) => total + message.tokens, 0),
+        ...(partial ? { partial: true } : {}),
+      })
     },
   }
+}
+
+export function reviewSpendText(spend: ReviewSpend) {
+  const tokens = `${formatTokens(spend.tokens)} tokens`
+  if (spend.costUsd === undefined) return `Cost unknown · ${tokens}`
+  return `${spend.partial ? "At least " : ""}${formatUsd(spend.costUsd)} · ${tokens}`
 }
 
 type StopReason = "user" | "timeout"
@@ -657,7 +674,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
         client,
         directory,
         parentID: input.parentID,
-        onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID }),
+        onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID, costKind: model.costKind }),
         name,
         title: `${REVIEW_SESSION_TITLE_PREFIX}${subject} · ${name}`,
         text: texts[name],
@@ -675,7 +692,23 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
   if (!reports.length) {
     stop.dispose()
     const usage = measureUsage(runs.flatMap((run) => run.usage.messages))
-    if (usage) input.onProgress?.({ type: "spend", costUsd: usage.costUsd ?? 0, tokens: totalTokens(usage.usage) })
+    if (usage) {
+      const known = runs
+        .flatMap((run) => run.usage.messages)
+        .reduce((total, message) => total + (Number.isFinite(message.cost) && message.cost! > 0 ? message.cost! : 0), 0)
+      const costUsd = ["priced", "free"].includes(model.costKind) ? (usage.costUsd ?? (known || undefined)) : undefined
+      input.onProgress?.({
+        type: "spend",
+        costUsd,
+        tokens: totalTokens(usage.usage),
+        ...(usage.partial ||
+        usage.costUsd === undefined ||
+        costUsd === undefined ||
+        runs.some((run) => !run.usage.complete)
+          ? { partial: true }
+          : {}),
+      })
+    }
     throw new Error(
       `Vector could not finish this review: ${runs.find((run) => run.detail)?.detail ?? "no reviewer answered"}.${spentSoFar(runs, model)}`,
     )
@@ -709,7 +742,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
           client,
           directory,
           parentID: input.parentID,
-          onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID }),
+          onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID, costKind: model.costKind }),
           title: `Vectorscope review · ${subject} · verify`,
           text: buildVerifyPrompt({
             trust: checkout.trust,

@@ -2,42 +2,26 @@ import { freeModelsLimitNotice, freeModelsLimitTitle } from "@vectordevai/core/f
 import type { Event, Session } from "@vectordevai/sdk/v2"
 import type { TuiAttentionSoundName, TuiPlugin, TuiPluginApi } from "@vectordevai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
+import { isInternalSession, notifyVisibleSession } from "../../util/session"
 
 const id = "internal:notifications"
 
 type SessionError = Extract<Event, { type: "session.error" }>["properties"]["error"]
 
-function isHelper(session: Session | undefined) {
-  return Boolean(
-    session?.internal ||
-      session?.title.startsWith("Vector Tool · ") ||
-      session?.title.startsWith("Vectorscope review · "),
-  )
-}
-
 function notify(api: TuiPluginApi, sessionID: string | undefined, message: string, sound: TuiAttentionSoundName) {
-  const send = (session: Session | undefined) => {
-    if (isHelper(session)) return
-    void api.attention.notify({
-      title: session?.title,
-      message,
-      notification: session?.parentID !== undefined ? false : { when: "blurred" },
-      sound: { name: sound, when: "always" },
-    })
-  }
-  const session = sessionID ? api.state.session.get(sessionID) : undefined
-  // The list excludes helpers and reconnect does not replay their creation. Resolve unknown sessions before
-  // deciding whether to notify, so a helper that was already running cannot make noise after reconnect.
-  if (sessionID && !session) {
-    void api.client.session
-      .get({ sessionID })
-      .then((result) => {
-        if (result.data) send(result.data)
+  void notifyVisibleSession({
+    sessionID,
+    cached: (id) => api.state.session.get(id),
+    read: (id) => api.client.session.get({ sessionID: id }).then((result) => result.data),
+    show: (session) => {
+      void api.attention.notify({
+        title: session?.title,
+        message,
+        notification: session?.parentID !== undefined ? false : { when: "blurred" },
+        sound: { name: sound, when: "always" },
       })
-      .catch(() => undefined)
-    return
-  }
-  send(session)
+    },
+  })
 }
 
 function sessionErrorMessage(error: SessionError) {
@@ -60,7 +44,7 @@ const tui: TuiPlugin = async (api) => {
   // surface that launched them. They are in no session list, so they are known only from their own events.
   const helpers = new Set<string>()
   const track = (event: { properties: { info: Session } }) => {
-    if (isHelper(event.properties.info)) helpers.add(event.properties.info.id)
+    if (isInternalSession(event.properties.info)) helpers.add(event.properties.info.id)
   }
   api.event.on("session.created", track)
   api.event.on("session.updated", track)

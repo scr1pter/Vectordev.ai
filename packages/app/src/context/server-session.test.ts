@@ -123,6 +123,29 @@ describe("server session", () => {
     ])
   })
 
+  test("the first spend event for an unseen helper refreshes its parent after metadata arrives", async () => {
+    const pending = Promise.withResolvers<{ data: Session }>()
+    const calls: string[] = []
+    const client = {
+      session: {
+        get: ({ sessionID }: { sessionID: string }) => {
+          calls.push(sessionID)
+          return sessionID === "helper"
+            ? pending.promise
+            : Promise.resolve({ data: { ...session("root"), subagentCost: 0.25 } })
+        },
+      },
+    } as unknown as VectorClient
+    const store = createServerSession(client)
+    store.remember({ ...session("root"), subagentCost: 0 })
+    store.apply({ type: "session.next.step.ended", properties: { sessionID: "helper" } })
+    expect(calls).toEqual(["helper"])
+    pending.resolve({ data: { ...session("helper", "root"), internal: "vectorscope.review" } })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    expect(calls).toEqual(["helper", "root"])
+    expect(store.get("root")?.subagentCost).toBe(0.25)
+  })
+
   test("resolves lineage by session ID without directory", async () => {
     const ctx = setup({ child: session("child", "root"), root: session("root") })
 

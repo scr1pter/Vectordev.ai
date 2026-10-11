@@ -19,6 +19,8 @@ import {
   reviewCatalog,
   reviewEvents,
   reviewFooter,
+  reviewSpendText,
+  type ReviewSpend,
   runReview,
   trackReviewSpend,
   workflowModel,
@@ -233,7 +235,7 @@ describe("chooseCheckout", () => {
 
 describe("trackReviewSpend", () => {
   test("adds up what the review's own sessions spent so far, counting each message once", () => {
-    const seen: { costUsd: number; tokens: number }[] = []
+    const seen: ReviewSpend[] = []
     const spend = trackReviewSpend((value) => seen.push(value))
     const assistant = (id: string, sessionID: string, cost: number, input: number) => ({
       type: "message.updated",
@@ -260,6 +262,84 @@ describe("trackReviewSpend", () => {
     expect(seen.at(-1)?.costUsd).toBeCloseTo(0.025)
     expect(seen.at(-1)?.tokens).toBe(215 + 65)
     expect(seen).toHaveLength(3)
+  })
+})
+
+describe("review spend presentation", () => {
+  test("unknown prices keep tokens visible without inventing a zero charge", () => {
+    const seen: ReviewSpend[] = []
+    const spend = trackReviewSpend((value) => seen.push(value))
+    spend.add("review", "unknown")
+    spend.observe({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message",
+          sessionID: "review",
+          role: "assistant",
+          cost: 0,
+          unpriced: true,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      },
+    })
+    expect(seen.at(-1)).toEqual({ costUsd: undefined, tokens: 120, partial: true })
+    expect(reviewSpendText(seen.at(-1)!)).toBe("Cost unknown · 120 tokens")
+  })
+
+  test("known charges beside unpriced work are shown as a lower bound", () => {
+    const seen: ReviewSpend[] = []
+    const spend = trackReviewSpend((value) => seen.push(value))
+    spend.add("review")
+    const info = {
+      role: "assistant",
+      sessionID: "review",
+      tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+    }
+    spend.observe({ type: "message.updated", properties: { info: { ...info, id: "known", cost: 0.02 } } })
+    spend.observe({
+      type: "message.updated",
+      properties: { info: { ...info, id: "unknown", cost: 0, unpriced: true } },
+    })
+    expect(reviewSpendText(seen.at(-1)!)).toBe("At least $0.02 · 240 tokens")
+  })
+
+  test("measured free models can still show a known zero charge", () => {
+    const seen: ReviewSpend[] = []
+    const spend = trackReviewSpend((value) => seen.push(value))
+    spend.add("review", "free")
+    spend.observe({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message",
+          sessionID: "review",
+          role: "assistant",
+          cost: 0,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      },
+    })
+    expect(reviewSpendText(seen.at(-1)!)).toBe("$0.00 · 120 tokens")
+  })
+
+  test("subscription usage does not show an API-equivalent price as its billed cost", () => {
+    const seen: ReviewSpend[] = []
+    const spend = trackReviewSpend((value) => seen.push(value))
+    spend.add("review", "plan")
+    spend.observe({
+      type: "message.updated",
+      properties: {
+        info: {
+          id: "message",
+          sessionID: "review",
+          role: "assistant",
+          cost: 0.02,
+          tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      },
+    })
+    expect(reviewSpendText(seen.at(-1)!)).toBe("Cost unknown · 120 tokens")
   })
 })
 
@@ -412,6 +492,21 @@ describe("runReview", () => {
       costUsd: 0.04,
       tokens: 2400,
     })
+  })
+
+  test("a failed unpriced review reports its tokens and unknown cost", async () => {
+    const progress: Parameters<NonNullable<ReviewRunInput["onProgress"]>>[0][] = []
+    const { client } = fakeClient({
+      files: { "src/list.ts": HEAD, ...NO_VERIFY },
+      reply: () => {
+        const message = answer(undefined, 0)
+        return { ...message, info: { ...message.info, unpriced: true } }
+      },
+    })
+    await expect(run(client, { onProgress: (event) => progress.push(event) })).rejects.toThrow("2.4k tokens")
+    const spend = progress.findLast((event) => event.type === "spend")
+    expect(spend).toEqual({ type: "spend", costUsd: undefined, tokens: 2400, partial: true })
+    if (spend?.type === "spend") expect(reviewSpendText(spend)).toBe("Cost unknown · 2.4k tokens")
   })
 
   test("keeps unpriced and invalid charges unknown while retaining measured tokens", async () => {

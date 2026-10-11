@@ -709,7 +709,11 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
 
   const apply = (event: { type: string; properties?: unknown }) => {
     const eventID = eventSessionID(event)
-    if (eventID && spendEvent(event)) refreshAncestors(eventID)
+    // A helper may already have been running when we reconnected, so learn its parent before refreshing ancestors.
+    if (eventID && spendEvent(event))
+      void resolve(eventID)
+        .then(() => refreshAncestors(eventID))
+        .catch(() => {})
     if (eventID) {
       touch(eventID)
       if (

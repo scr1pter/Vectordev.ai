@@ -1,6 +1,5 @@
 import { createEffect, createMemo, createSignal, For, Match, on, onCleanup, Show, Switch, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
-import { compactTokens } from "@/utils/session-cost"
 import { githubApi, GithubDeviceSignIn } from "@/components/github-connect"
 import {
   buildDesktopReview,
@@ -15,6 +14,8 @@ import {
   repoOf,
   reviewEvents,
   reviewFooter,
+  reviewSpendText,
+  type ReviewSpend,
   skippedText,
   type ReviewCheckout,
   type ReviewEstimate,
@@ -619,12 +620,6 @@ function SecretList(props: { secrets: readonly AutoReviewSecret[] }) {
   )
 }
 
-// A running review's cost, to the fraction of a cent cheap models spend, and its tokens.
-function liveSpendText(spend: { costUsd: number; tokens: number }) {
-  const cost = spend.costUsd > 0 && spend.costUsd < 0.01 ? spend.costUsd.toFixed(4) : spend.costUsd.toFixed(2)
-  return `$${cost} · ${compactTokens(spend.tokens)} tokens`
-}
-
 function capital(text: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
@@ -676,7 +671,7 @@ export function PullRequests(props: {
   const [estimate, setEstimate] = createSignal<{ value: ReviewEstimate; answer: (go: boolean) => void }>()
   const [busy, setBusy] = createSignal<string>()
   // What the running review's hidden sessions have spent so far.
-  const [liveSpend, setLiveSpend] = createSignal<{ costUsd: number; tokens: number }>()
+  const [liveSpend, setLiveSpend] = createSignal<ReviewSpend>()
   // Set by "Sign in again" for automatic reviews: the next GitHub sign-in also asks for the workflow permission.
   const [workflowSignIn, setWorkflowSignIn] = createSignal(false)
   const [error, setError] = createSignal<string>()
@@ -1146,7 +1141,12 @@ export function PullRequests(props: {
         onProgress: (progress) => {
           if (!current()) return
           // Spend keeps coming in while a stopped review finishes; everything else is the run's own progress.
-          if (progress.type === "spend") setLiveSpend({ costUsd: progress.costUsd, tokens: progress.tokens })
+          if (progress.type === "spend")
+            setLiveSpend({
+              costUsd: progress.costUsd,
+              tokens: progress.tokens,
+              ...(progress.partial ? { partial: true } : {}),
+            })
           if (controller.signal.aborted) return
           if (progress.type === "status") setBusy(progress.text)
           if (progress.type === "checkout") setCheckout({ mode: progress.checkout.mode, label: progress.label })
@@ -1344,12 +1344,12 @@ export function PullRequests(props: {
           <div class="truncate text-[11.5px] text-[color:var(--vx-text-muted)]">
             {reviewing()
               ? liveSpend()
-                ? `Reviewing… · ${liveSpendText(liveSpend()!)} so far`
+                ? `Reviewing… · ${reviewSpendText(liveSpend()!)} so far`
                 : "Reviewing…"
               : review()
                 ? `Reviewed ${subject.pr ? review()!.head.slice(0, 7) : "your uncommitted changes"} · ${reviewFooter(review()!)}`
                 : liveSpend()
-                  ? `Review stopped · at least ${liveSpendText(liveSpend()!)}`
+                  ? `Review stopped · ${reviewSpendText(liveSpend()!)}`
                   : "Not reviewed yet"}
           </div>
         </div>

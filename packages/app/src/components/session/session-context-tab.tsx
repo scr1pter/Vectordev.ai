@@ -9,10 +9,10 @@ import { useSync } from "@/context/sync"
 import { same } from "@/utils/same"
 import { createOutcomes } from "@/features/economics/economics-repository"
 import { categorizeTask } from "@/features/economics/task-categorizer"
-import { getSessionContext, getSessionTokenTotal } from "./session-context-metrics"
+import { getSessionContext } from "./session-context-metrics"
 import { rankModelsForCategory } from "./session-model-economics"
 import { createSessionContextFormatter } from "./session-context-format"
-import { formatSessionCost, sessionSpend } from "@/utils/session-cost"
+import { formatSessionCost, sessionSpend, sessionTokens } from "@/utils/session-cost"
 import { createDelegatedSpend } from "@/components/session-delegated-spend"
 
 const emptyMessages: Message[] = []
@@ -55,7 +55,7 @@ export function SessionContextTab() {
   const tokens = createMemo(() => info()?.tokens)
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
   const usage = createMemo(() => Math.max(0, Math.min(100, ctx()?.usage ?? 0)))
-  const totalTokens = createMemo(() => getSessionTokenTotal(tokens()) ?? 0)
+  const totalTokens = createMemo(() => sessionTokens(info()))
   const delegated = createDelegatedSpend(info)
 
   const counts = createMemo(() => {

@@ -6501,7 +6501,7 @@ export default function NewLayout(props: ParentProps) {
               directory,
               ...(parentID?.startsWith("ses") ? { parentID } : {}),
               onProgress: (progress) => {
-                if (progress.type === "session") spend.add(progress.sessionID)
+                if (progress.type === "session") spend.add(progress.sessionID, progress.costKind)
                 input.onProgress?.(progress)
               },
               catalog: reviewCatalog(byokProviders.connected()),

@@ -59,7 +59,7 @@ import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogAlert } from "./ui/dialog-alert"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { ToastProvider, useToast } from "./ui/toast"
-import { isDefaultTitle } from "./util/session"
+import { isDefaultTitle, isInternalSession, notifyVisibleSession } from "./util/session"
 import { KVProvider, useKV } from "./context/kv"
 import * as Model from "./util/model"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
@@ -1027,7 +1027,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   // launched them, so their errors are not shown here.
   const helperSessions = new Set<string>()
   event.on("session.created", (evt) => {
-    if (evt.properties.info.internal) helperSessions.add(evt.properties.info.id)
+    if (isInternalSession(evt.properties.info)) helperSessions.add(evt.properties.info.id)
   })
 
   event.on("session.error", (evt, { workspace }) => {
@@ -1035,22 +1035,31 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     if (evt.properties.sessionID && helperSessions.has(evt.properties.sessionID)) return
     const error = evt.properties.error
     if (error && typeof error === "object" && error.name === "MessageAbortedError") return
-    const limit = freeModelsLimitNotice(error)
-    if (limit && evt.properties.sessionID) {
-      const sessionID = evt.properties.sessionID
-      if (route.data.type === "session" && route.data.sessionID === sessionID) {
-        dialog.replace(() => <DialogFreeModelsLimit sessionID={sessionID} limit={limit} />)
-        return
-      }
-      toast.show({ variant: "info", message: freeModelsLimitTitle(limit), duration: 10000 })
-      return
-    }
-    const message = errorMessage(error)
+    void notifyVisibleSession({
+      sessionID: evt.properties.sessionID,
+      cached: (id) => sync.session.get(id),
+      read: (id) => sdk.client.session.get({ sessionID: id }).then((result) => result.data),
+      show: () => {
+        // The lookup can finish after the user switches workspaces.
+        if (workspace !== project.workspace.current()) return
+        const limit = freeModelsLimitNotice(error)
+        if (limit && evt.properties.sessionID) {
+          const sessionID = evt.properties.sessionID
+          if (route.data.type === "session" && route.data.sessionID === sessionID) {
+            dialog.replace(() => <DialogFreeModelsLimit sessionID={sessionID} limit={limit} />)
+            return
+          }
+          toast.show({ variant: "info", message: freeModelsLimitTitle(limit), duration: 10000 })
+          return
+        }
+        const message = errorMessage(error)
 
-    toast.show({
-      variant: "error",
-      message,
-      duration: 5000,
+        toast.show({
+          variant: "error",
+          message,
+          duration: 5000,
+        })
+      },
     })
   })
 
