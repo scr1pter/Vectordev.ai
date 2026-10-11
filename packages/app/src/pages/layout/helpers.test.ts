@@ -219,7 +219,13 @@ describe("layout workspace helpers", () => {
           title: "Agent 2",
           metadata: { vector: { kind: "parallel-agent", workspaceId: "w1" } },
         }),
-        session({ id: "team", directory: "/workspace", title: "Team: payments", metadata: { team: "t1" } }),
+        // A team member is a parallel agent the team runs.
+        session({
+          id: "team",
+          directory: "/workspace",
+          title: "Payments team · reviewer",
+          metadata: { vector: { kind: "parallel-agent", workspaceId: "w2" } },
+        }),
         session({ id: "review", directory: "/workspace", title: "#7 review", internal: "vectorscope.review" }),
         session({
           id: "autocomplete",

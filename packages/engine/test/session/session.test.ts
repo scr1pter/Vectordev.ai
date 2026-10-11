@@ -517,6 +517,11 @@ describe("helper sessions", () => {
       const sessions = yield* SessionNs.Service
       const launcher = yield* sessions.create({ title: "Fix the login flow" })
       const subagent = yield* sessions.create({ parentID: launcher.id, title: "explore (@explore subagent)" })
+      // Parallel agents and team members are sessions the user started, linked to their task only in metadata.
+      const parallel = yield* sessions.create({
+        title: "Agent 2",
+        metadata: { vector: { kind: "parallel-agent", workspaceId: "w2", parentSessionId: launcher.id } },
+      })
       const review = yield* sessions.create({
         parentID: launcher.id,
         internal: "vectorscope.review",
@@ -530,10 +535,10 @@ describe("helper sessions", () => {
 
       const ids = (input?: SessionNs.ListInput) =>
         sessions.list({ limit: 50, ...input }).pipe(Effect.map((list) => list.map((session) => session.id)))
-      expect(yield* ids({ roots: true })).toEqual([launcher.id])
-      expect((yield* ids()).toSorted()).toEqual([launcher.id, subagent.id].toSorted())
+      expect((yield* ids({ roots: true })).toSorted()).toEqual([launcher.id, parallel.id].toSorted())
+      expect((yield* ids()).toSorted()).toEqual([launcher.id, subagent.id, parallel.id].toSorted())
       expect((yield* ids({ internal: true })).toSorted()).toEqual(
-        [launcher.id, subagent.id, review.id, standalone.id].toSorted(),
+        [launcher.id, subagent.id, parallel.id, review.id, standalone.id].toSorted(),
       )
       const global = (yield* sessions.listGlobal({ limit: 200 })).map((session) => session.id)
       expect(global).not.toContain(review.id)
@@ -570,6 +575,7 @@ describe("helper sessions", () => {
       ])
 
       yield* sessions.remove(standalone.id)
+      yield* sessions.remove(parallel.id)
       yield* sessions.remove(launcher.id)
     }),
   )
