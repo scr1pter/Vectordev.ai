@@ -2,7 +2,7 @@
 
 No paid model calls were made during this integration. Offline scripts execute fixed tool calls against a local fake provider; they cannot establish model quality, real prompt-cache warmth, or a live price/speed advantage. The prior archive still has `decisiveClaimPermitted: false`.
 
-These commands consume your provider allowance or credits. Run them yourself only when ready to spend approximately $1 per matched round (actual usage can vary). Use your normal CLI sign-ins; do not copy, print, or inspect credential stores. Keep generated transcripts and logs private. The benchmark code launches the CLIs normally and does not open their credential files.
+These commands consume your provider allowance or credits. Run them yourself only when ready to spend approximately $1 per matched round (actual usage can vary). Use your normal CLI sign-ins; do not copy, print, or inspect credential stores. Keep generated transcripts and logs private. The matched-run and current nine-task commands below launch the CLIs normally and do not open their credential files. The recovered historical evaluator uses the derived final-source adapter described below, which delegates sign-in to the runtime.
 
 ## Prepare the exact final revision
 
@@ -83,7 +83,33 @@ The shipped code restores `prompt_cache_key` by default, with `setCacheKey: fals
 
 ## Behavioral gate
 
-The historical `behavior-evaluation-v12` result was 15/18 required scenarios. Its runnable scenario definitions and validators were not present in the supplied repository/handoff; archived numerical projections are insufficient to reconstruct them faithfully. Recover the original frozen evaluator from the private archive before claiming to rerun that exact gate; pin its scenario/validator hashes and compare the final engine to its baseline without weakening checks. The original 15/18 score has not been superseded.
+The original frozen evaluator was recovered on the handoff machine at:
+
+```text
+/Users/Krishna/.codex/benchmarks/vector-codex-20261007-7deUGe/round4/diagnosis/prompt-consolidation-proposal/behavior-evaluation-v12
+```
+
+Its `scenarios.json`, `rubric-v4.json`, `execution-plan.json`, `collector.ts`, `broker.ts`, actor sources, fixtures and completed reviews are present. Preserve this directory and its referenced sibling studies/source snapshots; it is not a standalone repository command. The original candidate result remains **15/18**, against a historical baseline of **14/18**. No final-code live rerun has superseded it.
+
+The 18 candidate cells are the six original families (`general-unavailable`, `plan-only`, `nested-specialist`, `blocked-todos`, `complex-delegation-launch`, `failed-resume`) across `gpt-6.1-sol`, `gpt-6-astra` and `gpt-6-luna`, at medium effort. Matching both source arms produces 36 episodes. The gate requires every applicable criterion in all 18 candidate episodes to pass, with no critical candidate violation or candidate-only behavioral regression. Missing evidence is inconclusive, never a pass. Two independent blinded reviewers judge complete episodes; root adjudication covers every failure, inconclusive and disagreement plus the frozen positive sample before unblinding. This is a capped behavioral checkpoint screen, not proof of completed implementations or end-to-end task quality.
+
+These recovered input hashes identify the original gate:
+
+| File | SHA-256 |
+| --- | --- |
+| `scenarios.json` | `931bc371f73acca8e9fd6013abe6b1531d9021608b58622793acacb6d66137cb` |
+| `rubric-v4.json` | `0d19d40cb9e2ccdb45caed3f2fd9f4f7239dd3395d9cffd74a43a52b53b78e5a` |
+| `completion.json` | `7e10211f8835a657ae4d79c101d068311f72d217007c08357fa124638be51159` |
+
+The exact historical live entry points, from that directory, were `bun run broker.ts --execute-first-block` and then `bun run broker.ts --execute-second-block`. The supplied `execute-first-block.sh` and `execute-second-block.sh` wrap them with macOS `caffeinate`. The first block runs six episodes, capped at 18 sends; the remaining 30 require a separate protocol-feasibility review and are capped at 90 sends. Each episode permits at most three turns, with a 120-second request timeout. Preserve all attempts and protocol failures; do not automatically retry or select successful replacements.
+
+**Do not run those archived live commands as a final-code check.** They bind old V4/V11 source paths, import the archived V8 transport, require Bun 1.3.14, pin October 10 request shapes and completed run IDs, and directly read a configured OAuth credential file before connecting to the ChatGPT WebSocket endpoint. Changing an environment variable does not select the final checkout. The recorded study made 49 provider requests and estimated **$1.34958074 API-equivalent cost** using its frozen rates; actual subscription billing is unknown. That historical amount is not a current price or a promised rerun cost.
+
+The repository now includes a [derived final-source adapter and exact preparation/live commands](behavior-v12/README.md). It runs the original native seeds and checkpoint policies through the selected checkout's engine, freezes original scenarios/rubric, source and fixture bytes, and preserves the original response, shell, source-consumption and blinded-review validators. Its declared transport change uses each source runtime's own OpenAI HTTP integration instead of the archived V8 WebSocket broker; the harness never reads credentials or authorization headers. The owner signs into a fresh CLI-only data directory normally, then explicitly starts the two live blocks after offline/protocol review. Both final candidate and original V4 baseline run all 18 cells. The historical gate remains unmet until the complete new live evidence passes blinded review.
+
+Prepare from the clean final `VECTOR_BENCH_SOURCE` commit, and review all declared adapter differences before spending. Rebind actual request shapes and dates without weakening scenario checks. The old request contract required candidate cache-key omission, whereas the integrated code restores that key; the adapter records the current emitted shape instead of pretending that the old wire contract remains current. Its offline 36-cell preflight and six-cell rehearsal validate instrumentation with scripted responses, never model quality. Preserve every failed study and attempt; do not replace unsuccessful cells selectively.
+
+The archived broker also implements `--check` (frozen integrity only), `--preflight <fresh-run-id>` (36 scripted loopback episodes) and `--rehearse-first-block <fresh-run-id>` (six synthetic WebSocket episodes). Their non-live branches do not read the configured real credentials or contact the provider, but they still target historical sources; preflight/rehearsal write artifacts. Use the derived adapter's separate commands for final-code preparation, offline checks and owner-run live blocks through the normal runtime. Passing synthetic responses cannot establish the 18/18 model-behavior gate. The archive itself was inspected read-only during this integration; none of these commands was executed.
 
 The current repository's separate nine-task objective suite can be run manually as an additional paid check (it does not replace the historical 18-scenario gate):
 
