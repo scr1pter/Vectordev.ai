@@ -8,6 +8,7 @@ import { ProviderError } from "../../src/provider/error"
 import { OpenAIWebSocket } from "../../src/plugin/openai/ws"
 import { OpenAIWebSocketPool, TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
 import { OpenAITransport } from "../../src/plugin/openai/transport"
+import { isRecord } from "../../src/util/record"
 
 describe("plugin.openai.ws", () => {
   test("derives websocket URLs and sends auth plus protocol headers", async () => {
@@ -310,67 +311,88 @@ describe("plugin.openai.ws-pool", () => {
     fetch.close()
   })
 
-  test("falls back to HTTP after websocket setup retries are exhausted", async () => {
+  test("serves a call over HTTP when the websocket handshake fails and skips handshakes during the cooldown", async () => {
     const attempts: string[] = []
     await using server = await createRejectingWebSocketServer(() => attempts.push("websocket"))
-    const fetch = OpenAIWebSocketPool.createWebSocketFetch({
-      url: server.url,
-      connectTimeout: 100,
-      streamRetries: 1,
-    })
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ url: server.url })
 
     const first = await fetch(server.url, streamRequest({ [TITLE_HEADER]: "false" }))
-    expect(await readTextError(first.text())).toBeInstanceOf(ProviderError.ResponseStreamError)
     const second = await fetch(server.url, streamRequest({ [TITLE_HEADER]: "false" }))
-    const third = await fetch(server.url, streamRequest({ [TITLE_HEADER]: "false" }))
+    const otherSession = await fetch(server.url, streamRequest({ "session-id": "session-2" }))
 
+    expect(await first.text()).toBe("http")
     expect(await second.text()).toBe("http")
-    expect(await third.text()).toBe("http")
-    expect(attempts).toEqual(["websocket", "websocket"])
-    expect(server.httpRequests).toHaveLength(2)
+    expect(await otherSession.text()).toBe("http")
+    expect(attempts).toEqual(["websocket"])
+    expect(server.httpRequests).toHaveLength(3)
     expect(server.httpRequests[0]?.headers[TITLE_HEADER]).toBeUndefined()
     expect(server.httpRequests[1]?.headers[TITLE_HEADER]).toBeUndefined()
     fetch.close()
   })
 
+  test("tries the websocket again once the handshake cooldown ends", async () => {
+    let attempts = 0
+    let connections = 0
+    await using server = await createWebSocketServer((socket) => {
+      connections += 1
+      socket.once("message", () => socket.send(JSON.stringify({ type: "response.completed", response: { id: "r" } })))
+    })
+    await using rejecting = await createRejectingWebSocketServer(() => attempts++)
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ connectCooldown: 20 })
+
+    const first = await fetch(rejecting.url, streamRequest())
+    expect(await first.text()).toBe("http")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const second = await fetch(server.url, streamRequest())
+
+    expect(await second.text()).toContain("data: [DONE]")
+    expect(attempts).toBe(1)
+    expect(connections).toBe(1)
+    fetch.close()
+  })
+
   test("keeps HTTP fallback active after its idle timeout", async () => {
-    let websocketAttempts = 0
-    await using server = await createRejectingWebSocketServer(() => websocketAttempts++)
+    let connections = 0
+    await using server = await createWebSocketServer((socket) => {
+      connections += 1
+      socket.once("message", () => socket.close(1001, "server shutdown"))
+    })
     const fetch = OpenAIWebSocketPool.createWebSocketFetch({
       url: server.url,
-      connectTimeout: 100,
       idleTimeout: 20,
       streamRetries: 0,
     })
 
     const first = await fetch(server.url, streamRequest())
-    expect(await first.text()).toBe("http")
+    expect((await readTextError(first.text())).message).toContain("WebSocket closed before response.completed")
     await new Promise((resolve) => setTimeout(resolve, 50))
     const second = await fetch(server.url, streamRequest())
 
     expect(await second.text()).toBe("http")
-    expect(websocketAttempts).toBe(1)
-    expect(server.httpRequests).toHaveLength(2)
+    expect(connections).toBe(1)
+    expect(server.httpRequests).toHaveLength(1)
     fetch.close()
   })
 
   test("removes HTTP fallback when its session is deleted", async () => {
-    let websocketAttempts = 0
-    await using server = await createRejectingWebSocketServer(() => websocketAttempts++)
+    let connections = 0
+    await using server = await createWebSocketServer((socket) => {
+      connections += 1
+      socket.once("message", () => socket.close(1001, "server shutdown"))
+    })
     const fetch = OpenAIWebSocketPool.createWebSocketFetch({
       url: server.url,
-      connectTimeout: 100,
       streamRetries: 0,
     })
 
     const first = await fetch(server.url, streamRequest())
-    expect(await first.text()).toBe("http")
+    expect((await readTextError(first.text())).message).toContain("WebSocket closed before response.completed")
     fetch.remove("session-1")
     const second = await fetch(server.url, streamRequest())
 
-    expect(await second.text()).toBe("http")
-    expect(websocketAttempts).toBe(2)
-    expect(server.httpRequests).toHaveLength(2)
+    expect((await readTextError(second.text())).message).toContain("WebSocket closed before response.completed")
+    expect(connections).toBe(2)
+    expect(server.httpRequests).toHaveLength(0)
     fetch.close()
   })
 
@@ -896,6 +918,257 @@ describe("plugin.openai.ws-pool", () => {
   })
 })
 
+describe("plugin.openai.ws-pool continuation", () => {
+  test("continues a session with only the new items and the model sees the same conversation", async () => {
+    await using server = await createResponsesServer()
+    const events: OpenAITransport.Diagnostic[] = []
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ onDiagnostic: (event) => events.push(event) })
+    const session = conversation()
+
+    const bodies: string[] = []
+    for (const _ of [1, 2, 3]) {
+      const request = session.request()
+      bodies.push(request.body as string)
+      await session.turn(await fetch(server.url, request))
+    }
+
+    expect(server.frames.map((item) => item.frame.previous_response_id)).toEqual([undefined, "resp_1", "resp_2"])
+    // After the first request only the tool result is new.
+    expect(server.frames.map((item) => (item.frame.input as unknown[]).length)).toEqual([1, 1, 1])
+    expect(server.contexts.map(visible)).toEqual(session.sent.map(visible))
+    expect(server.connections()).toBe(1)
+    // Each continuation carries the settings and one new item; the full body grows with the whole conversation.
+    expect(server.frames[2]!.bytes).toBeLessThan(Buffer.byteLength(bodies[2]!) - Buffer.byteLength(bodies[0]!))
+    const requests = events.filter((event) => event.phase === "request_sent")
+    expect(requests.map((event) => event.continuation)).toEqual(["full", "incremental", "incremental"])
+    expect(requests.map((event) => event.bytes)).toEqual(server.frames.map((item) => item.bytes))
+    fetch.close()
+  })
+
+  test("reports the server's usage for the whole context unchanged", async () => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const session = conversation()
+
+    await session.turn(await fetch(server.url, session.request()))
+    const second = await session.turn(await fetch(server.url, session.request()))
+
+    expect(server.frames[1]!.frame.previous_response_id).toBe("resp_1")
+    expect(second.find((event) => event.type === "response.completed")?.response).toMatchObject({
+      id: "resp_2",
+      usage: server.usage[1],
+    })
+    expect(server.usage[1]!.input_tokens).toBe(server.contexts[1]!.length * 100)
+    fetch.close()
+  })
+
+  test.each([
+    ["the model changes", { model: "gpt-6.1-luna" }],
+    ["the instructions change", { instructions: "You are Vector. Today is a new day." }],
+    ["the tools change", { tools: [] }],
+    ["the reasoning setting changes", { reasoning: { effort: "high" } }],
+  ])("sends the whole conversation when %s", async (_name, change) => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const session = conversation()
+
+    await session.turn(await fetch(server.url, session.request()))
+    await session.turn(await fetch(server.url, session.request(change)))
+
+    expect(server.frames[1]!.frame.previous_response_id).toBeUndefined()
+    expect(server.frames[1]!.frame.input).toEqual(session.sent[1])
+    expect(server.connections()).toBe(1)
+    fetch.close()
+  })
+
+  test.each([
+    [
+      "an earlier item was edited",
+      (input: unknown[]) => [{ role: "user", content: [{ type: "input_text", text: "edited" }] }, ...input.slice(1)],
+    ],
+    ["a reasoning item was dropped", (input: unknown[]) => input.filter((item) => !isReasoning(item))],
+    [
+      "the history was compacted",
+      (input: unknown[]) => [{ role: "user", content: [{ type: "input_text", text: "summary" }] }, input.at(-1)],
+    ],
+  ])("sends the whole conversation when %s", async (_name, rewrite) => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const session = conversation()
+
+    await session.turn(await fetch(server.url, session.request()))
+    session.input.splice(0, session.input.length, ...rewrite(session.input))
+    await session.turn(await fetch(server.url, session.request()))
+
+    expect(server.frames[1]!.frame.previous_response_id).toBeUndefined()
+    expect(server.frames[1]!.frame.input).toEqual(session.sent[1])
+    fetch.close()
+  })
+
+  test.each(["error", "failed"] as const)(
+    "resends in full on the same connection when the server lost the previous response (%s)",
+    async (shape) => {
+      await using server = await createResponsesServer({ lost: shape })
+      const events: OpenAITransport.Diagnostic[] = []
+      const fetch = OpenAIWebSocketPool.createWebSocketFetch({ onDiagnostic: (event) => events.push(event) })
+      const session = conversation()
+
+      await session.turn(await fetch(server.url, session.request()))
+      server.evict()
+      const second = await session.turn(await fetch(server.url, session.request()))
+      await session.turn(await fetch(server.url, session.request()))
+
+      expect(server.frames.map((item) => item.frame.previous_response_id)).toEqual([
+        undefined,
+        "resp_1",
+        undefined,
+        "resp_2",
+      ])
+      expect(server.frames[2]!.frame.input).toEqual(session.sent[1])
+      // The rejected attempt never reaches the caller: one response, and only its usage.
+      expect(second.filter((event) => event.type === "response.created")).toHaveLength(1)
+      expect(second.filter((event) => event.type === "response.completed")).toHaveLength(1)
+      expect(second.some((event) => event.type === "error" || event.type === "response.failed")).toBe(false)
+      expect(server.contexts.map(visible)).toEqual(session.sent.map(visible))
+      expect(server.connections()).toBe(1)
+      expect(events.filter((event) => event.reason === "continuation_lost")).toHaveLength(1)
+      fetch.close()
+    },
+  )
+
+  test("starts over in full after the connection is replaced", async () => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch({ maxConnectionAge: 0 })
+    const session = conversation()
+
+    await session.turn(await fetch(server.url, session.request()))
+    await session.turn(await fetch(server.url, session.request()))
+
+    expect(server.frames.map((item) => item.frame.previous_response_id)).toEqual([undefined, undefined])
+    expect(server.connections()).toBe(2)
+    fetch.close()
+  })
+
+  test("starts over in full after the server drops the connection", async () => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const session = conversation()
+
+    await session.turn(await fetch(server.url, session.request()))
+    server.disconnect()
+    await waitFor(() => server.open() === 0, "server did not drop the connection")
+    // The client learns of the close an event-loop turn after the server does.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await session.turn(await fetch(server.url, session.request()))
+    await session.turn(await fetch(server.url, session.request()))
+
+    expect(server.frames.map((item) => item.frame.previous_response_id)).toEqual([undefined, undefined, "resp_2"])
+    expect(server.connections()).toBe(2)
+    expect(server.contexts.map(visible)).toEqual(session.sent.map(visible))
+    fetch.close()
+  })
+
+  test("keeps each subagent's continuation on its own connection", async () => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const parent = conversation("session-parent")
+    const child = conversation("session-child")
+
+    await parent.turn(await fetch(server.url, parent.request()))
+    await child.turn(await fetch(server.url, child.request()))
+    await parent.turn(await fetch(server.url, parent.request()))
+    await child.turn(await fetch(server.url, child.request()))
+
+    expect(server.frames.map((item) => [item.connection, item.frame.previous_response_id])).toEqual([
+      [1, undefined],
+      [2, undefined],
+      [1, "resp_1"],
+      [2, "resp_2"],
+    ])
+    expect(server.contexts.map(visible)).toEqual(
+      [parent.sent[0], child.sent[0], parent.sent[1], child.sent[1]].map(visible),
+    )
+    fetch.close()
+  })
+
+  test("continues parallel subagents that share one pool, each on its own connection", async () => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const sessions = ["session-parent", "session-child-1", "session-child-2"].map((id) => conversation(id))
+
+    for (const _ of [1, 2, 3])
+      await Promise.all(sessions.map(async (session) => session.turn(await fetch(server.url, session.request()))))
+
+    expect(server.connections()).toBe(3)
+    const frames = (connection: number) => server.frames.filter((item) => item.connection === connection)
+    // Each connection serves one session, and continues it after its first request.
+    expect(
+      [1, 2, 3].map((connection) => new Set(frames(connection).map((item) => item.frame.prompt_cache_key)).size),
+    ).toEqual([1, 1, 1])
+    expect(
+      [1, 2, 3].map((connection) => frames(connection).map((item) => item.frame.previous_response_id !== undefined)),
+    ).toEqual([
+      [false, true, true],
+      [false, true, true],
+      [false, true, true],
+    ])
+    const contexts = (list: unknown[][]) => list.map((context) => JSON.stringify(visible(context))).toSorted()
+    expect(contexts(server.contexts)).toEqual(contexts(sessions.flatMap((session) => session.sent)))
+    fetch.close()
+  })
+
+  test("never continues a response that was aborted mid-stream", async () => {
+    await using server = await createResponsesServer({ hang: (n) => n === 2 })
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const session = conversation()
+    const abort = new AbortController()
+
+    await session.turn(await fetch(server.url, session.request()))
+    const interrupted = await fetch(server.url, session.request({}, abort.signal))
+    const text = interrupted.text()
+    await waitFor(() => server.frames.length === 2, "second request was not sent")
+    abort.abort(new Error("stop"))
+    expect((await readTextError(text)).message).toContain("stop")
+    session.input.push({ role: "user", content: [{ type: "input_text", text: "try again" }] })
+    await session.turn(await fetch(server.url, session.request()))
+
+    expect(server.frames.map((item) => item.frame.previous_response_id)).toEqual([undefined, "resp_1", undefined])
+    expect(server.frames[2]!.frame.input).toEqual(session.sent[2])
+    expect(server.connections()).toBe(2)
+    fetch.close()
+  })
+
+  test("never continues an incomplete response", async () => {
+    await using server = await createResponsesServer({ incomplete: (n) => n === 1 })
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const session = conversation()
+
+    await session.turn(await fetch(server.url, session.request()))
+    await session.turn(await fetch(server.url, session.request()))
+
+    expect(server.frames.map((item) => item.frame.previous_response_id)).toEqual([undefined, undefined])
+    fetch.close()
+  })
+
+  test("leaves title, busy and fallback requests on HTTP without disturbing the continuation", async () => {
+    await using server = await createResponsesServer()
+    const fetch = OpenAIWebSocketPool.createWebSocketFetch()
+    const session = conversation()
+
+    await session.turn(await fetch(server.url, session.request()))
+    const title = await fetch(server.url, {
+      ...session.request(),
+      headers: { ...headersOf("session-1"), [TITLE_HEADER]: "true" },
+    })
+    expect(await title.text()).toBe("http")
+    await session.turn(await fetch(server.url, session.request()))
+
+    expect(server.frames.map((item) => item.frame.previous_response_id)).toEqual([undefined, "resp_1"])
+    expect(server.httpRequests).toHaveLength(1)
+    fetch.close()
+  })
+})
+
 describe("plugin.openai.http", () => {
   test("strips internal Request headers while preserving body, signal, correlation, and init precedence", async () => {
     const bodies: string[] = []
@@ -1068,6 +1341,177 @@ function streamRequest(headers?: Record<string, string>, signal?: AbortSignal): 
     },
     body: JSON.stringify({ stream: true, input: "hi" }),
     signal,
+  }
+}
+
+const SETTINGS = {
+  model: "gpt-6.1-sol",
+  instructions: "You are Vector.",
+  tools: [{ type: "function", name: "bash", parameters: { type: "object" } }],
+  reasoning: { effort: "medium", summary: "auto" },
+  include: ["reasoning.encrypted_content"],
+  store: false,
+  prompt_cache_key: "session-1",
+}
+
+function headersOf(session: string) {
+  return { "session-id": session, authorization: "Bearer test" }
+}
+
+// Plays a session the way Vector's request builder does: every turn sends the whole conversation, with each
+// response's output items sent back without their IDs or status, followed by the tool results.
+function conversation(session = "session-1") {
+  const input: unknown[] = [{ role: "user", content: [{ type: "input_text", text: "fix the failing test" }] }]
+  const sent: unknown[][] = []
+  return {
+    input,
+    sent,
+    request(change: Record<string, unknown> = {}, signal?: AbortSignal): RequestInit {
+      sent.push([...input])
+      return {
+        method: "POST",
+        headers: headersOf(session),
+        body: JSON.stringify({ ...SETTINGS, prompt_cache_key: session, stream: true, input, ...change }),
+        signal,
+      }
+    },
+    async turn(response: Response) {
+      const events = (await response.text())
+        .split("\n\n")
+        .filter((chunk) => chunk.startsWith("data: {"))
+        .map((chunk) => JSON.parse(chunk.slice(6)) as Record<string, unknown> & { response?: Record<string, unknown> })
+      const items = events.flatMap((event) =>
+        event.type === "response.output_item.done" && isRecord(event.item) ? [event.item] : [],
+      )
+      input.push(
+        ...items.map(({ id: _id, status: _status, ...item }) => item),
+        ...items
+          .filter((item) => item.type === "function_call")
+          .map((item) => ({ type: "function_call_output", call_id: item.call_id, output: "1 pass" })),
+      )
+      return events
+    },
+  }
+}
+
+function isReasoning(item: unknown) {
+  return isRecord(item) && item.type === "reasoning"
+}
+
+// What the model sees of a list of items: their content, without item IDs or status.
+function visible(items: unknown[]) {
+  return items.map((item) =>
+    isRecord(item)
+      ? Object.fromEntries(Object.entries(item).filter(([key]) => key !== "id" && key !== "status"))
+      : item,
+  )
+}
+
+// A WebSocket Responses endpoint that behaves like the real one: each connection remembers the responses it produced,
+// so a request can continue one with previous_response_id, and an ID it no longer holds is rejected before any output.
+async function createResponsesServer(
+  options: {
+    lost?: "error" | "failed"
+    hang?: (n: number) => boolean
+    incomplete?: (n: number) => boolean
+  } = {},
+) {
+  const frames: Array<{ connection: number; frame: Record<string, unknown>; bytes: number }> = []
+  const contexts: unknown[][] = []
+  const usage: Array<{ input_tokens: number; input_tokens_details: { cached_tokens: number }; output_tokens: number }> =
+    []
+  const memories = new Set<Map<string, unknown[]>>()
+  const sockets = new Set<WebSocket>()
+  let connections = 0
+  let responses = 0
+  const server = await createWebSocketServer((socket) => {
+    const connection = ++connections
+    const memory = new Map<string, unknown[]>()
+    memories.add(memory)
+    sockets.add(socket)
+    socket.on("close", () => sockets.delete(socket))
+    socket.on("message", (data) => {
+      const text = data.toString()
+      const frame = JSON.parse(text) as Record<string, unknown>
+      frames.push({ connection, frame, bytes: Buffer.byteLength(text) })
+      const previous = typeof frame.previous_response_id === "string" ? frame.previous_response_id : undefined
+      const prior = previous === undefined ? [] : memory.get(previous)
+      if (!prior) {
+        const error = {
+          type: "invalid_request_error",
+          code: "previous_response_not_found",
+          message: `Previous response with id '${previous}' not found.`,
+          param: "previous_response_id",
+        }
+        if (options.lost === "failed") {
+          socket.send(
+            JSON.stringify({ type: "response.created", response: { id: "resp_rejected", status: "in_progress" } }),
+          )
+          socket.send(
+            JSON.stringify({ type: "response.failed", response: { id: "resp_rejected", status: "failed", error } }),
+          )
+          return
+        }
+        socket.send(JSON.stringify({ type: "error", status: 400, error }))
+        return
+      }
+      const n = ++responses
+      const id = `resp_${n}`
+      const context = [...prior, ...(frame.input as unknown[])]
+      contexts.push(context)
+      const output = [
+        {
+          type: "reasoning",
+          id: `rs_${n}`,
+          summary: [{ type: "summary_text", text: `Step ${n}.` }],
+          encrypted_content: `encrypted-${n}`,
+        },
+        {
+          type: "function_call",
+          id: `fc_${n}`,
+          status: "completed",
+          call_id: `call_${n}`,
+          name: "bash",
+          arguments: JSON.stringify({ command: `step ${n}` }),
+        },
+      ]
+      socket.send(JSON.stringify({ type: "response.created", response: { id, status: "in_progress", output: [] } }))
+      output.forEach((item, index) => {
+        socket.send(JSON.stringify({ type: "response.output_item.added", output_index: index, item }))
+        if (options.hang?.(n)) return
+        socket.send(JSON.stringify({ type: "response.output_item.done", output_index: index, item }))
+      })
+      if (options.hang?.(n)) return
+      const reported = {
+        input_tokens: context.length * 100,
+        input_tokens_details: { cached_tokens: prior.length * 100 },
+        output_tokens: 7,
+      }
+      usage.push(reported)
+      if (options.incomplete?.(n)) {
+        socket.send(
+          JSON.stringify({
+            type: "response.incomplete",
+            response: { id, status: "incomplete", output, usage: reported },
+          }),
+        )
+        return
+      }
+      memory.set(id, [...context, ...output])
+      socket.send(
+        JSON.stringify({ type: "response.completed", response: { id, status: "completed", output, usage: reported } }),
+      )
+    })
+  })
+  return {
+    ...server,
+    frames,
+    contexts,
+    usage,
+    connections: () => connections,
+    open: () => sockets.size,
+    evict: () => memories.forEach((memory) => memory.clear()),
+    disconnect: () => sockets.forEach((socket) => socket.close(1001, "going away")),
   }
 }
 

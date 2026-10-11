@@ -15,6 +15,8 @@ import {
   type IdTokenClaims,
 } from "../../src/plugin/openai/codex"
 import { ProviderAuth } from "../../src/provider/auth"
+import { webSocketTransport } from "../../src/plugin"
+import { TITLE_HEADER } from "../../src/plugin/openai/ws-pool"
 
 function createTestJwt(payload: object): string {
   const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")
@@ -177,7 +179,7 @@ describe("plugin.codex", () => {
 
   test("installs HTTP transport by default and websocket transport when enabled", async () => {
     const disabled = await CodexAuthPlugin({} as never)
-    const enabled = await CodexAuthPlugin({} as never, { experimentalWebSockets: true })
+    const enabled = await CodexAuthPlugin({} as never, { webSockets: { signIn: true, apiKey: true } })
 
     const disabledOptions = await disabled.auth!.loader!(
       async () => ({ type: "api", key: "sk-test" }) as never,
@@ -311,6 +313,45 @@ describe("plugin.codex", () => {
     await hooks["chat.headers"]!({ model: { providerID: "openai" }, sessionID: "session" } as never, headers as never)
     expect(headers.headers.originator).toBe("vector")
     expect(headers.headers["User-Agent"]).toStartWith("vector/")
+  })
+
+  test("a ChatGPT sign-in continues its conversation over the Responses WebSocket by default", async () => {
+    await using backend = signInBackend()
+    const hooks = await CodexAuthPlugin(backend.plugin, {
+      issuer: backend.url,
+      codexApiEndpoint: `${backend.url}/responses`,
+      webSockets: webSocketTransport({ enabled: false, disabled: false, channel: "latest" }),
+    })
+    const send = await signedIn(hooks, backend)
+
+    expect(await (await send([user])).text()).toContain("response.completed")
+    expect(await (await send([user, call, result])).text()).toContain("response.completed")
+    expect(await (await send([user], { [TITLE_HEADER]: "true" })).text()).toBe("http")
+
+    expect(backend.upgrades).toEqual([
+      { authorization: `Bearer ${backend.access}`, account: "acct-1", beta: "responses_websockets=2026-02-06" },
+    ])
+    expect(backend.frames.map((frame) => [frame.previous_response_id, frame.input])).toEqual([
+      [undefined, [user]],
+      ["resp_1", [result]],
+    ])
+    expect(backend.http).toEqual(["/oauth/token", "/responses"])
+    await hooks.dispose?.()
+  })
+
+  test("the WebSocket opt-out keeps a ChatGPT sign-in on HTTP", async () => {
+    await using backend = signInBackend()
+    const hooks = await CodexAuthPlugin(backend.plugin, {
+      issuer: backend.url,
+      codexApiEndpoint: `${backend.url}/responses`,
+      webSockets: webSocketTransport({ enabled: true, disabled: true, channel: "latest" }),
+    })
+    const send = await signedIn(hooks, backend)
+
+    expect(await (await send([user])).text()).toBe("http")
+    expect(backend.upgrades).toEqual([])
+    expect(backend.http).toEqual(["/oauth/token", "/responses"])
+    await hooks.dispose?.()
   })
 
   test("a headless ChatGPT sign-in identifies as Vector and stamps the registration it came from", async () => {
@@ -453,3 +494,77 @@ describe("plugin.codex", () => {
     })
   })
 })
+
+const user = { role: "user", content: [{ type: "input_text", text: "fix the failing test" }] }
+const call = { type: "function_call", call_id: "call_1", name: "bash", arguments: "{}" }
+const result = { type: "function_call_output", call_id: "call_1", output: "1 pass" }
+
+// The sign-in token endpoint plus a Responses endpoint that answers HTTP and WebSocket requests, as chatgpt.com does.
+function signInBackend() {
+  const access = createTestJwt({ chatgpt_account_id: "acct-1" })
+  const upgrades: Array<{ authorization: string | null; account: string | null; beta: string | null }> = []
+  const frames: Array<Record<string, unknown>> = []
+  const http: string[] = []
+  // The saved credential: expired at first, then whatever the refresh stored.
+  let auth: Record<string, unknown> = { type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 }
+  const server = Bun.serve({
+    port: 0,
+    fetch(request, server) {
+      const path = new URL(request.url).pathname
+      if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        upgrades.push({
+          authorization: request.headers.get("authorization"),
+          account: request.headers.get("chatgpt-account-id"),
+          beta: request.headers.get("openai-beta"),
+        })
+        return server.upgrade(request) ? undefined : new Response("upgrade failed", { status: 400 })
+      }
+      http.push(path)
+      if (path === "/oauth/token")
+        return Response.json({ access_token: access, refresh_token: "test-refresh", expires_in: 3600 })
+      return new Response("http")
+    },
+    websocket: {
+      message(socket, raw) {
+        frames.push(JSON.parse(String(raw)))
+        const id = `resp_${frames.length}`
+        const item = { ...call, id: `fc_${frames.length}`, status: "completed" }
+        const usage = { input_tokens: 10, input_tokens_details: { cached_tokens: 0 }, output_tokens: 1 }
+        socket.send(JSON.stringify({ type: "response.created", response: { id } }))
+        socket.send(JSON.stringify({ type: "response.output_item.added", output_index: 0, item }))
+        socket.send(JSON.stringify({ type: "response.output_item.done", output_index: 0, item }))
+        socket.send(JSON.stringify({ type: "response.completed", response: { id, output: [item], usage } }))
+      },
+    },
+  })
+  return {
+    url: server.url.origin,
+    access,
+    plugin: {
+      client: { auth: { set: async (input: { body: Record<string, unknown> }) => (auth = input.body) } },
+    } as never,
+    auth: async () => auth as never,
+    upgrades,
+    frames,
+    http,
+    async [Symbol.asyncDispose]() {
+      await server.stop(true)
+    },
+  }
+}
+
+async function signedIn(hooks: Awaited<ReturnType<typeof CodexAuthPlugin>>, backend: ReturnType<typeof signInBackend>) {
+  const options = await hooks.auth!.loader!(backend.auth, { models: {} } as never)
+  return (input: unknown[], headers: Record<string, string> = {}) =>
+    (options.fetch as typeof fetch)("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { "session-id": "session-1", ...headers },
+      body: JSON.stringify({
+        model: "gpt-6.1-sol",
+        instructions: "You are Vector.",
+        store: false,
+        stream: true,
+        input,
+      }),
+    })
+}

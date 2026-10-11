@@ -32,7 +32,13 @@ export type Diagnostic = {
     | "rejected"
     | "connect"
     | "stream"
+    | "unreachable"
+    | "continuation_lost"
   terminal?: "completed" | "failed" | "incomplete" | "error" | "body_end"
+  // How a WebSocket request was sent: the whole conversation, or only the items after the previous response.
+  continuation?: "full" | "incremental"
+  // Bytes of the request frame as sent.
+  bytes?: number
   status?: number
   model?: string
   reasoningEffort?: string
@@ -64,7 +70,10 @@ export function createTrace(input: {
       ? effort
       : undefined
   const patch = patchToolType(body)
-  return (phase: Diagnostic["phase"], details?: Pick<Diagnostic, "reused" | "reason" | "terminal" | "status">) => {
+  return (
+    phase: Diagnostic["phase"],
+    details?: Pick<Diagnostic, "reused" | "reason" | "terminal" | "status" | "continuation" | "bytes">,
+  ) => {
     input.report?.({
       requestID,
       sessionID,
