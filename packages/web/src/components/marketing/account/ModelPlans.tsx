@@ -5,7 +5,6 @@ import {
   modelPlanPurchasable,
   modelPlanRedirect,
   modelPlanRemaining,
-  modelPlanTokenEstimate,
   modelTopupPurchasable,
   modelWalletRemaining,
   readModelPlanConfig,
@@ -17,15 +16,14 @@ import "./model-plans.css"
 
 export type ModelPlansPreview = { config: ModelPlanConfig; status: ModelPlanStatus }
 
-const credits = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 })
+const count = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
 const price = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })
-const tokens = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
+// Balances are shown as a share of the credits bought, never as amounts, which with the purchase price would reveal
+// the dollars of model credit in it.
+const share = (remaining: number, total: number) => (total > 0 ? Math.min(1, Math.max(0, remaining / total)) : 0)
+const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 })
 
-export function ModelPlans(props: {
-  accessToken: string
-  preview?: ModelPlansPreview | true
-  publicConfig?: ModelPlanConfig
-}) {
+export function ModelPlans(props: { accessToken: string; preview?: ModelPlansPreview | true }) {
   const preview: ModelPlansPreview | undefined =
     props.preview === true
       ? {
@@ -33,16 +31,14 @@ export function ModelPlans(props: {
           status: { active: false },
         }
       : props.preview
-  const [data, setData] = React.useState<ModelPlansPreview | undefined>(
-    props.publicConfig ? { config: props.publicConfig, status: { active: false } } : preview,
-  )
-  const [loading, setLoading] = React.useState(!props.publicConfig && !preview && Boolean(props.accessToken))
+  const [data, setData] = React.useState<ModelPlansPreview | undefined>(preview)
+  const [loading, setLoading] = React.useState(!preview && Boolean(props.accessToken))
   const [error, setError] = React.useState("")
   const [action, setAction] = React.useState("")
   const [refresh, setRefresh] = React.useState(0)
 
   React.useEffect(() => {
-    if (props.publicConfig || preview || !props.accessToken) return
+    if (preview || !props.accessToken) return
     const controller = new AbortController()
     setLoading(true)
     setError("")
@@ -69,10 +65,10 @@ export function ModelPlans(props: {
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [props.accessToken, props.preview, props.publicConfig, refresh])
+  }, [props.accessToken, props.preview, refresh])
 
   const openBilling = (kind: "checkout" | "portal" | "topup", plan?: string) => {
-    if (props.publicConfig || props.preview || !props.accessToken || action || !data) return
+    if (props.preview || !props.accessToken || action || !data) return
     if (
       kind === "checkout" &&
       !data.config.plans.some((item) => item.id === plan && modelPlanPurchasable(data.config, item, data.status))
@@ -105,23 +101,17 @@ export function ModelPlans(props: {
   const remaining = status ? modelPlanRemaining(status) : undefined
   const purchasedRemaining = status?.wallet ? modelWalletRemaining(status.wallet) : undefined
   const customer = status?.active || status?.customer
+  const defaultModel = data?.config.models?.[0]
   return (
-    <section
-      className="acct-section model-plans"
-      data-public={Boolean(props.publicConfig) || undefined}
-      aria-labelledby="model-plans-heading"
-      aria-busy={loading}
-    >
+    <section className="acct-section model-plans" aria-labelledby="model-plans-heading" aria-busy={loading}>
       <div className="model-plans-heading">
-        <h2 id="model-plans-heading">
-          {props.publicConfig ? "Choose your coding budget" : (data?.config.product ?? "Vector Codium")}
-        </h2>
+        <h2 id="model-plans-heading">{data?.config.product ?? "Vector Codium"}</h2>
         {status?.active && (
           <span className="model-plans-badge">{status.cancelAtPeriodEnd ? "Ending this period" : "Active"}</span>
         )}
       </div>
       <p>The same coding model catalog for every budget. Subscribe monthly or buy credits when you need them.</p>
-      {!props.accessToken && !preview && !props.publicConfig && <p>Sign in to view your model plan.</p>}
+      {!props.accessToken && !preview && <p>Sign in to view your model plan.</p>}
       {loading && <p role="status">Loading model plans…</p>}
       {error && (
         <div className="model-plans-error" role="alert">
@@ -147,19 +137,19 @@ export function ModelPlans(props: {
               "Usage temporarily unavailable"
             ) : (
               <span>
-                <strong>{credits.format(remaining * 100)}</strong> Codium credits remaining
+                <strong>{percent.format(share(remaining, status.credits))}</strong> of this month&apos;s Codium credits
+                remaining
               </span>
             )}
           </p>
           {remaining !== undefined && status.credits > 0 && (
             <progress
-              value={remaining * 100}
-              max={status.credits * 100}
+              value={Math.round(share(remaining, status.credits) * 100)}
+              max={100}
               aria-label="Monthly Codium credits remaining"
             />
           )}
           <p>
-            {credits.format(status.credits * 100)} Codium credits per month ·{" "}
             {status.cancelAtPeriodEnd ? "Access ends" : "Renews"}{" "}
             {new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(status.periodEnd)}
           </p>
@@ -173,7 +163,8 @@ export function ModelPlans(props: {
               "Usage temporarily unavailable"
             ) : (
               <span>
-                <strong>{credits.format(purchasedRemaining * 100)}</strong> purchased Codium credits remaining
+                <strong>{percent.format(share(purchasedRemaining, status.wallet.credits))}</strong> of your purchased
+                Codium credits remaining
               </span>
             )}
           </p>
@@ -228,7 +219,7 @@ export function ModelPlans(props: {
                     group.kind === "checkout"
                       ? modelPlanPurchasable(data.config, plan, status)
                       : modelTopupPurchasable(data.config, plan, status)
-                  const estimate = modelPlanTokenEstimate(plan.credits, data.config.models)
+                  const tasks = plan.tasks?.[0]
                   return (
                     <article className="model-plan" key={plan.id} data-current={current || undefined}>
                       <h4>{plan.name}</h4>
@@ -236,42 +227,29 @@ export function ModelPlans(props: {
                         <strong>{price.format(plan.price)}</strong>
                         <span>{group.kind === "checkout" ? "/month" : "once"}</span>
                       </p>
-                      <p className="model-plan-credits">
-                        {plan.credits > 0
-                          ? `${credits.format(plan.credits * 100)} Codium credits${group.kind === "checkout" ? " / month" : ""}`
-                          : "Credit allowance to be announced"}
-                      </p>
-                      {estimate && (
+                      {tasks && defaultModel && (
                         <p className="model-plan-estimate">
-                          Est. {tokens.format(estimate.min)}
-                          {estimate.max !== estimate.min && `–${tokens.format(estimate.max)}`} tokens
+                          About {count.format(tasks[0])}–{count.format(tasks[1])} typical tasks
+                          {group.kind === "checkout" ? " a month" : ""} with {defaultModel.name}
                         </p>
                       )}
                       <p className="model-plan-access">All Codium models included</p>
-                      {props.publicConfig && available ? (
-                        <a className="acct-button" href="/account">
-                          Choose {plan.name}
-                        </a>
-                      ) : (
-                        <button
-                          className="acct-button"
-                          type="button"
-                          disabled={
-                            !available || Boolean(action) || Boolean(props.preview) || Boolean(props.publicConfig)
-                          }
-                          onClick={() => openBilling(group.kind, plan.id)}
-                        >
-                          {current
-                            ? "Current plan"
-                            : group.kind === "checkout" && status?.active
-                              ? "Manage in billing"
-                              : action === plan.id
-                                ? "Opening checkout…"
-                                : available
-                                  ? `Choose ${plan.name}`
-                                  : "Coming soon"}
-                        </button>
-                      )}
+                      <button
+                        className="acct-button"
+                        type="button"
+                        disabled={!available || Boolean(action) || Boolean(props.preview)}
+                        onClick={() => openBilling(group.kind, plan.id)}
+                      >
+                        {current
+                          ? "Current plan"
+                          : group.kind === "checkout" && status?.active
+                            ? "Manage in billing"
+                            : action === plan.id
+                              ? "Opening checkout…"
+                              : available
+                                ? `Choose ${plan.name}`
+                                : "Coming soon"}
+                      </button>
                     </article>
                   )
                 })}
@@ -281,9 +259,8 @@ export function ModelPlans(props: {
       {data && (
         <div className="model-plans-terms">
           <p>
-            Token estimates are a guide, not a guarantee. They assume 80% input and 20% output across the planned model
-            catalog. Model choice, context length, and reasoning affect usage; repeated context also counts toward
-            usage.
+            Usage estimates are a guide, not a guarantee. Model choice, context length, and reasoning affect usage;
+            repeated context also counts toward usage.
           </p>
           <p>
             Monthly credits reset each billing period; purchased credits carry forward. No automatic overage charges or
@@ -312,7 +289,7 @@ export function ModelPlans(props: {
           </p>
         </div>
       )}
-      {data && !props.preview && !props.publicConfig && (
+      {data && !props.preview && (
         <button
           className="model-plans-refresh"
           type="button"

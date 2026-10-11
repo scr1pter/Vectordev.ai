@@ -28,8 +28,9 @@ export const CODIUM_MODELS = [
     name: "Claude Haiku 5.5",
     category: "advanced",
     description: "For harder, multi-step problems. Uses credits faster than the other models.",
-    // Every endpoint bills the whole request at 5x once a prompt reaches 100,000 tokens. The gateway rejects a prompt
-    // plus its output above this limit, so a request never reaches that price.
+    // Every endpoint bills the whole request at 5x once a prompt reaches 100,000 tokens. The gateway rejects a request
+    // whose prompt bound plus output exceeds this limit; the bound overcounts code, prose and tool output, so only
+    // text averaging under about three bytes a token could reach that price.
     contextLength: 100000,
     maxOutputTokens: 20000,
     // Covers prompt-cache writes, which these endpoints bill at up to twice the 0.11 input price.

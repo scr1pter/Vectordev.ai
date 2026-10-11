@@ -3,14 +3,13 @@ import {
   modelPlanPurchasable,
   modelPlanRedirect,
   modelPlanRemaining,
-  modelPlanTokenEstimate,
   modelTopupPurchasable,
   modelWalletRemaining,
   readModelPlanConfig,
   readModelPlanStatus,
 } from "./model-plans"
 
-const plan = { id: "vector-10", name: "Vector 10", price: 10, credits: 100, available: true }
+const plan = { id: "vector-10", name: "Vector 10", price: 10, available: true }
 const config = { enabled: true, currency: "usd" as const, interval: "month" as const, plans: [plan] }
 const status = {
   active: true as const,
@@ -22,21 +21,36 @@ const status = {
 }
 
 describe("model plan API boundaries", () => {
-  test("reads the public catalog while preserving disabled and unconfigured plans", () => {
+  test("reads the public catalog while preserving disabled plans", () => {
     expect(readModelPlanConfig(config)).toEqual(config)
-    expect(
-      readModelPlanConfig({ ...config, enabled: false, plans: [{ ...plan, credits: 0, available: false }] }),
-    ).toMatchObject({ enabled: false, plans: [{ credits: 0, available: false }] })
+    expect(readModelPlanConfig({ ...config, enabled: false, plans: [{ ...plan, available: false }] })).toMatchObject({
+      enabled: false,
+      plans: [{ available: false }],
+    })
   })
 
-  test("rejects malformed prices, allowances, currencies and duplicate plan IDs", () => {
+  test("keeps only public fields, even when a response carries credit amounts or model prices", () => {
+    const read = readModelPlanConfig({
+      ...config,
+      plans: [{ ...plan, credits: 8, multiple: 5, tasks: [[60, 550], null] }],
+      models: [{ id: "vendor/coder", name: "Coder", inputPrice: 0.1, outputPrice: 0.4, contextLength: 128_000 }],
+    })
+    expect(read.plans).toEqual([{ ...plan, multiple: 5, tasks: [[60, 550], null] }])
+    expect(read.models).toEqual([{ id: "vendor/coder", name: "Coder" }])
+  })
+
+  test("rejects malformed prices, multiples, ranges, currencies and duplicate plan IDs", () => {
     for (const value of [
       null,
       { ...config, currency: "eur" },
       { ...config, plans: [plan, plan] },
       { ...config, plans: [{ ...plan, price: NaN }] },
-      { ...config, plans: [{ ...plan, credits: -1 }] },
       { ...config, plans: [{ ...plan, available: "true" }] },
+      { ...config, plans: [{ ...plan, multiple: 1 }] },
+      { ...config, plans: [{ ...plan, tasks: [[550, 60]] }] },
+      { ...config, plans: [{ ...plan, tasks: [[0, 60]] }] },
+      { ...config, plans: [{ ...plan, tasks: [[60]] }] },
+      { ...config, plans: [{ ...plan, tasks: "60–550" }] },
     ]) {
       expect(() => readModelPlanConfig(value)).toThrow("could not load model plans")
     }
@@ -46,10 +60,6 @@ describe("model plan API boundaries", () => {
     const model = {
       id: "vendor/coder",
       name: "Coder",
-      contextLength: 128_000,
-      maxOutputTokens: 8_192,
-      inputPrice: 0.1,
-      outputPrice: 0.4,
       category: "everyday" as const,
       description: "For routine coding tasks.",
     }
@@ -62,9 +72,7 @@ describe("model plan API boundaries", () => {
     expect(readModelPlanConfig(current)).toEqual(current)
     for (const invalid of [
       { ...current, models: [model, model] },
-      { ...current, models: [{ ...model, outputPrice: NaN }] },
-      { ...current, models: [{ ...model, inputPrice: -1 }] },
-      { ...current, models: [{ ...model, maxOutputTokens: 128_001 }] },
+      { ...current, models: [{ ...model, name: " " }] },
       { ...current, models: [{ ...model, category: "best" }] },
       { ...current, models: [{ ...model, id: "not a model" }] },
       { ...current, topups: [plan] },
@@ -101,11 +109,10 @@ describe("model plan API boundaries", () => {
     expect(modelPlanRemaining({ active: false })).toBeUndefined()
   })
 
-  test("purchase requires configured credits, availability and a confirmed inactive subscription", () => {
+  test("purchase requires availability and a confirmed inactive subscription", () => {
     expect(modelPlanPurchasable(config, plan, { active: false })).toBe(true)
     expect(modelPlanPurchasable(config, plan, { active: false, customer: true })).toBe(true)
     expect(modelPlanPurchasable({ ...config, enabled: false }, plan, { active: false })).toBe(false)
-    expect(modelPlanPurchasable(config, { ...plan, credits: 0 }, { active: false })).toBe(false)
     expect(modelPlanPurchasable(config, { ...plan, available: false }, { active: false })).toBe(false)
     expect(modelPlanPurchasable(config, plan, status)).toBe(false)
     expect(modelPlanPurchasable(config, plan, undefined)).toBe(false)
@@ -130,25 +137,6 @@ describe("model plan API boundaries", () => {
     expect(modelTopupPurchasable(config, plan, { active: false })).toBe(true)
     expect(modelTopupPurchasable(config, plan, undefined)).toBe(false)
     expect(modelTopupPurchasable({ ...config, enabled: false }, plan, status)).toBe(false)
-  })
-
-  test("token estimates span the configured catalog and do not invent estimates for missing rates", () => {
-    const model = {
-      id: "vendor/coder",
-      name: "Coder",
-      contextLength: 128_000,
-      maxOutputTokens: 8_192,
-      inputPrice: 0.125,
-      outputPrice: 0.5,
-    }
-    expect(
-      modelPlanTokenEstimate(8, [model, { ...model, id: "vendor/advanced", inputPrice: 1.25, outputPrice: 5 }]),
-    ).toEqual({ min: 4_000_000, max: 40_000_000 })
-    expect(modelPlanTokenEstimate(8, [model])).toEqual({ min: 40_000_000, max: 40_000_000 })
-    expect(modelPlanTokenEstimate(8)).toBeUndefined()
-    expect(modelPlanTokenEstimate(0, [model])).toBeUndefined()
-    expect(modelPlanTokenEstimate(NaN, [model])).toBeUndefined()
-    expect(modelPlanTokenEstimate(8, [{ ...model, inputPrice: NaN }])).toBeUndefined()
   })
 })
 

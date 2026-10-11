@@ -5,6 +5,9 @@
   --cx-soft: rgb(205, 205, 205);
   --cx-quiet: rgba(255, 255, 255, 0.6);
   --cx-accent: #aa8cff;
+  /* Section and card headings, fluid from 24px on a 375px phone to 30px at 1440px. */
+  --cx-heading-size: clamp(24px, 21.8874px + 0.56338vw, 30px);
+  --cx-heading-line: clamp(31.68px, calc(31.68px + 0.495 * ((100vw - 375px) / 66.5625)), 39.6px);
 }
 
 .cx-visually-hidden {
@@ -120,10 +123,10 @@
 }
 
 .cx-card-head h3 {
-  font-size: 30px;
+  font-size: var(--cx-heading-size);
   font-weight: 500;
-  line-height: 39.6px;
-  letter-spacing: -0.3px;
+  line-height: var(--cx-heading-line);
+  letter-spacing: -0.01em;
 }
 
 .cx-card-head p {
@@ -146,11 +149,12 @@
   gap: 6px;
 }
 
+/* Fluid from 32px on a 375px phone to 48px at 1440px, tracking loosening as it shrinks. */
 .cx-amount {
-  font-size: 48px;
+  font-size: clamp(32px, 26.3662px + 1.50235vw, 48px);
   font-weight: 500;
-  line-height: 48px;
-  letter-spacing: -1.44px;
+  line-height: 1;
+  letter-spacing: clamp(-0.03em, calc(-0.03em + 0.02 * ((1440px - 100vw) / 66.5625)), -0.01em);
   font-variant-numeric: tabular-nums;
 }
 
@@ -244,10 +248,10 @@
 
 .cx-usage h2,
 .cx-faq h2 {
-  font-size: 30px;
+  font-size: var(--cx-heading-size);
   font-weight: 500;
-  line-height: 39.6px;
-  letter-spacing: -0.3px;
+  line-height: var(--cx-heading-line);
+  letter-spacing: -0.01em;
   text-align: center;
 }
 
@@ -302,14 +306,11 @@
   margin-top: 128px;
 }
 
+/* One faint rule above the list and none between questions. */
 .cx-faq-list {
   max-width: 535px;
   margin: 40px auto 0;
-  border-top: 1px solid var(--cx-line);
-}
-
-.cx-faq-item {
-  border-bottom: 1px solid var(--cx-line);
+  border-top: 1px solid var(--cx-hairline);
 }
 
 .cx-faq-item button {
@@ -402,36 +403,24 @@
     row-gap: 0;
   }
 
-  .cx-card-head h3 {
-    font-size: 26px;
-    line-height: 34px;
-  }
-
-  .cx-amount {
-    font-size: 32.2px;
-    line-height: 36px;
-    letter-spacing: -0.97px;
-  }
-
   .cx-usage,
   .cx-faq {
-    margin-top: 96px;
+    margin-top: 88px;
   }
 
-  .cx-usage h2,
-  .cx-faq h2 {
-    font-size: 26px;
-    line-height: 34px;
-  }
-
+  /* The table is wider than a phone, so it scrolls edge to edge with its first column on the page gutter. */
   .cx-table {
+    width: auto;
+    max-width: none;
     margin-right: -16px;
     margin-left: -16px;
-    padding: 0 16px;
+    padding: 0 8px;
   }
 
   .cx-faq-list {
     max-width: none;
+    margin-right: 20px;
+    margin-left: 20px;
   }
 }
 

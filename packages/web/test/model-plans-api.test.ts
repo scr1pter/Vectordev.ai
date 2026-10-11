@@ -80,10 +80,7 @@ const environment = [
   "KV_REST_API_TOKEN",
   "UPSTASH_REDIS_REST_URL",
   "UPSTASH_REDIS_REST_TOKEN",
-  ...[10, 50, 100, 200].flatMap((price) => [
-    `MODEL_PLAN_${price}_CREDITS_USD`,
-    `STRIPE_MODEL_PLAN_${price}_PRICE_ID`,
-  ]),
+  ...[10, 50, 100, 200].flatMap((price) => [`MODEL_PLAN_${price}_CREDITS_USD`, `STRIPE_MODEL_PLAN_${price}_PRICE_ID`]),
 ]
 const previousEnvironment = new Map(environment.map((key) => [key, process.env[key]]))
 
@@ -773,7 +770,8 @@ describe("model plan HTTP inference", () => {
       max_tokens: 1,
       response_format: {
         type: "json_schema",
-        json_schema: { name: "fixture", schema: { type: "object", description: "x".repeat(model.contextLength) } },
+        // The gateway bounds a prompt at a token per three bytes, so this schema alone exceeds the context.
+        json_schema: { name: "fixture", schema: { type: "object", description: "x".repeat(model.contextLength * 3) } },
       },
     })
     expect(response.status).toBe(400)

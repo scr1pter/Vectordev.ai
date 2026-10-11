@@ -7,7 +7,7 @@ const config: ModelPlansPreview["config"] = {
   enabled: true,
   currency: "usd",
   interval: "month",
-  plans: [{ id: "vector-10", name: "Vector 10", price: 10, credits: 100, available: true }],
+  plans: [{ id: "vector-10", name: "Vector 10", price: 10, available: true }],
 }
 const status: ModelPlansPreview["status"] = {
   active: true,
@@ -31,27 +31,28 @@ describe("account model plans", () => {
     expect(signedOut).not.toContain("Loading model plans")
   })
 
-  test("disabled purchase configuration shows the price with an honest pending allowance", () => {
+  test("disabled purchase configuration shows the price and offers nothing to buy", () => {
     const html = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",
         preview: {
-          config: { ...config, enabled: false, plans: [{ ...config.plans[0]!, credits: 0, available: false }] },
+          config: { ...config, enabled: false, plans: [{ ...config.plans[0]!, available: false }] },
           status: { active: false },
         },
       }),
     )
     expect(html).toContain("$10")
-    expect(html).toContain("Credit allowance to be announced")
     expect(html).toContain("Purchasing is not available yet")
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Coming soon<\/button>/)
     expect(html).not.toContain("Choose Vector 10")
   })
 
-  test("active subscriptions show remaining credits, renewal and management", () => {
+  test("active subscriptions show the share of credits remaining, renewal and management", () => {
     const html = renderToStaticMarkup(createElement(ModelPlans, { accessToken: "", preview: { config, status } }))
-    expect(html).toContain("<strong>2,500</strong> Codium credits remaining")
-    expect(html).toContain('value="2500" max="10000"')
+    expect(html).toContain("<strong>25%</strong> of this month&#x27;s Codium credits")
+    expect(html).toContain('value="25" max="100"')
+    // Amounts, with the price, would give away the dollars of model credit in the plan.
+    expect(html.replace(/<progress[^>]*>/, "")).not.toMatch(/\b(100|10,000|2,500|75)\b/)
     expect(html).toContain("Renews")
     expect(html).toContain("Manage subscription")
     expect(html).toContain("Current plan")
@@ -92,60 +93,42 @@ describe("account model plans", () => {
     }
   })
 
-  test("the public Codium page shows credits and token estimates without supplier costs or an account", () => {
+  test("each offer shows typical tasks on the default model, never credits or token estimates", () => {
     const html = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",
-        publicConfig: {
-          ...config,
-          enabled: false,
-          product: "Vector Codium",
-          plans: [{ ...config.plans[0]!, name: "Codium 10", credits: 8, available: false }],
-          topups: [{ id: "codium-topup-10", name: "$10 credit pack", price: 10, credits: 8, available: false }],
-          models: [
-            {
-              id: "vendor/coder",
-              name: "Coding Model",
-              category: "everyday",
-              description: "Routine coding tasks.",
-              contextLength: 128_000,
-              maxOutputTokens: 8_192,
-              inputPrice: 0.075,
-              outputPrice: 0.2,
-            },
-          ],
+        preview: {
+          config: {
+            ...config,
+            enabled: false,
+            product: "Vector Codium",
+            plans: [{ ...config.plans[0]!, name: "Codium 10", available: false, tasks: [[60, 550], null] }],
+            topups: [
+              { id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: false, tasks: [[60, 550]] },
+            ],
+            models: [
+              { id: "vendor/coder", name: "Coding Model", category: "everyday", description: "Routine coding tasks." },
+              { id: "vendor/hard", name: "Hard Model", category: "advanced" },
+            ],
+          },
+          status: { active: false },
         },
       }),
     )
     expect(html).toContain("Monthly subscriptions")
     expect(html).toContain("One-time credit packs")
-    expect(html).toContain("800 Codium credits")
+    expect(html).toContain("About 60–550 typical tasks a month with Coding Model")
+    expect(html).toContain("About 60–550 typical tasks with Coding Model")
     expect(html).toContain("Credits carry forward")
     expect(html).toContain("do not roll over")
     expect(html).toContain("no automatic top-ups")
-    expect(html).toContain("Coding Model")
-    expect(html).not.toContain("$0.075")
-    expect(html).not.toContain("$0.20")
-    expect(html).not.toContain("USD model credits")
-    expect(html).not.toContain("markup")
-    expect(html).toContain("Est. 80M tokens")
     expect(html).toContain("Everyday")
     expect(html).toContain("reasoning affect usage")
     expect(html).toContain("repeated context also counts")
     expect(html).toContain("not a guarantee")
     expect(html).toContain('href="/legal/terms#codium"')
     expect(html).toContain("Cancel any time")
-    expect(html.match(/disabled=""/g)).toHaveLength(2)
-    expect(html).not.toContain("Sign in to view")
-    expect(html).not.toContain("Loading model plans")
-    expect(html).not.toContain("Refresh plan")
-    expect(html).not.toContain("stripe.com")
-  })
-
-  test("the public page links to the account rather than performing checkout", () => {
-    const html = renderToStaticMarkup(createElement(ModelPlans, { accessToken: "", publicConfig: config }))
-    expect(html).toContain('href="/account"')
-    expect(html).not.toContain("stripe.com")
+    for (const leak of ["Codium credits /", "800", "tokens", "80% input", "markup"]) expect(html).not.toContain(leak)
   })
 
   test("monthly and purchased balances remain distinct, including unknown purchased usage", () => {
@@ -156,8 +139,8 @@ describe("account model plans", () => {
       }),
     )
     expect(html).toContain("Monthly allowance")
-    expect(html).toContain("<strong>2,500</strong> Codium credits remaining")
-    expect(html).toContain("<strong>600</strong> purchased Codium credits remaining")
+    expect(html).toContain("<strong>25%</strong> of this month&#x27;s Codium credits")
+    expect(html).toContain("<strong>75%</strong> of your purchased")
     const standalone = renderToStaticMarkup(
       createElement(ModelPlans, {
         accessToken: "",

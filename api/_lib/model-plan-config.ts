@@ -117,36 +117,100 @@ export function requireModelTopups() {
     throw configurationError()
 }
 
+/**
+ * What anyone may read about Codium, for /codium and the account page: names, purchase prices, each purchase's credits
+ * as a multiple of the smallest one, and usage as ranges of typical tasks per model. Credit amounts, model prices and
+ * the task assumptions behind the ranges stay on the server, so no reader can work back to the dollars of model
+ * credit in a purchase.
+ */
 export function publicModelPlans() {
-  const plans = modelPlans()
   const enabled = modelPlansEnabled() && modelPlanConfigurationReady()
   const topups = modelTopups()
   const topupsEnabled =
     enabled &&
     topups.every((pack) => !!pack.credits && !!pack.priceID) &&
     new Set(topups.map((pack) => pack.priceID)).size === topups.length
+  const models = configuredPlanModels()
+  const usage = codiumTaskUsage()
+  const offers = (items: { id: string; name: string; price: number; credits: number }[], available: boolean) =>
+    items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      available: available && item.credits > 0,
+      ...(items[0]!.credits > 0 && item.credits > items[0]!.credits
+        ? { multiple: Math.round((item.credits / items[0]!.credits) * 10) / 10 }
+        : {}),
+      // Typical tasks for each model, in catalog order; null where a model has no reviewed assumptions.
+      tasks: models.map((model) => taskRange(item.credits, usage[model.id])),
+    }))
   return {
     product: "Vector Codium",
     enabled,
     currency: "usd",
     interval: "month",
     catalogUpdated: CODIUM_CATALOG_UPDATED,
-    models: configuredPlanModels(),
-    plans: plans.map((plan) => ({
-      id: plan.id,
-      name: plan.name,
-      price: plan.price,
-      credits: plan.credits,
-      available: enabled,
+    models: models.map((model) => ({
+      id: model.id,
+      name: model.name,
+      ...(model.category === undefined ? {} : { category: model.category }),
+      ...(model.description === undefined ? {} : { description: model.description }),
     })),
-    topups: topups.map((pack) => ({
-      id: pack.id,
-      name: pack.name,
-      price: pack.price,
-      credits: pack.credits,
-      available: topupsEnabled,
-    })),
+    plans: offers(modelPlans(), enabled),
+    topups: offers(topups, topupsEnabled),
   }
+}
+
+// The assumptions behind the public usage ranges, per model: the share of input tokens read from the prompt cache,
+// the expected input, cached-input and output prices per million tokens, and a smaller and a larger typical task.
+// They live only in CODIUM_TASK_USAGE_JSON in the hosting environment: published next to the ranges, they would give
+// away each purchase's credits and so the markup.
+const TaskTokens = Schema.Struct({ input: Schema.Number, output: Schema.Number })
+const ModelTaskUsage = Schema.Struct({
+  cached: Schema.Number,
+  price: Schema.Struct({ input: Schema.Number, cached: Schema.Number, output: Schema.Number }),
+  tasks: Schema.Tuple([TaskTokens, TaskTokens]),
+})
+
+function codiumTaskUsage(): Record<string, typeof ModelTaskUsage.Type | undefined> {
+  const value = process.env.CODIUM_TASK_USAGE_JSON?.trim()
+  if (!value) return {}
+  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Record(Schema.String, ModelTaskUsage)))(value)
+  if (
+    Option.isNone(decoded) ||
+    Object.values(decoded.value).some(
+      (usage) =>
+        !(usage.cached >= 0 && usage.cached <= 1) ||
+        !(usage.price.input > 0 && usage.price.output > 0 && usage.price.cached >= 0) ||
+        [usage.price.input, usage.price.cached, usage.price.output].some((price) => !Number.isFinite(price)) ||
+        usage.tasks.some(
+          (task) => !(task.input > 0 && task.output > 0) || !Number.isSafeInteger(task.input + task.output),
+        ),
+    )
+  )
+    throw configurationError()
+  return decoded.value
+}
+
+/** How many typical tasks a purchase covers, from the larger task to the smaller, rounded down to two digits. */
+function taskRange(credits: number, usage: typeof ModelTaskUsage.Type | undefined) {
+  if (!usage || !(credits > 0)) return null
+  const [low, high] = usage.tasks
+    .map(
+      (task) =>
+        credits /
+        ((task.input * (1 - usage.cached) * usage.price.input +
+          task.input * usage.cached * usage.price.cached +
+          task.output * usage.price.output) /
+          1_000_000),
+    )
+    .toSorted((a, b) => a - b)
+    .map((tasks) => {
+      const step = 10 ** Math.max(0, Math.floor(Math.log10(tasks)) - 1)
+      return Math.floor(tasks / step) * step
+    })
+  if (!(low! >= 1)) return null
+  return [low!, high!] as const
 }
 
 export function modelPlanOrigin() {

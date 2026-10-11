@@ -9,7 +9,7 @@ import {
   configuredPlanModels,
   requireModelPlans,
 } from "../../../api/_lib/model-plan-config"
-import { modelPlanRequest, streamModelPlanResponse } from "../../../api/_lib/model-plan-chat"
+import { advertisedPlanModels, modelPlanRequest, streamModelPlanResponse } from "../../../api/_lib/model-plan-chat"
 import { verifyModelPlanWebhook } from "../../../api/_lib/model-plan-stripe"
 import { IncomingMessage, ServerResponse } from "node:http"
 import { Socket } from "node:net"
@@ -19,6 +19,7 @@ const names = [
   "MODEL_PLAN_MODELS_JSON",
   "MODEL_PLAN_KEY_ENCRYPTION_SECRET",
   "MODEL_CREDIT_MARKUP_PERCENT",
+  "CODIUM_TASK_USAGE_JSON",
   "STRIPE_MODEL_PLAN_WEBHOOK_SECRET",
   ...[10, 50, 100, 200].flatMap((price) => [
     `MODEL_PLAN_${price}_CREDITS_USD`,
@@ -36,6 +37,15 @@ afterEach(() =>
   }),
 )
 
+// Placeholder assumptions, not the reviewed ones, which stay private.
+const usage = {
+  cached: 0.5,
+  price: { input: 1, cached: 0.1, output: 4 },
+  tasks: [
+    { input: 100_000, output: 2_000 },
+    { input: 1_000_000, output: 20_000 },
+  ],
+}
 const now = Date.UTC(2026, 9, 9)
 const start = Math.floor(now / 1000) - 86400
 const end = start + 30 * 86400
@@ -99,6 +109,57 @@ describe("subscription configuration", () => {
     ])
     expect(publicModelPlans().catalogUpdated).toBe("2026-10-10")
     expect(() => requireModelPlans()).toThrow("not available yet")
+  })
+  test("the public configuration carries no credit amounts, model prices or limits", () => {
+    names.forEach((name) => delete process.env[name])
+    process.env.CODIUM_TASK_USAGE_JSON = JSON.stringify({ "deepseek/deepseek-v4.1-flash": usage })
+    const config = publicModelPlans()
+    for (const offer of [...config.plans, ...config.topups])
+      expect(
+        Object.keys(offer).every((key) => ["id", "name", "price", "available", "multiple", "tasks"].includes(key)),
+      ).toBe(true)
+    for (const model of config.models)
+      expect(Object.keys(model).every((key) => ["id", "name", "category", "description"].includes(key))).toBe(true)
+    const text = JSON.stringify(config)
+    for (const key of [
+      "credits",
+      "inputPrice",
+      "outputPrice",
+      "contextLength",
+      "maxOutputTokens",
+      "markupPercent",
+      "cached",
+    ])
+      expect(text).not.toContain(`"${key}":`)
+  })
+  test("usage ranges come only from the private task assumptions", () => {
+    names.forEach((name) => delete process.env[name])
+    // Without assumptions there are no ranges, but the multiples still show how the purchases compare.
+    expect(publicModelPlans().plans.map((plan) => plan.tasks)).toEqual(Array(4).fill([null, null, null]))
+    expect(publicModelPlans().plans.map((plan) => plan.multiple)).toEqual([undefined, 5, 10, 20])
+    process.env.CODIUM_TASK_USAGE_JSON = JSON.stringify({ "deepseek/deepseek-v4.1-flash": usage })
+    // A task costs input x (1 - cached) x input price + input x cached x cached price + output x output price: here
+    // $0.063 and $0.63. Ranges divide a purchase's credits by them and round down to two significant digits.
+    expect(publicModelPlans().plans.map((plan) => plan.tasks[0])).toEqual([
+      [12, 120],
+      [63, 630],
+      [120, 1200],
+      [250, 2500],
+    ])
+    expect(publicModelPlans().topups[1]!.tasks).toEqual([[63, 630], null, null])
+    // A purchase too small for one larger task has no range.
+    process.env.MODEL_PLAN_10_CREDITS_USD = "0.5"
+    expect(publicModelPlans().plans[0]!.tasks[0]).toBeNull()
+    for (const invalid of [
+      "not json",
+      JSON.stringify({ "vendor/model": { ...usage, cached: 2 } }),
+      JSON.stringify({ "vendor/model": { ...usage, price: { ...usage.price, input: 0 } } }),
+      JSON.stringify({ "vendor/model": { ...usage, tasks: [usage.tasks[0]] } }),
+      JSON.stringify({ "vendor/model": { ...usage, tasks: [{ input: -1, output: 1 }, usage.tasks[1]] } }),
+    ]) {
+      process.env.CODIUM_TASK_USAGE_JSON = invalid
+      expect(() => publicModelPlans()).toThrow("temporarily unavailable")
+    }
   })
   test("markup is configurable and never rounds credits above the purchased allowance", () => {
     names.forEach((name) => delete process.env[name])
@@ -175,6 +236,14 @@ describe("paid entitlement", () => {
 })
 
 describe("gateway request policy", () => {
+  test("the app is told three quarters of each context, so it compacts before the prompt bound refuses a request", () => {
+    expect(advertisedPlanModels(configuredPlanModels()).map((model) => model.contextLength)).toEqual([
+      196_608, 196_608, 75_000,
+    ])
+    expect(advertisedPlanModels([{ ...model, contextLength: 9_000, maxOutputTokens: 8_192 }])[0]!.contextLength).toBe(
+      8_192,
+    )
+  })
   test("preserves bounded retry timing without exposing upstream billing errors", async () => {
     for (const status of [402, 429]) {
       const response = new ServerResponse(new IncomingMessage(new Socket()))

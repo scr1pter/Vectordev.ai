@@ -10,6 +10,22 @@ import { ApiError, json, readJson, requireMethod, type ApiRequest, type ApiRespo
 import { requireUnrevokedAccount } from "./revocation.js"
 
 const MAX_BYTES = 4_500_000
+// A prompt is bounded as one token per three bytes of its request JSON. Code, prose and tool output run nearer four
+// bytes a token once JSON escaping is counted, so the bound overcounts them by up to a third; counting every byte as
+// a token would cut a model's usable prompt to about a quarter of its context.
+const PROMPT_BYTES_PER_TOKEN = 3
+
+/**
+ * The catalog as the app should see it, with each context cut to what the gateway accepts for typical requests: the
+ * prompt bound overcounts by up to a third, so the app compacts a session at three quarters of the real context
+ * before the gateway would refuse it.
+ */
+export function advertisedPlanModels(models: readonly ModelPlanModel[]) {
+  return models.map((model) => ({
+    ...model,
+    contextLength: Math.max(model.maxOutputTokens, Math.floor((model.contextLength * PROMPT_BYTES_PER_TOKEN) / 4)),
+  }))
+}
 
 export async function requireModelPlanUser(request: ApiRequest, fetcher: typeof fetch = fetch, now = Date.now()) {
   const token = /^Bearer (vct_[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)$/.exec(String(request.headers.authorization ?? ""))?.[1]
@@ -187,11 +203,11 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
       requirePersistent: true,
     })
     const model = configuredPlanModels().find((model) => model.id === body.model)!
-    // A byte bound deliberately overestimates tokenized input; include tool
-    // schemas and formatting overhead before choosing a credit pool. The
-    // provider key cap is the final spending control; its concurrent request
-    // accounting still depends on the upstream provider's enforcement.
-    const inputBound = Buffer.byteLength(JSON.stringify(body)) + body.messages.length * 32 + 256
+    // The bound covers tool schemas and per-message formatting before choosing a credit pool. The provider key cap is
+    // the final spending control; its concurrent request accounting still depends on the upstream provider's
+    // enforcement.
+    const inputBound =
+      Math.ceil(Buffer.byteLength(JSON.stringify(body)) / PROMPT_BYTES_PER_TOKEN) + body.messages.length * 8 + 256
     if (inputBound + body.max_tokens > model.contextLength)
       throw new ApiError(
         400,

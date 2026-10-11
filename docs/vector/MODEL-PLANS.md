@@ -6,54 +6,44 @@ The public `/codium` pricing page (`/pricing` redirects to it) shows the offerin
 
 The page tells buyers that Codium works in the Vector desktop app and CLI, so keep `MODEL_PLANS_ENABLED=false` until a published desktop and CLI release includes the Vector Codium provider. Its balance answer names only the account page; when that release shows Codium balances in the app, name the app there as well.
 
-Customer-facing amounts use **100 Codium credits per internal USD credit**: the four default purchases include 800, 4,000, 8,000 and 16,000 credits. This is a display conversion only; the backend continues accounting in provider-cost USD. The account page shows those credit amounts and balances. Renewal, expiration, carry-forward and cancellation terms remain visible before purchase; `/legal/terms#codium` describes variable consumption and preserves billing-error remedies and mandatory consumer rights.
+Customers never see credit amounts. The account page shows balances as the share of monthly and purchased credits remaining, and each offer's usage as a range of typical tasks on the default model; the backend accounts in provider-cost USD. Credit amounts appear only in an account's own authenticated status (`/api/model-plans/status`), never in `/api/model-plans/config` or on a public page. Renewal, expiration, carry-forward and cancellation terms remain visible before purchase; `/legal/terms#codium` describes variable consumption and preserves billing-error remedies and mandatory consumer rights.
 
 ## The /codium page
 
 The page follows the layout and behaviour of a familiar coding-plan pricing page with Vector's own copy, logo and colours: its own top bar and footer, a plain black background with hairline borders, Geist for type, and Vector violet only as an accent. An **Individual / Top-ups** radiogroup switches between the four monthly plans and the four one-time packs and keeps the choice in the address (`?type=topups`), so links, reloads and the back button restore it. There is no free card: the workspace itself is free to download.
 
-The page never shows credit amounts, dollar values of credits, model prices or the markup, and its island props carry none of them. `packages/web/src/lib/codium-pricing.ts` reduces the configuration to names, purchase prices, each offer's credits as a multiple of the smallest offer ("5× the monthly credits of Codium 10"), and **usage estimates as ranges of typical agent tasks**, rounded down to two significant digits. Because the ranges depend on the task assumptions below, which are not published on the page, a reader cannot work back from them to the dollars of model credit in a purchase.
+The page never shows credit amounts, dollar values of credits, model prices or the markup, and neither do its island props or the unauthenticated `/api/model-plans/config`. Both are built from `publicModelPlans()` in `api/_lib/model-plan-config.ts`, which reduces the configuration to names, purchase prices, each offer's credits as a multiple of the smallest offer ("5× the monthly credits of Codium 10"), model names and descriptions, and **usage estimates as ranges of typical agent tasks**, rounded down to two significant digits. The ranges are computed on the server from each purchase's credits and private task assumptions. Anyone holding both the ranges and those assumptions can work out each purchase's credits, and from them the markup, so the assumptions, the markup and the allowances stay out of this repository and off every public page.
 
 ### How the usage ranges are derived
 
-For each model, a typical agent task runs from a focused fix (the smaller task) to a multi-file change (the larger one). 90% of input tokens are assumed to come from the prompt cache. Each task's cost is `input × 10% × input price + input × 90% × cached price + output × output price`, and a purchase's range is its USD model credits divided by the larger task's cost (low end) and by the smaller task's cost (high end).
+`CODIUM_TASK_USAGE_JSON` holds the assumptions, keyed by model ID: the share of input tokens expected from the prompt cache, the expected input, cached-input and output prices per million tokens, and two typical tasks, a focused fix and a multi-file change, as input and output tokens. The shape, with placeholder values:
 
-| Model                  | Smaller task (input / output) | Larger task (input / output) | Expected input / cached / output price per million |
-| ---------------------- | ----------------------------- | ---------------------------- | -------------------------------------------------- |
-| DeepSeek V4.1 Flash    | 500K / 10K                    | 5M / 75K                     | $0.11 / $0.008 / $0.54                             |
-| Xiaomi MiMo V2.6 Flash | 400K / 8K                     | 3.5M / 60K                   | $0.15 / $0.005 / $0.30                             |
-| Claude Haiku 5.5       | 600K / 25K                    | 6M / 180K                    | $0.13 / $0.011 / $0.55                             |
+```json
+{
+  "vendor/model": {
+    "cached": 0.5,
+    "price": { "input": 1, "cached": 0.1, "output": 4 },
+    "tasks": [
+      { "input": 100000, "output": 2000 },
+      { "input": 1000000, "output": 20000 }
+    ]
+  }
+}
+```
 
-- **Prices** are what OpenRouter's default routing is expected to pay. It prefers the cheapest stable providers, weighted by the inverse square of price, so these are the inverse-square-weighted averages across each model's ZDR endpoints that pass the catalog audit, using fp8 or better (October 10, 2026 snapshot). Haiku's uncached input is priced as a prompt-cache write (1.25× its list input price).
-- **Token counts** reflect how much each model spends per task in independent agentic benchmarks (Vals Terminal-Bench 4.0, Vibe Code Bench and Code Migration): MiMo at default reasoning effort spends about 0.7× DeepSeek's cost per task, and Haiku at high effort at least 1.7× once its long-prompt surcharge is taken out. Haiku's 100K context also makes it compact and re-read context more often.
-- A model without reviewed assumptions (for example one added through `MODEL_PLAN_MODELS_JSON`) is priced at its routing ceilings with no cache discount and DeepSeek's token counts, which understates its range rather than overstating it.
+A task costs `input × (1 − cached) × input price + input × cached × cached price + output × output price`. A purchase's range runs from its credits divided by the larger task's cost to its credits divided by the smaller task's cost. A model without an entry has no range. Set the variable both where `/codium` is built and where the API runs; without it the page leaves out the usage table and the usage lines on its cards, and the account page leaves out its estimates. Invalid JSON fails the build and the configuration endpoint closed, as an invalid `MODEL_PLAN_MODELS_JSON` does.
 
-With the default 25% markup this gives, per month on each plan (and per pack for top-ups of the same price):
-
-| Model                  | Codium 10 | Codium 50 | Codium 100 | Codium 200   |
-| ---------------------- | --------- | --------- | ---------- | ------------ |
-| DeepSeek V4.1 Flash    | 60–550    | 300–2,700 | 600–5,500  | 1,200–11,000 |
-| Xiaomi MiMo V2.6 Flash | 92–780    | 460–3,900 | 920–7,800  | 1,800–15,000 |
-| Claude Haiku 5.5       | 33–290    | 160–1,400 | 330–2,900  | 670–5,800    |
-
-These are estimates, not allotments. Revisit the assumptions after measuring real Vector sessions on each model, and when the catalog or its routing changes.
+Base prices on what OpenRouter's price-weighted routing is expected to pay across each model's ZDR endpoints, and tokens per task on independent agentic benchmarks. Keep the reviewed values with the markup in the owner's private records, and revisit them after measuring real Vector sessions and whenever the catalog or its routing changes. These are estimates, not allotments.
 
 ## Pricing and margin
 
-The starting markup is 25% on model cost, configurable through `MODEL_CREDIT_MARKUP_PERCENT`. USD model credits are the amount available for provider-reported inference, not the amount paid at checkout. The markup is applied once when converting a purchase into credits; usage debits actual upstream model cost, without applying a second markup.
+`MODEL_CREDIT_MARKUP_PERCENT` sets the markup on model cost applied when a purchase is converted into USD model credits; `MODEL_PLAN_<price>_CREDITS_USD` and `MODEL_TOPUP_<price>_CREDITS_USD` can set an allowance directly. USD model credits are the amount available for provider-reported inference, not the amount paid at checkout. The markup is applied once, when converting a purchase into credits; usage debits actual upstream model cost without a second markup. Set the markup only in the hosting environment: neither its value nor the resulting allowances belong in this repository, its docs or its tests, because the code's fallback is public.
 
-| Purchase | Included model credits | Difference before fees and expenses |
-| -------- | ---------------------- | ----------------------------------- |
-| $10      | $8                     | $2                                  |
-| $50      | $40                    | $10                                 |
-| $100     | $80                    | $20                                 |
-| $200     | $160                   | $40                                 |
+The same conversion applies to monthly subscriptions and one-time packs. Monthly allowance expires at the end of its paid period. Purchased credits carry forward independently of the subscription. There are no automatic top-ups or overage charges. This is not an unlimited-use offering, and no fixed number of coding tasks is promised.
 
-These defaults apply to both monthly subscriptions and one-time packs. Monthly allowance expires at the end of its paid period. Purchased credits carry forward independently of the subscription. There are no automatic top-ups or overage charges. This is not an unlimited-use offering, and no fixed number of coding tasks is promised.
+A markup on cost is a smaller spread on revenue, and it comes **before** payment fees, provider funding fees, hosting, support, refunds, fraud and taxes, so it is not a profit margin. Actual fees depend on the account and payment method. Public references checked October 9, 2026: [OpenRouter pricing](https://openrouter.ai/pricing), [Stripe pricing](https://stripe.com/pricing), [Stripe Billing](https://stripe.com/billing/pricing).
 
-A 25% markup on cost is a 20% spread on revenue **before** payment fees, provider funding fees, hosting, support, refunds, fraud and taxes. It is not a 25% profit margin. As a conservative illustration, consuming all $8 of a $10 monthly plan leaves about $0.70 before other expenses when assuming an 8% provider fee, 2.9% + $0.30 payment processing, and 0.7% subscription billing. Actual fees depend on the account and payment method. Public references checked October 9, 2026: [OpenRouter pricing](https://openrouter.ai/pricing), [Stripe pricing](https://stripe.com/pricing), [Stripe Billing](https://stripe.com/billing/pricing).
-
-From `packages/web`, `bun scripts/codium-economics.ts` prints a contribution table for the configured allowances. Its fee assumptions are planning inputs only and never change customer balances. Override `CODIUM_PROVIDER_FEE_PERCENT`, `CODIUM_PAYMENT_FEE_PERCENT`, `CODIUM_PAYMENT_FIXED_USD` and `CODIUM_SUBSCRIPTION_FEE_PERCENT` when the actual commercial terms are known.
+From `packages/web`, `bun scripts/codium-economics.ts` prints a contribution table for the allowances configured in the environment it runs in; run it with the private values and keep its output private. Its fee assumptions are planning inputs only and never change customer balances. Override `CODIUM_PROVIDER_FEE_PERCENT`, `CODIUM_PAYMENT_FEE_PERCENT`, `CODIUM_PAYMENT_FIXED_USD` and `CODIUM_SUBSCRIPTION_FEE_PERCENT` when the actual commercial terms are known.
 
 ## Coding catalog
 
@@ -67,11 +57,13 @@ Codium offers low-cost coding models only, chosen for the most usage per credit 
 
 Why these three, from independent boards that still separate low-cost models (Vals Terminal-Bench 4.0 and 2.1, Vibe Code Bench v1.1, Code Migration) rather than saturated vendor SWE-bench figures, and from cached-input price, which dominates Vector's agent sessions:
 
-- **DeepSeek V4.1 Flash** has the best independent quality per dollar of the low-cost models (Vibe Code 84.7%, Code Migration 45.6%, Terminal-Bench 2.1 74.5%), runs at about 217 tokens/s and has the widest ZDR coverage. The $0.30 / $1.20 ceiling covers the mainstream fp8 ZDR endpoints and leaves out Fireworks US and BaseTen fast. 262K context covers real work; recall across the 1M window is unproven.
+- **DeepSeek V4.1 Flash** has the best independent quality per dollar of the low-cost models (Vibe Code 84.7%, Code Migration 45.6%, Terminal-Bench 2.1 74.5%), runs at about 217 tokens/s and has the widest ZDR coverage. The $0.30 / $1.20 ceiling covers the mainstream fp8 ZDR endpoints and leaves out Fireworks US and BaseTen fast. The catalog uses 262K of its context, enough for real work; recall across the 1M window is unproven.
 - **Xiaomi MiMo V2.6 Flash** is the cheapest per task among credible agentic models (Terminal-Bench 2.1 76.4% at about $0.02 a task) with cached input at $0.002 to $0.004 per million on four of its five ZDR vendors. It streams at about 62 tokens/s, so output is capped at 16,384 tokens to finish inside the gateway's 600-second limit even on a slow provider. The Xiaomi first-party endpoint is not ZDR.
-- **Claude Haiku 5.5** has the highest independent quality among low-price models (Vibe Code 90.4%, Terminal-Bench 4.0 35.4%). It is ZDR on Google Vertex and Amazon Bedrock only. Every endpoint bills the whole request at 5x once a prompt reaches 100,000 tokens, so its context is set to 100,000 on purpose: the gateway rejects a prompt plus requested output above that, and the engine compacts at about 80,000. Its input ceiling is $0.22 rather than the $0.11 list price because these endpoints bill prompt-cache writes at up to twice the input price, and the gateway's pre-authorisation must cover them.
+- **Claude Haiku 5.5** has the highest independent quality among low-price models (Vibe Code 90.4%, Terminal-Bench 4.0 35.4%). It is ZDR on Google Vertex and Amazon Bedrock only. Every endpoint bills the whole request at 5x once a prompt reaches 100,000 tokens, so its context is set to 100,000 on purpose: the gateway rejects a request whose prompt bound plus requested output exceeds that, and its bound overcounts typical code, prose and tool output (see below). Its input ceiling is $0.22 rather than the $0.11 list price because these endpoints bill prompt-cache writes at up to twice the input price, and the gateway's pre-authorisation must cover them.
 
 Set reasoning effort explicitly when the Codium provider lands in the app so usage stays predictable: DeepSeek high, MiMo default, Haiku high (max adds about five Artificial Analysis Intelligence Index points for about 2.6x the cost per task). The gateway does not restrict quantization, and DeepSeek V4.1 Flash has fp4 ZDR endpoints inside its ceiling that price-weighted routing will favour; restrict routing to fp8 or better before launch if quality on real Vector tasks drops.
+
+The gateway cannot tokenize every model, so it bounds a prompt as one token per three bytes of its request JSON plus a small allowance per message. Code, prose and tool output run nearer four bytes a token once JSON escaping is counted, so the bound overcounts them by up to a third; only text averaging under about three bytes a token, such as long runs of non-Latin script, could pass the bound and still reach Haiku's 100,000-token price. The authenticated `/api/model-plans/models` tells the app three quarters of each context (196,608 for DeepSeek and MiMo, 75,000 for Haiku), so the app compacts a session before the gateway would refuse its next request. Revisit both numbers if real Vector sessions on a model average under three or over four bytes a token.
 
 These roles are product recommendations from public benchmarks, not measured Vector results. Evaluate completion quality and latency on real Vector coding tasks before launch. Models are selected by the user; this change does not introduce automatic model routing by task difficulty. All models consume the same credit pools, and more expensive models spend them faster. Input, output and billed reasoning count toward usage. Caching can lower actual usage cost.
 
@@ -96,7 +88,8 @@ Account deletion closes new purchases and model access durably, expires pending 
 Server secrets belong in the hosting environment, never in client builds or the repository. See `.env.example` for the complete list:
 
 - `MODEL_PLANS_ENABLED=false` while payment setup is deferred.
-- `MODEL_CREDIT_MARKUP_PERCENT=25` sets default purchase-to-credit conversion.
+- `MODEL_CREDIT_MARKUP_PERCENT` sets the purchase-to-credit conversion. Set it privately; blank uses the public fallback in `api/_lib/model-plan-config.ts`.
+- `CODIUM_TASK_USAGE_JSON` holds the private task assumptions behind the usage ranges (see above), in both the build and the API environment.
 - `MODEL_PLAN_<price>_CREDITS_USD` and `MODEL_TOPUP_<price>_CREDITS_USD` optionally override the default allowance; valid values are greater than zero and no greater than the purchase price.
 - `MODEL_PLAN_MODELS_JSON` optionally overrides the catalog. Blank uses the reviewed defaults; `[]` intentionally offers no models.
 - `STRIPE_MODEL_PLAN_<price>_PRICE_ID` and `STRIPE_MODEL_TOPUP_<price>_PRICE_ID` map each of the four prices ($10, $50, $100 and $200) to recurring and one-time prices respectively.

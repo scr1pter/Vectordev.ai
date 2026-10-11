@@ -13,7 +13,8 @@ import { wordmarkCells, wordmarkWidth } from "../lib/wordmark"
 export const prerender = true
 
 // Only names, prices, credit multiples and rounded task ranges reach the page and its island props: never credit
-// amounts or model prices.
+// amounts or model prices. The ranges need CODIUM_TASK_USAGE_JSON in the build environment; a build without it leaves
+// out the usage estimates.
 const pricing = codiumPricing(readModelPlanConfig(publicModelPlans()))
 const prices = pricing.monthly.map((plan) => plan.price)
 const links = [
@@ -293,12 +294,13 @@ const columns = [
     letter-spacing: -0.14px;
   }
 
+  /* Fluid from 32px at a 375px phone to 64px at 1440px, like the reference's display type. */
   .cx-hero h1 {
     margin-top: 32px;
-    font-size: 64px;
+    font-size: clamp(32px, 20.7323px + 3.0047vw, 64px);
     font-weight: 500;
-    line-height: 64px;
-    letter-spacing: -1.92px;
+    line-height: clamp(35.2px, calc(35.2px + 1.8 * ((100vw - 375px) / 66.5625)), 64px);
+    letter-spacing: -0.03em;
   }
 
   .cx-lead {
@@ -385,7 +387,7 @@ const columns = [
     }
 
     .cx-main {
-      padding: 20px 16px 96px;
+      padding: 20px 16px 128px;
     }
 
     .cx-footer-inner {
@@ -401,14 +403,6 @@ const columns = [
     .cx-footer-base {
       padding: 0 16px 32px;
       flex-direction: column;
-    }
-  }
-
-  @media (max-width: 639px) {
-    .cx-hero h1 {
-      font-size: 32.45px;
-      line-height: 36px;
-      letter-spacing: -0.97px;
     }
   }
 </style>

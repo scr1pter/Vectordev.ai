@@ -56,6 +56,11 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
   const radios = React.useRef<(HTMLButtonElement | null)[]>([])
   const offers = mode === "monthly" ? props.pricing.monthly : props.pricing.topups
   const monthly = mode === "monthly"
+  // Later cards give their usage on the default model and, when the catalog has one, the advanced model.
+  const featured = [...new Set([0, props.pricing.models.findIndex((model) => model.category === "advanced")])].filter(
+    (row) => row >= 0 && row < props.pricing.models.length,
+  )
+  const range = (tasks: readonly [number, number]) => `${count.format(tasks[0])}–${count.format(tasks[1])}`
   const names = (category: "everyday" | "advanced") =>
     new Intl.ListFormat("en-US", { type: "disjunction" }).format(
       props.pricing.models.filter((model) => model.category === category).map((model) => model.name),
@@ -238,6 +243,24 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
         {offers.map((offer, index) => {
           const first = offers[0]!
           const anchor = monthly ? first.name : `the ${usd.format(first.price)} top-up`
+          // Later tiers differ only in credits: a multiple of the first, so they never read as adding up, and the
+          // usage that buys. Credit amounts never appear.
+          const features =
+            index === 0
+              ? FEATURES[mode]
+              : [
+                  offer.multiple &&
+                    (monthly
+                      ? `${count.format(offer.multiple)}× the monthly credits of ${anchor}`
+                      : `${count.format(offer.multiple)}× ${anchor}'s credits`),
+                  ...featured.map((row) => {
+                    const tasks = offer.tasks[row]
+                    return (
+                      tasks &&
+                      `About ${range(tasks)} typical tasks${monthly ? " a month" : ""} with ${props.pricing.models[row]!.name}`
+                    )
+                  }),
+                ].filter((feature) => typeof feature === "string")
           return (
             <article className="cx-card" key={offer.id}>
               <div className="cx-card-top">
@@ -280,19 +303,11 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
               </div>
               <div className="cx-card-bottom">
                 <div className="cx-card-list">
-                  {/* Later tiers differ only in credits, stated as a multiple so they never read as adding up. */}
-                  {index > 0 && <p className="cx-everything">{`Everything in ${anchor}, and:`}</p>}
+                  {index > 0 && features.length > 0 && (
+                    <p className="cx-everything">{`Everything in ${anchor}, and:`}</p>
+                  )}
                   <ul>
-                    {(index === 0
-                      ? FEATURES[mode]
-                      : offer.multiple
-                        ? [
-                            monthly
-                              ? `${count.format(offer.multiple)}× the monthly credits of ${anchor}`
-                              : `${count.format(offer.multiple)}× ${anchor}'s credits`,
-                          ]
-                        : []
-                    ).map((feature) => (
+                    {features.map((feature) => (
                       <li key={feature}>
                         <Check size={20} strokeWidth={1.5} aria-hidden="true" />
                         {feature}
@@ -314,7 +329,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
         })}
       </div>
 
-      {props.pricing.models.length > 0 && offers.length > 0 && (
+      {offers.some((offer) => offer.tasks.some(Boolean)) && (
         <section className="cx-usage" aria-labelledby="cx-usage-heading">
           <h2 id="cx-usage-heading">Usage estimates</h2>
           <div className="cx-table" role="region" aria-label="Typical agent tasks by model" tabIndex={0}>
@@ -336,9 +351,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
                     <th scope="row">{model.name}</th>
                     {offers.map((offer) => {
                       const tasks = offer.tasks[row]
-                      return (
-                        <td key={offer.id}>{tasks ? `${count.format(tasks[0])}–${count.format(tasks[1])}` : "–"}</td>
-                      )
+                      return <td key={offer.id}>{tasks ? range(tasks) : "–"}</td>
                     })}
                     <td>
                       <a href="/docs/models">Usage-based</a>

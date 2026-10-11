@@ -12,35 +12,29 @@ const config: ModelPlanConfig = {
   interval: "month",
   product: "Vector Codium",
   plans: [
-    { id: "vector-10", name: "Codium 10", price: 10, credits: 8, available: true },
-    { id: "vector-50", name: "Codium 50", price: 50, credits: 40, available: true },
+    { id: "vector-10", name: "Codium 10", price: 10, available: true, tasks: [[60, 550], null] },
+    { id: "vector-50", name: "Codium 50", price: 50, available: true, multiple: 5, tasks: [[300, 2700], null] },
   ],
   topups: [
-    { id: "codium-topup-10", name: "Codium 10 top-up", price: 10, credits: 8, available: true },
-    { id: "codium-topup-50", name: "Codium 50 top-up", price: 50, credits: 40, available: true },
+    { id: "codium-topup-10", name: "Codium 10 top-up", price: 10, available: true, tasks: [[60, 550], null] },
+    {
+      id: "codium-topup-50",
+      name: "Codium 50 top-up",
+      price: 50,
+      available: true,
+      multiple: 5,
+      tasks: [
+        [300, 2700],
+        [160, 1400],
+      ],
+    },
   ],
   models: [
-    {
-      id: "deepseek/deepseek-v4.1-flash",
-      name: "Everyday Coder",
-      category: "everyday",
-      description: "Routine edits and tests.",
-      contextLength: 262_144,
-      maxOutputTokens: 32_000,
-      inputPrice: 0.3,
-      outputPrice: 1.2,
-    },
-    {
-      id: "vendor/unreviewed",
-      name: "Hard Coder",
-      category: "advanced",
-      contextLength: 128_000,
-      maxOutputTokens: 8_192,
-      inputPrice: 0.5,
-      outputPrice: 3,
-    },
+    { id: "deepseek/deepseek-v4.1-flash", name: "Everyday Coder", category: "everyday", description: "Routine edits." },
+    { id: "vendor/unreviewed", name: "Hard Coder", category: "advanced" },
   ],
 }
+// The deployed configuration. The task assumptions are private, so this repository builds it without usage ranges.
 const live = readModelPlanConfig(publicModelPlans())
 // The deployed configuration with sales switched on, as it will be at launch.
 const selling: ModelPlanConfig = {
@@ -76,6 +70,22 @@ describe("Codium pricing page", () => {
     for (const multiple of [5, 10, 20]) expect(html).toContain(`${multiple}× the monthly credits of Codium 10</li>`)
     expect(html).toContain("Monthly credits for every Codium model</li>")
     expect(html).toContain("Works in the Vector desktop app and CLI</li>")
+  })
+
+  test("later tiers list their usage on the default and advanced models, never their credits", () => {
+    const monthly = text(render(config))
+    expect(monthly).toContain(
+      "Everything in Codium 10, and: 5× the monthly credits of Codium 10 About 300–2,700 typical tasks a month with Everyday Coder",
+    )
+    // A model without a range gets no line.
+    expect(monthly).not.toContain("with Hard Coder")
+    const topups = text(render(config, "topup"))
+    expect(topups).toContain(
+      "5× the $10 top-up's credits About 300–2,700 typical tasks with Everyday Coder About 160–1,400 typical tasks with Hard Coder",
+    )
+    // Without ranges or a multiple, a later card has nothing to add and no header promising more.
+    const bare = render({ ...config, plans: config.plans.map((plan) => ({ ...plan, multiple: undefined, tasks: [] })) })
+    expect(bare).not.toContain("Everything in")
   })
 
   test("top-ups are the same four amounts as one-time packs in the same cards", () => {
@@ -157,35 +167,26 @@ describe("Codium pricing page", () => {
       match[1],
       [...match[2]!.matchAll(/<td>(.*?)<\/td>/g)].map((cell) => cell[1]),
     ])
-    expect(rows.map((row) => row[0])).toEqual(["Everyday Coder", "Hard Coder"])
-    for (const [, cells] of rows) {
-      expect(cells.at(-1)).toBe('<a href="/docs/models">Usage-based</a>')
-      for (const cell of cells.slice(0, -1)) expect(cell).toMatch(/^[\d,]+–[\d,]+$/)
-    }
-    // Ranges are rounded down to two significant digits and rise with the plan.
-    const ranges = rows.map((row) => (row[1] as string[]).slice(0, -1).map((cell) => cell.split("–")))
-    expect(ranges[0]).toEqual([
-      ["60", "550"],
-      ["300", "2,700"],
+    expect(rows).toEqual([
+      ["Everyday Coder", ["60–550", "300–2,700", '<a href="/docs/models">Usage-based</a>']],
+      ["Hard Coder", ["–", "–", '<a href="/docs/models">Usage-based</a>']],
     ])
-    for (const value of ranges.flat(2)) expect(value.replace(",", "").replace(/0+$/, "").length).toBeLessThanOrEqual(2)
-    // A model without reviewed assumptions falls back to its price ceilings, so its range is lower.
-    expect(Number(ranges[1]![0]![1]!.replace(",", ""))).toBeLessThan(Number(ranges[0]![0]![1]!.replace(",", "")))
     expect(html).toContain("Typical agent tasks a month on each plan")
     expect(render(config, "topup")).toContain("Typical agent tasks from each one-time top-up")
   })
 
-  test("the hard model spends credits fastest and the cheap one slowest, as the catalog describes", () => {
-    const pricing = codiumPricing(live)
-    const names = pricing.models.map((model) => model.name)
-    expect(names).toEqual(["DeepSeek V4.1 Flash", "Xiaomi MiMo V2.6 Flash", "Claude Haiku 5.5"])
-    for (const offer of pricing.monthly) {
-      const [deepseek, mimo, haiku] = offer.tasks
-      expect(haiku![1]).toBeLessThan(deepseek![1])
-      expect(deepseek![1]).toBeLessThan(mimo![1])
-      expect(haiku![0]).toBeLessThan(deepseek![0])
-    }
-    expect(pricing.models.find((model) => model.category === "advanced")?.description).toContain(
+  test("without the private task assumptions the page leaves the usage estimates out", () => {
+    const html = render(live)
+    expect(codiumPricing(live).monthly.every((offer) => offer.tasks.every((tasks) => tasks === null))).toBe(true)
+    expect(html).not.toContain("cx-usage")
+    expect(html).not.toContain("typical tasks")
+    expect(html).toContain("5× the monthly credits of Codium 10")
+    expect(codiumPricing(live).models.map((model) => model.name)).toEqual([
+      "DeepSeek V4.1 Flash",
+      "Xiaomi MiMo V2.6 Flash",
+      "Claude Haiku 5.5",
+    ])
+    expect(codiumPricing(live).models.find((model) => model.category === "advanced")?.description).toContain(
       "Uses credits faster than the other models",
     )
   })
@@ -198,7 +199,8 @@ describe("Codium pricing page", () => {
       for (const model of pricing.models)
         expect(Object.keys(model).every((key) => ["id", "name", "category", "description"].includes(key))).toBe(true)
       const props = JSON.stringify(pricing)
-      for (const plan of value.plans) expect(props).not.toContain(`:${plan.credits},`)
+      for (const key of ["credits", "inputPrice", "outputPrice", "contextLength"])
+        expect(props).not.toContain(`"${key}"`)
       for (const mode of ["monthly", "topup"] as const) {
         const html = render(value, mode)
         for (const word of ["markup", "margin", "per million", "M tokens", "%"]) expect(html).not.toContain(word)
