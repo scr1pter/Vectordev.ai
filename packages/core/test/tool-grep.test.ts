@@ -421,3 +421,21 @@ real.live("directory grep preserves explicitly authorized environment-file reads
     )
   }),
 )
+
+real.live("multiline filenames cannot broaden a literal directory search", () =>
+  Effect.gen(function* () {
+    if (process.platform === "win32") return
+    const filesystem = yield* FSUtil.Service
+    const location = yield* Location.Service
+    const registry = yield* ToolRegistry.Service
+    yield* filesystem.makeDirectory(path.join(location.directory, "search", "\n.."), { recursive: true })
+    yield* filesystem.writeFileString(
+      path.join(location.directory, "search", "\n..", "outside.txt"),
+      "needle admitted multiline file",
+    )
+    yield* filesystem.writeFileString(path.join(location.directory, "outside.txt"), "needle FAKE_OUTSIDE_SENTINEL")
+    const result = yield* executeTool(registry, literal({ pattern: "needle", path: "search" }))
+    expect(result.value).toContain("admitted multiline file")
+    expect(result.value).not.toContain("FAKE_OUTSIDE_SENTINEL")
+  }),
+)

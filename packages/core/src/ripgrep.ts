@@ -104,6 +104,7 @@ const layer = Layer.effect(
       readonly signal?: AbortSignal
       readonly parse: (line: string) => Effect.Effect<A | undefined, Error>
       readonly pattern?: string
+      readonly nullDelimited?: boolean
       readonly onItem?: (item: A) => Effect.Effect<void>
     }) => {
       const program = Effect.scoped(
@@ -117,7 +118,17 @@ const layer = Layer.effect(
           )
           let observed = 0
           const rows = yield* Stream.decodeText(handle.stdout).pipe(
-            Stream.splitLines,
+            // Newlines are legal in filenames. Only NUL delimits a complete
+            // enumerated path; split lines could fabricate ../ search arguments.
+            input.nullDelimited
+              ? Stream.mapAccum(
+                  () => "",
+                  (pending, chunk: string) => {
+                    const records = (pending + chunk).split("\0")
+                    return [records.pop()!, records] as const
+                  },
+                )
+              : Stream.splitLines,
             Stream.filter((line) => line.length > 0),
             Stream.mapEffect(input.parse),
             Stream.filter((row): row is A => row !== undefined),
@@ -219,9 +230,11 @@ const layer = Layer.effect(
           cwd: input.cwd,
           limit: input.limit,
           signal: input.signal,
+          nullDelimited: true,
           args: [
             "--no-config",
             "--files",
+            "--null",
             ...(input.hidden ? ["--hidden"] : []),
             ...(input.follow ? ["--follow"] : []),
             `--glob=${input.pattern}`,
@@ -251,9 +264,11 @@ const layer = Layer.effect(
           cwd: input.cwd,
           limit: input.limit,
           signal: input.signal,
+          nullDelimited: true,
           args: [
             "--no-config",
             "--files",
+            "--null",
             ...(input.hidden ? ["--hidden"] : []),
             ...(input.follow ? ["--follow"] : []),
             ...(input.pattern === "*" ? [] : [`--glob=${input.pattern}`]),

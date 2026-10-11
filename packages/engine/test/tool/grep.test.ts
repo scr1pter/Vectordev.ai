@@ -464,3 +464,20 @@ it.instance("directory grep keeps explicitly authorized environment files search
     expect((yield* grep.execute({ pattern: "needle", include: "*.env" }, ctx)).output).toContain("authorized-fixture")
   }),
 )
+
+it.instance("multiline filenames cannot broaden a literal directory search", () =>
+  Effect.gen(function* () {
+    if (process.platform === "win32") return
+    const test = yield* TestInstance
+    yield* Effect.promise(() => fs.mkdir(path.join(test.directory, "search", "\n.."), { recursive: true }))
+    yield* Effect.promise(() =>
+      Bun.write(path.join(test.directory, "search", "\n..", "outside.txt"), "needle admitted multiline file"),
+    )
+    yield* Effect.promise(() => Bun.write(path.join(test.directory, "outside.txt"), "needle FAKE_OUTSIDE_SENTINEL"))
+    const info = yield* GrepTool
+    const grep = yield* info.init()
+    const result = yield* grep.execute({ pattern: "needle", path: "search" }, ctx)
+    expect(result.output).toContain("admitted multiline file")
+    expect(result.output).not.toContain("FAKE_OUTSIDE_SENTINEL")
+  }),
+)
