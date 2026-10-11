@@ -1,5 +1,5 @@
 import type { FreeModelInfo } from "@vectordevai/schema/free-model"
-import { isFreeModelID } from "./free-model-catalog"
+import { isFreeModelID } from "./free-model-catalog.js"
 
 const DISABLED_PLUGINS = [
   "web",
