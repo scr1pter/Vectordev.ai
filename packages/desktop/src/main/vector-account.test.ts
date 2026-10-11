@@ -12,6 +12,7 @@ function fixture() {
     syncDelay: undefined as Promise<void> | undefined,
     failSync: false,
     codium: {} as Record<string, unknown>,
+    name: undefined as string | undefined,
   }
   const fetched: string[] = []
   const urls: string[] = []
@@ -48,7 +49,11 @@ function fixture() {
       requests.push(init)
       if (url === "https://vectordev.ai/api/model-plans/status") return Response.json(state.codium)
       await state.fetchDelay
-      return Response.json({ token, expiresAt: state.now + 100_000, user: { email: "fixture@example.test" } })
+      return Response.json({
+        token,
+        expiresAt: state.now + 100_000,
+        user: { email: "fixture@example.test", ...(state.name === undefined ? {} : { name: state.name }) },
+      })
     },
     sync: async (value) => {
       tokens.push(value)
@@ -263,4 +268,32 @@ test("Codium balances are read in the main process and only the result reaches t
     low: false,
   })
   expect(JSON.stringify(status)).not.toContain(app.token)
+})
+
+test("the signed-in name is kept for the sidebar, and older sign-ins without one still work", async () => {
+  const app = fixture()
+  app.state.name = "  Ada Lovelace  "
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  expect(app.controller.status()).toMatchObject({
+    authenticated: true,
+    email: "fixture@example.test",
+    name: "Ada Lovelace",
+  })
+  expect(app.state.stored).toMatchObject({ email: "fixture@example.test", name: "Ada Lovelace" })
+  const { name: _, ...older } = app.state.stored as { name: string }
+  app.state.stored = older
+  const status = app.controller.status()
+  expect(status).toMatchObject({ authenticated: true, email: "fixture@example.test" })
+  expect(status).not.toHaveProperty("name")
+})
+
+test("a missing or blank name never fails sign-in", async () => {
+  const app = fixture()
+  app.state.name = "   "
+  await app.controller.start()
+  await app.controller.consume([app.callback()])
+  expect(app.controller.status()).toMatchObject({ authenticated: true, email: "fixture@example.test" })
+  expect(app.controller.status()).not.toHaveProperty("name")
+  expect(app.state.stored).not.toHaveProperty("name")
 })
