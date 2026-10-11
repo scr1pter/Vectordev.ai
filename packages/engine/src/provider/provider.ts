@@ -54,6 +54,7 @@ import { ModelV2 } from "@vectordevai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { ResponseTerminal } from "./response-terminal"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
@@ -117,7 +118,7 @@ function timeoutController(ms: number) {
 // A provider's base URL from its options or the catalog, with variables from its loader and the environment filled in.
 function resolveBaseURL(
   model: Model,
-  options: Record<string, any>,
+  options: Record<string, unknown>,
   loader: CustomVarsLoader | undefined,
   envs: Record<string, string | undefined>,
 ) {
@@ -138,7 +139,7 @@ const SDK_ORIGINS: Record<string, string> = {
 // The origin a model's requests go to: a plugin that sends them elsewhere names it in the `preconnect` option.
 function requestOrigin(
   model: Model,
-  options: Record<string, any>,
+  options: Record<string, unknown>,
   loader: CustomVarsLoader | undefined,
   envs: Record<string, string | undefined>,
 ) {
@@ -2006,11 +2007,13 @@ const layer = Layer.effect(
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
 
-          const res = await fetchFn(input, {
-            ...opts,
-            // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
-            timeout: false,
-          }).finally(() => headerTimeoutCtl?.clear())
+          const res = ResponseTerminal.wrap(
+            await fetchFn(input, {
+              ...opts,
+              // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
+              timeout: false,
+            }).finally(() => headerTimeoutCtl?.clear()),
+          )
 
           if (!chunkAbortCtl) return res
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)
