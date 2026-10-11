@@ -2,19 +2,13 @@
 import { publicModelPlans } from "../../../../api/_lib/model-plan-config"
 import { CodiumPricing } from "../components/marketing/codium/CodiumPricing"
 import MarketingLayout from "../components/marketing/MarketingLayout.astro"
-// Not rendered: /codium has its own chrome. Importing the shared nav and footer keeps the stylesheet chunks this page
-// shares with the rest of the site as they were, so every other page builds byte for byte the same.
-import "../components/marketing/MarketingNav.astro"
-import "../components/marketing/SiteFooter.astro"
 import { codiumPricing } from "../lib/codium-pricing"
 import { readModelPlanConfig } from "../lib/model-plans"
 import { wordmarkCells, wordmarkWidth } from "../lib/wordmark"
 
 export const prerender = true
 
-// Only names, prices, credit multiples and rounded task ranges reach the page and its island props: never credit
-// amounts or model prices. The ranges need CODIUM_TASK_USAGE_JSON in the build environment; a build without it leaves
-// out the usage estimates.
+// The public view carries only names, prices, relative tiers and precomputed coarse task ranges.
 const pricing = codiumPricing(readModelPlanConfig(publicModelPlans()))
 const prices = pricing.monthly.map((plan) => plan.price)
 const links = [
@@ -53,10 +47,15 @@ const columns = [
 ]
 ---
 
+
+
 <MarketingLayout
   title="Pricing · Vector Codium"
   description={`Vector is free. Vector Codium adds low-cost coding models with credits: monthly plans or one-time top-ups${prices.length ? ` from $${Math.min(...prices)} to $${Math.max(...prices)}` : ""}, with no automatic overages.`}
 >
+<script is:inline>
+  document.documentElement.dataset.codiumMode = new URLSearchParams(location.search).get("type") === "topups" ? "topup" : "monthly";
+</script>
   <div class="cx-page">
     <header class="cx-bar">
       <a class="cx-brand" href="/" aria-label="Vector home">
@@ -218,8 +217,8 @@ const columns = [
     padding: 0 14px;
     display: inline-flex;
     align-items: center;
-    color: rgb(13, 13, 13);
-    background: rgb(249, 249, 249);
+    color: rgba(255, 255, 255, 0.8);
+    background: transparent;
     border-radius: 999px;
     font-size: 14px;
     font-weight: 500;
@@ -227,7 +226,7 @@ const columns = [
   }
 
   .cx-login:hover {
-    background: rgb(226, 226, 226);
+    color: #fff;
   }
 
   .cx-menu {
@@ -369,6 +368,8 @@ const columns = [
     }
 
     .cx-login {
+      color: rgb(13, 13, 13);
+      background: rgb(249, 249, 249);
       height: 38px;
       padding: 0 12px;
       font-size: 16px;

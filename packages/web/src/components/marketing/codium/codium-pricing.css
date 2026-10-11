@@ -6,8 +6,8 @@
   --cx-quiet: rgba(255, 255, 255, 0.6);
   --cx-accent: #aa8cff;
   /* Section and card headings, fluid from 24px on a 375px phone to 30px at 1440px. */
-  --cx-heading-size: clamp(24px, 21.8874px + 0.56338vw, 30px);
-  --cx-heading-line: clamp(31.68px, calc(31.68px + 0.495 * ((100vw - 375px) / 66.5625)), 39.6px);
+  --cx-heading-size: 30px;
+  --cx-heading-line: 39.6px;
 }
 
 .cx-visually-hidden {
@@ -72,12 +72,14 @@
   color: #fff;
 }
 
-.cx-toggle button[aria-checked="true"] {
+html:not([data-codium-mode="topup"]) .cx-toggle button[data-mode="monthly"],
+html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] {
   color: #fff;
   background: rgb(33, 33, 33);
 }
 
-.cx-toggle button[aria-checked="true"] svg {
+html:not([data-codium-mode="topup"]) .cx-toggle button[data-mode="monthly"] svg,
+html[data-codium-mode="topup"] .cx-toggle button[data-mode="topup"] svg {
   color: var(--cx-accent);
   opacity: 1;
 }
@@ -382,7 +384,7 @@
   }
 }
 
-@media (max-width: 1099px) {
+@media (max-width: 1023px) {
   .cx-cards {
     max-width: 760px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -396,6 +398,10 @@
     margin-top: 32px;
   }
 
+  .cx-toggle button svg {
+    display: none;
+  }
+
   .cx-cards {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: none;
@@ -405,7 +411,7 @@
 
   .cx-usage,
   .cx-faq {
-    margin-top: 88px;
+    margin-top: 128px;
   }
 
   /* The table is wider than a phone, so it scrolls edge to edge with its first column on the page gutter. */
@@ -428,4 +434,19 @@
   .cx-faq-answer {
     transition: none;
   }
+}
+
+.cx-card-head p,
+.cx-card-list li,
+.cx-faq-answer {
+  text-wrap: pretty;
+}
+
+.cx-faq-item {
+  border-bottom: 1px solid var(--cx-hairline);
+}
+
+html:not([data-codium-mode="topup"]) .cx-panel[data-mode="topup"],
+html[data-codium-mode="topup"] .cx-panel[data-mode="monthly"] {
+  display: none;
 }

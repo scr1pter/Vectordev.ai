@@ -34,7 +34,7 @@ const config: ModelPlanConfig = {
     { id: "vendor/unreviewed", name: "Hard Coder", category: "advanced" },
   ],
 }
-// The deployed configuration. The task assumptions are private, so this repository builds it without usage ranges.
+// The deployed configuration contains only precomputed coarse estimates.
 const live = readModelPlanConfig(publicModelPlans())
 // The deployed configuration with sales switched on, as it will be at launch.
 const selling: ModelPlanConfig = {
@@ -44,8 +44,19 @@ const selling: ModelPlanConfig = {
   topups: live.topups?.map((pack) => ({ ...pack, available: true })),
 }
 
-const render = (value: ModelPlanConfig, mode?: CodiumMode) =>
+const renderBoth = (value: ModelPlanConfig, mode?: CodiumMode) =>
   renderToStaticMarkup(createElement(CodiumPricing, { pricing: codiumPricing(value), mode }))
+const render = (value: ModelPlanConfig, mode: CodiumMode = "monthly") => {
+  const html = renderBoth(value, mode)
+  const monthly = html.indexOf('<div class="cx-panel" data-mode="monthly">')
+  const topup = html.indexOf('<div class="cx-panel" data-mode="topup">')
+  const faq = html.indexOf('<section class="cx-faq"')
+  return (
+    html.slice(0, monthly) +
+    (mode === "monthly" ? html.slice(monthly, topup) : html.slice(topup, faq)) +
+    html.slice(faq)
+  )
+}
 const text = (html: string) =>
   html
     .replace(/<[^>]+>/g, " ")
@@ -53,6 +64,17 @@ const text = (html: string) =>
     .replace(/\s+/g, " ")
 
 describe("Codium pricing page", () => {
+  test("both complete panels render before hydration for direct top-up links", async () => {
+    const html = renderBoth(selling)
+    expect(html.match(/<article class="cx-card"/g)).toHaveLength(8)
+    expect(html).toContain('class="cx-panel" data-mode="monthly"')
+    expect(html).toContain('class="cx-panel" data-mode="topup"')
+    const page = await Bun.file(new URL("../../../pages/codium.astro", import.meta.url)).text()
+    expect(page.indexOf("document.documentElement.dataset.codiumMode")).toBeLessThan(
+      page.indexOf('<div class="cx-page">'),
+    )
+    expect(page).not.toContain('import "../components/marketing/MarketingNav.astro"')
+  })
   test("offers exactly the four monthly plans, with no free card", () => {
     const html = render(selling)
     expect(live.plans.map((plan) => plan.price)).toEqual([10, 50, 100, 200])
@@ -74,18 +96,16 @@ describe("Codium pricing page", () => {
 
   test("later tiers list their usage on the default and advanced models, never their credits", () => {
     const monthly = text(render(config))
-    expect(monthly).toContain(
-      "Everything in Codium 10, and: 5× the monthly credits of Codium 10 About 300–2,700 typical tasks a month with Everyday Coder",
-    )
+    expect(monthly).toContain("About 300–2,700 typical tasks a month with Everyday Coder")
     // A model without a range gets no line.
     expect(monthly).not.toContain("with Hard Coder")
     const topups = text(render(config, "topup"))
     expect(topups).toContain(
-      "5× the $10 top-up's credits About 300–2,700 typical tasks with Everyday Coder About 160–1,400 typical tasks with Hard Coder",
+      "About 300–2,700 typical tasks with Everyday Coder About 160–1,400 typical tasks with Hard Coder",
     )
-    // Without ranges or a multiple, a later card has nothing to add and no header promising more.
+    // Larger purchases retain concrete usage guidance even without reviewed ranges.
     const bare = render({ ...config, plans: config.plans.map((plan) => ({ ...plan, multiple: undefined, tasks: [] })) })
-    expect(bare).not.toContain("Everything in")
+    expect(bare).toContain("More room for daily coding and larger projects")
   })
 
   test("top-ups are the same four amounts as one-time packs in the same cards", () => {
@@ -111,7 +131,9 @@ describe("Codium pricing page", () => {
       const html = render(config, mode)
       expect(html).toContain('<div class="cx-toggle" role="radiogroup" aria-label="Choose how to buy Codium">')
       const radios = [
-        ...html.matchAll(/role="radio" aria-checked="(true|false)" tabindex="(0|-1)"[^>]*>(.*?)<\/button>/g),
+        ...html.matchAll(
+          /role="radio" data-mode="(?:monthly|topup)" aria-checked="(true|false)" tabindex="(0|-1)"[^>]*>(.*?)<\/button>/g,
+        ),
       ]
       expect(radios.map((match) => text(match[3]!).trim())).toEqual(["Individual", "Top-ups"])
       expect(radios.map((match) => [match[1], match[2]])).toEqual(
@@ -160,7 +182,7 @@ describe("Codium pricing page", () => {
 
   test("usage is shown as ranges of typical tasks for each model and plan", () => {
     const html = render(config)
-    expect(html).toContain('<h2 id="cx-usage-heading">Usage estimates</h2>')
+    expect(html).toContain('<h2 id="cx-usage-heading-monthly">Usage estimates</h2>')
     const header = [...html.matchAll(/<th scope="col">(.*?)<\/th>/g)].map((match) => match[1])
     expect(header).toEqual(["Model", "Codium 10", "Codium 50", "Your own key"])
     const rows = [...html.matchAll(/<tr><th scope="row">(.*?)<\/th>(.*?)<\/tr>/g)].map((match) => [
@@ -175,11 +197,11 @@ describe("Codium pricing page", () => {
     expect(render(config, "topup")).toContain("Typical agent tasks from each one-time top-up")
   })
 
-  test("without the private task assumptions the page leaves the usage estimates out", () => {
+  test("the launch catalog publishes coarse estimates without private assumptions", () => {
     const html = render(live)
-    expect(codiumPricing(live).monthly.every((offer) => offer.tasks.every((tasks) => tasks === null))).toBe(true)
-    expect(html).not.toContain("cx-usage")
-    expect(html).not.toContain("typical tasks")
+    expect(codiumPricing(live).monthly.every((offer) => offer.tasks.every((tasks) => tasks !== null))).toBe(true)
+    expect(html).toContain("cx-usage")
+    expect(html).toContain("typical tasks")
     expect(html).toContain("5× the monthly credits of Codium 10")
     expect(codiumPricing(live).models.map((model) => model.name)).toEqual([
       "DeepSeek V4.1 Flash",

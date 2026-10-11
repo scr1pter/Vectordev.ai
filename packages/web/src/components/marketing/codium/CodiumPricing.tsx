@@ -54,8 +54,6 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
   const [failure, setFailure] = React.useState<{ id: string; message: string }>()
   const [open, setOpen] = React.useState(["run-out"])
   const radios = React.useRef<(HTMLButtonElement | null)[]>([])
-  const offers = mode === "monthly" ? props.pricing.monthly : props.pricing.topups
-  const monthly = mode === "monthly"
   // Later cards give their usage on the default model and, when the catalog has one, the advanced model.
   const featured = [...new Set([0, props.pricing.models.findIndex((model) => model.category === "advanced")])].filter(
     (row) => row >= 0 && row < props.pricing.models.length,
@@ -70,6 +68,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
     if (focus) radios.current[MODES.findIndex((item) => item.mode === next)]?.focus()
     if (next === mode) return
     setMode(next)
+    document.documentElement.dataset.codiumMode = next
     history.pushState(history.state, "", codiumModeUrl(location.href, next))
   }
 
@@ -94,7 +93,11 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
 
   // The tab lives in the address (?type=topups), so a shared link, a reload and the back button all restore it.
   React.useEffect(() => {
-    const restore = () => setMode(codiumMode(location.search))
+    const restore = () => {
+      const next = codiumMode(location.search)
+      setMode(next)
+      document.documentElement.dataset.codiumMode = next
+    }
     restore()
     addEventListener("popstate", restore)
     return () => removeEventListener("popstate", restore)
@@ -228,6 +231,7 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
               }}
               type="button"
               role="radio"
+              data-mode={item.mode}
               aria-checked={mode === item.mode}
               tabIndex={mode === item.mode ? 0 : -1}
               onClick={() => choose(item.mode)}
@@ -239,144 +243,159 @@ export function CodiumPricing(props: { pricing: CodiumPricingView; mode?: Codium
         </div>
       )}
 
-      <div className="cx-cards">
-        {offers.map((offer, index) => {
-          const first = offers[0]!
-          const anchor = monthly ? first.name : `the ${usd.format(first.price)} top-up`
-          // Later tiers differ only in credits: a multiple of the first, so they never read as adding up, and the
-          // usage that buys. Credit amounts never appear.
-          const features =
-            index === 0
-              ? FEATURES[mode]
-              : [
-                  offer.multiple &&
-                    (monthly
-                      ? `${count.format(offer.multiple)}× the monthly credits of ${anchor}`
-                      : `${count.format(offer.multiple)}× ${anchor}'s credits`),
-                  ...featured.map((row) => {
-                    const tasks = offer.tasks[row]
-                    return (
-                      tasks &&
-                      `About ${range(tasks)} typical tasks${monthly ? " a month" : ""} with ${props.pricing.models[row]!.name}`
-                    )
-                  }),
-                ].filter((feature) => typeof feature === "string")
-          return (
-            <article className="cx-card" key={offer.id}>
-              <div className="cx-card-top">
-                <div className="cx-card-head">
-                  <h3>{offer.name}</h3>
-                  <p>{FIT[mode][index] ?? "For more usage."}</p>
-                </div>
-                <div className="cx-card-buy">
-                  <p className="cx-price">
-                    <span className="cx-amount">{usd.format(offer.price)}</span>
-                    <span className="cx-period">{monthly ? "/ month" : "one-time"}</span>
-                  </p>
-                  <button
-                    className="cx-button"
-                    type="button"
-                    disabled={!offer.available || pending !== undefined}
-                    onClick={() => buy(offer, mode)}
-                  >
-                    {!offer.available ? (
-                      "Coming soon"
-                    ) : pending?.id === offer.id ? (
-                      pending.signIn ? (
-                        "Signing in…"
-                      ) : (
-                        "Opening checkout…"
-                      )
-                    ) : (
-                      <React.Fragment>
-                        {monthly ? `Get ${offer.name}` : `Buy ${usd.format(offer.price)} top-up`}
-                        <ChevronRight size={16} aria-hidden="true" />
-                      </React.Fragment>
-                    )}
-                  </button>
-                  {failure?.id === offer.id && (
-                    <p className="cx-error" role="alert">
-                      {failure.message} <a href="/account">Open your account</a>
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div className="cx-card-bottom">
-                <div className="cx-card-list">
-                  {index > 0 && features.length > 0 && (
-                    <p className="cx-everything">{`Everything in ${anchor}, and:`}</p>
-                  )}
-                  <ul>
-                    {features.map((feature) => (
-                      <li key={feature}>
-                        <Check size={20} strokeWidth={1.5} aria-hidden="true" />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                {index === offers.length - 1 && (
-                  <p className="cx-fine">
-                    {monthly
-                      ? "Plans renew monthly at the listed price until you cancel. Monthly credits reset each billing period and don't roll over."
-                      : "Top-ups are one-time purchases that don't renew. Unused top-up credits carry forward separately from your subscription."}{" "}
-                    <a href="/legal/terms#codium">Codium terms</a>
-                  </p>
-                )}
-              </div>
-            </article>
-          )
-        })}
-      </div>
+      {MODES.map((item) => {
+        const offers = item.mode === "monthly" ? props.pricing.monthly : props.pricing.topups
+        const monthly = item.mode === "monthly"
+        return (
+          <div className="cx-panel" data-mode={item.mode} key={item.mode}>
+            <div className="cx-cards">
+              {offers.map((offer, index) => {
+                const first = offers[0]!
+                const anchor = monthly ? first.name : `the ${usd.format(first.price)} top-up`
+                // Later tiers differ only in credits: a multiple of the first, so they never read as adding up, and the
+                // usage that buys. Credit amounts never appear.
+                const features =
+                  index === 0
+                    ? FEATURES[item.mode]
+                    : [
+                        offer.multiple &&
+                          (monthly
+                            ? `${count.format(offer.multiple)}× the monthly credits of ${anchor}`
+                            : `${count.format(offer.multiple)}× ${anchor}'s credits`),
+                        ...(monthly
+                          ? [
+                              "More room for daily coding and larger projects",
+                              "One monthly allowance across desktop and CLI",
+                            ]
+                          : ["A larger reserve for busy weeks", "Use across desktop and CLI without a subscription"]),
+                        ...featured.map((row) => {
+                          const tasks = offer.tasks[row]
+                          return (
+                            tasks &&
+                            `About ${range(tasks)} typical tasks${monthly ? " a month" : ""} with ${props.pricing.models[row]!.name}`
+                          )
+                        }),
+                      ].filter((feature) => typeof feature === "string")
+                return (
+                  <article className="cx-card" key={offer.id}>
+                    <div className="cx-card-top">
+                      <div className="cx-card-head">
+                        <h3>{offer.name}</h3>
+                        <p>{FIT[item.mode][index] ?? "For more usage."}</p>
+                      </div>
+                      <div className="cx-card-buy">
+                        <p className="cx-price">
+                          <span className="cx-amount">{usd.format(offer.price)}</span>
+                          <span className="cx-period">{monthly ? "/ month" : "one-time"}</span>
+                        </p>
+                        <button
+                          className="cx-button"
+                          type="button"
+                          disabled={!offer.available || pending !== undefined}
+                          onClick={() => buy(offer, item.mode)}
+                        >
+                          {!offer.available ? (
+                            "Coming soon"
+                          ) : pending?.id === offer.id ? (
+                            pending.signIn ? (
+                              "Signing in…"
+                            ) : (
+                              "Opening checkout…"
+                            )
+                          ) : (
+                            <React.Fragment>
+                              {monthly ? `Get ${offer.name}` : `Buy ${usd.format(offer.price)} top-up`}
+                              <ChevronRight size={16} aria-hidden="true" />
+                            </React.Fragment>
+                          )}
+                        </button>
+                        {failure?.id === offer.id && (
+                          <p className="cx-error" role="alert">
+                            {failure.message} <a href="/account">Open your account</a>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="cx-card-bottom">
+                      <div className="cx-card-list">
+                        {index > 0 && features.length > 0 && (
+                          <p className="cx-everything">{`Everything in ${anchor}, and:`}</p>
+                        )}
+                        <ul>
+                          {features.map((feature) => (
+                            <li key={feature}>
+                              <Check size={20} strokeWidth={1.5} aria-hidden="true" />
+                              {feature}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      {index === offers.length - 1 && (
+                        <p className="cx-fine">
+                          {monthly
+                            ? "Plans renew monthly at the listed price until you cancel. Monthly credits reset each billing period and don't roll over."
+                            : "Top-ups are one-time purchases that don't renew. Unused top-up credits carry forward separately from your subscription."}{" "}
+                          <a href="/legal/terms#codium">Codium terms</a>
+                        </p>
+                      )}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
 
-      {offers.some((offer) => offer.tasks.some(Boolean)) && (
-        <section className="cx-usage" aria-labelledby="cx-usage-heading">
-          <h2 id="cx-usage-heading">Usage estimates</h2>
-          <div className="cx-table" role="region" aria-label="Typical agent tasks by model" tabIndex={0}>
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Model</th>
-                  {offers.map((offer) => (
-                    <th scope="col" key={offer.id}>
-                      {offer.name}
-                    </th>
-                  ))}
-                  <th scope="col">Your own key</th>
-                </tr>
-              </thead>
-              <tbody>
-                {props.pricing.models.map((model, row) => (
-                  <tr key={model.id}>
-                    <th scope="row">{model.name}</th>
-                    {offers.map((offer) => {
-                      const tasks = offer.tasks[row]
-                      return <td key={offer.id}>{tasks ? range(tasks) : "–"}</td>
-                    })}
-                    <td>
-                      <a href="/docs/models">Usage-based</a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {offers.some((offer) => offer.tasks.some(Boolean)) && (
+              <section className="cx-usage" aria-labelledby={`cx-usage-heading-${item.mode}`}>
+                <h2 id={`cx-usage-heading-${item.mode}`}>Usage estimates</h2>
+                <div className="cx-table" role="region" aria-label="Typical agent tasks by model" tabIndex={0}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th scope="col">Model</th>
+                        {offers.map((offer) => (
+                          <th scope="col" key={offer.id}>
+                            {offer.name}
+                          </th>
+                        ))}
+                        <th scope="col">Your own key</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {props.pricing.models.map((model, row) => (
+                        <tr key={model.id}>
+                          <th scope="row">{model.name}</th>
+                          {offers.map((offer) => {
+                            const tasks = offer.tasks[row]
+                            return <td key={offer.id}>{tasks ? range(tasks) : "–"}</td>
+                          })}
+                          <td>
+                            <a href="/docs/models">Usage-based</a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="cx-notes">
+                  <p>
+                    {monthly
+                      ? "Typical agent tasks a month on each plan, from a focused fix to a multi-file change."
+                      : "Typical agent tasks from each one-time top-up, from a focused fix to a multi-file change."}
+                  </p>
+                  <p>
+                    Long reasoning, large files and parallel agents use credits faster; cached context makes them last
+                    longer.
+                  </p>
+                  <p>
+                    Estimates are a guide, not a guaranteed number of tasks. See the{" "}
+                    <a href="/legal/terms#codium">Codium terms</a>.
+                  </p>
+                </div>
+              </section>
+            )}
           </div>
-          <div className="cx-notes">
-            <p>
-              {monthly
-                ? "Typical agent tasks a month on each plan, from a focused fix to a multi-file change."
-                : "Typical agent tasks from each one-time top-up, from a focused fix to a multi-file change."}
-            </p>
-            <p>
-              Long reasoning, large files and parallel agents use credits faster; cached context makes them last longer.
-            </p>
-            <p>
-              Estimates are a guide, not a guaranteed number of tasks. See the{" "}
-              <a href="/legal/terms#codium">Codium terms</a>.
-            </p>
-          </div>
-        </section>
-      )}
+        )
+      })}
 
       <section className="cx-faq" aria-labelledby="cx-faq-heading">
         <h2 id="cx-faq-heading">Frequently asked questions</h2>
