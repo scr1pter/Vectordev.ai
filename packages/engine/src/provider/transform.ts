@@ -1163,15 +1163,13 @@ export function options(input: {
     }
   }
 
-  // GPT-5.6+ routes cache reuse automatically. A fresh key per session creates a separate cache accounting
-  // group even for shared prefixes; retain session isolation only when explicitly requested.
-  const cacheVersion = /^(?:openai\/)?gpt-([5-9])(?:\.(\d+))?(?:-|$)/.exec(input.model.api.id)
-  const automaticCacheRouting =
-    cacheVersion !== null &&
-    (Number(cacheVersion[1]) > 5 || (Number(cacheVersion[1]) === 5 && Number(cacheVersion[2] ?? 0) >= 6))
+  // Every OpenAI request names its session as the prompt cache key, on every model, as the Codex CLI does. OpenAI
+  // routes a request by its opening tokens together with this key, and spills a group that passes roughly 15 requests
+  // a minute onto other cache machines. Without a key every Vector session shares one group, because their opening
+  // tokens (the tool definitions) are the same, so parallel sessions and subagents push each other off their cache.
   if (
     input.providerOptions?.setCacheKey === true ||
-    (input.model.providerID === "openai" && !automaticCacheRouting && input.providerOptions?.setCacheKey !== false)
+    (input.model.providerID === "openai" && input.providerOptions?.setCacheKey !== false)
   ) {
     result["promptCacheKey"] = input.sessionID
   }

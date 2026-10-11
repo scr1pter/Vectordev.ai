@@ -1,32 +1,53 @@
 #!/usr/bin/env bun
 // Offline request-cost benchmark. Runs a real agent (Vector's `vector run`, the Claude Code CLI or the Codex CLI)
-// against a local fake model server (Anthropic Messages, or OpenAI Responses for Codex) that plays a fixed script of
-// tool calls, records every request the agent sends, and prices each one under the provider's prompt-caching rules. No API key, no network and no model variance: the same
-// build always produces the same numbers, and two runtimes doing the same steps can be compared exactly. It measures
-// what each runtime sends, not how well a model would do with it; the live harness in run.ts measures that.
+// against a local fake model server (Anthropic Messages, or the OpenAI Responses API) that plays a fixed script of
+// tool calls, records every request the agent sends, and prices each one under the provider's prompt-caching rules
+// (prompt-cache.ts). No API key, no network and no model variance: the same build always produces the same numbers,
+// and two runtimes doing the same steps can be compared exactly. It measures what each runtime sends, not how well a
+// model would do with it; the live harness in run.ts measures that.
 //
-//   bun script/agent-eval/footprint.ts                              Vector, every scenario
-//   bun script/agent-eval/footprint.ts --runtime vector,claude-code,codex side by side
-//   bun script/agent-eval/footprint.ts --runtime codex --codex /path/to/codex
-//   bun script/agent-eval/footprint.ts --scenario solo-fix --out report.json
+//   bun script/agent-eval/footprint.ts                                   Vector, every scenario
+//   bun script/agent-eval/footprint.ts --runtime vector,claude-code      side by side on Anthropic Messages
+//   bun script/agent-eval/footprint.ts --runtime vector-openai,codex --codex /path/to/codex
+//                                                                        side by side on the OpenAI Responses API
+//   bun script/agent-eval/footprint.ts --sessions 2                      each scenario twice, to see a second
+//                                                                        session start on a warm cache
+//   bun script/agent-eval/footprint.ts --scenario solo-fix --out report.json --dump requests/
 
 import { spawn, spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { taskById } from "./tasks"
+import {
+  continued,
+  createPromptCache,
+  dollars,
+  estimate,
+  price,
+  strip,
+  toolSignature,
+  toolsOf,
+  type PromptCache,
+  type Rates,
+  type Recorded,
+  type RequestCost,
+} from "./prompt-cache"
 
 const REPO_ROOT = resolve(import.meta.dir, "../..")
 const ENGINE = join(REPO_ROOT, "packages", "engine", "src", "index.ts")
 const MODEL = "claude-sonnet-4-5"
-// Claude Sonnet 4.5 list prices per million tokens; a 5-minute cache write costs 1.25x input, a read 0.1x.
-const PRICE = { input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 }
-// Anthropic caches nothing shorter than this, and looks back at most this many blocks from a breakpoint for a hit.
-const MIN_CACHEABLE_TOKENS = 1_024
-const LOOKBACK_BLOCKS = 20
+// Per million tokens. Anthropic Messages runs are priced at Claude Sonnet 4.5 list prices, with a 5-minute cache write
+// at 1.25x input and a read at 0.1x. OpenAI Responses runs are priced at the rates of the October 2026 live
+// Vector/Codex archive (gpt-6.1-sol: $2 input, $0.10 cached input, $10 output; writes are free), so offline and live
+// numbers can be read side by side. Only compare runtimes on the same API.
+const RATES = {
+  messages: { input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 },
+  responses: { input: 2, cacheWrite: 0, cacheRead: 0.1, output: 10 },
+} satisfies Record<string, Rates>
 
-type Runtime = "vector" | "claude-code" | "codex"
-const RUNTIMES: Runtime[] = ["vector", "claude-code", "codex"]
+type Runtime = "vector" | "vector-openai" | "claude-code" | "codex"
+const RUNTIMES: Runtime[] = ["vector", "vector-openai", "claude-code", "codex"]
 
 // A runtime-neutral step. Each runtime gets it as a call to its own tool for the job, so both do the same work.
 type Step =
@@ -41,7 +62,7 @@ type Step =
 
 type Scenario = { id: string; title: string; task: string; steps: Step[] }
 
-// Whole lines, so the same edit also works as a patch hunk for Codex.
+// Whole lines, so the same edit also works as a patch hunk.
 const FIX: Step = {
   kind: "edit",
   path: "src/invoice.ts",
@@ -143,16 +164,15 @@ function stepsFor(runtime: Runtime, scenario: Scenario) {
 
 // The call each runtime makes for a step, with its own tool names and parameters. Claude Code has no separate search
 // or list tool, so those run through Bash with ripgrep, as it does them; Codex does everything but edits through its
-// shell tool, and edits with an apply_patch hunk.
+// shell tool, and edits with an apply_patch hunk. Vector on a GPT model edits with its own apply_patch tool, as it is
+// offered there instead of edit and write.
 function toolCall(runtime: Runtime, step: Step, dir: string): Call {
   const path = (relative: string) => join(dir, relative)
+  const patch = (edit: { path: string; from: string; to: string }) =>
+    `*** Begin Patch\n*** Update File: ${edit.path}\n@@\n-${edit.from}\n+${edit.to}\n*** End Patch`
   if (step.kind === "answer") return { text: step.text }
   if (runtime === "codex") {
-    if (step.kind === "edit")
-      return {
-        name: "apply_patch",
-        custom: `*** Begin Patch\n*** Update File: ${step.path}\n@@\n-${step.from}\n+${step.to}\n*** End Patch\n`,
-      }
+    if (step.kind === "edit") return { name: "apply_patch", custom: `${patch(step)}\n` }
     const cmd =
       step.kind === "bash"
         ? step.command
@@ -165,9 +185,11 @@ function toolCall(runtime: Runtime, step: Step, dir: string): Call {
               : "true"
     return { name: "exec_command", input: { cmd } }
   }
-  if (runtime === "vector") {
+  if (runtime === "vector" || runtime === "vector-openai") {
     if (step.kind === "bash") return { name: "bash", input: { command: step.command, description: step.description } }
     if (step.kind === "read") return { name: "read", input: { filePath: path(step.path) } }
+    if (step.kind === "edit" && runtime === "vector-openai")
+      return { name: "apply_patch", input: { patchText: patch(step) } }
     if (step.kind === "edit")
       return { name: "edit", input: { filePath: path(step.path), oldString: step.from, newString: step.to } }
     if (step.kind === "search") return { name: "grep", input: { pattern: step.pattern, path: dir } }
@@ -201,29 +223,11 @@ function toolCall(runtime: Runtime, step: Step, dir: string): Call {
   }
 }
 
-type Recorded = { body: Record<string, unknown>; output: string }
-
-type Block = { key: string; tokens: number; breakpoint: boolean }
-
-type RequestCost = {
-  index: number
-  who: "agent" | "subagent" | "side"
-  tools: number
-  systemTokens: number
-  toolTokens: number
-  messageTokens: number
-  inputTokens: number
-  cacheRead: number
-  cacheWrite: number
-  uncached: number
-  outputTokens: number
-  costUsd: number
-  uncachedCostUsd: number
-}
-
 const flags = parseFlags(process.argv.slice(2))
 const CODEX = flags.codex ?? process.env.VECTOR_EVAL_CODEX ?? "codex"
-const CODEX_MODEL = "gpt-5.5"
+const OPENAI_MODEL = flags.openaiModel ?? "gpt-5.5"
+const CODEX_MODEL = flags.codexModel ?? OPENAI_MODEL
+const SESSIONS = Math.max(1, Number(flags.sessions ?? 1) || 1)
 const scenarios = flags.scenario ? SCENARIOS.filter((scenario) => scenario.id === flags.scenario) : SCENARIOS
 if (scenarios.length === 0) {
   process.stderr.write(
@@ -238,43 +242,88 @@ if (unknown.length > 0) {
   process.exit(2)
 }
 
+// The CLIs are checked once, from an empty environment and a throwaway HOME, so a version check never reads a real
+// configuration or credentials.
+const versionHome = await mkdtemp(join(tmpdir(), "vector-footprint-version-"))
+const available = Object.fromEntries(
+  (runtimes as Runtime[]).map((runtime) => {
+    const cli = runtime === "claude-code" ? "claude" : runtime === "codex" ? CODEX : undefined
+    if (!cli) return [runtime, true]
+    const check = spawnSync(cli, ["--version"], { env: { PATH: process.env.PATH ?? "", HOME: versionHome } })
+    return [runtime, check.status === 0]
+  }),
+)
+await rm(versionHome, { recursive: true, force: true })
+
+// One prompt cache per runtime for the whole run, as a provider keeps an account's cached prefixes between sessions.
+const caches = new Map<Runtime, PromptCache>()
 const reports: Array<Record<string, unknown>> = []
 for (const scenario of scenarios) {
   for (const runtime of runtimes as Runtime[]) {
-    process.stderr.write(`\n=== ${runtime} · ${scenario.id}: ${scenario.title} ===\n`)
-    const cli = runtime === "claude-code" ? "claude" : runtime === "codex" ? CODEX : undefined
-    if (cli && spawnSync(cli, ["--version"]).status !== 0) {
-      process.stderr.write(`  unavailable: the ${cli} CLI was not found\n`)
-      reports.push({ scenario: scenario.id, runtime, unavailable: true })
-      continue
+    for (const session of Array.from({ length: SESSIONS }, (_, index) => index + 1)) {
+      const label = SESSIONS > 1 ? ` · session ${session}` : ""
+      process.stderr.write(`\n=== ${runtime} · ${scenario.id}${label}: ${scenario.title} ===\n`)
+      if (!available[runtime]) {
+        process.stderr.write(`  unavailable: the ${runtime === "codex" ? CODEX : "claude"} CLI was not found\n`)
+        reports.push({ scenario: scenario.id, runtime, session, unavailable: true })
+        continue
+      }
+      const recorded = await runScenario(scenario, runtime)
+      if ("error" in recorded) {
+        process.stderr.write(`  failed: ${recorded.error}\n`)
+        reports.push({ scenario: scenario.id, runtime, session, error: recorded.error })
+        continue
+      }
+      if (flags.dump) {
+        await mkdir(flags.dump, { recursive: true })
+        await writeFile(
+          join(flags.dump, `${runtime}-${scenario.id}-${session}.json`),
+          JSON.stringify(recorded.requests, null, 1) + "\n",
+        )
+      }
+      const cache = caches.get(runtime) ?? createPromptCache()
+      caches.set(runtime, cache)
+      const costs = price(recorded.requests, cache, ratesFor(runtime))
+      const definitions = toolDefinitions(recorded.requests)
+      process.stdout.write(
+        `\n${runtime} · ${scenario.id}${label} — ${scenario.title}\n${render(costs)}\n${renderDefinitions(definitions)}\n`,
+      )
+      reports.push({
+        scenario: scenario.id,
+        runtime,
+        session,
+        model: runtime === "codex" ? CODEX_MODEL : runtime === "vector-openai" ? OPENAI_MODEL : MODEL,
+        exitCode: recorded.exitCode,
+        unplayed: recorded.unplayed,
+        requests: costs,
+        totals: totals(costs),
+        toolDefinitions: definitions,
+      })
     }
-    const recorded = await runScenario(scenario, runtime)
-    if ("error" in recorded) {
-      process.stderr.write(`  failed: ${recorded.error}\n`)
-      reports.push({ scenario: scenario.id, runtime, error: recorded.error })
-      continue
-    }
-    const costs = price(recorded.requests)
-    const definitions = toolDefinitions(recorded.requests)
-    process.stdout.write(
-      `\n${runtime} · ${scenario.id} — ${scenario.title}\n${render(costs)}\n${renderDefinitions(definitions)}\n`,
-    )
-    reports.push({
-      scenario: scenario.id,
-      runtime,
-      exitCode: recorded.exitCode,
-      unplayed: recorded.unplayed,
-      requests: costs,
-      totals: totals(costs),
-      toolDefinitions: definitions,
-    })
   }
 }
-if (runtimes.length > 1) process.stdout.write(`\nSide by side\n${renderComparison(reports)}\n`)
+if (runtimes.length > 1 || SESSIONS > 1) process.stdout.write(`\nSide by side\n${renderComparison(reports)}\n`)
 
 const out = flags.out ?? join(tmpdir(), `vector-footprint-${Date.now()}.json`)
-await writeFile(out, JSON.stringify({ model: MODEL, price: PRICE, scenarios: reports }, null, 2) + "\n")
+await writeFile(
+  out,
+  JSON.stringify(
+    {
+      models: { anthropic: MODEL, openai: OPENAI_MODEL, codex: CODEX_MODEL },
+      rates: RATES,
+      sessions: SESSIONS,
+      websocket: flags.ws,
+      scenarios: reports,
+    },
+    null,
+    2,
+  ) + "\n",
+)
 process.stdout.write(`\nJSON report: ${out}\n`)
+
+function ratesFor(runtime: Runtime) {
+  return runtime === "vector" || runtime === "claude-code" ? RATES.messages : RATES.responses
+}
 
 async function runScenario(scenario: Scenario, runtime: Runtime) {
   const task = taskById(scenario.task)
@@ -296,38 +345,84 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
 
   const calls = stepsFor(runtime, scenario).map((step) => toolCall(runtime, step, dir))
   const requests: Recorded[] = []
+  // What each response was asked and answered, so a request that continues it can be priced on the whole context.
+  const history = new Map<string, { input: unknown[]; output: unknown[] }>()
   let id = 0
-  const server = Bun.serve({
+  // Plays the next scripted call for one Responses or Messages request and records it.
+  const respond = (body: Record<string, unknown>, sentBytes: number, headers: Record<string, string>, ws: boolean) => {
+    const tools = Array.isArray(body.tools) ? body.tools : []
+    // Requests without tools are side calls such as title generation, and a generate:false request only warms the
+    // cache; neither advances the script.
+    const call: Call =
+      body.generate === false
+        ? { text: "" }
+        : tools.length === 0
+          ? { text: "Bench task" }
+          : (calls.shift() ?? { text: "Done." })
+    const n = ++id
+    const priced = "input" in body ? continued(body, history) : body
+    const items = body.generate === false ? [] : responseItems(call, n, body)
+    if (Array.isArray(priced.input)) history.set(`resp_${n}`, { input: priced.input, output: items })
+    requests.push({
+      body: priced,
+      output: "custom" in call ? call.custom : "input" in call ? JSON.stringify(call.input) : call.text,
+      sentBytes,
+      headers,
+      transport: ws ? "websocket" : "http",
+    })
+    return { call, n, items }
+  }
+  const server = Bun.serve<{ headers: Record<string, string> }>({
     port: 0,
     hostname: "127.0.0.1",
-    async fetch(request) {
+    websocket: {
+      message(socket, raw) {
+        const text = String(raw)
+        const frame = JSON.parse(text) as Record<string, unknown>
+        if (frame.type !== "response.create") return
+        const body = Object.fromEntries(Object.entries(frame).filter(([key]) => key !== "type"))
+        const played = respond(body, text.length, socket.data.headers, true)
+        responseEvents(played.items, played.n, String(body.model ?? "")).forEach((event) =>
+          socket.send(JSON.stringify(event)),
+        )
+      },
+    },
+    async fetch(request, srv) {
       const url = new URL(request.url)
-      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
+      const headers = Object.fromEntries(request.headers.entries())
+      if (flags.ws && (request.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
+        if (srv.upgrade(request, { data: { headers } })) return undefined
+        return new Response("upgrade failed", { status: 400 })
+      }
+      const text = await request.text()
+      const body = await Promise.resolve()
+        .then(() => JSON.parse(text) as Record<string, unknown>)
+        .catch((): Record<string, unknown> => ({}))
       if (url.pathname.endsWith("/count_tokens")) return Response.json({ input_tokens: estimate(JSON.stringify(body)) })
       const responses = url.pathname.endsWith("/responses")
       if (!url.pathname.endsWith("/messages") && !responses) return Response.json({ data: [] })
-      const tools = Array.isArray(body.tools) ? body.tools : []
-      // Requests without tools are side calls such as title generation; they do not advance the script.
-      const call: Call = tools.length === 0 ? { text: "Bench task" } : (calls.shift() ?? { text: "Done." })
-      requests.push({
-        body,
-        output: "custom" in call ? call.custom : "input" in call ? JSON.stringify(call.input) : call.text,
-      })
-      if (responses)
-        return new Response(responseStream(call, ++id, String(body.model ?? "")), {
-          headers: { "content-type": "text/event-stream" },
-        })
+      if (responses) {
+        const played = respond(body, text.length, headers, false)
+        return new Response(
+          responseEvents(played.items, played.n, String(body.model ?? ""))
+            .map((event) => `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`)
+            .join(""),
+          { headers: { "content-type": "text/event-stream" } },
+        )
+      }
+      const played = respond(body, text.length, headers, false)
+      const call = played.call
       if ("custom" in call) return Response.json({ error: "custom tools are a Responses API feature" }, { status: 400 })
-      if (body.stream !== true) return Response.json(message(call, `toolu_${++id}`, String(body.model ?? MODEL)))
-      return new Response(stream(call, `toolu_${++id}`, String(body.model ?? MODEL)), {
+      if (body.stream !== true) return Response.json(message(call, `toolu_${played.n}`, String(body.model ?? MODEL)))
+      return new Response(stream(call, `toolu_${played.n}`, String(body.model ?? MODEL)), {
         headers: { "content-type": "text/event-stream" },
       })
     },
   })
   const base = `http://127.0.0.1:${server.port}`
   const result =
-    runtime === "vector"
-      ? await exec("bun", vectorArgs(task.prompt), dir, vectorEnv(home, base))
+    runtime === "vector" || runtime === "vector-openai"
+      ? await exec("bun", vectorArgs(task.prompt, runtime), dir, vectorEnv(runtime, home, base, dir))
       : runtime === "claude-code"
         ? await exec("claude", claudeArgs(task.prompt), dir, claudeEnv(home, base), true)
         : await exec(CODEX, codexArgs(task.prompt), dir, await codexEnv(home, base), true)
@@ -339,7 +434,7 @@ async function runScenario(scenario: Scenario, runtime: Runtime) {
   return { exitCode: result.exitCode, requests, unplayed: calls.length }
 }
 
-function vectorArgs(prompt: string) {
+function vectorArgs(prompt: string, runtime: Runtime) {
   return [
     "run",
     "--conditions=browser",
@@ -348,46 +443,73 @@ function vectorArgs(prompt: string) {
     "--format",
     "json",
     "--model",
-    `anthropic/${MODEL}`,
+    runtime === "vector-openai" ? `openai/${OPENAI_MODEL}` : `anthropic/${MODEL}`,
     "--dangerously-skip-permissions",
     prompt,
   ]
 }
 
-function vectorEnv(home: string, base: string) {
+// Vector on Anthropic Messages, or on the OpenAI Responses API with an API key ("vector-openai"). PWD is the fixture:
+// `vector run` takes its directory from PWD, and an inherited one would run it in the directory the harness started in.
+function vectorEnv(runtime: Runtime, home: string, base: string, dir: string) {
+  const anthropic = {
+    name: "Anthropic",
+    id: "anthropic",
+    env: [],
+    npm: "@ai-sdk/anthropic",
+    models: {
+      [MODEL]: {
+        id: MODEL,
+        name: "Claude Sonnet 4.5",
+        attachment: true,
+        reasoning: true,
+        temperature: true,
+        tool_call: true,
+        release_date: "2025-09-29",
+        limit: { context: 200_000, output: 64_000 },
+        cost: {
+          input: RATES.messages.input,
+          output: RATES.messages.output,
+          cache_read: RATES.messages.cacheRead,
+          cache_write: RATES.messages.cacheWrite,
+        },
+        options: {},
+      },
+    },
+    options: { apiKey: "bench", baseURL: `${base}/v1` },
+  }
+  const openai = {
+    name: "OpenAI",
+    id: "openai",
+    env: [],
+    npm: "@ai-sdk/openai",
+    models: {
+      [OPENAI_MODEL]: {
+        id: OPENAI_MODEL,
+        name: OPENAI_MODEL,
+        attachment: true,
+        reasoning: true,
+        temperature: false,
+        tool_call: true,
+        release_date: "2026-04-23",
+        limit: { context: 400_000, input: 272_000, output: 128_000 },
+        cost: {
+          input: RATES.responses.input,
+          output: RATES.responses.output,
+          cache_read: RATES.responses.cacheRead,
+        },
+        options: {},
+      },
+    },
+    options: { apiKey: "bench", baseURL: `${base}/v1` },
+  }
   const config = {
     formatter: false,
     lsp: false,
-    provider: {
-      anthropic: {
-        name: "Anthropic",
-        id: "anthropic",
-        env: [],
-        npm: "@ai-sdk/anthropic",
-        models: {
-          [MODEL]: {
-            id: MODEL,
-            name: "Claude Sonnet 4.5",
-            attachment: true,
-            reasoning: true,
-            temperature: true,
-            tool_call: true,
-            release_date: "2025-09-29",
-            limit: { context: 200_000, output: 64_000 },
-            cost: {
-              input: PRICE.input,
-              output: PRICE.output,
-              cache_read: PRICE.cacheRead,
-              cache_write: PRICE.cacheWrite,
-            },
-            options: {},
-          },
-        },
-        options: { apiKey: "bench", baseURL: `${base}/v1` },
-      },
-    },
+    provider: runtime === "vector-openai" ? { openai } : { anthropic },
   }
   return {
+    PWD: dir,
     VECTOR_TEST_HOME: home,
     HOME: home,
     XDG_CONFIG_HOME: join(home, ".config"),
@@ -438,7 +560,8 @@ function codexArgs(prompt: string) {
   return ["exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", prompt]
 }
 
-// Like Claude Code, Codex starts with an empty environment and a config that points it at the fake server only.
+// Like Claude Code, Codex starts with an empty environment and a throwaway HOME whose config points it at the fake
+// server only. With --ws it is told the server takes the Responses API over a WebSocket, as Codex uses it.
 async function codexEnv(home: string, base: string) {
   await mkdir(join(home, ".codex"), { recursive: true })
   await writeFile(
@@ -451,16 +574,17 @@ async function codexEnv(home: string, base: string) {
       `base_url = "${base}/v1"`,
       `env_key = "BENCH_API_KEY"`,
       `wire_api = "responses"`,
+      ...(flags.ws ? [`supports_websockets = true`] : []),
       "",
     ].join("\n"),
   )
   return { PATH: process.env.PATH ?? "", HOME: home, TERM: "dumb", BENCH_API_KEY: "bench" }
 }
 
-// One streamed response in the OpenAI Responses SSE format.
-function responseStream(call: Call, n: number, model: string) {
-  const event = (name: string, data: Record<string, unknown>) =>
-    `event: ${name}\ndata: ${JSON.stringify({ type: name, ...data })}\n\n`
+// The output items of one Responses answer. A request that asks for reasoning gets a reasoning item first, with a
+// summary when it asked for one and encrypted content when it included it, as a reasoning model returns them; the
+// agent hands both back on its next request.
+function responseItems(call: Call, n: number, body: Record<string, unknown>) {
   const item =
     "custom" in call
       ? { type: "custom_tool_call", id: `ctc_${n}`, call_id: `call_${n}`, name: call.name, input: call.custom }
@@ -478,13 +602,34 @@ function responseStream(call: Call, n: number, model: string) {
             role: "assistant",
             content: [{ type: "output_text", text: call.text, annotations: [] }],
           }
+  const reasoning = (body.reasoning ?? {}) as { effort?: unknown; summary?: unknown }
+  if (reasoning.effort === undefined || reasoning.effort === "none") return [{ ...item, status: "completed" }]
+  const include = Array.isArray(body.include) ? body.include : []
+  return [
+    {
+      type: "reasoning",
+      id: `rs_${n}`,
+      summary:
+        reasoning.summary === undefined
+          ? []
+          : [{ type: "summary_text", text: `Planning step ${n}: pick the next call.` }],
+      ...(include.includes("reasoning.encrypted_content")
+        ? { encrypted_content: `gAAAA${String(n).padStart(4, "0")}${"Q".repeat(1_200)}` }
+        : {}),
+    },
+    { ...item, status: "completed" },
+  ]
+}
+
+// One answer as the Responses API streams it, over SSE or a WebSocket.
+function responseEvents(items: Array<Record<string, unknown>>, n: number, model: string) {
   const response = {
     id: `resp_${n}`,
     object: "response",
     created_at: 0,
     model,
     status: "completed",
-    output: [{ ...item, status: "completed" }],
+    output: items,
     usage: {
       input_tokens: 1,
       input_tokens_details: { cached_tokens: 0 },
@@ -494,11 +639,59 @@ function responseStream(call: Call, n: number, model: string) {
     },
   }
   return [
-    event("response.created", { response: { ...response, status: "in_progress", output: [] } }),
-    event("response.output_item.added", { output_index: 0, item: { ...item, status: "in_progress" } }),
-    event("response.output_item.done", { output_index: 0, item: { ...item, status: "completed" } }),
-    event("response.completed", { response }),
-  ].join("")
+    { type: "response.created", response: { ...response, status: "in_progress", output: [] } },
+    ...items.flatMap((item, index) => itemEvents(item, index)),
+    { type: "response.completed", response },
+  ]
+}
+
+function itemEvents(item: Record<string, unknown>, index: number): Array<Record<string, unknown>> {
+  const id = String(item.id)
+  const at = { item_id: id, output_index: index }
+  if (item.type === "reasoning") {
+    const summary = Array.isArray(item.summary) ? (item.summary as Array<{ text: string }>) : []
+    return [
+      {
+        type: "response.output_item.added",
+        output_index: index,
+        item: { ...item, summary: [], encrypted_content: null },
+      },
+      ...summary.flatMap((part, summaryIndex) => [
+        {
+          type: "response.reasoning_summary_part.added",
+          ...at,
+          summary_index: summaryIndex,
+          part: { type: "summary_text", text: "" },
+        },
+        { type: "response.reasoning_summary_text.delta", ...at, summary_index: summaryIndex, delta: part.text },
+        { type: "response.reasoning_summary_text.done", ...at, summary_index: summaryIndex, text: part.text },
+        { type: "response.reasoning_summary_part.done", ...at, summary_index: summaryIndex, part },
+      ]),
+      { type: "response.output_item.done", output_index: index, item },
+    ]
+  }
+  const content = Array.isArray(item.content) ? (item.content as Array<{ text: string }>) : []
+  return [
+    { type: "response.output_item.added", output_index: index, item: { ...item, status: "in_progress" } },
+    ...(typeof item.arguments === "string"
+      ? [
+          { type: "response.function_call_arguments.delta", ...at, delta: item.arguments },
+          { type: "response.function_call_arguments.done", ...at, arguments: item.arguments },
+        ]
+      : []),
+    ...content.flatMap((part) => [
+      {
+        type: "response.content_part.added",
+        ...at,
+        content_index: 0,
+        part: { type: "output_text", text: "", annotations: [] },
+      },
+      { type: "response.output_text.delta", ...at, content_index: 0, delta: part.text },
+      { type: "response.output_text.done", ...at, content_index: 0, text: part.text },
+      { type: "response.content_part.done", ...at, content_index: 0, part },
+    ]),
+    { type: "response.output_item.done", output_index: index, item },
+  ]
 }
 
 function message(call: { name: string; input: Record<string, unknown> } | { text: string }, id: string, model: string) {
@@ -560,123 +753,9 @@ function stream(call: { name: string; input: Record<string, unknown> } | { text:
   ].join("")
 }
 
-// Prices each request in order, keeping the set of prefixes the provider would have cached. Within a request the
-// order is tools, then system, then messages, which is the order the cache prefix follows. Anthropic caches only up to
-// the breakpoints a request marks and charges extra to write them; the OpenAI Responses API (Codex) caches every
-// prefix it has seen on its own and charges nothing to write, so there the longest prefix seen before is read.
-function price(requests: Recorded[]): RequestCost[] {
-  const cached = new Set<string>()
-  const implicit = requests.some((request) => "input" in request.body && !("messages" in request.body))
-  const main = toolSignature(requests.find((item) => toolsOf(item).length > 0))
-  return requests.map((request, index) => {
-    const blocks = toBlocks(request.body)
-    const prefixes = blocks.reduce<{ keys: string[]; tokens: number[] }>(
-      (acc, block) => ({
-        keys: [...acc.keys, `${acc.keys.at(-1) ?? ""}\u0000${block.key}`],
-        tokens: [...acc.tokens, (acc.tokens.at(-1) ?? 0) + block.tokens],
-      }),
-      { keys: [], tokens: [] },
-    )
-    const breakpoints = blocks.flatMap((block, at) =>
-      block.breakpoint && (prefixes.tokens[at] ?? 0) >= MIN_CACHEABLE_TOKENS ? [at] : [],
-    )
-    const inputTokens = prefixes.tokens.at(-1) ?? 0
-    if (implicit) {
-      const seen = prefixes.keys.findLastIndex(
-        (key, at) => cached.has(key) && (prefixes.tokens[at] ?? 0) >= MIN_CACHEABLE_TOKENS,
-      )
-      prefixes.keys.forEach((key) => cached.add(key))
-      const read = seen === -1 ? 0 : (prefixes.tokens[seen] ?? 0)
-      return cost(request, index, { inputTokens, cacheRead: read, cacheWrite: 0 })
-    }
-    const last = breakpoints.at(-1)
-    const hit = breakpoints
-      .map((at) => {
-        const from = Math.max(0, at - LOOKBACK_BLOCKS)
-        return Array.from({ length: at - from + 1 }, (_, offset) => at - offset).find((k) =>
-          cached.has(prefixes.keys[k] ?? ""),
-        )
-      })
-      .reduce<number | undefined>((best, k) => (k === undefined ? best : Math.max(best ?? -1, k)), undefined)
-    breakpoints.forEach((at) => cached.add(prefixes.keys[at] ?? ""))
-    const cacheRead = hit === undefined ? 0 : (prefixes.tokens[hit] ?? 0)
-    const cacheWrite = last === undefined ? 0 : (prefixes.tokens[last] ?? 0) - cacheRead
-    return cost(request, index, { inputTokens, cacheRead, cacheWrite })
-  })
-
-  function cost(
-    request: Recorded,
-    index: number,
-    input: { inputTokens: number; cacheRead: number; cacheWrite: number },
-  ): RequestCost {
-    const { inputTokens, cacheRead, cacheWrite } = input
-    const uncached = inputTokens - cacheRead - cacheWrite
-    const outputTokens = estimate(request.output)
-    const tools = toolsOf(request)
-    const who = tools.length === 0 ? "side" : toolSignature(request) === main ? "agent" : "subagent"
-    const toolTokens = tools.reduce<number>((total, tool) => total + estimate(strip(tool)), 0)
-    const systemTokens = systemBlocks(request.body).reduce<number>((total, block) => total + estimate(strip(block)), 0)
-    return {
-      index: index + 1,
-      who,
-      tools: tools.length,
-      systemTokens,
-      toolTokens,
-      messageTokens: inputTokens - toolTokens - systemTokens,
-      inputTokens,
-      cacheRead,
-      cacheWrite,
-      uncached,
-      outputTokens,
-      costUsd: dollars(
-        uncached * PRICE.input +
-          cacheWrite * PRICE.cacheWrite +
-          cacheRead * PRICE.cacheRead +
-          outputTokens * PRICE.output,
-      ),
-      uncachedCostUsd: dollars(inputTokens * PRICE.input + outputTokens * PRICE.output),
-    }
-  }
-}
-
-function toBlocks(body: Record<string, unknown>): Block[] {
-  const block = (item: unknown) => {
-    const key = strip(item)
-    return { key, tokens: estimate(key), breakpoint: JSON.stringify(item).includes('"cache_control"') }
-  }
-  return [
-    ...(Array.isArray(body.tools) ? body.tools : []).map(block),
-    ...systemBlocks(body).map(block),
-    ...(Array.isArray(body.messages) ? body.messages : Array.isArray(body.input) ? body.input : []).map(block),
-  ]
-}
-
-function systemBlocks(body: Record<string, unknown>): unknown[] {
-  if (typeof body.instructions === "string") return [{ type: "text", text: body.instructions }]
-  if (typeof body.system === "string") return [{ type: "text", text: body.system }]
-  return Array.isArray(body.system) ? body.system : []
-}
-
-function toolsOf(request: Recorded | undefined) {
-  return Array.isArray(request?.body.tools) ? (request.body.tools as Array<Record<string, unknown>>) : []
-}
-
-// The main agent and a subagent are told apart by the tools they are offered.
-function toolSignature(request: Recorded | undefined) {
-  return toolsOf(request)
-    .map((tool) => String(tool.name ?? tool.type))
-    .toSorted()
-    .join(",")
-}
-
-// The cache key of a block is its content; where its cache_control marker sits does not change it.
-function strip(item: unknown) {
-  return JSON.stringify(item, (name, value) => (name === "cache_control" ? undefined : value))
-}
-
 // Each tool definition's size, for the main agent's first request and a subagent's: the fixed cost every request pays.
 function toolDefinitions(requests: Recorded[]) {
-  const withTools = requests.filter((item) => toolsOf(item).length > 0)
+  const withTools = requests.filter((item) => toolsOf(item).length > 0 && item.body.generate !== false)
   const main = toolSignature(withTools[0])
   const sizes = (request: Recorded | undefined) =>
     Object.fromEntries(
@@ -699,31 +778,30 @@ function renderDefinitions(definitions: ReturnType<typeof toolDefinitions>) {
   return [...line("Agent", definitions.agent), ...line("Subagent", definitions.subagent)].join("\n")
 }
 
-// About four characters per token, close enough to compare runtimes; the same estimate is used everywhere.
-function estimate(text: string) {
-  return Math.ceil(text.length / 4)
-}
-
-function dollars(tokenDollars: number) {
-  return Math.round(tokenDollars) / 1_000_000
-}
-
 function totals(costs: RequestCost[]) {
   const sum = (pick: (cost: RequestCost) => number) => costs.reduce((total, cost) => total + pick(cost), 0)
   const input = sum((cost) => cost.inputTokens)
-  const working = costs.filter((cost) => cost.who !== "side")
+  const working = costs.filter((cost) => cost.who === "agent" || cost.who === "subagent")
+  // The first request that does the work, the one a cold cache makes most expensive.
+  const first = costs.find((cost) => cost.who === "agent")
   return {
     requests: costs.length,
     subagentRequests: costs.filter((cost) => cost.who === "subagent").length,
     sideRequests: costs.filter((cost) => cost.who === "side").length,
+    warmupRequests: costs.filter((cost) => cost.who === "warmup").length,
     inputTokens: input,
     cacheRead: sum((cost) => cost.cacheRead),
     cacheWrite: sum((cost) => cost.cacheWrite),
     uncached: sum((cost) => cost.uncached),
+    outputTokens: sum((cost) => cost.outputTokens),
+    sentBytes: sum((cost) => cost.sentBytes),
     cacheReadShare: input === 0 ? 0 : Math.round((sum((cost) => cost.cacheRead) / input) * 1000) / 1000,
     fixedTokensPerRequest: Math.round(
       working.reduce((total, cost) => total + cost.systemTokens + cost.toolTokens, 0) / Math.max(1, working.length),
     ),
+    firstRequest: first
+      ? { inputTokens: first.inputTokens, cacheRead: first.cacheRead, uncached: first.uncached, costUsd: first.costUsd }
+      : undefined,
     costUsd: dollars(sum((cost) => cost.costUsd) * 1_000_000),
     uncachedCostUsd: dollars(sum((cost) => cost.uncachedCostUsd) * 1_000_000),
   }
@@ -731,7 +809,7 @@ function totals(costs: RequestCost[]) {
 
 function render(costs: RequestCost[]) {
   const rows = [
-    ["#", "WHO", "TOOLS", "SYSTEM", "TOOL DEFS", "MESSAGES", "INPUT", "READ", "WRITE", "UNCACHED", "COST"],
+    ["#", "WHO", "TOOLS", "SYSTEM", "TOOL DEFS", "MESSAGES", "INPUT", "READ", "WRITE", "UNCACHED", "SENT", "COST"],
     ...costs.map((cost) => [
       String(cost.index),
       cost.who,
@@ -743,30 +821,45 @@ function render(costs: RequestCost[]) {
       String(cost.cacheRead),
       String(cost.cacheWrite),
       String(cost.uncached),
+      `${Math.round(cost.sentBytes / 1024)}K`,
       `$${cost.costUsd.toFixed(4)}`,
     ]),
   ]
   const sum = totals(costs)
   return [
     ...table(rows).map((line) => `  ${line}`),
-    `  ${sum.requests} requests (${sum.subagentRequests} subagent, ${sum.sideRequests} side) · ${sum.inputTokens} input tokens, ${Math.round(sum.cacheReadShare * 100)}% read from cache · ${sum.fixedTokensPerRequest} fixed tokens per request (system + tool definitions)`,
+    `  ${sum.requests} requests (${sum.subagentRequests} subagent, ${sum.sideRequests} side, ${sum.warmupRequests} warmup) · ${sum.inputTokens} input tokens, ${Math.round(sum.cacheReadShare * 100)}% read from cache · ${sum.fixedTokensPerRequest} fixed tokens per request (system + tool definitions)`,
     `  $${sum.costUsd.toFixed(4)} with prompt caching, $${sum.uncachedCostUsd.toFixed(4)} without · tokens ≈ characters / 4`,
   ].join("\n")
 }
 
 function renderComparison(reports: Array<Record<string, unknown>>) {
   const rows = [
-    ["SCENARIO", "RUNTIME", "REQUESTS", "INPUT TOKENS", "CACHED", "FIXED/REQ", "COST", "NO CACHE"],
+    [
+      "SCENARIO",
+      "RUNTIME",
+      "SESSION",
+      "REQUESTS",
+      "INPUT TOKENS",
+      "CACHED",
+      "UNCACHED",
+      "1ST READ",
+      "1ST UNCACHED",
+      "COST",
+      "NO CACHE",
+    ],
     ...reports.map((report) => {
       const sum = report.totals as ReturnType<typeof totals> | undefined
-      if (!sum) return [String(report.scenario), String(report.runtime), report.unavailable ? "unavailable" : "failed"]
+      const head = [String(report.scenario), String(report.runtime), String(report.session)]
+      if (!sum) return [...head, report.unavailable ? "unavailable" : "failed"]
       return [
-        String(report.scenario),
-        String(report.runtime),
+        ...head,
         String(sum.requests),
         String(sum.inputTokens),
         `${Math.round(sum.cacheReadShare * 100)}%`,
-        String(sum.fixedTokensPerRequest),
+        String(sum.uncached),
+        String(sum.firstRequest?.cacheRead ?? "-"),
+        String(sum.firstRequest?.uncached ?? "-"),
         `$${sum.costUsd.toFixed(4)}`,
         `$${sum.uncachedCostUsd.toFixed(4)}`,
       ]
@@ -816,6 +909,11 @@ function parseFlags(argv: string[]) {
     runtime: value("runtime"),
     codex: value("codex"),
     out: value("out"),
+    dump: value("dump"),
+    sessions: value("sessions"),
+    openaiModel: value("openai-model"),
+    codexModel: value("codex-model"),
+    ws: argv.includes("--ws"),
     keep: argv.includes("--keep"),
   }
 }

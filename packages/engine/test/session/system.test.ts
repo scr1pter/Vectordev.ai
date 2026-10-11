@@ -314,6 +314,19 @@ describe("session.system", () => {
     }),
   )
 
+  it.instance("the environment states the day it is given, so it stays the same from step to step", () =>
+    Effect.gen(function* () {
+      const prompt = yield* SystemPrompt.Service
+      const model = { api: { id: "model" }, providerID: "provider" } as unknown as Provider.Model
+      const date = new Date(2026, 0, 2, 12).getTime()
+      const session = (yield* prompt.environment(model, { date })).session.join("\n")
+      expect(session).toContain(`Today's date: ${new Date(date).toDateString()}`)
+      expect((yield* prompt.environment(model)).session.join("\n")).toContain(
+        `Today's date: ${new Date().toDateString()}`,
+      )
+    }),
+  )
+
   it.effect("skills output is sorted by name and stable across calls", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service

@@ -7,7 +7,7 @@ import { TestConsole } from "effect/testing"
 import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { ToolRegistry } from "@/tool/registry"
 import { Tool } from "@/tool/tool"
-import { disposeAllInstances, TestInstance } from "../fixture/fixture"
+import { disposeAllInstances, provideInstance, TestInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestConfig } from "../fixture/config"
 import { Config } from "@/config/config"
@@ -197,6 +197,34 @@ describe("tool.registry", () => {
       expect(Schema.decodeUnknownSync(task.parameters)(legacy)).toEqual(legacy)
       expect(Result.isSuccess(Schema.decodeUnknownResult(task.parameters)({ tasks: [legacy] }))).toBe(false)
     }),
+  )
+
+  // The tool definitions open every request, so a provider's prompt cache can reuse them across sessions only while
+  // they are the same, byte for byte and in the same order, from one session and directory to the next.
+  it.instance("built-in tool definitions are the same in every directory", () =>
+    Effect.gen(function* () {
+      const definitions = Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderV2.ID.openai,
+          modelID: ModelV2.ID.make("test"),
+          agent: build,
+        })
+        return JSON.stringify(tools.map((tool) => [tool.id, tool.description, ToolJsonSchema.fromTool(tool)]))
+      })
+      const here = yield* definitions
+      const other = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      const elsewhere = yield* definitions.pipe(provideInstance(other.path))
+      expect(here).toContain('"task"')
+      expect(elsewhere).toBe(here)
+    }),
+    60_000,
   )
 
   it.instance("loads tools from .vector/tool (singular)", () =>

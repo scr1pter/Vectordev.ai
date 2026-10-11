@@ -60,10 +60,14 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     ...(input.stableSystem ?? []),
   ]
   const rest = [...input.system, ...(input.user.system ? [input.user.system] : [])]
-  // With stable parts on a model that takes cache breakpoints, the prompt and those parts form the first block and
-  // everything per-session the second, so a new session, directory or date only re-writes the small second block.
-  // Elsewhere it stays one block as before: those providers cache the prefix without markers.
-  const split = input.stableSystem && ProviderTransform.usesCacheBreakpoints(input.model)
+  // With stable parts, the prompt and those parts form the first block and everything per-session (directory, date,
+  // references, project instructions, MCP, skills, the user's system text) the second, so a new session, directory or
+  // date leaves the first block, and every prefix it starts, unchanged. A model that takes cache breakpoints gets one
+  // on each block. A ChatGPT sign-in sends the first block as `instructions` and the second as a developer message
+  // after it, as the Codex CLI does: the instructions and tools then stay the same from session to session, so a new
+  // session's first request can read them from the provider's cache whichever of the two the provider renders first.
+  // Elsewhere it stays one block, stable parts first: those providers cache the prefix without markers.
+  const split = input.stableSystem && (ProviderTransform.usesCacheBreakpoints(input.model) || isOpenaiOauth)
   const system = (split ? [prompt, rest] : [[...prompt, ...rest]])
     .map((block) => block.filter((x) => x).join("\n"))
     .filter((block) => block)
@@ -99,20 +103,26 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     delete options.reasoningSummary
     delete options.include
   }
-  if (isOpenaiOauth) options.instructions = system.join("\n")
+  // A ChatGPT sign-in takes the leading block as `instructions` (all of it when nothing was split off) and the blocks
+  // after it as developer items ahead of the conversation, the role the Codex CLI gives its environment, whatever role
+  // the SDK would pick for the model on its own.
+  const instructions = isOpenaiOauth ? (split ? system.slice(0, 1) : system) : []
+  if (isOpenaiOauth) {
+    options.instructions = instructions.join("\n")
+    options.systemMessageMode = "developer"
+  }
 
-  const messages =
-    isOpenaiOauth || input.isWorkflow
-      ? input.messages
-      : [
-          ...system.map(
-            (x): ModelMessage => ({
-              role: "system",
-              content: x,
-            }),
-          ),
-          ...input.messages,
-        ]
+  const messages = input.isWorkflow
+    ? input.messages
+    : [
+        ...system.slice(instructions.length).map(
+          (x): ModelMessage => ({
+            role: "system",
+            content: x,
+          }),
+        ),
+        ...input.messages,
+      ]
 
   const params = yield* input.plugin.trigger(
     "chat.params",

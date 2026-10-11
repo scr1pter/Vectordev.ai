@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { SessionV1 } from "@vectordevai/core/v1/session"
 import { SessionProjector } from "@vectordevai/core/session/projector"
@@ -89,4 +89,33 @@ describe("session reminders", () => {
       expect(texts(applied[4])).toEqual([SessionReminders.PLAN_STILL_ACTIVE])
     }),
   )
+})
+
+describe("session date notes", () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const start = new Date(2026, 9, 10, 23, 30).getTime()
+  const at = (created: number): SessionV1.WithParts => ({
+    info: { id: MessageID.ascending(), role: "user", sessionID, agent: "build", time: { created } } as SessionV1.Info,
+    parts: [],
+  })
+
+  test("messages on the day the history starts carry no note", () => {
+    const notes = SessionReminders.dates(fresh([at(start), assistant("build"), at(start + 60_000)])).map(texts)
+    expect(notes).toEqual([[], [], []])
+  })
+
+  test("the first message on a later day carries the new date, and every earlier message renders the same", () => {
+    const history = [at(start), assistant("build"), at(start + 2 * 60 * 60 * 1000)]
+    const first = SessionReminders.dates(fresh(history)).map(texts)
+    const note = `<system-reminder>The date is now ${new Date(start + 2 * 60 * 60 * 1000).toDateString()}.</system-reminder>`
+    expect(first).toEqual([[], [], [note]])
+
+    // The next request, later the same day and again two days on: earlier messages keep exactly what they had.
+    const second = SessionReminders.dates(
+      fresh([...history, assistant("build"), at(start + 3 * 60 * 60 * 1000), assistant("build"), at(start + 2 * DAY)]),
+    ).map(texts)
+    expect(second.slice(0, 3)).toEqual(first)
+    expect(second[4]).toEqual([])
+    expect(second[6]).toEqual([`<system-reminder>The date is now ${new Date(start + 2 * DAY).toDateString()}.</system-reminder>`])
+  })
 })
