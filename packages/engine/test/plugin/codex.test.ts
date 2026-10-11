@@ -241,6 +241,23 @@ describe("plugin.codex", () => {
     }
   })
 
+  test("a ChatGPT sign-in names the Codex endpoint as the connection to open early, unless a WebSocket carries it", async () => {
+    const oauth = async () => ({ type: "oauth", refresh: "placeholder", access: "placeholder", expires: 0 }) as never
+    const http = await CodexAuthPlugin({} as never, { codexApiEndpoint: "https://codex.example/backend/responses" })
+    const websocket = await CodexAuthPlugin({} as never, {
+      codexApiEndpoint: "https://codex.example/backend/responses",
+      experimentalWebSockets: true,
+    })
+
+    expect((await http.auth!.loader!(oauth, { models: {} } as never)).preconnect).toBe("https://codex.example")
+    expect((await websocket.auth!.loader!(oauth, { models: {} } as never)).preconnect).toBeUndefined()
+    // An API key leaves requests on the SDK's own endpoint, which needs no name.
+    expect(
+      (await http.auth!.loader!(async () => ({ type: "api", key: "sk-test" }) as never, {} as never)).preconnect,
+    ).toBeUndefined()
+    await websocket.dispose?.()
+  })
+
   test("offers ChatGPT sign-in alongside API keys and uses a cached ChatGPT credential", async () => {
     const hooks = await CodexAuthPlugin({} as never)
     expect(hooks.auth?.methods.map((method) => method.label)).toEqual([

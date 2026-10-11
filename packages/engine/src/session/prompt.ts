@@ -326,6 +326,8 @@ const layer = Layer.effect(
           ? yield* provider.getModel(ag.model.providerID, ag.model.modelID)
           : ((yield* provider.getSmallModel(input.providerID, input.modelID)) ?? primary)
       const usage = TitleUsage.create({ sessionID: input.session.id, model: mdl, publish: events.publish })
+      // A title sent to the session's provider needs a connection of its own beside the one opened for the first step.
+      yield* provider.preconnect(mdl)
       const text = yield* llm
         .stream({
           agent: ag,
@@ -1276,7 +1278,11 @@ const layer = Layer.effect(
     ) {
       // A run that ends before the provider answers keeps its provisional title without starting another request.
       const answering = yield* Deferred.make<boolean>()
-      return yield* runSteps(sessionID, answering, resumed).pipe(Effect.ensuring(Deferred.succeed(answering, false)))
+      return yield* runSteps(sessionID, answering, resumed).pipe(
+        Effect.ensuring(Deferred.succeed(answering, false)),
+        // Stop waits for queued snapshots so immediate undo sees all changes from completed steps.
+        Effect.ensuring(processor.settle(sessionID)),
+      )
     })
 
     const runSteps = Effect.fn("SessionPrompt.runSteps")(function* (
@@ -1359,6 +1365,8 @@ const layer = Layer.effect(
                 .getModel(selectedModel.providerID, ModelV2.ID.make(`${selectedModel.id}-fast`))
                 .pipe(Effect.catchIf(Provider.ModelNotFoundError.isInstance, () => Effect.succeed(selectedModel)))
             : selectedModel
+        // The provider connection opens while the first request is prepared, rather than after it is sent.
+        if (step === 1) yield* provider.preconnect(model)
         const task = tasks.pop()
 
         if (task?.type === "subtask") {
@@ -1611,6 +1619,8 @@ const layer = Layer.effect(
         continue
       }
 
+      // Read after queued patches land so a successful response includes the step's final parts too.
+      yield* processor.settle(sessionID)
       return yield* lastAssistant(sessionID)
     })
 

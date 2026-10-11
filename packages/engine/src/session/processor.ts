@@ -2,8 +2,9 @@ import { LayerNode } from "@vectordevai/core/effect/layer-node"
 import { PermissionV1 } from "@vectordevai/core/v1/permission"
 import { Image } from "@/image/image"
 import { SessionV1 } from "@vectordevai/core/v1/session"
-import { Cause, Deferred, Effect, Exit, Layer, Context, Scope, Schema } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Context, Scope, Schema } from "effect"
 import * as Stream from "effect/Stream"
+import type { Tool } from "ai"
 import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
 import { Permission } from "@/permission"
@@ -26,6 +27,8 @@ import { isRecord } from "@/util/record"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Database } from "@vectordevai/core/database/database"
 import { Usage, type LLMEvent } from "@vectordevai/llm"
+import { EffectBridge } from "@/effect/bridge"
+import { NativePatch } from "./llm/native-patch"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -56,6 +59,8 @@ type Input = {
 
 export interface Interface {
   readonly create: (input: Input) => Effect.Effect<Handle>
+  // Waits for the session's snapshot work: the closing snapshot, patch and step-finish snapshot of its steps.
+  readonly settle: (sessionID: SessionID) => Effect.Effect<void>
 }
 
 type ToolCall = {
@@ -69,6 +74,8 @@ interface ProcessorContext extends Input {
   toolcalls: Record<string, ToolCall>
   shouldBreak: boolean
   snapshot: string | undefined
+  // The opening snapshot while it is still being taken.
+  opening: Fiber.Fiber<string | undefined> | undefined
   blocked: boolean
   needsCompaction: boolean
   currentText: SessionV1.TextPart | undefined
@@ -98,18 +105,48 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const database = yield* Database.Service
 
+    // A session's snapshot work runs in order and off the request path: each piece starts after the one before it, so
+    // the closing snapshot and patch of one step land before the next step's opening snapshot. Every tool call waits
+    // for the work queued so far (see `gate`), so tools still never run before the snapshot of the state they change.
+    const queues = new Map<SessionID, Fiber.Fiber<unknown>>()
+
+    const enqueue = <A>(sessionID: SessionID, work: Effect.Effect<A>) =>
+      Effect.gen(function* () {
+        const previous = queues.get(sessionID)
+        const fiber = yield* (previous ? Fiber.await(previous).pipe(Effect.andThen(work)) : work).pipe(
+          Effect.forkIn(scope),
+        )
+        queues.set(sessionID, fiber)
+        fiber.addObserver(() => {
+          if (queues.get(sessionID) === fiber) queues.delete(sessionID)
+        })
+        return fiber
+      })
+
+    const settle = Effect.fn("SessionProcessor.settle")(function* (sessionID: SessionID) {
+      while (true) {
+        const fiber = queues.get(sessionID)
+        if (!fiber) return
+        yield* Fiber.await(fiber)
+        if (queues.get(sessionID) === fiber) queues.delete(sessionID)
+      }
+    })
+
+    const result = <A>(fiber: Fiber.Fiber<A | undefined>) =>
+      Fiber.await(fiber).pipe(Effect.map((exit) => (Exit.isSuccess(exit) ? exit.value : undefined)))
+
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
-      // Pre-capture snapshot before the LLM stream starts. The AI SDK
-      // may execute tools internally before emitting start-step events,
-      // so capturing inside the event handler can be too late.
-      const initialSnapshot = yield* snapshot.track()
+      // The opening snapshot is taken while the request is built and sent rather than before it. The AI SDK may run
+      // tools before it emits start-step, so tools are held until it lands instead (see `gate` in process).
+      const opening = yield* enqueue(input.sessionID, snapshot.track())
       const ctx: ProcessorContext = {
         assistantMessage: input.assistantMessage,
         sessionID: input.sessionID,
         model: input.model,
         toolcalls: {},
         shouldBreak: false,
-        snapshot: initialSnapshot,
+        snapshot: undefined,
+        opening,
         blocked: false,
         needsCompaction: false,
         currentText: undefined,
@@ -124,6 +161,31 @@ const layer = Layer.effect(
         MessageV2.fromError(e, {
           providerID: input.model.providerID,
           aborted,
+        })
+
+      // The hash of the step's opening snapshot, taking one if this step has none yet.
+      const opened = Effect.fnUntraced(function* () {
+        if (ctx.snapshot) return ctx.snapshot
+        const fiber = ctx.opening ?? (yield* enqueue(ctx.sessionID, snapshot.track()))
+        ctx.opening = undefined
+        ctx.snapshot = yield* result(fiber)
+        return ctx.snapshot
+      })
+
+      // Records the files the step changed since its opening snapshot. Queued, so it reads the worktree before any
+      // later step's tools can change it.
+      const recordPatch = (start: string) =>
+        Effect.gen(function* () {
+          const patch = yield* snapshot.patch(start)
+          if (!patch.files.length) return
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: ctx.assistantMessage.id,
+            sessionID: ctx.sessionID,
+            type: "patch",
+            hash: patch.hash,
+            files: patch.files,
+          })
         })
 
       const settleToolCall = Effect.fn("SessionProcessor.settleToolCall")(function* (toolCallID: string) {
@@ -426,12 +488,11 @@ const layer = Layer.effect(
             throw new Error(value.message)
 
           case "step-start":
-            if (!ctx.snapshot) ctx.snapshot = yield* snapshot.track()
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: ctx.assistantMessage.id,
               sessionID: ctx.sessionID,
-              snapshot: ctx.snapshot,
+              snapshot: yield* opened(),
               type: "step-start",
             })
             return
@@ -478,29 +539,28 @@ const layer = Layer.effect(
                 yield* session.updateMessage(ctx.assistantMessage)
               }),
             )
-            const completedSnapshot = yield* snapshot.track()
             yield* Effect.forEach(Object.keys(ctx.reasoningMap), finishReasoning)
-            if (completedSnapshot) yield* session.updatePart({ ...stepFinish, snapshot: completedSnapshot })
-            if (ctx.snapshot) {
-              const patch = yield* snapshot.patch(ctx.snapshot)
-              if (patch.files.length) {
-                yield* session.updatePart({
-                  id: PartID.ascending(),
-                  messageID: ctx.assistantMessage.id,
-                  sessionID: ctx.sessionID,
-                  type: "patch",
-                  hash: patch.hash,
-                  files: patch.files,
-                })
-              }
-              ctx.snapshot = undefined
-            }
-            yield* summary
-              .summarize({
-                sessionID: ctx.sessionID,
-                messageID: ctx.assistantMessage.parentID,
-              })
-              .pipe(Effect.ignore, Effect.forkIn(scope))
+            // The step is over once the provider's terminal event is recorded, so the loop moves on now. The closing
+            // snapshot and the step's patch run in the session's snapshot queue, ahead of the next step's tools.
+            const start = ctx.snapshot
+            const opening = ctx.opening
+            ctx.snapshot = undefined
+            ctx.opening = undefined
+            yield* enqueue(
+              ctx.sessionID,
+              Effect.gen(function* () {
+                const closing = yield* snapshot.track()
+                if (closing) yield* session.updatePart({ ...stepFinish, snapshot: closing })
+                const from = start ?? (opening ? yield* result(opening) : undefined)
+                if (from) yield* recordPatch(from)
+                yield* summary
+                  .summarize({
+                    sessionID: ctx.sessionID,
+                    messageID: ctx.assistantMessage.parentID,
+                  })
+                  .pipe(Effect.ignore, Effect.forkIn(scope))
+              }),
+            )
             if (
               !ctx.assistantMessage.summary &&
               isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
@@ -598,19 +658,20 @@ const layer = Layer.effect(
 
       const cleanup = Effect.fn("SessionProcessor.cleanup")(function* () {
         yield* settleStarted("other")
-        if (ctx.snapshot) {
-          const patch = yield* snapshot.patch(ctx.snapshot)
-          if (patch.files.length) {
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.sessionID,
-              type: "patch",
-              hash: patch.hash,
-              files: patch.files,
-            })
-          }
+        // A step that never finished still records what its tools changed, before the loop moves on.
+        if (ctx.snapshot || ctx.opening) {
+          const start = ctx.snapshot
+          const opening = ctx.opening
           ctx.snapshot = undefined
+          ctx.opening = undefined
+          const work = yield* enqueue(
+            ctx.sessionID,
+            Effect.gen(function* () {
+              const from = start ?? (opening ? yield* result(opening) : undefined)
+              if (from) yield* recordPatch(from)
+            }),
+          )
+          yield* Fiber.await(work)
         }
 
         if (ctx.currentText) {
@@ -685,6 +746,25 @@ const layer = Layer.effect(
         yield* status.set(ctx.sessionID, { type: "idle" })
       })
 
+      // Each tool call first waits for the session's queued snapshot work, so it never changes a file before the
+      // snapshot that records the file's earlier state. The wrapped tool keeps its native-patch provenance.
+      const gate = (tools: Record<string, Tool>, bridge: EffectBridge.Shape) =>
+        Object.fromEntries(
+          Object.entries(tools).map(([name, item]) => {
+            const execute = item.execute
+            if (!execute) return [name, item]
+            const gated: Tool = {
+              ...item,
+              execute: (args, options) =>
+                queues.has(ctx.sessionID)
+                  ? bridge.promise(settle(ctx.sessionID)).then(() => execute(args, options))
+                  : execute(args, options),
+            }
+            NativePatch.carry(item, gated)
+            return [name, gated]
+          }),
+        )
+
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         yield* Effect.logInfo("process", {
           "session.id": input.sessionID,
@@ -695,6 +775,7 @@ const layer = Layer.effect(
         const current = yield* SessionAdmission.Current
         const admission = current?.sessionID === input.sessionID ? current : undefined
         let denied = false
+        const tools = gate(streamInput.tools, yield* EffectBridge.make())
 
         return yield* Effect.gen(function* () {
           yield* Effect.uninterruptibleMask((restore) =>
@@ -721,13 +802,9 @@ const layer = Layer.effect(
                       ...streamInput,
                       // Hidden SDK retries would bypass the per-attempt admission boundary.
                       ...(admission ? { retries: 0 } : {}),
-                      ...(lease?.tools
-                        ? {
-                            tools: Object.fromEntries(
-                              Object.entries(streamInput.tools).filter(([name]) => lease.tools?.includes(name)),
-                            ),
-                          }
-                        : {}),
+                      tools: lease?.tools
+                        ? Object.fromEntries(Object.entries(tools).filter(([name]) => lease.tools?.includes(name)))
+                        : tools,
                       started: (usage) => {
                         ctx.started = Usage.from(usage)
                         if (attempt)
@@ -811,7 +888,7 @@ const layer = Layer.effect(
       } satisfies Handle
     })
 
-    return Service.of({ create })
+    return Service.of({ create, settle })
   }),
 )
 

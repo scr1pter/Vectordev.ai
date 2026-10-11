@@ -290,6 +290,46 @@ const itStalledSnapshot = testEffect(
   LayerNode.compile(root, [...replacements, [LLM.node, billedLLM], [Snapshot.node, stalledSnapshot()]]),
 )
 
+// The opening snapshot lands only when the test releases it; the closing one returns at once. Each landing is logged
+// next to what the test and the tool record, so the log is the order things happened in.
+const snapshotGate = { log: [] as string[], release: defer<void>(), tracks: 0 }
+const gatedSnapshot = Layer.succeed(
+  Snapshot.Service,
+  Snapshot.Service.of({
+    init: () => Effect.void,
+    cleanup: () => Effect.void,
+    track: () =>
+      Effect.suspend(() =>
+        ++snapshotGate.tracks === 1
+          ? Effect.promise(() => snapshotGate.release.promise).pipe(
+              Effect.map(() => {
+                snapshotGate.log.push("opening snapshot")
+                return "opening"
+              }),
+            )
+          : Effect.sync(() => {
+              snapshotGate.log.push("closing snapshot")
+              return "closing"
+            }),
+      ),
+    patch: (hash) =>
+      Effect.sync(() => {
+        snapshotGate.log.push(`patch from ${hash}`)
+        return { hash, files: ["/changed.txt"] }
+      }),
+    restore: () => Effect.void,
+    revert: () => Effect.void,
+    diff: () => Effect.succeed(""),
+    diffFull: () => Effect.succeed([]),
+  }),
+)
+const itGatedSnapshot = testEffect(
+  LayerNode.compile(
+    LayerNode.group([root, LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] })]),
+    [...replacements, [Snapshot.node, gatedSnapshot]],
+  ),
+)
+
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
   const session = yield* Session.Service
@@ -828,6 +868,77 @@ it.live("session.processor effect tests complete AI SDK tool calls when native f
       }),
     { trusted: true, config: (url) => providerCfg(url) },
   ),
+)
+
+itGatedSnapshot.live(
+  "session.processor effect tests send the request before the opening snapshot lands and hold tools until it does",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
+          yield* llm.tool("lookup", { query: "weather" })
+
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "tool")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+          const run = yield* handle
+            .process({
+              user: {
+                id: parent.id,
+                sessionID: chat.id,
+                role: "user",
+                time: parent.time,
+                agent: parent.agent,
+                model: { providerID: ref.providerID, modelID: ref.modelID },
+              } satisfies SessionV1.User,
+              sessionID: chat.id,
+              model: mdl,
+              agent: agent(),
+              system: [],
+              messages: [{ role: "user", content: "tool" }],
+              tools: {
+                lookup: tool({
+                  description: "Look up information",
+                  inputSchema: z.object({ query: z.string() }),
+                  execute: async (input) => {
+                    snapshotGate.log.push("tool")
+                    return { title: "Weather lookup", output: `result:${input.query}`, metadata: {} }
+                  },
+                }),
+              },
+            })
+            .pipe(Effect.forkChild)
+
+          // The provider has the request while the opening snapshot is still being taken.
+          yield* llm.wait(1)
+          snapshotGate.log.push("request")
+          snapshotGate.release.resolve()
+          expect(yield* Fiber.join(run)).toBe("continue")
+          yield* processors.settle(chat.id)
+
+          expect(snapshotGate.log).toEqual([
+            "request",
+            "opening snapshot",
+            "tool",
+            "closing snapshot",
+            "patch from opening",
+          ])
+          const parts = yield* MessageV2.parts(msg.id)
+          expect(parts.find((part) => part.type === "step-start")).toMatchObject({ snapshot: "opening" })
+          expect(parts.find((part) => part.type === "step-finish")).toMatchObject({ snapshot: "closing" })
+          expect(parts.find((part) => part.type === "patch")).toMatchObject({
+            hash: "opening",
+            files: ["/changed.txt"],
+          })
+          const call = parts.find((part): part is SessionV1.ToolPart => part.type === "tool")
+          expect(call?.state.status).toBe("completed")
+        }),
+      { config: (url) => providerCfg(url) },
+    ),
 )
 
 it.live("session.processor effect tests mark pending tools as aborted on cleanup", () =>

@@ -548,6 +548,9 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
 
         return {
           apiKey: OAUTH_DUMMY_KEY,
+          // Responses go to the Codex endpoint, not the SDK's host, so that is the connection to open ahead of a
+          // session's first request. A WebSocket opens its own.
+          ...(websocketFetch ? {} : { preconnect: new URL(codexApiEndpoint).origin }),
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
             if (init?.headers) {
               if (init.headers instanceof Headers) {

@@ -87,21 +87,23 @@ export const Info = Schema.Struct({
 })
   .annotate({ identifier: "ModelV2.Info" })
   .pipe(
+    // Built as a plain value rather than through `make`: the catalog creates one for every model it lists, thousands
+    // per reload, and validating these fixed fields cost several hundred milliseconds of startup. `make` returns this
+    // same object.
     statics((schema) => ({
-      empty: (providerID: Provider.ID, modelID: ID) =>
-        schema.make({
-          id: modelID,
-          providerID,
-          name: modelID,
-          api: { id: modelID, type: "native", settings: {} },
-          capabilities: { tools: false, input: [], output: [] },
-          request: { headers: {}, body: {} },
-          variants: [],
-          time: { released: 0 },
-          cost: [],
-          status: "active",
-          enabled: true,
-          limit: { context: 0, output: 0 },
-        }),
+      empty: (providerID: Provider.ID, modelID: ID): typeof schema.Type => ({
+        id: modelID,
+        providerID,
+        name: modelID,
+        api: { id: modelID, type: "native", settings: {} },
+        capabilities: { tools: false, input: [], output: [] },
+        request: { headers: {}, body: {} },
+        variants: [],
+        time: { released: 0 },
+        cost: [],
+        status: "active",
+        enabled: true,
+        limit: { context: 0, output: 0 },
+      }),
     })),
   )

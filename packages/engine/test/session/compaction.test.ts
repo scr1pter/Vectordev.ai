@@ -214,6 +214,7 @@ function processorLayer(result: "continue" | "compact") {
     SessionProcessorModule.SessionProcessor.Service,
     SessionProcessorModule.SessionProcessor.Service.of({
       create: Effect.fn("TestSessionProcessor.create")((input) => Effect.succeed(fake(input, result))),
+      settle: () => Effect.void,
     }),
   )
 }

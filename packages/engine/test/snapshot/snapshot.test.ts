@@ -1276,6 +1276,76 @@ it.instance(
   { git: true },
 )
 
+const gitOutput = (gitdir: string, args: string[]) =>
+  Effect.promise(async () => {
+    const proc = Bun.spawn(["git", "--git-dir", gitdir, ...args], { stdout: "pipe", stderr: "ignore" })
+    const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+    return code === 0 ? text.trim() : undefined
+  })
+
+it.instance(
+  "a new shadow repo carries the snapshot settings",
+  withTrackedSnapshot(({ tmp }) =>
+    Effect.gen(function* () {
+      const gitdir = yield* shadowGitdirFor(tmp.path)
+      expect(gitdir).toBeTruthy()
+      const settings = yield* Effect.forEach(
+        [
+          "core.autocrlf",
+          "core.longpaths",
+          "core.symlinks",
+          "core.fsmonitor",
+          "feature.manyFiles",
+          "index.version",
+          "index.threads",
+          "core.untrackedCache",
+        ],
+        (key) => gitOutput(gitdir!, ["config", "--get", key]).pipe(Effect.map((value) => [key, value] as const)),
+      )
+      expect(Object.fromEntries(settings)).toEqual({
+        "core.autocrlf": "false",
+        "core.longpaths": "true",
+        "core.symlinks": "true",
+        "core.fsmonitor": "false",
+        "feature.manyFiles": "true",
+        "index.version": "4",
+        "index.threads": "true",
+        "core.untrackedCache": "true",
+      })
+      // The settings sit beside what `git init` wrote rather than replacing it.
+      expect(yield* gitOutput(gitdir!, ["config", "--get", "core.bare"])).toBe("false")
+    }),
+  ),
+  { git: true },
+)
+
+it.instance(
+  "an unchanged worktree keeps the anchor of its snapshot, and a changed one gets its own",
+  withTrackedSnapshot(({ tmp, snapshot, before }) =>
+    Effect.gen(function* () {
+      const gitdir = yield* shadowGitdirFor(tmp.path)
+      const anchor = (hash: string) => gitOutput(gitdir!, ["rev-parse", `refs/vector/snapshot/${hash}`])
+      const first = yield* anchor(before)
+      expect(first).toBeTruthy()
+
+      expect(yield* snapshot.track()).toBe(before)
+      expect(yield* anchor(before)).toBe(first)
+
+      yield* write(`${tmp.path}/later.txt`, "LATER")
+      const after = yield* snapshot.track()
+      expect(after).not.toBe(before)
+      expect(yield* anchor(after!)).toBeTruthy()
+      expect(yield* gitOutput(gitdir!, ["rev-parse", `${(yield* anchor(after!))!}^{tree}`])).toBe(after)
+
+      // Both trees stay reachable through their anchors.
+      yield* exec(tmp.path, ["git", "--git-dir", gitdir!, "gc", "--prune=now"])
+      expect(yield* gitOutput(gitdir!, ["cat-file", "-t", before])).toBe("tree")
+      expect(yield* gitOutput(gitdir!, ["cat-file", "-t", after!])).toBe("tree")
+    }),
+  ),
+  { git: true },
+)
+
 it.instance(
   "revert against an unreadable snapshot fails instead of deleting the file",
   withTrackedSnapshot(({ tmp, snapshot }) =>

@@ -19,6 +19,11 @@ export function mark(tool: Tool) {
   if (tool.execute) executors.add(tool.execute)
 }
 
+// A wrapper around a marked tool, such as one that waits before running it, keeps its provenance.
+export function carry(from: Tool, to: Tool) {
+  if (from.execute && executors.has(from.execute)) mark(to)
+}
+
 export function middleware(input: {
   model: { providerID: string; api: { npm: string } }
   options: Record<string, unknown>
