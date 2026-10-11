@@ -100,7 +100,7 @@ export function outcomeFromSession(input: {
   spend?: SessionSpend
 }): ModelOutcome | undefined {
   const infos = input.messages
-    .map((entry) => entry.info)
+    .map((entry) => (entry.info ? { ...entry.info, parts: input.parts[entry.info.id ?? ""] } : undefined))
     .filter((info): info is NonNullable<typeof info> => Boolean(info))
   const measured = measureUsage(infos)
   // No reported usage means nothing worth learning from — a session that never
@@ -125,7 +125,8 @@ export function outcomeFromSession(input: {
     changedFiles: changedFileCount(input.parts),
     usage: measured.usage,
     costUsd,
-    ...(costUsd !== undefined ? { costPriced: true } : {}),
+    // A partial cost is a lower bound: kept for the record, never ranked as what the run cost.
+    ...(costUsd !== undefined ? { costPriced: !measured.partial } : {}),
   }
 }
 
@@ -165,6 +166,7 @@ export function createSessionOutcomeRecorder(
       if (revision <= value.revision) return
       value.revision = revision
       value.attempts = 0
+      if (value.pending) value.requested = true
     },
     async refresh(sessionID: string, directory: string, revision: number) {
       if (!Number.isFinite(revision) || lifecycle.disposed) return false

@@ -389,7 +389,7 @@ export default function LegacyLayout(props: ParentProps) {
         alertedAtBySession.delete(sessionKey)
       }
 
-      const unsub = serverSDK().event.listen((e) => {
+      const unsub = serverSDK().event.listen(async (e) => {
         if (e.details?.type === "worktree.ready") {
           setBusy(e.name, false)
           WorktreeState.ready(serverSDK().scope, e.name)
@@ -428,9 +428,10 @@ export default function LegacyLayout(props: ParentProps) {
         if (e.details.type === "permission.asked" && permission.autoResponds(e.details.properties, directory)) return
 
         // A helper's request belongs to the surface that launched it; never point the user at the helper session.
-        if (isInternalSession(serverSync().session.get(props.sessionID))) return
-        const [store] = serverSync().child(directory, { bootstrap: false })
-        const session = store.session.find((s) => s.id === props.sessionID)
+        const session = await serverSync()
+          .session.resolve(props.sessionID)
+          .catch(() => undefined)
+        if (!session || isInternalSession(session)) return
         const sessionKey = `${directory}:${props.sessionID}`
 
         const sessionTitle = session?.title ?? language.t("command.session.new")

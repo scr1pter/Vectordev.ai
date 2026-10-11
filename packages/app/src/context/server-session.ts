@@ -33,7 +33,8 @@ function spendEvent(event: { type: string; properties?: unknown }) {
   if (
     event.type === "session.next.step.ended" ||
     event.type === "session.next.ancillary.usage" ||
-    event.type === "session.next.compaction.ended"
+    event.type === "session.next.compaction.ended" ||
+    event.type === "session.next.compaction.failed"
   )
     return true
   if (event.type !== "message.part.updated") return false
@@ -182,6 +183,7 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
   }
   const seen = new Set<string>()
   const infoSeen = new Set<string>()
+  const infoRevisions = new Map<string, object>()
   const pinned = new Map<string, number>()
   const generations = new Map<string, object>()
   const generation = (sessionID: string) => {
@@ -200,6 +202,7 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
   })
 
   const remember = (session: Session) => {
+    infoRevisions.set(session.id, {})
     setData("info", session.id, reconcile(session))
     infoSeen.delete(session.id)
     infoSeen.add(session.id)
@@ -235,6 +238,7 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
         if (!preserve.has(sessionID)) stale.push(sessionID)
       }
       stale.forEach((sessionID) => infoSeen.delete(sessionID))
+      stale.forEach((sessionID) => infoRevisions.delete(sessionID))
       stale.forEach((sessionID) => generations.delete(sessionID))
       setData(
         "info",
@@ -250,9 +254,19 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
     const pending = requests.get(sessionID)
     if (pending) return pending
     const active = generation(sessionID)
+    const revision = infoRevisions.get(sessionID)
     const request = client.session.get({ sessionID }).then((result) => {
       if (!result.data) throw sessionNotFoundError(sessionID)
       if (generations.get(sessionID) !== active) return result.data
+      // Title and archive events can keep the same timestamp. Prefer an event that arrived during the read when
+      // its durable revision is at least as recent, including equal timestamps.
+      const current = data.info[sessionID]
+      if (
+        current &&
+        (current.time.updated > result.data.time.updated ||
+          (infoRevisions.get(sessionID) !== revision && current.time.updated === result.data.time.updated))
+      )
+        return current
       return remember(result.data)
     })
     requests.set(sessionID, request)
@@ -719,6 +733,7 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
       case "session.deleted": {
         const sessionID = (event.properties as { info: Session }).info.id
         infoSeen.delete(sessionID)
+        infoRevisions.delete(sessionID)
         setData(
           "info",
           produce((draft) => void delete draft[sessionID]),
@@ -739,6 +754,12 @@ export function createServerSession(client: VectorClient, options?: { retry?: ty
       case "session.status": {
         const props = event.properties as { sessionID: string; status: SessionStatus }
         setData("session_status", props.sessionID, reconcile(props.status))
+        return
+      }
+      // Ancillary spend, such as the title request, changes this session's cost without a session.updated event
+      // when no title follows. Re-read that one session; a directory re-bootstrap reloads the whole model catalog.
+      case "session.next.ancillary.usage": {
+        if (eventID && data.info[eventID]) void resolve(eventID, { force: true }).catch(() => {})
         return
       }
       case "message.updated": {

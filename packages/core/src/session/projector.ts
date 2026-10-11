@@ -168,7 +168,7 @@ function applyUsage(
         time_updated: sql`max(${SessionTable.time_updated} + 1, ${timestamp})`,
       })
       .where(
-        sql`${SessionTable.id} IN (WITH RECURSIVE ancestor(id) AS (SELECT parent_id FROM session WHERE id = ${sessionID} UNION SELECT session.parent_id FROM session JOIN ancestor ON session.id = ancestor.id) SELECT id FROM ancestor WHERE id IS NOT NULL)`,
+        sql`${SessionTable.id} IN (WITH RECURSIVE ancestor(id) AS (SELECT parent_id FROM session WHERE id = ${sessionID} UNION SELECT session.parent_id FROM session JOIN ancestor ON session.id = ancestor.id) SELECT id FROM ancestor WHERE id IS NOT NULL AND id != ${sessionID})`,
       )
       .run()
       .pipe(Effect.orDie)

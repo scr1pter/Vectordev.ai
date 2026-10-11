@@ -628,11 +628,11 @@ describe("applyDirectoryEvent", () => {
   })
 })
 
-test("ancillary usage refreshes session metadata without inserting a transcript message", () => {
+test("ancillary usage neither re-bootstraps the directory nor inserts a transcript message", () => {
   const [store, setStore] = createStore(baseState())
   const refreshed: string[] = []
   applyDirectoryEvent({
-    event: { type: "session.next.ancillary.usage" },
+    event: { type: "session.next.ancillary.usage", properties: { sessionID: "ses_1" } },
     store,
     setStore,
     push: (directory) => {
@@ -641,6 +641,6 @@ test("ancillary usage refreshes session metadata without inserting a transcript 
     directory: "/repo",
     loadLsp: () => {},
   })
-  expect(refreshed).toEqual(["/repo"])
+  expect(refreshed).toEqual([])
   expect(store.message).toEqual({})
 })

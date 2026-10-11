@@ -2,6 +2,8 @@
 // the browser agent and swarm planners. The engine marks them with `internal` (the helper's name) and leaves them out
 // of session lists. They must stay out of everything the user navigates — lists, search, tabs, notifications — while
 // their spend still counts, towards the session that launched them when there is one.
+export const REVIEW_SESSION_TITLE_PREFIX = "Vectorscope review · "
+
 const LEGACY_TITLE_PREFIXES = ["Vector Tool · ", "Vectorscope review · "]
 
 export function isInternalSession(session: { internal?: string; title?: string | null } | undefined | null) {

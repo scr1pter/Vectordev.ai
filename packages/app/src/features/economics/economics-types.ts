@@ -79,7 +79,8 @@ export type ModelOutcome = {
   usage?: TokenUsage
   costUsd?: number
   // Set when every response of the run had a listed price, so a costUsd of 0 is a free run. Outcomes recorded before
-  // Vector marked unpriced responses lack it, and their 0 cannot be told apart from an unknown price.
+  // Vector marked unpriced responses lack it, and their 0 cannot be told apart from an unknown price. False when a
+  // reply stopped or failed before reporting usage: costUsd is then only the known part of the run's cost.
   costPriced?: boolean
 }
 

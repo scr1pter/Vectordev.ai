@@ -127,7 +127,7 @@ export const createDirSyncContext = (
         setStore("limit", (value) => value + count)
         const response = await client.session.list()
         const sessions = (response.data ?? [])
-          .filter((session) => !!session?.id)
+          .filter((session) => !!session?.id && !isInternalSession(session))
           .sort((a, b) => cmp(a.id, b.id))
           .slice(0, store.limit)
         sessions.forEach(serverSync.session.remember)

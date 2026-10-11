@@ -931,6 +931,8 @@ describe("session HttpApi", () => {
             headers,
           }).pipe(Effect.map((list) => list.map((item) => item.id)))
         expect(yield* ids({})).not.toContain(helper.id)
+        expect(yield* ids({ limit: "1" })).toEqual([launcher.id])
+        expect(yield* ids({ limit: "1" }, ExperimentalPaths.session)).toEqual([launcher.id])
         expect(yield* ids({ internal: "true" })).toContain(helper.id)
         expect(yield* ids({}, ExperimentalPaths.session)).not.toContain(helper.id)
         expect(yield* ids({ internal: "true" }, ExperimentalPaths.session)).toContain(helper.id)

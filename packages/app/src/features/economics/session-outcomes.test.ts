@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { knownCostUsd } from "./economics-types"
 import { createSessionOutcomeRecorder, measureReplyTime, outcomeFromSession } from "./session-outcomes"
 
 const usage = { input: 1_000, output: 300, reasoning: 0, cache: { read: 0, write: 0 } }
@@ -45,8 +46,32 @@ describe("outcomeFromSession", () => {
       spend: { cost: 0.1 },
     })
     expect(outcome).toMatchObject({ variant: { kind: "mixed" }, execution: "failed", hadChecks: false })
-    expect(outcome?.costUsd).toBeUndefined()
+    expect(outcome).toMatchObject({ costUsd: 0.1, costPriced: false })
     expect(outcome?.usage?.input).toBe(usage.input)
+  })
+
+  test("a stopped reply keeps the session's known cost unranked; a refused one leaves it fully priced", () => {
+    const info = {
+      role: "assistant",
+      providerID: "p",
+      modelID: "m",
+      tokens: usage,
+      cost: 0.1,
+      finish: "stop",
+      time: { created: 1, completed: 2 },
+    }
+    const ended = (error: { name: string; data?: { statusCode: number } }) =>
+      session({
+        messages: [{ info }, { info: { ...info, id: "refused", tokens: {}, cost: 0, error } }],
+        parts: { refused: [] },
+        spend: { cost: 0.1 },
+      })
+    const stopped = ended({ name: "MessageAbortedError" })
+    expect(stopped).toMatchObject({ costUsd: 0.1, costPriced: false, model: "m", execution: "aborted" })
+    expect(knownCostUsd(stopped!)).toBeUndefined()
+    const refused = ended({ name: "APIError", data: { statusCode: 429 } })
+    expect(refused).toMatchObject({ costUsd: 0.1, costPriced: true, model: "m", execution: "failed" })
+    expect(knownCostUsd(refused!)).toBe(0.1)
   })
 
   test("records the provider, model, measured cost, and latency", () => {
@@ -353,6 +378,21 @@ describe("session outcome refresh", () => {
     await Promise.all([first, next])
     expect(calls).toHaveLength(2)
     expect(committed).toEqual(["s1"])
+  })
+
+  test("a root update during capture retries even without another idle event", async () => {
+    const gate = Promise.withResolvers<void>()
+    const committed: boolean[] = []
+    const recorder = createSessionOutcomeRecorder(async (_id, _directory, current) => {
+      if (!committed.length) await gate.promise
+      committed.push(current())
+    })
+    recorder.changed("s1", "/repo", 10)
+    const pending = recorder.idle("s1", "/repo")
+    recorder.changed("s1", "/repo", 20)
+    gate.resolve()
+    await pending
+    expect(committed).toEqual([false, true])
   })
 
   test("isolates directories and stops pending writes after disposal", async () => {

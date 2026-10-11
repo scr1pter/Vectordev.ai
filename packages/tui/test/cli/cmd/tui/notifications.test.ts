@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import Notifications from "../../../../src/feature-plugins/system/notifications"
-import type { Event, PermissionRequest, QuestionRequest, Session } from "@vectordevai/sdk/v2"
+import {
+  createVectorClient,
+  type Event,
+  type PermissionRequest,
+  type QuestionRequest,
+  type Session,
+} from "@vectordevai/sdk/v2"
 import type { TuiAttentionNotifyInput } from "@vectordevai/plugin/tui"
 import { createTuiPluginApi } from "../../../fixture/tui-plugin"
 
 async function setup() {
   const notifications: TuiAttentionNotifyInput[] = []
+  const lookups: string[] = []
   const handlers = new Map<Event["type"], ((event: Event) => void)[]>()
   const session = (id: string, title: string, parentID?: string): Session => ({
     id,
@@ -46,6 +53,13 @@ async function setup() {
           }
         },
       },
+      client: createVectorClient({
+        baseUrl: "http://engine.test",
+        fetch: async (request) => {
+          lookups.push(new URL(request.url).pathname)
+          return Response.json({ ...session("hidden", "Review"), internal: "vectorscope.review" })
+        },
+      }),
       state: {
         session: {
           get: (sessionID: string) => sessions[sessionID],
@@ -58,6 +72,7 @@ async function setup() {
 
   return {
     notifications,
+    lookups,
     emit(event: Event) {
       for (const handler of handlers.get(event.type) ?? []) handler(event)
     },
@@ -105,6 +120,18 @@ describe("internal notifications TUI plugin", () => {
     harness.emit({ id: "event-2", type: "permission.asked", properties: permission("permission-1") })
 
     expect(harness.notifications).toEqual([questionNotification, permissionNotification])
+  })
+
+  test("looks up an unseen helper before notifying after reconnect", async () => {
+    const harness = await setup()
+    harness.emit({
+      id: "event-hidden",
+      type: "permission.asked",
+      properties: permission("permission-hidden", "hidden"),
+    })
+    await Bun.sleep(0)
+    expect(harness.lookups).toEqual(["/session/hidden"])
+    expect(harness.notifications).toEqual([])
   })
 
   test("dedupes pending questions and permissions until they are resolved", async () => {

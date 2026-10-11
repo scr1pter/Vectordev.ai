@@ -2,12 +2,19 @@ import type { Event } from "@vectordevai/sdk/v2"
 
 type Session = { id: string; parentID?: string; directory: string; time: { updated: number } }
 
-export function sessionFamilyEventID(event: Event) {
-  if (event.type === "session.updated") return event.properties.info.parentID ? event.properties.info.id : undefined
+// A family's sample is read again only when it can have settled. A running session reports spend and history changes
+// on every step, and its idle event follows when it stops, so those reports are skipped until then.
+export function sessionFamilyEventID(event: Event, working: (sessionID: string) => boolean) {
+  if (event.type === "session.idle") return event.properties.sessionID
   // The deleted child's metadata is no longer queryable, but its event retains the authoritative parent.
   if (event.type === "session.deleted") return event.properties.info.parentID
+  const sessionID = changedSessionID(event)
+  if (sessionID && !working(sessionID)) return sessionID
+}
+
+function changedSessionID(event: Event) {
+  if (event.type === "session.updated") return event.properties.info.parentID ? event.properties.info.id : undefined
   if (
-    event.type === "session.idle" ||
     event.type === "session.next.ancillary.usage" ||
     event.type === "session.next.step.ended" ||
     event.type === "session.next.compaction.ended" ||
@@ -17,7 +24,8 @@ export function sessionFamilyEventID(event: Event) {
     event.type === "message.part.removed" ||
     event.type === "message.removed" ||
     (event.type === "message.part.updated" && event.properties.part.type === "step-finish")
-  ) return event.properties.sessionID
+  )
+    return event.properties.sessionID
 }
 
 // Child spend is projected into ancestors, but their idle event may already have happened.

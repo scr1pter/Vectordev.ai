@@ -65,12 +65,13 @@ describe("measureUsage", () => {
       expect(result?.provider).toBeUndefined()
       expect(result?.model).toBeUndefined()
       expect(result?.variant).toBeUndefined()
-      expect(result?.costUsd).toBeUndefined()
+      // The known part, marked partial: the unmetered attempt may have cost something.
+      expect(result).toMatchObject({ costUsd: 0.1, partial: true })
     }
     const unknown = measureUsage([paid, { ...unmetered, providerID: undefined, modelID: undefined }])
     expect(unknown?.model).toBeUndefined()
     expect(unknown?.mixedModels).toBeUndefined()
-    expect(unknown?.costUsd).toBeUndefined()
+    expect(unknown).toMatchObject({ costUsd: 0.1, partial: true })
     expect(measureUsage([paid, { ...unmetered, forked: true }])).toMatchObject({
       provider: "p",
       model: "paid",
@@ -234,7 +235,6 @@ describe("measureUsage", () => {
     expect(measured?.model).toBeUndefined()
   })
 
-
   test("keeps mixed-model totals without attributing the entire run to its last model", () => {
     const measured = measureUsage([
       { role: "assistant", providerID: "openai", modelID: "gpt-4o-mini", cost: 0.01, tokens: { input: 10, output: 5 } },
@@ -269,6 +269,47 @@ describe("measureUsage", () => {
     ])
     expect(measured?.usage.input).toBe(30)
     expect(measured?.costUsd).toBeUndefined()
+  })
+
+  test("a reply stopped before it reported usage leaves the known cost, marked partial", () => {
+    const paid = { role: "assistant", providerID: "p", modelID: "m", cost: 0.04, tokens: { input: 1_000, output: 50 } }
+    for (const error of [
+      { name: "MessageAbortedError" },
+      { name: "UnknownError" },
+      { name: "APIError" },
+      { name: "APIError", data: { statusCode: 500 } },
+      // A timeout or a closed connection can come after the provider started work.
+      { name: "APIError", data: { statusCode: 408 } },
+      { name: "APIError", data: { statusCode: 499 } },
+      undefined,
+    ]) {
+      const measured = measureUsage([paid, { ...paid, cost: 0, tokens: undefined, error }])
+      expect(measured).toMatchObject({ costUsd: 0.04, partial: true, messageCount: 1, model: "m" })
+      expect(measured?.usage.input).toBe(1_000)
+    }
+  })
+
+  test("a reply the provider refused cost nothing, so the run stays fully priced", () => {
+    const paid = { role: "assistant", providerID: "p", modelID: "m", cost: 0.04, tokens: { input: 1_000, output: 50 } }
+    for (const error of [
+      { name: "APIError", data: { statusCode: 400 } },
+      { name: "APIError", data: { statusCode: 429 } },
+      { name: "ProviderAuthError" },
+      { name: "ContextOverflowError" },
+      { name: "FreeModelsLimitError" },
+    ]) {
+      const measured = measureUsage([paid, { ...paid, cost: 0, tokens: { input: 0, output: 0 }, error, parts: [] }])
+      expect(measured?.costUsd).toBe(0.04)
+      expect(measured?.partial).toBeUndefined()
+    }
+  })
+
+  test("a refused retry after streamed content keeps the cost partial", () => {
+    const paid = { role: "assistant", providerID: "p", modelID: "m", cost: 0.04, tokens: { input: 1_000 } }
+    const dropped = { ...paid, cost: 0, tokens: {}, error: { name: "APIError", data: { statusCode: 429 } } }
+    for (const parts of [undefined, [{ type: "text" }], [{ type: "reasoning" }], [{ type: "tool" }]]) {
+      expect(measureUsage([paid, { ...dropped, parts }])?.partial).toBe(true)
+    }
   })
 
   test("preserves an explicitly reported zero cost", () => {

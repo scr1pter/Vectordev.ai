@@ -146,8 +146,11 @@ function normalizeRecord(record: BackgroundTaskRecord): BackgroundTaskRecord {
 export function listBackgroundTasks(scope?: string | { projectPath?: string; taskId?: string }) {
   const projectPath = typeof scope === "string" ? scope : scope?.projectPath
   const taskId = typeof scope === "string" ? undefined : scope?.taskId
-  const normalized = readRecords().map(normalizeRecord)
-  writeRecords(normalized)
+  const records = readRecords()
+  const normalized = records.map(normalizeRecord)
+  // The app polls this list every 1.5 s on a task route. Rewriting the store on every poll re-read and rewrote the
+  // whole file each time, so it is written only when a run left by an earlier process was just marked interrupted.
+  if (normalized.some((record, index) => record !== records[index])) writeRecords(normalized)
   return normalized.filter((record) => {
     if (projectPath && record.projectPath !== projectPath) return false
     return record.taskId === taskId

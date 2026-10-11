@@ -398,8 +398,9 @@ describe("subagent spend", () => {
       expect(afterRoot.time.updated).toBe(late)
       expect(afterRoot.time.created).toBe(beforeRoot.time.created)
       expect(afterRoot.subagentCost).toBeCloseTo(0.05)
-      for (const key of ["longestTaskMs", "averageTaskMs", "currentStreak", "longestStreak", "lifetimeTokens"] as const)
+      for (const key of ["longestTaskMs", "averageTaskMs", "currentStreak", "longestStreak"] as const)
         expect(after[key]).toBe(before[key])
+      expect(after.lifetimeTokens).toBe(before.lifetimeTokens + 4)
       expect(after.favoriteModels).toEqual(before.favoriteModels)
       expect(after.days.filter((day) => day.tasks > 0)).toEqual(before.days.filter((day) => day.tasks > 0))
       expect(after.lifetimeCost).toBeCloseTo(before.lifetimeCost + 0.05)
@@ -729,9 +730,16 @@ it.instance("global spend counts title attempts once through replay, archive imp
     const recorded = yield* sessions.usage()
     expect(recorded.lifetimeCost).toBeCloseTo(before.lifetimeCost + 0.25)
     expect(recorded.unpricedResponses).toBe((before.unpricedResponses ?? 0) + 1)
+    expect(recorded.lifetimeTokens).toBe(before.lifetimeTokens + 12)
+    expect(recorded.inputTokens).toBe(before.inputTokens + 10)
+    expect(recorded.outputTokens).toBe(before.outputTokens + 2)
     expect({
       ...recorded,
       lifetimeCost: before.lifetimeCost,
+      lifetimeTokens: before.lifetimeTokens,
+      inputTokens: before.inputTokens,
+      outputTokens: before.outputTokens,
+      peakTokens: before.peakTokens,
       unpricedResponses: before.unpricedResponses,
       days: before.days,
     }).toEqual({ ...before, unpricedResponses: before.unpricedResponses })

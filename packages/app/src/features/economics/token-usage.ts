@@ -17,6 +17,10 @@ export type UsageBearingMessage = {
   unpriced?: boolean
   // Copied in by a fork; the original session already measured it.
   forked?: boolean
+  // Why the reply ended early, when it did. Only a refusal before any response proves an unmeasured reply was free.
+  error?: unknown
+  // Present only when the caller has the full transcript parts, so an empty array proves no content streamed.
+  parts?: readonly { type?: string }[]
   tokens?: {
     input?: number
     output?: number
@@ -27,8 +31,10 @@ export type UsageBearingMessage = {
 
 export type MeasuredUsage = {
   usage: TokenUsage
-  // Absent when any message ran unpriced: what the rest cost is not what the run cost.
+  // Absent when any measured message ran unpriced or lacks its charge: what the rest cost is not what the run cost.
   costUsd?: number
+  // A reply stopped or failed before reporting any usage, so costUsd is only the known part of what the run cost.
+  partial?: true
   provider?: string
   model?: string
   mixedModels?: boolean
@@ -44,6 +50,7 @@ export type SessionSpend = {
 }
 
 // Session totals include ancillary requests, whose tokens and model do not belong to the main assistant's sample.
+// The engine records an unmeasured reply as no spend, so a partial measurement leaves this a known subtotal too.
 export function totalSessionCost(spend: SessionSpend | undefined, measuredCost: number | undefined) {
   if (!spend || spend.unpricedSteps || spend.subagentUnpricedSteps) return undefined
   if (measuredCost === undefined || !Number.isFinite(measuredCost)) return undefined
@@ -79,15 +86,14 @@ export function measureUsage(messages: readonly UsageBearingMessage[]): Measured
   const measured = assistant.filter((message) => totalTokens(usageOf(message)) > 0)
   if (!measured.length) return undefined
 
-  // A positive recorded charge remains measured spend without token counters. A zero-cost
-  // attempt without usage cannot establish free execution, so it leaves the total unknown.
-  const accounted = assistant.filter(
-    (message) =>
-      totalTokens(usageOf(message)) > 0 || message.unpriced || (typeof message.cost === "number" && message.cost !== 0),
-  )
+  // A positive recorded charge remains measured spend without token counters. A zero-cost attempt without usage
+  // cannot establish free execution unless the provider refused it, so it leaves only a known part of the total.
+  const reported = (message: UsageBearingMessage) =>
+    totalTokens(usageOf(message)) > 0 || message.unpriced || (typeof message.cost === "number" && message.cost !== 0)
+  const accounted = assistant.filter(reported)
+  const unmeasured = assistant.some((message) => !reported(message) && !refused(message))
   const costs = accounted.map((message) => message.cost)
   const costUsd =
-    accounted.length !== assistant.length ||
     accounted.some((message) => message.unpriced) ||
     costs.some((cost) => typeof cost !== "number" || !Number.isFinite(cost) || cost < 0)
       ? undefined
@@ -121,10 +127,35 @@ export function measureUsage(messages: readonly UsageBearingMessage[]): Measured
   return {
     usage: measured.map(usageOf).reduce(addUsage, emptyUsage),
     costUsd: Number.isFinite(costUsd) ? costUsd : undefined,
+    ...(unmeasured ? { partial: true as const } : {}),
     provider: attributable ? first.providerID : undefined,
     model: attributable ? first.modelID : undefined,
     mixedModels: identities.size > 1 ? true : undefined,
     variant: attributable ? variant : undefined,
     messageCount: measured.length,
   }
+}
+
+// The provider refused the request instead of running it: an HTTP client error, rejected credentials, a prompt over
+// the context window, or Vector's free-model limit. None is billed, so that reply's missing usage is a real zero.
+// A stop, a network failure or a server error can come after the provider started work, so those stay unknown.
+// A later rejected retry can follow billed streamed content; only a known empty transcript proves a refusal.
+function refused(message: UsageBearingMessage) {
+  if (!message.parts || message.parts.some((part) => ["text", "reasoning", "tool"].includes(part.type ?? "")))
+    return false
+  const error = message.error
+  if (!error || typeof error !== "object" || !("name" in error)) return false
+  if (["ProviderAuthError", "ContextOverflowError", "FreeModelsLimitError"].includes(String(error.name))) return true
+  // The engine sets a status only from the HTTP response, never for a failure inside a stream that had started.
+  const status =
+    error.name === "APIError" &&
+    "data" in error &&
+    error.data &&
+    typeof error.data === "object" &&
+    "statusCode" in error.data
+      ? error.data.statusCode
+      : undefined
+  // A request timeout (408) or a proxy's record of the client closing the connection (499) can come after the
+  // provider started work, so neither proves the reply was free.
+  return typeof status === "number" && status >= 400 && status < 499 && status !== 408
 }

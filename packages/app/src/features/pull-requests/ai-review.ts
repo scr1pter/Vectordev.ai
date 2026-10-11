@@ -1,6 +1,8 @@
 import { isFreeModel } from "@vectordevai/schema/free-model"
 import { providerUsable } from "@vectordevai/schema/provider-policy"
+import { totalTokens } from "../economics/economics-types"
 import { measureUsage } from "../economics/token-usage"
+import { REVIEW_SESSION_TITLE_PREFIX } from "@/utils/internal-sessions"
 // Vector code review in the desktop Pull Requests panel (section 6, D1), of a pull request or of the uncommitted
 // changes in the user's own checkout. It runs the same core as the GitHub Action and `vector review`: the same
 // prompts, output schema, filters and summary. The engine instance always stays on the user's own project, so another
@@ -32,6 +34,7 @@ import {
   buildSummaryBody,
   costWording,
   formatDuration,
+  formatTokens,
   formatUsd,
   noteNothingToReview,
   sanitizeModelMarkdown,
@@ -656,7 +659,7 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
         parentID: input.parentID,
         onSession: (sessionID) => input.onProgress?.({ type: "session", sessionID }),
         name,
-        title: `Vectorscope review · ${subject} · ${name}`,
+        title: `${REVIEW_SESSION_TITLE_PREFIX}${subject} · ${name}`,
         text: texts[name],
         model,
         rules,
@@ -671,8 +674,10 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
   const reports = runs.flatMap((run) => (run.report ? [{ source: run.name, report: run.report }] : []))
   if (!reports.length) {
     stop.dispose()
+    const usage = measureUsage(runs.flatMap((run) => run.usage.messages))
+    if (usage) input.onProgress?.({ type: "spend", costUsd: usage.costUsd ?? 0, tokens: totalTokens(usage.usage) })
     throw new Error(
-      `Vector could not finish this review: ${runs.find((run) => run.detail)?.detail ?? "no reviewer answered"}.`,
+      `Vector could not finish this review: ${runs.find((run) => run.detail)?.detail ?? "no reviewer answered"}.${spentSoFar(runs, model)}`,
     )
   }
 
@@ -693,7 +698,9 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
             (checkout.trust === "untrusted" && finding.suggestion !== undefined),
         )
   if (candidates.length)
-    status(`Double-checking ${candidates.length} ${candidates.length === 1 ? "finding" : "findings"}…`)
+    status(
+      `Double-checking ${candidates.length} ${candidates.length === 1 ? "finding" : "findings"}…${spentSoFar(runs, model)}`,
+    )
   const verify = !candidates.length
     ? undefined
     : stop.stopped()
@@ -785,6 +792,8 @@ export async function runReview(input: ReviewRunInput, client: ReviewClient): Pr
           cacheRead: usage?.usage.cacheRead ?? 0,
           cacheWrite: usage?.usage.cacheWrite ?? 0,
           ...(!usage ? { usageMissing: true } : {}),
+          // A stopped specialist's reply may have been billed without reporting usage: the priced part is a floor.
+          ...(usage?.partial ? { partial: true } : {}),
           kind,
           model: used,
         }
@@ -1108,10 +1117,23 @@ function estimateReview(input: {
   }
 }
 
+// The reviewer sessions stay out of view, so a running review shows what it has spent in its progress line. Only a
+// listed price makes a cost: a subscription or an unlisted model reports tokens alone.
+function spentSoFar(runs: readonly { usage: Usage }[], model: ReviewModel) {
+  const usage = measureUsage(runs.flatMap((run) => run.usage.messages))
+  if (!usage) return ""
+  const tokens = `${formatTokens(totalTokens(usage.usage))} tokens`
+  if (model.costKind !== "priced" || usage.costUsd === undefined || usage.mixedModels) return ` ${tokens} so far.`
+  return ` ${usage.partial ? "At least " : ""}${formatUsd(usage.costUsd)} and ${tokens} so far.`
+}
+
 // Every assistant step of the session, so the cost includes the finalize step.
 async function usageOf(client: ReviewClient, sessionID: string, directory: string): Promise<Usage> {
   return client.session.messages({ sessionID, directory }).then(
-    (result) => ({ messages: (result.data ?? []).map((message) => message.info), complete: result.data !== undefined }),
+    (result) => ({
+      messages: (result.data ?? []).map((message) => ({ ...message.info, parts: message.parts })),
+      complete: result.data !== undefined,
+    }),
     () => ({ messages: [], complete: false }),
   )
 }

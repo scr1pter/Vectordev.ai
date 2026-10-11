@@ -208,6 +208,34 @@ describe("layout workspace helpers", () => {
     expect(result?.id).toBe("root")
   })
 
+  test("never offers a Vectorscope reviewer or a tool session as the latest root session", () => {
+    const result = latestRootSession(
+      [
+        {
+          path: { directory: "/workspace" },
+          session: [
+            session({ id: "task", directory: "/workspace", time: { created: 10, updated: 10, archived: undefined } }),
+            session({
+              id: "review",
+              directory: "/workspace",
+              title: "Vectorscope review · #7 · security",
+              time: { created: 20, updated: 20, archived: undefined },
+            }),
+            session({
+              id: "planner",
+              directory: "/workspace",
+              title: "Vector Tool · Browser Agent Planner",
+              time: { created: 30, updated: 30, archived: undefined },
+            }),
+          ],
+        },
+      ],
+      120_000,
+    )
+
+    expect(result?.id).toBe("task")
+  })
+
   test("lists the user's sessions, parallel agents and teams but none of Vector's helpers", () => {
     const store = {
       path: { directory: "/workspace" },

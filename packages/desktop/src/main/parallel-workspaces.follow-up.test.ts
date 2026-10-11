@@ -146,6 +146,15 @@ describe("sending a follow-up to an external workspace", () => {
     throw new Error("the follow-up turn never settled")
   }
 
+  test("polling an unchanged workspace preserves its revision and last activity", async () => {
+    const seeded = await seed()
+    const first = await refreshParallelWorkspace(seeded.id)
+    const second = await refreshParallelWorkspace(seeded.id)
+    expect(second.revision).toBe(first.revision)
+    expect(second.lastActivityAt).toBe(first.lastActivityAt)
+    expect(second.diff).toBe(first.diff)
+  })
+
   test("an empty message is refused before anything is queued", async () => {
     const seeded = await seed()
     await expect(followUpParallelWorkspace(seeded.id, engine, "   ")).rejects.toThrow("Type a message")
@@ -197,10 +206,11 @@ describe("sending a follow-up to an external workspace", () => {
   })
 
   test("same-millisecond updates advance the persisted revision and continue after reload", async () => {
-    const seeded = await seed({ revision: 4 })
+    const seeded = await seed({ revision: 4, baselineHashes: {} })
     setSystemTime(new Date("2026-10-10T00:00:00.000Z"))
 
     const first = await refreshParallelWorkspace(seeded.id)
+    await Bun.write(join(seeded.isolatedPath, "a.ts"), "second revision")
     const second = await refreshParallelWorkspace(seeded.id)
     expect(first.lastActivityAt).toBe(second.lastActivityAt)
     expect(first.revision).toBe(5)
@@ -212,6 +222,7 @@ describe("sending a follow-up to an external workspace", () => {
     store.set("parallel-workspaces-state", new Map([["records", await Bun.file(persisted).json()]]))
 
     expect(getParallelWorkspace(seeded.id)?.revision).toBe(6)
+    await Bun.write(join(seeded.isolatedPath, "a.ts"), "third revision")
     expect((await refreshParallelWorkspace(seeded.id)).revision).toBe(7)
   })
 
@@ -282,7 +293,7 @@ describe("sending a follow-up to an external workspace", () => {
     expect(refreshed.changedFiles).toEqual([])
     expect(refreshed.diff).toBe("")
     expect(refreshed.riskLevel).toBe("low")
-    expect(refreshed.revision).toBe(1)
+    expect(refreshed.revision).toBe(created.revision)
   })
 
   test("a task can hold more than sixteen active agents", async () => {
