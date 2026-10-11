@@ -299,6 +299,6 @@ describe("experimental HttpApi", () => {
         expect(afterRemove.status).toBe(200)
         expect(yield* json(afterRemove)).toEqual([])
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 })

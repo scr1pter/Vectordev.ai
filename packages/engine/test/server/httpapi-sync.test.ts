@@ -144,6 +144,6 @@ describe("sync HttpApi", () => {
         expect(body.success).toBe(false)
         expect(Array.isArray(body.error) || Array.isArray(body.errors)).toBe(true)
       }),
-    { git: true, config: { formatter: false, lsp: false } },
+    { trusted: true, git: true, config: { formatter: false, lsp: false } },
   )
 })
