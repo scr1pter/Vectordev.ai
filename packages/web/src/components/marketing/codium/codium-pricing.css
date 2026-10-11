@@ -1,11 +1,13 @@
-.codium-pricing {
-  --codium-card: linear-gradient(180deg, rgba(170, 140, 255, 0.055), rgba(255, 255, 255, 0.012) 42%);
-  --codium-pill: #ece4ff;
-  --codium-pill-ink: #140e1f;
-  font-family: var(--font-landing);
+/* The plans, usage table and questions on /codium. Plain black page, white type, hairline borders. */
+.cx-pricing {
+  --cx-hairline: rgba(255, 255, 255, 0.05);
+  --cx-line: rgba(255, 255, 255, 0.15);
+  --cx-soft: rgb(205, 205, 205);
+  --cx-quiet: rgba(255, 255, 255, 0.6);
+  --cx-accent: #aa8cff;
 }
 
-.codium-visually-hidden {
+.cx-visually-hidden {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -14,463 +16,427 @@
   white-space: nowrap;
 }
 
-.codium-toggle {
-  width: fit-content;
-  margin: 0 auto;
-  padding: 4px;
-  display: flex;
-  gap: 4px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+.cx-pricing a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
-.codium-toggle button {
-  min-width: 210px;
-  min-height: 40px;
-  padding: 0 18px;
-  display: inline-flex;
+.cx-pricing a:hover {
+  color: var(--cx-accent);
+}
+
+/* Individual / Top-ups */
+.cx-toggle {
+  width: 100%;
+  max-width: 512px;
+  margin: 48px auto 0;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  background: rgb(47, 47, 47);
+  border: 1px solid var(--cx-line);
+  border-radius: 20px;
+}
+
+.cx-toggle button {
+  min-height: 44px;
+  padding: 10px 24px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  color: var(--muted-strong);
+  gap: 6px;
+  color: rgb(175, 175, 175);
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  font-size: 13.5px;
-  font-weight: 520;
+  border-radius: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
   cursor: pointer;
   transition:
-    color 160ms ease,
-    background 160ms ease,
-    border-color 160ms ease;
+    color 150ms ease,
+    background-color 150ms ease;
 }
 
-.codium-toggle button:hover {
+.cx-toggle button svg {
+  flex: none;
+  opacity: 0.8;
+}
+
+.cx-toggle button:hover {
   color: #fff;
 }
 
-.codium-toggle button[aria-pressed="true"] {
+.cx-toggle button[aria-checked="true"] {
   color: #fff;
-  background: linear-gradient(180deg, rgba(170, 140, 255, 0.3), rgba(139, 92, 246, 0.18));
-  border-color: rgba(213, 197, 255, 0.2);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 6px 22px rgba(105, 72, 180, 0.25);
+  background: rgb(33, 33, 33);
 }
 
-.codium-mode-note {
-  max-width: 640px;
-  margin: 18px auto 0;
-  color: var(--muted);
-  font-size: 13.5px;
-  line-height: 1.6;
-  text-align: center;
+.cx-toggle button[aria-checked="true"] svg {
+  color: var(--cx-accent);
+  opacity: 1;
 }
 
-.codium-soon {
-  width: fit-content;
-  margin: 14px auto 0;
-  padding: 5px 12px;
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  border: 1px solid rgba(170, 140, 255, 0.24);
-  border-radius: 14px;
-  font-size: 12px;
-  text-align: center;
-}
-
-/* One row of equal cards whose name, price, button, allowance and list line up across the row. */
-.codium-cards {
-  margin-top: 40px;
+/* Four cards whose name, price, button and list line up across the row. */
+.cx-cards {
+  width: 100%;
+  max-width: 1143px;
+  margin: 32px auto 0;
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-template-rows: repeat(5, auto);
-  gap: 12px 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(3, auto);
+  column-gap: 24px;
 }
 
-.codium-card {
-  grid-row: span 5;
+.cx-card {
+  grid-row: span 3;
   display: grid;
   grid-template-rows: subgrid;
   row-gap: 0;
   min-width: 0;
-  padding: 22px 16px 20px;
-  background: var(--codium-card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
 }
 
-.codium-card header h3 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 19px;
-  font-weight: 560;
-  letter-spacing: -0.01em;
+.cx-card-top {
+  grid-row: span 2;
+  display: grid;
+  grid-template-rows: subgrid;
+  row-gap: 32px;
+  padding: 16px 16px 24px;
+  border: 1px solid var(--cx-hairline);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
 }
 
-.codium-card header p {
-  margin: 6px 0 0;
-  color: var(--muted-strong);
-  font-size: 13.5px;
-  line-height: 1.45;
-}
-
-.codium-price {
-  margin: 26px 0 0;
+.cx-card-bottom {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 2px 8px;
+  flex-direction: column;
+  gap: 24px;
+  padding: 0 16px 24px;
+  border: 1px solid var(--cx-hairline);
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
 }
 
-.codium-price strong {
-  color: var(--ink);
-  font-size: 40px;
-  font-weight: 520;
-  line-height: 1;
-  letter-spacing: -0.035em;
+.cx-card-head h3 {
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 39.6px;
+  letter-spacing: -0.3px;
+}
+
+.cx-card-head p {
+  font-size: 17px;
+  line-height: 28px;
+  letter-spacing: -0.17px;
+}
+
+.cx-card-buy {
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cx-price {
+  margin-top: 4px;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.cx-amount {
+  font-size: 48px;
+  font-weight: 500;
+  line-height: 48px;
+  letter-spacing: -1.44px;
   font-variant-numeric: tabular-nums;
 }
 
-.codium-price span {
-  color: var(--muted);
-  font-size: 13px;
+.cx-period {
+  padding-bottom: 3.5px;
+  color: var(--cx-soft);
+  font-size: 14px;
+  line-height: 17.5px;
 }
 
-.codium-action {
-  margin-top: 18px;
-}
-
-.codium-button {
+.cx-button {
   width: 100%;
-  min-height: 36px;
-  padding: 0 14px;
-  display: inline-flex;
+  height: 44px;
+  padding: 0 20px;
+  display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  color: var(--codium-pill-ink);
-  background: var(--codium-pill);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  color: rgb(13, 13, 13);
+  background: rgb(249, 249, 249);
   border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  transition:
-    background 180ms ease,
-    box-shadow 220ms ease,
-    transform 120ms ease;
-}
-
-.codium-button:hover:not(:disabled),
-.codium-button:focus-visible {
-  background: #f6f2ff;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    -10px 0 24px -6px rgba(160, 110, 255, 0.85),
-    10px 0 24px -6px rgba(160, 110, 255, 0.85);
-}
-
-.codium-button:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.codium-button:disabled {
-  color: #b3a6c8;
-  background: rgba(237, 228, 255, 0.06);
-  border-color: var(--line);
-  box-shadow: none;
-  cursor: not-allowed;
-}
-
-.codium-error {
-  margin: 10px 0 0;
-  color: #ffb4c2;
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
-/* Each card's own credits and estimate, kept apart from the features a later card carries over. */
-.codium-allowance {
-  margin-top: 18px;
-  padding: 11px 13px;
-  display: grid;
-  align-content: start;
-  gap: 3px;
-  background: rgba(170, 140, 255, 0.07);
-  border: 1px solid rgba(170, 140, 255, 0.16);
-  border-radius: 12px;
-}
-
-.codium-allowance p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.45;
-  font-variant-numeric: tabular-nums;
-}
-
-.codium-allowance p:first-child {
-  color: var(--ink);
   font-size: 14px;
-  font-weight: 560;
+  font-weight: 500;
+  line-height: 20px;
+  cursor: pointer;
+  transition: background-color 150ms ease;
 }
 
-.codium-features {
-  margin-top: 22px;
+.cx-button:hover:not(:disabled) {
+  background: rgb(226, 226, 226);
+}
+
+.cx-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.cx-error {
+  color: #ffb4b4;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.cx-card-list {
   display: flex;
   flex-direction: column;
+  gap: 20px;
 }
 
-.codium-everything {
-  margin: 0 0 12px;
-  color: var(--ink);
-  font-size: 13.5px;
+.cx-everything {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--cx-line);
+  font-size: 14px;
   font-weight: 600;
+  line-height: 22.96px;
+  letter-spacing: -0.14px;
 }
 
-.codium-features ul {
-  margin: 0;
-  padding: 0;
-  display: grid;
+.cx-card-list ul {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  list-style: none;
 }
 
-.codium-features li {
-  display: grid;
-  grid-template-columns: 15px minmax(0, 1fr);
-  gap: 10px;
-  color: #ddd5ea;
-  font-size: 13.5px;
-  line-height: 1.45;
+.cx-card-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  font-size: 14px;
+  line-height: 22.96px;
+  letter-spacing: -0.14px;
 }
 
-.codium-features li svg {
-  margin-top: 2px;
-  color: var(--accent);
+.cx-card-list li svg {
+  flex: none;
+  margin-top: 1.5px;
+  color: var(--cx-accent);
 }
 
-.codium-fine {
-  margin: 22px 0 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
+.cx-fine {
+  margin-top: auto;
+  color: var(--cx-soft);
+  font-size: 14px;
+  line-height: 17.5px;
 }
 
-.codium-fine a,
-.codium-notes a,
-.codium-faq a,
-.codium-error a,
-.codium-table td a {
-  color: var(--accent-strong);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.codium-usage {
+/* Usage estimates */
+.cx-usage {
   margin-top: 128px;
 }
 
-.codium-usage h2,
-.codium-faq h2 {
-  margin: 0;
-  color: var(--ink);
-  font-size: clamp(26px, 3vw, 32px);
-  font-weight: 520;
-  letter-spacing: -0.02em;
+.cx-usage h2,
+.cx-faq h2 {
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 39.6px;
+  letter-spacing: -0.3px;
   text-align: center;
 }
 
-.codium-table {
+.cx-table {
   width: fit-content;
   max-width: 100%;
-  margin: 30px auto 0;
+  margin: 40px auto 0;
   overflow-x: auto;
-  overscroll-behavior-x: contain;
 }
 
-.codium-table:focus-visible {
-  outline-offset: 4px;
-  border-radius: 8px;
-}
-
-.codium-table table {
+.cx-table table {
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 17px;
+  line-height: 28px;
+  letter-spacing: -0.17px;
+  white-space: nowrap;
+}
+
+.cx-table th,
+.cx-table td {
+  padding: 8px;
+  font-weight: 400;
+  text-align: left;
   font-variant-numeric: tabular-nums;
 }
 
-.codium-table th,
-.codium-table td {
-  padding: 13px 16px;
-  text-align: left;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--line);
+.cx-table thead th {
+  font-weight: 700;
 }
 
-.codium-table thead th {
-  color: var(--ink);
-  font-weight: 600;
-  border-bottom-color: var(--line-strong);
+.cx-table tr {
+  border-bottom: 1px solid var(--cx-line);
 }
 
-.codium-table tbody th {
-  color: var(--ink);
-  font-weight: 500;
+.cx-table tbody tr:last-child {
+  border-bottom: 0;
 }
 
-.codium-table tbody th span {
-  display: block;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 400;
-}
-
-.codium-table td {
-  color: var(--muted-strong);
-}
-
-.codium-table td a {
-  color: var(--ink);
-}
-
-.codium-notes {
-  max-width: 680px;
-  margin: 26px auto 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.6;
+.cx-notes {
+  margin-top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  color: var(--cx-soft);
+  font-size: 14px;
+  line-height: 22.96px;
   text-align: center;
 }
 
-.codium-notes p {
-  margin: 8px 0 0;
+/* Questions */
+.cx-faq {
+  margin-top: 128px;
 }
 
-.codium-faq {
-  max-width: 660px;
-  margin: 128px auto 0;
+.cx-faq-list {
+  max-width: 535px;
+  margin: 40px auto 0;
+  border-top: 1px solid var(--cx-line);
 }
 
-.codium-faq h2 {
-  margin-bottom: 34px;
+.cx-faq-item {
+  border-bottom: 1px solid var(--cx-line);
 }
 
-.codium-faq-item {
-  border-bottom: 1px solid var(--line);
-}
-
-.codium-faq-item h3 {
-  margin: 0;
-}
-
-.codium-faq-item button {
+.cx-faq-item button {
   width: 100%;
-  padding: 18px 0;
+  min-height: 60px;
+  padding: 16px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  color: var(--ink);
-  background: none;
-  border: 0;
-  font-size: 15px;
-  font-weight: 500;
+  gap: 16px;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 28px;
+  letter-spacing: -0.17px;
   text-align: left;
   cursor: pointer;
 }
 
-.codium-faq-item button svg {
+.cx-faq-item button svg {
   flex: none;
-  color: var(--muted-strong);
 }
 
-.codium-faq-item button:hover svg,
-.codium-faq-item button[aria-expanded="true"] svg {
-  color: var(--accent-strong);
+.cx-faq-answer {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 300ms ease,
+    opacity 300ms ease;
 }
 
-.codium-faq-answer {
-  padding-bottom: 18px;
-  color: var(--muted-strong);
+.cx-faq-answer[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.cx-faq-answer > div {
+  min-height: 0;
+  overflow: hidden;
+  color: var(--cx-quiet);
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 22.96px;
 }
 
-.codium-faq-answer p,
-.codium-faq-answer ul {
-  margin: 0;
+.cx-faq-answer > div > :last-child {
+  margin-bottom: 24px;
 }
 
-.codium-faq-answer p + p,
-.codium-faq-answer ul + p,
-.codium-faq-answer p + ul {
-  margin-top: 10px;
+.cx-faq-answer p + p,
+.cx-faq-answer p + ul,
+.cx-faq-answer ul + p {
+  margin-top: 12px;
 }
 
-.codium-faq-answer ul {
-  padding-left: 18px;
+.cx-faq-answer ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.codium-faq-answer strong {
-  color: var(--ink);
-  font-weight: 560;
+.cx-faq-answer strong {
+  color: #fff;
+  font-weight: 500;
 }
 
 @media (max-width: 1279px) {
-  .codium-cards {
-    grid-auto-flow: row;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: none;
-    gap: 14px 12px;
+  .cx-cards {
+    max-width: none;
   }
 }
 
-@media (max-width: 759px) {
-  .codium-cards {
+@media (max-width: 1099px) {
+  .cx-cards {
+    max-width: 760px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(6, auto);
+    row-gap: 24px;
+  }
+}
+
+@media (max-width: 639px) {
+  .cx-toggle {
+    margin-top: 32px;
   }
 
-  .codium-usage,
-  .codium-faq {
+  .cx-cards {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    row-gap: 0;
+  }
+
+  .cx-card-head h3 {
+    font-size: 26px;
+    line-height: 34px;
+  }
+
+  .cx-amount {
+    font-size: 32.2px;
+    line-height: 36px;
+    letter-spacing: -0.97px;
+  }
+
+  .cx-usage,
+  .cx-faq {
     margin-top: 96px;
   }
 
-  /* The table keeps its columns and scrolls inside a visible box. */
-  .codium-table {
-    width: 100%;
-    border: 1px solid var(--line);
-    border-radius: 12px;
+  .cx-usage h2,
+  .cx-faq h2 {
+    font-size: 26px;
+    line-height: 34px;
   }
 
-  .codium-table th:first-child {
-    position: sticky;
-    left: 0;
-    background: var(--page);
+  .cx-table {
+    margin-right: -16px;
+    margin-left: -16px;
+    padding: 0 16px;
+  }
+
+  .cx-faq-list {
+    max-width: none;
   }
 }
 
-@media (max-width: 559px) {
-  .codium-toggle {
-    width: 100%;
-  }
-
-  .codium-toggle button {
-    min-width: 0;
-    flex: 1;
-    padding: 0 10px;
-    font-size: 13px;
-  }
-
-  .codium-cards {
-    grid-template-columns: minmax(0, 1fr);
+@media (prefers-reduced-motion: reduce) {
+  .cx-faq-answer {
+    transition: none;
   }
 }

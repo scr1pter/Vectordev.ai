@@ -6,7 +6,37 @@ The public `/codium` pricing page (`/pricing` redirects to it) shows the offerin
 
 The page tells buyers that Codium works in the Vector desktop app and CLI, so keep `MODEL_PLANS_ENABLED=false` until a published desktop and CLI release includes the Vector Codium provider. Its balance answer names only the account page; when that release shows Codium balances in the app, name the app there as well.
 
-Customer-facing amounts use **100 Codium credits per internal USD credit**: the four default purchases include 800, 4,000, 8,000 and 16,000 credits. This is a display conversion only; the backend continues accounting in provider-cost USD. Pricing cards show purchase price, credits and estimated tokens, without an internal markup or supplier-cost table. The estimates are computed from public model prices, so a reader who knows those prices can approximate the markup from them; only dropping the estimates would prevent that. Estimates assume 80% input and 20% output and span the configured models' price ceilings. They are not guaranteed token allotments. Renewal, expiration, carry-forward and cancellation terms remain visible before purchase; `/legal/terms#codium` describes variable consumption and preserves billing-error remedies and mandatory consumer rights.
+Customer-facing amounts use **100 Codium credits per internal USD credit**: the four default purchases include 800, 4,000, 8,000 and 16,000 credits. This is a display conversion only; the backend continues accounting in provider-cost USD. The account page shows those credit amounts and balances. Renewal, expiration, carry-forward and cancellation terms remain visible before purchase; `/legal/terms#codium` describes variable consumption and preserves billing-error remedies and mandatory consumer rights.
+
+## The /codium page
+
+The page follows the layout and behaviour of a familiar coding-plan pricing page with Vector's own copy, logo and colours: its own top bar and footer, a plain black background with hairline borders, Geist for type, and Vector violet only as an accent. An **Individual / Top-ups** radiogroup switches between the four monthly plans and the four one-time packs and keeps the choice in the address (`?type=topups`), so links, reloads and the back button restore it. There is no free card: the workspace itself is free to download.
+
+The page never shows credit amounts, dollar values of credits, model prices or the markup, and its island props carry none of them. `packages/web/src/lib/codium-pricing.ts` reduces the configuration to names, purchase prices, each offer's credits as a multiple of the smallest offer ("5× the monthly credits of Codium 10"), and **usage estimates as ranges of typical agent tasks**, rounded down to two significant digits. Because the ranges depend on the task assumptions below, which are not published on the page, a reader cannot work back from them to the dollars of model credit in a purchase.
+
+### How the usage ranges are derived
+
+For each model, a typical agent task runs from a focused fix (the smaller task) to a multi-file change (the larger one). 90% of input tokens are assumed to come from the prompt cache. Each task's cost is `input × 10% × input price + input × 90% × cached price + output × output price`, and a purchase's range is its USD model credits divided by the larger task's cost (low end) and by the smaller task's cost (high end).
+
+| Model                  | Smaller task (input / output) | Larger task (input / output) | Expected input / cached / output price per million |
+| ---------------------- | ----------------------------- | ---------------------------- | -------------------------------------------------- |
+| DeepSeek V4.1 Flash    | 500K / 10K                    | 5M / 75K                     | $0.11 / $0.008 / $0.54                             |
+| Xiaomi MiMo V2.6 Flash | 400K / 8K                     | 3.5M / 60K                   | $0.15 / $0.005 / $0.30                             |
+| Claude Haiku 5.5       | 600K / 25K                    | 6M / 180K                    | $0.13 / $0.011 / $0.55                             |
+
+- **Prices** are what OpenRouter's default routing is expected to pay. It prefers the cheapest stable providers, weighted by the inverse square of price, so these are the inverse-square-weighted averages across each model's ZDR endpoints that pass the catalog audit, using fp8 or better (October 10, 2026 snapshot). Haiku's uncached input is priced as a prompt-cache write (1.25× its list input price).
+- **Token counts** reflect how much each model spends per task in independent agentic benchmarks (Vals Terminal-Bench 4.0, Vibe Code Bench and Code Migration): MiMo at default reasoning effort spends about 0.7× DeepSeek's cost per task, and Haiku at high effort at least 1.7× once its long-prompt surcharge is taken out. Haiku's 100K context also makes it compact and re-read context more often.
+- A model without reviewed assumptions (for example one added through `MODEL_PLAN_MODELS_JSON`) is priced at its routing ceilings with no cache discount and DeepSeek's token counts, which understates its range rather than overstating it.
+
+With the default 25% markup this gives, per month on each plan (and per pack for top-ups of the same price):
+
+| Model                  | Codium 10 | Codium 50 | Codium 100 | Codium 200   |
+| ---------------------- | --------- | --------- | ---------- | ------------ |
+| DeepSeek V4.1 Flash    | 60–550    | 300–2,700 | 600–5,500  | 1,200–11,000 |
+| Xiaomi MiMo V2.6 Flash | 92–780    | 460–3,900 | 920–7,800  | 1,800–15,000 |
+| Claude Haiku 5.5       | 33–290    | 160–1,400 | 330–2,900  | 670–5,800    |
+
+These are estimates, not allotments. Revisit the assumptions after measuring real Vector sessions on each model, and when the catalog or its routing changes.
 
 ## Pricing and margin
 
