@@ -268,7 +268,6 @@ function isLocalNetworkHostname(input: string) {
       (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
     )
   }
-  if (isIP(hostname) === 4) return false
   if (isIP(hostname) === 6) return /^f[cd][0-9a-f]{2}:/.test(hostname) || /^fe[89ab][0-9a-f]:/.test(hostname)
   if (hostname.includes(":")) return false
   return !hostname.includes(".") || /\.(?:local|lan|home|internal|home\.arpa)$/.test(hostname)
