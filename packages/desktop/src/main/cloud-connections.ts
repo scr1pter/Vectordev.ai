@@ -328,7 +328,7 @@ async function providerJson(
   return body
 }
 
-async function finishOAuthDeepLink(url: URL): Promise<void> {
+async function finishOAuthDeepLink(url: URL, request: CloudFetch): Promise<void> {
   const providerValue = url.searchParams.get("provider")
   if (!isProvider(providerValue)) return
   const flow = activeFlows.get(providerValue)
@@ -341,19 +341,23 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
     refreshToken?: string
     expiresIn?: number
     teamId?: string
-  }>("/exchange", {
-    method: "POST",
-    body: JSON.stringify({
-      provider: providerValue,
-      code: authorization,
-      state: returnedState,
-      codeVerifier: flow.codeVerifier,
-    }),
-  })
+  }>(
+    "/exchange",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        provider: providerValue,
+        code: authorization,
+        state: returnedState,
+        codeVerifier: flow.codeVerifier,
+      }),
+    },
+    request,
+  )
   const teamId = token.teamId ?? url.searchParams.get("teamId") ?? undefined
   if (!token.accessToken) throw new Error(`${connectionLabel(providerValue)} did not return an access token.`)
 
-  const identity = await validateCloudProviderToken(providerValue, token.accessToken, fetch, teamId)
+  const identity = await validateCloudProviderToken(providerValue, token.accessToken, request, teamId)
   const connectedAt = now()
   saveConnection({
     provider: providerValue,
@@ -380,7 +384,7 @@ async function finishOAuthDeepLink(url: URL): Promise<void> {
   })
 }
 
-export async function handleCloudOAuthDeepLinks(urls: string[]): Promise<string[]> {
+export async function handleCloudOAuthDeepLinks(urls: string[], request: CloudFetch = fetch): Promise<string[]> {
   const remaining: string[] = []
   for (const value of urls) {
     let url: URL
@@ -399,7 +403,7 @@ export async function handleCloudOAuthDeepLinks(urls: string[]): Promise<string[
     // An unrelated protocol invocation must not cancel a pending approval.
     if (!flow || !matchesCloudOAuthState(flow.state, url.searchParams.get("state") ?? "")) continue
     try {
-      await finishOAuthDeepLink(url)
+      await finishOAuthDeepLink(url, request)
     } catch (error) {
       if (isProvider(provider)) {
         const flow = activeFlows.get(provider)
