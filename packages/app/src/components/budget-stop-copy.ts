@@ -51,10 +51,12 @@ function spentLine(error: BudgetStopError["data"]) {
   return `${formatUsd(error.spentUsd)} of ${formatUsd(error.capUsd)} spent`
 }
 
-// A loop is not about money, so it continues as is. Every other stop continues
-// only under a fresh cap of the same size, and without a cap there is none to renew.
+// A loop is not about money, so it continues as is. A money stop continues only
+// under a fresh cap of the same size. A step limit with no cap renews the step
+// limit, since every new run starts with the configured one.
 function continueLabel(error: BudgetStopError["data"]) {
   if (error.reason === "loop") return "Continue anyway"
-  if (error.capUsd === undefined) return undefined
-  return `Continue with a new ${formatUsd(error.capUsd)} cap`
+  if (error.capUsd !== undefined) return `Continue with a new ${formatUsd(error.capUsd)} cap`
+  if (error.reason === "steps") return "Continue with a new step limit"
+  return undefined
 }

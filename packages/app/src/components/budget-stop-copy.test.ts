@@ -92,9 +92,9 @@ describe("budgetStopCopy", () => {
     expect(copy.capUsd).toBe(5)
   })
 
-  test("no Continue button appears without a cap", () => {
+  test("a step stop without a cap renews the step limit", () => {
     const copy = budgetStopCopy({ reason: "steps", message: "Step limit reached: 60 of 60 steps used for this run." })
-    expect(copy.continueLabel).toBeUndefined()
+    expect(copy.continueLabel).toBe("Continue with a new step limit")
     expect(copy.capUsd).toBeUndefined()
     expect(copy.spent).toBeUndefined()
     expect(copy.estimate).toBeUndefined()
