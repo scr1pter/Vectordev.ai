@@ -81,6 +81,32 @@ describe("vector stats", () => {
     }),
   )
 
+  it.instance("counts what Vector's helpers spent without counting them as sessions", () =>
+    Effect.gen(function* () {
+      const session = yield* Session.Service
+      const before = yield* aggregateSessionStats(7)
+      const task = yield* session.create({ title: "fix the login form" })
+      const review = yield* session.create({
+        title: "Vectorscope review · 1a2b3c4 · review",
+        internal: "vectorscope.review",
+        parentID: task.id,
+      })
+      const autocomplete = yield* session.create({ title: "Autocomplete", internal: "codespace.autocomplete" })
+      yield* step(task.id, Date.now(), 0.5)
+      yield* step(review.id, Date.now(), 0.25)
+      yield* step(autocomplete.id, Date.now(), 0.01)
+
+      const after = yield* aggregateSessionStats(7)
+      expect(after.totalSessions - before.totalSessions).toBe(1)
+      expect(after.totalCost - before.totalCost).toBeCloseTo(0.76)
+      expect(after.totalTokens.input - before.totalTokens.input).toBe(3_000)
+      expect(after.helpers.cost - before.helpers.cost).toBeCloseTo(0.26)
+      expect(after.helpers.tokens - before.helpers.tokens).toBe(2_200)
+      yield* session.remove(autocomplete.id)
+      yield* session.remove(task.id)
+    }),
+  )
+
   it.instance("a window leaves out a session that was only renamed inside it", () =>
     Effect.gen(function* () {
       const session = yield* Session.Service
