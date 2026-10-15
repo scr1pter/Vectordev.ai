@@ -99,6 +99,16 @@ it.instance(
   },
 )
 
+test("Codium's own default is the first model its catalog lists, not the last by ID", () => {
+  // The launch lineup in the order vectordev.ai lists it: DeepSeek V4.1 Flash is the recommended default.
+  const launch = ["deepseek/deepseek-v4.1-flash", "xiaomi/mimo-v2.6-flash", "anthropic/claude-haiku-5.5"].map(
+    (model) => ({ ...codiumModel, id: model, name: model }),
+  )
+  expect(Provider.defaultModelIDs({ [id]: Provider.fromModelPlans(launch) })).toEqual({
+    [id]: "deepseek/deepseek-v4.1-flash",
+  })
+})
+
 it.instance("a Codium turn streams text and a tool call through the gateway and records the billed cost", () =>
   Effect.gen(function* () {
     const provider = yield* Provider.Service

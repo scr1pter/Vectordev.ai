@@ -1092,9 +1092,15 @@ export function defaultModelIDs<
 >(providers: Record<string, T>) {
   return Object.fromEntries(
     Object.entries(providers).flatMap(([id, item]) => {
-      const model = sort(
-        Object.values(item.models).filter((model) => id !== "openrouter" || model.freeModel?.source === "openrouter"),
-      )[0]
+      // Vector Codium lists its models in the catalog's order, led by the model it recommends.
+      const model =
+        id === ModelPlans.PROVIDER_ID
+          ? Object.values(item.models)[0]
+          : sort(
+              Object.values(item.models).filter(
+                (model) => id !== "openrouter" || model.freeModel?.source === "openrouter",
+              ),
+            )[0]
       return model ? [[id, model.id]] : []
     }),
   )
