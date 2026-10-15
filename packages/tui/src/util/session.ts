@@ -8,7 +8,9 @@ export function isInternalSession(session: Pick<Session, "internal" | "title"> |
   return Boolean(
     session?.internal ||
       session?.title.startsWith("Vector Tool · ") ||
-      session?.title.startsWith("Vectorscope review · "),
+      session?.title.startsWith("Vectorscope review · ") ||
+      // Desktop 1.99.8 and `vector review` titled reviewers this way before Vectorscope had its name.
+      /^Vector review · .+ · (review|security|verify)$/.test(session?.title ?? ""),
   )
 }
 

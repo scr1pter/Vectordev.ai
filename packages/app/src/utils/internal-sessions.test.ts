@@ -10,10 +10,13 @@ describe("isInternalSession", () => {
   test("recognises helpers from an engine that predates the marker by their titles", () => {
     expect(isInternalSession({ title: "Vector Tool · Browser Agent Planner" })).toBe(true)
     expect(isInternalSession({ title: "Vectorscope review · uncommitted changes · review" })).toBe(true)
+    expect(isInternalSession({ title: "Vector review · #12 · review" })).toBe(true)
+    expect(isInternalSession({ title: "Vector review · 1a2b3c4 · verify" })).toBe(true)
   })
 
   test("leaves the user's own sessions alone", () => {
     expect(isInternalSession({ title: "Review the Vectorscope panel" })).toBe(false)
+    expect(isInternalSession({ title: "Vector review · notes for the launch" })).toBe(false)
     expect(isInternalSession({ title: "New session - 2026-10-10T10:00:00.000Z" })).toBe(false)
     expect(isInternalSession(undefined)).toBe(false)
   })
