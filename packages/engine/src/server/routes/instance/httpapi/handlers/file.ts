@@ -11,6 +11,7 @@ import path from "path"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { InvalidRequestError } from "../errors"
+import { realpath } from "@/tool/external-directory"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
   Effect.gen(function* () {
@@ -128,7 +129,9 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
     const write = Effect.fn("FileHttpApi.write")(function* (ctx: { payload: { path: string; content: string } }) {
       const directory = (yield* InstanceState.context).directory
       const target = path.resolve(directory, ctx.payload.path)
-      if (!FSUtil.contains(directory, target)) {
+      // Decided on where the write really lands: a link inside the workspace passes a textual check while the
+      // write goes through it to the rest of the disk.
+      if (!FSUtil.contains(directory, target) || !FSUtil.contains(realpath(directory), realpath(target))) {
         return yield* new InvalidRequestError({ message: "Path escapes the workspace.", field: "path" })
       }
       const fs = yield* FSUtil.Service

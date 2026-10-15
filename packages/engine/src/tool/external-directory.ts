@@ -79,7 +79,8 @@ export async function assertExternalDirectory(ctx: Tool.Context, target?: string
   return Effect.runPromise(assertExternalDirectoryEffect(ctx, target, options))
 }
 
-function realpath(target: string): string {
+/** Where a path really lands, following links in it and in its parents, even when the file does not exist yet. */
+export function realpath(target: string): string {
   const resolved = FSUtil.resolve(target)
   const link = lstatSync(resolved, { throwIfNoEntry: false })
   // A dangling symlink cannot be resolved by realpath, but writing through it
