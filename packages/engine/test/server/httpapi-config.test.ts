@@ -61,6 +61,45 @@ describe("config HttpApi", () => {
   )
 
   it.live(
+    "reports the user's language servers held back in an untrusted project without its own config",
+    Effect.gen(function* () {
+      const plain = yield* tmpdirEffect({})
+      const tmp = yield* tmpdirEffect({})
+      const request = (directory: string, route: string, init: RequestInit = {}) =>
+        Effect.promise(async () => {
+          const response = await app().request(route, {
+            ...init,
+            headers: { "content-type": "application/json", "x-vector-directory": directory },
+          })
+          return { status: response.status, body: await response.json() }
+        })
+      // Nothing is held back without project config or user tooling, so no notice.
+      expect((yield* request(plain.path, "/config/trust")).body).toMatchObject({ trusted: false, ignored: false })
+
+      const original = process.env.VECTOR_CONFIG_CONTENT
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (original === undefined) delete process.env.VECTOR_CONFIG_CONTENT
+          else process.env.VECTOR_CONFIG_CONTENT = original
+        }),
+      )
+      process.env.VECTOR_CONFIG_CONTENT = JSON.stringify({ lsp: true })
+      const notice = yield* waitGlobalBusEvent({
+        message: "timed out waiting for the held-back notice",
+        predicate: (event) => event.payload.type === "tui.toast.show",
+      }).pipe(Effect.forkScoped({ startImmediately: true }))
+
+      expect((yield* request(tmp.path, "/config/trust")).body).toMatchObject({ trusted: false, ignored: true })
+      expect((yield* Fiber.join(notice)).payload.properties.message).toContain("language servers")
+
+      const disposed = yield* waitDisposed(tmp.path).pipe(Effect.forkScoped({ startImmediately: true }))
+      const approved = yield* request(tmp.path, "/config/trust", { method: "POST" })
+      expect(approved).toMatchObject({ status: 200, body: { trusted: true, ignored: false } })
+      yield* Fiber.join(disposed)
+    }),
+  )
+
+  it.live(
     "serves config update through the default server app",
     Effect.gen(function* () {
       const tmp = yield* tmpdirEffect({ trusted: true, config: { formatter: false, lsp: false } })

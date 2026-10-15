@@ -228,6 +228,11 @@ const layer = Layer.effect(
 
         if (!cfg.lsp) {
           yield* Effect.logInfo("all LSPs are disabled")
+        } else if (!(yield* config.trust()).trusted) {
+          // Language servers run the project's own code: binaries under its node_modules/.bin, its tsserver and
+          // ESLint config, its virtualenv's Python, build scripts. So even a user-level `lsp` setting starts them
+          // only once the project is trusted.
+          yield* Effect.logWarning("LSP servers stay off until the workspace is trusted")
         } else {
           for (const server of Object.values(LSPServer)) {
             servers[server.id] = server

@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import type { Stream as NodeStream } from "node:stream"
@@ -21,6 +22,7 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js"
 import { Config } from "@/config/config"
+import { Global } from "@vectordevai/core/global"
 import { ConfigMCPV1 } from "@vectordevai/core/v1/config/mcp"
 import { NamedError } from "@vectordevai/core/util/error"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
@@ -321,6 +323,7 @@ const layer = Layer.effect(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const auth = yield* McpAuth.Service
     const events = yield* EventV2Bridge.Service
+    const cfgSvc = yield* Config.Service
 
     type Transport = StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport
 
@@ -460,7 +463,16 @@ const layer = Layer.effect(
       const [cmd, ...args] = mcp.command.map((value) =>
         resolveMcpValue(value, `MCP command for "${key}"`, process.env, secrets),
       )
-      const baseDir = yield* InstanceState.directory
+      // Inside an untrusted project the project's own files would take a server from the user's config over: its
+      // node_modules and .npmrc steer npx, and python -m imports from the working directory. So until the project is
+      // trusted the server starts in an empty directory of Vector's instead.
+      const baseDir = (yield* cfgSvc.trust()).trusted
+        ? yield* InstanceState.directory
+        : yield* Effect.promise(async () => {
+            const directory = path.join(Global.Path.state, "mcp", "untrusted-workspace")
+            await mkdir(directory, { recursive: true })
+            return directory
+          })
       const cwd = mcp.cwd ? path.resolve(baseDir, mcp.cwd) : baseDir
       const environment = mcp.environment
         ? Object.fromEntries(
@@ -537,8 +549,6 @@ const layer = Layer.effect(
         })
       }),
     )
-    const cfgSvc = yield* Config.Service
-
     const descendants = Effect.fnUntraced(
       function* (pid: number) {
         if (process.platform === "win32") return [] as number[]

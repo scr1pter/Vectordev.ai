@@ -128,6 +128,17 @@ const layer = Layer.effect(
           }
         }
 
+        // Formatters load the project's own code (a prettier.config.js and its plugins, mix.exs, a .rubocop.yml
+        // `require`), so even a user-level `formatter` setting runs them only once the project is trusted.
+        if (!(yield* config.trust()).trusted) {
+          yield* Effect.logWarning("formatters stay off until the workspace is trusted")
+          return {
+            formatters,
+            isEnabled,
+            formatFile,
+          }
+        }
+
         for (const item of Object.values(Formatter)) {
           formatters[item.name] = item
         }

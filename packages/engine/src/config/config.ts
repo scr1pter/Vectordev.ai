@@ -346,7 +346,10 @@ type State = {
 }
 
 export type TrustStatus = WorkspaceTrust.Status & {
-  /** The project has config or .vector content that is being ignored because it is not trusted. */
+  /**
+   * The project is not trusted and that holds something back: its config, .vector or skills content, or the
+   * language servers, formatters and local MCP servers the user enabled (see startsInWorkspace).
+   */
   ignored: boolean
 }
 
@@ -393,6 +396,20 @@ export function integrationStore(root: string) {
     Global.Path.state,
     "integrations",
     `${createHash("sha256").update(path.resolve(root)).digest("hex").slice(0, 32)}.json`,
+  )
+}
+
+/**
+ * Whether the user's own config starts something in the project that the project's files can take over: language
+ * servers, formatters or a local MCP server. Until the project is trusted the first two stay off and MCP servers start
+ * outside it.
+ */
+function startsInWorkspace(config: Info) {
+  return (
+    Boolean(config.lsp || config.formatter) ||
+    Object.values(config.mcp ?? {}).some(
+      (entry) => "type" in entry && entry.type === "local" && entry.enabled !== false,
+    )
   )
 }
 
@@ -645,20 +662,6 @@ const layer = Layer.effect(
         if (!trusted && !Flag.VECTOR_PURE && WorkspaceTrust.hasInputs(trustSnapshot)) {
           yield* Effect.logWarning("ignoring project config until the workspace is trusted", {
             workspace: trustWorkspace,
-          })
-          // Without this the project's agents, commands and default model would vanish with no explanation.
-          GlobalBus.emit("event", {
-            directory: "global",
-            payload: {
-              type: TuiEvent.ToastShow.type,
-              properties: {
-                title: "Project settings ignored",
-                message:
-                  "Vector is not loading this project's vector.json or .vector settings until you trust it. Use /trust in the TUI, Trust project in the app, or run `vector trust approve` in the project.",
-                variant: "warning",
-                duration: 15_000,
-              },
-            },
           })
         }
         const trustedSnapshot = trusted
@@ -970,6 +973,24 @@ const layer = Layer.effect(
           deps.push(yield* dependencies.prepare().pipe(Effect.forkDetach))
         }
 
+        if (!trusted && !Flag.VECTOR_PURE && (WorkspaceTrust.hasInputs(trustSnapshot) || startsInWorkspace(result))) {
+          // Without this the project's agents, commands and default model, or the user's language servers,
+          // formatters and MCP servers, would vanish or change with no explanation.
+          GlobalBus.emit("event", {
+            directory: "global",
+            payload: {
+              type: TuiEvent.ToastShow.type,
+              properties: {
+                title: "Project settings ignored",
+                message:
+                  "Vector is not loading this project's vector.json or .vector settings until you trust it, and keeps your language servers, formatters and MCP servers out of it. Use /trust in the TUI, Trust project in the app, or run `vector trust approve` in the project.",
+                variant: "warning",
+                duration: 15_000,
+              },
+            },
+          })
+        }
+
         return {
           config: result,
           directories,
@@ -1030,7 +1051,10 @@ const layer = Layer.effect(
           const status = await WorkspaceTrust.status(Global.Path.state, s.trust)
           return {
             ...status,
-            ignored: !status.trusted && !Flag.VECTOR_PURE && WorkspaceTrust.hasInputs(s.trust),
+            ignored:
+              !status.trusted &&
+              !Flag.VECTOR_PURE &&
+              (WorkspaceTrust.hasInputs(s.trust) || startsInWorkspace(s.config)),
           }
         }),
       )
