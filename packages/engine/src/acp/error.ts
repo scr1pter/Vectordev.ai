@@ -1,5 +1,6 @@
 import { RequestError } from "@agentclientprotocol/sdk"
 import { Schema } from "effect"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 
 export class SessionNotFoundError extends Schema.TaggedErrorClass<SessionNotFoundError>()("ACPSessionNotFoundError", {
   sessionId: Schema.String,
@@ -78,7 +79,9 @@ export function toRequestError(error: Error) {
     case "ACPAuthRequiredError":
       return RequestError.authRequired(
         { providerId: error.providerId },
-        "Connect a provider with vector auth login, or sign in to Vector to use available free models.",
+        error.providerId === ModelPlanStatus.PROVIDER_ID
+          ? "Vector Codium is available, but Vector never chooses it for you. Set model to vector-plan/<model> in your Vector config to use your Codium credits, or connect another provider."
+          : "Connect a provider with vector auth login, or sign in to Vector to use available free models.",
       )
     case "ACPUnknownAuthMethodError":
       return RequestError.invalidParams({ methodId: error.methodId }, `unknown auth method: ${error.methodId}`)

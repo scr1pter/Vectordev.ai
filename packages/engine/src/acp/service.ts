@@ -30,6 +30,7 @@ import {
   type SetSessionModeResponse,
 } from "@agentclientprotocol/sdk"
 import { InstallationVersion } from "@vectordevai/core/installation/version"
+import { ModelPlanStatus } from "@vectordevai/core/model-plan-status"
 import { AppNodeBuilder } from "@vectordevai/core/effect/app-node-builder"
 import type { AssistantMessage, Message, VectorClient, SessionMessageResponse } from "@vectordevai/sdk/v2"
 import { Context, Effect, Layer, ManagedRuntime } from "effect"
@@ -798,7 +799,8 @@ function defaultModelFromConfig(
     return configured
 
   // First-session startup resolves configured or sorted available models without reading historical sessions.
-  const connected = Object.values(providers)
+  // Vector Codium spends the account's credits, so it is never chosen automatically.
+  const connected = Object.values(providers).filter((provider) => provider.id !== ModelPlanStatus.PROVIDER_ID)
   const preferred = connected.some((provider) => provider.id !== "vector")
     ? connected.filter((provider) => provider.id !== "vector")
     : connected
@@ -814,8 +816,11 @@ const selectDefaultModel = Effect.fn("ACP.selectDefaultModel")(function* (snapsh
   ).find((model) => model.freeModel?.source === "openrouter")
   if (free) return { providerID: free.providerID, modelID: free.id }
   if (snapshot.providers[ProviderV2.ID.openrouter]) return yield* new ACPError.AuthRequiredError({})
-  const model = snapshot.modelOptions[0]
+  const model = snapshot.modelOptions.find((option) => option.providerID !== ModelPlanStatus.PROVIDER_ID)
   if (model) return { providerID: model.providerID, modelID: model.modelID }
+  // Codium alone is listed: it runs only on a model the person names, never as the automatic choice.
+  if (snapshot.providers[ProviderV2.ID.make(ModelPlanStatus.PROVIDER_ID)])
+    return yield* new ACPError.AuthRequiredError({ providerId: ModelPlanStatus.PROVIDER_ID })
   return yield* new ACPError.AuthRequiredError({})
 })
 
