@@ -63,6 +63,71 @@ describe("layer node", () => {
     expect(await Effect.runPromise(program)).toEqual(["first", "second"])
   })
 
+  test("builds a node shared by many dependents once", async () => {
+    // Each rung depends on the two below it, so the graph has thousands of paths to the bottom rung.
+    const builds = new Map<string, number>()
+    const rungs = Array.from({ length: 20 }, (_, index) => `rung-${index}`).reduce(
+      (list: LayerNode.Node<never>[], name) => {
+        // Layer.fromBuild is not memoized, so it counts every time the graph builds this rung.
+        const layer = Layer.fromBuild(() =>
+          Effect.sync(() => {
+            builds.set(name, (builds.get(name) ?? 0) + 1)
+            return Context.empty()
+          }),
+        )
+        const deps = list.length < 2 ? ([] as const) : ([list.at(-1)!, list.at(-2)!] as const)
+        return [...list, LayerNode.make({ name, layer, deps })]
+      },
+      [],
+    )
+
+    await Effect.runPromise(Effect.void.pipe(Effect.provide(build(LayerNode.group([rungs.at(-1)!])))))
+
+    expect([...builds.values()]).toEqual(Array.from({ length: 20 }, () => 1))
+  })
+
+  test("keeps fresh copies of a graph separate and releases shared nodes once", async () => {
+    const events: string[] = []
+    const counted = make({
+      service: Value,
+      layer: Layer.effect(
+        Value,
+        Effect.acquireRelease(
+          Effect.sync(() => {
+            events.push("acquire")
+            return Value.of({ value: "counted" })
+          }),
+          () => Effect.sync(() => events.push("release")),
+        ),
+      ),
+      deps: [],
+    })
+    const left = make({
+      service: Left,
+      layer: Layer.effect(
+        Left,
+        Effect.map(Value, (item) => Left.of({ value: item.value })),
+      ),
+      deps: [counted],
+    })
+    const right = make({
+      service: Right,
+      layer: Layer.effect(
+        Right,
+        Effect.map(Value, (item) => Right.of({ value: item.value })),
+      ),
+      deps: [counted],
+    })
+    const compiled = build(LayerNode.group([left, right]))
+
+    await Effect.runPromise(Effect.void.pipe(Effect.provide(Layer.mergeAll(compiled, compiled))))
+    expect(events).toEqual(["acquire", "release"])
+
+    events.length = 0
+    await Effect.runPromise(Effect.void.pipe(Effect.provide(Layer.mergeAll(Layer.fresh(compiled), Layer.fresh(compiled)))))
+    expect(events).toEqual(["acquire", "acquire", "release", "release"])
+  })
+
   test("requires unbound nodes to be replaced before compilation", async () => {
     const unbound = LayerNode.unbound(Value, tags.values.app)
     const greeting = make({ service: Greeting, layer: greetingLayer, deps: [unbound] })
