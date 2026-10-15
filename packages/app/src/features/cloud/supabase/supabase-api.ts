@@ -167,6 +167,10 @@ export function supabaseClient(
         input,
       ),
     migrationStatus: () => run<MigrationState>("migration_status"),
+    // Writes supabase/migrations/<timestamp>_<name>.sql (and its down file) in
+    // the repository; applying it is a separate, reviewed step.
+    createMigration: (input: { name: string; sql: string; downSql?: string }) =>
+      run<{ file: string; downFile?: string; nextStep: string }>("create_migration", input),
     planMigrations: () => run<MigrationState & MigrationReview>("plan_migrations"),
     applyMigrations: (approvalID: string) => run<MigrationState>("apply_migrations", { approvalID }),
     rollback: (name: string) => run<{ rolledBack: string; nextStep: string }>("rollback_migration", { name }),

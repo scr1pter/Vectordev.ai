@@ -12,6 +12,14 @@ import { fetchCloudLogs } from "./cloud-logs"
 import { applyCloudMigrations } from "./cloud-migrations"
 import { recordPublishAttempt } from "./cloud-overview"
 import { createCloudDatabase } from "./cloud-provision"
+import {
+  describeReleaseSettings,
+  isReleaseCommand,
+  parseReleaseFields,
+  RELEASE_COMMANDS,
+  runReleaseCommand,
+  type ReleaseSettingsFields,
+} from "./cloud-release-commands"
 import { resolveCloudScope, type CloudScope, type CloudWorkspace } from "./cloud-scope"
 import { describeSupabaseCommand, isSupabaseCommand, runSupabaseCommand } from "./cloud-supabase"
 import type { CloudFetch } from "./cloud-supabase-api"
@@ -47,6 +55,7 @@ const COMMANDS = [
   "apply_migrations",
   "describe",
   ...VERCEL_COMMANDS,
+  ...RELEASE_COMMANDS,
 ] as const
 
 // The actions that change something in the user's cloud accounts or project.
@@ -59,6 +68,7 @@ const DESCRIBABLE = [
   "prepare_database",
   "prepare_auth",
   "apply_migrations",
+  "set_release_settings",
   ...VERCEL_DESCRIBABLE,
 ] as const
 
@@ -66,6 +76,7 @@ type CloudCommand = (typeof COMMANDS)[number]
 type CloudAction = (typeof DESCRIBABLE)[number]
 
 type CloudCommandInput = VercelCommandFields & {
+  release: ReleaseSettingsFields
   command: CloudCommand
   action?: CloudAction
   projectPath: string
@@ -219,6 +230,7 @@ function parseCloudCommandInput(value: unknown): CloudCommandInput {
   if (source !== undefined && source !== "build" && source !== "runtime") throw new Error("Invalid log source.")
   return {
     ...parseVercelFields(value),
+    release: parseReleaseFields(value),
     approvalID,
     source,
     command: known,
@@ -385,11 +397,15 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
   const scope = await resolveCloudScope(request.projectPath, (await options.workspaces?.()) ?? [])
   const input = { ...request, projectPath: scope.projectPath }
   if (input.command === "describe") {
-    const described =
-      input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)
-        ? await describeVercelAction(input, scope, options.vercel)
-        : await describeCloudAction(input, scope, options.request ?? options.vercel?.request)
-    return described
+    if (input.action === "set_release_settings") {
+      return describeReleaseSettings({ ...input.release, ...input, directory: scope.directory })
+    }
+    return input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)
+      ? describeVercelAction(input, scope, options.vercel)
+      : describeCloudAction(input, scope, options.request ?? options.vercel?.request)
+  }
+  if (isReleaseCommand(input.command)) {
+    return runReleaseCommand({ ...input.release, ...input, directory: scope.directory })
   }
   if (
     VERCEL_COMMANDS.some((item) => item === input.command) ||

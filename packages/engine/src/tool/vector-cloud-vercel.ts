@@ -58,23 +58,26 @@ export const VercelParameters = {
   }),
   framework: Schema.optional(Schema.String).annotate({
     description:
-      "For create_project and update_project_settings: Vercel's framework identifier, for example nextjs, vite, astro, sveltekit. An empty string returns it to automatic detection.",
+      "For create_project and update_project_settings: Vercel's framework identifier, for example nextjs, vite, astro, sveltekit. An empty string returns it to automatic detection. For set_release_settings: the framework name Vector shows.",
   }),
   rootDirectory: Schema.optional(Schema.String).annotate({
     description: "For create_project and update_project_settings: the app's directory inside the repository.",
   }),
   buildCommand: Schema.optional(Schema.String).annotate({
-    description: "For update_project_settings. An empty string returns it to automatic detection.",
+    description:
+      "For update_project_settings (Vercel's build; an empty string returns it to automatic detection) and set_release_settings (Vector's pre-publish build; an empty string runs none).",
   }),
   outputDirectory: Schema.optional(Schema.String).annotate({
-    description: "For update_project_settings. An empty string returns it to automatic detection.",
+    description:
+      "For update_project_settings (an empty string returns it to automatic detection) and set_release_settings (the folder Vector checks and serves).",
   }),
   installCommand: Schema.optional(Schema.String).annotate({
-    description: "For update_project_settings. An empty string returns it to automatic detection.",
+    description:
+      "For update_project_settings (an empty string returns it to automatic detection) and set_release_settings (an empty string installs nothing).",
   }),
   nodeVersion: Schema.optional(Schema.String).annotate({
     description:
-      "For update_project_settings: 24.x or 22.x. Vercel no longer builds new deployments with 20.x or 18.x.",
+      "For update_project_settings: 24.x or 22.x. Vercel no longer builds new deployments with 20.x or 18.x. For set_release_settings: the Node version Vector builds with locally.",
   }),
   key: Schema.optional(Schema.String).annotate({ description: "For set_env and remove_env: the variable name." }),
   value: Schema.optional(Schema.String).annotate({

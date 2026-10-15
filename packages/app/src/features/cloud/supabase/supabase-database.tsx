@@ -30,6 +30,7 @@ export function SupabaseDatabase(
   const [sql, setSql] = createSignal("select * from information_schema.tables where table_schema = 'public' limit 50;")
   const [result, setResult] = createSignal<SqlResult>()
   const [pendingWrite, setPendingWrite] = createSignal("")
+  const [draft, setDraft] = createStore({ open: false, name: "", sql: "", downSql: "" })
 
   onCleanup(props.client.subscribe((event) => setProgress((items) => [...items, event].slice(-12))))
 
@@ -176,6 +177,22 @@ export function SupabaseDatabase(
           ? { tone: "error", text: `${outcome.failed.name} failed: ${outcome.failed.error}` }
           : { tone: "success", text: `Applied ${outcome?.applied.length ?? 0} migration(s).` },
       )
+      await loadMigrations()
+    })
+
+  const createMigration = () =>
+    act("new-migration", async () => {
+      const report = await props.client.createMigration({
+        name: draft.name.trim(),
+        sql: draft.sql,
+        downSql: draft.downSql.trim() || undefined,
+      })
+      if (failed(props.notice, report)) return
+      setDraft({ open: false, name: "", sql: "", downSql: "" })
+      props.notice({
+        tone: "success",
+        text: `Wrote ${report.file}${report.downFile ? ` and ${report.downFile}` : ""}. Review pending SQL to apply it.`,
+      })
       await loadMigrations()
     })
 
@@ -449,7 +466,7 @@ export function SupabaseDatabase(
               detail={
                 migrations()?.migrations
                   ? `${migrations()?.migrations?.directory} · ${migrations()?.migrations?.alreadyApplied.length} applied · ${migrations()?.migrations?.pending.length} pending`
-                  : "Write .sql files in supabase/migrations (or ask the agent to), then apply them here."
+                  : "Write a migration here, or as a .sql file in supabase/migrations, then apply it here."
               }
             >
               <button
@@ -459,6 +476,14 @@ export function SupabaseDatabase(
                 onClick={() => void loadMigrations()}
               >
                 Refresh
+              </button>
+              <button
+                class="cloud-button"
+                type="button"
+                disabled={Boolean(busy())}
+                onClick={() => setDraft("open", !draft.open)}
+              >
+                {draft.open ? "Close" : "New migration"}
               </button>
               <Show when={migrations()?.migrations?.pending.length}>
                 <button
@@ -485,6 +510,57 @@ export function SupabaseDatabase(
                 )}
               </Show>
             </PanelHead>
+            <Show when={draft.open}>
+              <form
+                class="sb-section"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void createMigration()
+                }}
+              >
+                <label class="cloud-token-field">
+                  <span>Name</span>
+                  <input
+                    class="cloud-input"
+                    placeholder="add_profiles"
+                    spellcheck={false}
+                    value={draft.name}
+                    onInput={(event) => setDraft("name", event.currentTarget.value)}
+                  />
+                </label>
+                <label class="cloud-token-field mt-3">
+                  <span>SQL</span>
+                  <textarea
+                    class="sb-textarea"
+                    spellcheck={false}
+                    value={draft.sql}
+                    onInput={(event) => setDraft("sql", event.currentTarget.value)}
+                  />
+                </label>
+                <label class="cloud-token-field mt-3">
+                  <span>Down SQL (undoes it; without it Vector cannot roll it back)</span>
+                  <textarea
+                    class="sb-textarea"
+                    spellcheck={false}
+                    value={draft.downSql}
+                    onInput={(event) => setDraft("downSql", event.currentTarget.value)}
+                  />
+                </label>
+                <div class="sb-actions mt-3">
+                  <button
+                    class="cloud-button"
+                    data-variant="primary"
+                    type="submit"
+                    disabled={Boolean(busy()) || !draft.name.trim() || !draft.sql.trim()}
+                  >
+                    {busy() === "new-migration" ? "Writing…" : "Write migration file"}
+                  </button>
+                  <span class="cloud-muted text-[12px]">
+                    Vector writes the file into this repository; nothing reaches the database until you apply it.
+                  </span>
+                </div>
+              </form>
+            </Show>
             <Show when={migrationReview.plan}>
               {(plan) => (
                 <div class="sb-section">

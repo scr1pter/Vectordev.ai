@@ -103,7 +103,9 @@ export const prerender = true
   <p>
     The agent's cloud tool can inspect connections, detect build settings, prepare a linked database or authentication,
     and run the same Vercel and Supabase controls: Vercel projects and their settings, deployments, logs, promotion
-    and rollback, variables and domains, and everything listed for Supabase above. It asks before it publishes, moves
+    and rollback, variables and domains, everything listed for Supabase above, and Vector's own release checks: it can
+    probe live releases, re-run a release's checks, and change the build commands and which checks are required before
+    production. It asks before it publishes, moves
     production, changes a database, writes a host's environment or changes a Vercel project or domain, and the prompt
     names the provider, project and environment and shows any SQL that would run. It asks every time: auto-accepting
     permissions, a permission rule that allows it and an earlier approval never skip these prompts, and none of them

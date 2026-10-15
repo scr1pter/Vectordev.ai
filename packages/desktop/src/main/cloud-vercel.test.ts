@@ -37,9 +37,8 @@ mock.module("./store", () => ({
 }))
 
 const { encryptCloudCredential } = await import("./cloud-credential-vault")
-const { cloudProjectScopeKey, listDeployments, listEnv, recordDeployment, setEnv, updateDeployment } = await import(
-  "./cloud-console"
-)
+const { cloudProjectScopeKey, getBuildSettings, listDeployments, listEnv, recordDeployment, setEnv, updateDeployment } =
+  await import("./cloud-console")
 const { disconnectCloudProvider, getCloudProviderProjectLink, getCloudProviderRuntimeAuth } = await import(
   "./cloud-connections"
 )
@@ -1188,6 +1187,71 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     expect(set).toMatchObject({ ok: true, text: "Created STRIPE_SECRET on shop for production." })
     expect(api.state.env.find((item) => item.key === "STRIPE_SECRET")?.value).toBe("sk_live_stored_fixture")
     expect(JSON.stringify([described, set])).not.toContain("sk_live_stored_fixture")
+  })
+
+  test("checks health, re-runs release checks and changes the required checks from the agent", async () => {
+    seed()
+    const site = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("ok") })
+    try {
+      recordDeployment({
+        projectPath: project,
+        slug: "shop",
+        url: site.url.origin,
+        name: "shop",
+        target: "vercel",
+        environment: "preview",
+        providerDeploymentId: "dpl_site",
+        checks: [],
+      })
+      const command = await bridge()
+      // The prompt names exactly which gate stops blocking production.
+      const described = await command({
+        command: "describe",
+        action: "set_release_settings",
+        requiredChecks: { browser: false },
+        testCommand: "bun test",
+      })
+      expect(described.scope.summary).toBe(
+        "Change the release settings Vector uses before it publishes: test command bun test; Browser render no longer blocks a production release.",
+      )
+      expect(described).toMatchObject({
+        ok: true,
+        noop: false,
+        scope: { provider: "Vector Cloud", project: "shop", environment: "release checks" },
+      })
+      const saved = await command({
+        command: "set_release_settings",
+        requiredChecks: { browser: false },
+        testCommand: "bun test",
+      })
+      expect(saved.text).toContain("Required before production: Secret scan, Health probe.")
+      expect(getBuildSettings(project)).toMatchObject({
+        testCommand: "bun test",
+        requiredChecks: { test: false, secrets: true, health: true, browser: false },
+      })
+      expect(
+        await command({ command: "describe", action: "set_release_settings", testCommand: "bun test" }),
+      ).toMatchObject({ ok: true, noop: true })
+
+      const health = await command({ command: "check_health" })
+      expect(health).toMatchObject({ ok: true, text: expect.stringContaining("(dpl_site) · ready · HTTP 200") })
+      expect(await command({ command: "check_health", deploymentId: "dpl_site" })).toMatchObject({
+        ok: true,
+        url: `${site.url.origin}/`,
+        text: expect.stringContaining("ready · HTTP 200"),
+      })
+      const rerun = await command({ command: "rerun_checks", deploymentId: "dpl_site" })
+      expect(rerun.text).toContain("passed · Health check / (required): HTTP 200")
+      expect(rerun.text).toContain("skipped · Browser smoke test")
+      expect(rerun.text).toContain("No required check failed.")
+      expect(await command({ command: "rerun_checks", deploymentId: "dpl_live" })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("Vector did not publish dpl_live"),
+      })
+      expect(await command({ command: "rerun_checks" })).toMatchObject({ ok: false })
+    } finally {
+      await site.stop(true)
+    }
   })
 
   test("sets a variable, manages domains and creates a project from the agent", async () => {

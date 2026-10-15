@@ -29,6 +29,9 @@ const Action = Schema.Literals([
   "list_deployments",
   "logs",
   "apply_migrations",
+  "check_health",
+  "rerun_checks",
+  "set_release_settings",
   ...VERCEL_ACTIONS,
   "supabase_projects",
   "link_database",
@@ -130,6 +133,26 @@ export const Parameters = Schema.Struct({
       "For create_database, create a new Supabase project even though this project already has a database connected. Defaults to false.",
   }),
   ...VercelParameters,
+  packageManager: Schema.optional(Schema.Literals(["bun", "pnpm", "yarn", "npm", "static"])).annotate({
+    description: "For set_release_settings: the package manager Vector installs and builds with.",
+  }),
+  testCommand: Schema.optional(Schema.String).annotate({
+    description: "For set_release_settings: the test command Vector runs before it publishes. An empty string runs none.",
+  }),
+  healthPath: Schema.optional(Schema.String).annotate({
+    description: "For set_release_settings: the path Vector's health probe opens on each release, for example /api/health.",
+  }),
+  requiredChecks: Schema.optional(
+    Schema.Struct({
+      test: Schema.optional(Schema.Boolean),
+      secrets: Schema.optional(Schema.Boolean),
+      health: Schema.optional(Schema.Boolean),
+      browser: Schema.optional(Schema.Boolean),
+    }),
+  ).annotate({
+    description:
+      "For set_release_settings: which checks must pass before a release can reach production. Name only the ones to change; turn one off only when the user asks.",
+  }),
   projectRef: Schema.optional(Schema.String).annotate({
     description: "For link_database, the reference of a Supabase project from supabase_projects.",
   }),
@@ -326,6 +349,8 @@ function bridgeRequest(input: Record<string, unknown>, signal: AbortSignal) {
 function toolTitle(action: Action) {
   if (isVercelAction(action)) return "Vercel"
   if (SUPABASE_ACTIONS.has(action)) return "Supabase"
+  if (action === "check_health" || action === "rerun_checks" || action === "set_release_settings")
+    return "Release checks"
   if (action === "publish") return "Publish with Vector Cloud"
   if (action === "logs") return "Read deployment logs"
   if (action === "apply_migrations") return "Apply database migrations"
@@ -405,7 +430,11 @@ function formatPublish(report: CloudReport) {
 }
 
 function formatReport(action: Action, report: CloudReport) {
-  if (report.text && (isVercelAction(action) || action === "list_deployments" || action === "sync_environment")) {
+  if (
+    report.text &&
+    (isVercelAction(action) ||
+      ["list_deployments", "sync_environment", "check_health", "rerun_checks", "set_release_settings"].includes(action))
+  ) {
     return lines(report.text, report.nextStep)
   }
   if (action === "publish") return formatPublish(report)
@@ -623,6 +652,7 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
       "Supabase control for the linked project: supabase_projects lists organizations and projects; link_database and unlink_database; pause_database and restore_database; write_database_url writes a server-only DATABASE_URL, only when the user wants one; rotate_database_password resets the password and can rewrite DATABASE_URL and push it to Vercel. Database: migration_status; create_migration writes a timestamped file (pass downSql so it can be rolled back); apply_migrations; rollback_migration undoes only the latest applied migration and only with its down migration; run_sql runs read-only unless allowWrite, and hides cells in columns named like passwords, tokens or secrets. Auth: auth_config; update_auth for the site URL, redirect URLs (addVercelUrls adds the linked Vercel production and preview addresses), email sign-in and Google, GitHub or Apple sign-in; auth_users, invite_user, delete_user. Storage: create_bucket, update_bucket, delete_bucket. Edge Functions: deploy_function from supabase/functions/<name>, delete_function, function_secrets (names only), set_function_secrets from names of stored environment variables, delete_function_secrets. supabase_logs reads api, postgres, auth, storage or functions logs, so check them when a Supabase-backed feature fails. security_check runs Supabase's security advisors and a scan for leaked server keys; production only moves to a release while it passes, as long as Secret scan is a required release check, which it is by default.",
       "Publishing: publish deploys this project to the Vercel project linked to it. It publishes a preview by default and leaves production unchanged; pass production: true only when the user asked for a production release, and say which Vercel project before calling. Vector then builds production, runs the release checks and promotes it only if they pass. Report the URL and the check results. When a publish fails, the result lists the failed checks with the end of their output: fix the cause in the project and publish a preview again. Do not tell the user to reconnect an account unless the result says setup is needed. When a live production release is broken, first offer rollback (with no deploymentId it returns production to the last deployment that served it and passed Vector's checks), then read its logs with the logs action before guessing at a cause or asking the user to paste an error.",
       VERCEL_GUIDANCE,
+      "Vector's release checks: status shows the saved build settings and which checks are required before production. check_health probes every release Vector published (or the one deploymentId names) and reports its HTTP status and response time; rerun_checks re-runs Vector's release checks on one release; set_release_settings changes the install, test and build commands, output directory, health path and the required checks (requiredChecks), and asks first.",
       "Secrets: results carry names, never values. Never ask the user to paste a token, key or password into the chat. Name what is needed and where to add it: Vector Cloud > Environment variables for the app's settings (set_env without a value copies the stored one to Vercel), Vector Cloud > Connections for the Vercel and Supabase accounts (the user signs in there; only the user can connect or disconnect an account). OAuth client secrets and function secret values are also entered by the user in Vector Cloud.",
       "Every action that publishes or moves production, creates or changes a database, or writes hosting settings, domains or host variables asks the user first, every time, naming the provider, project and environment. Auto-accept, permission rules and earlier approvals never answer these prompts, so expect one for each such call and do not batch unrelated changes into one. A rejected prompt means nothing changed. Hosting and database usage follow the connected accounts' billing. Never claim a resource was created unless this tool reports it.",
     ].join(" "),
@@ -658,6 +688,10 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
           gitBranch: params.gitBranch,
           envType: params.envType,
           domain: params.domain,
+          packageManager: params.packageManager,
+          testCommand: params.testCommand,
+          healthPath: params.healthPath,
+          requiredChecks: params.requiredChecks,
           ...(supabase ? supabaseFields(params) : {}),
         }
         // Runs the action with what its prompt approved: the id of the exact
@@ -715,17 +749,19 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
           vercelPermission(params.action) ??
           (params.action === "publish"
             ? "vector_cloud_publish"
-            : params.action === "sync_environment"
-              ? "vector_cloud_environment"
-              : params.action === "apply_migrations" && params.dryRun === true
-                ? "vector_cloud_inspect"
-                : params.action === "apply_migrations" ||
-                    params.action === "create_database" ||
-                    params.action === "prepare_database" ||
-                    params.action === "prepare_auth" ||
-                    SUPABASE_CHANGES.has(params.action)
-                  ? "vector_cloud_database"
-                  : undefined)
+            : params.action === "set_release_settings"
+              ? "vector_cloud_hosting"
+              : params.action === "sync_environment"
+                ? "vector_cloud_environment"
+                : params.action === "apply_migrations" && params.dryRun === true
+                  ? "vector_cloud_inspect"
+                  : params.action === "apply_migrations" ||
+                      params.action === "create_database" ||
+                      params.action === "prepare_database" ||
+                      params.action === "prepare_auth" ||
+                      SUPABASE_CHANGES.has(params.action)
+                    ? "vector_cloud_database"
+                    : undefined)
         const described = permission
           ? yield* Effect.promise(() =>
               bridgeRequest({ ...request, command: "describe", action: params.action }, ctx.abort),

@@ -1103,7 +1103,7 @@ export const dict = {
     "Change your Vercel project's environment variables, or pull its development values into .env",
   "settings.permissions.tool.vector_cloud_hosting.title": "Hosting settings",
   "settings.permissions.tool.vector_cloud_hosting.description":
-    "Create, link or configure your Vercel project, its deployment protection and its domains",
+    "Create, link or configure your Vercel project, its deployment protection, its domains and Vector's release checks",
   "settings.permissions.tool.vector_cloud_inspect.title": "Inspect database",
   "settings.permissions.tool.vector_cloud_inspect.description":
     "Read which migrations your Supabase database has applied",

@@ -724,6 +724,62 @@ describe("vector_cloud bridge", () => {
   )
 })
 
+describe("vector_cloud release checks", () => {
+  it.instance("probes and re-runs release checks without asking, and relays the bridge's words", () =>
+    Effect.gen(function* () {
+      for (const params of [
+        { action: "check_health" },
+        { action: "check_health", deploymentId: "dpl_live" },
+        { action: "rerun_checks", deploymentId: "dpl_live" },
+      ] as const) {
+        const requests = yield* bridge({ ok: true, text: "https://shop.vercel.app (dpl_live) · ready · HTTP 200" })
+        const asks = recordAsks()
+        const result = yield* execute(params, asks.ask)
+        expect(asks.permissions).toEqual([])
+        expect(requests).toEqual([
+          expect.objectContaining({
+            command: params.action,
+            ...("deploymentId" in params ? { deploymentId: params.deploymentId } : {}),
+          }),
+        ])
+        expect(result.title).toBe("Release checks")
+        expect(result.output).toBe("https://shop.vercel.app (dpl_live) · ready · HTTP 200")
+      }
+    }),
+  )
+
+  it.instance("asks under hosting settings, every time, before changing the required checks", () =>
+    Effect.gen(function* () {
+      const requests = yield* bridge(
+        { ok: true, text: "Saved Vector's release settings: Secret scan no longer blocks a production release." },
+        200,
+        scope(
+          "Vector Cloud",
+          "shop",
+          "release checks",
+          "Change the release settings Vector uses before it publishes: Secret scan no longer blocks a production release.",
+        ),
+      )
+      const asks = recordAsks()
+      const result = yield* execute(
+        { action: "set_release_settings", requiredChecks: { secrets: false }, testCommand: "bun test" },
+        asks.ask,
+      )
+      expect(asks.permissions).toEqual([
+        expect.objectContaining({
+          permission: "vector_cloud_hosting",
+          patterns: ["vector cloud/shop/release checks/set_release_settings"],
+          always: [],
+          metadata: expect.objectContaining({ summary: expect.stringContaining("Secret scan no longer blocks") }),
+        }),
+      ])
+      expect(requests.map((item) => item.command)).toEqual(["describe", "set_release_settings"])
+      expect(requests[1]).toMatchObject({ requiredChecks: { secrets: false }, testCommand: "bun test" })
+      expect(result.output).toContain("Secret scan no longer blocks")
+    }),
+  )
+})
+
 describe("vector_cloud Vercel actions", () => {
   it.instance("asks before moving production, naming the action, and offers no 'always'", () =>
     Effect.gen(function* () {
