@@ -68,6 +68,7 @@ describe("swarm lifecycle", () => {
   // A test can answer engine requests itself; anything it returns undefined for gets the planner defaults below.
   let route: (url: URL) => Response | Promise<Response> | undefined = () => undefined
   const requests: string[] = []
+  const created: unknown[] = []
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "vector-swarm-"))
@@ -75,14 +76,16 @@ describe("swarm lifecycle", () => {
     onWrite = () => {}
     route = () => undefined
     requests.length = 0
+    created.length = 0
     prompted = Promise.withResolvers<void>()
     server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch(request) {
+      async fetch(request) {
         const url = new URL(request.url)
         const path = url.pathname
         requests.push(`${request.method} ${path}`)
+        if (request.method === "POST" && path === "/api/session") created.push(await request.json())
         const routed = route(url)
         if (routed) return routed
         if (path === "/api/session") return Response.json({ data: { id: "planner" } })
@@ -104,7 +107,11 @@ describe("swarm lifecycle", () => {
     await rm(directory, { recursive: true, force: true })
   })
 
-  async function seed(status: SwarmRunRecord["status"] = "interrupted", tasks: SwarmRunRecord["tasks"] = []) {
+  async function seed(
+    status: SwarmRunRecord["status"] = "interrupted",
+    tasks: SwarmRunRecord["tasks"] = [],
+    parentSessionId?: string,
+  ) {
     const isolatedPath = join(directory, "staging", "repo")
     await mkdir(isolatedPath, { recursive: true })
     const run: SwarmRunRecord = {
@@ -132,6 +139,7 @@ describe("swarm lifecycle", () => {
       riskLevel: "low",
       summary: "",
       logs: [],
+      ...(parentSessionId ? { parentSessionId } : {}),
     }
     stores.set("swarm-orchestrator-state", new Map([["runs", [run]]]))
     stores.set(
@@ -159,6 +167,30 @@ describe("swarm lifecycle", () => {
     )
     return run
   }
+
+  test("runs the planner as a hidden helper under the task the swarm started from", async () => {
+    const run = await seed("interrupted", [], "ses_task")
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    await prompted.promise
+
+    expect(created).toEqual([
+      expect.objectContaining({
+        internal: "swarm.planner",
+        parentID: "ses_task",
+        title: "Swarm planner · Inspect and improve the project",
+      }),
+    ])
+  })
+
+  test("runs a planner started outside any task as a hidden helper without a parent", async () => {
+    const run = await seed("interrupted", [], "swarm:not-a-session")
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    await prompted.promise
+
+    expect(created).toHaveLength(1)
+    expect(created[0]).toMatchObject({ internal: "swarm.planner" })
+    expect(created[0]).not.toHaveProperty("parentID")
+  })
 
   test("stopping a planner interrupts admitted work and never launches fallback tasks", async () => {
     const run = await seed()

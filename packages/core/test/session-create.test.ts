@@ -77,6 +77,8 @@ describe("SessionV2.create", () => {
         internal: "swarm.planner",
       })
       expect((yield* session.list()).map((item) => item.id)).toEqual([task.id])
+      expect(yield* session.list({ search: "Swarm planner" })).toEqual([])
+      expect((yield* session.list({ limit: 1 })).map((item) => item.id)).toEqual([task.id])
       expect((yield* session.get(planner.id)).internal).toBe("swarm.planner")
     }),
   )
