@@ -64,6 +64,19 @@ test("release notes contain no unfinished placeholders", async () => {
   ).toEqual([])
 })
 
+// The workspace layout writes data-vector-theme="dark" when it mounts, so on a normal launch with Light saved
+// the light-theme --vx-* rules stay off until the scheme is switched in Settings, and a reload undoes that.
+// A release note that calls something light in the light theme is not true for that launch.
+const workspaceForcesDark = (await Bun.file(`${web}../app/src/pages/layout-new.tsx`).text()).includes(
+  'root.dataset.vectorTheme = "dark"',
+)
+
+test.if(workspaceForcesDark)("release notes make no light-theme claim while the workspace mounts dark", () => {
+  expect(
+    release199.filter((release) => /light theme/i.test(release.summary)).map((release) => release.version),
+  ).toEqual([])
+})
+
 test("copy does not hard-code which release is current", () => {
   // Releases ship on their own schedules, so "currently 1.99.99" goes stale without anyone touching the page.
   expect(
