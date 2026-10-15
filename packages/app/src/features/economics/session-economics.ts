@@ -110,6 +110,13 @@ export function createSessionEconomics(input: {
       return input.workspaces(sessionID, directory)
     },
   )
+  // The idle event of a run the status snapshot already settled is a repeat. When the event comes first, the run leaves
+  // active here, so the snapshot after this flush does not settle it again. A session still shown working keeps its
+  // place, and its snapshot settles it once the idle status arrives.
+  const repeatedIdle = (sessionID: string) => {
+    if (!input.working(sessionID) && active.delete(sessionID)) return false
+    return settled.delete(sessionID)
+  }
   return {
     // Bootstrap reconciles statuses after reconnect without replaying idle. Capture the same busy-to-idle
     // transition from that reactive snapshot, so runs completed while disconnected still become samples.
@@ -135,12 +142,7 @@ export function createSessionEconomics(input: {
         settled.delete(event.details.properties.sessionID)
       // Idle reaches the root through the family refresh too, which records each settled revision once.
       const familyID = sessionFamilyEventID(event.details, input.working)
-      // The idle event of a run the status snapshot already settled is a repeat. When the event comes first, taking
-      // the run out of active keeps the snapshot after this flush from settling it again.
-      const repeated =
-        event.details.type === "session.idle" &&
-        !active.delete(event.details.properties.sessionID) &&
-        settled.delete(event.details.properties.sessionID)
+      const repeated = event.details.type === "session.idle" && repeatedIdle(event.details.properties.sessionID)
       const cached = familyID ? input.cached(familyID) : undefined
       // Frequent autocomplete updates are included at the task's next settlement; other helpers settle their
       // parent after completion, including a review that was launched after the parent became idle.

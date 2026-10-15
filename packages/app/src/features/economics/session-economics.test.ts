@@ -147,17 +147,21 @@ test("a root update event during the history read records the run at the newer r
 const status = (type: "busy" | "idle") =>
   ({ type: "session.status", properties: { sessionID: "ses_root", status: { type } } }) as Event
 
-test("the idle status and the idle event settle a run once, in either order", async () => {
-  for (const order of ["one flush", "status first"]) {
+test("the idle status and the idle event settle a run once, in any order", async () => {
+  for (const order of ["one flush", "status first", "event first"]) {
     const state = { working: true }
     const ctx = setup({ writeDuringHistory: false, working: () => state.working })
     // The layout reconciles the status snapshot after each flush of events.
     ctx.economics.handle({ name: directory, details: status("busy") })
     ctx.economics.reconcile([ctx.info()])
+    if (order === "event first") {
+      ctx.economics.handle({ name: directory, details: idle })
+      ctx.economics.reconcile([ctx.info()])
+    }
     state.working = false
     ctx.economics.handle({ name: directory, details: status("idle") })
     if (order === "status first") ctx.economics.reconcile([ctx.info()])
-    ctx.economics.handle({ name: directory, details: idle })
+    if (order !== "event first") ctx.economics.handle({ name: directory, details: idle })
     ctx.economics.reconcile([ctx.info()])
     await settle(ctx.requests)
     ctx.economics.dispose()
