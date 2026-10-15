@@ -22,7 +22,7 @@ export function serializeFreeModelRequest(body: ReturnType<typeof freeModelReque
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value)
 
-export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[], personal = false) {
+export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[]) {
   if (!isRecord(body) || typeof body.model !== "string" || !Array.isArray(body.messages) || !body.messages.length)
     throw new Error("Choose a free model and include conversation messages.")
   const selected = models.find((model) => model.id === body.model && isFreeModelID(model.id))
@@ -114,9 +114,11 @@ export function freeModelRequest(body: unknown, models: readonly FreeModelInfo[]
     // Explicit disablement survives client/server normalization; enforced account plugins must also be off.
     // https://openrouter.ai/docs/guides/features/plugins
     plugins: DISABLED_PLUGINS.map((id) => ({ id, enabled: false })),
+    // Included free models are no-training, not zero data retention: providers may keep prompts under their
+    // own policy, so zdr is not requested. data_collection: "deny" keeps training endpoints out, and the
+    // provider allowlist plus zero max_price leave no paid endpoint to fall back to.
     provider: {
       data_collection: "deny",
-      ...(personal ? { zdr: true } : {}),
       require_parameters: true,
       only: [...new Set(fallbacks.flatMap((model) => model.providers.map((provider) => provider.id)))],
       max_price: { prompt: 0, completion: 0, request: 0, image: 0 },

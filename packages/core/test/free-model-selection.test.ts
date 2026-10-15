@@ -149,10 +149,12 @@ for (const scenario of [
       expect(prepared.success.request.headers.authorization).toBe("Bearer synthetic-owned-key")
       expect(prepared.success.request.body._tag).toBe("Uint8Array")
       if (prepared.success.request.body._tag !== "Uint8Array") throw new Error("Expected request JSON")
-      expect(JSON.parse(new TextDecoder().decode(prepared.success.request.body.body))).toMatchObject({
+      const sent = JSON.parse(new TextDecoder().decode(prepared.success.request.body.body))
+      expect(sent).toMatchObject({
         model: approved.id,
-        provider: { max_price: { prompt: 0, completion: 0, request: 0, image: 0 }, zdr: true },
+        provider: { max_price: { prompt: 0, completion: 0, request: 0, image: 0 }, data_collection: "deny" },
       })
+      expect(sent.provider).not.toHaveProperty("zdr")
     }),
   )
 }

@@ -36,11 +36,7 @@ export function freeModelRoute(
             const body = yield* Effect.try({
               try: () =>
                 serializeFreeModelRequest(
-                  freeModelRequest(
-                    { ...input.request.http?.body, ...input.body, model: model.id },
-                    route.models,
-                    route.source === "openrouter",
-                  ),
+                  freeModelRequest({ ...input.request.http?.body, ...input.body, model: model.id }, route.models),
                   route.url === FreeModels.SHARED_CHAT_URL,
                 ),
               catch: (cause) =>

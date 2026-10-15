@@ -49,99 +49,29 @@ export function parseFreeModelLimit(value: unknown): FreeModelLimit | undefined 
   return Option.getOrUndefined(Schema.decodeUnknownOption(FreeModelLimit)(candidate))
 }
 
+// Included free models are not zero data retention. Reviewed providers may keep prompts and outputs under their
+// own policies; every request asks OpenRouter to deny data collection so they are not used for training.
+export const NO_TRAINING_RETENTION =
+  "May keep prompts and outputs under its own policy. Vector requests that they are not used for training."
+
 // A rescue catalog is used only after a client has received explicit server enablement.
 // The server still validates its current catalog and free price for every shared request.
+// Checked against OpenRouter's public model and endpoint data on 15 October 2026.
 export const FREE_MODEL_FALLBACKS: readonly FreeModelInfo[] = [
   {
     id: "cohere/north-mini-code:free",
     name: "Cohere: North Mini Code",
     contextLength: 256000,
     maxOutputTokens: 64000,
-    providers: [
-      {
-        id: "cohere",
-        name: "Cohere",
-        retention: "Up to 30 days; no training according to OpenRouter's provider policy.",
-      },
-    ],
+    providers: [{ id: "cohere", name: "Cohere", retention: NO_TRAINING_RETENTION }],
   },
   {
-    id: "poolside/laguna-s-2.1:free",
-    name: "Poolside: Laguna S 2.1",
-    contextLength: 262144,
-    maxOutputTokens: 32768,
-    providers: [
-      {
-        id: "poolside",
-        name: "Poolside",
-        retention: "Prompts retained; duration not specified. No training according to OpenRouter's provider policy.",
-      },
-    ],
-  },
-  {
-    id: "poolside/laguna-xs-2.1:free",
-    name: "Poolside: Laguna XS 2.1",
-    contextLength: 262144,
-    maxOutputTokens: 32768,
-    providers: [
-      {
-        id: "poolside",
-        name: "Poolside",
-        retention: "Prompts retained; duration not specified. No training according to OpenRouter's provider policy.",
-      },
-    ],
-  },
-  {
-    id: "qwen/qwen3.8-27b:free",
-    name: "Qwen: Qwen3.8 27B",
-    contextLength: 262144,
-    maxOutputTokens: 235929,
-    providers: [
-      {
-        id: "modelrun",
-        name: "ModelRun",
-        retention: "No prompt retention or training according to OpenRouter's provider policy.",
-      },
-    ],
-  },
-  {
+    // OpenRouter lists this free preview until 31 December 2026.
     id: "dots-studio/dots-3-note-preview:free",
     name: "Dots Studio: Dots3-Note Preview",
     contextLength: 512000,
     maxOutputTokens: 460800,
-    providers: [
-      {
-        id: "atlas-cloud",
-        name: "AtlasCloud",
-        retention: "Prompts retained; duration not specified. No training according to OpenRouter's provider policy.",
-      },
-    ],
-  },
-  {
-    id: "inclusionai/ling-3.0-flash-sante:free",
-    name: "inclusionAI: Ling 3.0 Flash Sante",
-    contextLength: 262144,
-    maxOutputTokens: 32768,
-    providers: [
-      {
-        id: "novita",
-        name: "NovitaAI",
-        retention: "No prompt retention or training according to OpenRouter's provider policy.",
-      },
-    ],
-  },
-  {
-    id: "inclusionai/ling-3.0-flash-fin:free",
-    name: "inclusionAI: Ling 3.0 Flash Fin",
-    contextLength: 262144,
-    maxOutputTokens: 32768,
-    providers: [
-      {
-        id: "novita",
-        name: "NovitaAI",
-        retention: "No prompt retention or training according to OpenRouter's provider policy.",
-      },
-    ],
+    providers: [{ id: "atlas-cloud", name: "AtlasCloud", retention: NO_TRAINING_RETENTION }],
   },
 ]
 

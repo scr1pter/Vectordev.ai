@@ -1,20 +1,40 @@
 import { expect, test } from "bun:test"
+import { NO_TRAINING_RETENTION } from "@vectordevai/schema/free-model"
 import { FreeModels } from "../src/free-models"
 
-test("the captured public API shapes produce guarded personal models without an inference request", async () => {
+const endpointsPath = (url: string) => /\/models\/(.+)\/endpoints$/.exec(url)?.[1]
+
+test("today's public OpenRouter data gives personal accounts the reviewed no-training models", async () => {
+  // Captured from OpenRouter's public /models and per-model /endpoints on 15 October 2026. None of these
+  // endpoints is on OpenRouter's ZDR list, which left the earlier ZDR-only selection empty.
   const fixture = await Bun.file(new URL("./fixture/free-model-public.json", import.meta.url)).json()
+  const requests: string[] = []
   const client = FreeModels.createClient({
     now: () => fixture.capturedAt,
     request: async (url) => {
+      requests.push(url)
       if (url.endsWith("/models/user")) return Response.json({ data: fixture.models })
-      if (url.endsWith("/endpoints/zdr")) return Response.json({ data: fixture.endpoints })
+      const id = endpointsPath(url)
+      if (id && fixture.endpoints[id]) return Response.json({ data: { id, endpoints: fixture.endpoints[id] } })
       throw new Error("Only catalog metadata may be requested")
     },
   })
-  expect((await client.forKey("fixture-placeholder")).map((item) => item.id)).toEqual([
-    "apodex/apodex-1.1-mini:free",
-    "inclusionai/ling-3.0-flash-sante:free",
-    "qwen/qwen3.8-27b:free",
+  const models = await client.forKey("fixture-placeholder")
+  // Poolside's free Laguna pages say free use may train on inputs, so its endpoints are not offered.
+  expect(models.map((item) => [item.id, item.providers.map((provider) => provider.id)])).toEqual([
+    ["dots-studio/dots-3-note-preview:free", ["atlas-cloud/fp8"]],
+    ["cohere/north-mini-code:free", ["cohere"]],
+  ])
+  expect(models.flatMap((item) => item.providers.map((provider) => provider.retention))).toEqual([
+    NO_TRAINING_RETENTION,
+    NO_TRAINING_RETENTION,
+  ])
+  // Excluded authors (NVIDIA, Google, Liquid, Thinking Machines) never reach an endpoint lookup.
+  expect(requests.slice(1).map(endpointsPath).sort()).toEqual([
+    "cohere/north-mini-code:free",
+    "dots-studio/dots-3-note-preview:free",
+    "poolside/laguna-s-2.1:free",
+    "poolside/laguna-xs-2.1:free",
   ])
 })
 
@@ -28,8 +48,8 @@ const model = (id: string) => ({
 })
 const endpoint = {
   model_id: "maker/new:free",
-  provider_name: "Fixture",
-  tag: "fixture/checked",
+  provider_name: "Cohere",
+  tag: "cohere/checked",
   context_length: 8000,
   max_completion_tokens: 2048,
   pricing: { prompt: "0", completion: "0", request: "0", image: "0" },
@@ -48,7 +68,7 @@ test("personal discovery validates live endpoints without the shared service and
         return Response.json({ data: [model("maker/new:free")] })
       }
       expect(new Headers(init.headers).has("authorization")).toBe(false)
-      if (url.endsWith("/endpoints/zdr")) return Response.json({ data: [endpoint] })
+      if (endpointsPath(url) === "maker/new:free") return Response.json({ data: { endpoints: [endpoint] } })
       throw new Error("Personal access must not request the shared catalog")
     },
   })
@@ -60,9 +80,9 @@ test("personal discovery validates live endpoints without the shared service and
       maxOutputTokens: 2048,
       providers: [
         {
-          id: "fixture/checked",
-          name: "Fixture",
-          retention: "OpenRouter lists this endpoint as zero data retention; no-training routing is required.",
+          id: "cohere/checked",
+          name: "Cohere",
+          retention: NO_TRAINING_RETENTION,
         },
       ],
     },
@@ -98,14 +118,39 @@ test("personal discovery excludes paid fields, aliases, expired and answers-only
             })),
           ],
         })
-      return Response.json({ data: [{ ...endpoint, model_id: "maker/valid:free" }] })
+      return Response.json({ data: { endpoints: [{ ...endpoint, model_id: "maker/valid:free" }] } })
     },
   })
   expect((await client.forKey("placeholder")).map((item) => item.id)).toEqual(["maker/valid:free"])
-  expect(requests).toEqual([`${FreeModels.OPENROUTER_ROOT}/models/user`, `${FreeModels.OPENROUTER_ROOT}/endpoints/zdr`])
+  expect(requests).toEqual([
+    `${FreeModels.OPENROUTER_ROOT}/models/user`,
+    `${FreeModels.OPENROUTER_ROOT}/models/maker/valid:free/endpoints`,
+  ])
 })
 
-test("personal discovery fails closed for priced, unavailable or mismatched ZDR endpoints", async () => {
+test("personal discovery skips excluded authors and models within a week of expiry", async () => {
+  const requests: string[] = []
+  const client = FreeModels.createClient({
+    now: () => Date.UTC(2026, 9, 15),
+    request: async (url) => {
+      requests.push(url)
+      if (url.endsWith("/models/user"))
+        return Response.json({
+          data: [
+            model("maker/new:free"),
+            model("nvidia/logged:free"),
+            model("google/unreviewed:free"),
+            { ...model("maker/expiring:free"), expiration_date: "2026-10-20" },
+          ],
+        })
+      return Response.json({ data: { endpoints: [endpoint] } })
+    },
+  })
+  expect((await client.forKey("placeholder")).map((item) => item.id)).toEqual(["maker/new:free"])
+  expect(requests.slice(1).map(endpointsPath)).toEqual(["maker/new:free"])
+})
+
+test("personal discovery fails closed for priced, unavailable, mismatched or unreviewed endpoints", async () => {
   const invalid = [
     { ...endpoint, pricing: { ...endpoint.pricing, request: "0.01" } },
     { ...endpoint, pricing: { ...endpoint.pricing, completion: "0.01" } },
@@ -115,12 +160,14 @@ test("personal discovery fails closed for priced, unavailable or mismatched ZDR 
     { ...endpoint, tag: "" },
     { ...endpoint, model_id: "maker/other:free" },
     { ...endpoint, model_id: undefined },
+    { ...endpoint, provider_name: "Poolside", tag: "poolside/fp8" },
+    { ...endpoint, provider_name: "Unknown", tag: "unknown" },
   ]
   for (const entry of invalid) {
     const client = FreeModels.createClient({
       request: async (url) => {
         if (url.endsWith("/models/user")) return Response.json({ data: [model("maker/new:free")] })
-        return Response.json({ data: [entry] })
+        return Response.json({ data: { endpoints: [entry] } })
       },
     })
     expect(await client.forKey("placeholder")).toEqual([])
@@ -134,7 +181,7 @@ test("rejected keys and unavailable metadata discard cached personal eligibility
     request: async (url) => {
       if (state.failure && url.endsWith(state.failure)) return new Response(null, { status: 401 })
       if (url.endsWith("/models/user")) return Response.json({ data: [model("maker/new:free")] })
-      return Response.json({ data: [endpoint] })
+      return Response.json({ data: { endpoints: [endpoint] } })
     },
   })
   expect(await client.forKey("placeholder")).toHaveLength(1)
@@ -143,6 +190,6 @@ test("rejected keys and unavailable metadata discard cached personal eligibility
   expect(await client.forKey("placeholder")).toEqual([])
   state.failure = ""
   expect(await client.forKey("placeholder")).toHaveLength(1)
-  state.failure = "/endpoints/zdr"
+  state.failure = "/maker/new:free/endpoints"
   expect(await client.forKey("placeholder", true)).toEqual([])
 })
