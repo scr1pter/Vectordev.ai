@@ -77,7 +77,7 @@ export function SettingsVectorCodium() {
                           <dd>
                             {active().remaining === undefined
                               ? "Balance unavailable"
-                              : `${ModelPlanStatus.formatCredits(active().remaining!)} of ${ModelPlanStatus.formatCredits(active().credits)} left`}
+                              : `${ModelPlanStatus.formatShare(active().remaining!, active().credits)} left`}
                           </dd>
                         </div>
                         <div>
@@ -94,7 +94,7 @@ export function SettingsVectorCodium() {
                         ? "None"
                         : current().purchased.remaining === undefined
                           ? "Balance unavailable"
-                          : `${ModelPlanStatus.formatCredits(current().purchased.remaining!)} left`}
+                          : `${ModelPlanStatus.formatShare(current().purchased.remaining!, current().purchased.credits)} left`}
                     </dd>
                   </div>
                 </dl>

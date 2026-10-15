@@ -9,7 +9,10 @@ export const PURCHASE_URL = `${SITE}/codium`
 export const MANAGE_URL = `${SITE}/account`
 // The stable internal ID stays "vector-plan"; people see the provider as Vector Codium.
 export const PROVIDER_ID = "vector-plan"
-/** Customer-facing Codium credits per USD of model credit. A display conversion only; the gateway accounts in USD. */
+/**
+ * Codium credits per USD of model credit, the unit balances are kept in here. Balances are shown only as the share of a
+ * grant left: with the purchase price, an amount would give away the model credit a purchase buys.
+ */
 export const CREDITS_PER_USD = 100
 
 const Remote = Schema.Struct({
@@ -55,8 +58,8 @@ const EMPTY: Status = {
   empty: false,
   low: false,
 }
-// Running low warns below a tenth of the monthly grant, and never later than at 100 credits ($1 of usage).
-const LOW_FLOOR = 100
+// Running low warns below a tenth of the monthly grant, and never later than a dollar of usage.
+const LOW_FLOOR = CREDITS_PER_USD
 
 /** Reads the signed-in account's Codium plan and balances. The token is only ever sent to vectordev.ai. */
 export async function fetchStatus(
@@ -125,8 +128,10 @@ function credits(usd: number) {
   return Math.floor(usd * CREDITS_PER_USD + 1e-6)
 }
 
-export function formatCredits(value: number) {
-  return value.toLocaleString("en-US")
+/** A balance as the share of its grant left, rounded down so it is never overstated. */
+export function formatShare(remaining: number, total: number) {
+  const share = total > 0 ? Math.floor((remaining / total) * 100) : 0
+  return remaining > 0 && share === 0 ? "under 1%" : `${share}%`
 }
 
 export function formatDate(time: number) {
@@ -140,10 +145,10 @@ export function describe(status: Status) {
   const plan = status.plan
   const lines = [
     plan
-      ? `Plan: ${plan.name}, ${plan.remaining === undefined ? "balance unavailable" : `${formatCredits(plan.remaining)} of ${formatCredits(plan.credits)} monthly credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
+      ? `Plan: ${plan.name}, ${plan.remaining === undefined ? "balance unavailable" : `${formatShare(plan.remaining, plan.credits)} of monthly credits left`}, ${plan.cancelAtPeriodEnd ? "ends" : "renews"} ${formatDate(plan.renewsAt)}`
       : "Plan: none",
     status.purchased.credits
-      ? `Purchased credits: ${status.purchased.remaining === undefined ? "balance unavailable" : `${formatCredits(status.purchased.remaining)} of ${formatCredits(status.purchased.credits)} left`}`
+      ? `Purchased credits: ${status.purchased.remaining === undefined ? "balance unavailable" : `${formatShare(status.purchased.remaining, status.purchased.credits)} left`}`
       : "Purchased credits: none",
   ]
   const current = notice(status)
@@ -166,11 +171,7 @@ export function notice(status: Status): { kind: "unavailable" | "empty" | "low";
     }
   if (status.empty || !status.access)
     return { kind: "empty", text: "You have no Codium credits available. Buy credits to use Codium models." }
-  if (status.low)
-    return {
-      kind: "low",
-      text: `You are running low on Codium credits${status.remaining === undefined ? "" : ` (${formatCredits(status.remaining)} left)`}.`,
-    }
+  if (status.low) return { kind: "low", text: "You are running low on Codium credits." }
 }
 
 export type Action = "credits" | "sign-in" | "unavailable"

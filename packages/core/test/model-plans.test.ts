@@ -443,11 +443,16 @@ test("status reads plan and balances in Codium credits and flags a low balance",
     low: true,
   })
   expect(ModelPlanStatus.describe(status)).toEqual([
-    `Plan: Codium 20, 120 of 1,600 monthly credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
-    "Purchased credits: 10 of 800 left",
-    "You are running low on Codium credits (130 left).",
+    `Plan: Codium 20, 7% of monthly credits left, renews ${ModelPlanStatus.formatDate(1_790_000_000_000)}`,
+    "Purchased credits: 1% left",
+    "You are running low on Codium credits.",
   ])
   expect(JSON.stringify(status)).not.toContain(token)
+  // Balances read as shares, never amounts, which with a purchase's price would give away its model credit.
+  expect(ModelPlanStatus.describe(status).join(" ")).not.toMatch(/\b(1,600|1600|800|130|120)\b/)
+  expect(ModelPlanStatus.formatShare(1, 1600)).toBe("under 1%")
+  expect(ModelPlanStatus.formatShare(0, 1600)).toBe("0%")
+  expect(ModelPlanStatus.formatShare(1600, 1600)).toBe("100%")
 })
 
 test("status without credits, signed out, expired or unreachable says what to do", async () => {
@@ -484,7 +489,7 @@ test("status without credits, signed out, expired or unreachable says what to do
 })
 
 test("a subscriber whose monthly credits are spent is told so, even though the plan still grants access", () => {
-  // What the server's modelPlanStatus returns for a Codium 10 subscriber who used all $8.
+  // What the server's modelPlanStatus returns for a subscriber who used all of this month's credits.
   const spent = {
     enabled: true,
     active: true,
@@ -522,7 +527,7 @@ test("running low follows the monthly grant, not every top-up ever bought", () =
     remaining: 90,
     low: true,
   })
-  // A Codium 200 subscriber is warned under a tenth of the month's 16,000 credits.
+  // A subscriber is warned under a tenth of the month's credits.
   const subscriber = {
     enabled: true,
     active: true,
