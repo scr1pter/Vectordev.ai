@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { stat } from "node:fs/promises"
 
 import { getStore } from "./store"
+import { createStoreCache } from "./store-cache"
 import {
   createParallelWorkspace,
   discardParallelWorkspace,
@@ -117,14 +118,21 @@ export type CreateSwarmRunInput = {
 
 const now = () => new Date().toISOString()
 
+const cache = createStoreCache<SwarmRunRecord>()
+
 function readRuns(): SwarmRunRecord[] {
-  const raw = getStore(STORE_NAME).get(STORE_KEY)
-  if (!Array.isArray(raw)) return []
-  return raw.filter((item): item is SwarmRunRecord => typeof item?.id === "string")
+  const store = getStore(STORE_NAME)
+  return cache.read(store, () => {
+    const raw = store.get(STORE_KEY)
+    if (!Array.isArray(raw)) return []
+    return raw.filter((item): item is SwarmRunRecord => typeof item?.id === "string")
+  })
 }
 
 function writeRuns(runs: SwarmRunRecord[]) {
-  getStore(STORE_NAME).set(STORE_KEY, runs)
+  const store = getStore(STORE_NAME)
+  store.set(STORE_KEY, runs)
+  cache.wrote(store, runs)
 }
 
 function deriveProgress(tasks: SwarmTaskRecord[]) {
