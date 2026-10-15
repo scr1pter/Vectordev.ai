@@ -381,6 +381,73 @@ describe("SpendGuard service", () => {
     }),
   )
 
+  it.effect("exempts a linked session that polices its own loops, while the rest of its run is still checked", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const reviewer = SessionID.make("ses_quiet_child")
+      yield* guard.begin(root, { usd: 1 })
+      yield* guard.link(reviewer, root)
+      yield* guard.ignoreLoops(reviewer)
+      const quiet = yield* Effect.forEach([1, 2, 3], () =>
+        guard.record(reviewer, step({ costUsd: 0.1, tools: [bash("cat src/a.ts")] })),
+      )
+      expect(quiet.map((verdict) => verdict.state)).toEqual(["ok", "ok", "ok"])
+      // Its spend still counts against the run it is linked to.
+      expect((yield* guard.snapshot(root))?.spentUsd).toBeCloseTo(0.3, 6)
+      const looping = yield* Effect.forEach([1, 2, 3], () => guard.record(root, step({ tools: [bash("cat src/a.ts")] })))
+      expect(looping[2]).toMatchObject({ state: "stopped", reason: "loop" })
+    }),
+  )
+
+  it.effect("waits for a step's real file change only when the guess would pause it as a loop", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      const asked: number[] = []
+      const confirm = (index: number, changed: boolean) => Effect.sync(() => asked.push(index)).pipe(Effect.as(changed))
+      yield* guard.begin(root)
+      // A command that writes a file each time is not a loop, but nothing in the step says so until its patch lands.
+      for (const index of [1, 2, 3])
+        expect((yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(index, true))).state).toBe(
+          "ok",
+        )
+      expect(asked).toEqual([3])
+      // Once it changes nothing, the call that changed the files and the two after it are a loop.
+      expect((yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(4, false))).state).toBe("ok")
+      const verdict = yield* guard.record(root, step({ tools: [bash("bun run generate")] }), confirm(5, false))
+      expect(verdict).toMatchObject({ state: "stopped", reason: "loop" })
+      expect(asked).toEqual([3, 5])
+    }),
+  )
+
+  it.effect("forgets a session's loop memory when its files change after its step was counted", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.begin(root)
+      yield* guard.link(child, root)
+      yield* guard.record(child, step({ tools: [bash("bun test")] }))
+      yield* guard.record(child, step({ tools: [bash("bun test")] }))
+      yield* guard.record(root, step({ tools: [bash("bun test")] }))
+      yield* guard.record(root, step({ tools: [bash("bun test")] }))
+      yield* guard.changed(child)
+      expect((yield* guard.record(child, step({ tools: [bash("bun test")] }))).state).toBe("ok")
+      // Another session's change leaves the root's memory alone.
+      expect((yield* guard.record(root, step({ tools: [bash("bun test")] }))).reason).toBe("loop")
+    }),
+  )
+
+  it.effect("says whether the root of a session has a run going", () =>
+    Effect.gen(function* () {
+      const guard = yield* SpendGuard.Service
+      yield* guard.link(child, root)
+      expect(yield* guard.running(child)).toBe(false)
+      yield* guard.begin(root)
+      expect(yield* guard.running(child)).toBe(true)
+      expect(yield* guard.running(root)).toBe(true)
+      yield* guard.end(root)
+      expect(yield* guard.running(child)).toBe(false)
+    }),
+  )
+
   it.effect(
     "holds a linked child still stepping after its root's run ended to that run, until the root begins again",
     () =>

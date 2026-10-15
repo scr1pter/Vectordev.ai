@@ -322,6 +322,14 @@ test("a native Codium turn streams text and a tool call and records the cost the
   const tokens = { input: 1000, output: 50, reasoning: 0, cache: { read: 0, write: 0 } }
   // The ceiling price would be 0.00022; the gateway reported what the provider actually billed.
   expect(SessionRunnerModel.calculateCost(route, tokens, finish.usage?.providerMetadata)).toBe(0.00042)
+  // The run guard counts the same billed amount, as a priced step.
+  expect(
+    SessionRunnerModel.spendStep(
+      route,
+      { tokens, providerMetadata: finish.usage?.providerMetadata },
+      { continues: true, patched: false },
+    ),
+  ).toMatchObject({ costUsd: 0.00042, costKind: "priced" })
   const sent = gateway.seen.slice(before)
   expect(sent.map((item) => item.path)).toEqual(["/api/model-plans/chat"])
   expect(sent[0].authorization).toBe(`Bearer ${token}`)
