@@ -139,10 +139,11 @@ export function measureUsage(messages: readonly UsageBearingMessage[]): Measured
 // The provider refused the request instead of running it: an HTTP client error, rejected credentials, a prompt over
 // the context window, or Vector's free-model limit. None is billed, so that reply's missing usage is a real zero.
 // A stop, a network failure or a server error can come after the provider started work, so those stay unknown.
-// A later rejected retry can follow billed streamed content; only a known empty transcript proves a refusal.
+// A later rejected retry can follow an attempt the provider billed and dropped mid-stream; only a known empty
+// transcript proves a refusal. Any part counts: through the AI SDK the engine writes step-start as soon as the
+// provider's stream begins, so an attempt dropped before its first token can leave only that part behind.
 function refused(message: UsageBearingMessage) {
-  if (!message.parts || message.parts.some((part) => ["text", "reasoning", "tool"].includes(part.type ?? "")))
-    return false
+  if (!message.parts || message.parts.length) return false
   const error = message.error
   if (!error || typeof error !== "object" || !("name" in error)) return false
   if (["ProviderAuthError", "ContextOverflowError", "FreeModelsLimitError"].includes(String(error.name))) return true
