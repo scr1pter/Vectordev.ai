@@ -439,6 +439,16 @@ async function engineRequest<T>(
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+// Aborting a run's requests does not stop the model work the engine admitted, so Stop and Discard interrupt the
+// session too. The interrupt is best effort and bounded: an engine that never answers must not hang Stop, Discard or
+// a swarm waiting on its workers.
+function interruptEngineSession(engine: ParallelWorkspaceEngine, sessionId: string) {
+  return engineRequest(engine, `/api/session/${encodeURIComponent(sessionId)}/interrupt`, {
+    method: "POST",
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => undefined)
+}
+
 function collectText(value: unknown, output: string[] = []) {
   if (!value) return output
   if (typeof value === "string") return output
@@ -2374,11 +2384,7 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     // A failed or timed-out run must not leave the engine session running and
     // spending the user's API keys in the background.
     const active = activeRuns.get(id)
-    if (active?.sessionId && !stopped) {
-      await engineRequest(engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
-        method: "POST",
-      }).catch(() => undefined)
-    }
+    if (active?.sessionId && !stopped) await interruptEngineSession(engine, active.sessionId)
     const detail = stopped
       ? "The parallel agent was stopped by the user."
       : error instanceof Error
@@ -2513,11 +2519,7 @@ export async function stopParallelWorkspace(id: string) {
   queuedRuns.delete(id)
   active?.controller.abort()
   queued?.controller.abort()
-  if (active?.sessionId) {
-    await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
-      method: "POST",
-    }).catch(() => undefined)
-  }
+  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId)
   const current = readRecords().find((record) => record.id === id)
   if (!current) throw new Error("Parallel workspace was not found.")
   // Stopping is only meaningful for work in flight; settled records
@@ -3044,11 +3046,7 @@ export async function discardParallelWorkspace(id: string) {
   queuedRuns.delete(id)
   active?.controller.abort()
   queued?.controller.abort()
-  if (active?.sessionId) {
-    await engineRequest(active.engine, `/api/session/${encodeURIComponent(active.sessionId)}/interrupt`, {
-      method: "POST",
-    }).catch(() => undefined)
-  }
+  if (active?.sessionId) await interruptEngineSession(active.engine, active.sessionId)
   await cleanupIsolation(record)
   const discarded = updateRecord(id, (current) => ({
     ...current,

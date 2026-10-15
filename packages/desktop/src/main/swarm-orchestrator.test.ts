@@ -66,7 +66,7 @@ describe("swarm lifecycle", () => {
   let server: ReturnType<typeof Bun.serve>
   let prompted = Promise.withResolvers<void>()
   // A test can answer engine requests itself; anything it returns undefined for gets the planner defaults below.
-  let route: (url: URL) => Response | Promise<Response> | undefined = () => undefined
+  let route: (url: URL, request: Request) => Response | Promise<Response> | undefined = () => undefined
   const requests: string[] = []
 
   beforeEach(async () => {
@@ -83,7 +83,7 @@ describe("swarm lifecycle", () => {
         const url = new URL(request.url)
         const path = url.pathname
         requests.push(`${request.method} ${path}`)
-        const routed = route(url)
+        const routed = route(url, request)
         if (routed) return routed
         if (path === "/api/session") return Response.json({ data: { id: "planner" } })
         if (path === "/session") return Response.json({ id: "planner" })
@@ -277,6 +277,27 @@ describe("swarm lifecycle", () => {
     expect(requests).toContain("POST /api/session/planner/interrupt")
     expect(stopped.tasks.some((task) => task.status === "complete")).toBe(false)
   })
+
+  test("Discard finishes when the engine never answers a worker's interrupt", async () => {
+    const run = await seed("interrupted", [inspectTask])
+    // The worker's session is "planner" (the default session ID). Its interrupt is held open until Vector gives up.
+    route = (url, request) => {
+      if (url.pathname !== "/api/session/planner/interrupt") return undefined
+      const abandoned = Promise.withResolvers<Response>()
+      request.signal.addEventListener("abort", () => abandoned.resolve(new Response(null, { status: 204 })))
+      return abandoned.promise
+    }
+    await resumeSwarmRun(run.id, { url: server.url.toString(), directory })
+    await prompted.promise
+    const started = Date.now()
+    const discarded = await discardSwarmRun(run.id)
+
+    expect(Date.now() - started).toBeLessThan(9_000)
+    expect(discarded.status).toBe("discarded")
+    expect(discarded.tasks[0]?.status).toBe("canceled")
+    expect(requests).toContain("POST /api/session/planner/interrupt")
+    expect(await stat(join(directory, "staging")).catch(() => undefined)).toBeUndefined()
+  }, 30_000)
 
   test("stopping while a worker's changes merge into staging keeps the task complete", async () => {
     const run = await seed("interrupted", [inspectTask])
