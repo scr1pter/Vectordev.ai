@@ -6,6 +6,7 @@ import { ConfigProvider, Context, Effect, Exit, Layer, Scope } from "effect"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { OpenApi } from "effect/unstable/httpapi"
 import { createServer } from "node:http"
+import { connect } from "node:net"
 import { MDNS } from "./mdns"
 import { HttpApiApp } from "./routes/instance/httpapi/server"
 import { disposeMiddleware } from "./routes/instance/httpapi/lifecycle"
@@ -140,10 +141,37 @@ function listenerLayer(opts: ListenOptions, port: number) {
 }
 
 function startWithPortFallback(opts: ListenOptions) {
-  if (opts.port !== 0) return startListener(opts, opts.port)
+  if (opts.port !== 0) return startUnsharedListener(opts, opts.port)
   // Match the legacy listener port-resolution behavior: explicit `0` prefers
   // 4096 first, then any free port.
-  return startListener(opts, 4096).pipe(Effect.catch(() => startListener(opts, 0)))
+  return startUnsharedListener(opts, 4096).pipe(Effect.catch(() => startListener(opts, 0)))
+}
+
+// macOS lets a wildcard bind share a port another process holds on loopback, and a loopback bind share one held on
+// the wildcard. Local clients then reach whichever socket is more specific, so a password server on 0.0.0.0:4096
+// would leave localhost:4096 answered by another, possibly passwordless, server. A port that already answers local
+// connections is taken.
+function startUnsharedListener(opts: ListenOptions, port: number) {
+  return Effect.gen(function* () {
+    const hosts = ["0.0.0.0", "::", "", "localhost"].includes(opts.hostname) ? ["127.0.0.1", "::1"] : [opts.hostname]
+    const answering = yield* Effect.forEach(hosts, (host) => answers(host, port), { concurrency: "unbounded" })
+    if (answering.some(Boolean))
+      return yield* Effect.fail(new Error(`Port ${port} is already in use: another server answers on ${opts.hostname}`))
+    return yield* startListener(opts, port)
+  })
+}
+
+function answers(host: string, port: number) {
+  return Effect.callback<boolean>((resume) => {
+    const socket = connect({ host, port })
+    const settle = (value: boolean) => {
+      socket.destroy()
+      resume(Effect.succeed(value))
+    }
+    socket.setTimeout(500, () => settle(false))
+    socket.once("connect", () => settle(true))
+    socket.once("error", () => settle(false))
+  })
 }
 
 function startListener(opts: ListenOptions, port: number) {
