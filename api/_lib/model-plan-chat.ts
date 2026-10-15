@@ -54,12 +54,26 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
         ))
     )
       throw new ApiError(400, "MODEL_PLAN_TOOL", "A tool message is invalid.")
+    // Vector's clients send earlier reasoning as reasoning_content, OpenRouter's alias for reasoning. Thinking models
+    // such as DeepSeek refuse a tool-call turn whose reasoning is missing, and signed reasoning stays in its details.
+    const reasoning = message.reasoning ?? message.reasoning_content
+    if (
+      (reasoning !== undefined && reasoning !== null && typeof reasoning !== "string") ||
+      (message.reasoning_details !== undefined &&
+        (!Array.isArray(message.reasoning_details) || !message.reasoning_details.every(stripeRecord)))
+    )
+      throw new ApiError(400, "MODEL_PLAN_MESSAGE", "A conversation message is invalid.")
     return {
       ...Object.fromEntries(
         Object.entries(message).filter(([key]) =>
-          ["role", "content", "name", "tool_calls", "tool_call_id", "reasoning", "reasoning_details"].includes(key),
+          ["role", "content", "name", "tool_calls", "tool_call_id"].includes(key),
         ),
       ),
+      // Only an assistant's own turn carries reasoning.
+      ...(message.role === "assistant" && typeof reasoning === "string" ? { reasoning } : {}),
+      ...(message.role === "assistant" && message.reasoning_details !== undefined
+        ? { reasoning_details: message.reasoning_details }
+        : {}),
       // A text part keeps only its text, so a client cannot add cache markers or other per-part options.
       ...(Array.isArray(message.content)
         ? { content: message.content.map((part) => ({ type: "text", text: String(part.text) })) }
@@ -69,22 +83,52 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
   if (
     body.tools !== undefined &&
     (!Array.isArray(body.tools) ||
-      body.tools.some((tool) => !stripeRecord(tool) || tool.type !== "function" || !stripeRecord(tool.function)))
+      body.tools.some(
+        (tool) =>
+          !stripeRecord(tool) ||
+          tool.type !== "function" ||
+          !stripeRecord(tool.function) ||
+          typeof tool.function.name !== "string",
+      ))
   )
     throw new ApiError(400, "MODEL_PLAN_TOOL", "Only local function tools are supported.")
   const maximum = body.max_tokens ?? body.max_completion_tokens ?? Math.min(8192, model.maxOutputTokens)
   if (typeof maximum !== "number" || !Number.isSafeInteger(maximum) || maximum < 1)
     throw new ApiError(400, "MODEL_PLAN_OUTPUT", "The requested response length is invalid.")
+  // With require_parameters, OpenRouter routes only to endpoints that accept every option sent, so a model whose
+  // endpoints refuse some options keeps only the ones they accept.
+  const options = model.options ?? MODEL_PLAN_OPTIONS
   return {
-    // With require_parameters, OpenRouter routes only to endpoints that accept every option sent, so a model whose
-    // endpoints refuse some options keeps only the ones they accept.
-    ...Object.fromEntries(
-      Object.entries(body).filter(([key]) => (model.options ?? MODEL_PLAN_OPTIONS).some((option) => option === key)),
-    ),
+    ...Object.fromEntries(Object.entries(body).filter(([key]) => options.some((option) => option === key))),
+    // A tool keeps only its definition, so a client cannot add cache markers or other per-tool options.
+    ...(Array.isArray(body.tools) && options.some((option) => option === "tools")
+      ? {
+          tools: body.tools.flatMap((tool) =>
+            stripeRecord(tool) && stripeRecord(tool.function)
+              ? [
+                  {
+                    type: "function",
+                    function: {
+                      name: String(tool.function.name),
+                      ...(typeof tool.function.description === "string"
+                        ? { description: tool.function.description }
+                        : {}),
+                      ...(stripeRecord(tool.function.parameters) ? { parameters: tool.function.parameters } : {}),
+                      ...(typeof tool.function.strict === "boolean" ? { strict: tool.function.strict } : {}),
+                    },
+                  },
+                ]
+              : [],
+          ),
+        }
+      : {}),
     model: model.id,
     messages: model.explicitCache ? cacheBreakpoints(messages) : messages,
-    // Forcing a tool call skips the model's reasoning on these endpoints, so it decides between tools itself.
-    ...(model.explicitCache && body.tool_choice === "required" ? { tool_choice: "auto" } : {}),
+    // Forcing a tool call, or one named tool, skips the model's reasoning on these endpoints, which refuse it while
+    // reasoning is pinned on, so the model decides between tools itself.
+    ...(model.explicitCache && (body.tool_choice === "required" || stripeRecord(body.tool_choice))
+      ? { tool_choice: "auto" }
+      : {}),
     // Catalog policy owns effort; client overrides cannot silently increase spend or change reviewed quality.
     reasoning: model.reasoningEffort ? { effort: model.reasoningEffort } : undefined,
     max_tokens: Math.min(maximum, model.maxOutputTokens),
@@ -106,7 +150,9 @@ export function modelPlanRequest(body: unknown, models: readonly ModelPlanModel[
 /**
  * Explicit five-minute breakpoints for endpoints without implicit caching: the end of the system prompt, which tools
  * and instructions share across a session, the latest user message, and the end of the conversation, which moves
- * with every tool result. Three stay inside the four a request may mark.
+ * with every tool result. When the system prompt comes as several messages, Vector's stable block of tools and
+ * instructions first, the end of that first message is marked too, so a new session reads it from the cache. Four
+ * is the most a request may mark, and the gateway drops every client marker, including any on tools.
  */
 function cacheBreakpoints(messages: Record<string, unknown>[]) {
   const text = (message: Record<string, unknown>) =>
@@ -114,8 +160,10 @@ function cacheBreakpoints(messages: Record<string, unknown>[]) {
       ? message.content.length > 0
       : Array.isArray(message.content) && message.content.some((part) => part.text.length > 0)
   const leading = messages.findIndex((message) => message.role !== "system" && message.role !== "developer")
+  const system = leading === -1 ? messages.length : leading
   const marked = [
-    (leading === -1 ? messages.length : leading) - 1,
+    ...(system > 1 ? [0] : []),
+    system - 1,
     messages.findLastIndex((message) => message.role === "user" && text(message)),
     messages.findLastIndex(text),
   ].filter((index) => index >= 0 && text(messages[index]!))
@@ -135,13 +183,14 @@ function cacheBreakpoints(messages: Record<string, unknown>[]) {
 /**
  * Rejects a request the model's context window cannot hold and returns its estimated input tokens, which also size
  * the credit check. The gateway has no tokenizer, so it estimates tokens as Vector's clients do, at four bytes of
- * content per token; a JSON escape such as \n or \" adds a byte the model never reads, so it is not counted.
- * Counting each byte as a token rejected conversations at about a quarter of the window the catalog lists.
+ * content per token. A JSON escape stands for one character the model reads, so only the bytes it adds are left out:
+ * one for \n, \" or \\, five for \u0001. Counting each byte as a token rejected conversations at about a quarter of
+ * the window the catalog lists.
  */
 export function requireModelPlanContext<T extends { max_tokens: number }>(body: T, model: ModelPlanModel) {
   const text = JSON.stringify(body)
   const bytes = Buffer.byteLength(text)
-  const escapes = text.match(/\\/g)?.length ?? 0
+  const escapes = (text.match(/\\(?:u[0-9a-fA-F]{4}|.)/g) ?? []).reduce((total, escape) => total + escape.length - 1, 0)
   const inputTokens = Math.ceil((bytes - escapes) / 4)
   if (inputTokens + body.max_tokens > model.contextLength) throw contextError()
   if (model.promptTokenLimit !== undefined && promptBound(text, bytes, escapes) >= model.promptTokenLimit)

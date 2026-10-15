@@ -1,5 +1,5 @@
 import { Option, Schema } from "effect"
-import { configuredPlanModels, type ModelPlanModel } from "../../../api/_lib/model-plan-config"
+import { configuredPlanModels, MODEL_PLAN_OPTIONS, type ModelPlanModel } from "../../../api/_lib/model-plan-config"
 
 const CatalogModel = Schema.Struct({
   id: Schema.String,
@@ -58,8 +58,9 @@ export function auditModelPlanCatalog(
           : []),
         ...(!endpoint.tag.trim() || !endpoint.provider_name.trim() ? ["missing provider identity"] : []),
         ...(!supportsTools(endpoint.supported_parameters) ? ["missing tools/tool_choice"] : []),
-        // The gateway requires every option it forwards, so an endpoint missing one would never be routed to.
-        ...(configured.options?.some((option) => !endpoint.supported_parameters.includes(option))
+        // The gateway requires every option it forwards, so an endpoint missing one is never routed a request that
+        // sets it. Without its own list a model forwards the gateway's default options.
+        ...((configured.options ?? MODEL_PLAN_OPTIONS).some((option) => !endpoint.supported_parameters.includes(option))
           ? ["missing a forwarded request option"]
           : []),
         ...(!Number.isSafeInteger(endpoint.context_length) || endpoint.context_length < configured.contextLength

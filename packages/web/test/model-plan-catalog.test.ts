@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { MODEL_PLAN_OPTIONS } from "../../../api/_lib/model-plan-config"
 import { auditModelPlanCatalog } from "../scripts/model-plan-catalog"
 
 const configured = {
@@ -21,7 +22,7 @@ const endpoint = {
   context_length: 256000,
   max_completion_tokens: 32768,
   pricing: { prompt: "0.0000003", completion: "0.0000012", input_cache_read: "0.00000003", discount: 0 },
-  supported_parameters: ["tools", "tool_choice"],
+  supported_parameters: [...MODEL_PLAN_OPTIONS],
   status: 0,
 }
 
@@ -115,13 +116,29 @@ describe("configured Codium model audit", () => {
   })
 
   test("an endpoint must accept every option the gateway forwards to the model", () => {
+    const tools = { ...endpoint, supported_parameters: ["tools", "tool_choice"] }
     const result = auditModelPlanCatalog(
       [{ ...configured, options: ["tools", "tool_choice", "stop"] }],
       [model],
-      [endpoint, { ...endpoint, tag: "stops", supported_parameters: ["tools", "tool_choice", "stop"] }],
+      [tools, { ...endpoint, tag: "stops", supported_parameters: ["tools", "tool_choice", "stop"] }],
     )[0]
     expect(result.ok).toBe(true)
     expect(result.providers.map((provider) => provider.id)).toEqual(["stops"])
+    // A model without its own list forwards the gateway's default options, so an endpoint without seed is left out.
+    const defaults = auditModelPlanCatalog(
+      [configured],
+      [model],
+      [
+        {
+          ...endpoint,
+          tag: "seedless",
+          supported_parameters: MODEL_PLAN_OPTIONS.filter((option) => option !== "seed"),
+        },
+        endpoint,
+      ],
+    )[0]
+    expect(defaults.providers.map((provider) => provider.id)).toEqual(["example/fp8"])
+    expect(auditModelPlanCatalog([configured], [model], [tools])[0]).toMatchObject({ ok: false, providers: [] })
   })
 
   test("accepts zero flat fees but rejects unknown positive fees and malformed pricing overrides", () => {

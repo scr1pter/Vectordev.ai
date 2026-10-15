@@ -31,8 +31,10 @@ export const CODIUM_MODELS = [
     name: "Claude Haiku 5.5",
     category: "advanced",
     description: "For harder, multi-step problems. Uses credits faster than the other models.",
-    // The window Vector compacts within, which keeps a full conversation clear of the prompt limit below.
-    contextLength: 80000,
+    // Vector compacts once a step reaches this window less the reply: 48,000 tokens, which the gateway's window check
+    // counts as 192,000 characters. That stays under the 196,000 ASCII characters the prompt bound below admits, so for
+    // ASCII text the bound never refuses a full-reply request that the window check accepts.
+    contextLength: 64000,
     maxOutputTokens: 16000,
     // Every endpoint bills a whole request at five times the price once its prompt reaches 100,000 tokens.
     promptTokenLimit: 100000,
