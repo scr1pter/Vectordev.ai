@@ -161,7 +161,6 @@ fallback is available; a partial pair must fail closed. No immutable catalog
 publication or installer publication is claimed here.
 
 Vercel agreement/Create and Supabase OAuth confirmation remain owner actions.
-Netlify registration was canceled and is not a blocker for this requested rollout.
 No new OAuth credentials or live customer consent flow are claimed. Real personal
 OpenRouter acceptance with an unfunded account also remains unverified: eligibility
 and zero-price/privacy guards stay enforced, and rejection stops the request.
@@ -221,8 +220,7 @@ unfinished test. The next run explicitly waits for the nested Bun process and
 splits Engine across two native Bun file shards, with full output and unchanged
 per-test and job-step deadlines. Those changes still require native acceptance.
 
-Vector Cloud registration is limited to Vercel and Supabase. Netlify registration
-was canceled at the owner's request. The prepared Vercel agreement requires owner
+Vector Cloud registration is limited to Vercel and Supabase. The prepared Vercel agreement requires owner
 submission; the prepared Supabase OAuth registration awaits action-time approval.
 No new OAuth credential has been retrieved or saved, and no live customer consent
 flow has been verified. Personal OpenRouter access still needs the documented
