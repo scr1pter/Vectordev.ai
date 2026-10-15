@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 
 import {
   engineEventSource,
+  setDesktopWorkBlocker,
   startKeepAwake,
+  whileDesktopWorks,
   type KeepAwakeEvent,
   type KeepAwakeLocation,
   type KeepAwakeSource,
@@ -358,6 +360,53 @@ describe("startKeepAwake", () => {
     keepAwake.stop()
     expect(blocker.active.size).toBe(0)
     expect(fake.current().signal.aborted).toBe(true)
+  })
+})
+
+describe("whileDesktopWorks", () => {
+  test("holds one blocker across overlapping desktop work and releases it when the last piece ends", async () => {
+    const blocker = power()
+    setDesktopWorkBlocker(blocker.blocker)
+    const external = Promise.withResolvers<string>()
+    const checks = Promise.withResolvers<void>()
+
+    const running = whileDesktopWorks(() => external.promise)
+    const validating = whileDesktopWorks(() => checks.promise)
+    expect(blocker.active.size).toBe(1)
+    external.resolve("done")
+    expect(await running).toBe("done")
+    expect(blocker.active.size).toBe(1)
+    checks.reject(new Error("typecheck failed"))
+    await expect(validating).rejects.toThrow("typecheck failed")
+    await until(() => blocker.active.size === 0)
+    expect(blocker.counts.started).toBe(1)
+    setDesktopWorkBlocker(undefined)
+  })
+
+  test("work that throws before it starts still releases the blocker", async () => {
+    const blocker = power()
+    setDesktopWorkBlocker(blocker.blocker)
+    const failed = whileDesktopWorks((): Promise<void> => {
+      throw new Error("could not spawn the CLI")
+    })
+    expect(blocker.active.size).toBe(1)
+    await expect(failed).rejects.toThrow("could not spawn the CLI")
+    await until(() => blocker.active.size === 0)
+    setDesktopWorkBlocker(undefined)
+  })
+
+  test("clearing the blocker releases what desktop work holds", async () => {
+    const blocker = power()
+    setDesktopWorkBlocker(blocker.blocker)
+    const external = Promise.withResolvers<void>()
+    const running = whileDesktopWorks(() => external.promise)
+    expect(blocker.active.size).toBe(1)
+
+    setDesktopWorkBlocker(undefined)
+    expect(blocker.active.size).toBe(0)
+    external.resolve()
+    await running
+    expect(blocker.counts.started).toBe(1)
   })
 })
 

@@ -233,6 +233,43 @@ export function startKeepAwake(input: {
   }
 }
 
+/*
+ * Work the desktop runs itself never reaches the engine's stream: an external agent's CLI (Codex, Claude Code, Cursor)
+ * and a workspace's checks run in this process, with the engine idle. Each piece of that work holds a blocker of its
+ * own for as long as it runs. None of it waits on the user, and an external agent's run has its own time limit.
+ */
+const desktopWork = new Set<symbol>()
+let desktopBlocker: PowerBlocker | undefined
+let desktopHeld: number | undefined
+
+/** The blocker desktop work holds; undefined releases what is held and holds nothing until one is set again. */
+export function setDesktopWorkBlocker(blocker: PowerBlocker | undefined) {
+  if (desktopHeld !== undefined) desktopBlocker?.stop(desktopHeld)
+  desktopHeld = undefined
+  desktopBlocker = blocker
+  syncDesktopWork()
+}
+
+/** Keeps the computer awake while `work` runs, however it ends. */
+export function whileDesktopWorks<T>(work: () => Promise<T>) {
+  const token = Symbol()
+  desktopWork.add(token)
+  syncDesktopWork()
+  return Promise.resolve()
+    .then(work)
+    .finally(() => {
+      desktopWork.delete(token)
+      syncDesktopWork()
+    })
+}
+
+function syncDesktopWork() {
+  if (desktopWork.size > 0 && desktopHeld === undefined && desktopBlocker) desktopHeld = desktopBlocker.start()
+  if (desktopWork.size > 0 || desktopHeld === undefined) return
+  desktopBlocker?.stop(desktopHeld)
+  desktopHeld = undefined
+}
+
 /** The local engine's event stream, session statuses and prompts, over its authenticated loopback HTTP server. */
 export function engineEventSource(connection: { url: string; username: string; password: string }): KeepAwakeSource {
   const authorization = `Basic ${Buffer.from(`${connection.username}:${connection.password}`).toString("base64")}`

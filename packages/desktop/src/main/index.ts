@@ -57,7 +57,7 @@ import {
   setAllScheduledAgentsPaused,
 } from "./scheduled-agents"
 import { createTray, destroyTray, notifyScheduledRunFinished, updateTray } from "./tray"
-import { engineEventSource, startKeepAwake } from "./keep-awake"
+import { engineEventSource, setDesktopWorkBlocker, startKeepAwake } from "./keep-awake"
 import { getStore } from "./store"
 import { USAGE_STORE } from "./store-keys"
 import { createUsageCheckin, usageCheckinEndpoint } from "./usage-checkin"
@@ -203,6 +203,7 @@ const main = Effect.gen(function* () {
   const stopSidecars = async () => {
     unregisterManagedAccount()
     keepAwake?.stop()
+    setDesktopWorkBlocker(undefined)
     await Promise.all([killSidecar(), stopBrowserBridge(), stopCloudBridge(), wslServers.stopAll()])
   }
   const relaunch = () => {
@@ -485,15 +486,18 @@ const main = Effect.gen(function* () {
       ),
     )
 
-    // Idle sleep freezes agents mid-run, so the machine stays awake while the engine has work running.
+    // Idle sleep freezes agents mid-run, so the machine stays awake while the engine has work running, and while the
+    // desktop runs an external agent or a workspace's checks itself.
+    const blocker = {
+      start: () => powerSaveBlocker.start("prevent-app-suspension"),
+      stop: (id: number) => powerSaveBlocker.stop(id),
+    }
     keepAwake = startKeepAwake({
       source: engineEventSource({ url, username: "vector", password }),
-      blocker: {
-        start: () => powerSaveBlocker.start("prevent-app-suspension"),
-        stop: (id) => powerSaveBlocker.stop(id),
-      },
+      blocker,
       log: (message, meta) => logger.log(message, meta),
     })
+    setDesktopWorkBlocker(blocker)
 
     yield* Effect.promise(() => vectorAccount.restore())
     if (process.platform === "win32") {

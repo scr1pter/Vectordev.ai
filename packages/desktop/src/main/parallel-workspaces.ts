@@ -34,6 +34,7 @@ import { markTeamMessagesDelivered, pendingTeamMessages, postTeamMessage, teamFo
 import { formatDelivery, formatHandoff, type TeamMessage } from "./agent-team-model"
 import { priorFor, recordValidationRun } from "./failure-memory"
 import { formatValidationForRepair, validateWorkspace, type WorkspaceValidationReport } from "./workspace-guardrails"
+import { whileDesktopWorks } from "./keep-awake"
 import { parseUnifiedDiff, selectUnifiedDiff, type UnifiedDiffSelection } from "./unified-diff"
 import { scanChangedSecrets } from "./secret-scanner"
 import { spendLedger } from "./spend-limits"
@@ -2142,7 +2143,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     startTeamSweep(initial)
     if (initial.runtime !== "vector") {
       const prepared = await prepareParallelWorkspaceContext(initial)
-      await executeExternalParallelWorkspace(id, prepared, controller, runId, followUp, queuedRun?.externalAgentRunner)
+      // An external agent's CLI runs in this process, out of the engine's sight, so it keeps the computer awake itself.
+      await whileDesktopWorks(() =>
+        executeExternalParallelWorkspace(id, prepared, controller, runId, followUp, queuedRun?.externalAgentRunner),
+      )
       return
     }
 
@@ -2245,9 +2249,10 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
     syncBackgroundTask(record, "Agent became idle. Running deterministic checks in the isolated workspace.")
 
     let refreshed = await refreshParallelWorkspace(id)
-    let validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
-      signal: controller.signal,
-    })
+    // The agent's session is idle now, so only this keeps the computer awake through the checks.
+    let validation = await whileDesktopWorks(() =>
+      validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, { signal: controller.signal }),
+    )
     await rememberValidation(refreshed, validation)
     controller.signal.throwIfAborted()
     record = updateRecord(id, (current) => ({
@@ -2303,9 +2308,9 @@ async function executeParallelWorkspace(id: string, engine: ParallelWorkspaceEng
       if (repairFailure) throw new Error(repairFailure)
 
       refreshed = await refreshParallelWorkspace(id)
-      validation = await validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, {
-        signal: controller.signal,
-      })
+      validation = await whileDesktopWorks(() =>
+        validateWorkspace(refreshed.isolatedPath, refreshed.changedFiles, { signal: controller.signal }),
+      )
       // The agent's own account of this repair pass, so a check that now passes
       // records what actually fixed it rather than a bare list of edited files.
       const repairContext = await engineRequest<{ data?: unknown }>(
@@ -2726,7 +2731,7 @@ async function validateBeforeIntegration(record: ParallelWorkspaceRecord, allowS
       `Secret scan blocked integration. Review ${summary}. Vector never includes secret values in this report; explicitly confirm the force action only if these are intentional test credentials.`,
     )
   }
-  const validationReport = await validateWorkspace(record.isolatedPath, record.changedFiles)
+  const validationReport = await whileDesktopWorks(() => validateWorkspace(record.isolatedPath, record.changedFiles))
   const updated = updateRecord(record.id, (current) => ({
     ...current,
     validationReport,

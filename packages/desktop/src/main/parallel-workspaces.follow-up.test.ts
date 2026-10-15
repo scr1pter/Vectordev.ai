@@ -73,6 +73,7 @@ const {
   runParallelWorkspace,
   stopParallelWorkspace,
 } = await import("./parallel-workspaces")
+const { setDesktopWorkBlocker } = await import("./keep-awake")
 
 const engine = { url: "http://127.0.0.1:0", directory: "" } as never
 
@@ -497,6 +498,43 @@ describe("sending a follow-up to an external workspace", () => {
     expect(runCalls[0]?.prompt).toContain("Your edits apply directly")
     expect(runCalls[0]?.prompt).toContain("preserve their changes")
     expect(runCalls[0]?.prompt).not.toContain("must remain untouched")
+  })
+
+  test("an external agent keeps the computer awake while its CLI runs, then lets it sleep", async () => {
+    const sourcePath = join(userDataPath, "awake-project")
+    await mkdir(sourcePath, { recursive: true })
+    await writeFile(join(sourcePath, "README.md"), "# Awake\n")
+    const created = await createParallelWorkspace({
+      name: "Long external run",
+      taskPrompt: "Inspect README.md.",
+      runtime: "codex",
+      parentSessionId: "ses_parent",
+      sourcePath,
+    })
+    started.push(created.id)
+    const held = new Set<number>()
+    setDesktopWorkBlocker({
+      start: () => {
+        held.add(held.size + 1)
+        return held.size
+      },
+      stop: (id) => held.delete(id),
+    })
+    const cli = Promise.withResolvers<void>()
+    const running = Promise.withResolvers<void>()
+    runHandler = async () => {
+      running.resolve()
+      await cli.promise
+      return { exitCode: 0, summary: "Read README.md.", output: [] }
+    }
+
+    await runParallelWorkspace(created.id, engine, undefined, dependencies)
+    await running.promise
+    expect(held.size).toBe(1)
+    cli.resolve()
+    await settle(created.id)
+    expect(held.size).toBe(0)
+    setDesktopWorkBlocker(undefined)
   })
 
   test("stopping during validation remains stopped and never launches a repair", async () => {
