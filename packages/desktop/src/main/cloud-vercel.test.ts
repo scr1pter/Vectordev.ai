@@ -1305,4 +1305,97 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     expect((await command({ command: "vercel_scopes" })).text).toContain("Acme (teamId team_1, slug acme)")
     expect((await command({ command: "vercel_projects", teamId: "team_1" })).text).toContain("shop-two (projectId")
   })
+
+  test("inspects, cancels, edits settings, removes and pulls variables and verifies a domain from the agent", async () => {
+    const seeded = seed()
+    const building = api.addDeployment({
+      projectId: seeded.remote.id,
+      uid: "dpl_building",
+      target: "preview",
+      readyState: "BUILDING",
+      created: 3_000,
+    })
+    api.addEnv(seeded.remote.id, { key: "API_URL", value: "https://api.shop", type: "plain", target: ["preview"] })
+    api.addEnv(seeded.remote.id, {
+      key: "DEV_TOKEN",
+      value: "dev_token_fixture_value",
+      type: "encrypted",
+      target: ["development"],
+    })
+    setEnv(project, undefined, "LOCAL_ONLY", "local_fixture_value")
+    const command = await bridge()
+
+    expect(await command({ command: "inspect_deployment", deploymentId: "dpl_live" })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("dpl_live"),
+    })
+
+    expect(
+      await command({ command: "describe", action: "cancel_deployment", deploymentId: building.uid }),
+    ).toMatchObject({
+      ok: true,
+      scope: { project: "shop", environment: "preview", summary: expect.stringContaining("Cancel the") },
+    })
+    expect(await command({ command: "cancel_deployment", deploymentId: building.uid })).toMatchObject({
+      ok: true,
+      text: `Canceled ${building.uid}.`,
+    })
+    expect(building.readyState).toBe("CANCELED")
+
+    expect(
+      await command({ command: "describe", action: "update_project_settings", buildCommand: "bun run build" }),
+    ).toMatchObject({ ok: true, scope: { summary: expect.stringContaining("buildCommand = bun run build") } })
+    expect(await command({ command: "update_project_settings", buildCommand: "bun run build" })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("build bun run build"),
+    })
+
+    expect(
+      await command({ command: "describe", action: "remove_env", key: "API_URL", targets: ["preview"] }),
+    ).toMatchObject({ ok: true, scope: { environment: "preview" } })
+    expect(await command({ command: "remove_env", key: "API_URL", targets: ["preview"] })).toMatchObject({
+      ok: true,
+      text: "Removed API_URL from shop for preview.",
+    })
+    expect(api.state.env.map((item) => item.key)).not.toContain("API_URL")
+
+    // env_plan shows what a sync would write without writing it.
+    const planned = await command({ command: "env_plan", targets: ["preview"] })
+    expect(planned).toMatchObject({ ok: true, text: expect.stringContaining("LOCAL_ONLY") })
+    expect(api.state.env.map((item) => item.key)).not.toContain("LOCAL_ONLY")
+
+    // pull_env writes only the plan its prompt showed.
+    expect(await command({ command: "pull_env" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("prompt"),
+    })
+    const pull = await command({ command: "describe", action: "pull_env" })
+    const carry = structuredClone(pull.carry)
+    expect(pull).toMatchObject({ ok: true, scope: { summary: expect.stringContaining("DEV_TOKEN (add)") } })
+    expect(await command({ command: "pull_env", ...carry })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("DEV_TOKEN"),
+    })
+    expect(await readFile(join(project, ".env"), "utf8")).toContain("DEV_TOKEN=dev_token_fixture_value")
+
+    await command({ command: "add_domain", domain: "www.shop.example" })
+    expect(await command({ command: "describe", action: "verify_domain", domain: "www.shop.example" })).toMatchObject({
+      ok: true,
+      scope: { environment: "production" },
+    })
+    expect(await command({ command: "verify_domain", domain: "www.shop.example" })).toMatchObject({
+      ok: true,
+      text: expect.stringContaining("Checked on shop:\n- www.shop.example: needs verification"),
+    })
+
+    const connections = await command({ command: "cloud_connections" })
+    expect(connections).toMatchObject({ ok: true, links: [{ provider: "vercel", projectName: "shop" }] })
+    expect(await command({ command: "database_status" })).toMatchObject({ ok: true, database: { connected: false } })
+
+    // No answer the model sees carries a stored or pulled value, or the token.
+    expect(JSON.stringify([planned, pull, connections])).not.toMatch(
+      /dev_token_fixture_value|local_fixture_value|api\.shop/,
+    )
+    expect(JSON.stringify(connections)).not.toContain(api.token)
+  })
 })
