@@ -1,4 +1,4 @@
-import { copyFile, readdir, rm } from "node:fs/promises"
+import { copyFile, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -99,6 +99,29 @@ export async function pruneVectorSite(directory) {
   }
 
   await copyFile(path.join(directory, "index.html"), path.join(directory, "404.html"))
+  await dropNoindexFromSitemap(directory)
+}
+
+// Starlight's sitemap lists every prerendered page, including the ones that ask search engines not to index them,
+// such as the unlisted investor page and the account pages. A noindex page must not be advertised either.
+async function dropNoindexFromSitemap(directory) {
+  const file = path.join(directory, "sitemap-0.xml")
+  const sitemap = await readFile(file, "utf8").catch(() => "")
+  const entries = await Promise.all(
+    Array.from(sitemap.matchAll(/<url>.*?<\/url>/gs), async ([entry]) => ({ entry, hidden: await isNoindex(directory, entry) })),
+  )
+  const hidden = entries.filter((item) => item.hidden)
+  if (!hidden.length) return
+  await writeFile(file, hidden.reduce((text, item) => text.replace(item.entry, ""), sitemap))
+}
+
+async function isNoindex(directory, entry) {
+  const location = entry.match(/<loc>(.*?)<\/loc>/s)?.[1]
+  if (!location || !URL.canParse(location)) return false
+  const page = path.join(directory, decodeURIComponent(new URL(location).pathname), "index.html")
+  if (!page.startsWith(directory + path.sep)) return false
+  const html = await readFile(page, "utf8").catch(() => "")
+  return /<meta name="robots" content="[^"]*noindex/i.test(html)
 }
 
 async function prunePublicDirectory(directory) {

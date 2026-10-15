@@ -35,3 +35,27 @@ test("publishes browser assets while excluding server code and nested private ar
   expect(await readdir(path.join(directory, "docs"))).toEqual(["index.html"])
   expect(await readFile(path.join(directory, "404.html"), "utf8")).toBe("public")
 })
+
+test("keeps noindex pages such as the unlisted investor page out of the published sitemap", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "vector-publication-"))
+  directories.push(directory)
+  await mkdir(path.join(directory, "investors"))
+  await mkdir(path.join(directory, "docs"))
+  await writeFile(path.join(directory, "index.html"), "<html><head><title>Vector</title></head></html>")
+  await writeFile(path.join(directory, "docs", "index.html"), "<html><head><title>Docs</title></head></html>")
+  await writeFile(
+    path.join(directory, "investors", "index.html"),
+    '<html><head><meta name="robots" content="noindex, nofollow"></head></html>',
+  )
+  const url = (page: string) => `<url><loc>https://vectordev.ai/${page}</loc></url>`
+  await writeFile(
+    path.join(directory, "sitemap-0.xml"),
+    `<?xml version="1.0" encoding="UTF-8"?><urlset>${url("")}${url("docs/")}${url("investors/")}${url("download/")}</urlset>`,
+  )
+
+  await pruneVectorSite(directory)
+
+  expect(await readFile(path.join(directory, "sitemap-0.xml"), "utf8")).toBe(
+    `<?xml version="1.0" encoding="UTF-8"?><urlset>${url("")}${url("docs/")}${url("download/")}</urlset>`,
+  )
+})
