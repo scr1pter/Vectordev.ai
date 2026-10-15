@@ -33,7 +33,7 @@ export const prerender = true
           <p>
             The next release holds runs to a live cap instead of checking only before they start. Vector checks spend
             after every model step and stops within one step of the cap. Dollars are the reported tokens at catalog
-            list price, so plan billing and discounts are not reflected.
+            list price unless the provider reported what the step cost, so discounts are not reflected.
           </p>
           <dl class="doc-rows">
             {runGuardRows.map(([term, detail]) => (<div><dt>{term}</dt><dd>{detail}</dd></div>))}

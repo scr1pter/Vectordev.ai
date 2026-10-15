@@ -40,7 +40,7 @@ export const runGuardRows = [
   ],
   [
     "Unpriced is not free",
-    "With a dollar cap set, a model with no catalog price stops after 40 unpriced steps, because its spend cannot be counted. A step whose provider reported what it charged, such as Vector Codium, counts at that amount. Free models are labelled free and are held by step and loop limits instead.",
+    "With a dollar cap set, a model with no catalog price stops after 40 unpriced steps, because its spend cannot be counted. A step whose provider reported what it charged, such as Vector Codium, counts at that amount. Free models are labelled free, and steps a plan pays for, such as a ChatGPT sign-in, are not counted in dollars; step and loop limits still hold both.",
   ],
   [
     "Loops pause themselves",
