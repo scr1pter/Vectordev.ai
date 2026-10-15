@@ -1330,7 +1330,8 @@ export function summarizeUsage(
     const share = transcriptTokens > 0 ? tokens / transcriptTokens : totalResponses > 0 ? responses / totalResponses : 0
     return Math.round(share * 1_000) / 10
   }
-  const durations = assistant
+  // Task timing describes the user's own replies; an autocomplete or review pass is not a task, as in the counts above.
+  const durations = own
     .filter((message) => message.time.completed !== undefined)
     .map((message) => ({
       ms: Math.max(0, (message.time.completed ?? message.time.created) - message.time.created),
