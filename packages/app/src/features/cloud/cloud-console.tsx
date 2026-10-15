@@ -738,7 +738,7 @@ export function CloudConsole(props: {
     if (!api) return
     setProviderBusy(provider)
     try {
-      await api.connections.disconnect(provider)
+      const result = await api.connections.disconnect(provider)
       setConnections((items) =>
         items.map((item) =>
           item.provider === provider
@@ -748,7 +748,7 @@ export function CloudConsole(props: {
       )
       setProviderResources((current) => ({ ...current, [provider]: [] }))
       cancelManualToken()
-      setNotice({ tone: "info", text: `${providerLabel(provider)} disconnected from Vector.` })
+      setNotice({ tone: result.revoked ? "success" : "info", text: result.detail })
     } catch (error) {
       setNotice({
         tone: "error",

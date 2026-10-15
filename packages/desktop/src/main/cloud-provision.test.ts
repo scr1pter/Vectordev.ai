@@ -586,3 +586,51 @@ test("desktop readiness advertises its versioned encrypted relay to the actual b
     await server.stop(true)
   }
 })
+
+test("disconnecting a Supabase sign-in revokes it through the broker and says when revoking failed", async () => {
+  const { disconnectCloudProvider } = await import("./cloud-connections")
+  const revocations: unknown[] = []
+  let answer = 200
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      revocations.push({ path: new URL(request.url).pathname, body: await request.json() })
+      return Response.json(answer === 200 ? { ok: true } : { ok: false, error: "provider unavailable" }, { status: answer })
+    },
+  })
+  const previous = process.env.VECTOR_OAUTH_BROKER_URL
+  process.env.VECTOR_OAUTH_BROKER_URL = new URL("/api/cloud/oauth", server.url).toString()
+  const signIn = () =>
+    seed("cloud-provider-connections", "records", [
+      {
+        provider: "supabase",
+        accessToken: encryptCloudCredential("fixture-access-token"),
+        refreshToken: encryptCloudCredential("fixture-refresh-token"),
+        connectedAt: "2026-10-01T00:00:00.000Z",
+      },
+    ])
+  try {
+    signIn()
+    expect(await disconnectCloudProvider("supabase")).toEqual({
+      revoked: true,
+      detail: "Supabase disconnected, and Vector's access on Supabase is revoked.",
+    })
+    expect(revocations).toEqual([
+      { path: "/api/cloud/oauth/revoke", body: { provider: "supabase", refreshToken: "fixture-refresh-token" } },
+    ])
+    expect(store.get("cloud-provider-connections")?.get("records")).toEqual([])
+
+    signIn()
+    answer = 502
+    const failed = await disconnectCloudProvider("supabase")
+    expect(failed.revoked).toBe(false)
+    expect(failed.detail).toContain("still has access until you remove Vector")
+    expect(JSON.stringify(failed)).not.toContain("fixture-")
+    expect(store.get("cloud-provider-connections")?.get("records")).toEqual([])
+  } finally {
+    if (previous === undefined) delete process.env.VECTOR_OAUTH_BROKER_URL
+    else process.env.VECTOR_OAUTH_BROKER_URL = previous
+    await server.stop(true)
+  }
+})

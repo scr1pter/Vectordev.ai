@@ -12,6 +12,7 @@ import { cloudProjectScopeKey } from "./cloud-console"
 import { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 import { getStore, removeStoreFileIfEmpty } from "./store"
 import { validateCloudProviderToken, type CloudProviderId } from "./cloud-provider-token"
+import { vercelApiBase } from "./cloud-vercel-api"
 
 export { decryptCloudCredential, encryptCloudCredential } from "./cloud-credential-vault"
 export type { CloudProviderId } from "./cloud-provider-token"
@@ -413,19 +414,79 @@ export async function handleCloudOAuthDeepLinks(urls: string[]): Promise<string[
   return remaining
 }
 
-export async function disconnectCloudProvider(provider: CloudProviderId): Promise<void> {
+// Removes Vector's credential and, for a sign-in connection, revokes it on the
+// provider too: Supabase's OAuth grant through the broker, and Vercel's
+// integration installation, which is what its token belongs to. A personal
+// access token the user pasted is theirs, so only Vector's copy is deleted.
+// The local credential goes even when revoking fails, and `detail` says which.
+export async function disconnectCloudProvider(
+  provider: CloudProviderId,
+  request: CloudFetch = fetch,
+): Promise<{ revoked: boolean; detail: string }> {
   cancelFlow(provider, new Error(`${connectionLabel(provider)} connection was cancelled.`))
   const connection = storedConnection(provider)
-  if (provider === "supabase" && connection?.refreshToken) {
-    const refreshToken = decryptCloudCredential(connection.refreshToken)
-    await brokerRequest("/revoke", {
-      method: "POST",
-      body: JSON.stringify({ provider, refreshToken }),
-    }).catch(() => undefined)
-  }
+  const label = connectionLabel(provider)
+  const revoked = connection ? await revokeConnection(connection, request) : undefined
   const records = readConnections().filter((item) => item.provider !== provider)
   writeConnections(records)
   await removeStoreFileIfEmpty(CONNECTION_STORE)
+  if (revoked === true) return { revoked: true, detail: `${label} disconnected, and Vector's access on ${label} is revoked.` }
+  if (revoked === false) {
+    return {
+      revoked: false,
+      detail:
+        provider === "vercel"
+          ? "Vercel disconnected from Vector, but Vercel did not confirm removing Vector's integration. It still has access until you remove Vector under your Vercel team's Integrations."
+          : "Supabase disconnected from Vector, but Supabase did not confirm revoking Vector's access. It still has access until you remove Vector under your Supabase organization's OAuth Apps.",
+    }
+  }
+  return {
+    revoked: false,
+    detail: connection
+      ? `${label} disconnected. Vector deleted its copy of your access token; the token itself stays valid until you delete it in ${label}'s token settings.`
+      : `${label} is not connected.`,
+  }
+}
+
+// true when the provider confirmed the revocation, false when it was tried and
+// failed, undefined when there is nothing for Vector to revoke.
+async function revokeConnection(connection: StoredConnection, request: CloudFetch) {
+  if (connection.provider === "supabase") {
+    if (!connection.refreshToken) return undefined
+    const refreshToken = decryptCloudCredential(connection.refreshToken)
+    return brokerRequest("/revoke", {
+      method: "POST",
+      body: JSON.stringify({ provider: "supabase", refreshToken }),
+    }).then(
+      () => true,
+      () => false,
+    )
+  }
+  if (!connection.configurationId) return undefined
+  // https://vercel.com/docs/rest-api/reference/endpoints/integrations/delete-an-integration-configuration
+  const url = new URL(
+    `${vercelApiBase()}/v1/integrations/configuration/${encodeURIComponent(connection.configurationId)}`,
+  )
+  if (connection.teamId) url.searchParams.set("teamId", connection.teamId)
+  return request(url, {
+    method: "DELETE",
+    headers: {
+      authorization: `Bearer ${decryptCloudCredential(connection.accessToken)}`,
+      "user-agent": VECTOR_USER_AGENT,
+    },
+    signal: AbortSignal.timeout(20_000),
+  }).then(
+    async (response) =>
+      // Already removed on Vercel, or the token no longer works: Vector has no access left either way.
+      response.ok ||
+      response.status === 404 ||
+      ((response.status === 401 || response.status === 403) &&
+        (await response
+          .json()
+          .then((body: unknown) => Reflect.get(Reflect.get(Object(body), "error") ?? {}, "invalidToken") === true)
+          .catch(() => false))),
+    () => false,
+  )
 }
 
 async function accessToken(

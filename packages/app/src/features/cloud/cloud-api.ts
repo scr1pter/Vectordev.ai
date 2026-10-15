@@ -176,7 +176,7 @@ export type CloudApi = {
     list: () => Promise<CloudProviderConnection[]>
     connect: (provider: CloudProviderId) => Promise<CloudProviderConnection>
     connectWithToken: (provider: CloudProviderId, token: string) => Promise<CloudProviderConnection>
-    disconnect: (provider: CloudProviderId) => Promise<void>
+    disconnect: (provider: CloudProviderId) => Promise<{ revoked: boolean; detail: string }>
   }
   providers: {
     resources: (provider: CloudProviderId) => Promise<CloudProviderResource[]>

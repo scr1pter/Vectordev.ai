@@ -40,7 +40,9 @@ const { encryptCloudCredential } = await import("./cloud-credential-vault")
 const { cloudProjectScopeKey, listDeployments, listEnv, recordDeployment, setEnv, updateDeployment } = await import(
   "./cloud-console"
 )
-const { getCloudProviderProjectLink, getCloudProviderRuntimeAuth } = await import("./cloud-connections")
+const { disconnectCloudProvider, getCloudProviderProjectLink, getCloudProviderRuntimeAuth } = await import(
+  "./cloud-connections"
+)
 const { VercelError, VERCEL_TOKEN_REJECTED } = await import("./cloud-vercel-api")
 const projects = await import("./cloud-vercel-projects")
 const deployments = await import("./cloud-vercel-deployments")
@@ -132,6 +134,52 @@ describe("Vercel connection and scope", () => {
   test("without a connection every action asks for one", async () => {
     await expect(projects.listVercelProjects()).rejects.toMatchObject({ code: "not_connected" })
     await expect(deployments.listVercelDeployments(project)).rejects.toMatchObject({ code: "not_linked" })
+  })
+
+  test("disconnecting a sign-in removes Vector's Vercel integration, which revokes its token", async () => {
+    connect("team_1")
+    const records = stores.get("cloud-provider-connections")!.get("records") as Record<string, unknown>[]
+    records[0].configurationId = "icfg_1"
+    api.state.configurations.set("icfg_1", "team_1")
+    expect(await disconnectCloudProvider("vercel")).toEqual({
+      revoked: true,
+      detail: "Vercel disconnected, and Vector's access on Vercel is revoked.",
+    })
+    expect(api.state.requests.at(-1)).toMatchObject({
+      method: "DELETE",
+      path: "/v1/integrations/configuration/icfg_1",
+      query: { teamId: "team_1" },
+    })
+    expect(api.state.configurations.has("icfg_1")).toBe(false)
+    expect(stores.get("cloud-provider-connections")!.get("records")).toEqual([])
+    await expect(projects.listVercelProjects()).rejects.toMatchObject({ code: "not_connected" })
+  })
+
+  test("a failed uninstall still removes the credential and says Vercel kept access", async () => {
+    connect("team_1")
+    const records = stores.get("cloud-provider-connections")!.get("records") as Record<string, unknown>[]
+    records[0].configurationId = "icfg_missing_scope"
+    // Not installed on that team as far as the fake knows, but answer as a scope error would.
+    api.state.configurations.set("icfg_missing_scope", "team_2")
+    const result = await disconnectCloudProvider("vercel", async (input, init) => {
+      const response = await fetch(input, init)
+      return response.status === 404 ? Response.json({ error: { code: "forbidden" } }, { status: 403 }) : response
+    })
+    expect(result.revoked).toBe(false)
+    expect(result.detail).toContain("still has access until you remove Vector")
+    expect(stores.get("cloud-provider-connections")!.get("records")).toEqual([])
+  })
+
+  test("disconnecting a pasted token deletes only Vector's copy and says the token still works", async () => {
+    connect()
+    const result = await disconnectCloudProvider("vercel")
+    expect(result).toEqual({
+      revoked: false,
+      detail:
+        "Vercel disconnected. Vector deleted its copy of your access token; the token itself stays valid until you delete it in Vercel's token settings.",
+    })
+    expect(api.state.requests).toEqual([])
+    expect(JSON.stringify(result)).not.toContain(api.token)
   })
 })
 

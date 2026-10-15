@@ -226,9 +226,13 @@ Before claiming live OAuth or release acceptance:
    and a verified acceptable billing boundary. Fixtures do not prove a live
    account's costs or provider permissions.
 5. Verify Supabase renewal without requiring a previously linked database.
-   Disconnect removes the local credential and attempts remote revocation;
-   confirm revocation with the provider when it matters rather than inferring
-   it from local removal.
+   Disconnect removes the local credential and revokes a sign-in connection:
+   it deletes Vector's Vercel integration installation
+   (`DELETE /v1/integrations/configuration/{id}`, which needs the
+   integration-configuration read/write scope) and revokes the Supabase grant
+   through the broker. Vector reports when the provider did not confirm it.
+   A pasted personal access token is the user's own and stays valid until the
+   user deletes it.
 
 Local automated tests cover callback security, readiness, environment writes,
 public-key selection and project scoping. They do not register provider apps,
