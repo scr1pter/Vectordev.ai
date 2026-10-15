@@ -159,7 +159,6 @@ export type VercelApi = {
   ) => Promise<VercelProjectDetails>
   enableBypass: (projectPath: string) => Promise<{ enabled: boolean; project: string }>
   deployments: (projectPath: string, limit?: number) => Promise<VercelDeployment[]>
-  inspect: (projectPath: string, id: string) => Promise<VercelDeployment>
   logs: (
     projectPath: string,
     id: string,

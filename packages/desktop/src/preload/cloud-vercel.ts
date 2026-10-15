@@ -14,7 +14,6 @@ const NAMES = [
   "updateSettings",
   "enableBypass",
   "deployments",
-  "inspect",
   "logs",
   "cancel",
   "redeploy",

@@ -1,7 +1,6 @@
 import { redactCloudLog } from "./cloud-console"
 import {
   cancelVercelDeployment,
-  inspectVercelDeployment,
   listVercelDeployments,
   promoteVercelDeployment,
   redeployVercelDeployment,
@@ -54,7 +53,6 @@ export const vercelIpc = {
     updateVercelProjectSettings(projectPath, patch),
   enableBypass: (projectPath: string) => enableVercelProtectionBypass(projectPath),
   deployments: (projectPath: string, limit?: number) => listVercelDeployments(projectPath, { limit }),
-  inspect: (projectPath: string, id: string) => inspectVercelDeployment(projectPath, id),
   logs: async (projectPath: string, id: string, source: "build" | "runtime", limit = 200) => {
     const result =
       source === "runtime"
