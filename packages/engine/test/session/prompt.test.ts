@@ -4315,6 +4315,33 @@ unix(
 )
 
 unix(
+  "run guard leaves a repeated bash call alone while each run of it changes a file",
+  () =>
+    withSh(() =>
+      Effect.gen(function* () {
+        if (!(yield* hasBash)) return
+        const { llm } = yield* useServerConfig(providerCfg)
+        const prompt = yield* SessionPrompt.Service
+        const chat = yield* guardedChat()
+        // The same input every time, but every run appends to a file, which only the step's patch shows.
+        const call = { command: "echo again >> stamp.txt", description: "Append a line" }
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.tool("bash", call)
+        yield* llm.text("done")
+
+        const result = yield* prompt.loop({ sessionID: chat.id })
+
+        expect(budgetStop(result.info)).toBeUndefined()
+        expect(result.parts.some((part) => part.type === "text" && part.text === "done")).toBe(true)
+        expect(yield* llm.pending).toBe(0)
+      }),
+    ),
+  { git: true },
+  30_000,
+)
+
+unix(
   "run guard leaves repeated calls alone when config turns the loop rules off",
   () =>
     withSh(() =>
@@ -4476,6 +4503,64 @@ it.instance(
       expect(yield* guard.rootOf(child.id)).toBe(root.id)
       expect(budgetStop(result.info)?.reason).toBe("cap")
       expect(budgetStop(result.info)?.spentUsd).toBe(2)
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard runs a helper started after its session's run stopped under its own limits",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const guard = yield* SpendGuard.Service
+      const root = yield* sessions.create({ title: "Root" })
+      yield* guard.begin(root.id, { usd: 1 })
+      yield* guard.record(root.id, {
+        costUsd: 2,
+        costKind: "priced",
+        contextTokens: 0,
+        cachedTokens: 0,
+        continues: false,
+        tools: [],
+        patched: false,
+      })
+      yield* guard.end(root.id)
+      // A review the user asks for once the stopped run is over is a run of its own, not a part of the stopped one.
+      const helper = yield* sessions.create({ title: "Review", parentID: root.id, internal: "vectorscope.security" })
+      yield* user(helper.id, "review this")
+      yield* llm.text("reviewed")
+
+      const result = yield* prompt.loop({ sessionID: helper.id })
+
+      expect(budgetStop(result.info)).toBeUndefined()
+      expect(yield* llm.calls).toBe(1)
+      expect(yield* guard.rootOf(helper.id)).toBe(helper.id)
+      expect((yield* guard.snapshot(root.id))?.spentUsd).toBe(2)
+    }),
+  30_000,
+)
+
+it.instance(
+  "run guard counts a helper started during its session's run against that run",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(pricedCfg({ input: 100, output: 1 }))
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const guard = yield* SpendGuard.Service
+      const root = yield* sessions.create({ title: "Root" })
+      yield* guard.begin(root.id, { usd: 5 })
+      const helper = yield* sessions.create({ title: "Review", parentID: root.id, internal: "vectorscope.security" })
+      yield* user(helper.id, "review this")
+      yield* llm.push(reply().tool("lookup", { value: 1 }).usage({ input: 1_000, output: 0 }))
+      yield* llm.text("reviewed")
+
+      yield* prompt.loop({ sessionID: helper.id })
+
+      expect(yield* guard.rootOf(helper.id)).toBe(root.id)
+      expect((yield* guard.snapshot(root.id))?.spentUsd).toBeCloseTo(0.1, 6)
     }),
   30_000,
 )
