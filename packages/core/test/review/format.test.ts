@@ -481,6 +481,23 @@ describe("running and note bodies", () => {
     expect(body.startsWith(`## Vectorscope review · Risk: High\n\n> ${note}\n\nThis change adds`)).toBe(true)
   })
 
+  test("a failed review says what its reviewers used before it stopped", () => {
+    expect(
+      noteFailed("HTTP 500 from the provider.", {
+        costUsd: 0.21,
+        input: 17_200,
+        output: 3_100,
+        reasoning: 0,
+        cacheRead: 31_000,
+        cacheWrite: 0,
+        kind: "priced",
+        model: "anthropic/claude-sonnet-4-5",
+      }),
+    ).toBe(
+      "Vector could not finish this review: HTTP 500 from the provider. Used before it stopped: anthropic/claude-sonnet-4-5 · $0.21 (48.2k in, 31.0k of it cached / 3.1k out). Comment `/vector review` to try again.",
+    )
+  })
+
   test("a model error after a first run that never finished", async () => {
     const note = noteFailed("The provider returned 529 Overloaded.")
     expect(note).toBe(

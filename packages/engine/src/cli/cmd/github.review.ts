@@ -665,7 +665,7 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
         failed: true,
         ...(outcome.cost ? { cost: outcome.cost } : {}),
       })
-      await upsertSticky(buildNoteBody({ previous: before, note: noteFailed(detail), state: next }))
+      await upsertSticky(buildNoteBody({ previous: before, note: noteFailed(detail, outcome.cost), state: next }))
       await clearEyes()
       return finish(0)
     }
@@ -925,8 +925,8 @@ async function reviewJob(ctx: ReviewJobContext, deps: ReviewJobDeps, seen: Seen)
       failed: true,
       ...(spent ? { cost: spent } : {}),
     })
-    await upsertSticky(buildNoteBody({ previous: before, note: noteFailed(message), state: next })).catch((cause) =>
-      log(`Could not post the failure: ${messageOf(cause)}`),
+    await upsertSticky(buildNoteBody({ previous: before, note: noteFailed(message, spent), state: next })).catch(
+      (cause) => log(`Could not post the failure: ${messageOf(cause)}`),
     )
     await clearEyes()
     return finish(0)

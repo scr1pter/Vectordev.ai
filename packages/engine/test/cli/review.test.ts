@@ -422,7 +422,12 @@ describe("vector review: results and exit codes", () => {
           },
         }).deps,
       )
-      expect(failed).toMatchObject({ exitCode: 2, error: "Vector could not finish this review: APIError: 400" })
+      // The reviewers' sessions are hidden, so the failure itself says what they used.
+      expect(failed).toMatchObject({
+        exitCode: 2,
+        error:
+          "Vector could not finish this review: APIError: 400. Used before it stopped: lmstudio/test-model · $0.00 (1.0k in / 100 out).",
+      })
 
       const outside = yield* scopedTmpdir()
       const notRepo = yield* review({ directory: outside.path }, fake().deps)
