@@ -840,6 +840,42 @@ codiumPrompts.instance("a Codium session's title goes through the gateway and is
   }),
 )
 
+codiumPrompts.instance("a Codium subagent's charges count once: in its own session and in its parent's", () =>
+  Effect.gen(function* () {
+    gateway.state.mode = "text"
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const chat = yield* sessions.create({
+      title: "Pinned",
+      permission: [{ permission: "*", pattern: "*", action: "allow" }],
+    })
+    const asked = yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      model: codiumRef,
+      noReply: true,
+      parts: [{ type: "text", text: "Find where the cache key is built" }],
+    })
+    yield* addSubtask(chat.id, asked.info.id, codiumRef)
+    const before = gateway.seen.length
+    yield* prompt.loop({ sessionID: chat.id })
+    gateway.state.mode = "ok"
+    const sent = gateway.seen.slice(before)
+    expect(sent.length).toBeGreaterThan(1)
+    expect(sent.every((item) => item.path === "/api/model-plans/chat")).toBe(true)
+    const charged = textStream[2]?.usage?.cost ?? 0
+    const [child] = yield* sessions.children(chat.id)
+    if (!child) throw new Error("Expected the subagent's session")
+    const parent = yield* sessions.get(chat.id)
+    const spent = (yield* sessions.get(child.id)).cost
+    // Each gateway charge is recorded exactly once: the subagent's in its session and in its parent's delegated
+    // spend, the parent's own in its cost.
+    expect(spent).toBeGreaterThan(0)
+    expect(parent.subagentCost).toBeCloseTo(spent, 12)
+    expect(parent.cost + (parent.subagentCost ?? 0)).toBeCloseTo(sent.length * charged, 12)
+  }),
+)
+
 codiumPrompts.instance("a Codium turn after signing out reports why and offers Sign in to Vector", () =>
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
