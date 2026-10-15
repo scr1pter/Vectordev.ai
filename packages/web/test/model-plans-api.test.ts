@@ -134,6 +134,7 @@ const state = {
   streamMode: "normal",
   charge: 0,
   keyReadDelay: 0,
+  chatDelay: 0,
   subscriptions: [] as ReturnType<typeof subscription>[],
 }
 const calls: { path: string; method: string; headers: Headers; body: Record<string, unknown> }[] = []
@@ -260,6 +261,8 @@ const upstream = Bun.serve({
       expect(request.headers.get("authorization")).toBe(`Bearer ${keys.values().next().value?.secret}`)
       if (state.upstreamStatus !== 200)
         return Response.json({ error: { message: "PRIVATE fixture-paid-secret-1" } }, { status: state.upstreamStatus })
+      // The provider bills a request, and the key's usage grows, only once it finishes.
+      if (state.chatDelay) await Bun.sleep(state.chatDelay)
       const charged = keys.values().next().value
       if (charged && state.charge) charged.data.usage = Number(charged.data.usage ?? 0) + state.charge
       const mode = state.streamMode
@@ -352,6 +355,7 @@ beforeEach(async () => {
     streamMode: "normal",
     charge: 0,
     keyReadDelay: 0,
+    chatDelay: 0,
     subscriptions: [],
   })
   calls.length = 0
@@ -623,7 +627,7 @@ describe("model plan account deletion", () => {
 describe("paid credential lifecycle", () => {
   test("persists only encrypted credentials and reuses the period key with a hard nonresetting cap", async () => {
     const subscription = await paid()
-    const credential = await modelPlanCredential(user.id, fetcher)
+    const credential = (await modelPlanCredential(user.id, fetcher)).key
     expect(credential).toBe("fixture-paid-secret-1")
     expect(String(await redis(["GET", accountKey]))).not.toContain(credential)
     expect(await readModelPlanAccount(user.id, fetcher)).toMatchObject({
@@ -635,20 +639,20 @@ describe("paid credential lifecycle", () => {
       include_byok_in_limit: true,
       expires_at: new Date(subscription.items.data[0]!.current_period_end * 1000).toISOString(),
     })
-    expect(await modelPlanCredential(user.id, fetcher)).toBe(credential)
+    expect((await modelPlanCredential(user.id, fetcher)).key).toBe(credential)
     expect(keys.size).toBe(1)
     expect(mutations()).toHaveLength(1)
   })
 
   test("parallel paid-key reads do not serialize through a mutation lease", async () => {
     await paid()
-    const credential = await modelPlanCredential(user.id, fetcher)
+    const credential = (await modelPlanCredential(user.id, fetcher)).key
     calls.length = 0
     commands.length = 0
     state.keyReadDelay = 25
-    expect(await Promise.all(Array.from({ length: 8 }, () => modelPlanCredential(user.id, fetcher)))).toEqual(
-      Array(8).fill(credential),
-    )
+    expect(
+      await Promise.all(Array.from({ length: 8 }, async () => (await modelPlanCredential(user.id, fetcher)).key)),
+    ).toEqual(Array(8).fill(credential))
     expect(mutations()).toHaveLength(0)
     expect(commands.every((command) => command[0] === "GET")).toBe(true)
     expect(calls.filter((call) => call.path === "/api/v1/keys/hash_fixture1")).toHaveLength(8)
@@ -656,9 +660,9 @@ describe("paid credential lifecycle", () => {
 
   test("same-period restoration re-enables the same key without clearing already charged usage", async () => {
     await paid()
-    const credential = await modelPlanCredential(user.id, fetcher)
+    const credential = (await modelPlanCredential(user.id, fetcher)).key
     Object.assign(keys.get("hash_fixture1")!.data, { disabled: true, usage: 3.5 })
-    expect(await modelPlanCredential(user.id, fetcher)).toBe(credential)
+    expect((await modelPlanCredential(user.id, fetcher)).key).toBe(credential)
     expect(keys.size).toBe(1)
     expect(keys.get("hash_fixture1")?.data).toMatchObject({ disabled: false, usage: 3.5, limit: 5, limit_reset: null })
     expect(calls.findLast((call) => call.method === "PATCH")?.body).not.toHaveProperty("usage")
@@ -667,10 +671,10 @@ describe("paid credential lifecycle", () => {
 
   test("renewal disables the old key before issuing a new period allowance", async () => {
     const current = await paid()
-    const first = await modelPlanCredential(user.id, fetcher)
+    const first = (await modelPlanCredential(user.id, fetcher)).key
     const start = current.items.data[0]!.current_period_end
     state.subscriptions = [subscription(start, start + 7200)]
-    const next = await modelPlanCredential(user.id, fetcher, (start + 1) * 1000)
+    const next = (await modelPlanCredential(user.id, fetcher, (start + 1) * 1000)).key
     expect(next).not.toBe(first)
     expect(keys.size).toBe(2)
     expect(keys.get("hash_fixture1")?.data.disabled).toBe(true)
@@ -858,6 +862,49 @@ describe("model plan HTTP inference", () => {
       },
     })
     expect(chats()).toHaveLength(1)
+  })
+
+  test("parallel requests hold their largest cost, so together they cannot spend past the balance", async () => {
+    await paid()
+    await modelPlanCredential(user.id, fetcher)
+    // Each hold is "<ticket>:<credits>". A request settles its hold just after its answer ends.
+    const held = async (count: number, charge?: string) => {
+      const members = async () => (await redis(["ZRANGE", "vector:model-plans:held:hash_fixture1", 0, -1])) as string[]
+      for (let tries = 0; tries < 100; tries++) {
+        const current = await members()
+        if (current.length === count && current.every((member) => !charge || member.endsWith(`:${charge}`)))
+          return current
+        await Bun.sleep(10)
+      }
+      return members()
+    }
+    // Room for two of the fixture's largest requests (2,048 output tokens at $2 per million, plus input), not three.
+    keys.get("hash_fixture1")!.data.usage = 5 - 0.01
+    state.chatDelay = 100
+    state.charge = 0.001
+    const responses = await Promise.all(Array.from({ length: 5 }, () => chat()))
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 402, 402, 402])
+    expect(chats()).toHaveLength(2)
+    const refused = await responses.find((response) => response.status === 402)!.json()
+    expect(refused).toEqual({
+      error: {
+        code: "MODEL_PLAN_EXHAUSTED",
+        message:
+          "The monthly credits left cannot cover this request alongside the requests already sent. Wait for them to finish, or add a top-up.",
+      },
+    })
+    // Finished requests keep only what they were charged, for a moment, until the key's usage shows it.
+    expect(keys.get("hash_fixture1")!.data.usage).toBeCloseTo(4.992, 9)
+    expect(await held(2, "0.001")).toHaveLength(2)
+    state.chatDelay = 0
+    expect((await chat()).status).toBe(200)
+    expect(await held(3, "0.001")).toHaveLength(3)
+    // A request the provider refuses releases its hold at once.
+    keys.get("hash_fixture1")!.data.usage = 4
+    state.upstreamStatus = 500
+    expect((await chat()).status).toBe(503)
+    expect(await held(3, "0.001")).toHaveLength(3)
+    expect(chats()).toHaveLength(4)
   })
 
   test("normalizes upstream capacity and busy failures without leaking credentials or retrying", async () => {

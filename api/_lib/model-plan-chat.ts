@@ -140,6 +140,7 @@ export function requireModelPlanContext<T extends { max_tokens: number }>(body: 
   return inputTokens
 }
 
+/** Streams the provider's answer to Vector and returns what the provider charged for it, when it said. */
 export async function streamModelPlanResponse(upstream: Response, response: ApiResponse) {
   if (upstream.status === 402 || upstream.status === 429) {
     const retry = upstream.headers.get("retry-after")
@@ -173,7 +174,7 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
     controller.abort()
     void reader.cancel().catch(() => undefined)
   }
-  const state = { pending: "" }
+  const state = { pending: "", charge: undefined as number | undefined }
   response.once("close", cancel)
   try {
     while (!response.destroyed) {
@@ -191,7 +192,7 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
           .join("\n")
         if (data === "[DONE]") {
           response.end("data: [DONE]\n\n")
-          return
+          return state.charge
         }
         if (!data) continue
         const parsed = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(data)
@@ -203,11 +204,14 @@ export async function streamModelPlanResponse(upstream: Response, response: ApiR
             "MODEL_PLAN_STREAM",
             "The model stopped responding. Your account shows any usage charged by the provider.",
           )
+        const cost = stripeRecord(parsed.value.usage) ? parsed.value.usage.cost : undefined
+        if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0) state.charge = cost
         if (!response.write(`data: ${JSON.stringify(withoutCharge(parsed.value))}\n\n`))
           await once(response, "drain", { signal: controller.signal })
       }
       if (part.done) throw new ApiError(503, "MODEL_PLAN_STREAM", "The model response ended before completion.")
     }
+    return state.charge
   } finally {
     response.off("close", cancel)
     await reader.cancel().catch(() => undefined)
@@ -244,6 +248,14 @@ function contextRefused(body: string) {
 export async function handleModelPlanChat(request: ApiRequest, response: ApiResponse, fetcher: typeof fetch = fetch) {
   const controller = new AbortController()
   const close = () => controller.abort()
+  // The credits held for this request until it settles: its charge once the provider streamed an answer, which may be
+  // billed even when the stream later breaks, or nothing when no answer came.
+  const hold = {
+    release: async (_charge?: number) => {},
+    required: 0,
+    streamed: false,
+    charge: undefined as number | undefined,
+  }
   response.once("close", close)
   try {
     requireMethod(request, "POST")
@@ -261,21 +273,23 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
     const model = configuredPlanModels().find((model) => model.id === body.model)!
     // Estimate prompt tokens, including tool schemas, before reserving provider credit.
     const inputTokens = requireModelPlanContext(body, model)
-    const requiredCredits = (inputTokens * model.inputPrice + body.max_tokens * model.outputPrice) / 1_000_000
-    const key = await modelPlanCredential(account.id, fetcher, Date.now(), requiredCredits)
+    hold.required = (inputTokens * model.inputPrice + body.max_tokens * model.outputPrice) / 1_000_000
+    const funding = await modelPlanCredential(account.id, fetcher, Date.now(), hold.required)
+    hold.release = funding.release
     const upstream = await fetcher(`${MODEL_PLAN_ROOT}/chat/completions`, {
       method: "POST",
       redirect: "error",
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(600_000)]),
       headers: {
-        authorization: `Bearer ${key}`,
+        authorization: `Bearer ${funding.key}`,
         "content-type": "application/json",
         "HTTP-Referer": "https://vectordev.ai/",
         "X-OpenRouter-Title": "Vector",
       },
       body: JSON.stringify({ ...body, user: createHash("sha256").update(account.id).digest("hex") }),
     })
-    await streamModelPlanResponse(upstream, response)
+    hold.streamed = upstream.ok
+    hold.charge = await streamModelPlanResponse(upstream, response)
   } catch (error) {
     if (response.destroyed) return
     const payload = {
@@ -298,5 +312,7 @@ export async function handleModelPlanChat(request: ApiRequest, response: ApiResp
     request.resume()
     response.off("close", close)
     controller.abort()
+    // An unreleased hold lapses on its own once the request could no longer be running.
+    await hold.release(hold.streamed ? (hold.charge ?? hold.required) : undefined).catch(() => undefined)
   }
 }
