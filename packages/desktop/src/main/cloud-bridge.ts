@@ -336,7 +336,7 @@ async function describeCloudAction(input: CloudCommandInput, workspace: CloudSco
       needsSetup: true,
       error: "No Vector Cloud database is connected.",
       nextStep:
-        "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Vector Cloud > Database.",
+        "Run create_database to create one on the user's connected Supabase account, or link the user's existing project with link_database (supabase_projects lists them).",
     }
   }
   if (input.action === "apply_migrations") {
@@ -389,7 +389,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
       input.action === "sync_environment" || VERCEL_DESCRIBABLE.some((item) => item === input.action)
         ? await describeVercelAction(input, scope, options.vercel)
         : await describeCloudAction(input, scope, options.request ?? options.vercel?.request)
-    return askEveryTime(input, described)
+    return described
   }
   if (
     VERCEL_COMMANDS.some((item) => item === input.command) ||
@@ -444,7 +444,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
         : { connected: false },
       nextStep: database
         ? "The project database is ready through Vector Cloud."
-        : "No database is connected. Offer to create one with create_database, which creates a real Supabase project on the user's connected Supabase account; if the user already has a Supabase project for this app, ask them to link it in Vector Cloud > Database instead.",
+        : "No database is connected. Offer to create one with create_database, which creates a real Supabase project on the user's connected Supabase account; if the user already has a Supabase project for this app, find it with supabase_projects and link it with link_database (the user approves both).",
     }
   }
   if (input.command === "create_database") {
@@ -464,7 +464,7 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
         needsSetup: true,
         error: "No Vector Cloud database is connected.",
         nextStep:
-          "Run create_database to create one on the user's connected Supabase account, or ask them to link an existing project in Vector Cloud > Database.",
+          "Run create_database to create one on the user's connected Supabase account, or link the user's existing project with link_database (supabase_projects lists them).",
       }
     }
     return {
@@ -531,32 +531,6 @@ async function runCloudCommand(request: CloudCommandInput, options: CloudBridgeO
 }
 
 const SETUP_CODES = ["not_connected", "not_linked", "no_node", "token_rejected"]
-
-// Moving production or what it serves, creating something the user is billed
-// for, changing the production database's schema, and handing over a
-// credential or variable values ask every time, as Supabase's own risky
-// commands do: an earlier "always" for the same kind of action never covers
-// them. (The app's auto-accept answers none of these either.)
-const EACH_TIME = [
-  "create_database",
-  "promote",
-  "rollback",
-  "add_domain",
-  "remove_domain",
-  "enable_protection_bypass",
-  "set_env",
-  "pull_env",
-  "sync_environment",
-]
-
-function askEveryTime<T extends object>(input: CloudCommandInput, described: T) {
-  const scope = Reflect.get(described, "scope")
-  if (Reflect.get(described, "ok") !== true || !scope || typeof scope !== "object") return described
-  const production = input.action === "publish" && Reflect.get(scope, "environment") === "production"
-  const migration = input.action === "apply_migrations" && input.dryRun !== true
-  if (!production && !migration && !EACH_TIME.includes(input.action ?? "")) return described
-  return { ...described, repeatable: false }
-}
 
 function publishNextStep(result: PublishResult, isolated: boolean) {
   if (result.ok) {

@@ -2,6 +2,8 @@ import { createTwoFilesPatch } from "diff"
 import { Effect, Schema } from "effect"
 import path from "path"
 
+import { PermissionPolicy } from "@vectordevai/schema/permission-policy"
+
 import { InstanceState } from "@/effect/instance-state"
 import { trimDiff } from "./edit"
 import { Tool } from "./tool"
@@ -226,7 +228,6 @@ type CloudCheck = { label?: string; status?: string; required?: boolean; details
 type CloudReport = {
   [key: string]: unknown
   ok: boolean
-  repeatable?: boolean
   scope?: { provider: string; project: string; environment: string; summary: string }
   /** From describe: what the approved action runs with, such as the id of the plan the user saw. */
   carry?: Record<string, unknown>
@@ -344,8 +345,7 @@ function nameList(values?: string[]) {
 // an account Vector cannot connect on the user's behalf, so an unfinished setup
 // has to read as an instruction rather than as a failed run. It is only added
 // when the report says setup is missing: a failed build is not a setup problem.
-const SETUP_HINT =
-  "Ask the user to connect Vercel or Supabase in Vector Cloud > Connections with an access token, then try again."
+const SETUP_HINT = "Ask the user to connect Vercel or Supabase in Vector Cloud > Connections, then try again."
 
 // How much of a failed check's output, or of the publish log, reaches the
 // model: the end of a build log is where the error is.
@@ -623,8 +623,8 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
       "Supabase control for the linked project: supabase_projects lists organizations and projects; link_database and unlink_database; pause_database and restore_database; write_database_url writes a server-only DATABASE_URL, only when the user wants one; rotate_database_password resets the password and can rewrite DATABASE_URL and push it to Vercel. Database: migration_status; create_migration writes a timestamped file (pass downSql so it can be rolled back); apply_migrations; rollback_migration undoes only the latest applied migration and only with its down migration; run_sql runs read-only unless allowWrite, and hides cells in columns named like passwords, tokens or secrets. Auth: auth_config; update_auth for the site URL, redirect URLs (addVercelUrls adds the linked Vercel production and preview addresses), email sign-in and Google, GitHub or Apple sign-in; auth_users, invite_user, delete_user. Storage: create_bucket, update_bucket, delete_bucket. Edge Functions: deploy_function from supabase/functions/<name>, delete_function, function_secrets (names only), set_function_secrets from names of stored environment variables, delete_function_secrets. supabase_logs reads api, postgres, auth, storage or functions logs, so check them when a Supabase-backed feature fails. security_check runs Supabase's security advisors and a scan for leaked server keys; production only moves to a release while it passes, as long as Secret scan is a required release check, which it is by default.",
       "Publishing: publish deploys this project to the Vercel project linked to it. It publishes a preview by default and leaves production unchanged; pass production: true only when the user asked for a production release, and say which Vercel project before calling. Vector then builds production, runs the release checks and promotes it only if they pass. Report the URL and the check results. When a publish fails, the result lists the failed checks with the end of their output: fix the cause in the project and publish a preview again. Do not tell the user to reconnect an account unless the result says setup is needed. When a live production release is broken, first offer rollback (with no deploymentId it returns production to the last deployment that served it and passed Vector's checks), then read its logs with the logs action before guessing at a cause or asking the user to paste an error.",
       VERCEL_GUIDANCE,
-      "Secrets: results carry names, never values. Never ask the user to paste a token, key or password into the chat. Name what is needed and where to add it: Vector Cloud > Environment variables for the app's settings (set_env without a value copies the stored one to Vercel), Vector Cloud > Connections for the Vercel and Supabase accounts (connected with an access token). OAuth client secrets and function secret values are also entered by the user in Vector Cloud.",
-      "Every action that publishes or moves production, changes a database, or writes hosting settings, domains or host variables asks the user first, naming the provider, project and environment, and auto-accept never answers these prompts. Production moves (a production publish, promote, rollback, adding or removing a domain), billed creations (create_database), applying migrations, anything that hands over a credential or variable values, run_sql and other destructive actions ask every time, even after the user allowed that kind of action always. Hosting and database usage follow the connected accounts' billing. Never claim a resource was created unless this tool reports it.",
+      "Secrets: results carry names, never values. Never ask the user to paste a token, key or password into the chat. Name what is needed and where to add it: Vector Cloud > Environment variables for the app's settings (set_env without a value copies the stored one to Vercel), Vector Cloud > Connections for the Vercel and Supabase accounts (the user signs in there; only the user can connect or disconnect an account). OAuth client secrets and function secret values are also entered by the user in Vector Cloud.",
+      "Every action that publishes or moves production, creates or changes a database, or writes hosting settings, domains or host variables asks the user first, every time, naming the provider, project and environment. Auto-accept, permission rules and earlier approvals never answer these prompts, so expect one for each such call and do not batch unrelated changes into one. A rejected prompt means nothing changed. Hosting and database usage follow the connected accounts' billing. Never claim a resource was created unless this tool reports it.",
     ].join(" "),
     parameters: Parameters,
     execute: (params, ctx) =>
@@ -741,24 +741,22 @@ export const VectorCloudTool = Tool.define<typeof Parameters, Metadata, never>(
           }
         }
         if (!permission || !described?.scope) return yield* run()
-        // Every approval names its action, so "always" for one (adding a
-        // domain, creating a bucket, preparing the database) never approves
-        // another (removing a domain, deleting users, applying migrations).
-        // Production moves, billed creations, credential-bearing and
-        // destructive requests get no "always" and a pattern of their own, so
-        // an earlier "always" for a milder form of the same action (a preview
-        // publish, a read-only run_sql, a private bucket) never approves them.
+        // The pattern names the provider, project, environment and action, so
+        // a deny rule can target exactly one of them. The account permissions
+        // (publish, database, environment, hosting) ask every time under the
+        // shared PermissionPolicy: auto-accept, a configured allow and an
+        // earlier "always" answer none of them, so they offer no "always".
+        // Only the read-only migration dry run can be remembered.
         const pattern = [
           described.scope.provider.toLowerCase(),
           described.scope.project,
           described.scope.environment,
           params.action,
-          ...(described.repeatable === false ? ["each-time"] : []),
         ].join("/")
         yield* ctx.ask({
           permission,
           patterns: [pattern],
-          always: described.repeatable === false ? [] : [pattern],
+          always: PermissionPolicy.canAlwaysApprove(permission, [pattern]) ? [pattern] : [],
           metadata: {
             projectPath: instance.directory,
             action: params.action,

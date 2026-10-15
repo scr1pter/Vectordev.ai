@@ -503,7 +503,6 @@ describe("migrations", () => {
     })) as Report
     expect(described).toMatchObject({
       ok: true,
-      repeatable: false,
       scope: { summary: expect.stringContaining(`Roll back ${name}`) },
       statements: [{ label: expect.stringContaining(".down.sql"), sql: "drop table profiles;" }],
       approved: { name, downChecksum: sha("drop table profiles;\n") },
@@ -769,44 +768,27 @@ describe("authentication", () => {
       request: fake.request,
     })
     expect(described).toMatchObject({
-      repeatable: true,
       scope: {
         summary:
           "Change Supabase Auth on shop-db: allow redirects to https://shop.vercel.app/**, https://*-krishnas-projects.vercel.app/**.",
       },
     })
-    // Turning a method off or removing an address can lock users out.
-    for (const narrowing of [
-      { emailEnabled: false },
-      { removeRedirectUrls: ["http://localhost:3000/**"] },
-      { providers: { github: { enabled: false } } },
-    ]) {
-      expect(await describeSupabaseCommand("update_auth", { projectPath: project, ...narrowing }, [])).toMatchObject({
-        repeatable: false,
+    // Turning a method off or removing an address can lock users out, and a
+    // new site URL or redirect is somewhere sign-in can hand over a session:
+    // the prompt names each change. Every one asks each time (PermissionPolicy).
+    for (const [change, named] of [
+      [{ emailEnabled: false }, "turn email sign-in off"],
+      [{ removeRedirectUrls: ["http://localhost:3000/**"] }, "stop allowing http://localhost:3000/**"],
+      [{ providers: { github: { enabled: false } } }, "turn github sign-in off"],
+      [{ siteUrl: "https://shop.example.com" }, "set the site URL to https://shop.example.com"],
+      [{ redirectUrls: ["https://attacker.example/**"] }, "allow redirects to https://attacker.example/**"],
+    ] as const) {
+      const prompt = await describeSupabaseCommand("update_auth", { projectPath: project, ...change }, [], {
+        request: fake.request,
       })
+      expect(prompt).toMatchObject({ ok: true, scope: { summary: expect.stringContaining(named) } })
+      expect(prompt).not.toHaveProperty("repeatable")
     }
-    // A new site URL, or an address that is not one of the linked Vercel ones,
-    // is somewhere sign-in can hand over a session, so an earlier "always"
-    // for the Vercel addresses never covers it.
-    for (const widening of [
-      { siteUrl: "https://shop.example.com" },
-      { redirectUrls: ["https://attacker.example/**"] },
-      { redirectUrls: ["https://shop.vercel.app/**", "https://attacker.example/**"] },
-    ]) {
-      expect(
-        await describeSupabaseCommand("update_auth", { projectPath: project, ...widening }, [], {
-          request: fake.request,
-        }),
-      ).toMatchObject({ repeatable: false })
-    }
-    expect(
-      await describeSupabaseCommand(
-        "update_auth",
-        { projectPath: project, redirectUrls: ["https://shop.vercel.app/**"] },
-        [],
-        { request: fake.request },
-      ),
-    ).toMatchObject({ repeatable: true })
     expect(
       await describeSupabaseCommand(
         "update_auth",
@@ -1168,7 +1150,7 @@ describe("agent bridge", () => {
     return (await response.json()) as Report
   }
 
-  test("describes changes for the permission prompt, with destructive ones never always-allowed", async () => {
+  test("describes each change for the permission prompt, naming what it would do", async () => {
     connect()
     linkDatabase()
     // Every query asks, and the prompt shows it.
@@ -1176,7 +1158,6 @@ describe("agent bridge", () => {
       await bridgeCommand({ command: "describe", action: "run_sql", sql: "select token from auth.refresh_tokens" }),
     ).toEqual({
       ok: true,
-      repeatable: false,
       scope: {
         provider: "Supabase",
         project: "shop-db",
@@ -1206,17 +1187,15 @@ describe("agent bridge", () => {
     ] as const) {
       expect(await bridgeCommand({ command: "describe", action, ...extra })).toMatchObject({
         ok: true,
-        repeatable: false,
+        scope: { provider: "Supabase", project: "shop-db", environment: "production" },
       })
     }
     expect(
       (await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "open" })).scope.summary,
     ).toContain("verify_jwt = false for it, so anyone on the internet can call it")
     expect(
-      await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "hello" }),
-    ).toMatchObject({
-      repeatable: true,
-    })
+      (await bridgeCommand({ command: "describe", action: "deploy_function", functionName: "hello" })).scope.summary,
+    ).toBe("Deploy supabase/functions/hello to shop-db as a live Edge Function.")
     expect(
       (
         await bridgeCommand({
@@ -1249,7 +1228,6 @@ describe("agent bridge", () => {
         userId: "00000000-0000-0000-0000-000000000001",
       }),
     ).toMatchObject({
-      repeatable: false,
       scope: {
         summary:
           "Delete the user ada@example.com (00000000-0000-0000-0000-000000000001) from shop-db. This cannot be undone.",

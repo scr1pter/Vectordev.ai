@@ -142,9 +142,9 @@ describe("vector_cloud bridge", () => {
       expect(asks.permissions).toEqual([
         expect.objectContaining({
           permission: "vector_cloud_publish",
-          // The approval names its action, so "always" here never covers another one.
+          // The pattern names the action; a publish asks every time, so nothing can be remembered.
           patterns: ["vercel/website/preview/publish"],
-          always: ["vercel/website/preview/publish"],
+          always: [],
           metadata: expect.objectContaining({
             provider: "Vercel",
             project: "website",
@@ -269,7 +269,7 @@ describe("vector_cloud bridge", () => {
       yield* bridge({ ok: false, needsSetup: true, error: "Supabase rejected the saved access token." })
       const setup = yield* execute({ action: "supabase_services" })
       expect(setup.output).toContain("Supabase rejected the saved access token.")
-      expect(setup.output).toContain("Vector Cloud > Connections with an access token")
+      expect(setup.output).toContain("connect Vercel or Supabase in Vector Cloud > Connections")
     }),
   )
 
@@ -298,6 +298,12 @@ describe("vector_cloud bridge", () => {
         expect(text).not.toMatch(/Netlify|AWS|Cloud Services|Integrations/)
       }
       expect(tool.description).toContain("publishes a preview by default")
+      // One rule for every account change: it asks each time, whatever auto-accept or earlier approvals say.
+      expect(tool.description).toContain("asks the user first, every time")
+      expect(tool.description).not.toContain("allowed that kind of action always")
+      // Values Vector writes to .env are secrets the model must not read.
+      expect(tool.description).not.toContain("which you can read")
+      expect(VECTOR_CLOUD_POLICY).toContain("do not read .env files")
       expect(VECTOR_CLOUD_POLICY).toContain("Publish previews by default")
     }),
   )
@@ -361,9 +367,18 @@ describe("vector_cloud bridge", () => {
         const asks = recordAsks()
         yield* execute(item.params, asks.ask)
         const described = item.scope.report as { scope: Record<string, string> }
+        const pattern = [
+          described.scope.provider.toLowerCase(),
+          described.scope.project,
+          described.scope.environment,
+          item.params.action,
+        ].join("/")
         expect(asks.permissions).toEqual([
           expect.objectContaining({
             permission: item.permission,
+            patterns: [pattern],
+            // Only the read-only dry run may be remembered; every account change asks each time.
+            always: item.permission === "vector_cloud_inspect" ? [pattern] : [],
             metadata: expect.objectContaining(described.scope),
           }),
         ])
@@ -403,17 +418,15 @@ describe("vector_cloud bridge", () => {
     }),
   )
 
-  it.instance("asks per Supabase action, never offers always for destructive ones, and maps its fields", () =>
+  it.instance("asks every time for each Supabase change and maps its fields", () =>
     Effect.gen(function* () {
       const cases = [
         {
           params: { action: "run_sql", sql: "delete from sessions", allowWrite: true } as const,
-          repeatable: false,
           sent: { sql: "delete from sessions", write: true },
         },
         {
           params: { action: "create_bucket", bucket: "avatars", publicBucket: false } as const,
-          repeatable: true,
           sent: { bucket: "avatars", public: false },
         },
         {
@@ -424,7 +437,6 @@ describe("vector_cloud bridge", () => {
             clientId: "google-client",
             redirectUrls: ["https://shop.example.com/**"],
           } as const,
-          repeatable: true,
           sent: {
             providers: { google: { enabled: true, clientId: "google-client" } },
             redirectUrls: ["https://shop.example.com/**"],
@@ -432,23 +444,19 @@ describe("vector_cloud bridge", () => {
         },
         {
           params: { action: "delete_user", userId: "00000000-0000-0000-0000-000000000000" } as const,
-          repeatable: false,
           sent: { userId: "00000000-0000-0000-0000-000000000000" },
         },
       ]
       for (const item of cases) {
         const described = scope("Supabase", "shop-db", "production", `Change shop-db with ${item.params.action}.`)
-        const requests = yield* bridge({ ok: true }, 200, {
-          report: { ...(described.report as object), repeatable: item.repeatable },
-        })
+        const requests = yield* bridge({ ok: true }, 200, described)
         const asks = recordAsks()
         yield* execute(item.params, asks.ask)
-        const pattern = `supabase/shop-db/production/${item.params.action}${item.repeatable ? "" : "/each-time"}`
         expect(asks.permissions).toEqual([
           expect.objectContaining({
             permission: "vector_cloud_database",
-            patterns: [pattern],
-            always: item.repeatable ? [pattern] : [],
+            patterns: [`supabase/shop-db/production/${item.params.action}`],
+            always: [],
             metadata: expect.objectContaining({ provider: "Supabase", project: "shop-db", action: item.params.action }),
           }),
         ])
@@ -536,7 +544,6 @@ describe("vector_cloud bridge", () => {
       const requests = yield* bridge({ ok: true }, 200, {
         report: {
           ok: true,
-          repeatable: false,
           scope: {
             provider: "Supabase",
             project: "shop-db",
@@ -573,7 +580,6 @@ describe("vector_cloud bridge", () => {
       const requests = yield* bridge({ ok: true, rolledBack: "20261010120000_add_profiles.sql" }, 200, {
         report: {
           ok: true,
-          repeatable: false,
           scope: {
             provider: "Supabase",
             project: "shop-db",
@@ -719,7 +725,7 @@ describe("vector_cloud bridge", () => {
 })
 
 describe("vector_cloud Vercel actions", () => {
-  it.instance("asks before moving production, naming the action in what 'always' approves", () =>
+  it.instance("asks before moving production, naming the action, and offers no 'always'", () =>
     Effect.gen(function* () {
       const requests = yield* bridge(
         { ok: true, text: "Production now serves https://shop-abc.vercel.app (dpl_abc).", url: "https://shop.example" },
@@ -732,7 +738,7 @@ describe("vector_cloud Vercel actions", () => {
         expect.objectContaining({
           permission: "vector_cloud_publish",
           patterns: ["vercel/shop/production/promote"],
-          always: ["vercel/shop/production/promote"],
+          always: [],
           metadata: expect.objectContaining({
             provider: "Vercel",
             project: "shop",

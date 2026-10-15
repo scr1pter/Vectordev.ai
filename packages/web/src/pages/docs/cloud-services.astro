@@ -105,15 +105,10 @@ export const prerender = true
     and run the same Vercel and Supabase controls: Vercel projects and their settings, deployments, logs, promotion
     and rollback, variables and domains, and everything listed for Supabase above. It asks before it publishes, moves
     production, changes a database, writes a host's environment or changes a Vercel project or domain, and the prompt
-    names the provider, project and environment. Neither a wildcard allow nor auto-accepting permissions in a session
-    skips these prompts; only a permission rule that names the cloud action does. Each cloud action is approved on
-    its own, so allowing one always never allows another. Moving production (a production publish, promote,
-    rollback, adding or removing a domain), creating a database, applying migrations, turning on Protection Bypass,
-    and setting, syncing or pulling Vercel variables ask every time. So do every SQL query, rolling back a migration,
-    deleting users, buckets or functions, pausing, rotating the password, writing DATABASE_URL, setting function
-    secrets, deploying a function anyone can call, a new site URL, a redirect address other than your linked Vercel
-    ones, and turning a sign-in method or redirect address off, and the prompt shows the SQL that would run. A new migration file asks like any other edit, showing both the
-    migration and its down file. OAuth client secrets, function secret values and the database password are entered
+    names the provider, project and environment and shows any SQL that would run. It asks every time: auto-accepting
+    permissions, a permission rule that allows it and an earlier approval never skip these prompts, and none of them
+    offers Always allow. Only the read-only migration dry run can be answered by auto-accept.
+    A new migration file asks like any other edit, showing both the migration and its down file. OAuth client secrets, function secret values and the database password are entered
     in Vector Cloud, never in chat, and the agent can only refer to variables already stored there. Query results
     reach the agent as the query returns them, except cells in columns named like passwords, tokens or secrets, which
     are hidden.

@@ -2,11 +2,12 @@
 
 ## Current availability
 
-The Cloud completion changes described here are prepared for **1.99.99** and
-are not a published desktop release. Provider application registration, hosted
-configuration and a real browser-to-desktop consent check are separate release
-steps. No Vercel or Supabase registration has been confirmed complete
-for this checkpoint. Do not infer readiness from a successful build or test.
+The Cloud changes described here are on the integration branch and are not in a
+published desktop release yet. Provider application registration, hosted
+configuration and a real browser-to-desktop consent check are separate owner
+steps, listed in [owner-actions/cloud-oauth.md](owner-actions/cloud-oauth.md).
+No Vercel or Supabase registration has been confirmed complete. Do not infer
+readiness from a successful build or test.
 
 Vector Cloud supports two providers: Vercel for hosting and Supabase for data.
 Vector connects accounts and resources that belong to the user. Provider
@@ -174,13 +175,22 @@ The agent's `vector_cloud` tool asks before it publishes or moves production
 (`vector_cloud_database`), writes a host's environment variables
 (`vector_cloud_environment`) or changes a Vercel project, its protection or its
 domains (`vector_cloud_hosting`). Each prompt names the provider, the
-provider-side project and the environment the action touches. All four default
-to ask for every agent; a wildcard `"*": "allow"` does not approve them, only a
-rule that names them. The app's auto-accept never answers them either, nor any
-other Vector Cloud request that asks every time (one with no "always" pattern);
-the list is `ALWAYS_ASK` in `packages/app/src/context/permission-auto-respond.ts`.
-A migration dry run only reads, so it uses `vector_cloud_inspect`, which is
-allowed by default and which auto-accept may answer.
+provider-side project and the environment the action touches, and shows any SQL
+it would run.
+
+These four ask every time. Auto-accept, `vector run --auto`, a configured
+`allow` rule (a wildcard or one that names them) and an earlier "Always allow"
+never answer them, and no Vector client offers "Always allow" for them; a
+`deny` rule still blocks them. The rule is `PermissionPolicy` in
+`packages/schema/src/permission-policy.ts`. The app, the TUI, `vector run`, the
+ACP bridge and both permission runtimes use it, and it also keeps `doom_loop`,
+`browser_sensitive` and `computer_*` prompts manual. A migration dry run only
+reads, so it uses `vector_cloud_inspect`, which is allowed by default and which
+auto-accept may answer. A new migration file is a repository edit and asks
+under `edit`.
+
+Connecting or disconnecting a Vercel or Supabase account is never an agent
+action: only the user can do it, in Vector Cloud → Connections.
 
 ## Repository migrations
 

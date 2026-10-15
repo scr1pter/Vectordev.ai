@@ -215,7 +215,7 @@ export const VECTOR_CLOUD_POLICY = [
   "Publish previews by default: vector_cloud publish makes a preview release unless you pass production: true. Ask the user before any production release, naming the Vercel project. Report the URL and the check results.",
   "When a publish fails, use the failed checks and log lines in the result to fix the project, then publish a preview again. When a live production release is broken, first offer vector_cloud rollback, which returns production to the last release that served it and passed Vector's checks, then investigate with the logs action.",
   "After a user-facing feature is built and verified, offer a preview publish when Vercel is linked; when it is not, say what to connect in Vector Cloud > Connections.",
-  "Never ask for secret values (tokens, keys, passwords) in the chat. Name the variable or account that is needed and send the user to Vector Cloud > Environment variables or Vector Cloud > Connections to add it there; vector_cloud set_env without a value copies a stored value to Vercel. Never show or repeat environment variable values.",
+  "Never ask for secret values (tokens, keys, passwords) in the chat. Name the variable or account that is needed and send the user to Vector Cloud > Environment variables or Vector Cloud > Connections to add it there; vector_cloud set_env without a value copies a stored value to Vercel. Never show or repeat environment variable values, and do not read .env files to get them.",
   "</vector_cloud_policy>",
 ].join("\n")
 

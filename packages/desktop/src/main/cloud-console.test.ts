@@ -383,15 +383,14 @@ describe("cloud bridge publish destination", () => {
       environment: "production",
       summary: expect.stringContaining("Production traffic moves to it only if they pass"),
     })
-    // Moving production asks every time; a preview may be remembered.
-    expect(production.repeatable).toBe(false)
+    // Every account action asks each time (PermissionPolicy), so describe carries no approval tier.
+    expect(production).not.toHaveProperty("repeatable")
     for (const action of ["prepare_database", "prepare_auth", "apply_migrations"]) {
       expect(await describe({ action })).toMatchObject({ ok: false, needsSetup: true })
     }
-    // Creating something the user is billed for asks every time.
+    // Creating something the user is billed for names who pays.
     expect(await describe({ action: "create_database", organizationId: "org_1", region: "eu-west-2" })).toMatchObject({
       ok: true,
-      repeatable: false,
       scope: {
         provider: "Supabase",
         project: "a new project",
@@ -406,7 +405,7 @@ describe("cloud bridge publish destination", () => {
       projectRef: "fixtureref",
       projectName: "shop-db",
     })
-    // A schema change on the production database asks every time; reading the plan does not.
+    // A schema change on the production database asks; reading the plan is its own read-only permission.
     // An approval requires actual pending SQL for review.
     expect(await describe({ action: "apply_migrations" })).toMatchObject({ ok: false, needsSetup: true })
     const dryRun = await describe({ action: "apply_migrations", dryRun: true })

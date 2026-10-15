@@ -390,10 +390,8 @@ function list(input: Input, key: string) {
 
 // What a changing command would do, worded for the agent's permission prompt:
 // provider, project, environment, a one-line summary and any SQL it would run.
-// `repeatable` is false for anything destructive, billed, credential-bearing or
-// widening who can reach the project, so "always allow" never covers it and
-// each run asks again. `approved` goes back with the command, so the run does
-// exactly what the prompt showed.
+// Every one of them asks each time (PermissionPolicy). `approved` goes back
+// with the command, so the run does exactly what the prompt showed.
 export async function describeSupabaseCommand(
   command: SupabaseCommand,
   raw: unknown,
@@ -405,13 +403,8 @@ export async function describeSupabaseCommand(
   const project = { projectPath: scope.projectPath, taskId: text(input, "taskId") }
   const database = getDatabase(project.projectPath, project.taskId)
   const name = database ? (database.projectName ?? database.projectRef ?? database.url) : ""
-  const describe = (
-    summary: string,
-    repeatable: boolean,
-    extra: { project?: string; statements?: Statement[]; approved?: Input } = {},
-  ) => ({
+  const describe = (summary: string, extra: { project?: string; statements?: Statement[]; approved?: Input } = {}) => ({
     ok: true,
-    repeatable,
     scope: { provider: "Supabase", project: extra.project ?? name, environment: "production", summary },
     statements: extra.statements,
     approved: extra.approved,
@@ -437,14 +430,12 @@ export async function describeSupabaseCommand(
       const replaces = database && database.projectRef !== ref ? ` This replaces the link to ${name}.` : ""
       return describe(
         `Link the Supabase project ${ref} to this repository and write its public URL and publishable key to .env.${replaces}`,
-        true,
         { project: ref },
       )
     }
     if (command === "create_project") {
       return describe(
         `Create a new Supabase project${text(input, "organizationId") ? ` in organization ${text(input, "organizationId")}` : ""} in ${text(input, "region") ?? "us-east-1"}. Supabase bills it to that organization.`,
-        false,
         { project: "a new project" },
       )
     }
@@ -458,18 +449,17 @@ export async function describeSupabaseCommand(
       }
     }
     if (command === "unlink_database") {
-      return describe(`Unlink ${name} from this repository. The Supabase project itself is not changed.`, true)
+      return describe(`Unlink ${name} from this repository. The Supabase project itself is not changed.`)
     }
     if (command === "pause_database") {
-      return describe(`Pause ${name}. The live app loses its database, auth and storage until it is restored.`, false)
+      return describe(`Pause ${name}. The live app loses its database, auth and storage until it is restored.`)
     }
     if (command === "restore_database") {
-      return describe(`Restore the paused project ${name}. Supabase bills its organization while it runs.`, false)
+      return describe(`Restore the paused project ${name}. Supabase bills its organization while it runs.`)
     }
     if (command === "write_database_url") {
       return describe(
         `Write a server-only DATABASE_URL for ${name} (transaction pooler) to this project's environment and .env. It contains the database password; its value is never shown.`,
-        false,
       )
     }
     if (command === "rotate_database_password") {
@@ -486,11 +476,10 @@ export async function describeSupabaseCommand(
         ]
           .filter(Boolean)
           .join(" "),
-        false,
       )
     }
     if (command === "apply_migrations") {
-      return describe(`Apply this project's pending migrations to ${name}. This changes its live database.`, true)
+      return describe(`Apply this project's pending migrations to ${name}. This changes its live database.`)
     }
     if (command === "rollback_migration") {
       const plan = await rollbackPlan(await supabaseContext(project, options), {
@@ -500,7 +489,6 @@ export async function describeSupabaseCommand(
       if (!plan.ok) return plan
       return describe(
         `Roll back ${plan.last.name}, the most recently applied migration on ${name}, by running ${plan.down.source === "file" ? plan.downFile : `the -- down section of ${plan.last.name}`}. This changes the live database.`,
-        false,
         {
           statements: [statement(`Down migration ${plan.downFile}`, plan.down.sql)],
           approved: { name: plan.last.name, downChecksum: plan.downChecksum },
@@ -524,18 +512,15 @@ export async function describeSupabaseCommand(
         ]
           .filter(Boolean)
           .join(" "),
-        false,
         { statements: [statement(write ? "SQL that can change data" : "Read-only SQL", sql)] },
       )
     }
     if (command === "update_auth") {
       // The exact addresses are named, since each one becomes a place sign-in
       // may send a user's session.
-      const suggested =
-        bool(input, "addVercelUrls") || list(input, "redirectUrls")?.length
-          ? (await vercelRedirectSuggestions(scope.projectPath, options.request)).redirectUrls
-          : []
-      const vercel = bool(input, "addVercelUrls") ? suggested : []
+      const vercel = bool(input, "addVercelUrls")
+        ? (await vercelRedirectSuggestions(scope.projectPath, options.request)).redirectUrls
+        : []
       const providers = AUTH_PROVIDERS.flatMap((provider) => {
         const change =
           input.providers && typeof input.providers === "object" ? (input.providers as Input)[provider] : undefined
@@ -564,28 +549,16 @@ export async function describeSupabaseCommand(
             .join(" "),
         ),
       ].filter(Boolean)
-      // Turning a sign-in method off or removing an address can lock users
-      // out. A new site URL, or a redirect that is not one of the linked Vercel
-      // addresses, is somewhere a sign-in can hand over a user's session. Both
-      // ask every time.
-      const narrows =
-        bool(input, "emailEnabled") === false ||
-        Boolean(list(input, "removeRedirectUrls")?.length) ||
-        providers.some((item) => item.enabled === false)
-      const widens =
-        text(input, "siteUrl") !== undefined ||
-        (list(input, "redirectUrls") ?? []).some((url) => !suggested.includes(url))
-      return describe(`Change Supabase Auth on ${name}: ${parts.join("; ") || "no changes"}.`, !narrows && !widens)
+      return describe(`Change Supabase Auth on ${name}: ${parts.join("; ") || "no changes"}.`)
     }
     if (command === "invite_user") {
-      return describe(`Send a sign-up invitation email to ${required(input, "email")} from ${name}.`, false)
+      return describe(`Send a sign-up invitation email to ${required(input, "email")} from ${name}.`)
     }
     if (command === "delete_user") {
       const userId = required(input, "userId")
       const email = await authUserEmail(await supabaseContext(project, options), userId)
       return describe(
         `Delete the user ${email ? `${email} (${userId})` : userId} from ${name}. This cannot be undone.`,
-        false,
       )
     }
     if (command === "create_bucket") {
@@ -593,7 +566,6 @@ export async function describeSupabaseCommand(
       const limits = bucketLimits(input)
       return describe(
         `Create a ${visibility} storage bucket ${required(input, "bucket")} in ${name}${limits.length ? ` (${limits.join("; ")})` : ""}.`,
-        visibility === "private",
       )
     }
     if (command === "update_bucket") {
@@ -608,13 +580,11 @@ export async function describeSupabaseCommand(
       ].filter(Boolean)
       return describe(
         `Change the storage bucket ${required(input, "bucket")} in ${name}: ${changes.join("; ") || "no changes"}.`,
-        visibility !== true,
       )
     }
     if (command === "delete_bucket") {
       return describe(
         `Delete the storage bucket ${required(input, "bucket")} from ${name}${bool(input, "empty") ? ", and every file in it first" : ""}. This cannot be undone.`,
-        false,
       )
     }
     if (command === "deploy_function") {
@@ -622,11 +592,10 @@ export async function describeSupabaseCommand(
       const verified = await verifyJwt(scope.directory, functionName)
       return describe(
         `Deploy supabase/functions/${functionName} to ${name} as a live Edge Function.${verified ? "" : ` supabase/config.toml sets verify_jwt = false for it, so anyone on the internet can call it.`}`,
-        verified,
       )
     }
     if (command === "delete_function") {
-      return describe(`Delete the Edge Function ${required(input, "functionName")} from ${name}.`, false)
+      return describe(`Delete the Edge Function ${required(input, "functionName")} from ${name}.`)
     }
     if (command === "set_function_secrets") {
       const names = list(input, "secretNames") ?? []
@@ -643,13 +612,11 @@ export async function describeSupabaseCommand(
       // A credential leaves Vector for Supabase, so each set asks.
       return describe(
         `Set the Edge Function secrets ${names.join(", ")} on ${name} from this project's stored environment. Their values are never shown.`,
-        false,
       )
     }
     if (command === "delete_function_secrets") {
       return describe(
         `Delete the Edge Function secrets ${(list(input, "secretNames") ?? []).join(", ")} from ${name}.`,
-        false,
       )
     }
     return { ok: false, error: `${command} does not change anything, so it needs no approval.` }

@@ -936,10 +936,9 @@ describe("vector_cloud Vercel actions over the bridge", () => {
   test("describes production moves with provider, project and environment before asking", async () => {
     seed()
     const command = await bridge()
-    // Moving production, or what it serves, asks every time.
+    // Moving production, or what it serves, names the deployment it moves to.
     expect(await command({ command: "describe", action: "promote", deploymentId: "dpl_old" })).toMatchObject({
       ok: true,
-      repeatable: false,
       scope: {
         provider: "Vercel",
         project: "shop",
@@ -949,24 +948,23 @@ describe("vector_cloud Vercel actions over the bridge", () => {
     })
     // The rollback target is resolved before asking, and the approved run uses it.
     expect(await command({ command: "describe", action: "rollback" })).toMatchObject({
-      repeatable: false,
       scope: { environment: "production", summary: expect.stringContaining("(dpl_old)") },
       carry: { deploymentId: "dpl_old" },
     })
-    // A production rebuild does not move production, so it may be remembered.
+    // A production rebuild says that production does not move.
     const redeploy = await command({ command: "describe", action: "redeploy", deploymentId: "dpl_live" })
     expect(redeploy).toMatchObject({
       scope: { environment: "production", summary: expect.stringContaining("production does not move") },
     })
-    expect(redeploy).not.toHaveProperty("repeatable")
     expect(await command({ command: "describe", action: "add_domain", domain: "shop.example" })).toMatchObject({
-      repeatable: false,
       scope: { environment: "production" },
     })
-    // Handing over a credential or variable values asks every time too.
-    expect(await command({ command: "describe", action: "enable_protection_bypass" })).toMatchObject({
-      repeatable: false,
-    })
+    // Every account action asks each time (PermissionPolicy), so no describe carries an approval tier.
+    for (const action of ["promote", "rollback", "redeploy", "add_domain", "enable_protection_bypass"]) {
+      expect(await command({ command: "describe", action, deploymentId: "dpl_old", domain: "shop.example" })).not.toHaveProperty(
+        "repeatable",
+      )
+    }
     expect(
       await command({
         command: "describe",
@@ -975,7 +973,7 @@ describe("vector_cloud Vercel actions over the bridge", () => {
         value: "https://api.example",
         targets: ["preview"],
       }),
-    ).toMatchObject({ ok: true, repeatable: false })
+    ).toMatchObject({ ok: true, scope: { environment: "preview" } })
     expect(await command({ command: "describe", action: "promote" })).toMatchObject({ ok: false })
   })
 

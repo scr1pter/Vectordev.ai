@@ -112,6 +112,7 @@ function permissionAsked(
   input: {
     permission?: string
     metadata?: Record<string, unknown>
+    always?: string[]
     tool?: { messageID: string; callID: string }
   } = {},
 ) {
@@ -124,7 +125,7 @@ function permissionAsked(
       permission: input.permission ?? "bash",
       patterns: ["*"],
       metadata: input.metadata ?? { command: "printf hello" },
-      always: [],
+      always: input.always ?? ["printf *"],
       ...(input.tool ? { tool: input.tool } : {}),
     },
   } as PermissionEvent
@@ -189,6 +190,24 @@ describe("acp permissions", () => {
       ],
     })
     expect(harness.replies).toEqual([{ requestID: "perm_1", reply: "once", directory: "/workspace" }])
+  })
+
+  it("offers no 'always' where Vector's permission policy never remembers an approval", async () => {
+    const harness = createHarness()
+    await createSession(harness.session, "ses_a")
+    const cases = [
+      { permission: "vector_cloud_publish", always: ["vercel/shop/production/promote"] },
+      { permission: "vector_cloud_database", always: [] },
+      { permission: "computer_interact", always: ["window:42:0"] },
+      { permission: "bash", always: [] },
+    ]
+    cases.forEach((item, index) =>
+      harness.subscription.handle(permissionAsked("ses_a", `perm_${index}`, { ...item, metadata: {} })),
+    )
+    await pollUntil(() => harness.replies.length === cases.length, "permissions were never replied")
+    for (const request of harness.requests) {
+      expect(request.options.map((option) => option.optionId)).toEqual(["once", "reject"])
+    }
   })
 
   it("asks in the client's session for a subagent's request", async () => {
