@@ -3078,20 +3078,20 @@ html[data-vector-glass="false"] [data-vector-help-menu] {
   text-align: center;
 }
 
-/* Light theme. The session header, its title bar and the route background above are hard-coded dark,
-   while the text tokens on them flip to dark values, which left the title at 1.06:1 and the branch and
-   status chips at 2.2:1. The header and title bar take the stage colour of the conversation below them,
-   as they do in the dark theme, and the white-alpha edges and fills become dark-alpha ones. */
+/* Light theme. The session header and the route background above are hard-coded dark, while the text
+   tokens on them flip to dark values, which left the title at 1.06:1 and the branch and status chips at
+   2.2:1. The header takes the light stage colour, the route the light canvas, and the white-alpha edges
+   and fills become dark-alpha ones. The title bar needs no rule: index.css makes it transparent with
+   !important inside a layer, which no unlayered rule here can override, so it shows what is behind it.
+   layout-new.tsx writes data-vector-theme="dark" once when the workspace mounts, and only the settings
+   effect writes "light" again, so on a normal launch with Light saved these rules stay off until the
+   scheme is switched in Settings, and a reload turns them off again. */
 :root[data-vector-theme="light"] [data-vector-session-route] {
   --vector-workspace-bg: var(--vx-canvas);
 }
 
 :root[data-vector-theme="light"] [data-vector-session-header] {
   background: var(--vx-stage);
-}
-
-:root[data-vector-theme="light"] [data-vector-session-route] [data-session-title] {
-  background: var(--vx-stage) !important;
 }
 
 /* :where keeps this below the branch picker's hover, open and switching rules in branch-picker.css. */

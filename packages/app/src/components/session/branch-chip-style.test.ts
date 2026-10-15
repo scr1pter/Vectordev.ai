@@ -18,7 +18,6 @@ const ROUTE = `<div data-vector-session-route>
     <span id="status" data-vector-session-status>Ready</span>
     <button type="button" data-vector-session-tool>Changes <span id="count" data-vector-session-count>3</span></button>
   </header>
-  <div id="title-bar" data-session-title></div>
 </div>`
 
 function mount(theme: "dark" | "light") {
@@ -111,9 +110,10 @@ describe("session header branch chip", () => {
 
 describe("session header readability", () => {
   test("takes the light stage colour in the light theme", () => {
+    // The sticky title bar is left out: index.css makes it transparent with !important inside a layer,
+    // which beats any unlayered rule, and this test does not load index.css.
     mount("light")
     expect(chip("header").background).toBe(token("--vx-stage"))
-    expect(chip("title-bar").background).toBe(token("--vx-stage"))
     expect(getComputedStyle(document.querySelector("[data-vector-session-route]")!).backgroundColor).toBe(
       token("--vx-canvas"),
     )

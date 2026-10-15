@@ -18,6 +18,8 @@ button[data-vector-branch-picker][data-expanded] {
   color: var(--vx-text);
 }
 
+/* Kept at --vx-text-muted, as before 9 October, for parity with the restored look. On the chip it measures
+   4.0:1 dark and 3.8:1 light, under 4.5:1, and shows only while a branch switch runs. */
 button[data-vector-branch-picker][aria-busy="true"] {
   cursor: progress;
   color: var(--vx-text-muted);
